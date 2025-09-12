@@ -174,3 +174,4 @@ services:
 networks:
   app-network:
     driver: bridge
+    name: archon_app-network
