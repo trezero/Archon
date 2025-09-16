@@ -9,3 +9,11 @@ PRPs/completed/
 tmp/
 temp/
 UAT/
+web-bundles
+.qwen
+.claude
+.bmad-core
+.gemini
+.windsurf
+.kilocodemodules
+
