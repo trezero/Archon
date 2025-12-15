@@ -389,5 +389,187 @@ branch refs/heads/feature/auth
         expect.any(Function)
       );
     });
+
+    it('reuses existing branch if it already exists', async () => {
+      const { createWorktreeForIssue } = require('./git');
+      const repoPath = '/workspace/repo';
+      const issueNumber = 42;
+
+      let callCount = 0;
+      mockExecFile.mockImplementation(
+        (
+          _cmd: string,
+          args: string[],
+          _opts: unknown,
+          callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void
+        ) => {
+          callCount++;
+          // First call: worktree add -b fails (branch exists)
+          if (callCount === 1 && args.includes('-b')) {
+            const error = new Error('fatal: A branch named issue-42 already exists.') as Error & { stderr?: string };
+            error.stderr = 'fatal: A branch named issue-42 already exists.';
+            callback(error);
+          } else {
+            // Second call: worktree add without -b succeeds
+            callback(null, { stdout: '', stderr: '' });
+          }
+        }
+      );
+
+      await createWorktreeForIssue(repoPath, issueNumber, false);
+
+      // Verify first call attempted to create new branch
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['-C', repoPath, 'worktree', 'add', expect.any(String), '-b', 'issue-42']),
+        expect.any(Object),
+        expect.any(Function)
+      );
+
+      // Verify second call used existing branch
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['-C', repoPath, 'worktree', 'add', expect.any(String), 'issue-42']),
+        expect.any(Object),
+        expect.any(Function)
+      );
+    });
+
+    it('throws error if fetch fails', async () => {
+      const { createWorktreeForIssue } = require('./git');
+      const repoPath = '/workspace/repo';
+      const issueNumber = 42;
+      const prHeadBranch = 'feature/auth';
+
+      mockExecFile.mockImplementation(
+        (
+          _cmd: string,
+          args: string[],
+          _opts: unknown,
+          callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void
+        ) => {
+          // Fail on fetch command
+          if (args.includes('fetch')) {
+            callback(new Error('fatal: unable to access repository'));
+          } else {
+            callback(null, { stdout: '', stderr: '' });
+          }
+        }
+      );
+
+      await expect(createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch)).rejects.toThrow(
+        "Failed to create worktree for PR branch 'feature/auth'"
+      );
+    });
+
+    it('provides helpful error message with branch name', async () => {
+      const { createWorktreeForIssue } = require('./git');
+      const repoPath = '/workspace/repo';
+      const issueNumber = 42;
+      const prHeadBranch = 'feature/auth';
+
+      mockExecFile.mockImplementation(
+        (
+          _cmd: string,
+          args: string[],
+          _opts: unknown,
+          callback: (err: Error | null) => void
+        ) => {
+          if (args.includes('fetch')) {
+            callback(new Error('Network error'));
+          } else {
+            callback(null);
+          }
+        }
+      );
+
+      try {
+        await createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch);
+        fail('Should have thrown an error');
+      } catch (error) {
+        const err = error as Error;
+        // Verify error includes prHeadBranch in message
+        expect(err.message).toContain('feature/auth');
+        expect(err.message).toContain('Failed to create worktree for PR branch');
+      }
+    });
+
+    it('creates new branch when PR head branch not provided', async () => {
+      const { createWorktreeForIssue } = require('./git');
+      const repoPath = '/workspace/repo';
+      const issueNumber = 42;
+
+      mockExecFile.mockImplementation(
+        (
+          _cmd: string,
+          _args: string[],
+          _opts: unknown,
+          callback: (err: Error | null, result: { stdout: string; stderr: string }) => void
+        ) => {
+          callback(null, { stdout: '', stderr: '' });
+        }
+      );
+
+      await createWorktreeForIssue(repoPath, issueNumber, true);
+
+      // Verify worktree add was called with -b flag for new pr-XX branch
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['-C', repoPath, 'worktree', 'add', expect.any(String), '-b', 'pr-42']),
+        expect.any(Object),
+        expect.any(Function)
+      );
+
+      // Verify fetch was NOT called (no branch to fetch)
+      const fetchCalls = mockExecFile.mock.calls.filter((call: unknown[]) => {
+        const args = call[1] as string[];
+        return args.includes('fetch');
+      });
+      expect(fetchCalls).toHaveLength(0);
+    });
+
+    it('finds and adopts worktree by PR head branch name', async () => {
+      const { createWorktreeForIssue } = require('./git');
+      const repoPath = '/workspace/repo';
+      const issueNumber = 42;
+      const prHeadBranch = 'feature/auth';
+
+      // Mock listWorktrees to return existing worktree with matching branch
+      mockExecFile.mockImplementation(
+        (
+          _cmd: string,
+          args: string[],
+          _opts: unknown,
+          callback: (err: Error | null, result: { stdout: string; stderr: string }) => void
+        ) => {
+          if (args.includes('list')) {
+            const output = `worktree /workspace/repo
+HEAD abc123
+branch refs/heads/main
+
+worktree /workspace/worktrees/feature-auth
+HEAD def456
+branch refs/heads/feature/auth
+
+`;
+            callback(null, { stdout: output, stderr: '' });
+          } else {
+            callback(null, { stdout: '', stderr: '' });
+          }
+        }
+      );
+
+      const result = await createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch);
+
+      // Verify existing worktree was found and adopted
+      expect(result).toBe('/workspace/worktrees/feature-auth');
+
+      // Verify no worktree creation commands were called (only list was called)
+      const createCalls = mockExecFile.mock.calls.filter((call: unknown[]) => {
+        const args = call[1] as string[];
+        return args.includes('add');
+      });
+      expect(createCalls).toHaveLength(0);
+    });
   });
 });

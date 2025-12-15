@@ -1216,6 +1216,325 @@ describe('GitHubAdapter', () => {
         expect(handleMessageMock).not.toHaveBeenCalled();
       });
     });
+
+    describe('PR review worktree creation', () => {
+      test('fetches PR head branch from GitHub API', async () => {
+        const { Octokit } = require('@octokit/rest');
+        const MockOctokit = Octokit as jest.Mock;
+        const mockGetPR = jest.fn().mockResolvedValue({
+          data: {
+            head: {
+              ref: 'feature/awesome-feature',
+              sha: 'abc123def456',
+            },
+          },
+        });
+
+        MockOctokit.mockImplementation(() => ({
+          rest: {
+            issues: {
+              createComment: mockCreateComment,
+            },
+            repos: {
+              get: jest.fn().mockResolvedValue({
+                data: { default_branch: 'main' },
+              }),
+            },
+            pulls: {
+              get: mockGetPR,
+            },
+          },
+        }));
+
+        adapter = new GitHubAdapter('fake-token', 'test-secret');
+
+        getOrCreateConversationMock.mockResolvedValue({
+          id: 'conv-1',
+          codebase_id: null,
+          cwd: null,
+          worktree_path: null,
+        });
+
+        findCodebaseByRepoUrlMock.mockResolvedValue(null);
+        createCodebaseMock.mockResolvedValue({
+          id: 'codebase-1',
+          name: 'test-repo',
+          default_cwd: '/workspace/test-repo',
+        });
+
+        createWorktreeMock.mockResolvedValue('/workspace/worktrees/pr-42');
+
+        const payload = JSON.stringify({
+          action: 'opened',
+          pull_request: {
+            number: 42,
+            title: 'Awesome Feature',
+            body: '@remote-agent review this',
+            user: { login: 'testuser' },
+            state: 'open',
+          },
+          repository: {
+            owner: { login: 'testorg' },
+            name: 'test-repo',
+            full_name: 'testorg/test-repo',
+            html_url: 'https://github.com/testorg/test-repo',
+            default_branch: 'main',
+          },
+          sender: { login: 'testuser' },
+        });
+
+        const crypto = require('crypto');
+        const signature = 'sha256=' + crypto.createHmac('sha256', 'test-secret').update(payload).digest('hex');
+
+        await adapter.handleWebhook(payload, signature);
+
+        // Verify GitHub API was called to fetch PR details
+        expect(mockGetPR).toHaveBeenCalledWith({
+          owner: 'testorg',
+          repo: 'test-repo',
+          pull_number: 42,
+        });
+
+        // Verify createWorktreeForIssue was called with prHeadBranch and prHeadSha
+        expect(createWorktreeMock).toHaveBeenCalledWith(
+          expect.stringMatching(/test-repo$/),
+          42,
+          true,
+          'feature/awesome-feature',
+          'abc123def456'
+        );
+      });
+
+      test('falls back gracefully if GitHub API call fails', async () => {
+        const { Octokit } = require('@octokit/rest');
+        const MockOctokit = Octokit as jest.Mock;
+        const mockGetPR = jest.fn().mockRejectedValue(new Error('API rate limit exceeded'));
+
+        MockOctokit.mockImplementation(() => ({
+          rest: {
+            issues: {
+              createComment: mockCreateComment,
+            },
+            repos: {
+              get: jest.fn().mockResolvedValue({
+                data: { default_branch: 'main' },
+              }),
+            },
+            pulls: {
+              get: mockGetPR,
+            },
+          },
+        }));
+
+        adapter = new GitHubAdapter('fake-token', 'test-secret');
+
+        getOrCreateConversationMock.mockResolvedValue({
+          id: 'conv-1',
+          codebase_id: null,
+          cwd: null,
+          worktree_path: null,
+        });
+
+        findCodebaseByRepoUrlMock.mockResolvedValue(null);
+        createCodebaseMock.mockResolvedValue({
+          id: 'codebase-1',
+          name: 'test-repo',
+          default_cwd: '/workspace/test-repo',
+        });
+
+        createWorktreeMock.mockResolvedValue('/workspace/worktrees/pr-42');
+
+        const payload = JSON.stringify({
+          action: 'opened',
+          pull_request: {
+            number: 42,
+            title: 'Test PR',
+            body: '@remote-agent review',
+            user: { login: 'testuser' },
+            state: 'open',
+          },
+          repository: {
+            owner: { login: 'testorg' },
+            name: 'test-repo',
+            full_name: 'testorg/test-repo',
+            html_url: 'https://github.com/testorg/test-repo',
+            default_branch: 'main',
+          },
+          sender: { login: 'testuser' },
+        });
+
+        const crypto = require('crypto');
+        const signature = 'sha256=' + crypto.createHmac('sha256', 'test-secret').update(payload).digest('hex');
+
+        await adapter.handleWebhook(payload, signature);
+
+        // Verify createWorktreeForIssue was called WITHOUT prHeadBranch (fallback)
+        expect(createWorktreeMock).toHaveBeenCalledWith(
+          expect.stringMatching(/test-repo$/),
+          42,
+          true,
+          undefined,
+          undefined
+        );
+
+        // Verify orchestrator was still called (workflow continues despite API failure)
+        expect(handleMessageMock).toHaveBeenCalled();
+      });
+
+      test('updates context message for PR branch', async () => {
+        const { Octokit } = require('@octokit/rest');
+        const MockOctokit = Octokit as jest.Mock;
+        const mockGetPR = jest.fn().mockResolvedValue({
+          data: {
+            head: {
+              ref: 'feature/new-ui',
+              sha: 'def456abc',
+            },
+          },
+        });
+
+        MockOctokit.mockImplementation(() => ({
+          rest: {
+            issues: {
+              createComment: mockCreateComment,
+            },
+            repos: {
+              get: jest.fn().mockResolvedValue({
+                data: { default_branch: 'main' },
+              }),
+            },
+            pulls: {
+              get: mockGetPR,
+            },
+          },
+        }));
+
+        adapter = new GitHubAdapter('fake-token', 'test-secret');
+
+        getOrCreateConversationMock.mockResolvedValue({
+          id: 'conv-1',
+          codebase_id: null,
+          cwd: null,
+          worktree_path: null,
+        });
+
+        findCodebaseByRepoUrlMock.mockResolvedValue(null);
+        createCodebaseMock.mockResolvedValue({
+          id: 'codebase-1',
+          name: 'test-repo',
+          default_cwd: '/workspace/test-repo',
+        });
+
+        createWorktreeMock.mockResolvedValue('/workspace/worktrees/pr-42');
+
+        const payload = JSON.stringify({
+          action: 'opened',
+          pull_request: {
+            number: 42,
+            title: 'New UI',
+            body: '@remote-agent review',
+            user: { login: 'testuser' },
+            state: 'open',
+          },
+          repository: {
+            owner: { login: 'testorg' },
+            name: 'test-repo',
+            full_name: 'testorg/test-repo',
+            html_url: 'https://github.com/testorg/test-repo',
+            default_branch: 'main',
+          },
+          sender: { login: 'testuser' },
+        });
+
+        const crypto = require('crypto');
+        const signature = 'sha256=' + crypto.createHmac('sha256', 'test-secret').update(payload).digest('hex');
+
+        await adapter.handleWebhook(payload, signature);
+
+        // Verify handleMessage was called with context mentioning PR branch
+        expect(handleMessageMock).toHaveBeenCalled();
+        const messageCall = handleMessageMock.mock.calls[0];
+        const contextMessage = messageCall[3]; // Fourth parameter is context
+
+        // Verify context mentions the actual PR branch and SHA
+        expect(contextMessage).toContain('feature/new-ui');
+        expect(contextMessage).toContain('def456a'); // Short SHA (first 7 chars)
+        expect(contextMessage).toContain('isolated worktree');
+      });
+
+      test('updates context message for new branch fallback', async () => {
+        const { Octokit } = require('@octokit/rest');
+        const MockOctokit = Octokit as jest.Mock;
+        const mockGetPR = jest.fn().mockRejectedValue(new Error('API error'));
+
+        MockOctokit.mockImplementation(() => ({
+          rest: {
+            issues: {
+              createComment: mockCreateComment,
+            },
+            repos: {
+              get: jest.fn().mockResolvedValue({
+                data: { default_branch: 'main' },
+              }),
+            },
+            pulls: {
+              get: mockGetPR,
+            },
+          },
+        }));
+
+        adapter = new GitHubAdapter('fake-token', 'test-secret');
+
+        getOrCreateConversationMock.mockResolvedValue({
+          id: 'conv-1',
+          codebase_id: null,
+          cwd: null,
+          worktree_path: null,
+        });
+
+        findCodebaseByRepoUrlMock.mockResolvedValue(null);
+        createCodebaseMock.mockResolvedValue({
+          id: 'codebase-1',
+          name: 'test-repo',
+          default_cwd: '/workspace/test-repo',
+        });
+
+        createWorktreeMock.mockResolvedValue('/workspace/worktrees/pr-42');
+
+        const payload = JSON.stringify({
+          action: 'opened',
+          pull_request: {
+            number: 42,
+            title: 'Test PR',
+            body: '@remote-agent review',
+            user: { login: 'testuser' },
+            state: 'open',
+          },
+          repository: {
+            owner: { login: 'testorg' },
+            name: 'test-repo',
+            full_name: 'testorg/test-repo',
+            html_url: 'https://github.com/testorg/test-repo',
+            default_branch: 'main',
+          },
+          sender: { login: 'testuser' },
+        });
+
+        const crypto = require('crypto');
+        const signature = 'sha256=' + crypto.createHmac('sha256', 'test-secret').update(payload).digest('hex');
+
+        await adapter.handleWebhook(payload, signature);
+
+        // Verify handleMessage was called with fallback context (isolated branch message)
+        expect(handleMessageMock).toHaveBeenCalled();
+        const messageCall = handleMessageMock.mock.calls[0];
+        const contextMessage = messageCall[3];
+
+        // Verify context shows fallback message (no SHA, just pr-42 branch)
+        expect(contextMessage).toContain('isolated branch');
+        expect(contextMessage).toContain('pr-42');
+      });
+    });
   });
 
   describe('multi-repo path isolation', () => {
