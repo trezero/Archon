@@ -458,11 +458,11 @@ branch refs/heads/feature/auth
       );
 
       await expect(createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch)).rejects.toThrow(
-        "Failed to create worktree for PR branch 'feature/auth'"
+        'Failed to create worktree for PR #42'
       );
     });
 
-    it('provides helpful error message with branch name', async () => {
+    it('provides helpful error message with PR number', async () => {
       const { createWorktreeForIssue } = require('./git');
       const repoPath = '/workspace/repo';
       const issueNumber = 42;
@@ -488,9 +488,9 @@ branch refs/heads/feature/auth
         fail('Should have thrown an error');
       } catch (error) {
         const err = error as Error;
-        // Verify error includes prHeadBranch in message
-        expect(err.message).toContain('feature/auth');
-        expect(err.message).toContain('Failed to create worktree for PR branch');
+        // Verify error includes PR number and underlying error
+        expect(err.message).toContain('PR #42');
+        expect(err.message).toContain('Network error');
       }
     });
 
