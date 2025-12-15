@@ -258,10 +258,10 @@ branch refs/heads/feature/auth
 
       await createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch, prHeadSha);
 
-      // Verify git fetch was called with SHA
+      // Verify git fetch was called with PR ref (works for fork and non-fork PRs)
       expect(mockExecFile).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', repoPath, 'fetch', 'origin', prHeadSha]),
+        expect.arrayContaining(['-C', repoPath, 'fetch', 'origin', 'pull/42/head']),
         expect.any(Object),
         expect.any(Function)
       );
@@ -302,28 +302,65 @@ branch refs/heads/feature/auth
 
       await createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch);
 
-      // Verify git fetch was called with branch
+      // Verify git fetch was called with PR ref and creates local branch (works for fork PRs)
       expect(mockExecFile).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', repoPath, 'fetch', 'origin', prHeadBranch]),
+        expect.arrayContaining(['-C', repoPath, 'fetch', 'origin', 'pull/42/head:pr-42-review']),
         expect.any(Object),
         expect.any(Function)
       );
 
-      // Verify worktree add was called with branch reference
+      // Verify worktree add was called with the local branch created from PR ref
       expect(mockExecFile).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', repoPath, 'worktree', 'add', expect.any(String), `origin/${prHeadBranch}`]),
+        expect.arrayContaining(['-C', repoPath, 'worktree', 'add', expect.any(String), 'pr-42-review']),
         expect.any(Object),
         expect.any(Function)
       );
 
-      // Verify checkout -b was NOT called (branch-based checkout doesn't need it)
+      // Verify checkout -b was NOT called (not needed when using PR ref)
       const checkoutCalls = mockExecFile.mock.calls.filter((call: unknown[]) => {
         const args = call[1] as string[];
         return args.includes('checkout');
       });
       expect(checkoutCalls).toHaveLength(0);
+    });
+
+    it('handles fork PRs using GitHub PR refs', async () => {
+      const { createWorktreeForIssue } = require('./git');
+      const repoPath = '/workspace/repo';
+      const issueNumber = 123;
+      const prHeadBranch = 'fix-bug'; // Branch name in fork
+      const prHeadSha = 'def789abc123';
+
+      mockExecFile.mockImplementation(
+        (
+          _cmd: string,
+          _args: string[],
+          _opts: unknown,
+          callback: (err: Error | null, result: { stdout: string; stderr: string }) => void
+        ) => {
+          callback(null, { stdout: '', stderr: '' });
+        }
+      );
+
+      await createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch, prHeadSha);
+
+      // Verify git fetch uses PR ref (not fork branch from origin)
+      // This is the key fix: refs/pull/<number>/head works for fork PRs
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['-C', repoPath, 'fetch', 'origin', 'pull/123/head']),
+        expect.any(Object),
+        expect.any(Function)
+      );
+
+      // Verify we DON'T try to fetch the fork's branch name from origin
+      const fetchCalls = mockExecFile.mock.calls.filter((call: unknown[]) => {
+        const args = call[1] as string[];
+        return args.includes('fetch') && args.includes(prHeadBranch);
+      });
+      expect(fetchCalls).toHaveLength(0);
     });
 
     it('creates issue branch for non-PR issues', async () => {

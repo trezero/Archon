@@ -158,8 +158,9 @@ export async function createWorktreeForIssue(
     try {
       // If SHA provided, use it for reproducible reviews (hybrid approach)
       if (prHeadSha) {
-        // Fetch the specific commit SHA
-        await execFileAsync('git', ['-C', repoPath, 'fetch', 'origin', prHeadSha], {
+        // Fetch the specific commit SHA using PR refs (works for both fork and non-fork PRs)
+        // GitHub creates refs/pull/<number>/head for all PRs automatically
+        await execFileAsync('git', ['-C', repoPath, 'fetch', 'origin', `pull/${String(issueNumber)}/head`], {
           timeout: 30000,
         });
 
@@ -173,19 +174,20 @@ export async function createWorktreeForIssue(
           timeout: 30000,
         });
       } else {
-        // Fallback: fetch the PR's head branch from origin
-        await execFileAsync('git', ['-C', repoPath, 'fetch', 'origin', prHeadBranch], {
+        // Use GitHub's PR refs which work for both fork and non-fork PRs
+        // GitHub automatically creates refs/pull/<number>/head for all PRs
+        await execFileAsync('git', ['-C', repoPath, 'fetch', 'origin', `pull/${String(issueNumber)}/head:pr-${String(issueNumber)}-review`], {
           timeout: 30000,
         });
 
-        // Create worktree using the fetched branch
-        await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, `origin/${prHeadBranch}`], {
+        // Create worktree using the fetched PR ref
+        await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, `pr-${String(issueNumber)}-review`], {
           timeout: 30000,
         });
       }
     } catch (error) {
       const err = error as Error & { stderr?: string };
-      throw new Error(`Failed to create worktree for PR branch '${prHeadBranch}': ${err.message}`);
+      throw new Error(`Failed to create worktree for PR #${String(issueNumber)}: ${err.message}`);
     }
   } else {
     // For issues (or PRs without branch info): create new branch
