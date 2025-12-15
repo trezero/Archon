@@ -246,11 +246,16 @@ Session:
         workingUrl = normalizedUrl.replace('git@github.com:', 'https://github.com/');
       }
 
-      const repoName = workingUrl.split('/').pop()?.replace('.git', '') ?? 'unknown';
+      // Extract owner and repo from URL
+      // https://github.com/owner/repo.git -> owner, repo
+      const urlParts = workingUrl.replace(/\.git$/, '').split('/');
+      const repoName = urlParts.pop() ?? 'unknown';
+      const ownerName = urlParts.pop() ?? 'unknown';
+
       // Use WORKSPACE_PATH env var for flexibility (local dev vs Docker)
-      // resolve() converts relative paths to absolute (cross-platform)
+      // Include owner in path to prevent collisions (e.g., alice/utils vs bob/utils)
       const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
-      const targetPath = join(workspacePath, repoName);
+      const targetPath = join(workspacePath, ownerName, repoName);
 
       try {
         // Check if target directory already exists
@@ -361,7 +366,7 @@ Session:
         }
 
         const codebase = await codebaseDb.createCodebase({
-          name: repoName,
+          name: `${ownerName}/${repoName}`,
           repository_url: workingUrl,
           default_cwd: targetPath,
           ai_assistant_type: suggestedAssistant,

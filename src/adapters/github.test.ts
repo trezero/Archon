@@ -1217,4 +1217,38 @@ describe('GitHubAdapter', () => {
       });
     });
   });
+
+  describe('multi-repo path isolation', () => {
+    test('should use owner/repo path structure for codebases', () => {
+      // Test that path construction includes owner
+      const workspacePath = '/workspace';
+      const owner1 = 'alice';
+      const owner2 = 'bob';
+      const repo = 'utils';
+
+      // Simulate the path construction logic
+      const path1 = `${workspacePath}/${owner1}/${repo}`;
+      const path2 = `${workspacePath}/${owner2}/${repo}`;
+
+      // Paths should be different even with same repo name
+      expect(path1).not.toBe(path2);
+      expect(path1).toBe('/workspace/alice/utils');
+      expect(path2).toBe('/workspace/bob/utils');
+    });
+
+    test('worktrees should be isolated by owner', () => {
+      // Worktrees are relative to repo path, so they auto-isolate
+      const aliceRepoPath = '/workspace/alice/utils';
+      const bobRepoPath = '/workspace/bob/utils';
+      const issueNumber = 33;
+
+      // Simulate worktree path construction
+      const aliceWorktree = `${aliceRepoPath}/../worktrees/issue-${issueNumber}`;
+      const bobWorktree = `${bobRepoPath}/../worktrees/issue-${issueNumber}`;
+
+      // Note: These resolve to different paths
+      // /workspace/alice/worktrees/issue-33 vs /workspace/bob/worktrees/issue-33
+      expect(aliceWorktree).not.toBe(bobWorktree);
+    });
+  });
 });

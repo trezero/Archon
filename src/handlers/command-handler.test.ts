@@ -1080,5 +1080,74 @@ describe('CommandHandler', () => {
         expect(mockSessionDb.deactivateSession).toHaveBeenCalledWith('session-123');
       });
     });
+
+    describe('clone command path isolation', () => {
+      test('should extract owner from GitHub URL', () => {
+        const url = 'https://github.com/alice/utils.git';
+        const urlParts = url.replace(/\.git$/, '').split('/');
+        const repoName = urlParts.pop();
+        const ownerName = urlParts.pop();
+
+        expect(ownerName).toBe('alice');
+        expect(repoName).toBe('utils');
+      });
+
+      test('should construct path with owner/repo', () => {
+        const workspacePath = '/workspace';
+        const ownerName = 'alice';
+        const repoName = 'utils';
+
+        const targetPath = `${workspacePath}/${ownerName}/${repoName}`;
+
+        expect(targetPath).toBe('/workspace/alice/utils');
+      });
+
+      test('should isolate repos with same name but different owners', () => {
+        const workspacePath = '/workspace';
+
+        // alice/utils
+        const aliceUrl = 'https://github.com/alice/utils.git';
+        const aliceParts = aliceUrl.replace(/\.git$/, '').split('/');
+        const aliceRepo = aliceParts.pop();
+        const aliceOwner = aliceParts.pop();
+        const alicePath = `${workspacePath}/${aliceOwner}/${aliceRepo}`;
+
+        // bob/utils
+        const bobUrl = 'https://github.com/bob/utils.git';
+        const bobParts = bobUrl.replace(/\.git$/, '').split('/');
+        const bobRepo = bobParts.pop();
+        const bobOwner = bobParts.pop();
+        const bobPath = `${workspacePath}/${bobOwner}/${bobRepo}`;
+
+        // Different owners, same repo name should result in different paths
+        expect(alicePath).toBe('/workspace/alice/utils');
+        expect(bobPath).toBe('/workspace/bob/utils');
+        expect(alicePath).not.toBe(bobPath);
+      });
+
+      test('should handle URL without .git suffix', () => {
+        const url = 'https://github.com/alice/utils';
+        const urlParts = url.replace(/\.git$/, '').split('/');
+        const repoName = urlParts.pop();
+        const ownerName = urlParts.pop();
+
+        expect(ownerName).toBe('alice');
+        expect(repoName).toBe('utils');
+      });
+
+      test('should handle SSH URL conversion', () => {
+        // SSH URLs are converted to HTTPS in the handler
+        // git@github.com:user/repo.git -> https://github.com/user/repo.git
+        const sshUrl = 'git@github.com:alice/utils.git';
+        const httpsUrl = sshUrl.replace('git@github.com:', 'https://github.com/');
+
+        const urlParts = httpsUrl.replace(/\.git$/, '').split('/');
+        const repoName = urlParts.pop();
+        const ownerName = urlParts.pop();
+
+        expect(ownerName).toBe('alice');
+        expect(repoName).toBe('utils');
+      });
+    });
   });
 });

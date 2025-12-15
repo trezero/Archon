@@ -402,8 +402,9 @@ export class GitHubAdapter implements IPlatformAdapter {
     let existing = await codebaseDb.findCodebaseByRepoUrl(repoUrlNoGit);
     existing ??= await codebaseDb.findCodebaseByRepoUrl(repoUrlWithGit);
 
-    // Canonical path is always $WORKSPACE_PATH/{repo}
-    const canonicalPath = join(resolve(process.env.WORKSPACE_PATH ?? '/workspace'), repo);
+    // Canonical path includes owner to prevent collisions between repos with same name
+    // e.g., alice/utils and bob/utils get separate directories
+    const canonicalPath = join(resolve(process.env.WORKSPACE_PATH ?? '/workspace'), owner, repo);
 
     if (existing) {
       // Check if existing codebase points to a worktree path - fix it if so
@@ -419,10 +420,10 @@ export class GitHubAdapter implements IPlatformAdapter {
       return { codebase: existing, repoPath: existing.default_cwd, isNew: false };
     }
 
-    // Use just the repo name (not owner-repo) to match /clone behavior
+    // Include owner in name to distinguish repos with same name from different owners
     // resolve() converts relative paths to absolute (cross-platform)
     const codebase = await codebaseDb.createCodebase({
-      name: repo,
+      name: `${owner}/${repo}`,
       repository_url: repoUrlNoGit, // Store without .git for consistency
       default_cwd: canonicalPath,
     });
