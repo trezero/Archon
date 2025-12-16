@@ -1,38 +1,22 @@
-// Mock the Claude and Codex clients before importing factory
-jest.mock('./claude', () => ({
-  ClaudeClient: jest.fn().mockImplementation(() => ({
-    getType: () => 'claude',
-  })),
-}));
-
-jest.mock('./codex', () => ({
-  CodexClient: jest.fn().mockImplementation(() => ({
-    getType: () => 'codex',
-  })),
-}));
-
+import { describe, test, expect } from 'bun:test';
 import { getAssistantClient } from './factory';
-import { ClaudeClient } from './claude';
-import { CodexClient } from './codex';
 
 describe('factory', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
   describe('getAssistantClient', () => {
     test('returns ClaudeClient for claude type', () => {
       const client = getAssistantClient('claude');
 
-      expect(ClaudeClient).toHaveBeenCalledTimes(1);
+      expect(client).toBeDefined();
       expect(client.getType()).toBe('claude');
+      expect(typeof client.sendQuery).toBe('function');
     });
 
     test('returns CodexClient for codex type', () => {
       const client = getAssistantClient('codex');
 
-      expect(CodexClient).toHaveBeenCalledTimes(1);
+      expect(client).toBeDefined();
       expect(client.getType()).toBe('codex');
+      expect(typeof client.sendQuery).toBe('function');
     });
 
     test('throws error for unknown type', () => {
@@ -57,8 +41,7 @@ describe('factory', () => {
       const client1 = getAssistantClient('claude');
       const client2 = getAssistantClient('claude');
 
-      expect(ClaudeClient).toHaveBeenCalledTimes(2);
-      // Since they're mock instances, they'll be different objects
+      // Each call should return a new instance
       expect(client1).not.toBe(client2);
     });
   });

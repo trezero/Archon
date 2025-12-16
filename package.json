@@ -4,19 +4,19 @@
   "description": "Remote agentic coding platform - Control AI coding assistants from Telegram, Slack, and GitHub",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "setup-auth": "node dist/scripts/setup-auth.js",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
-    "test:ci": "jest --coverage --ci --maxWorkers=2",
-    "type-check": "tsc --noEmit",
-    "lint": "eslint . --cache",
-    "lint:fix": "eslint . --cache --fix",
-    "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "dev": "bun --watch src/index.ts",
+    "build": "bun build src/index.ts --outdir=dist --target=bun",
+    "start": "bun src/index.ts",
+    "setup-auth": "bun src/scripts/setup-auth.ts",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage",
+    "test:ci": "bun test --coverage",
+    "type-check": "bun x tsc --noEmit",
+    "lint": "bun x eslint . --cache",
+    "lint:fix": "bun x eslint . --cache --fix",
+    "format": "bun x prettier --write .",
+    "format:check": "bun x prettier --check ."
   },
   "keywords": [
     "ai",
@@ -43,21 +43,18 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@types/bun": "latest",
     "@types/express": "^5.0.5",
-    "@types/jest": "^30.0.0",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.11.0",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "10.1.8",
-    "jest": "^30.2.0",
     "prettier": "^3.7.4",
-    "ts-jest": "^29.4.6",
-    "tsx": "^4.21.0",
     "typescript": "^5.3.0",
     "typescript-eslint": "^8.48.0"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "bun": ">=1.0.0"
   },
   "overrides": {
     "test-exclude": "^7.0.1"

@@ -1,11 +1,12 @@
 import type { QueryResult, QueryResultRow } from 'pg';
+import { mock, type Mock } from 'bun:test';
 
 export interface MockPool {
-  query: jest.Mock;
+  query: Mock<(...args: unknown[]) => Promise<QueryResult<QueryResultRow>>>;
 }
 
 export const createMockPool = (): MockPool => ({
-  query: jest.fn(),
+  query: mock(() => Promise.resolve(createQueryResult([]))),
 });
 
 export const mockPool = createMockPool();

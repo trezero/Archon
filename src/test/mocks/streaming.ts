@@ -1,3 +1,5 @@
+import { mock, type Mock } from 'bun:test';
+
 export interface StreamEvent {
   type: 'text' | 'tool' | 'error' | 'complete';
   content?: string;
@@ -15,17 +17,17 @@ export async function* createMockStream(events: StreamEvent[]): AsyncGenerator<S
 export const createMockAssistantClient = (
   events: StreamEvent[] = []
 ): {
-  sendMessage: jest.Mock;
-  getType: jest.Mock;
-  resumeSession: jest.Mock;
+  sendMessage: Mock<() => AsyncGenerator<StreamEvent>>;
+  getType: Mock<() => string>;
+  resumeSession: Mock<() => AsyncGenerator<StreamEvent>>;
 } => ({
-  sendMessage: jest.fn(async function* () {
+  sendMessage: mock(async function* () {
     for (const event of events) {
       yield event;
     }
   }),
-  getType: jest.fn().mockReturnValue('claude'),
-  resumeSession: jest.fn(async function* () {
+  getType: mock(() => 'claude'),
+  resumeSession: mock(async function* () {
     for (const event of events) {
       yield event;
     }

@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM oven/bun:1-slim
 
 # Prevent interactive prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -29,20 +29,20 @@ RUN useradd -m -u 1001 -s /bin/bash appuser \
     && mkdir -p /workspace \
     && chown -R appuser:appuser /app /workspace
 
-# Copy package files
-COPY package*.json ./
+# Copy package files and lockfile
+COPY package.json bun.lock ./
 
 # Install ALL dependencies (including devDependencies for build)
-RUN npm ci
+RUN bun install --frozen-lockfile
 
 # Copy application code
 COPY . .
 
-# Build TypeScript
-RUN npm run build
+# Build TypeScript with Bun
+RUN bun build src/index.ts --outdir=dist --target=bun
 
 # Remove devDependencies to reduce image size
-RUN npm prune --production
+RUN bun install --production --frozen-lockfile
 
 # Fix permissions for appuser
 RUN chown -R appuser:appuser /app
@@ -63,4 +63,4 @@ RUN git config --global --add safe.directory /workspace && \
 EXPOSE 3000
 
 # Setup Codex authentication from environment variables, then start app
-CMD ["sh", "-c", "npm run setup-auth && npm start"]
+CMD ["sh", "-c", "bun run setup-auth && bun run start"]

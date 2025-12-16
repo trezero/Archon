@@ -22,6 +22,6 @@ Describe how you tested the changes.
 ## Checklist
 
 - [ ] Code follows the project style guidelines
-- [ ] Tests pass locally (`npm test`)
-- [ ] Type check passes (`npm run type-check`)
-- [ ] Lint passes (`npm run lint`)
+- [ ] Tests pass locally (`bun test`)
+- [ ] Type check passes (`bun run type-check`)
+- [ ] Lint passes (`bun run lint`)

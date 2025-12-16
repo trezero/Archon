@@ -1,43 +1,34 @@
-// Mock the Codex SDK via the dynamic import mechanism
-const mockStartThread = jest.fn();
-const mockResumeThread = jest.fn();
-const mockRunStreamed = jest.fn();
+import { describe, test, expect, mock, beforeEach, spyOn } from 'bun:test';
 
-// Create a mock thread object
+// Create mock runStreamed first (before it's referenced)
+const mockRunStreamed = mock(() =>
+  Promise.resolve({
+    events: (async function* () {
+      yield { type: 'turn.completed' };
+    })(),
+  })
+);
+
+// Create a mock thread object factory
 const createMockThread = (id: string) => ({
   id,
   runStreamed: mockRunStreamed,
 });
 
+// Create mock functions for Codex SDK that use createMockThread
+const mockStartThread = mock(() => createMockThread('new-thread-id'));
+const mockResumeThread = mock(() => createMockThread('resumed-thread-id'));
+
 // Mock Codex class
-const MockCodex = jest.fn().mockImplementation(() => ({
+const MockCodex = mock(() => ({
   startThread: mockStartThread,
   resumeThread: mockResumeThread,
 }));
 
-// Mock the dynamic import
-jest.mock(
-  '@openai/codex-sdk',
-  () => ({
-    Codex: MockCodex,
-  }),
-  { virtual: true }
-);
-
-// Patch the global Function to intercept the dynamic import
-const originalFunction = global.Function;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(global as any).Function = function (...args: string[]) {
-  // Check if this is the dynamic import function
-  if (args[0] === 'modulePath' && args[1]?.includes('import(')) {
-    return () =>
-      Promise.resolve({
-        Codex: MockCodex,
-      });
-  }
-  // Otherwise, use the original Function constructor
-  return originalFunction.apply(this, args as [string, string]);
-};
+// Mock the Codex SDK
+mock.module('@openai/codex-sdk', () => ({
+  Codex: MockCodex,
+}));
 
 import { CodexClient } from './codex';
 
@@ -46,17 +37,13 @@ describe('CodexClient', () => {
 
   beforeEach(() => {
     client = new CodexClient();
-    jest.clearAllMocks();
+    mockStartThread.mockClear();
+    mockResumeThread.mockClear();
+    mockRunStreamed.mockClear();
 
     // Setup default mock thread
     mockStartThread.mockReturnValue(createMockThread('new-thread-id'));
     mockResumeThread.mockReturnValue(createMockThread('resumed-thread-id'));
-  });
-
-  afterAll(() => {
-    // Restore original Function
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (global as any).Function = originalFunction;
   });
 
   describe('getType', () => {
@@ -174,7 +161,7 @@ describe('CodexClient', () => {
         })(),
       });
 
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
       const chunks = [];
       for await (const chunk of client.sendQuery('test', '/workspace', 'bad-thread-id')) {
@@ -217,7 +204,7 @@ describe('CodexClient', () => {
         })(),
       });
 
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
       const chunks = [];
       for await (const chunk of client.sendQuery('test', '/workspace')) {
@@ -236,7 +223,7 @@ describe('CodexClient', () => {
         })(),
       });
 
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
       const chunks = [];
       for await (const chunk of client.sendQuery('test', '/workspace')) {
@@ -257,7 +244,7 @@ describe('CodexClient', () => {
         })(),
       });
 
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
       const chunks = [];
       for await (const chunk of client.sendQuery('test', '/workspace')) {
@@ -275,7 +262,7 @@ describe('CodexClient', () => {
         })(),
       });
 
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
       const chunks = [];
       for await (const chunk of client.sendQuery('test', '/workspace')) {
@@ -289,13 +276,15 @@ describe('CodexClient', () => {
     test('throws on runStreamed error', async () => {
       mockRunStreamed.mockRejectedValue(new Error('Network failure'));
 
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
-      await expect(async () => {
+      const consumeGenerator = async () => {
         for await (const _ of client.sendQuery('test', '/workspace')) {
           // consume
         }
-      }).rejects.toThrow('Codex query failed: Network failure');
+      };
+
+      await expect(consumeGenerator()).rejects.toThrow('Codex query failed: Network failure');
 
       consoleSpy.mockRestore();
     });

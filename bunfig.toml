@@ -1,0 +1,8 @@
+# Bun configuration for Remote Agentic Coding Platform
+
+[test]
+# Run preload script before tests
+preload = ["./src/test/setup.ts"]
+# Coverage output
+coverage = true
+coverageDir = "coverage"

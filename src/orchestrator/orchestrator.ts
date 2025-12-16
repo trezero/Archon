@@ -124,7 +124,10 @@ export async function handleMessage(
         const commandArgs = args.slice(1);
 
         if (!conversation.codebase_id) {
-          await platform.sendMessage(conversationId, 'No codebase configured. Use /clone for a new repo or /repos to list your current repos you can switch to.');
+          await platform.sendMessage(
+            conversationId,
+            'No codebase configured. Use /clone for a new repo or /repos to list your current repos you can switch to.'
+          );
           return;
         }
 
@@ -183,7 +186,9 @@ export async function handleMessage(
             console.log('[Orchestrator] Appended issue/PR context to template prompt');
           }
 
-          console.log(`[Orchestrator] Executing template '${command}' with ${String(args.length)} args`);
+          console.log(
+            `[Orchestrator] Executing template '${command}' with ${String(args.length)} args`
+          );
         } else {
           // Unknown command
           await platform.sendMessage(
@@ -196,7 +201,10 @@ export async function handleMessage(
     } else {
       // Regular message - route through router template
       if (!conversation.codebase_id) {
-        await platform.sendMessage(conversationId, 'No codebase configured. Use /clone for a new repo or /repos to list your current repos you can switch to.');
+        await platform.sendMessage(
+          conversationId,
+          'No codebase configured. Use /clone for a new repo or /repos to list your current repos you can switch to.'
+        );
         return;
       }
 
@@ -228,7 +236,8 @@ export async function handleMessage(
     const codebase = conversation.codebase_id
       ? await codebaseDb.getCodebase(conversation.codebase_id)
       : null;
-    let cwd = conversation.worktree_path ?? conversation.cwd ?? codebase?.default_cwd ?? '/workspace';
+    let cwd =
+      conversation.worktree_path ?? conversation.cwd ?? codebase?.default_cwd ?? '/workspace';
 
     // Validate cwd exists - handle stale worktree paths gracefully
     try {
@@ -261,9 +270,9 @@ export async function handleMessage(
     // - plan-feature → execute (regular workflow)
     // - plan-feature-github → execute-github (GitHub workflow with staging)
     const needsNewSession =
-     
       (commandName === 'execute' && session?.metadata?.lastCommand === 'plan-feature') ||
-      (commandName === 'execute-github' && session?.metadata?.lastCommand === 'plan-feature-github');
+      (commandName === 'execute-github' &&
+        session?.metadata?.lastCommand === 'plan-feature-github');
 
     if (needsNewSession) {
       console.log('[Orchestrator] Plan→Execute transition: creating new session');

@@ -2,8 +2,6 @@
  * Command handler for slash commands
  * Handles deterministic operations without AI
  */
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { readFile, writeFile, readdir, access, rm } from 'fs/promises';
 import { join, basename, resolve, relative } from 'path';
 import { Conversation, CommandResult } from '../types';
@@ -12,9 +10,7 @@ import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
 import * as templateDb from '../db/command-templates';
 import { isPathWithinWorkspace } from '../utils/path-validation';
-import { listWorktrees } from '../utils/git';
-
-const execFileAsync = promisify(execFile);
+import { listWorktrees, execFileAsync } from '../utils/git';
 
 /**
  * Convert an absolute path to a relative path from the repository root
@@ -413,7 +409,8 @@ Session:
         if (commandsLoaded > 0) {
           responseMessage += `\n✓ Loaded ${String(commandsLoaded)} commands`;
         }
-        responseMessage += '\n\nSession reset - starting fresh on next message.\n\nYou can now start asking questions about the code.';
+        responseMessage +=
+          '\n\nSession reset - starting fresh on next message.\n\nYou can now start asking questions about the code.';
 
         return {
           success: true,
@@ -847,7 +844,10 @@ Session:
         return { success: false, message: 'Usage: /template-add <name> <file-path>' };
       }
       if (!conversation.cwd) {
-        return { success: false, message: 'No working directory set. Use /clone or /setcwd first.' };
+        return {
+          success: false,
+          message: 'No working directory set. Use /clone or /setcwd first.',
+        };
       }
 
       const [templateName, ...pathParts] = args;
@@ -888,7 +888,8 @@ Session:
       if (templates.length === 0) {
         return {
           success: true,
-          message: 'No command templates registered.\n\nUse /template-add <name> <file-path> to add one.',
+          message:
+            'No command templates registered.\n\nUse /template-add <name> <file-path> to add one.',
         };
       }
 
@@ -1083,7 +1084,8 @@ Session:
             if (err.message.includes('untracked files') || err.message.includes('modified')) {
               return {
                 success: false,
-                message: 'Worktree has uncommitted changes.\n\nCommit your work first, or use `/worktree remove --force` to discard.',
+                message:
+                  'Worktree has uncommitted changes.\n\nCommit your work first, or use `/worktree remove --force` to discard.',
               };
             }
             return { success: false, message: `Failed to remove worktree: ${err.message}` };
@@ -1098,7 +1100,8 @@ Session:
           if (gitWorktrees.length <= 1) {
             return {
               success: true,
-              message: 'No worktrees found (only main repo).\n\nUse `/worktree create <branch>` to create one.',
+              message:
+                'No worktrees found (only main repo).\n\nUse `/worktree create <branch>` to create one.',
             };
           }
 

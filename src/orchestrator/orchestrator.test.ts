@@ -1,33 +1,37 @@
+import { mock, describe, test, expect, beforeEach } from 'bun:test';
 import { MockPlatformAdapter } from '../test/mocks/platform';
 import { Conversation, Codebase, Session } from '../types';
 import { join } from 'path';
 
 // Setup mocks before importing the module under test
-const mockGetOrCreateConversation = jest.fn();
-const mockUpdateConversation = jest.fn();
-const mockGetCodebase = jest.fn();
-const mockGetActiveSession = jest.fn();
-const mockCreateSession = jest.fn();
-const mockUpdateSession = jest.fn();
-const mockDeactivateSession = jest.fn();
-const mockUpdateSessionMetadata = jest.fn();
-const mockGetTemplate = jest.fn();
-const mockHandleCommand = jest.fn();
-const mockParseCommand = jest.fn();
-const mockGetAssistantClient = jest.fn();
-const mockReadFile = jest.fn();
-const mockAccess = jest.fn();
+const mockGetOrCreateConversation = mock(() => Promise.resolve(null));
+const mockUpdateConversation = mock(() => Promise.resolve());
+const mockGetCodebase = mock(() => Promise.resolve(null));
+const mockGetActiveSession = mock(() => Promise.resolve(null));
+const mockCreateSession = mock(() => Promise.resolve(null));
+const mockUpdateSession = mock(() => Promise.resolve());
+const mockDeactivateSession = mock(() => Promise.resolve());
+const mockUpdateSessionMetadata = mock(() => Promise.resolve());
+const mockGetTemplate = mock(() => Promise.resolve(null));
+const mockHandleCommand = mock(() => Promise.resolve({ message: '', modified: false }));
+const mockParseCommand = mock((message: string) => {
+  const parts = message.split(/\s+/);
+  return { command: parts[0].substring(1), args: parts.slice(1) };
+});
+const mockGetAssistantClient = mock(() => null);
+const mockReadFile = mock(() => Promise.resolve(''));
+const mockAccess = mock(() => Promise.resolve());
 
-jest.mock('../db/conversations', () => ({
+mock.module('../db/conversations', () => ({
   getOrCreateConversation: mockGetOrCreateConversation,
   updateConversation: mockUpdateConversation,
 }));
 
-jest.mock('../db/codebases', () => ({
+mock.module('../db/codebases', () => ({
   getCodebase: mockGetCodebase,
 }));
 
-jest.mock('../db/sessions', () => ({
+mock.module('../db/sessions', () => ({
   getActiveSession: mockGetActiveSession,
   createSession: mockCreateSession,
   updateSession: mockUpdateSession,
@@ -35,20 +39,20 @@ jest.mock('../db/sessions', () => ({
   updateSessionMetadata: mockUpdateSessionMetadata,
 }));
 
-jest.mock('../db/command-templates', () => ({
+mock.module('../db/command-templates', () => ({
   getTemplate: mockGetTemplate,
 }));
 
-jest.mock('../handlers/command-handler', () => ({
+mock.module('../handlers/command-handler', () => ({
   handleCommand: mockHandleCommand,
   parseCommand: mockParseCommand,
 }));
 
-jest.mock('../clients/factory', () => ({
+mock.module('../clients/factory', () => ({
   getAssistantClient: mockGetAssistantClient,
 }));
 
-jest.mock('fs/promises', () => ({
+mock.module('fs/promises', () => ({
   readFile: mockReadFile,
   access: mockAccess,
 }));
@@ -112,13 +116,30 @@ describe('orchestrator', () => {
   };
 
   const mockClient = {
-    sendQuery: jest.fn(),
-    getType: jest.fn().mockReturnValue('claude'),
+    sendQuery: mock(async function* () {
+      yield { type: 'result', sessionId: 'session-id' };
+    }),
+    getType: mock(() => 'claude'),
   };
 
   beforeEach(() => {
     platform = new MockPlatformAdapter();
-    jest.clearAllMocks();
+    mockGetOrCreateConversation.mockClear();
+    mockUpdateConversation.mockClear();
+    mockGetCodebase.mockClear();
+    mockGetActiveSession.mockClear();
+    mockCreateSession.mockClear();
+    mockUpdateSession.mockClear();
+    mockDeactivateSession.mockClear();
+    mockUpdateSessionMetadata.mockClear();
+    mockGetTemplate.mockClear();
+    mockHandleCommand.mockClear();
+    mockParseCommand.mockClear();
+    mockGetAssistantClient.mockClear();
+    mockReadFile.mockClear();
+    mockAccess.mockClear();
+    mockClient.sendQuery.mockClear();
+    mockClient.getType.mockClear();
 
     // Default mocks
     mockGetOrCreateConversation.mockResolvedValue(mockConversation);
@@ -441,7 +462,7 @@ describe('orchestrator', () => {
         expect.stringContaining('is on the case')
       );
       // Verify both Part 1 and Final summary are included (joined with ---)
-      const finalMessage = platform.sendMessage.mock.calls[1][1];
+      const finalMessage = (platform.sendMessage as ReturnType<typeof mock>).mock.calls[1][1];
       expect(finalMessage).toContain('Part 1');
       expect(finalMessage).toContain('---');
       expect(finalMessage).toContain('Final summary');
@@ -457,7 +478,7 @@ describe('orchestrator', () => {
       await handleMessage(platform, 'chat-456', '/command-invoke plan');
 
       // Second message is the final one (first is "starting" message)
-      const sentMessage = platform.sendMessage.mock.calls[1][1];
+      const sentMessage = (platform.sendMessage as ReturnType<typeof mock>).mock.calls[1][1];
       expect(sentMessage).not.toContain('🔧');
       expect(sentMessage).toContain('Clean summary');
     });

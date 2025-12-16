@@ -1,9 +1,10 @@
+import { mock, describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { createQueryResult } from '../test/mocks/database';
 
-const mockQuery = jest.fn();
+const mockQuery = mock(() => Promise.resolve(createQueryResult([])));
 
 // Mock the connection module before importing the module under test
-jest.mock('./connection', () => ({
+mock.module('./connection', () => ({
   pool: {
     query: mockQuery,
   },
@@ -14,7 +15,7 @@ import { Conversation } from '../types';
 
 describe('conversations', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockQuery.mockClear();
   });
 
   describe('getOrCreateConversation', () => {

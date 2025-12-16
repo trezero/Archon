@@ -1,29 +1,45 @@
 /**
  * Unit tests for Slack adapter
  */
-import { SlackAdapter, SlackMessageEvent } from './slack';
+import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import type { Mock } from 'bun:test';
+
+// Create mock functions
+const mockPostMessage = mock(() => Promise.resolve(undefined));
+const mockReplies = mock(() => Promise.resolve({ messages: [] }));
+const mockEvent = mock(() => {});
+const mockStart = mock(() => Promise.resolve(undefined));
+const mockStop = mock(() => Promise.resolve(undefined));
+
+const mockApp = {
+  client: {
+    chat: {
+      postMessage: mockPostMessage,
+    },
+    conversations: {
+      replies: mockReplies,
+    },
+  },
+  event: mockEvent,
+  start: mockStart,
+  stop: mockStop,
+};
 
 // Mock @slack/bolt
-jest.mock('@slack/bolt', () => ({
-  App: jest.fn().mockImplementation(() => ({
-    client: {
-      chat: {
-        postMessage: jest.fn().mockResolvedValue(undefined),
-      },
-      conversations: {
-        replies: jest.fn().mockResolvedValue({ messages: [] }),
-      },
-    },
-    event: jest.fn(),
-    start: jest.fn().mockResolvedValue(undefined),
-    stop: jest.fn().mockResolvedValue(undefined),
-  })),
+mock.module('@slack/bolt', () => ({
+  App: mock(() => mockApp),
   LogLevel: {
     INFO: 'info',
   },
 }));
 
+import { SlackAdapter, SlackMessageEvent } from './slack';
+
 describe('SlackAdapter', () => {
+  beforeEach(() => {
+    mockPostMessage.mockClear();
+  });
+
   describe('streaming mode configuration', () => {
     test('should return batch mode when configured', () => {
       const adapter = new SlackAdapter('xoxb-fake', 'xapp-fake', 'batch');
@@ -131,9 +147,7 @@ describe('SlackAdapter', () => {
     });
 
     test('should strip multiple mentions', () => {
-      expect(adapter.stripBotMention('<@U1234ABCD> <@W5678EFGH> hello')).toBe(
-        '<@W5678EFGH> hello'
-      );
+      expect(adapter.stripBotMention('<@U1234ABCD> <@W5678EFGH> hello')).toBe('<@W5678EFGH> hello');
     });
 
     test('should return unchanged if no mention', () => {
@@ -141,20 +155,24 @@ describe('SlackAdapter', () => {
     });
 
     test('should normalize Slack URL formatting', () => {
-      expect(
-        adapter.stripBotMention('<@U1234ABCD> /clone <https://github.com/test/repo>')
-      ).toBe('/clone https://github.com/test/repo');
+      expect(adapter.stripBotMention('<@U1234ABCD> /clone <https://github.com/test/repo>')).toBe(
+        '/clone https://github.com/test/repo'
+      );
     });
 
     test('should normalize Slack URL with label', () => {
       expect(
-        adapter.stripBotMention('<@U1234ABCD> check <https://github.com/test/repo|github.com/test/repo>')
+        adapter.stripBotMention(
+          '<@U1234ABCD> check <https://github.com/test/repo|github.com/test/repo>'
+        )
       ).toBe('check https://github.com/test/repo');
     });
 
     test('should normalize multiple URLs', () => {
       expect(
-        adapter.stripBotMention('<@U1234ABCD> compare <https://github.com/a> and <https://github.com/b>')
+        adapter.stripBotMention(
+          '<@U1234ABCD> compare <https://github.com/a> and <https://github.com/b>'
+        )
       ).toBe('compare https://github.com/a and https://github.com/b');
     });
   });
@@ -199,11 +217,9 @@ describe('SlackAdapter', () => {
 
   describe('message formatting', () => {
     let adapter: SlackAdapter;
-    let mockPostMessage: jest.Mock;
 
     beforeEach(() => {
       adapter = new SlackAdapter('xoxb-fake', 'xapp-fake');
-      mockPostMessage = adapter.getApp().client.chat.postMessage as jest.Mock;
       mockPostMessage.mockClear();
     });
 
@@ -272,7 +288,9 @@ describe('SlackAdapter', () => {
           text: 'test message',
         })
       );
-      expect(mockPostMessage.mock.calls[1][0]).not.toHaveProperty('blocks');
+      expect((mockPostMessage as Mock<typeof mockPostMessage>).mock.calls[1][0]).not.toHaveProperty(
+        'blocks'
+      );
     });
 
     test('should split long messages into multiple markdown blocks', async () => {
@@ -284,8 +302,12 @@ describe('SlackAdapter', () => {
 
       expect(mockPostMessage).toHaveBeenCalledTimes(2);
       // Both calls should use markdown blocks
-      expect(mockPostMessage.mock.calls[0][0]).toHaveProperty('blocks');
-      expect(mockPostMessage.mock.calls[1][0]).toHaveProperty('blocks');
+      expect((mockPostMessage as Mock<typeof mockPostMessage>).mock.calls[0][0]).toHaveProperty(
+        'blocks'
+      );
+      expect((mockPostMessage as Mock<typeof mockPostMessage>).mock.calls[1][0]).toHaveProperty(
+        'blocks'
+      );
     });
 
     test('should handle empty message without crashing', async () => {

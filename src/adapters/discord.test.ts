@@ -1,45 +1,65 @@
 /**
  * Unit tests for Discord adapter
  */
-import { DiscordAdapter } from './discord';
+import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import type { Mock } from 'bun:test';
+
+// Create mock functions before mocking the module
+const mockChannelSend = mock(() => Promise.resolve(undefined));
+const mockChannelsFetch = mock(() =>
+  Promise.resolve({
+    isSendable: () => true,
+    send: mockChannelSend,
+  })
+);
+const mockClientOn = mock(() => {});
+const mockClientOnce = mock(() => {});
+const mockClientLogin = mock(() => Promise.resolve('token'));
+const mockClientDestroy = mock(() => {});
+
+const mockClient = {
+  channels: {
+    fetch: mockChannelsFetch,
+  },
+  on: mockClientOn,
+  once: mockClientOnce,
+  login: mockClientLogin,
+  destroy: mockClientDestroy,
+  user: { id: '123456789' },
+};
+
+const MockClient = mock(() => mockClient);
 
 // Mock discord.js
-jest.mock('discord.js', () => {
-  const mockChannel = {
-    isSendable: () => true,
-    send: jest.fn().mockResolvedValue(undefined),
-  };
+mock.module('discord.js', () => ({
+  Client: MockClient,
+  GatewayIntentBits: {
+    Guilds: 1,
+    GuildMessages: 2,
+    MessageContent: 4,
+    DirectMessages: 8,
+  },
+  Partials: {
+    Channel: 0,
+  },
+  Events: {
+    MessageCreate: 'messageCreate',
+    ClientReady: 'ready',
+  },
+}));
 
-  const mockClient = {
-    channels: {
-      fetch: jest.fn().mockResolvedValue(mockChannel),
-    },
-    on: jest.fn(),
-    once: jest.fn(),
-    login: jest.fn().mockResolvedValue('token'),
-    destroy: jest.fn(),
-    user: { id: '123456789' }, // Bot user for mention detection
-  };
-
-  return {
-    Client: jest.fn(() => mockClient),
-    GatewayIntentBits: {
-      Guilds: 1,
-      GuildMessages: 2,
-      MessageContent: 4,
-      DirectMessages: 8,
-    },
-    Partials: {
-      Channel: 0,
-    },
-    Events: {
-      MessageCreate: 'messageCreate',
-      ClientReady: 'ready',
-    },
-  };
-});
+import { DiscordAdapter } from './discord';
 
 describe('DiscordAdapter', () => {
+  beforeEach(() => {
+    mockChannelSend.mockClear();
+    mockChannelsFetch.mockClear();
+    mockClientOn.mockClear();
+    mockClientOnce.mockClear();
+    mockClientLogin.mockClear();
+    mockClientDestroy.mockClear();
+  });
+
   describe('streaming mode configuration', () => {
     test('should return batch mode when configured', () => {
       const adapter = new DiscordAdapter('fake-token-for-testing', 'batch');
@@ -84,10 +104,8 @@ describe('DiscordAdapter', () => {
 
     test('should use thread ID when message is in a thread', () => {
       const adapter = new DiscordAdapter('fake-token-for-testing');
-      // When a message is in a thread, channelId IS the thread ID
-      // Parent channel would be accessible via message.channel.parentId
       const mockThreadMessage = {
-        channelId: '9876543210', // This is the thread ID, not parent channel
+        channelId: '9876543210',
       } as unknown as import('discord.js').Message;
 
       expect(adapter.getConversationId(mockThreadMessage)).toBe('9876543210');
@@ -98,28 +116,25 @@ describe('DiscordAdapter', () => {
     test('should send short messages directly', async () => {
       const adapter = new DiscordAdapter('fake-token-for-testing');
       const client = adapter.getClient();
-      const mockChannel = (await client.channels.fetch('123')) as { send: jest.Mock } | null;
 
       await adapter.sendMessage('123', 'Hello, World!');
 
       expect(client.channels.fetch).toHaveBeenCalledWith('123');
-      expect(mockChannel?.send).toHaveBeenCalledWith('Hello, World!');
+      expect(mockChannelSend).toHaveBeenCalledWith('Hello, World!');
     });
 
     test('should split long messages into chunks', async () => {
       const adapter = new DiscordAdapter('fake-token-for-testing');
-      const client = adapter.getClient();
-      const mockChannel = (await client.channels.fetch('123')) as { send: jest.Mock } | null;
 
-      // Create a message longer than 2000 chars with paragraph breaks
       const para1 = 'a'.repeat(1500);
       const para2 = 'b'.repeat(1500);
       const longMessage = `${para1}\n\n${para2}`;
 
       await adapter.sendMessage('123', longMessage);
 
-      // Should have been split and sent as multiple messages
-      expect(mockChannel?.send.mock.calls.length).toBeGreaterThan(1);
+      expect((mockChannelSend as Mock<typeof mockChannelSend>).mock.calls.length).toBeGreaterThan(
+        1
+      );
     });
   });
 
@@ -156,13 +171,11 @@ describe('DiscordAdapter', () => {
   describe('message handler registration', () => {
     test('should allow registering a message handler', async () => {
       const adapter = new DiscordAdapter('fake-token-for-testing');
-      const mockHandler = jest.fn().mockResolvedValue(undefined);
+      const mockHandler = mock(() => Promise.resolve(undefined));
 
       adapter.onMessage(mockHandler);
       await adapter.start();
 
-      // The handler should be registered internally
-      // We can verify this indirectly by checking that onMessage doesn't throw
       expect(true).toBe(true);
     });
   });
@@ -172,7 +185,7 @@ describe('DiscordAdapter', () => {
       const adapter = new DiscordAdapter('fake-token-for-testing');
       const mockMessage = {
         mentions: {
-          has: jest.fn().mockReturnValue(true),
+          has: mock(() => true),
         },
       } as unknown as import('discord.js').Message;
 
@@ -183,7 +196,7 @@ describe('DiscordAdapter', () => {
       const adapter = new DiscordAdapter('fake-token-for-testing');
       const mockMessage = {
         mentions: {
-          has: jest.fn().mockReturnValue(false),
+          has: mock(() => false),
         },
       } as unknown as import('discord.js').Message;
 

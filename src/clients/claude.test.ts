@@ -1,7 +1,12 @@
-// Mock the claude-agent-sdk before importing
-const mockQuery = jest.fn();
+import { describe, test, expect, mock, beforeEach, spyOn } from 'bun:test';
 
-jest.mock('@anthropic-ai/claude-agent-sdk', () => ({
+// Create mock query function
+const mockQuery = mock(async function* () {
+  // Empty generator by default
+});
+
+// Mock the claude-agent-sdk
+mock.module('@anthropic-ai/claude-agent-sdk', () => ({
   query: mockQuery,
 }));
 
@@ -12,7 +17,7 @@ describe('ClaudeClient', () => {
 
   beforeEach(() => {
     client = new ClaudeClient();
-    jest.clearAllMocks();
+    mockQuery.mockClear();
   });
 
   describe('getType', () => {
@@ -23,7 +28,6 @@ describe('ClaudeClient', () => {
 
   describe('sendQuery', () => {
     test('yields text events from assistant messages', async () => {
-      // Mock the SDK to return async generator
       mockQuery.mockImplementation(async function* () {
         yield {
           type: 'assistant',
@@ -204,13 +208,15 @@ describe('ClaudeClient', () => {
         throw error;
       });
 
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
-      await expect(async () => {
+      const consumeGenerator = async () => {
         for await (const _ of client.sendQuery('test', '/workspace')) {
           // consume
         }
-      }).rejects.toThrow('API connection failed');
+      };
+
+      await expect(consumeGenerator()).rejects.toThrow('API connection failed');
 
       expect(consoleSpy).toHaveBeenCalledWith('[Claude] Query error:', error);
       consoleSpy.mockRestore();

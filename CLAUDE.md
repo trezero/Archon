@@ -1,6 +1,6 @@
 ## Project Overview
 
-**Remote Agentic Coding Platform**: Control AI coding assistants (Claude Code SDK, Codex SDK) remotely from Slack, Telegram, and GitHub. Built with **Node.js + TypeScript + PostgreSQL**, single-developer tool for practitioners of the Dynamous Agentic Coding Course. Architecture prioritizes simplicity, flexibility, and user control.
+**Remote Agentic Coding Platform**: Control AI coding assistants (Claude Code SDK, Codex SDK) remotely from Slack, Telegram, and GitHub. Built with **Bun + TypeScript + PostgreSQL**, single-developer tool for practitioners of the Dynamous Agentic Coding Course. Architecture prioritizes simplicity, flexibility, and user control.
 
 ## Core Principles
 
@@ -46,7 +46,7 @@ Run postgres in Docker, app locally for hot reload:
 docker-compose --profile with-db up -d postgres
 
 # Terminal 2: Run app with hot reload
-npm run dev
+bun run dev
 ```
 
 Requires `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/remote_coding_agent` in `.env`.
@@ -57,52 +57,52 @@ Code changes auto-reload instantly. Telegram/Slack work from any device (polling
 
 ```bash
 # Install dependencies
-npm install
+bun install
 
-# Build TypeScript
-npm run build
+# Build TypeScript (optional - Bun runs TS directly)
+bun run build
 
 # Start production server (no hot reload)
-npm start
+bun run start
 ```
 
 ### Testing
 
 ```bash
 # Run all tests
-npm test
+bun test
 
 # Run tests in watch mode
-npm run test:watch
+bun test --watch
 
 # Run specific test file
-npm test -- src/handlers/command-handler.test.ts
+bun test src/handlers/command-handler.test.ts
 ```
 
 ### Type Checking
 
 ```bash
 # TypeScript compiler check
-npm run type-check
+bun run type-check
 
 # Or use tsc directly
-npx tsc --noEmit
+bun x tsc --noEmit
 ```
 
 ### Linting & Formatting
 
 ```bash
 # Check linting
-npm run lint
+bun run lint
 
 # Auto-fix linting issues
-npm run lint:fix
+bun run lint:fix
 
 # Format code
-npm run format
+bun run format
 
 # Check formatting (CI-safe)
-npm run format:check
+bun run format:check
 ```
 
 **Code Quality Setup:**
@@ -410,7 +410,7 @@ DELETE http://localhost:3000/test/messages/test-123
 ```bash
 # 1. Start application (hybrid mode - recommended)
 docker-compose --profile with-db up -d postgres
-npm run dev
+bun run dev
 
 # 2. Send test message (use your configured PORT, default 3000)
 curl -X POST http://localhost:3000/test/message \
@@ -596,7 +596,7 @@ try {
 
 **Development Setup (Recommended):**
 - Run only postgres: `docker-compose --profile with-db up -d postgres`
-- Run app locally: `npm run dev` (hot reload enabled)
+- Run app locally: `bun run dev` (hot reload enabled)
 
 **Volumes:**
 - `/workspace` - Cloned repositories

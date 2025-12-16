@@ -1,35 +1,23 @@
 /**
  * Codex SDK wrapper
  * Provides async generator interface for streaming Codex responses
+ *
+ * With Bun runtime, we can directly import ESM packages without the
+ * dynamic import workaround that was needed for CommonJS/Node.js.
  */
+import { Codex } from '@openai/codex-sdk';
 import { IAssistantClient, MessageChunk } from '../types';
-
-// Type definition for Codex SDK (ESM import)
-type CodexSDK = typeof import('@openai/codex-sdk');
-type Codex = InstanceType<CodexSDK['Codex']>;
 
 // Singleton Codex instance
 let codexInstance: Codex | null = null;
-let codexClass: CodexSDK['Codex'] | null = null;
-
-// Dynamic import that bypasses TypeScript transpilation
-// This prevents TS from converting import() to require() when module=commonjs
-// eslint-disable-next-line @typescript-eslint/no-implied-eval
-const importDynamic = new Function('modulePath', 'return import(modulePath)');
 
 /**
- * Get or create Codex SDK instance (uses dynamic import for ESM compatibility)
+ * Get or create Codex SDK instance
+ * Synchronous now that we have direct ESM import
  */
-async function getCodex(): Promise<Codex> {
+function getCodex(): Codex {
   if (!codexInstance) {
-    if (!codexClass) {
-      // Dynamic import to handle ESM-only package (bypasses TS transpilation)
-      // eslint-disable-next-line @typescript-eslint/naming-convention, @typescript-eslint/no-unsafe-call
-      const { Codex: ImportedCodex } = (await importDynamic('@openai/codex-sdk')) as CodexSDK;
-      codexClass = ImportedCodex;
-    }
-
-    codexInstance = new codexClass();
+    codexInstance = new Codex();
   }
   return codexInstance;
 }
@@ -50,7 +38,7 @@ export class CodexClient implements IAssistantClient {
     cwd: string,
     resumeSessionId?: string
   ): AsyncGenerator<MessageChunk> {
-    const codex = await getCodex();
+    const codex = getCodex();
 
     // Get or create thread (synchronous operations!)
     let thread;

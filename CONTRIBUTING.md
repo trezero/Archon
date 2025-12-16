@@ -6,9 +6,9 @@ Thank you for your interest in contributing to the Remote Agentic Coding Platfor
 
 1. Fork the repository
 2. Clone your fork
-3. Install dependencies: `npm install`
+3. Install dependencies: `bun install`
 4. Copy `.env.example` to `.env` and configure
-5. Start development: `npm run dev`
+5. Start development: `bun run dev`
 
 ## Development Workflow
 
@@ -17,10 +17,10 @@ Thank you for your interest in contributing to the Remote Agentic Coding Platfor
 Before submitting a PR, ensure:
 
 ```bash
-npm run type-check  # TypeScript types
-npm run lint        # ESLint
-npm run format      # Prettier
-npm test            # Jest tests
+bun run type-check  # TypeScript types
+bun run lint        # ESLint
+bun run format      # Prettier
+bun test            # Bun tests
 ```
 
 ### Commit Messages

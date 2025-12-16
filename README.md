@@ -543,10 +543,10 @@ docker compose logs -f app-with-db
 
 **Option C: Local Development (No Docker)**
 
-Run directly with Node.js (requires local PostgreSQL or remote `DATABASE_URL` in `.env`):
+Run directly with Bun (requires local PostgreSQL or remote `DATABASE_URL` in `.env`):
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 **Stop the application:**
@@ -1029,8 +1029,8 @@ docker compose --profile external-db down  # or --profile with-db
 
 # Clean build
 rm -rf dist node_modules
-npm install
-npm run build
+bun install
+bun run build
 
 # Restart (use the profile you need)
 docker compose --profile external-db up -d --build  # or --profile with-db
@@ -1038,7 +1038,7 @@ docker compose --profile external-db up -d --build  # or --profile with-db
 
 **Check for type errors:**
 ```bash
-npm run type-check
+bun run type-check
 ```
 
 ### Container Won't Start

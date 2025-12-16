@@ -1,11 +1,14 @@
 import type { IPlatformAdapter } from '../../types';
+import { mock, type Mock } from 'bun:test';
 
 export class MockPlatformAdapter implements IPlatformAdapter {
-  public sendMessage = jest.fn<Promise<void>, [string, string]>().mockResolvedValue(undefined);
-  public getStreamingMode = jest.fn<'stream' | 'batch', []>().mockReturnValue('stream');
-  public getPlatformType = jest.fn<string, []>().mockReturnValue('mock');
-  public start = jest.fn<Promise<void>, []>().mockResolvedValue(undefined);
-  public stop = jest.fn<undefined, []>();
+  public sendMessage: Mock<(conversationId: string, message: string) => Promise<void>> = mock(() =>
+    Promise.resolve()
+  );
+  public getStreamingMode: Mock<() => 'stream' | 'batch'> = mock(() => 'stream' as const);
+  public getPlatformType: Mock<() => string> = mock(() => 'mock');
+  public start: Mock<() => Promise<void>> = mock(() => Promise.resolve());
+  public stop: Mock<() => void> = mock(() => undefined);
 
   public reset(): void {
     this.sendMessage.mockClear();

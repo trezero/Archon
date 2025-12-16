@@ -1,11 +1,20 @@
 /**
  * Unit tests for path validation utilities
  *
- * NOTE: WORKSPACE_PATH env var may be set in local .env file,
- * so we save/restore it to ensure consistent test behavior.
+ * NOTE: These tests use dynamic imports and module cache clearing
+ * to test different WORKSPACE_PATH configurations.
  */
 
+import { describe, test, expect, beforeEach, afterAll } from 'bun:test';
 import { resolve } from 'path';
+
+// Helper to import fresh module with cleared cache
+async function importFresh() {
+  // Clear the module from cache by deleting it from Loader registry
+  const modulePath = require.resolve('./path-validation');
+  delete require.cache[modulePath];
+  return import('./path-validation');
+}
 
 describe('path-validation', () => {
   const originalWorkspacePath = process.env.WORKSPACE_PATH;
@@ -13,8 +22,6 @@ describe('path-validation', () => {
   beforeEach(() => {
     // Reset to default /workspace for consistent test behavior
     delete process.env.WORKSPACE_PATH;
-    // Clear module cache to re-evaluate WORKSPACE_ROOT
-    jest.resetModules();
   });
 
   afterAll(() => {
@@ -28,21 +35,21 @@ describe('path-validation', () => {
 
   describe('isPathWithinWorkspace', () => {
     test('should allow paths within /workspace (default)', async () => {
-      const { isPathWithinWorkspace } = await import('./path-validation');
+      const { isPathWithinWorkspace } = await importFresh();
       expect(isPathWithinWorkspace('/workspace/repo')).toBe(true);
       expect(isPathWithinWorkspace('/workspace/repo/src')).toBe(true);
       expect(isPathWithinWorkspace('/workspace')).toBe(true);
     });
 
     test('should allow relative paths that resolve within workspace', async () => {
-      const { isPathWithinWorkspace } = await import('./path-validation');
+      const { isPathWithinWorkspace } = await importFresh();
       expect(isPathWithinWorkspace('repo', '/workspace')).toBe(true);
       expect(isPathWithinWorkspace('./repo', '/workspace')).toBe(true);
       expect(isPathWithinWorkspace('repo/src/file.ts', '/workspace')).toBe(true);
     });
 
     test('should reject path traversal attempts', async () => {
-      const { isPathWithinWorkspace } = await import('./path-validation');
+      const { isPathWithinWorkspace } = await importFresh();
       expect(isPathWithinWorkspace('/workspace/../etc/passwd')).toBe(false);
       expect(isPathWithinWorkspace('../etc/passwd', '/workspace')).toBe(false);
       expect(isPathWithinWorkspace('/workspace/repo/../../etc/passwd')).toBe(false);
@@ -50,14 +57,14 @@ describe('path-validation', () => {
     });
 
     test('should reject paths outside workspace', async () => {
-      const { isPathWithinWorkspace } = await import('./path-validation');
+      const { isPathWithinWorkspace } = await importFresh();
       expect(isPathWithinWorkspace('/etc/passwd')).toBe(false);
       expect(isPathWithinWorkspace('/tmp/file')).toBe(false);
       expect(isPathWithinWorkspace('/var/log/syslog')).toBe(false);
     });
 
     test('should reject paths that look similar but are outside workspace', async () => {
-      const { isPathWithinWorkspace } = await import('./path-validation');
+      const { isPathWithinWorkspace } = await importFresh();
       expect(isPathWithinWorkspace('/workspace-other')).toBe(false);
       expect(isPathWithinWorkspace('/workspaces')).toBe(false);
       expect(isPathWithinWorkspace('/workspace_backup')).toBe(false);
@@ -65,8 +72,7 @@ describe('path-validation', () => {
 
     test('should use WORKSPACE_PATH env var when set', async () => {
       process.env.WORKSPACE_PATH = '/custom/path';
-      jest.resetModules();
-      const { isPathWithinWorkspace } = await import('./path-validation');
+      const { isPathWithinWorkspace } = await importFresh();
       expect(isPathWithinWorkspace('/custom/path/repo')).toBe(true);
       expect(isPathWithinWorkspace('/workspace/repo')).toBe(false); // Original path now rejected
     });
@@ -74,15 +80,17 @@ describe('path-validation', () => {
 
   describe('validateAndResolvePath', () => {
     test('should return resolved path for valid paths', async () => {
-      const { validateAndResolvePath } = await import('./path-validation');
+      const { validateAndResolvePath } = await importFresh();
       // Use resolve() for platform-specific paths
       expect(validateAndResolvePath('/workspace/repo')).toBe(resolve('/workspace/repo'));
       expect(validateAndResolvePath('repo', '/workspace')).toBe(resolve('/workspace/repo'));
-      expect(validateAndResolvePath('./src', '/workspace/repo')).toBe(resolve('/workspace/repo/src'));
+      expect(validateAndResolvePath('./src', '/workspace/repo')).toBe(
+        resolve('/workspace/repo/src')
+      );
     });
 
     test('should throw for path traversal attempts', async () => {
-      const { validateAndResolvePath } = await import('./path-validation');
+      const { validateAndResolvePath } = await importFresh();
       const workspaceRoot = resolve('/workspace');
       expect(() => validateAndResolvePath('../etc/passwd', '/workspace')).toThrow(
         `Path must be within ${workspaceRoot} directory`
@@ -93,7 +101,7 @@ describe('path-validation', () => {
     });
 
     test('should throw for paths outside workspace', async () => {
-      const { validateAndResolvePath } = await import('./path-validation');
+      const { validateAndResolvePath } = await importFresh();
       const workspaceRoot = resolve('/workspace');
       expect(() => validateAndResolvePath('/etc/passwd')).toThrow(
         `Path must be within ${workspaceRoot} directory`
@@ -105,11 +113,12 @@ describe('path-validation', () => {
 
     test('should use custom WORKSPACE_PATH for validation and error message', async () => {
       process.env.WORKSPACE_PATH = '/my/custom/workspace';
-      jest.resetModules();
-      const { validateAndResolvePath } = await import('./path-validation');
+      const { validateAndResolvePath } = await importFresh();
       const customWorkspace = resolve('/my/custom/workspace');
       // Valid path under custom workspace
-      expect(validateAndResolvePath('/my/custom/workspace/repo')).toBe(resolve('/my/custom/workspace/repo'));
+      expect(validateAndResolvePath('/my/custom/workspace/repo')).toBe(
+        resolve('/my/custom/workspace/repo')
+      );
       // Path under default workspace should now throw with custom workspace in message
       expect(() => validateAndResolvePath('/workspace/repo')).toThrow(
         `Path must be within ${customWorkspace} directory`

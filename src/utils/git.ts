@@ -1,10 +1,32 @@
-import { readFile, access, mkdir } from 'fs/promises';
+import { readFile, access, mkdir as fsMkdir } from 'fs/promises';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { join, basename } from 'path';
 import { homedir } from 'os';
 
-const execFileAsync = promisify(execFile);
+const promisifiedExecFile = promisify(execFile);
+
+// Wrapper functions to allow mocking in tests
+// Don't use const here - use function declaration for proper mockability
+export async function execFileAsync(
+  cmd: string,
+  args: string[],
+  options?: { timeout?: number }
+): Promise<{ stdout: string; stderr: string }> {
+  const result = await promisifiedExecFile(cmd, args, options);
+  return {
+    stdout: result.stdout.toString(),
+    stderr: result.stderr.toString(),
+  };
+}
+
+// Mockable mkdir wrapper
+export async function mkdirAsync(
+  path: string,
+  options?: { recursive?: boolean }
+): Promise<void> {
+  await fsMkdir(path, options);
+}
 
 /**
  * Get the base directory for worktrees
@@ -44,9 +66,7 @@ export async function worktreeExists(worktreePath: string): Promise<boolean> {
  * List all worktrees for a repository
  * Returns array of {path, branch} objects parsed from git worktree list --porcelain
  */
-export async function listWorktrees(
-  repoPath: string
-): Promise<{ path: string; branch: string }[]> {
+export async function listWorktrees(repoPath: string): Promise<{ path: string; branch: string }[]> {
   try {
     const { stdout } = await execFileAsync(
       'git',
@@ -144,14 +164,16 @@ export async function createWorktreeForIssue(
   if (isPR && prHeadBranch) {
     const existingByBranch = await findWorktreeByBranch(repoPath, prHeadBranch);
     if (existingByBranch) {
-      console.log(`[Git] Adopting existing worktree for branch ${prHeadBranch}: ${existingByBranch}`);
+      console.log(
+        `[Git] Adopting existing worktree for branch ${prHeadBranch}: ${existingByBranch}`
+      );
       return existingByBranch;
     }
   }
 
   // Ensure worktree base directory exists
   const projectWorktreeDir = join(worktreeBase, projectName);
-  await mkdir(projectWorktreeDir, { recursive: true });
+  await mkdirAsync(projectWorktreeDir, { recursive: true });
 
   if (isPR && prHeadBranch) {
     // For PRs: fetch and checkout the PR's head branch
@@ -170,9 +192,13 @@ export async function createWorktreeForIssue(
         });
 
         // Create a local tracking branch so it's not detached HEAD
-        await execFileAsync('git', ['-C', worktreePath, 'checkout', '-b', `pr-${String(issueNumber)}-review`, prHeadSha], {
-          timeout: 30000,
-        });
+        await execFileAsync(
+          'git',
+          ['-C', worktreePath, 'checkout', '-b', `pr-${String(issueNumber)}-review`, prHeadSha],
+          {
+            timeout: 30000,
+          }
+        );
       } else {
         // Use GitHub's PR refs which work for both fork and non-fork PRs
         // GitHub automatically creates refs/pull/<number>/head for all PRs
@@ -193,9 +219,13 @@ export async function createWorktreeForIssue(
     // For issues (or PRs without branch info): create new branch
     try {
       // Try to create with new branch
-      await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName], {
-        timeout: 30000,
-      });
+      await execFileAsync(
+        'git',
+        ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName],
+        {
+          timeout: 30000,
+        }
+      );
     } catch (error) {
       const err = error as Error & { stderr?: string };
       // Branch already exists - use existing branch

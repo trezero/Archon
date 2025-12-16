@@ -1,9 +1,10 @@
+import { mock, describe, test, expect, beforeEach } from 'bun:test';
 import { createQueryResult } from '../test/mocks/database';
 import { CommandTemplate } from '../types';
 
-const mockQuery = jest.fn();
+const mockQuery = mock(() => Promise.resolve(createQueryResult([])));
 
-jest.mock('./connection', () => ({
+mock.module('./connection', () => ({
   pool: {
     query: mockQuery,
   },
@@ -19,7 +20,7 @@ import {
 
 describe('command-templates', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockQuery.mockClear();
   });
 
   const mockTemplate: CommandTemplate = {
@@ -138,10 +139,11 @@ describe('command-templates', () => {
       });
 
       expect(result).toEqual(mockTemplate);
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining('ON CONFLICT'),
-        ['plan', 'Create implementation plan', '# Plan']
-      );
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('ON CONFLICT'), [
+        'plan',
+        'Create implementation plan',
+        '# Plan',
+      ]);
     });
   });
 });

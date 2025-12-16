@@ -1,14 +1,20 @@
 /**
  * Unit tests for Telegram adapter
  */
-import { TelegramAdapter } from './telegram';
-import * as telegramMarkdown from '../utils/telegram-markdown';
+import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import type { Mock } from 'bun:test';
+
+// Create mock functions
+const mockConvertToTelegramMarkdown = mock((text: string) => text);
+const mockStripMarkdown = mock((text: string) => text);
 
 // Mock the telegram-markdown module
-jest.mock('../utils/telegram-markdown', () => ({
-  convertToTelegramMarkdown: jest.fn((text: string) => text),
-  stripMarkdown: jest.fn((text: string) => text),
+mock.module('../utils/telegram-markdown', () => ({
+  convertToTelegramMarkdown: mockConvertToTelegramMarkdown,
+  stripMarkdown: mockStripMarkdown,
 }));
+
+import { TelegramAdapter } from './telegram';
 
 describe('TelegramAdapter', () => {
   describe('streaming mode configuration', () => {
@@ -39,30 +45,30 @@ describe('TelegramAdapter', () => {
 
   describe('message formatting', () => {
     let adapter: TelegramAdapter;
-    let mockSendMessage: jest.Mock;
-    const mockConvert = telegramMarkdown.convertToTelegramMarkdown as jest.Mock;
+    let mockSendMessage: Mock<() => Promise<void>>;
 
     beforeEach(() => {
       adapter = new TelegramAdapter('fake-token-for-testing');
-      mockSendMessage = jest.fn().mockResolvedValue(undefined);
+      mockSendMessage = mock(() => Promise.resolve());
       // Override bot's sendMessage
-      (adapter.getBot().telegram as unknown as { sendMessage: jest.Mock }).sendMessage =
-        mockSendMessage;
-      mockConvert.mockClear();
+      (
+        adapter.getBot().telegram as unknown as { sendMessage: Mock<() => Promise<void>> }
+      ).sendMessage = mockSendMessage;
+      mockConvertToTelegramMarkdown.mockClear();
     });
 
     test('should convert markdown and send with MarkdownV2 parse_mode', async () => {
-      mockConvert.mockReturnValue('*formatted*');
+      mockConvertToTelegramMarkdown.mockReturnValue('*formatted*');
       await adapter.sendMessage('12345', '**test**');
 
-      expect(mockConvert).toHaveBeenCalledWith('**test**');
+      expect(mockConvertToTelegramMarkdown).toHaveBeenCalledWith('**test**');
       expect(mockSendMessage).toHaveBeenCalledWith(12345, '*formatted*', {
         parse_mode: 'MarkdownV2',
       });
     });
 
     test('should fallback to plain text when MarkdownV2 fails', async () => {
-      mockConvert.mockReturnValue('*formatted*');
+      mockConvertToTelegramMarkdown.mockReturnValue('*formatted*');
       mockSendMessage
         .mockRejectedValueOnce(new Error("Bad Request: can't parse entities"))
         .mockResolvedValueOnce(undefined);
@@ -80,17 +86,17 @@ describe('TelegramAdapter', () => {
 
     test('should apply markdown formatting to each chunk for long messages', async () => {
       // Create a message that will be split (>4096 chars)
-      // Use double newlines for paragraph splitting (code splits on \n\n)
-      // Each paragraph must be <= MAX_LENGTH - 200 (3896) to trigger formatting
       const paragraph1 = 'a'.repeat(3000);
       const paragraph2 = 'b'.repeat(3000);
       const message = `${paragraph1}\n\n${paragraph2}`;
-      mockConvert.mockImplementation((text: string) => `formatted:${text.length}`);
+      mockConvertToTelegramMarkdown.mockImplementation(
+        (text: string) => `formatted:${text.length}`
+      );
 
       await adapter.sendMessage('12345', message);
 
       // Should have converted each chunk separately
-      expect(mockConvert).toHaveBeenCalledTimes(2);
+      expect(mockConvertToTelegramMarkdown).toHaveBeenCalledTimes(2);
       // Each chunk should be sent with MarkdownV2
       expect(mockSendMessage).toHaveBeenCalledWith(12345, expect.stringContaining('formatted:'), {
         parse_mode: 'MarkdownV2',

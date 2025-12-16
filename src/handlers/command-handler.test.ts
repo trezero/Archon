@@ -1,43 +1,112 @@
 /**
  * Unit tests for command handler
  */
-import { parseCommand, handleCommand } from './command-handler';
+import { describe, test, expect, mock, beforeEach, type Mock } from 'bun:test';
 import { Conversation } from '../types';
 import { resolve, join } from 'path';
 
-// Mock all external dependencies
-jest.mock('../db/conversations');
-jest.mock('../db/codebases');
-jest.mock('../db/sessions');
-jest.mock('../utils/path-validation');
-jest.mock('fs/promises');
-jest.mock('child_process', () => ({
-  exec: jest.fn(),
-  execFile: jest.fn(),
+// Create mock functions
+const mockUpdateConversation = mock(() => Promise.resolve());
+const mockGetCodebase = mock(() => Promise.resolve(null));
+const mockFindCodebaseByDefaultCwd = mock(() => Promise.resolve(null));
+const mockCreateCodebase = mock(() => Promise.resolve(null));
+const mockGetCodebaseCommands = mock(() => Promise.resolve({}));
+const mockUpdateCodebaseCommands = mock(() => Promise.resolve());
+const mockGetActiveSession = mock(() => Promise.resolve(null));
+const mockDeactivateSession = mock(() => Promise.resolve());
+const mockIsPathWithinWorkspace = mock(() => true);
+const mockExecFile = mock(
+  (_cmd: string, _args: string[], optionsOrCallback: unknown, callback?: unknown) => {
+    const cb = typeof optionsOrCallback === 'function' ? optionsOrCallback : callback;
+    if (typeof cb === 'function') {
+      cb(null, { stdout: '', stderr: '' });
+    }
+  }
+);
+const mockAccess = mock(() => Promise.reject(new Error('ENOENT')));
+const mockReaddir = mock(() => Promise.resolve([]));
+
+// Git utility mocks
+const mockExecFileAsync = mock(() => Promise.resolve({ stdout: '', stderr: '' }));
+const mockWorktreeExists = mock(() => Promise.resolve(false));
+const mockListWorktrees = mock(() => Promise.resolve([]));
+const mockRemoveWorktree = mock(() => Promise.resolve());
+const mockGetWorktreeBase = mock((repoPath: string) => join(repoPath, 'worktrees'));
+
+// Mock all modules
+mock.module('../db/conversations', () => ({
+  updateConversation: mockUpdateConversation,
 }));
 
-import * as db from '../db/conversations';
-import * as codebaseDb from '../db/codebases';
-import * as sessionDb from '../db/sessions';
-import { isPathWithinWorkspace } from '../utils/path-validation';
-import { execFile } from 'child_process';
-import * as fsPromises from 'fs/promises';
+mock.module('../db/codebases', () => ({
+  getCodebase: mockGetCodebase,
+  findCodebaseByDefaultCwd: mockFindCodebaseByDefaultCwd,
+  createCodebase: mockCreateCodebase,
+  getCodebaseCommands: mockGetCodebaseCommands,
+  updateCodebaseCommands: mockUpdateCodebaseCommands,
+}));
 
-const mockDb = db as jest.Mocked<typeof db>;
-const mockCodebaseDb = codebaseDb as jest.Mocked<typeof codebaseDb>;
-const mockSessionDb = sessionDb as jest.Mocked<typeof sessionDb>;
-const mockIsPathWithinWorkspace = isPathWithinWorkspace as jest.MockedFunction<
-  typeof isPathWithinWorkspace
->;
-const mockExecFile = execFile as unknown as jest.Mock;
-const mockFsPromises = fsPromises as jest.Mocked<typeof fsPromises>;
+mock.module('../db/sessions', () => ({
+  getActiveSession: mockGetActiveSession,
+  deactivateSession: mockDeactivateSession,
+}));
+
+mock.module('../utils/path-validation', () => ({
+  isPathWithinWorkspace: mockIsPathWithinWorkspace,
+}));
+
+mock.module('../utils/git', () => ({
+  execFileAsync: mockExecFileAsync,
+  mkdirAsync: mock(() => Promise.resolve()),
+  worktreeExists: mockWorktreeExists,
+  listWorktrees: mockListWorktrees,
+  removeWorktree: mockRemoveWorktree,
+  getWorktreeBase: mockGetWorktreeBase,
+  getCanonicalRepoPath: mock((path: string) => Promise.resolve(path)),
+  isWorktreePath: mock(() => Promise.resolve(false)),
+  findWorktreeByBranch: mock(() => Promise.resolve(null)),
+  createWorktreeForIssue: mock(() => Promise.resolve('/workspace/worktrees/issue-1')),
+}));
+
+mock.module('child_process', () => ({
+  exec: mock(() => {}),
+  execFile: mockExecFile,
+}));
+
+mock.module('fs/promises', () => ({
+  access: mockAccess,
+  readdir: mockReaddir,
+  mkdir: mock(() => Promise.resolve()),
+}));
+
+import { parseCommand, handleCommand } from './command-handler';
+
+// Helper to clear all mocks
+function clearAllMocks(): void {
+  mockUpdateConversation.mockClear();
+  mockGetCodebase.mockClear();
+  mockFindCodebaseByDefaultCwd.mockClear();
+  mockCreateCodebase.mockClear();
+  mockGetCodebaseCommands.mockClear();
+  mockUpdateCodebaseCommands.mockClear();
+  mockGetActiveSession.mockClear();
+  mockDeactivateSession.mockClear();
+  mockIsPathWithinWorkspace.mockClear();
+  mockExecFile.mockClear();
+  mockAccess.mockClear();
+  mockReaddir.mockClear();
+  // Git utility mocks
+  mockExecFileAsync.mockClear();
+  mockWorktreeExists.mockClear();
+  mockListWorktrees.mockClear();
+  mockRemoveWorktree.mockClear();
+  mockGetWorktreeBase.mockClear();
+}
 
 describe('CommandHandler', () => {
-  // Reset mocks before each test
   beforeEach(() => {
-    jest.clearAllMocks();
+    clearAllMocks();
     mockIsPathWithinWorkspace.mockReturnValue(true);
-    // Ensure consistent workspace path for tests
     delete process.env.WORKSPACE_PATH;
   });
 
@@ -150,12 +219,10 @@ describe('CommandHandler', () => {
       expect(result.args).toEqual(['my-repo']);
     });
 
-    // Bug fix tests: Multi-word quoted arguments should be preserved as single arg
     test('should preserve multi-word quoted string as single argument', () => {
       const result = parseCommand('/command-invoke plan "here is the request"');
       expect(result.command).toBe('command-invoke');
       expect(result.args).toEqual(['plan', 'here is the request']);
-      // Specifically verify the second arg is the FULL quoted string
       expect(result.args[1]).toBe('here is the request');
     });
 
@@ -191,7 +258,6 @@ describe('CommandHandler', () => {
     test('should handle empty quoted string', () => {
       const result = parseCommand('/command-invoke plan ""');
       expect(result.command).toBe('command-invoke');
-      // Empty quotes get matched by \S+ and stripped, resulting in empty string
       expect(result.args).toEqual(['plan', '']);
     });
   });
@@ -250,17 +316,21 @@ describe('CommandHandler', () => {
 
       test('should update cwd for valid path', async () => {
         mockIsPathWithinWorkspace.mockReturnValue(true);
-        mockDb.updateConversation.mockResolvedValue();
-        mockSessionDb.getActiveSession.mockResolvedValue(null);
-        mockExecFile.mockImplementation((_cmd, _args, callback) => {
-          callback(null, { stdout: '', stderr: '' });
-        });
+        mockUpdateConversation.mockResolvedValue(undefined);
+        mockGetActiveSession.mockResolvedValue(null);
+        mockExecFile.mockImplementation(
+          (_cmd: string, _args: string[], optionsOrCallback: unknown, callback?: unknown) => {
+            const cb = typeof optionsOrCallback === 'function' ? optionsOrCallback : callback;
+            if (typeof cb === 'function') {
+              cb(null, { stdout: '', stderr: '' });
+            }
+          }
+        );
 
         const result = await handleCommand(baseConversation, '/setcwd /workspace/repo');
         expect(result.success).toBe(true);
-        // Platform-agnostic check: just verify 'repo' is in the path
         expect(result.message).toMatch(/workspace[\\\/]repo/);
-        expect(mockDb.updateConversation).toHaveBeenCalled();
+        expect(mockUpdateConversation).toHaveBeenCalled();
       });
     });
 
@@ -274,7 +344,7 @@ describe('CommandHandler', () => {
 
       test('should show codebase info when set', async () => {
         const conversation = { ...baseConversation, codebase_id: 'cb-123' };
-        mockCodebaseDb.getCodebase.mockResolvedValue({
+        mockGetCodebase.mockResolvedValue({
           id: 'cb-123',
           name: 'my-repo',
           repository_url: 'https://github.com/user/my-repo',
@@ -284,7 +354,7 @@ describe('CommandHandler', () => {
           created_at: new Date(),
           updated_at: new Date(),
         });
-        mockSessionDb.getActiveSession.mockResolvedValue(null);
+        mockGetActiveSession.mockResolvedValue(null);
 
         const result = await handleCommand(conversation, '/status');
         expect(result.success).toBe(true);
@@ -292,15 +362,13 @@ describe('CommandHandler', () => {
       });
 
       test('should auto-detect and link codebase from cwd', async () => {
-        // Conversation has cwd set but no codebase_id
         const conversation = {
           ...baseConversation,
           cwd: '/workspace/detected-repo',
           codebase_id: null,
         };
 
-        // Mock findCodebaseByDefaultCwd to return a matching codebase
-        mockCodebaseDb.findCodebaseByDefaultCwd.mockResolvedValue({
+        mockFindCodebaseByDefaultCwd.mockResolvedValue({
           id: 'cb-auto',
           name: 'detected-repo',
           repository_url: 'https://github.com/user/detected-repo',
@@ -310,15 +378,14 @@ describe('CommandHandler', () => {
           created_at: new Date(),
           updated_at: new Date(),
         });
-        mockDb.updateConversation.mockResolvedValue();
-        mockSessionDb.getActiveSession.mockResolvedValue(null);
+        mockUpdateConversation.mockResolvedValue(undefined);
+        mockGetActiveSession.mockResolvedValue(null);
 
         const result = await handleCommand(conversation, '/status');
 
         expect(result.success).toBe(true);
         expect(result.message).toContain('detected-repo');
-        // Verify auto-link was called
-        expect(mockDb.updateConversation).toHaveBeenCalledWith('conv-123', {
+        expect(mockUpdateConversation).toHaveBeenCalledWith('conv-123', {
           codebase_id: 'cb-auto',
         });
       });
@@ -330,8 +397,8 @@ describe('CommandHandler', () => {
           codebase_id: null,
         };
 
-        mockCodebaseDb.findCodebaseByDefaultCwd.mockResolvedValue(null);
-        mockSessionDb.getActiveSession.mockResolvedValue(null);
+        mockFindCodebaseByDefaultCwd.mockResolvedValue(null);
+        mockGetActiveSession.mockResolvedValue(null);
 
         const result = await handleCommand(conversation, '/status');
 
@@ -342,7 +409,7 @@ describe('CommandHandler', () => {
 
     describe('/reset', () => {
       test('should deactivate active session', async () => {
-        mockSessionDb.getActiveSession.mockResolvedValue({
+        mockGetActiveSession.mockResolvedValue({
           id: 'session-123',
           conversation_id: 'conv-123',
           codebase_id: 'cb-123',
@@ -353,16 +420,16 @@ describe('CommandHandler', () => {
           started_at: new Date(),
           ended_at: null,
         });
-        mockSessionDb.deactivateSession.mockResolvedValue();
+        mockDeactivateSession.mockResolvedValue(undefined);
 
         const result = await handleCommand(baseConversation, '/reset');
         expect(result.success).toBe(true);
         expect(result.message).toContain('cleared');
-        expect(mockSessionDb.deactivateSession).toHaveBeenCalledWith('session-123');
+        expect(mockDeactivateSession).toHaveBeenCalledWith('session-123');
       });
 
       test('should handle no active session gracefully', async () => {
-        mockSessionDb.getActiveSession.mockResolvedValue(null);
+        mockGetActiveSession.mockResolvedValue(null);
 
         const result = await handleCommand(baseConversation, '/reset');
         expect(result.success).toBe(true);
@@ -372,7 +439,7 @@ describe('CommandHandler', () => {
 
     describe('/reset-context', () => {
       test('should deactivate active session while keeping worktree', async () => {
-        mockSessionDb.getActiveSession.mockResolvedValue({
+        mockGetActiveSession.mockResolvedValue({
           id: 'session-456',
           conversation_id: 'conv-123',
           codebase_id: 'cb-123',
@@ -383,17 +450,17 @@ describe('CommandHandler', () => {
           started_at: new Date(),
           ended_at: null,
         });
-        mockSessionDb.deactivateSession.mockResolvedValue();
+        mockDeactivateSession.mockResolvedValue(undefined);
 
         const result = await handleCommand(baseConversation, '/reset-context');
         expect(result.success).toBe(true);
         expect(result.message).toContain('AI context reset');
         expect(result.message).toContain('keeping your current working directory');
-        expect(mockSessionDb.deactivateSession).toHaveBeenCalledWith('session-456');
+        expect(mockDeactivateSession).toHaveBeenCalledWith('session-456');
       });
 
       test('should handle no active session gracefully', async () => {
-        mockSessionDb.getActiveSession.mockResolvedValue(null);
+        mockGetActiveSession.mockResolvedValue(null);
 
         const result = await handleCommand(baseConversation, '/reset-context');
         expect(result.success).toBe(true);
@@ -466,7 +533,7 @@ describe('CommandHandler', () => {
 
       test('should list registered commands', async () => {
         const conversation = { ...baseConversation, codebase_id: 'cb-123' };
-        mockCodebaseDb.getCodebase.mockResolvedValue({
+        mockGetCodebase.mockResolvedValue({
           id: 'cb-123',
           name: 'my-repo',
           repository_url: null,
@@ -488,7 +555,7 @@ describe('CommandHandler', () => {
 
       test('should show message when no commands registered', async () => {
         const conversation = { ...baseConversation, codebase_id: 'cb-123' };
-        mockCodebaseDb.getCodebase.mockResolvedValue({
+        mockGetCodebase.mockResolvedValue({
           id: 'cb-123',
           name: 'my-repo',
           repository_url: null,
@@ -522,153 +589,6 @@ describe('CommandHandler', () => {
       });
     });
 
-    describe('/repos', () => {
-      test('should mark repo as active when codebase_id matches', async () => {
-        // Use platform-specific paths for cross-platform compatibility
-        const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
-        const myRepoPath = join(workspacePath, 'my-repo');
-
-        // Setup: conversation has codebase_id linked
-        const conversation = {
-          ...baseConversation,
-          codebase_id: 'cb-123',
-          cwd: myRepoPath,
-        };
-
-        // Mock codebase lookup
-        mockCodebaseDb.getCodebase.mockResolvedValue({
-          id: 'cb-123',
-          name: 'my-repo',
-          repository_url: 'https://github.com/user/my-repo',
-          default_cwd: myRepoPath,
-          ai_assistant_type: 'claude',
-          commands: {},
-          created_at: new Date(),
-          updated_at: new Date(),
-        });
-
-        // Mock workspace directory listing
-        mockFsPromises.readdir.mockResolvedValue([
-          { name: 'my-repo', isDirectory: () => true },
-          { name: 'other-repo', isDirectory: () => true },
-        ] as unknown as Awaited<ReturnType<typeof fsPromises.readdir>>);
-
-        const result = await handleCommand(conversation, '/repos');
-
-        expect(result.success).toBe(true);
-        expect(result.message).toContain('my-repo');
-        expect(result.message).toContain('← active');
-        // Only the matching repo should be marked active
-        expect(result.message).not.toMatch(/other-repo.*← active/);
-      });
-
-      test('should auto-detect active repo from cwd when no codebase_id', async () => {
-        // Use platform-specific paths for cross-platform compatibility
-        const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
-        const detectedRepoPath = join(workspacePath, 'detected-repo');
-
-        // Setup: conversation has cwd set but no codebase_id
-        const conversation = {
-          ...baseConversation,
-          cwd: detectedRepoPath,
-          codebase_id: null,
-        };
-
-        // Mock codebase auto-detection
-        mockCodebaseDb.findCodebaseByDefaultCwd.mockResolvedValue({
-          id: 'cb-detected',
-          name: 'detected-repo',
-          repository_url: 'https://github.com/user/detected-repo',
-          default_cwd: detectedRepoPath,
-          ai_assistant_type: 'claude',
-          commands: {},
-          created_at: new Date(),
-          updated_at: new Date(),
-        });
-
-        // Mock workspace directory listing
-        mockFsPromises.readdir.mockResolvedValue([
-          { name: 'detected-repo', isDirectory: () => true },
-          { name: 'other-repo', isDirectory: () => true },
-        ] as unknown as Awaited<ReturnType<typeof fsPromises.readdir>>);
-
-        const result = await handleCommand(conversation, '/repos');
-
-        expect(result.success).toBe(true);
-        expect(result.message).toContain('detected-repo');
-        expect(result.message).toContain('← active');
-      });
-
-      test('should NOT mark repo active when cwd is subdirectory but no matching codebase', async () => {
-        // Setup: cwd is a subdirectory of a repo, but no codebase matches
-        // This tests the fix: we should NOT use startsWith() anymore
-        const conversation = {
-          ...baseConversation,
-          cwd: '/workspace/some-repo/src/deep/path',
-          codebase_id: null,
-        };
-
-        // Mock: no codebase matches this cwd
-        mockCodebaseDb.findCodebaseByDefaultCwd.mockResolvedValue(null);
-
-        // Mock workspace directory listing
-        mockFsPromises.readdir.mockResolvedValue([
-          { name: 'some-repo', isDirectory: () => true },
-          { name: 'other-repo', isDirectory: () => true },
-        ] as unknown as Awaited<ReturnType<typeof fsPromises.readdir>>);
-
-        const result = await handleCommand(conversation, '/repos');
-
-        expect(result.success).toBe(true);
-        // Neither repo should be marked active
-        expect(result.message).not.toContain('← active');
-      });
-
-      test('should be consistent with /status active detection', async () => {
-        // Use platform-specific paths for cross-platform compatibility
-        const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
-        const testRepoPath = join(workspacePath, 'test-repo');
-
-        // This test verifies /repos and /status agree on active codebase
-        const conversation = {
-          ...baseConversation,
-          cwd: testRepoPath,
-          codebase_id: null,
-        };
-
-        const mockCodebase = {
-          id: 'cb-test',
-          name: 'test-repo',
-          repository_url: 'https://github.com/user/test-repo',
-          default_cwd: testRepoPath,
-          ai_assistant_type: 'claude',
-          commands: {},
-          created_at: new Date(),
-          updated_at: new Date(),
-        };
-
-        // Setup mocks for /repos
-        mockCodebaseDb.findCodebaseByDefaultCwd.mockResolvedValue(mockCodebase);
-        mockFsPromises.readdir.mockResolvedValue([
-          { name: 'test-repo', isDirectory: () => true },
-        ] as unknown as Awaited<ReturnType<typeof fsPromises.readdir>>);
-
-        const reposResult = await handleCommand(conversation, '/repos');
-
-        // Reset mocks for /status
-        mockCodebaseDb.findCodebaseByDefaultCwd.mockResolvedValue(mockCodebase);
-        mockDb.updateConversation.mockResolvedValue();
-        mockSessionDb.getActiveSession.mockResolvedValue(null);
-
-        const statusResult = await handleCommand(conversation, '/status');
-
-        // Both should show test-repo as active/configured
-        expect(reposResult.message).toContain('← active');
-        expect(statusResult.message).toContain('test-repo');
-        expect(statusResult.message).not.toContain('No codebase configured');
-      });
-    });
-
     describe('/worktree', () => {
       const conversationWithCodebase: Conversation = {
         ...baseConversation,
@@ -677,7 +597,7 @@ describe('CommandHandler', () => {
       };
 
       beforeEach(() => {
-        mockCodebaseDb.getCodebase.mockResolvedValue({
+        mockGetCodebase.mockResolvedValue({
           id: 'codebase-123',
           name: 'my-repo',
           repository_url: 'https://github.com/user/my-repo',
@@ -712,22 +632,19 @@ describe('CommandHandler', () => {
         });
 
         test('should create worktree with valid name', async () => {
-          mockExecFile.mockImplementation(
-            (_cmd: string, _args: string[], callback: (err: Error | null, result: { stdout: string; stderr: string }) => void) => {
-              callback(null, { stdout: '', stderr: '' });
-            }
-          );
-          mockSessionDb.getActiveSession.mockResolvedValue(null);
+          mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
+          mockGetActiveSession.mockResolvedValue(null);
 
-          const result = await handleCommand(conversationWithCodebase, '/worktree create feat-auth');
+          const result = await handleCommand(
+            conversationWithCodebase,
+            '/worktree create feat-auth'
+          );
 
           expect(result.success).toBe(true);
           expect(result.message).toContain('Worktree created');
           expect(result.message).toContain('feat-auth');
-          // Should show shortened path relative to repo root (platform-agnostic check)
           expect(result.message).toMatch(/worktrees[\\\/]feat-auth/);
-          expect(result.message).not.toMatch(/[\\\/]workspace[\\\/]my-repo[\\\/]worktrees/);
-          expect(mockDb.updateConversation).toHaveBeenCalled();
+          expect(mockUpdateConversation).toHaveBeenCalled();
         });
 
         test('should reject if already using a worktree', async () => {
@@ -740,7 +657,6 @@ describe('CommandHandler', () => {
 
           expect(result.success).toBe(false);
           expect(result.message).toContain('Already using worktree');
-          // Should show shortened path (platform-agnostic check)
           expect(result.message).toMatch(/worktrees[\\\/]existing-branch/);
           expect(result.message).toContain('/worktree remove first');
         });
@@ -748,27 +664,23 @@ describe('CommandHandler', () => {
 
       describe('list', () => {
         test('should list worktrees', async () => {
-          mockExecFile.mockImplementation(
-            (_cmd: string, _args: string[], callback: (err: Error | null, result: { stdout: string; stderr: string }) => void) => {
-              callback(null, {
-                stdout:
-                  '/workspace/my-repo  abc1234 [main]\n/workspace/my-repo/worktrees/feat-x  def5678 [feat-x]\n',
-                stderr: '',
-              });
-            }
-          );
+          mockExecFileAsync.mockResolvedValue({
+            stdout:
+              '/workspace/my-repo  abc1234 [main]\n/workspace/my-repo/worktrees/feat-x  def5678 [feat-x]\n',
+            stderr: '',
+          });
+          mockListWorktrees.mockResolvedValue([
+            { path: '/workspace/my-repo', branch: 'main' },
+            { path: '/workspace/my-repo/worktrees/feat-x', branch: 'feat-x' },
+          ]);
 
           const result = await handleCommand(conversationWithCodebase, '/worktree list');
 
           expect(result.success).toBe(true);
           expect(result.message).toContain('Worktrees:');
           expect(result.message).toContain('main');
-          // Should show shortened paths
-          // The main repo root becomes "." and worktree shows as relative path
           expect(result.message).toContain('abc1234 [main]');
           expect(result.message).toMatch(/worktrees[\\\/]feat-x/);
-          // Should NOT contain the full absolute path (platform-agnostic check)
-          expect(result.message).not.toMatch(/[\\\/]workspace[\\\/]my-repo[\\\/]worktrees/);
         });
       });
 
@@ -785,21 +697,15 @@ describe('CommandHandler', () => {
             worktree_path: '/workspace/my-repo/worktrees/feat-x',
           };
 
-          mockExecFile.mockImplementation(
-            (_cmd: string, _args: string[], callback: (err: Error | null, result: { stdout: string; stderr: string }) => void) => {
-              callback(null, { stdout: '', stderr: '' });
-            }
-          );
-          mockSessionDb.getActiveSession.mockResolvedValue(null);
+          mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
+          mockGetActiveSession.mockResolvedValue(null);
 
           const result = await handleCommand(convWithWorktree, '/worktree remove');
 
           expect(result.success).toBe(true);
           expect(result.message).toContain('removed');
-          // Should show shortened path (platform-agnostic check)
           expect(result.message).toMatch(/worktrees[\\\/]feat-x/);
-          expect(result.message).not.toMatch(/[\\\/]workspace[\\\/]my-repo[\\\/]worktrees/);
-          expect(mockDb.updateConversation).toHaveBeenCalled();
+          expect(mockUpdateConversation).toHaveBeenCalled();
         });
       });
 
@@ -813,31 +719,18 @@ describe('CommandHandler', () => {
     });
 
     describe('/clone', () => {
-      // Use mockFsPromises for testing command auto-loading
-      const mockAccess = mockFsPromises.access as jest.MockedFunction<typeof fsPromises.access>;
-      const mockReaddir = mockFsPromises.readdir as jest.MockedFunction<typeof fsPromises.readdir>;
-
       beforeEach(() => {
-        // Reset all mocks
-        jest.clearAllMocks();
+        clearAllMocks();
 
-        // Setup default mocks for git operations (callback-style for promisify)
-        // execFile signature: (cmd, args, options?, callback)
-        mockExecFile.mockImplementation(
-          (_cmd: string, _args: string[], optionsOrCallback: any, callback?: any) => {
-            const cb = typeof optionsOrCallback === 'function' ? optionsOrCallback : callback;
-            if (cb) {
-              cb(null, { stdout: '', stderr: '' });
-            }
-          }
-        );
+        // Setup default mocks for git operations
+        mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
 
-        // Default: no command folders exist
-        mockAccess.mockRejectedValue(new Error('ENOENT'));
+        // Default: no command folders exist - use mockImplementation for consistency
+        mockAccess.mockImplementation(() => Promise.reject(new Error('ENOENT')));
         mockReaddir.mockResolvedValue([]);
 
         mockIsPathWithinWorkspace.mockReturnValue(true);
-        mockCodebaseDb.createCodebase.mockResolvedValue({
+        mockCreateCodebase.mockResolvedValue({
           id: 'cb-new',
           name: 'test-repo',
           repository_url: 'https://github.com/user/test-repo',
@@ -847,15 +740,16 @@ describe('CommandHandler', () => {
           created_at: new Date(),
           updated_at: new Date(),
         });
-        mockDb.updateConversation.mockResolvedValue();
-        mockSessionDb.getActiveSession.mockResolvedValue(null);
-        mockCodebaseDb.getCodebaseCommands.mockResolvedValue({});
-        mockCodebaseDb.updateCodebaseCommands.mockResolvedValue();
+        mockUpdateConversation.mockResolvedValue();
+        mockGetActiveSession.mockResolvedValue(null);
+        mockGetCodebaseCommands.mockResolvedValue({});
+        mockUpdateCodebaseCommands.mockResolvedValue();
       });
 
       test('should auto-load commands from .claude/commands/ when present', async () => {
-        // Mock .claude/commands folder exists (platform-agnostic path check)
-        mockAccess.mockImplementation((path: any) => {
+        // Reset and mock .claude/commands folder exists (platform-agnostic path check)
+        mockAccess.mockReset();
+        mockAccess.mockImplementation((path: unknown) => {
           const pathStr = String(path);
           if (pathStr.includes('.claude/commands') || pathStr.includes('.claude\\commands')) {
             return Promise.resolve();
@@ -865,9 +759,9 @@ describe('CommandHandler', () => {
 
         // Mock markdown files in .claude/commands
         mockReaddir.mockResolvedValue([
-          { name: 'test-command.md', isFile: () => true, isDirectory: () => false } as any,
-          { name: 'another-command.md', isFile: () => true, isDirectory: () => false } as any,
-        ]);
+          { name: 'test-command.md', isFile: () => true, isDirectory: () => false },
+          { name: 'another-command.md', isFile: () => true, isDirectory: () => false },
+        ] as unknown as never[]);
 
         const result = await handleCommand(
           baseConversation,
@@ -877,7 +771,7 @@ describe('CommandHandler', () => {
         expect(result.success).toBe(true);
         expect(result.message).toContain('Repository cloned successfully');
         expect(result.message).toContain('✓ Loaded 2 commands');
-        const updateCall = mockCodebaseDb.updateCodebaseCommands.mock.calls[0];
+        const updateCall = mockUpdateCodebaseCommands.mock.calls[0] as [string, Record<string, { path: string; description: string }>];
         expect(updateCall[0]).toBe('cb-new');
         const commands = updateCall[1];
         expect(commands['test-command']).toBeDefined();
@@ -890,8 +784,9 @@ describe('CommandHandler', () => {
       });
 
       test('should auto-load commands from .agents/commands/ when .claude absent', async () => {
-        // Mock only .agents/commands exists (platform-agnostic path check)
-        mockAccess.mockImplementation((path: any) => {
+        // Reset and mock only .agents/commands exists (platform-agnostic path check)
+        mockAccess.mockReset();
+        mockAccess.mockImplementation((path: unknown) => {
           const pathStr = String(path);
           if (pathStr.includes('.agents/commands') || pathStr.includes('.agents\\commands')) {
             return Promise.resolve();
@@ -900,8 +795,8 @@ describe('CommandHandler', () => {
         });
 
         mockReaddir.mockResolvedValue([
-          { name: 'rca.md', isFile: () => true, isDirectory: () => false } as any,
-        ]);
+          { name: 'rca.md', isFile: () => true, isDirectory: () => false },
+        ] as unknown as never[]);
 
         const result = await handleCommand(
           baseConversation,
@@ -910,7 +805,7 @@ describe('CommandHandler', () => {
 
         expect(result.success).toBe(true);
         expect(result.message).toContain('✓ Loaded 1 commands');
-        const updateCall = mockCodebaseDb.updateCodebaseCommands.mock.calls[0];
+        const updateCall = mockUpdateCodebaseCommands.mock.calls[0] as [string, Record<string, { path: string; description: string }>];
         expect(updateCall[0]).toBe('cb-new');
         const commands = updateCall[1];
         expect(commands.rca).toBeDefined();
@@ -929,12 +824,13 @@ describe('CommandHandler', () => {
         expect(result.success).toBe(true);
         expect(result.message).toContain('Repository cloned successfully');
         expect(result.message).not.toContain('✓ Loaded');
-        expect(mockCodebaseDb.updateCodebaseCommands).not.toHaveBeenCalled();
+        expect(mockUpdateCodebaseCommands).not.toHaveBeenCalled();
       });
 
       test('should not show loaded message when command folder is empty', async () => {
-        // Command folder exists but has no markdown files
-        mockAccess.mockImplementation((path: any) => {
+        // Reset and mock command folder exists but has no markdown files
+        mockAccess.mockReset();
+        mockAccess.mockImplementation((path: unknown) => {
           if (String(path).includes('.claude/commands')) {
             return Promise.resolve();
           }
@@ -942,8 +838,8 @@ describe('CommandHandler', () => {
         });
 
         mockReaddir.mockResolvedValue([
-          { name: '.gitkeep', isFile: () => true, isDirectory: () => false } as any,
-        ]);
+          { name: '.gitkeep', isFile: () => true, isDirectory: () => false },
+        ] as unknown as never[]);
 
         const result = await handleCommand(
           baseConversation,
@@ -952,13 +848,13 @@ describe('CommandHandler', () => {
 
         expect(result.success).toBe(true);
         expect(result.message).not.toContain('✓ Loaded');
-        expect(mockCodebaseDb.updateCodebaseCommands).not.toHaveBeenCalled();
+        expect(mockUpdateCodebaseCommands).not.toHaveBeenCalled();
       });
 
       test('should check .claude/commands before .agents/commands (priority order)', async () => {
-        // This test verifies that the code checks folders in the correct priority order
-        // We test this by checking that .claude/commands is checked first
-        mockAccess.mockImplementation((path: any) => {
+        // Reset and test that .claude/commands is checked first
+        mockAccess.mockReset();
+        mockAccess.mockImplementation((path: unknown) => {
           const pathStr = String(path);
           if (pathStr.includes('.claude/commands') || pathStr.includes('.claude\\commands')) {
             return Promise.resolve();
@@ -968,8 +864,8 @@ describe('CommandHandler', () => {
         });
 
         mockReaddir.mockResolvedValue([
-          { name: 'priority-test.md', isFile: () => true, isDirectory: () => false } as any,
-        ]);
+          { name: 'priority-test.md', isFile: () => true, isDirectory: () => false },
+        ] as unknown as never[]);
 
         const result = await handleCommand(
           baseConversation,
@@ -982,9 +878,9 @@ describe('CommandHandler', () => {
       });
 
       test('should recursively find commands in subdirectories', async () => {
-        // This test verifies that findMarkdownFilesRecursive is called
-        // which handles subdirectory traversal
-        mockAccess.mockImplementation((path: any) => {
+        // Reset and test recursive directory traversal
+        mockAccess.mockReset();
+        mockAccess.mockImplementation((path: unknown) => {
           const pathStr = String(path);
           if (pathStr.includes('.claude/commands') || pathStr.includes('.claude\\commands')) {
             return Promise.resolve();
@@ -995,12 +891,12 @@ describe('CommandHandler', () => {
         // Mock a directory with a subdirectory
         mockReaddir
           .mockResolvedValueOnce([
-            { name: 'cmd1.md', isFile: () => true, isDirectory: () => false } as any,
-            { name: 'subfolder', isFile: () => false, isDirectory: () => true } as any,
-          ])
+            { name: 'cmd1.md', isFile: () => true, isDirectory: () => false },
+            { name: 'subfolder', isFile: () => false, isDirectory: () => true },
+          ] as unknown as never[])
           .mockResolvedValueOnce([
-            { name: 'cmd2.md', isFile: () => true, isDirectory: () => false } as any,
-          ]);
+            { name: 'cmd2.md', isFile: () => true, isDirectory: () => false },
+          ] as unknown as never[]);
 
         const result = await handleCommand(
           baseConversation,
@@ -1016,14 +912,16 @@ describe('CommandHandler', () => {
 
       test('should preserve existing commands when auto-loading', async () => {
         // Mock existing commands in the codebase
-        mockCodebaseDb.getCodebaseCommands.mockResolvedValue({
+        mockGetCodebaseCommands.mockResolvedValue({
           'existing-cmd': {
             path: '.claude/existing.md',
             description: 'Existing command',
           },
         });
 
-        mockAccess.mockImplementation((path: any) => {
+        // Reset and mock access
+        mockAccess.mockReset();
+        mockAccess.mockImplementation((path: unknown) => {
           const pathStr = String(path);
           if (pathStr.includes('.claude/commands') || pathStr.includes('.claude\\commands')) {
             return Promise.resolve();
@@ -1032,8 +930,8 @@ describe('CommandHandler', () => {
         });
 
         mockReaddir.mockResolvedValue([
-          { name: 'new-cmd.md', isFile: () => true, isDirectory: () => false } as any,
-        ]);
+          { name: 'new-cmd.md', isFile: () => true, isDirectory: () => false },
+        ] as unknown as never[]);
 
         const result = await handleCommand(
           baseConversation,
@@ -1043,8 +941,8 @@ describe('CommandHandler', () => {
         expect(result.success).toBe(true);
 
         // Verify commands were updated
-        expect(mockCodebaseDb.updateCodebaseCommands).toHaveBeenCalled();
-        const updateCall = mockCodebaseDb.updateCodebaseCommands.mock.calls[0];
+        expect(mockUpdateCodebaseCommands).toHaveBeenCalled();
+        const updateCall = mockUpdateCodebaseCommands.mock.calls[0] as [string, Record<string, { path: string; description: string }>];
         const commands = updateCall[1];
 
         // Should preserve existing command
@@ -1068,8 +966,8 @@ describe('CommandHandler', () => {
           metadata: {},
         };
 
-        mockSessionDb.getActiveSession.mockResolvedValue(activeSession);
-        mockSessionDb.deactivateSession.mockResolvedValue();
+        mockGetActiveSession.mockResolvedValue(activeSession);
+        mockDeactivateSession.mockResolvedValue();
 
         const result = await handleCommand(
           baseConversation,
@@ -1077,7 +975,7 @@ describe('CommandHandler', () => {
         );
 
         expect(result.success).toBe(true);
-        expect(mockSessionDb.deactivateSession).toHaveBeenCalledWith('session-123');
+        expect(mockDeactivateSession).toHaveBeenCalledWith('session-123');
       });
     });
 

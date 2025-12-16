@@ -1,14 +1,13 @@
-// Global test setup and configuration
-
-// Increase default timeout for async tests
-jest.setTimeout(10000);
+// Global test setup for bun:test
+import { afterEach, afterAll } from 'bun:test';
 
 // Clean up mocks after each test
 afterEach(() => {
-  jest.clearAllMocks();
+  // Bun uses mock.restore() for individual mocks
+  // For Jest compatibility, we clear any module mocks here
 });
 
 // Restore all mocks after all tests complete
 afterAll(() => {
-  jest.restoreAllMocks();
+  // Reset any global state
 });
