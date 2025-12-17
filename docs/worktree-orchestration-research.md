@@ -1,6 +1,6 @@
 # Worktree Orchestration Research
 
-> **Status**: Research Complete - Ready for Implementation (2025-12-17)
+> **Status**: ✅ Fully Implemented (2025-12-17)
 > **Context**: Unified isolation architecture across all platforms with work-centric data model
 
 ## Executive Summary
@@ -14,7 +14,7 @@ This document captures the design decisions for a **unified isolation architectu
 | **Isolation trigger**      | Auto on every @mention                        | Simplicity > efficiency; worktrees are cheap |
 | **Threading model**        | ALL bot responses → thread                    | Never pollute main channel                   |
 | **Cleanup service**        | Separate service, git-first                   | Clean separation; git is source of truth     |
-| **Cross-platform linking** | Metadata + `/worktree link` fallback          | Automated discovery with manual override     |
+| **Cross-platform linking** | Automatic via linkedIssues                    | PR→Issue linking; worktrees are cheap        |
 | **Limits**                 | 25 worktrees/codebase (configurable)          | Mental model limit, not resource constraint  |
 
 **Implementation phases**:
@@ -622,21 +622,21 @@ Options:
 3. User wants both to share the same worktree
 ```
 
-### MVP Solution: Metadata + Manual Linking
+### Solution: Automatic Linking via linkedIssues
 
-**Automatic metadata collection**:
+**How it works**:
 
-- When AI creates commits, extract issue/PR references from messages
-- When AI creates PRs, store PR number in environment metadata
-- Store keywords from conversation for future discovery
+- GitHub adapter parses PR body/description for "Fixes #X", "Closes #X" references
+- These are passed as `linkedIssues` in `IsolationHints`
+- Orchestrator checks for existing worktrees matching linked issues
+- If found, shares the worktree instead of creating a new one
 
-**Manual linking fallback**:
+**Why no manual `/worktree link` command**:
 
-```
-/worktree link issue-42
-```
-
-Links current conversation's worktree to issue-42's workflow identifier.
+- Worktrees are cheap (0.1s creation, 2.5MB storage)
+- Having separate worktrees per conversation isn't a problem
+- Cross-platform manual linking is a rare edge case
+- Git already handles work sharing (push branch, cherry-pick, etc.)
 
 **Future: AI-assisted discovery**:
 
@@ -660,30 +660,6 @@ if (hints?.linkedIssues?.length) {
       return linkedEnv;
     }
   }
-}
-
-// /worktree link command handler
-async function handleWorktreeLink(conversation: Conversation, target: string): Promise<string> {
-  // Parse target: "issue-42", "pr-99", "thread-abc123"
-  const match = /^(issue|pr|thread|task)-(.+)$/.exec(target);
-  if (!match) return 'Invalid target format. Use: issue-42, pr-99, etc.';
-
-  const [, workflowType, workflowId] = match;
-
-  const targetEnv = await isolationEnvDb.findByWorkflow(
-    conversation.codebase_id,
-    workflowType,
-    workflowId
-  );
-
-  if (!targetEnv) return `No worktree found for ${target}`;
-
-  await db.updateConversation(conversation.id, {
-    isolation_env_id: targetEnv.id,
-    cwd: targetEnv.working_path,
-  });
-
-  return `Linked to worktree \`${targetEnv.branch_name}\``;
 }
 ```
 
@@ -852,45 +828,44 @@ async handleWebhook(...) {
 
 **Phase 2.5 Checklist**:
 
-- [ ] Create migration for `isolation_environments` table + column renames
-- [ ] Create `src/db/isolation-environments.ts`
-- [ ] Create `src/services/cleanup-service.ts` (without scheduler)
-- [ ] Add `IsolationHints` interface to types
-- [ ] Update `handleMessage()` signature
-- [ ] Add `validateAndResolveIsolation()` to orchestrator
-- [ ] Add `migrateToIsolationEnvironment()` for legacy support
-- [ ] Add auto-isolation logic to orchestrator
-- [ ] Refactor GitHub adapter (remove isolation logic, add hints)
-- [ ] Add `/worktree link` command
-- [ ] Update tests
-- [ ] Test: GitHub issue → worktree created by orchestrator
-- [ ] Test: GitHub PR → shares linked issue's worktree
-- [ ] Test: Slack thread → worktree created by orchestrator
-- [ ] Test: Stale path → cleaned up, new worktree created
-- [ ] Test: Skill-created worktree → adopted correctly
-- [ ] Test: Legacy worktree_path → migrated on-the-fly
+- [x] Create migration for `isolation_environments` table + column renames
+- [x] Create `src/db/isolation-environments.ts`
+- [x] Create `src/services/cleanup-service.ts` (without scheduler)
+- [x] Add `IsolationHints` interface to types
+- [x] Update `handleMessage()` signature
+- [x] Add `validateAndResolveIsolation()` to orchestrator
+- [x] Add `migrateToIsolationEnvironment()` for legacy support
+- [x] Add auto-isolation logic to orchestrator
+- [x] Refactor GitHub adapter (remove isolation logic, add hints)
+- [x] Update tests
+- [x] Test: GitHub issue → worktree created by orchestrator
+- [x] Test: GitHub PR → shares linked issue's worktree
+- [x] Test: Slack thread → worktree created by orchestrator
+- [x] Test: Stale path → cleaned up, new worktree created
+- [x] Test: Skill-created worktree → adopted correctly
+- [x] Test: Legacy worktree_path → migrated on-the-fly
 
 ### Phase 3A: Force-Thread Response Model
 
 **Scope**: Bot ALWAYS responds in threads (Slack/Discord).
 
-- [ ] Add `createThread()` to `IPlatformAdapter` interface
-- [ ] Implement `Slack.createThread()`
-- [ ] Implement `Discord.createThread()`
-- [ ] Update message handlers to force-create threads
-- [ ] Test: @mention in channel → response in new thread
+- [x] Add `createThread()` to `IPlatformAdapter` interface
+- [x] Implement `Slack.createThread()` (native via thread_ts)
+- [x] Implement `Discord.createThread()` (ensureThread method)
+- [x] Update message handlers to force-create threads
+- [x] Test: @mention in channel → response in new thread
 
 ### Phase 3C: Git-Based Cleanup Scheduler
 
 **Scope**: Scheduled cleanup using git as source of truth.
 
-- [ ] Add `startCleanupScheduler()` to index.ts
-- [ ] Implement `runScheduledCleanup()` in cleanup service
-- [ ] Add `isBranchMerged()` git check
-- [ ] Add `findStaleEnvironments()` query
-- [ ] Test: Merged branch → auto-removed
-- [ ] Test: Stale Slack worktree → removed
-- [ ] Test: Stale Telegram worktree → NOT removed
+- [x] Add `startCleanupScheduler()` to index.ts
+- [x] Implement `runScheduledCleanup()` in cleanup service
+- [x] Add `isBranchMerged()` git check
+- [x] Add `findStaleEnvironments()` query
+- [x] Test: Merged branch → auto-removed
+- [x] Test: Stale Slack worktree → removed
+- [x] Test: Stale Telegram worktree → NOT removed
 
 ### Phase 3D: Limits and User Feedback
 
@@ -916,23 +891,23 @@ Options:
 
 **Checklist**:
 
-- [ ] Add limit check in orchestrator before creating new isolation
-- [ ] Attempt auto-cleanup of merged branches when limit hit
-- [ ] If auto-cleanup insufficient, show limit message with options
-- [ ] Add `/worktree cleanup merged` command
-- [ ] Add `/worktree cleanup stale` command
-- [ ] Update `/status` to show worktree count and breakdown
-- [ ] Test: Hit limit → helpful message shown
-- [ ] Test: Auto-cleanup makes room → continue without user action
+- [x] Add limit check in orchestrator before creating new isolation
+- [x] Attempt auto-cleanup of merged branches when limit hit
+- [x] If auto-cleanup insufficient, show limit message with options
+- [x] Add `/worktree cleanup merged` command
+- [x] Add `/worktree cleanup stale` command
+- [x] Update `/status` to show worktree count and breakdown
+- [x] Test: Hit limit → helpful message shown
+- [x] Test: Auto-cleanup makes room → continue without user action
 
 ### Phase 4: Schema Cleanup
 
 **Scope**: Remove legacy columns after migration complete.
 
-- [ ] Verify all code uses new model
-- [ ] Create migration to drop `worktree_path` column
-- [ ] Create migration to drop `isolation_provider` column
-- [ ] Remove fallback patterns from queries
+- [x] Verify all code uses new model
+- [x] Create migration to drop `worktree_path` column
+- [x] Create migration to drop `isolation_provider` column
+- [x] Remove fallback patterns from queries
 
 ---
 
@@ -962,12 +937,13 @@ Options:
 
 ### 3. Cross-Platform Linking
 
-**Decision**: **Metadata + `/worktree link` fallback**
+**Decision**: **Automatic via linkedIssues**
 
-MVP:
+Implementation:
 
-- Store `related_issues`, `related_prs` in metadata automatically
-- Manual `/worktree link` command for explicit linking
+- GitHub adapter parses "Fixes #X" references and passes as `linkedIssues`
+- Orchestrator shares worktrees with linked issues automatically
+- No manual `/worktree link` command (worktrees are cheap, separate ones are fine)
 
 Future:
 
