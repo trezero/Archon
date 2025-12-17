@@ -148,7 +148,7 @@ export async function handleMessage(
         }
 
         // Read command file
-        const cwd = conversation.worktree_path ?? conversation.cwd ?? codebase.default_cwd;
+        const cwd = conversation.isolation_env_id ?? conversation.worktree_path ?? conversation.cwd ?? codebase.default_cwd;
         const commandFilePath = join(cwd, commandDef.path);
 
         try {
@@ -237,7 +237,7 @@ export async function handleMessage(
       ? await codebaseDb.getCodebase(conversation.codebase_id)
       : null;
     let cwd =
-      conversation.worktree_path ?? conversation.cwd ?? codebase?.default_cwd ?? '/workspace';
+      conversation.isolation_env_id ?? conversation.worktree_path ?? conversation.cwd ?? codebase?.default_cwd ?? '/workspace';
 
     // Validate cwd exists - handle stale worktree paths gracefully
     try {
@@ -252,13 +252,15 @@ export async function handleMessage(
         console.log('[Orchestrator] Deactivated session with stale worktree');
       }
 
-      // Clear stale worktree reference from conversation
-      if (conversation.worktree_path) {
+      // Clear stale isolation reference from conversation
+      if (conversation.isolation_env_id || conversation.worktree_path) {
         await db.updateConversation(conversation.id, {
           worktree_path: null,
+          isolation_env_id: null,
+          isolation_provider: null,
           cwd: codebase?.default_cwd ?? '/workspace',
         });
-        console.log('[Orchestrator] Cleared stale worktree path from conversation');
+        console.log('[Orchestrator] Cleared stale isolation environment from conversation');
       }
 
       // Use default cwd for this request

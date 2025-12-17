@@ -557,6 +557,50 @@ describe('orchestrator', () => {
         'claude-session-xyz' // Uses existing session's ID
       );
     });
+
+    test('uses isolation_env_id over worktree_path and cwd', async () => {
+      mockGetOrCreateConversation.mockResolvedValue({
+        ...mockConversation,
+        isolation_env_id: '/workspace/isolation-env',
+        worktree_path: '/workspace/old-worktree',
+        cwd: '/workspace/project',
+      });
+      mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
+      mockReadFile.mockResolvedValue('Plan command');
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', '/command-invoke plan');
+
+      expect(mockClient.sendQuery).toHaveBeenCalledWith(
+        wrapCommandForExecution('plan', 'Plan command'),
+        '/workspace/isolation-env', // isolation_env_id takes priority
+        'claude-session-xyz'
+      );
+    });
+
+    test('falls back to worktree_path when isolation_env_id is null', async () => {
+      mockGetOrCreateConversation.mockResolvedValue({
+        ...mockConversation,
+        isolation_env_id: null,
+        worktree_path: '/workspace/worktree',
+        cwd: '/workspace/project',
+      });
+      mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
+      mockReadFile.mockResolvedValue('Plan command');
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', '/command-invoke plan');
+
+      expect(mockClient.sendQuery).toHaveBeenCalledWith(
+        wrapCommandForExecution('plan', 'Plan command'),
+        '/workspace/worktree', // worktree_path as fallback
+        'claude-session-xyz'
+      );
+    });
   });
 
   describe('stale worktree handling', () => {
@@ -595,6 +639,46 @@ describe('orchestrator', () => {
         expect.objectContaining({
           worktree_path: null,
           cwd: '/workspace/test-project', // Falls back to codebase default_cwd
+        })
+      );
+    });
+
+    test('should clear all isolation fields when isolation_env_id is stale', async () => {
+      // Setup: conversation with isolation_env_id that doesn't exist
+      const conversationWithStaleIsolation = {
+        ...mockConversation,
+        isolation_env_id: '/nonexistent/isolation/path',
+        isolation_provider: 'worktree',
+        worktree_path: null,
+        cwd: '/workspace/project',
+      };
+      mockGetOrCreateConversation.mockResolvedValue(conversationWithStaleIsolation);
+
+      // Mock fs.access to throw (path doesn't exist)
+      mockAccess.mockRejectedValueOnce(new Error('ENOENT: no such file or directory'));
+
+      // Mock active session
+      mockGetActiveSession.mockResolvedValue({
+        ...mockSession,
+        id: 'stale-session-id',
+      });
+
+      mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
+      mockReadFile.mockResolvedValue('Plan command');
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', '/command-invoke plan');
+
+      // Verify all isolation fields are cleared
+      expect(mockUpdateConversation).toHaveBeenCalledWith(
+        'conv-123',
+        expect.objectContaining({
+          worktree_path: null,
+          isolation_env_id: null,
+          isolation_provider: null,
+          cwd: '/workspace/test-project',
         })
       );
     });

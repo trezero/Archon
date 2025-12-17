@@ -632,7 +632,8 @@ ${userComment}`;
     let prHeadSha: string | undefined;
     // Detect PR: either pull_request event, or issue_comment on a PR (indicated by issue.pull_request or pullRequest)
     const isPR = eventType === 'pull_request' || !!pullRequest || !!issue?.pull_request;
-    if (!existingConv.worktree_path) {
+    const existingIsolation = existingConv.isolation_env_id ?? existingConv.worktree_path;
+    if (!existingIsolation) {
       // For PRs: Check if this PR is linked to an existing issue with a worktree
       if (isPR) {
         const linkedIssues = await getLinkedIssueNumbers(owner, repo, number);
@@ -642,9 +643,10 @@ ${userComment}`;
           const issueConvId = this.buildConversationId(owner, repo, issueNum);
           const issueConv = await db.getConversationByPlatformId('github', issueConvId);
 
-          if (issueConv?.worktree_path) {
+          const issueIsolation = issueConv?.isolation_env_id ?? issueConv?.worktree_path;
+          if (issueIsolation) {
             // Reuse the issue's worktree
-            worktreePath = issueConv.worktree_path;
+            worktreePath = issueIsolation;
             console.log(
               `[GitHub] PR #${String(number)} linked to issue #${String(issueNum)}, sharing worktree: ${worktreePath}`
             );
@@ -654,6 +656,8 @@ ${userComment}`;
               codebase_id: codebase.id,
               cwd: worktreePath,
               worktree_path: worktreePath,
+              isolation_env_id: issueConv?.isolation_env_id ?? worktreePath,
+              isolation_provider: issueConv?.isolation_provider ?? 'worktree',
             });
             break; // Use first found worktree
           }
@@ -719,8 +723,8 @@ ${userComment}`;
         }
       }
     } else {
-      // Conversation already has a worktree, use it
-      worktreePath = existingConv.worktree_path;
+      // Conversation already has isolation, use it
+      worktreePath = existingIsolation;
     }
 
     // 11. Build message with context
