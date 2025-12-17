@@ -8,7 +8,6 @@
 import 'dotenv/config';
 
 import express from 'express';
-import { resolve } from 'path';
 import { TelegramAdapter } from './adapters/telegram';
 import { TestAdapter } from './adapters/test';
 import { GitHubAdapter } from './adapters/github';
@@ -20,6 +19,8 @@ import { ConversationLockManager } from './utils/conversation-lock';
 import { classifyAndFormatError } from './utils/error-formatter';
 import { seedDefaultCommands } from './scripts/seed-commands';
 import { startCleanupScheduler, stopCleanupScheduler } from './services/cleanup-service';
+import { logArchonPaths } from './utils/archon-paths';
+import { loadConfig, logConfig } from './config';
 
 async function main(): Promise<void> {
   console.log('[App] Starting Remote Coding Agent');
@@ -64,16 +65,12 @@ async function main(): Promise<void> {
   // Start cleanup scheduler
   startCleanupScheduler();
 
-  // Warn if WORKSPACE_PATH is inside project directory
-  const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
-  const projectRoot = resolve(__dirname, '..');
-  if (workspacePath.startsWith(projectRoot + '/') || workspacePath === projectRoot) {
-    console.warn('⚠️  WARNING: WORKSPACE_PATH is inside project directory');
-    console.warn('   This can cause nested repository issues when working on this repo.');
-    console.warn(`   Current: ${workspacePath}`);
-    console.warn('   Recommended: /tmp/remote-agent-workspace or ~/remote-agent-workspace');
-    console.warn('');
-  }
+  // Log Archon paths configuration
+  logArchonPaths();
+
+  // Load and log configuration
+  const config = await loadConfig();
+  logConfig(config);
 
   // Seed default command templates
   await seedDefaultCommands();

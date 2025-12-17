@@ -1,7 +1,8 @@
-import { mock, describe, test, expect, beforeEach } from 'bun:test';
+import { mock, describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { MockPlatformAdapter } from '../test/mocks/platform';
 import { Conversation, Codebase, Session } from '../types';
 import { join } from 'path';
+import * as fsPromises from 'fs/promises';
 
 // Setup mocks before importing the module under test
 const mockGetOrCreateConversation = mock(() => Promise.resolve(null));
@@ -20,7 +21,10 @@ const mockParseCommand = mock((message: string) => {
   return { command: parts[0].substring(1), args: parts.slice(1) };
 });
 const mockGetAssistantClient = mock(() => null);
-const mockReadFile = mock(() => Promise.resolve(''));
+
+// Store original readFile for passthrough
+const originalReadFile = fsPromises.readFile;
+const mockReadFile = mock(originalReadFile);
 
 // Isolation environment mocks
 const mockIsolationEnvGetById = mock(() => Promise.resolve(null));
@@ -102,6 +106,7 @@ mock.module('../clients/factory', () => ({
 }));
 
 mock.module('fs/promises', () => ({
+  ...fsPromises,
   readFile: mockReadFile,
 }));
 
@@ -246,6 +251,11 @@ describe('orchestrator', () => {
     mockWorktreeExists.mockResolvedValue(true); // Existing worktree valid
     mockGetCanonicalRepoPath.mockImplementation((path: string) => Promise.resolve(path));
     mockExecFileAsync.mockResolvedValue({ stdout: 'main', stderr: '' });
+  });
+
+  afterEach(() => {
+    // Restore mock to passthrough mode for other test files
+    mockReadFile.mockImplementation(originalReadFile);
   });
 
   describe('slash commands (non-invoke)', () => {
@@ -712,7 +722,6 @@ describe('orchestrator', () => {
         'claude-session-xyz'
       );
     });
-
   });
 
   describe('stale worktree handling', () => {

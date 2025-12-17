@@ -22,11 +22,7 @@ import { substituteVariables } from '../utils/variable-substitution';
 import { classifyAndFormatError } from '../utils/error-formatter';
 import { getAssistantClient } from '../clients/factory';
 import { getIsolationProvider } from '../isolation';
-import {
-  worktreeExists,
-  findWorktreeByBranch,
-  getCanonicalRepoPath,
-} from '../utils/git';
+import { worktreeExists, findWorktreeByBranch, getCanonicalRepoPath } from '../utils/git';
 import {
   cleanupToMakeRoom,
   getWorktreeStatusBreakdown,

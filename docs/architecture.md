@@ -528,15 +528,15 @@ export class WorktreeProvider implements IIsolationProvider {
 ### Storage Location
 
 ```
-LOCAL:   ~/tmp/worktrees/<project>/<branch>/     ← WORKTREE_BASE can override
-DOCKER:  /workspace/worktrees/<project>/<branch>/ ← FIXED, no override
+LOCAL:   ~/.archon/worktrees/<project>/<branch>/   ← ARCHON_HOME can override base
+DOCKER:  /.archon/worktrees/<project>/<branch>/    ← FIXED, no override
 ```
 
 **Logic in `getWorktreeBase()`:**
 
-1. Docker detected? → `/workspace/worktrees` (always, no override)
-2. `WORKTREE_BASE` set? → use it (local only)
-3. Default → `~/tmp/worktrees`
+1. Docker detected? → `/.archon/worktrees` (always, no override)
+2. `ARCHON_HOME` set? → `${ARCHON_HOME}/worktrees`
+3. Default → `~/.archon/worktrees`
 
 ### Usage Pattern
 

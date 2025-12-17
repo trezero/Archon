@@ -260,7 +260,7 @@ GITHUB_TOKEN=ghp_your_token_here
 
 # Server settings
 PORT=3000
-WORKSPACE_PATH=/tmp/remote-agent-workspace  # Use external path to avoid nested repos
+ARCHON_HOME=/tmp/archon  # Override base directory (optional)
 ```
 
 **GitHub Token Setup:**

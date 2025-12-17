@@ -19,6 +19,7 @@ import {
   getWorktreeStatusBreakdown,
   MAX_WORKTREES_PER_CODEBASE,
 } from '../services/cleanup-service';
+import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
 
 /**
  * Convert an absolute path to a relative path from the repository root
@@ -35,7 +36,7 @@ function shortenPath(absolutePath: string, repoRoot?: string): string {
   }
 
   // Fallback: show relative to workspace
-  const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
+  const workspacePath = getArchonWorkspacesPath();
   const relPath = relative(workspacePath, absolutePath);
   if (!relPath.startsWith('..')) {
     return relPath;
@@ -122,7 +123,7 @@ Codebase Commands (per-project):
   /load-commands <folder> - Bulk load (recursive)
   /command-invoke <name> [args] - Execute
   /commands - List registered
-  Note: Commands use relative paths (e.g., .claude/commands)
+  Note: Commands use relative paths (e.g., .archon/commands)
 
 Codebase:
   /clone <repo-url> - Clone repository
@@ -144,7 +145,10 @@ Session:
   /status - Show state
   /reset - Clear session
   /reset-context - Reset AI context, keep worktree
-  /help - Show help`,
+  /help - Show help
+
+Setup:
+  /init - Create .archon structure in current repo`,
       };
 
     case 'status': {
@@ -224,7 +228,7 @@ Session:
       const resolvedCwd = resolve(newCwd);
 
       // Validate path is within workspace to prevent path traversal
-      const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
+      const workspacePath = getArchonWorkspacesPath();
       if (!isPathWithinWorkspace(resolvedCwd)) {
         return { success: false, message: `Path must be within ${workspacePath} directory` };
       }
@@ -279,9 +283,9 @@ Session:
       const repoName = urlParts.pop() ?? 'unknown';
       const ownerName = urlParts.pop() ?? 'unknown';
 
-      // Use WORKSPACE_PATH env var for flexibility (local dev vs Docker)
+      // Use Archon workspaces path (ARCHON_HOME/workspaces or ~/.archon/workspaces)
       // Include owner in path to prevent collisions (e.g., alice/utils vs bob/utils)
-      const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
+      const workspacePath = getArchonWorkspacesPath();
       const targetPath = join(workspacePath, ownerName, repoName);
 
       try {
@@ -313,7 +317,7 @@ Session:
 
             // Check for command folders (same logic as successful clone)
             let commandFolder: string | null = null;
-            for (const folder of ['.claude/commands', '.agents/commands']) {
+            for (const folder of getCommandFolderSearchPaths()) {
               try {
                 await access(join(targetPath, folder));
                 commandFolder = folder;
@@ -413,7 +417,7 @@ Session:
 
         // Auto-load commands if found
         let commandsLoaded = 0;
-        for (const folder of ['.claude/commands', '.agents/commands']) {
+        for (const folder of getCommandFolderSearchPaths()) {
           try {
             const commandPath = join(targetPath, folder);
             await access(commandPath);
@@ -468,7 +472,7 @@ Session:
 
       const [commandName, commandPath, ...textParts] = args;
       const commandText = textParts.join(' ');
-      const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
+      const workspacePath = getArchonWorkspacesPath();
       const basePath = conversation.cwd ?? workspacePath;
       const fullPath = resolve(basePath, commandPath);
 
@@ -507,7 +511,7 @@ Session:
       }
 
       const folderPath = args.join(' ');
-      const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
+      const workspacePath = getArchonWorkspacesPath();
       const basePath = conversation.cwd ?? workspacePath;
       const fullPath = resolve(basePath, folderPath);
 
@@ -573,7 +577,7 @@ Session:
     }
 
     case 'repos': {
-      const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
+      const workspacePath = getArchonWorkspacesPath();
 
       try {
         const entries = await readdir(workspacePath, { withFileTypes: true });
@@ -658,7 +662,7 @@ Session:
         return { success: false, message: 'Usage: /repo <number|name> [pull]' };
       }
 
-      const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
+      const workspacePath = getArchonWorkspacesPath();
       const identifier = args[0];
       const shouldPull = args[1]?.toLowerCase() === 'pull';
 
@@ -748,7 +752,7 @@ Session:
 
         // Auto-load commands if found
         let commandsLoaded = 0;
-        for (const folder of ['.claude/commands', '.agents/commands']) {
+        for (const folder of getCommandFolderSearchPaths()) {
           try {
             const commandPath = join(targetPath, folder);
             await access(commandPath);
@@ -793,7 +797,7 @@ Session:
         return { success: false, message: 'Usage: /repo-remove <number|name>' };
       }
 
-      const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
+      const workspacePath = getArchonWorkspacesPath();
       const identifier = args[0];
 
       try {
@@ -1201,6 +1205,82 @@ Session:
             message:
               'Usage:\n  /worktree create <branch>\n  /worktree list\n  /worktree remove [--force]\n  /worktree cleanup merged|stale\n  /worktree orphans',
           };
+      }
+    }
+
+    case 'init': {
+      // Create .archon structure in current repo
+      if (!conversation.cwd) {
+        return {
+          success: false,
+          message: 'No working directory set. Use /clone or /setcwd first.',
+        };
+      }
+
+      const archonDir = join(conversation.cwd, '.archon');
+      const commandsDir = join(archonDir, 'commands');
+      const configPath = join(archonDir, 'config.yaml');
+
+      try {
+        // Check if .archon already exists
+        try {
+          await access(archonDir);
+          return {
+            success: false,
+            message: '.archon directory already exists. Nothing to do.',
+          };
+        } catch {
+          // Directory doesn't exist, we can create it
+        }
+
+        // Create directories
+        await import('fs/promises').then(fs => fs.mkdir(commandsDir, { recursive: true }));
+
+        // Create default config.yaml
+        const defaultConfig = `# Archon repository configuration
+# See: https://github.com/dynamous-community/remote-coding-agent
+
+# AI assistant preference (optional - overrides global default)
+# assistant: claude
+
+# Commands configuration (optional)
+# commands:
+#   folder: .archon/commands
+#   autoLoad: true
+`;
+        await writeFile(configPath, defaultConfig);
+
+        // Create example command
+        const exampleCommand = join(commandsDir, 'example.md');
+        const exampleContent = `---
+description: Example command template
+---
+# Example Command
+
+This is an example command template.
+
+Arguments:
+- $1 - First positional argument
+- $ARGUMENTS - All arguments as string
+
+Task: $ARGUMENTS
+`;
+        await writeFile(exampleCommand, exampleContent);
+
+        return {
+          success: true,
+          message: `Created .archon structure:
+  .archon/
+  ├── config.yaml
+  └── commands/
+      └── example.md
+
+Use /load-commands .archon/commands to register commands.`,
+        };
+      } catch (error) {
+        const err = error as Error;
+        console.error('[Command] init failed:', err);
+        return { success: false, message: `Failed to initialize: ${err.message}` };
       }
     }
 

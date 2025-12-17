@@ -16,7 +16,9 @@
     "lint": "bun x eslint . --cache",
     "lint:fix": "bun x eslint . --cache --fix",
     "format": "bun x prettier --write .",
-    "format:check": "bun x prettier --check ."
+    "format:check": "bun x prettier --check .",
+    "validate": "bun run type-check && bun run lint && bun test",
+    "setup:check": "./scripts/validate-setup.sh"
   },
   "keywords": [
     "ai",
@@ -39,7 +41,8 @@
     "express": "^5.2.1",
     "pg": "^8.11.0",
     "telegraf": "^4.16.0",
-    "telegramify-markdown": "^1.3.0"
+    "telegramify-markdown": "^1.3.0",
+    "yaml": "^2.7.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

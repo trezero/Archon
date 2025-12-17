@@ -73,6 +73,8 @@ describe('git utilities', () => {
     const originalEnv = process.env.WORKTREE_BASE;
     const originalWorkspacePath = process.env.WORKSPACE_PATH;
     const originalHome = process.env.HOME;
+    const originalArchonHome = process.env.ARCHON_HOME;
+    const originalArchonDocker = process.env.ARCHON_DOCKER;
 
     afterEach(() => {
       if (originalEnv === undefined) {
@@ -90,61 +92,61 @@ describe('git utilities', () => {
       } else {
         process.env.HOME = originalHome;
       }
+      if (originalArchonHome === undefined) {
+        delete process.env.ARCHON_HOME;
+      } else {
+        process.env.ARCHON_HOME = originalArchonHome;
+      }
+      if (originalArchonDocker === undefined) {
+        delete process.env.ARCHON_DOCKER;
+      } else {
+        process.env.ARCHON_DOCKER = originalArchonDocker;
+      }
     });
 
-    test('returns ~/tmp/worktrees by default for local (non-Docker)', () => {
+    test('returns ~/.archon/worktrees by default for local (non-Docker)', () => {
       delete process.env.WORKTREE_BASE;
       delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_HOME;
+      delete process.env.ARCHON_DOCKER;
       const result = git.getWorktreeBase('/workspace/my-repo');
-      // Default for local: ~/tmp/worktrees (matches worktree-manager skill)
-      expect(result).toBe(join(homedir(), 'tmp', 'worktrees'));
+      // Default for local: ~/.archon/worktrees (new Archon structure)
+      expect(result).toBe(join(homedir(), '.archon', 'worktrees'));
     });
 
-    test('returns /workspace/worktrees for Docker environment', () => {
+    test('returns /.archon/worktrees for Docker environment', () => {
       delete process.env.WORKTREE_BASE;
+      delete process.env.ARCHON_HOME;
       process.env.WORKSPACE_PATH = '/workspace';
       const result = git.getWorktreeBase('/workspace/my-repo');
-      // Docker: inside mounted volume
-      expect(result).toBe('/workspace/worktrees');
+      // Docker: inside /.archon volume
+      expect(result).toBe('/.archon/worktrees');
     });
 
     test('detects Docker by HOME=/root + WORKSPACE_PATH', () => {
       delete process.env.WORKTREE_BASE;
+      delete process.env.ARCHON_HOME;
+      delete process.env.ARCHON_DOCKER;
       process.env.HOME = '/root';
       process.env.WORKSPACE_PATH = '/app/workspace';
       const result = git.getWorktreeBase('/workspace/my-repo');
-      expect(result).toBe('/workspace/worktrees');
+      expect(result).toBe('/.archon/worktrees');
     });
 
-    test('uses WORKTREE_BASE for local (non-Docker)', () => {
-      delete process.env.WORKSPACE_PATH; // Ensure not Docker
-      delete process.env.HOME; // Reset HOME to actual value
-      process.env.WORKTREE_BASE = '/custom/worktrees';
+    test('uses ARCHON_HOME for local (non-Docker)', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.WORKTREE_BASE;
+      delete process.env.ARCHON_DOCKER;
+      process.env.ARCHON_HOME = '/custom/archon';
       const result = git.getWorktreeBase('/workspace/my-repo');
-      expect(result).toBe('/custom/worktrees');
+      expect(result).toBe('/custom/archon/worktrees');
     });
 
-    test('ignores WORKTREE_BASE in Docker (end user protection)', () => {
-      process.env.WORKTREE_BASE = '/custom/worktrees';
-      process.env.WORKSPACE_PATH = '/workspace'; // Docker flag
+    test('uses fixed path in Docker', () => {
+      delete process.env.ARCHON_HOME;
+      process.env.ARCHON_DOCKER = 'true';
       const result = git.getWorktreeBase('/workspace/my-repo');
-      // Docker ALWAYS uses fixed location, override IGNORED
-      expect(result).toBe('/workspace/worktrees');
-    });
-
-    test('expands tilde in WORKTREE_BASE (local only)', () => {
-      delete process.env.WORKSPACE_PATH; // Ensure not Docker
-      process.env.WORKTREE_BASE = '~/tmp/worktrees';
-      const result = git.getWorktreeBase('/workspace/my-repo');
-      expect(result).toBe(join(homedir(), 'tmp', 'worktrees'));
-    });
-
-    test('ignores WORKTREE_BASE with tilde in Docker', () => {
-      process.env.WORKSPACE_PATH = '/workspace'; // Docker flag
-      process.env.WORKTREE_BASE = '~/custom/worktrees';
-      const result = git.getWorktreeBase('/workspace/my-repo');
-      // Tilde never expanded in Docker because override is ignored entirely
-      expect(result).toBe('/workspace/worktrees');
+      expect(result).toBe('/.archon/worktrees');
     });
   });
 

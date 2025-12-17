@@ -6,12 +6,12 @@ services:
     build: .
     env_file: .env
     environment:
-      # Override WORKSPACE_PATH for container (host path differs from container path)
-      WORKSPACE_PATH: /workspace
+      # Signal Docker environment for Archon path detection
+      ARCHON_DOCKER: "true"
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
     volumes:
-      - ${WORKSPACE_PATH:-./workspace}:/workspace
+      - archon_data:/.archon  # All Archon-managed data (workspaces, worktrees, config)
     restart: unless-stopped
     dns:
       - 8.8.8.8
@@ -28,12 +28,12 @@ services:
     environment:
       # Override DATABASE_URL to use Docker service name
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/remote_coding_agent
-      # Override WORKSPACE_PATH for container (host path differs from container path)
-      WORKSPACE_PATH: /workspace
+      # Signal Docker environment for Archon path detection
+      ARCHON_DOCKER: "true"
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
     volumes:
-      - ${WORKSPACE_PATH:-./workspace}:/workspace
+      - archon_data:/.archon  # All Archon-managed data (workspaces, worktrees, config)
     restart: unless-stopped
     dns:
       - 8.8.8.8
@@ -67,3 +67,4 @@ services:
 
 volumes:
   postgres_data:
+  archon_data:  # Persistent Archon data

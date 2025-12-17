@@ -265,7 +265,7 @@ SLACK_STREAMING_MODE=stream     # Default: stream
 GITHUB_STREAMING_MODE=batch     # Default: batch
 
 # Optional
-WORKSPACE_PATH=/workspace
+ARCHON_HOME=~/.archon  # Override the base directory
 PORT=3000
 
 # Builtin Commands (default: true)
@@ -280,14 +280,17 @@ The app can work alongside the worktree-manager Claude Code skill. Both use git 
 
 **To enable symbiosis:**
 
-1. Set `WORKTREE_BASE` to match the skill's `worktreeBase` config:
-   ```env
-   WORKTREE_BASE=~/tmp/worktrees
+1. Configure the worktree-manager skill to use Archon's worktrees directory:
+   ```json
+   // In ~/.claude/settings.json or worktree-manager config
+   {
+     "worktreeBase": "~/.archon/worktrees"
+   }
    ```
 
 2. Both systems will use the same directory:
-   - Skill creates: `~/tmp/worktrees/<project>/<branch-slug>/`
-   - App creates: `~/tmp/worktrees/<project>/<issue|pr>-<number>/`
+   - Skill creates: `~/.archon/worktrees/<project>/<branch-slug>/`
+   - App creates: `~/.archon/worktrees/<project>/<issue|pr>-<number>/`
 
 3. The app will **adopt** skill-created worktrees when:
    - A PR is opened for a branch that already has a worktree
@@ -300,6 +303,39 @@ The app can work alongside the worktree-manager Claude Code skill. Both use git 
 - App: Database (`conversations.worktree_path`)
 
 Git (`git worktree list`) is the source of truth for what actually exists on disk.
+
+### Archon Directory Structure
+
+All Archon-managed files are organized under a dedicated namespace:
+
+**User-level (`~/.archon/`):**
+```
+~/.archon/
+├── workspaces/     # Cloned repositories (via /clone)
+│   └── owner/repo/
+├── worktrees/      # Git worktrees for isolation
+│   └── repo-name/
+│       └── branch-name/
+└── config.yaml     # Global configuration (non-secrets)
+```
+
+**Repo-level (`.archon/` in any repository):**
+```
+.archon/
+├── commands/       # Custom command templates
+├── workflows/      # Future: workflow definitions
+└── config.yaml     # Repo-specific configuration
+```
+
+**For Docker:** Paths are automatically set to `/.archon/`.
+
+**Configuration:**
+- `ARCHON_HOME` - Override the base directory (default: `~/.archon`)
+
+**Command folder detection priority:**
+1. `.archon/commands/` - Archon-specific commands
+2. `.claude/commands/` - Claude Code standard location
+3. `.agents/commands/` - Alternative location
 
 ## Development Guidelines
 
@@ -599,8 +635,7 @@ try {
 - Run app locally: `bun run dev` (hot reload enabled)
 
 **Volumes:**
-- `/workspace` - Cloned repositories
-- Mount via `WORKSPACE_PATH` env var
+- `/.archon/` - All Archon-managed data (workspaces, worktrees)
 
 **Networking:**
 - App: Port 3000 (configurable via `PORT` env var)

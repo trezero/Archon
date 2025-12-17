@@ -4,6 +4,7 @@
 import { describe, test, expect, mock, beforeEach, type Mock } from 'bun:test';
 import { Conversation } from '../types';
 import { resolve, join } from 'path';
+import * as fsPromises from 'fs/promises';
 
 // Create mock functions
 const mockUpdateConversation = mock(() => Promise.resolve());
@@ -100,6 +101,7 @@ mock.module('child_process', () => ({
 }));
 
 mock.module('fs/promises', () => ({
+  ...fsPromises,
   access: mockAccess,
   readdir: mockReaddir,
   mkdir: mock(() => Promise.resolve()),

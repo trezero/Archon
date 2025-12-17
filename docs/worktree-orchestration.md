@@ -5,16 +5,16 @@
 ## Storage Location
 
 ```
-LOCAL:   ~/tmp/worktrees/<project>/<branch>/     ← WORKTREE_BASE can override
-DOCKER:  /workspace/worktrees/<project>/<branch>/ ← FIXED, no override
+LOCAL:   ~/.archon/worktrees/<project>/<branch>/   ← ARCHON_HOME can override base
+DOCKER:  /.archon/worktrees/<project>/<branch>/    ← FIXED, no override
 ```
 
 Detection order in `getWorktreeBase()`:
 
 ```
-1. isDocker? → /workspace/worktrees (ALWAYS)
-2. WORKTREE_BASE set? → use it (local only)
-3. default → ~/tmp/worktrees
+1. isDocker? → /.archon/worktrees (ALWAYS)
+2. ARCHON_HOME set? → ${ARCHON_HOME}/worktrees
+3. default → ~/.archon/worktrees
 ```
 
 ## Architecture

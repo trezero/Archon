@@ -1,5 +1,10 @@
 FROM oven/bun:1-slim
 
+# OCI Labels for GHCR
+LABEL org.opencontainers.image.source="https://github.com/dynamous-community/remote-coding-agent"
+LABEL org.opencontainers.image.description="Control AI coding assistants remotely from Telegram, Slack, Discord, and GitHub"
+LABEL org.opencontainers.image.licenses="MIT"
+
 # Prevent interactive prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -26,8 +31,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 # Create non-root user for running Claude Code
 # Claude Code refuses to run with --dangerously-skip-permissions as root for security
 RUN useradd -m -u 1001 -s /bin/bash appuser \
-    && mkdir -p /workspace \
-    && chown -R appuser:appuser /app /workspace
+    && chown -R appuser:appuser /app
+
+# Create Archon directories
+RUN mkdir -p /.archon/workspaces /.archon/worktrees \
+    && chown -R appuser:appuser /.archon
 
 # Copy package files and lockfile
 COPY package.json bun.lock ./
@@ -53,11 +61,13 @@ USER appuser
 # Create .codex directory for Codex authentication
 RUN mkdir -p /home/appuser/.codex
 
-# Configure git to trust /workspace directory
+# Configure git to trust Archon directories
 # This prevents "fatal: detected dubious ownership" errors when git operations
 # are performed in mounted volumes or repos cloned by different users
-RUN git config --global --add safe.directory /workspace && \
-    git config --global --add safe.directory '/workspace/*'
+RUN git config --global --add safe.directory '/.archon/workspaces' && \
+    git config --global --add safe.directory '/.archon/workspaces/*' && \
+    git config --global --add safe.directory '/.archon/worktrees' && \
+    git config --global --add safe.directory '/.archon/worktrees/*'
 
 # Expose port
 EXPOSE 3000

@@ -2,7 +2,7 @@ import { readFile, access, mkdir as fsMkdir } from 'fs/promises';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { join, basename } from 'path';
-import { homedir } from 'os';
+import { getArchonWorktreesPath } from './archon-paths';
 
 const promisifiedExecFile = promisify(execFile);
 
@@ -27,38 +27,10 @@ export async function mkdirAsync(path: string, options?: { recursive?: boolean }
 
 /**
  * Get the base directory for worktrees
- * - Docker: FIXED at /workspace/worktrees (end users can't override)
- * - Local: ~/tmp/worktrees by default, WORKTREE_BASE env var to override
+ * Now delegates to archon-paths module for consistency
  */
 export function getWorktreeBase(_repoPath: string): string {
-  // 1. Docker: FIXED location, no override for end users
-  const isDocker =
-    process.env.WORKSPACE_PATH === '/workspace' ||
-    (process.env.HOME === '/root' && process.env.WORKSPACE_PATH);
-
-  if (isDocker) {
-    return '/workspace/worktrees';
-  }
-
-  // 2. Local: Check WORKTREE_BASE override (for developers with custom setups)
-  const envBase = process.env.WORKTREE_BASE;
-  if (envBase) {
-    return expandTilde(envBase);
-  }
-
-  // 3. Local default: matches worktree-manager skill
-  return join(homedir(), 'tmp', 'worktrees');
-}
-
-/**
- * Expand ~ to home directory
- */
-function expandTilde(path: string): string {
-  if (path.startsWith('~')) {
-    const pathAfterTilde = path.slice(1).replace(/^[/\\]/, '');
-    return join(homedir(), pathAfterTilde);
-  }
-  return path;
+  return getArchonWorktreesPath();
 }
 
 /**

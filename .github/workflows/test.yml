@@ -36,7 +36,7 @@ jobs:
         # 1. Run all tests EXCEPT orchestrator (which mocks command-handler and factory)
         # 2. Run orchestrator tests last so its mocks don't affect other test files
         run: |
-          bun test --coverage src/db src/utils src/handlers src/clients src/adapters
+          bun test --coverage src/db src/utils src/handlers src/clients src/adapters src/config
           bun test --coverage src/orchestrator
 
       - name: Upload coverage report

@@ -27,7 +27,72 @@ Control AI coding assistants (Claude Code, Codex) remotely from Telegram, GitHub
 
 ---
 
-**🌐 Production Deployment:** This guide covers local development setup. To deploy remotely for 24/7 operation on a cloud VPS (DigitalOcean, AWS, Linode, etc.), see the **[Cloud Deployment Guide](docs/cloud-deployment.md)**.
+## Quick Start
+
+### Option 1: Docker (Recommended for trying it out)
+
+```bash
+# 1. Get the files
+mkdir remote-agent && cd remote-agent
+curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/deploy/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/deploy/.env.example -o .env
+
+# 2. Configure (edit .env with your tokens)
+nano .env
+
+# 3. Run
+docker compose up -d
+
+# 4. Check it's working
+curl http://localhost:3000/health
+```
+
+### Option 2: Local Development
+
+```bash
+# 1. Clone and install
+git clone https://github.com/dynamous-community/remote-coding-agent
+cd remote-coding-agent
+bun install
+
+# 2. Configure
+cp .env.example .env
+nano .env  # Add your tokens
+
+# 3. Start database
+docker compose --profile with-db up -d postgres
+
+# 4. Run migrations
+psql $DATABASE_URL < migrations/000_combined.sql
+
+# 5. Start with hot reload
+bun run dev
+
+# 6. Validate setup
+bun run validate
+```
+
+### Option 3: Self-Hosted Production
+
+See [Cloud Deployment Guide](docs/cloud-deployment.md) for deploying to:
+- DigitalOcean, Linode, AWS EC2, or any VPS
+- With automatic HTTPS via Caddy
+
+## Directory Structure
+
+The app uses `~/.archon/` for all managed files:
+
+```
+~/.archon/
+├── workspaces/     # Cloned repositories
+├── worktrees/      # Git worktrees for isolation
+└── config.yaml     # Optional: global configuration
+```
+
+On Windows: `C:\Users\<username>\.archon\`
+In Docker: `/.archon/`
+
+See [Configuration Guide](docs/configuration.md) for customization options.
 
 ---
 
@@ -54,7 +119,7 @@ cp .env.example .env
 | `GH_TOKEN` | Repository cloning | [Generate token](https://github.com/settings/tokens) with `repo` scope |
 | `GITHUB_TOKEN` | Same as `GH_TOKEN` | Use same token value |
 | `PORT` | HTTP server port | Default: `3000` (optional) |
-| `WORKSPACE_PATH` | Clone destination | **Recommended**: `/tmp/remote-agent-workspace` or `~/remote-agent-workspace` (see note below) |
+| `ARCHON_HOME` | (Optional) Override base directory | Default: `~/.archon` |
 
 **GitHub Personal Access Token Setup:**
 
@@ -68,18 +133,7 @@ GH_TOKEN=ghp_your_token_here
 GITHUB_TOKEN=ghp_your_token_here  # Same value
 ```
 
-**⚠️ Important: WORKSPACE_PATH Configuration**
-
-The `WORKSPACE_PATH` determines where cloned repositories are stored. **Use a path outside your project directory** to avoid issues:
-
-```env
-# Recommended options
-WORKSPACE_PATH=~/remote-agent-workspace (persistent in home directory - Linux/Mac)
-# or
-WORKSPACE_PATH=C:Users\[your-user-ID]\remote-agent-workspace (Windows)
-```
-
-**Docker note**: Inside containers, the path is always `/workspace` (mapped from your host `WORKSPACE_PATH` in docker-compose.yml).
+**Note:** Repository clones are stored in `~/.archon/workspaces/` by default (or `/.archon/workspaces/` in Docker). Set `ARCHON_HOME` to override the base directory.
 
 **Database Setup - Choose One:**
 

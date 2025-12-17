@@ -12,11 +12,12 @@ import * as codebaseDb from '../db/codebases';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { readdir, access } from 'fs/promises';
-import { join, resolve } from 'path';
+import { join } from 'path';
 import { parseAllowedUsers, isGitHubUserAuthorized } from '../utils/github-auth';
 import { getLinkedIssueNumbers } from '../utils/github-graphql';
 import { onConversationClosed } from '../services/cleanup-service';
 import { isWorktreePath } from '../utils/git';
+import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
 
 const execAsync = promisify(exec);
 
@@ -365,10 +366,10 @@ export class GitHubAdapter implements IPlatformAdapter {
   }
 
   /**
-   * Auto-detect and load commands from .claude/commands or .agents/commands
+   * Auto-detect and load commands from .archon/commands, .claude/commands or .agents/commands
    */
   private async autoDetectAndLoadCommands(repoPath: string, codebaseId: string): Promise<void> {
-    const commandFolders = ['.claude/commands', '.agents/commands'];
+    const commandFolders = getCommandFolderSearchPaths();
 
     for (const folder of commandFolders) {
       try {
@@ -417,7 +418,7 @@ export class GitHubAdapter implements IPlatformAdapter {
 
     // Canonical path includes owner to prevent collisions between repos with same name
     // e.g., alice/utils and bob/utils get separate directories
-    const canonicalPath = join(resolve(process.env.WORKSPACE_PATH ?? '/workspace'), owner, repo);
+    const canonicalPath = join(getArchonWorkspacesPath(), owner, repo);
 
     if (existing) {
       // Check if existing codebase points to a worktree path - fix it if so
