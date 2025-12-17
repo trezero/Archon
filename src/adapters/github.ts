@@ -651,6 +651,12 @@ ${userComment}`;
               `[GitHub] PR #${String(number)} linked to issue #${String(issueNum)}, sharing worktree: ${worktreePath}`
             );
 
+            // Send user feedback about shared worktree
+            await this.sendMessage(
+              conversationId,
+              `Reusing worktree from issue #${String(issueNum)}`
+            );
+
             // Update this conversation to use the shared worktree
             await db.updateConversation(existingConv.id, {
               codebase_id: codebase.id,
@@ -703,6 +709,21 @@ ${userComment}`;
           worktreePath = env.workingPath;
           console.log(`[GitHub] Created worktree: ${worktreePath}`);
 
+          // Send user feedback about isolation (single line, not verbose)
+          if (isPR && prHeadBranch && prHeadSha) {
+            const shortSha = prHeadSha.substring(0, 7);
+            await this.sendMessage(
+              conversationId,
+              `Reviewing PR at commit \`${shortSha}\` (branch: \`${prHeadBranch}\`)`
+            );
+          } else {
+            const branchName = isPR ? `pr-${String(number)}` : `issue-${String(number)}`;
+            await this.sendMessage(
+              conversationId,
+              `Working in isolated branch \`${branchName}\``
+            );
+          }
+
           // Update conversation with isolation info (both old and new fields for compatibility)
           await db.updateConversation(existingConv.id, {
             codebase_id: codebase.id,
@@ -725,6 +746,10 @@ ${userComment}`;
     } else {
       // Conversation already has isolation, use it
       worktreePath = existingIsolation;
+
+      // Send user feedback about reusing existing worktree
+      const branchName = isPR ? `pr-${String(number)}` : `issue-${String(number)}`;
+      await this.sendMessage(conversationId, `Reusing worktree \`${branchName}\``);
     }
 
     // 11. Build message with context

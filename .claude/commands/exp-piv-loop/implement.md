@@ -88,28 +88,87 @@ Execute the plan's **Validation Strategy** section:
 
 ---
 
-## Step 5: Report
+## Step 5: Write Implementation Report
+
+Create a detailed implementation report at `.agents/implementation-reports/[branch-name]-implementation-report.md`:
+
+```bash
+mkdir -p .agents/implementation-reports
+```
+
+**Report structure:**
 
 ```markdown
-## Implementation Complete
+---
+plan: [relative path to plan file]
+branch: [feature branch name]
+implemented: [YYYY-MM-DD]
+status: complete | partial
+---
 
-**Plan**: [path] → moved to `.agents/plans/completed/`
+# Implementation Report: [Feature Name from Plan Summary]
 
-### Tasks
-| # | Task | Status |
-|---|------|--------|
-| 1 | [from plan] | ✅/❌ |
+## Overview
 
-### Validation Results
-| Check | Result |
-|-------|--------|
-| [from plan's validation section] | ✅/❌ |
+**Plan**: `[plan path]` → moved to `.agents/plans/completed/`
+**Branch**: `[branch-name]`
+**Date**: [YYYY-MM-DD]
 
-### Deviations from Plan
-- [What you changed and why]
+## Tasks
 
-### Issues Encountered
-- [Problems and how you solved them]
+| # | Task | Status | Notes |
+|---|------|--------|-------|
+| 1 | [task from plan] | ✅/❌ | [brief note if needed] |
+| 2 | [task from plan] | ✅/❌ | |
+
+## Validation Results
+
+| Check | Result | Details |
+|-------|--------|---------|
+| Type check | ✅/❌ | [errors if any] |
+| Lint | ✅/❌ | [X warnings, 0 errors] |
+| Tests | ✅/❌ | [X pass, Y fail] |
+| [other from plan] | ✅/❌ | |
+
+## Deviations from Plan
+
+### [Deviation 1 Title]
+- **Plan specified**: [what the plan said to do]
+- **Actual implementation**: [what was actually done]
+- **Reason**: [why the deviation was made - user request, technical constraint, better approach discovered, etc.]
+- **Impact**: [how this affects the feature/system]
+
+### [Deviation 2 Title]
+...
+
+*If no deviations: "None - implementation followed plan exactly."*
+
+## Issues Encountered
+
+### [Issue 1 Title]
+- **Problem**: [what went wrong]
+- **Solution**: [how it was resolved]
+- **Time impact**: [minor/moderate/significant]
+
+*If no issues: "None - implementation proceeded smoothly."*
+
+## Files Changed
+
+| File | Change Type | Lines |
+|------|-------------|-------|
+| `src/path/to/file.ts` | Modified | +25/-0 |
+| `src/path/to/test.ts` | Modified | +73/-0 |
+
+## Implementation Notes
+
+[Any additional context, decisions made, or things the reviewer should know that don't fit above. This is free-form.]
+
+## For Reviewers
+
+When reviewing the PR for this implementation:
+1. The plan is at: `[plan path in completed/]`
+2. Deviations documented above were intentional
+3. Key areas to focus on: [list 2-3 areas if relevant]
 ```
 
 Then move plan to completed:
@@ -117,6 +176,9 @@ Then move plan to completed:
 mkdir -p .agents/plans/completed
 mv $1 .agents/plans/completed/
 ```
+
+**Naming convention**: `[branch-name]-implementation-report.md`
+- Example: `feature-github-adapter-ux-improvements-implementation-report.md`
 
 ---
 

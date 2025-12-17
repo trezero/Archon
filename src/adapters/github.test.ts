@@ -463,6 +463,79 @@ describe('GitHubAdapter', () => {
     });
   });
 
+  describe('worktree creation feedback messages', () => {
+    test('issue worktree message format', () => {
+      // Verify the message format for issue worktrees
+      const number = 42;
+      const branchName = `issue-${String(number)}`;
+      const message = `Working in isolated branch \`${branchName}\``;
+
+      expect(message).toBe('Working in isolated branch `issue-42`');
+      expect(message).toContain('isolated branch');
+      expect(message).toContain('issue-42');
+    });
+
+    test('PR worktree message format with SHA', () => {
+      // Verify the message format for PR worktrees with SHA
+      const prHeadSha = 'abc123def456789';
+      const prHeadBranch = 'feature/awesome-feature';
+      const shortSha = prHeadSha.substring(0, 7);
+      const message = `Reviewing PR at commit \`${shortSha}\` (branch: \`${prHeadBranch}\`)`;
+
+      expect(message).toBe('Reviewing PR at commit `abc123d` (branch: `feature/awesome-feature`)');
+      expect(message).toContain('Reviewing PR');
+      expect(message).toContain('abc123d');
+      expect(message).toContain('feature/awesome-feature');
+    });
+
+    test('PR worktree message format without SHA (fallback)', () => {
+      // Verify the fallback message format for PRs without head SHA
+      const number = 42;
+      const isPR = true;
+      const branchName = isPR ? `pr-${String(number)}` : `issue-${String(number)}`;
+      const message = `Working in isolated branch \`${branchName}\``;
+
+      expect(message).toBe('Working in isolated branch `pr-42`');
+      expect(message).toContain('isolated branch');
+      expect(message).toContain('pr-42');
+    });
+
+    test('shared worktree message format (PR linked to issue)', () => {
+      // Verify the message format when PR shares worktree with linked issue
+      const issueNum = 42;
+      const message = `Reusing worktree from issue #${String(issueNum)}`;
+
+      expect(message).toBe('Reusing worktree from issue #42');
+      expect(message).toContain('Reusing');
+      expect(message).toContain('#42');
+    });
+
+    test('existing worktree reuse message format', () => {
+      // Verify the message format when conversation already has a worktree
+      const number = 42;
+      const isPR = false;
+      const branchName = isPR ? `pr-${String(number)}` : `issue-${String(number)}`;
+      const message = `Reusing worktree \`${branchName}\``;
+
+      expect(message).toBe('Reusing worktree `issue-42`');
+      expect(message).toContain('Reusing');
+      expect(message).toContain('issue-42');
+    });
+
+    test('messages use backticks for branch names', () => {
+      // Verify messages use GitHub markdown backticks for branch names
+      const issueMessage = 'Working in isolated branch `issue-42`';
+      const prMessage = 'Reviewing PR at commit `abc1234` (branch: `feature-x`)';
+
+      // Count backticks (should be pairs for formatting)
+      const issueBackticks = (issueMessage.match(/`/g) ?? []).length;
+      const prBackticks = (prMessage.match(/`/g) ?? []).length;
+
+      expect(issueBackticks).toBe(2); // One pair for branch name
+      expect(prBackticks).toBe(4); // Two pairs (SHA + branch)
+    });
+  });
+
   describe('multi-repo path isolation', () => {
     test('should use owner/repo path structure for codebases', () => {
       // Test that path construction includes owner

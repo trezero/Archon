@@ -78,14 +78,40 @@ Read and internalize:
 - Testing requirements
 - Architecture patterns
 
-### 2.2 Understand PR Intent
+### 2.2 Find Implementation Context
 
-From the PR title and description:
+Look for the implementation report and plan:
+
+```bash
+# Find implementation report by branch name
+ls .agents/implementation-reports/*[branch-name]*.md 2>/dev/null
+
+# List all implementation reports (if branch name doesn't match)
+ls .agents/implementation-reports/
+
+# Find completed plans that might relate to this PR
+ls .agents/plans/completed/
+```
+
+**If implementation report exists:**
+1. Read the implementation report (`.agents/implementation-reports/[branch]-implementation-report.md`)
+2. Read the referenced plan from `.agents/plans/completed/`
+3. Note documented deviations - these are INTENTIONAL and should not be flagged as issues
+
+**If no implementation report exists:**
+- PR may not have been created via `/implement` command
+- Review normally without plan context
+- Note in review that no implementation report was found
+
+### 2.3 Understand PR Intent
+
+From the PR title, description, AND implementation report (if available):
 - What problem does this solve?
 - What approach was taken?
 - Are there any notes from the author?
+- What deviations from plan were documented and why?
 
-### 2.3 Analyze Changed Files
+### 2.4 Analyze Changed Files
 
 For each changed file, determine:
 - What type of file is it? (adapter, handler, util, test, config)
@@ -152,6 +178,9 @@ For each file in the diff:
 
 ### 3.3 Categorize Issues
 
+**Important: Check implementation report first!**
+If a deviation from expected patterns is documented in the implementation report with a valid reason, it is NOT an issue - it's an intentional decision. Only flag **undocumented** deviations.
+
 **🔴 Critical (Blocking)**
 - Security vulnerabilities
 - Data loss/corruption potential
@@ -165,10 +194,11 @@ For each file in the diff:
 - Logic errors that affect functionality
 
 **🟡 Medium (Should Consider)**
-- Pattern inconsistencies
+- Pattern inconsistencies (if NOT documented in implementation report)
 - Missing edge case handling
 - Complex code that could be simplified
 - Performance concerns in non-critical paths
+- Undocumented deviations from plan
 
 **🔵 Low (Suggestions)**
 - Style preferences
@@ -236,6 +266,14 @@ npm test -- [relevant-test-file]
 ## Summary
 
 [2-3 sentences: What this PR does and your overall assessment]
+
+## Implementation Context
+
+**Implementation Report**: `[path]` or "Not found"
+**Original Plan**: `[path]` or "Not found"
+**Documented Deviations**: [count] or "N/A"
+
+[If implementation report exists: Brief note about whether deviations were well-documented]
 
 ---
 
