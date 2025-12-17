@@ -152,11 +152,12 @@ DATABASE_URL=postgresql://user:password@host:5432/dbname
 psql $DATABASE_URL < migrations/000_combined.sql
 ```
 
-This creates 4 tables:
+This creates 5 tables:
 - `remote_agent_codebases` - Repository metadata
 - `remote_agent_conversations` - Platform conversation tracking
 - `remote_agent_sessions` - AI session management
 - `remote_agent_command_templates` - Global command templates
+- `remote_agent_isolation_environments` - Worktree isolation tracking
 
 **For updates to existing installations**, run only the migrations you haven't applied yet:
 
@@ -165,6 +166,8 @@ This creates 4 tables:
 psql $DATABASE_URL < migrations/002_command_templates.sql
 psql $DATABASE_URL < migrations/003_add_worktree.sql
 psql $DATABASE_URL < migrations/004_worktree_sharing.sql
+psql $DATABASE_URL < migrations/006_isolation_environments.sql
+psql $DATABASE_URL < migrations/007_drop_legacy_columns.sql
 ```
 
 </details>
@@ -190,6 +193,8 @@ docker compose exec postgres psql -U postgres -d remote_coding_agent
 \i /migrations/002_command_templates.sql
 \i /migrations/003_add_worktree.sql
 \i /migrations/004_worktree_sharing.sql
+\i /migrations/006_isolation_environments.sql
+\i /migrations/007_drop_legacy_columns.sql
 \q
 ```
 
@@ -199,6 +204,8 @@ Or from your host machine (requires `psql` installed):
 psql postgresql://postgres:postgres@localhost:5432/remote_coding_agent < migrations/002_command_templates.sql
 psql postgresql://postgres:postgres@localhost:5432/remote_coding_agent < migrations/003_add_worktree.sql
 psql postgresql://postgres:postgres@localhost:5432/remote_coding_agent < migrations/004_worktree_sharing.sql
+psql postgresql://postgres:postgres@localhost:5432/remote_coding_agent < migrations/006_isolation_environments.sql
+psql postgresql://postgres:postgres@localhost:5432/remote_coding_agent < migrations/007_drop_legacy_columns.sql
 ```
 
 </details>
@@ -481,7 +488,7 @@ Interact by @mentioning `@remote-agent` in issues or PRs:
 ```
 
 **First mention behavior:**
-- Automatically clones the repository to `/workspace`
+- Automatically clones the repository to `/.archon/workspaces/`
 - Detects and loads commands from `.claude/commands/` or `.agents/commands/`
 - Injects full issue/PR context for the AI assistant
 
@@ -625,7 +632,7 @@ Once your platform adapter is running, you can use these commands:
 | `/repos` | List cloned repositories | `/repos` |
 | `/status` | Show conversation state | `/status` |
 | `/getcwd` | Show current working directory | `/getcwd` |
-| `/setcwd <path>` | Change working directory | `/setcwd /workspace/repo` |
+| `/setcwd <path>` | Change working directory | `/setcwd ~/.archon/workspaces/repo` |
 | `/command-set <name> <path>` | Register a custom command | `/command-set analyze .claude/commands/analyze.md` |
 | `/load-commands <folder>` | Bulk load commands from folder | `/load-commands .claude/commands` |
 | `/command-invoke <name> [args]` | Execute custom command | `/command-invoke plan "Add dark mode"` |
@@ -641,7 +648,7 @@ You: /clone https://github.com/anthropics/anthropic-sdk-typescript
 Bot: ✅ Repository cloned successfully!
 
      📁 Codebase: anthropic-sdk-typescript
-     📂 Path: /workspace/anthropic-sdk-typescript
+     📂 Path: ~/.archon/workspaces/anthropics/anthropic-sdk-typescript
 
      🔍 Detected .claude/commands/ folder
 
@@ -690,7 +697,7 @@ Bot: 📊 Conversation Status
 
      📦 Codebase: anthropic-sdk-typescript
      🔗 Repository: https://github.com/anthropics/anthropic-sdk-typescript
-     📂 Working Directory: /workspace/anthropic-sdk-typescript
+     📂 Working Directory: ~/.archon/workspaces/anthropics/anthropic-sdk-typescript
 
      🔄 Active Session: a1b2c3d4...
 
@@ -918,8 +925,9 @@ Commands are version-controlled with your codebase, not stored in the database.
        └────────┬─────────┘
                 ▼
 ┌─────────────────────────────────────────────┐
-│        PostgreSQL (3 Tables)                │
-│  • Codebases  • Conversations  • Sessions   │
+│        PostgreSQL (5 Tables)                │
+│  Codebases • Conversations • Sessions       │
+│  Command Templates • Isolation Environments │
 └─────────────────────────────────────────────┘
 ```
 
@@ -934,7 +942,7 @@ Commands are version-controlled with your codebase, not stored in the database.
 ### Database Schema
 
 <details>
-<summary><b>3 tables with `remote_agent_` prefix</b></summary>
+<summary><b>5 tables with `remote_agent_` prefix</b></summary>
 
 1. **`remote_agent_codebases`** - Repository metadata
    - Commands stored as JSONB: `{command_name: {path, description}}`
@@ -950,6 +958,14 @@ Commands are version-controlled with your codebase, not stored in the database.
    - Active session flag (one per conversation)
    - Session ID for resume capability
    - Metadata JSONB for command context
+
+4. **`remote_agent_command_templates`** - Global command templates
+   - Shared command definitions (like `/plan`, `/commit`)
+   - Available across all codebases
+
+5. **`remote_agent_isolation_environments`** - Worktree isolation
+   - Tracks git worktrees per issue/PR
+   - Enables worktree sharing between linked issues and PRs
 
 </details>
 
@@ -1017,7 +1033,8 @@ psql $DATABASE_URL -c "SELECT 1"
 # For local postgres
 docker compose exec postgres psql -U postgres -d remote_coding_agent -c "\dt"
 
-# Should show: remote_agent_codebases, remote_agent_conversations, remote_agent_sessions
+# Should show: remote_agent_codebases, remote_agent_conversations, remote_agent_sessions,
+# remote_agent_command_templates, remote_agent_isolation_environments
 ```
 
 ### Clone Command Fails
@@ -1037,13 +1054,13 @@ curl -H "Authorization: token $GH_TOKEN" https://api.github.com/user
 **Check workspace permissions:**
 ```bash
 # Use the service name matching your profile
-docker compose exec app ls -la /workspace          # --profile external-db
-docker compose exec app-with-db ls -la /workspace  # --profile with-db
+docker compose exec app ls -la /.archon/workspaces          # --profile external-db
+docker compose exec app-with-db ls -la /.archon/workspaces  # --profile with-db
 ```
 
 **Try manual clone:**
 ```bash
-docker compose exec app git clone https://github.com/user/repo /workspace/test-repo
+docker compose exec app git clone https://github.com/user/repo /.archon/workspaces/test-repo
 # Or app-with-db if using --profile with-db
 ```
 
