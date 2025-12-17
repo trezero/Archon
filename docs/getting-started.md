@@ -72,6 +72,12 @@ curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-ag
 2. Create New App > From Scratch
 3. See [Slack Setup Guide](slack-setup.md) for detailed steps
 
+**GitHub Webhooks:**
+1. Generate a webhook secret: `openssl rand -hex 32`
+2. Add webhook to your repo (Settings > Webhooks)
+3. Set URL: `https://your-server/webhooks/github`
+4. See [README GitHub Webhooks section](../README.md#-github-webhooks) for detailed steps
+
 ### 1.3 Configure
 
 Edit `.env` with your credentials:
