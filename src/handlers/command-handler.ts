@@ -12,6 +12,13 @@ import * as templateDb from '../db/command-templates';
 import { isPathWithinWorkspace } from '../utils/path-validation';
 import { listWorktrees, execFileAsync } from '../utils/git';
 import { getIsolationProvider } from '../isolation';
+import * as isolationEnvDb from '../db/isolation-environments';
+import {
+  cleanupMergedWorktrees,
+  cleanupStaleWorktrees,
+  getWorktreeStatusBreakdown,
+  MAX_WORKTREES_PER_CODEBASE,
+} from '../services/cleanup-service';
 
 /**
  * Convert an absolute path to a relative path from the repository root
@@ -130,6 +137,8 @@ Worktrees:
   /worktree create <branch> - Create isolated worktree
   /worktree list - Show worktrees for this repo
   /worktree remove [--force] - Remove current worktree
+  /worktree cleanup merged|stale - Clean up worktrees
+  /worktree orphans - Show all worktrees from git
 
 Session:
   /status - Show state
@@ -176,6 +185,26 @@ Session:
       const session = await sessionDb.getActiveSession(conversation.id);
       if (session?.id) {
         msg += `\nActive Session: ${session.id.slice(0, 8)}...`;
+      }
+
+      // Add worktree breakdown if codebase is configured (Phase 3D)
+      if (codebase) {
+        try {
+          const breakdown = await getWorktreeStatusBreakdown(codebase.id, codebase.default_cwd);
+          msg += `\n\nWorktrees: ${String(breakdown.total)}/${String(breakdown.limit)}`;
+          if (breakdown.merged > 0 || breakdown.stale > 0) {
+            if (breakdown.merged > 0) {
+              msg += `\n  • ${String(breakdown.merged)} merged (can auto-remove)`;
+            }
+            if (breakdown.stale > 0) {
+              msg += `\n  • ${String(breakdown.stale)} stale (14+ days inactive)`;
+            }
+            msg += `\n  • ${String(breakdown.active)} active`;
+          }
+        } catch (error) {
+          // Don't fail status if breakdown fails
+          console.error('[Status] Failed to get worktree breakdown:', error);
+        }
       }
 
       return { success: true, message: msg };
@@ -1125,11 +1154,59 @@ Session:
           return { success: true, message: msg };
         }
 
+        case 'cleanup': {
+          const cleanupType = args[1];
+
+          if (!cleanupType || !['merged', 'stale'].includes(cleanupType)) {
+            return {
+              success: false,
+              message:
+                'Usage:\n  /worktree cleanup merged - Remove worktrees with merged branches\n  /worktree cleanup stale - Remove inactive worktrees (14+ days)',
+            };
+          }
+
+          try {
+            let result;
+            if (cleanupType === 'merged') {
+              result = await cleanupMergedWorktrees(conversation.codebase_id, mainPath);
+            } else {
+              result = await cleanupStaleWorktrees(conversation.codebase_id, mainPath);
+            }
+
+            let msg = '';
+
+            if (result.removed.length > 0) {
+              msg += `Cleaned up ${String(result.removed.length)} ${cleanupType} worktree(s):\n`;
+              for (const branch of result.removed) {
+                msg += `  • ${branch}\n`;
+              }
+            } else {
+              msg += `No ${cleanupType} worktrees to clean up.\n`;
+            }
+
+            if (result.skipped.length > 0) {
+              msg += `\nSkipped ${String(result.skipped.length)} (protected):\n`;
+              for (const { branchName, reason } of result.skipped) {
+                msg += `  • ${branchName} (${reason})\n`;
+              }
+            }
+
+            // Show updated count
+            const count = await isolationEnvDb.countByCodebase(conversation.codebase_id);
+            msg += `\nWorktrees: ${String(count)}/${String(MAX_WORKTREES_PER_CODEBASE)}`;
+
+            return { success: true, message: msg.trim() };
+          } catch (error) {
+            const err = error as Error;
+            return { success: false, message: `Failed to cleanup: ${err.message}` };
+          }
+        }
+
         default:
           return {
             success: false,
             message:
-              'Usage:\n  /worktree create <branch>\n  /worktree list\n  /worktree remove [--force]\n  /worktree orphans',
+              'Usage:\n  /worktree create <branch>\n  /worktree list\n  /worktree remove [--force]\n  /worktree cleanup merged|stale\n  /worktree orphans',
           };
       }
     }

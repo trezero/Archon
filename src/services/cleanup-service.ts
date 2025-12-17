@@ -12,6 +12,10 @@ import { IsolationEnvironmentRow } from '../types';
 // Configuration constants (configurable via env vars)
 const STALE_THRESHOLD_DAYS = parseInt(process.env.STALE_THRESHOLD_DAYS ?? '14', 10);
 const CLEANUP_INTERVAL_HOURS = parseInt(process.env.CLEANUP_INTERVAL_HOURS ?? '6', 10);
+const MAX_WORKTREES_PER_CODEBASE = parseInt(process.env.MAX_WORKTREES_PER_CODEBASE ?? '25', 10);
+
+// Export configuration for use by other modules
+export { MAX_WORKTREES_PER_CODEBASE, STALE_THRESHOLD_DAYS };
 
 // Module-level variable for scheduler
 let cleanupIntervalId: NodeJS.Timeout | null = null;
@@ -173,30 +177,16 @@ export async function getLastCommitDate(workingPath: string): Promise<Date | nul
 }
 
 /**
- * Clean up to make room when limit reached (Phase 3D will call this)
+ * Clean up to make room when limit reached (Phase 3D)
  * Attempts to remove merged branches first
+ * Returns detailed results for user feedback
  */
-export async function cleanupToMakeRoom(codebaseId: string, mainRepoPath: string): Promise<number> {
-  const envs = await isolationEnvDb.listByCodebase(codebaseId);
-  let removed = 0;
-
-  for (const env of envs) {
-    // Try merged branches first
-    const merged = await isBranchMerged(mainRepoPath, env.branch_name);
-    if (merged) {
-      const hasChanges = await hasUncommittedChanges(env.working_path);
-      if (!hasChanges) {
-        try {
-          await removeEnvironment(env.id);
-          removed++;
-        } catch {
-          // Continue to next
-        }
-      }
-    }
-  }
-
-  return removed;
+export async function cleanupToMakeRoom(
+  codebaseId: string,
+  mainRepoPath: string
+): Promise<CleanupOperationResult> {
+  // Reuse the merged cleanup logic
+  return cleanupMergedWorktrees(codebaseId, mainRepoPath);
 }
 
 /**
@@ -362,6 +352,182 @@ async function worktreeExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// =============================================================================
+// Phase 3D: Worktree Limits and User Feedback
+// =============================================================================
+
+/**
+ * Detailed worktree status breakdown for a codebase
+ */
+export interface WorktreeStatusBreakdown {
+  total: number;
+  merged: number;
+  stale: number;
+  active: number;
+  limit: number;
+  mergedEnvs: { id: string; branchName: string }[];
+  staleEnvs: { id: string; branchName: string; daysInactive: number }[];
+  activeEnvs: { id: string; branchName: string }[];
+}
+
+/**
+ * Result from cleanup operations with detailed information
+ */
+export interface CleanupOperationResult {
+  removed: string[];
+  skipped: { branchName: string; reason: string }[];
+}
+
+/**
+ * Get detailed worktree status breakdown for a codebase
+ * Includes git operations to detect merged branches
+ */
+export async function getWorktreeStatusBreakdown(
+  codebaseId: string,
+  mainRepoPath: string
+): Promise<WorktreeStatusBreakdown> {
+  const environments = await isolationEnvDb.listByCodebaseWithAge(codebaseId);
+
+  const breakdown: WorktreeStatusBreakdown = {
+    total: environments.length,
+    merged: 0,
+    stale: 0,
+    active: 0,
+    limit: MAX_WORKTREES_PER_CODEBASE,
+    mergedEnvs: [],
+    staleEnvs: [],
+    activeEnvs: [],
+  };
+
+  const mainBranch = await getMainBranch(mainRepoPath);
+
+  for (const env of environments) {
+    // Skip Telegram (never shown as stale)
+    const isTelegram = env.created_by_platform === 'telegram';
+
+    // Check if merged
+    const merged = await isBranchMerged(mainRepoPath, env.branch_name, mainBranch);
+    if (merged) {
+      breakdown.merged++;
+      breakdown.mergedEnvs.push({ id: env.id, branchName: env.branch_name });
+      continue;
+    }
+
+    // Check if stale (non-Telegram only)
+    const isStale = !isTelegram && env.days_since_activity >= STALE_THRESHOLD_DAYS;
+    if (isStale) {
+      breakdown.stale++;
+      breakdown.staleEnvs.push({
+        id: env.id,
+        branchName: env.branch_name,
+        daysInactive: env.days_since_activity,
+      });
+      continue;
+    }
+
+    // Active
+    breakdown.active++;
+    breakdown.activeEnvs.push({ id: env.id, branchName: env.branch_name });
+  }
+
+  return breakdown;
+}
+
+/**
+ * Clean up stale worktrees for a codebase
+ * Respects uncommitted changes and conversation references
+ */
+export async function cleanupStaleWorktrees(
+  codebaseId: string,
+  _mainRepoPath: string
+): Promise<CleanupOperationResult> {
+  const result: CleanupOperationResult = { removed: [], skipped: [] };
+  const environments = await isolationEnvDb.listByCodebaseWithAge(codebaseId);
+
+  for (const env of environments) {
+    // Skip Telegram
+    if (env.created_by_platform === 'telegram') continue;
+
+    // Check if stale
+    if (env.days_since_activity < STALE_THRESHOLD_DAYS) continue;
+
+    // Check for uncommitted changes
+    const hasChanges = await hasUncommittedChanges(env.working_path);
+    if (hasChanges) {
+      result.skipped.push({ branchName: env.branch_name, reason: 'has uncommitted changes' });
+      continue;
+    }
+
+    // Check for conversation references
+    const conversations = await isolationEnvDb.getConversationsUsingEnv(env.id);
+    if (conversations.length > 0) {
+      result.skipped.push({
+        branchName: env.branch_name,
+        reason: `still used by ${String(conversations.length)} conversation(s)`,
+      });
+      continue;
+    }
+
+    // Safe to remove
+    try {
+      await removeEnvironment(env.id);
+      result.removed.push(env.branch_name);
+    } catch (error) {
+      const err = error as Error;
+      result.skipped.push({ branchName: env.branch_name, reason: err.message });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Clean up merged worktrees for a codebase
+ * Respects uncommitted changes and conversation references
+ */
+export async function cleanupMergedWorktrees(
+  codebaseId: string,
+  mainRepoPath: string
+): Promise<CleanupOperationResult> {
+  const result: CleanupOperationResult = { removed: [], skipped: [] };
+  const environments = await isolationEnvDb.listByCodebase(codebaseId);
+  const mainBranch = await getMainBranch(mainRepoPath);
+
+  for (const env of environments) {
+    // Check if merged
+    const merged = await isBranchMerged(mainRepoPath, env.branch_name, mainBranch);
+    if (!merged) continue;
+
+    // Check for uncommitted changes
+    const hasChanges = await hasUncommittedChanges(env.working_path);
+    if (hasChanges) {
+      result.skipped.push({ branchName: env.branch_name, reason: 'has uncommitted changes' });
+      continue;
+    }
+
+    // Check for conversation references
+    const conversations = await isolationEnvDb.getConversationsUsingEnv(env.id);
+    if (conversations.length > 0) {
+      result.skipped.push({
+        branchName: env.branch_name,
+        reason: `still used by ${String(conversations.length)} conversation(s)`,
+      });
+      continue;
+    }
+
+    // Safe to remove
+    try {
+      await removeEnvironment(env.id);
+      result.removed.push(env.branch_name);
+    } catch (error) {
+      const err = error as Error;
+      result.skipped.push({ branchName: env.branch_name, reason: err.message });
+    }
+  }
+
+  return result;
 }
 
 /**

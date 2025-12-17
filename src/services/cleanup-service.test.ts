@@ -19,12 +19,17 @@ const mockListAllActiveWithCodebase = mock(() => Promise.resolve([]));
 const mockUpdateStatus = mock(() => Promise.resolve());
 const mockGetConversationsUsingEnv = mock(() => Promise.resolve([]));
 const mockGetById = mock(() => Promise.resolve(null));
+const mockListByCodebase = mock(() => Promise.resolve([]));
+const mockListByCodebaseWithAge = mock(() => Promise.resolve([]));
+const mockCountByCodebase = mock(() => Promise.resolve(0));
 mock.module('../db/isolation-environments', () => ({
   listAllActiveWithCodebase: mockListAllActiveWithCodebase,
   updateStatus: mockUpdateStatus,
   getConversationsUsingEnv: mockGetConversationsUsingEnv,
   getById: mockGetById,
-  listByCodebase: mock(() => Promise.resolve([])),
+  listByCodebase: mockListByCodebase,
+  listByCodebaseWithAge: mockListByCodebaseWithAge,
+  countByCodebase: mockCountByCodebase,
 }));
 
 // Mock conversations DB
@@ -47,6 +52,10 @@ import {
   startCleanupScheduler,
   stopCleanupScheduler,
   isSchedulerRunning,
+  getWorktreeStatusBreakdown,
+  cleanupMergedWorktrees,
+  cleanupStaleWorktrees,
+  MAX_WORKTREES_PER_CODEBASE,
 } from './cleanup-service';
 
 describe('cleanup-service', () => {
@@ -426,5 +435,315 @@ describe('scheduler lifecycle', () => {
 
     stopCleanupScheduler();
     expect(isSchedulerRunning()).toBe(false);
+  });
+});
+
+// =============================================================================
+// Phase 3D: Worktree Limits and User Feedback Tests
+// =============================================================================
+
+describe('getWorktreeStatusBreakdown', () => {
+  beforeEach(() => {
+    mockExecFileAsync.mockClear();
+    mockListByCodebaseWithAge.mockClear();
+  });
+
+  test('returns correct breakdown with mixed environments', async () => {
+    mockListByCodebaseWithAge.mockResolvedValueOnce([
+      {
+        id: 'env-1',
+        branch_name: 'merged-branch',
+        created_by_platform: 'github',
+        days_since_activity: 5,
+        working_path: '/path1',
+        status: 'active',
+      },
+      {
+        id: 'env-2',
+        branch_name: 'stale-branch',
+        created_by_platform: 'slack',
+        days_since_activity: 30,
+        working_path: '/path2',
+        status: 'active',
+      },
+      {
+        id: 'env-3',
+        branch_name: 'active-branch',
+        created_by_platform: 'github',
+        days_since_activity: 2,
+        working_path: '/path3',
+        status: 'active',
+      },
+      {
+        id: 'env-4',
+        branch_name: 'telegram-branch',
+        created_by_platform: 'telegram',
+        days_since_activity: 60,
+        working_path: '/path4',
+        status: 'active',
+      },
+    ]);
+
+    // Get main branch
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
+    // Check merged for env-1 (merged)
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  merged-branch\n  main\n', stderr: '' });
+    // Check merged for env-2 (not merged)
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  main\n', stderr: '' });
+    // Check merged for env-3 (not merged)
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  main\n', stderr: '' });
+    // Check merged for env-4 (not merged)
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  main\n', stderr: '' });
+
+    const breakdown = await getWorktreeStatusBreakdown('codebase-1', '/workspace/repo');
+
+    expect(breakdown.total).toBe(4);
+    expect(breakdown.merged).toBe(1);
+    expect(breakdown.stale).toBe(1); // env-2 is stale (30 days), env-4 is Telegram so not counted as stale
+    expect(breakdown.active).toBe(2); // env-3 active, env-4 Telegram (counted as active, not stale)
+    expect(breakdown.limit).toBe(MAX_WORKTREES_PER_CODEBASE);
+  });
+
+  test('excludes telegram from stale count', async () => {
+    mockListByCodebaseWithAge.mockResolvedValueOnce([
+      {
+        id: 'env-telegram',
+        branch_name: 'telegram-branch',
+        created_by_platform: 'telegram',
+        days_since_activity: 100,
+        working_path: '/path',
+        status: 'active',
+      },
+    ]);
+
+    // Get main branch
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
+    // Not merged
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  main\n', stderr: '' });
+
+    const breakdown = await getWorktreeStatusBreakdown('codebase-1', '/workspace/repo');
+
+    expect(breakdown.stale).toBe(0);
+    expect(breakdown.active).toBe(1);
+  });
+
+  test('returns empty breakdown for empty codebase', async () => {
+    mockListByCodebaseWithAge.mockResolvedValueOnce([]);
+    // Get main branch
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
+
+    const breakdown = await getWorktreeStatusBreakdown('codebase-1', '/workspace/repo');
+
+    expect(breakdown.total).toBe(0);
+    expect(breakdown.merged).toBe(0);
+    expect(breakdown.stale).toBe(0);
+    expect(breakdown.active).toBe(0);
+  });
+});
+
+describe('cleanupMergedWorktrees', () => {
+  beforeEach(() => {
+    mockExecFileAsync.mockClear();
+    mockDestroy.mockClear();
+    mockGetConversationsUsingEnv.mockClear();
+    mockGetById.mockClear();
+    mockListByCodebase.mockClear();
+  });
+
+  test('removes merged branches without uncommitted changes', async () => {
+    mockListByCodebase.mockResolvedValueOnce([
+      {
+        id: 'env-merged',
+        branch_name: 'merged-branch',
+        working_path: '/workspace/repo/worktrees/merged-branch',
+        status: 'active',
+      },
+    ]);
+
+    // Get main branch
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
+    // Is merged
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  merged-branch\n  main\n', stderr: '' });
+    // No uncommitted changes
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    // No conversations
+    mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
+    // For removeEnvironment
+    mockGetById.mockResolvedValueOnce({
+      id: 'env-merged',
+      working_path: '/workspace/repo/worktrees/merged-branch',
+      status: 'active',
+    });
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+    const result = await cleanupMergedWorktrees('codebase-1', '/workspace/repo');
+
+    expect(result.removed).toContain('merged-branch');
+    expect(result.skipped).toHaveLength(0);
+  });
+
+  test('skips merged branches with uncommitted changes', async () => {
+    mockListByCodebase.mockResolvedValueOnce([
+      {
+        id: 'env-dirty',
+        branch_name: 'dirty-branch',
+        working_path: '/workspace/repo/worktrees/dirty-branch',
+        status: 'active',
+      },
+    ]);
+
+    // Get main branch
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
+    // Is merged
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  dirty-branch\n  main\n', stderr: '' });
+    // Has uncommitted changes
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: ' M file.ts', stderr: '' });
+
+    const result = await cleanupMergedWorktrees('codebase-1', '/workspace/repo');
+
+    expect(result.removed).toHaveLength(0);
+    expect(result.skipped).toContainEqual({
+      branchName: 'dirty-branch',
+      reason: 'has uncommitted changes',
+    });
+  });
+
+  test('skips merged branches with conversation references', async () => {
+    mockListByCodebase.mockResolvedValueOnce([
+      {
+        id: 'env-in-use',
+        branch_name: 'in-use-branch',
+        working_path: '/workspace/repo/worktrees/in-use-branch',
+        status: 'active',
+      },
+    ]);
+
+    // Get main branch
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
+    // Is merged
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  in-use-branch\n  main\n', stderr: '' });
+    // No uncommitted changes
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    // Has conversation references
+    mockGetConversationsUsingEnv.mockResolvedValueOnce(['conv-1', 'conv-2']);
+
+    const result = await cleanupMergedWorktrees('codebase-1', '/workspace/repo');
+
+    expect(result.removed).toHaveLength(0);
+    expect(result.skipped).toContainEqual({
+      branchName: 'in-use-branch',
+      reason: 'still used by 2 conversation(s)',
+    });
+  });
+});
+
+describe('cleanupStaleWorktrees', () => {
+  beforeEach(() => {
+    mockExecFileAsync.mockClear();
+    mockDestroy.mockClear();
+    mockGetConversationsUsingEnv.mockClear();
+    mockGetById.mockClear();
+    mockListByCodebaseWithAge.mockClear();
+  });
+
+  test('removes stale worktrees without uncommitted changes', async () => {
+    mockListByCodebaseWithAge.mockResolvedValueOnce([
+      {
+        id: 'env-stale',
+        branch_name: 'stale-branch',
+        working_path: '/workspace/repo/worktrees/stale-branch',
+        created_by_platform: 'slack',
+        days_since_activity: 30,
+        status: 'active',
+      },
+    ]);
+
+    // No uncommitted changes
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    // No conversations
+    mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
+    // For removeEnvironment
+    mockGetById.mockResolvedValueOnce({
+      id: 'env-stale',
+      working_path: '/workspace/repo/worktrees/stale-branch',
+      status: 'active',
+    });
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+    const result = await cleanupStaleWorktrees('codebase-1', '/workspace/repo');
+
+    expect(result.removed).toContain('stale-branch');
+  });
+
+  test('skips telegram worktrees even if old', async () => {
+    mockListByCodebaseWithAge.mockResolvedValueOnce([
+      {
+        id: 'env-telegram',
+        branch_name: 'telegram-branch',
+        working_path: '/workspace/repo/worktrees/telegram-branch',
+        created_by_platform: 'telegram',
+        days_since_activity: 100,
+        status: 'active',
+      },
+    ]);
+
+    const result = await cleanupStaleWorktrees('codebase-1', '/workspace/repo');
+
+    expect(result.removed).toHaveLength(0);
+    expect(result.skipped).toHaveLength(0);
+  });
+
+  test('skips worktrees that are not stale', async () => {
+    mockListByCodebaseWithAge.mockResolvedValueOnce([
+      {
+        id: 'env-recent',
+        branch_name: 'recent-branch',
+        working_path: '/workspace/repo/worktrees/recent-branch',
+        created_by_platform: 'slack',
+        days_since_activity: 5, // Less than 14 days
+        status: 'active',
+      },
+    ]);
+
+    const result = await cleanupStaleWorktrees('codebase-1', '/workspace/repo');
+
+    expect(result.removed).toHaveLength(0);
+    expect(result.skipped).toHaveLength(0);
+  });
+
+  test('skips stale worktrees with uncommitted changes', async () => {
+    mockListByCodebaseWithAge.mockResolvedValueOnce([
+      {
+        id: 'env-dirty-stale',
+        branch_name: 'dirty-stale-branch',
+        working_path: '/workspace/repo/worktrees/dirty-stale-branch',
+        created_by_platform: 'slack',
+        days_since_activity: 30,
+        status: 'active',
+      },
+    ]);
+
+    // Has uncommitted changes
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: ' M file.ts', stderr: '' });
+
+    const result = await cleanupStaleWorktrees('codebase-1', '/workspace/repo');
+
+    expect(result.removed).toHaveLength(0);
+    expect(result.skipped).toContainEqual({
+      branchName: 'dirty-stale-branch',
+      reason: 'has uncommitted changes',
+    });
+  });
+});
+
+describe('MAX_WORKTREES_PER_CODEBASE', () => {
+  test('exports configuration constant', () => {
+    expect(typeof MAX_WORKTREES_PER_CODEBASE).toBe('number');
+    expect(MAX_WORKTREES_PER_CODEBASE).toBeGreaterThan(0);
+  });
+
+  test('has default value of 25', () => {
+    // Unless env var is set, default should be 25
+    expect(MAX_WORKTREES_PER_CODEBASE).toBe(25);
   });
 });

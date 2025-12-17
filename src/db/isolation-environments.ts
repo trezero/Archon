@@ -178,3 +178,29 @@ export async function listAllActiveWithCodebase(): Promise<
   );
   return result.rows;
 }
+
+/**
+ * List active environments for a codebase with days since last activity
+ * Used for worktree breakdown and limit messaging
+ */
+export async function listByCodebaseWithAge(
+  codebaseId: string
+): Promise<(IsolationEnvironmentRow & { days_since_activity: number })[]> {
+  const result = await pool.query<IsolationEnvironmentRow & { days_since_activity: number }>(
+    `SELECT e.*,
+            GREATEST(
+              EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 86400,
+              COALESCE(
+                (SELECT EXTRACT(EPOCH FROM (NOW() - MAX(conv.last_activity_at))) / 86400
+                 FROM remote_agent_conversations conv
+                 WHERE conv.isolation_env_id = e.id),
+                EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 86400
+              )
+            )::INTEGER as days_since_activity
+     FROM remote_agent_isolation_environments e
+     WHERE e.codebase_id = $1 AND e.status = 'active'
+     ORDER BY e.created_at DESC`,
+    [codebaseId]
+  );
+  return result.rows;
+}

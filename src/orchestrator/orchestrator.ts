@@ -28,6 +28,37 @@ import {
   getCanonicalRepoPath,
   execFileAsync,
 } from '../utils/git';
+import {
+  cleanupToMakeRoom,
+  getWorktreeStatusBreakdown,
+  MAX_WORKTREES_PER_CODEBASE,
+  STALE_THRESHOLD_DAYS,
+  WorktreeStatusBreakdown,
+} from '../services/cleanup-service';
+
+/**
+ * Format the worktree limit reached message
+ */
+function formatWorktreeLimitMessage(
+  codebaseName: string,
+  breakdown: WorktreeStatusBreakdown
+): string {
+  let msg = `Worktree limit reached (${String(breakdown.total)}/${String(breakdown.limit)}) for **${codebaseName}**.\n\n`;
+
+  msg += '**Status:**\n';
+  msg += `• ${String(breakdown.merged)} merged (can auto-remove)\n`;
+  msg += `• ${String(breakdown.stale)} stale (no activity in ${String(STALE_THRESHOLD_DAYS)}+ days)\n`;
+  msg += `• ${String(breakdown.active)} active\n\n`;
+
+  msg += '**Options:**\n';
+  if (breakdown.stale > 0) {
+    msg += '• `/worktree cleanup stale` - Remove stale worktrees\n';
+  }
+  msg += '• `/worktree list` - See all worktrees\n';
+  msg += '• `/worktree remove <name>` - Remove specific worktree';
+
+  return msg;
+}
 
 /**
  * Validate existing isolation and create new if needed
@@ -148,9 +179,43 @@ async function resolveIsolation(
     }
   }
 
-  // 4. Create new worktree
-  const provider = getIsolationProvider();
+  // 4. Check limit before creating new worktree (Phase 3D)
   const canonicalPath = await getCanonicalRepoPath(codebase.default_cwd);
+  const count = await isolationEnvDb.countByCodebase(codebase.id);
+  if (count >= MAX_WORKTREES_PER_CODEBASE) {
+    console.log(
+      `[Orchestrator] Worktree limit reached (${String(count)}/${String(MAX_WORKTREES_PER_CODEBASE)}), attempting auto-cleanup`
+    );
+
+    const cleanupResult = await cleanupToMakeRoom(codebase.id, canonicalPath);
+
+    if (cleanupResult.removed.length > 0) {
+      // Cleaned up some worktrees - send feedback and continue
+      await platform.sendMessage(
+        conversationId,
+        `Cleaned up ${String(cleanupResult.removed.length)} merged worktree(s) to make room.`
+      );
+    } else {
+      // Could not auto-cleanup - show limit message with options
+      const breakdown = await getWorktreeStatusBreakdown(codebase.id, canonicalPath);
+      const limitMessage = formatWorktreeLimitMessage(codebase.name, breakdown);
+      await platform.sendMessage(conversationId, limitMessage);
+      return null; // Don't create new isolation
+    }
+
+    // Re-check count after cleanup
+    const newCount = await isolationEnvDb.countByCodebase(codebase.id);
+    if (newCount >= MAX_WORKTREES_PER_CODEBASE) {
+      // Still at limit - show options
+      const breakdown = await getWorktreeStatusBreakdown(codebase.id, canonicalPath);
+      const limitMessage = formatWorktreeLimitMessage(codebase.name, breakdown);
+      await platform.sendMessage(conversationId, limitMessage);
+      return null;
+    }
+  }
+
+  // 5. Create new worktree
+  const provider = getIsolationProvider();
 
   try {
     const isolatedEnv = await provider.create({

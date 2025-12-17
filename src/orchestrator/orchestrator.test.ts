@@ -27,6 +27,7 @@ const mockIsolationEnvGetById = mock(() => Promise.resolve(null));
 const mockIsolationEnvFindByWorkflow = mock(() => Promise.resolve(null));
 const mockIsolationEnvCreate = mock(() => Promise.resolve(null));
 const mockIsolationEnvUpdateStatus = mock(() => Promise.resolve());
+const mockIsolationEnvCountByCodebase = mock(() => Promise.resolve(0)); // Phase 3D: limit check
 
 // Git utils mocks
 const mockWorktreeExists = mock(() => Promise.resolve(false));
@@ -61,6 +62,7 @@ mock.module('../db/isolation-environments', () => ({
   findByWorkflow: mockIsolationEnvFindByWorkflow,
   create: mockIsolationEnvCreate,
   updateStatus: mockIsolationEnvUpdateStatus,
+  countByCodebase: mockIsolationEnvCountByCodebase, // Phase 3D: limit check
 }));
 
 mock.module('../utils/git', () => ({
@@ -196,6 +198,7 @@ describe('orchestrator', () => {
     mockIsolationEnvFindByWorkflow.mockClear();
     mockIsolationEnvCreate.mockClear();
     mockIsolationEnvUpdateStatus.mockClear();
+    mockIsolationEnvCountByCodebase.mockClear(); // Phase 3D: limit check
     mockWorktreeExists.mockClear();
     mockFindWorktreeByBranch.mockClear();
     mockGetCanonicalRepoPath.mockClear();
