@@ -132,10 +132,7 @@ describe('orchestrator', () => {
     ai_assistant_type: 'claude',
     codebase_id: 'codebase-789',
     cwd: '/workspace/project',
-    worktree_path: '/workspace/project', // Simulate existing worktree
-    isolation_env_id_legacy: null,
     isolation_env_id: 'env-existing', // Simulate existing isolation
-    isolation_provider: 'worktree',
     last_activity_at: null,
     created_at: new Date(),
     updated_at: new Date(),
@@ -639,7 +636,6 @@ describe('orchestrator', () => {
       mockGetOrCreateConversation.mockResolvedValue({
         ...mockConversation,
         isolation_env_id: null,
-        worktree_path: null,
         cwd: null,
       });
 
@@ -683,7 +679,6 @@ describe('orchestrator', () => {
       mockGetOrCreateConversation.mockResolvedValue({
         ...mockConversation,
         isolation_env_id: 'env-priority',
-        worktree_path: '/workspace/old-worktree',
         cwd: '/workspace/project',
       });
 
@@ -718,27 +713,6 @@ describe('orchestrator', () => {
       );
     });
 
-    test('falls back to worktree_path when isolation_env_id is null', async () => {
-      mockGetOrCreateConversation.mockResolvedValue({
-        ...mockConversation,
-        isolation_env_id: null,
-        worktree_path: '/workspace/worktree',
-        cwd: '/workspace/project',
-      });
-      mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
-      mockClient.sendQuery.mockImplementation(async function* () {
-        yield { type: 'result', sessionId: 'session-id' };
-      });
-
-      await handleMessage(platform, 'chat-456', '/command-invoke plan');
-
-      expect(mockClient.sendQuery).toHaveBeenCalledWith(
-        wrapCommandForExecution('plan', 'Plan command'),
-        '/workspace/worktree', // worktree_path as fallback
-        'claude-session-xyz'
-      );
-    });
   });
 
   describe('stale worktree handling', () => {
@@ -747,8 +721,6 @@ describe('orchestrator', () => {
       const conversationWithStaleIsolation = {
         ...mockConversation,
         isolation_env_id: 'env-stale',
-        isolation_provider: 'worktree',
-        worktree_path: '/nonexistent/worktree/path',
         cwd: '/nonexistent/worktree/path',
       };
       mockGetOrCreateConversation.mockResolvedValue(conversationWithStaleIsolation);
@@ -777,13 +749,11 @@ describe('orchestrator', () => {
 
       await handleMessage(platform, 'chat-456', '/command-invoke plan');
 
-      // Verify isolation fields are cleared
+      // Verify isolation_env_id is cleared
       expect(mockUpdateConversation).toHaveBeenCalledWith(
         'conv-123',
         expect.objectContaining({
-          worktree_path: null,
           isolation_env_id: null,
-          isolation_provider: null,
         })
       );
 
@@ -804,10 +774,10 @@ describe('orchestrator', () => {
       await handleMessage(platform, 'chat-456', '/command-invoke plan');
 
       // Verify session was NOT deactivated (isolation is valid)
-      // updateConversation should NOT be called with null isolation fields
+      // updateConversation should NOT be called with null isolation_env_id
       expect(mockUpdateConversation).not.toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ worktree_path: null, isolation_env_id: null })
+        expect.objectContaining({ isolation_env_id: null })
       );
     });
 

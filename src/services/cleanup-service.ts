@@ -66,8 +66,6 @@ export async function onConversationClosed(
   // Clear this conversation's reference (regardless of whether we remove the worktree)
   await conversationDb.updateConversation(conversation.id, {
     isolation_env_id: null,
-    worktree_path: null,
-    isolation_provider: null,
     // Keep cwd pointing to main repo (will be set by caller or orchestrator)
   });
 

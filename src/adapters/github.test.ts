@@ -178,7 +178,7 @@ describe('GitHubAdapter', () => {
           id: 'conv-1',
           codebase_id: null,
           cwd: null,
-          worktree_path: null,
+          isolation_env_id: null,
         });
 
         findCodebaseByRepoUrlMock.mockResolvedValue(null);
@@ -259,7 +259,7 @@ describe('GitHubAdapter', () => {
           id: 'conv-1',
           codebase_id: null,
           cwd: null,
-          worktree_path: null,
+          isolation_env_id: null,
         });
 
         findCodebaseByRepoUrlMock.mockResolvedValue(null);
@@ -343,7 +343,7 @@ describe('GitHubAdapter', () => {
           id: 'conv-1',
           codebase_id: null,
           cwd: null,
-          worktree_path: null,
+          isolation_env_id: null,
         });
 
         findCodebaseByRepoUrlMock.mockResolvedValue(null);
@@ -418,7 +418,7 @@ describe('GitHubAdapter', () => {
           id: 'conv-1',
           codebase_id: null,
           cwd: null,
-          worktree_path: null,
+          isolation_env_id: null,
         });
 
         findCodebaseByRepoUrlMock.mockResolvedValue(null);

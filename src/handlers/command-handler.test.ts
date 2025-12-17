@@ -299,9 +299,8 @@ describe('CommandHandler', () => {
       ai_assistant_type: 'claude',
       codebase_id: null,
       cwd: null,
-      worktree_path: null,
       isolation_env_id: null,
-      isolation_provider: null,
+      last_activity_at: null,
       created_at: new Date(),
       updated_at: new Date(),
     };
@@ -441,7 +440,6 @@ describe('CommandHandler', () => {
         const conversation = {
           ...baseConversation,
           isolation_env_id: '/workspace/issue-123',
-          worktree_path: null,
         };
 
         mockGetActiveSession.mockResolvedValue(null);
@@ -451,39 +449,6 @@ describe('CommandHandler', () => {
         expect(result.success).toBe(true);
         expect(result.message).toContain('Worktree:');
         expect(result.message).toContain('issue-123');
-      });
-
-      test('should prefer isolation_env_id over worktree_path in status display', async () => {
-        const conversation = {
-          ...baseConversation,
-          isolation_env_id: '/workspace/issue-456',
-          worktree_path: '/workspace/old-worktree',
-        };
-
-        mockGetActiveSession.mockResolvedValue(null);
-
-        const result = await handleCommand(conversation, '/status');
-
-        expect(result.success).toBe(true);
-        expect(result.message).toContain('Worktree:');
-        expect(result.message).toContain('issue-456');
-        expect(result.message).not.toContain('old-worktree');
-      });
-
-      test('should fall back to worktree_path when isolation_env_id is null', async () => {
-        const conversation = {
-          ...baseConversation,
-          isolation_env_id: null,
-          worktree_path: '/workspace/legacy-worktree',
-        };
-
-        mockGetActiveSession.mockResolvedValue(null);
-
-        const result = await handleCommand(conversation, '/status');
-
-        expect(result.success).toBe(true);
-        expect(result.message).toContain('Worktree:');
-        expect(result.message).toContain('legacy-worktree');
       });
     });
 
@@ -731,7 +696,7 @@ describe('CommandHandler', () => {
         test('should reject if already using a worktree', async () => {
           const convWithWorktree: Conversation = {
             ...conversationWithCodebase,
-            worktree_path: '/workspace/my-repo/worktrees/existing-branch',
+            isolation_env_id: '/workspace/my-repo/worktrees/existing-branch',
           };
 
           const result = await handleCommand(convWithWorktree, '/worktree create new-branch');
@@ -775,7 +740,7 @@ describe('CommandHandler', () => {
         test('should remove worktree and switch to main', async () => {
           const convWithWorktree: Conversation = {
             ...conversationWithCodebase,
-            worktree_path: '/workspace/my-repo/worktrees/feat-x',
+            isolation_env_id: '/workspace/my-repo/worktrees/feat-x',
           };
 
           mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });

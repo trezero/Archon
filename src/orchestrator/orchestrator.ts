@@ -26,7 +26,6 @@ import {
   worktreeExists,
   findWorktreeByBranch,
   getCanonicalRepoPath,
-  execFileAsync,
 } from '../utils/git';
 import {
   cleanupToMakeRoom,
@@ -84,8 +83,6 @@ async function validateAndResolveIsolation(
     console.warn(`[Orchestrator] Stale isolation: ${conversation.isolation_env_id}`);
     await db.updateConversation(conversation.id, {
       isolation_env_id: null,
-      worktree_path: null,
-      isolation_provider: null,
     });
 
     if (env) {
@@ -93,28 +90,16 @@ async function validateAndResolveIsolation(
     }
   }
 
-  // 2. Legacy fallback (worktree_path without new UUID)
-  const legacyPath = conversation.worktree_path ?? conversation.isolation_env_id_legacy;
-  if (legacyPath && (await worktreeExists(legacyPath))) {
-    // Migrate to new model on-the-fly
-    const env = await migrateToIsolationEnvironment(conversation, codebase, legacyPath, platform);
-    if (env) {
-      return { cwd: legacyPath, env, isNew: false };
-    }
-  }
-
-  // 3. No valid isolation - check if we should create
+  // 2. No valid isolation - check if we should create
   if (!codebase) {
     return { cwd: conversation.cwd ?? '/workspace', env: null, isNew: false };
   }
 
-  // 4. Create new isolation (auto-isolation for all platforms!)
+  // 3. Create new isolation (auto-isolation for all platforms!)
   const env = await resolveIsolation(codebase, platform, conversationId, hints);
   if (env) {
     await db.updateConversation(conversation.id, {
       isolation_env_id: env.id,
-      worktree_path: env.working_path,
-      isolation_provider: env.provider,
       cwd: env.working_path,
     });
     return { cwd: env.working_path, env, isNew: true };
@@ -263,80 +248,6 @@ async function resolveIsolation(
 }
 
 /**
- * Migrate a legacy worktree_path to the new isolation_environments model
- */
-async function migrateToIsolationEnvironment(
-  conversation: Conversation,
-  codebase: Codebase | null,
-  legacyPath: string,
-  platform: IPlatformAdapter
-): Promise<IsolationEnvironmentRow | null> {
-  if (!codebase) return null;
-
-  try {
-    const { workflowType, workflowId } = inferWorkflowFromConversation(conversation, legacyPath);
-    const branchName = await getBranchNameFromWorktree(legacyPath);
-
-    const env = await isolationEnvDb.create({
-      codebase_id: codebase.id,
-      workflow_type: workflowType,
-      workflow_id: workflowId,
-      working_path: legacyPath,
-      branch_name: branchName,
-      created_by_platform: platform.getPlatformType(),
-      metadata: { migrated: true, migrated_at: new Date().toISOString() },
-    });
-
-    await db.updateConversation(conversation.id, {
-      isolation_env_id: env.id,
-    });
-
-    console.log(`[Orchestrator] Migrated legacy worktree to environment: ${env.id}`);
-    return env;
-  } catch (error) {
-    console.error('[Orchestrator] Failed to migrate legacy worktree:', error);
-    return null;
-  }
-}
-
-function inferWorkflowFromConversation(
-  conversation: Conversation,
-  legacyPath: string
-): { workflowType: string; workflowId: string } {
-  // Try to infer from platform conversation ID
-  if (conversation.platform_type === 'github') {
-    const match = /#(\d+)$/.exec(conversation.platform_conversation_id);
-    if (match) {
-      const isPR = legacyPath.includes('/pr-') || legacyPath.includes('-pr-');
-      return {
-        workflowType: isPR ? 'pr' : 'issue',
-        workflowId: match[1],
-      };
-    }
-  }
-
-  return {
-    workflowType: 'thread',
-    workflowId: conversation.platform_conversation_id,
-  };
-}
-
-async function getBranchNameFromWorktree(path: string): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync('git', [
-      '-C',
-      path,
-      'rev-parse',
-      '--abbrev-ref',
-      'HEAD',
-    ]);
-    return stdout.trim();
-  } catch {
-    return 'unknown';
-  }
-}
-
-/**
  * Wraps command content with execution context to signal the AI should execute immediately
  * @param commandName - The name of the command being invoked (e.g., 'create-pr')
  * @param content - The command template content after variable substitution
@@ -469,8 +380,8 @@ export async function handleMessage(
           return;
         }
 
-        // Read command file (use worktree_path or cwd for command location)
-        const commandCwd = conversation.worktree_path ?? conversation.cwd ?? codebase.default_cwd;
+        // Read command file using the conversation's cwd
+        const commandCwd = conversation.cwd ?? codebase.default_cwd;
         const commandFilePath = join(commandCwd, commandDef.path);
 
         try {

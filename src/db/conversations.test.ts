@@ -43,7 +43,8 @@ describe('conversations', () => {
       ai_assistant_type: 'claude',
       codebase_id: null,
       cwd: null,
-      worktree_path: null,
+      isolation_env_id: null,
+      last_activity_at: null,
       created_at: new Date(),
       updated_at: new Date(),
     };

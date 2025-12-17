@@ -175,7 +175,7 @@ Session:
 
       msg += `\n\nCurrent Working Directory: ${conversation.cwd ?? 'Not set'}`;
 
-      const activeIsolation = conversation.isolation_env_id ?? conversation.worktree_path;
+      const activeIsolation = conversation.isolation_env_id;
       if (activeIsolation) {
         const repoRoot = codebase?.default_cwd;
         const shortPath = shortenPath(activeIsolation, repoRoot);
@@ -969,8 +969,8 @@ Session:
             return { success: false, message: 'Usage: /worktree create <branch-name>' };
           }
 
-          // Check if already using a worktree (check both old and new fields)
-          const existingIsolation = conversation.isolation_env_id ?? conversation.worktree_path;
+          // Check if already using a worktree
+          const existingIsolation = conversation.isolation_env_id;
           if (existingIsolation) {
             const shortPath = shortenPath(existingIsolation, mainPath);
             return {
@@ -1007,11 +1007,9 @@ Session:
               env.workingPath,
             ]);
 
-            // Update conversation with isolation info (both old and new fields for compatibility)
+            // Update conversation with isolation info
             await db.updateConversation(conversation.id, {
-              worktree_path: env.workingPath,
               isolation_env_id: env.id,
-              isolation_provider: env.provider,
               cwd: env.workingPath,
             });
 
@@ -1046,8 +1044,7 @@ Session:
             const lines = stdout.trim().split('\n');
             let msg = 'Worktrees:\n\n';
 
-            // Check both old and new fields for current worktree
-            const currentWorktree = conversation.isolation_env_id ?? conversation.worktree_path;
+            const currentWorktree = conversation.isolation_env_id;
 
             for (const line of lines) {
               // Extract the path (first part before whitespace)
@@ -1072,8 +1069,7 @@ Session:
         }
 
         case 'remove': {
-          // Check both old and new fields
-          const isolationEnvId = conversation.isolation_env_id ?? conversation.worktree_path;
+          const isolationEnvId = conversation.isolation_env_id;
           if (!isolationEnvId) {
             return { success: false, message: 'This conversation is not using a worktree.' };
           }
@@ -1085,11 +1081,9 @@ Session:
             const provider = getIsolationProvider();
             await provider.destroy(isolationEnvId, { force: forceFlag });
 
-            // Clear all isolation references, set cwd to main repo
+            // Clear isolation reference, set cwd to main repo
             await db.updateConversation(conversation.id, {
-              worktree_path: null,
               isolation_env_id: null,
-              isolation_provider: null,
               cwd: mainPath,
             });
 
@@ -1134,8 +1128,7 @@ Session:
             };
           }
 
-          // Check both old and new fields for current worktree
-          const currentWorktree = conversation.isolation_env_id ?? conversation.worktree_path;
+          const currentWorktree = conversation.isolation_env_id;
 
           let msg = 'All worktrees (from git):\n\n';
           for (const wt of gitWorktrees) {

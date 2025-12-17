@@ -8,12 +8,9 @@ export interface Conversation {
   platform_conversation_id: string;
   codebase_id: string | null;
   cwd: string | null;
-  worktree_path: string | null; // Legacy field
-  isolation_env_id_legacy: string | null; // Renamed from isolation_env_id (TEXT)
-  isolation_env_id: string | null; // NEW: UUID FK to isolation_environments
-  isolation_provider: string | null; // Legacy field
+  isolation_env_id: string | null; // UUID FK to isolation_environments
   ai_assistant_type: string;
-  last_activity_at: Date | null; // NEW: for staleness detection
+  last_activity_at: Date | null; // For staleness detection
   created_at: Date;
   updated_at: Date;
 }

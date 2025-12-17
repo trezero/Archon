@@ -19,20 +19,6 @@ export async function getConversationByPlatformId(
   return result.rows[0] ?? null;
 }
 
-/**
- * Find a conversation that uses a specific worktree path
- * Used to share worktrees between linked issues and PRs
- */
-export async function getConversationByWorktreePath(
-  worktreePath: string
-): Promise<Conversation | null> {
-  const result = await pool.query<Conversation>(
-    'SELECT * FROM remote_agent_conversations WHERE worktree_path = $1 LIMIT 1',
-    [worktreePath]
-  );
-  return result.rows[0] ?? null;
-}
-
 export async function getOrCreateConversation(
   platformType: string,
   platformId: string,
@@ -92,12 +78,7 @@ export async function getOrCreateConversation(
 
 export async function updateConversation(
   id: string,
-  updates: Partial<
-    Pick<
-      Conversation,
-      'codebase_id' | 'cwd' | 'worktree_path' | 'isolation_env_id' | 'isolation_provider'
-    >
-  >
+  updates: Partial<Pick<Conversation, 'codebase_id' | 'cwd' | 'isolation_env_id'>>
 ): Promise<void> {
   const fields: string[] = [];
   const values: (string | null)[] = [];
@@ -111,17 +92,9 @@ export async function updateConversation(
     fields.push(`cwd = $${String(i++)}`);
     values.push(updates.cwd);
   }
-  if (updates.worktree_path !== undefined) {
-    fields.push(`worktree_path = $${String(i++)}`);
-    values.push(updates.worktree_path);
-  }
   if (updates.isolation_env_id !== undefined) {
     fields.push(`isolation_env_id = $${String(i++)}`);
     values.push(updates.isolation_env_id);
-  }
-  if (updates.isolation_provider !== undefined) {
-    fields.push(`isolation_provider = $${String(i++)}`);
-    values.push(updates.isolation_provider);
   }
 
   if (fields.length === 0) {
