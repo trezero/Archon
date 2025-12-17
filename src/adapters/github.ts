@@ -562,6 +562,14 @@ ${userComment}`;
       isNew: isNewCodebase,
     } = await this.getOrCreateCodebaseForRepo(owner, repo);
 
+    // 6b. Link conversation to codebase (fixes #97)
+    if (isNewConversation) {
+      await db.updateConversation(existingConv.id, {
+        codebase_id: codebase.id,
+        cwd: repoPath,
+      });
+    }
+
     // 7. Get default branch
     const { data: repoData } = await this.octokit.rest.repos.get({ owner, repo });
     const defaultBranch = repoData.default_branch;
