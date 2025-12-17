@@ -166,9 +166,10 @@ Session:
 
       msg += `\n\nCurrent Working Directory: ${conversation.cwd ?? 'Not set'}`;
 
-      if (conversation.worktree_path) {
+      const activeIsolation = conversation.isolation_env_id ?? conversation.worktree_path;
+      if (activeIsolation) {
         const repoRoot = codebase?.default_cwd;
-        const shortPath = shortenPath(conversation.worktree_path, repoRoot);
+        const shortPath = shortenPath(activeIsolation, repoRoot);
         msg += `\nWorktree: ${shortPath}`;
       }
 

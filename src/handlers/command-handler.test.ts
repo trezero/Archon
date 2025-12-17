@@ -436,6 +436,55 @@ describe('CommandHandler', () => {
         expect(result.success).toBe(true);
         expect(result.message).toContain('No codebase configured');
       });
+
+      test('should display worktree from isolation_env_id when set', async () => {
+        const conversation = {
+          ...baseConversation,
+          isolation_env_id: '/workspace/issue-123',
+          worktree_path: null,
+        };
+
+        mockGetActiveSession.mockResolvedValue(null);
+
+        const result = await handleCommand(conversation, '/status');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Worktree:');
+        expect(result.message).toContain('issue-123');
+      });
+
+      test('should prefer isolation_env_id over worktree_path in status display', async () => {
+        const conversation = {
+          ...baseConversation,
+          isolation_env_id: '/workspace/issue-456',
+          worktree_path: '/workspace/old-worktree',
+        };
+
+        mockGetActiveSession.mockResolvedValue(null);
+
+        const result = await handleCommand(conversation, '/status');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Worktree:');
+        expect(result.message).toContain('issue-456');
+        expect(result.message).not.toContain('old-worktree');
+      });
+
+      test('should fall back to worktree_path when isolation_env_id is null', async () => {
+        const conversation = {
+          ...baseConversation,
+          isolation_env_id: null,
+          worktree_path: '/workspace/legacy-worktree',
+        };
+
+        mockGetActiveSession.mockResolvedValue(null);
+
+        const result = await handleCommand(conversation, '/status');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Worktree:');
+        expect(result.message).toContain('legacy-worktree');
+      });
     });
 
     describe('/reset', () => {
