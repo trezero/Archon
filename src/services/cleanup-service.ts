@@ -7,6 +7,14 @@ import * as conversationDb from '../db/conversations';
 import * as sessionDb from '../db/sessions';
 import { getIsolationProvider } from '../isolation';
 import { execFileAsync } from '../utils/git';
+import { IsolationEnvironmentRow } from '../types';
+
+// Configuration constants (configurable via env vars)
+const STALE_THRESHOLD_DAYS = parseInt(process.env.STALE_THRESHOLD_DAYS ?? '14', 10);
+const CLEANUP_INTERVAL_HOURS = parseInt(process.env.CLEANUP_INTERVAL_HOURS ?? '6', 10);
+
+// Module-level variable for scheduler
+let cleanupIntervalId: NodeJS.Timeout | null = null;
 
 export interface CleanupReport {
   removed: string[];
@@ -189,4 +197,214 @@ export async function cleanupToMakeRoom(codebaseId: string, mainRepoPath: string
   }
 
   return removed;
+}
+
+/**
+ * Run full scheduled cleanup cycle
+ * 1. Find and remove merged branches
+ * 2. Find and remove stale environments
+ */
+export async function runScheduledCleanup(): Promise<CleanupReport> {
+  console.log('[Cleanup] Starting scheduled cleanup');
+  const report: CleanupReport = { removed: [], skipped: [], errors: [] };
+
+  try {
+    // Get all active environments with their codebase info
+    const environments = await isolationEnvDb.listAllActiveWithCodebase();
+    console.log(`[Cleanup] Found ${String(environments.length)} active environments`);
+
+    for (const env of environments) {
+      try {
+        // Skip if already processing or destroyed
+        if (env.status !== 'active') continue;
+
+        // Check if path still exists
+        const pathExists = await worktreeExists(env.working_path);
+        if (!pathExists) {
+          // Path doesn't exist - mark as destroyed in DB
+          await isolationEnvDb.updateStatus(env.id, 'destroyed');
+          report.removed.push(`${env.id} (path missing)`);
+          console.log(`[Cleanup] Marked ${env.id} as destroyed (path missing)`);
+          continue;
+        }
+
+        // Check if branch is merged
+        const mainBranch = await getMainBranch(env.codebase_default_cwd);
+        const merged = await isBranchMerged(env.codebase_default_cwd, env.branch_name, mainBranch);
+
+        if (merged) {
+          // Check for uncommitted changes before removing
+          const hasChanges = await hasUncommittedChanges(env.working_path);
+          if (hasChanges) {
+            report.skipped.push({ id: env.id, reason: 'merged but has uncommitted changes' });
+            console.log(`[Cleanup] Skipping ${env.id}: merged but has uncommitted changes`);
+            continue;
+          }
+
+          // Check if any conversations still reference this env
+          const conversations = await isolationEnvDb.getConversationsUsingEnv(env.id);
+          if (conversations.length > 0) {
+            report.skipped.push({
+              id: env.id,
+              reason: `merged but still used by ${String(conversations.length)} conversations`,
+            });
+            console.log(
+              `[Cleanup] Skipping ${env.id}: still used by ${String(conversations.length)} conversations`
+            );
+            continue;
+          }
+
+          // Safe to remove merged branch
+          await removeEnvironment(env.id, { force: false });
+          report.removed.push(`${env.id} (merged)`);
+          continue;
+        }
+
+        // Check staleness (skip Telegram - already filtered in query but double-check)
+        if (env.created_by_platform === 'telegram') {
+          continue; // Never cleanup Telegram (persistent workspace)
+        }
+
+        // Check if environment is stale
+        const isStale = await isEnvironmentStale(env, STALE_THRESHOLD_DAYS);
+        if (isStale) {
+          const hasChanges = await hasUncommittedChanges(env.working_path);
+          if (hasChanges) {
+            report.skipped.push({ id: env.id, reason: 'stale but has uncommitted changes' });
+            console.log(`[Cleanup] Skipping ${env.id}: stale but has uncommitted changes`);
+            continue;
+          }
+
+          const conversations = await isolationEnvDb.getConversationsUsingEnv(env.id);
+          if (conversations.length > 0) {
+            report.skipped.push({
+              id: env.id,
+              reason: `stale but still used by ${String(conversations.length)} conversations`,
+            });
+            continue;
+          }
+
+          await removeEnvironment(env.id, { force: false });
+          report.removed.push(`${env.id} (stale)`);
+        }
+      } catch (error) {
+        const err = error as Error;
+        report.errors.push({ id: env.id, error: err.message });
+        console.error(`[Cleanup] Error processing ${env.id}:`, err.message);
+        // Continue to next environment - don't crash the cleanup cycle
+      }
+    }
+  } catch (error) {
+    const err = error as Error;
+    console.error('[Cleanup] Scheduled cleanup failed:', err.message);
+    report.errors.push({ id: 'scheduler', error: err.message });
+  }
+
+  console.log('[Cleanup] Scheduled cleanup complete:', {
+    removed: report.removed.length,
+    skipped: report.skipped.length,
+    errors: report.errors.length,
+  });
+
+  return report;
+}
+
+/**
+ * Check if an environment is stale based on activity
+ */
+async function isEnvironmentStale(
+  env: IsolationEnvironmentRow,
+  staleDays: number
+): Promise<boolean> {
+  // Check last commit date in the worktree
+  const lastCommit = await getLastCommitDate(env.working_path);
+  if (lastCommit) {
+    const daysSinceCommit = (Date.now() - lastCommit.getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSinceCommit < staleDays) {
+      return false; // Recent commit activity
+    }
+  }
+
+  // Check environment creation date as fallback
+  const daysSinceCreation =
+    (Date.now() - new Date(env.created_at).getTime()) / (1000 * 60 * 60 * 24);
+  return daysSinceCreation >= staleDays;
+}
+
+/**
+ * Get the main branch name for a repository
+ */
+async function getMainBranch(repoPath: string): Promise<string> {
+  try {
+    // Try to get the default branch from remote
+    const { stdout } = await execFileAsync('git', [
+      '-C',
+      repoPath,
+      'symbolic-ref',
+      'refs/remotes/origin/HEAD',
+    ]);
+    // Output is like "refs/remotes/origin/main"
+    const match = /refs\/remotes\/origin\/(.+)/.exec(stdout.trim());
+    return match?.[1] ?? 'main';
+  } catch {
+    // Fallback to 'main'
+    return 'main';
+  }
+}
+
+/**
+ * Check if a worktree path exists
+ */
+async function worktreeExists(path: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', path, 'rev-parse', '--git-dir']);
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Start the cleanup scheduler
+ * Runs cleanup cycle every CLEANUP_INTERVAL_HOURS
+ */
+export function startCleanupScheduler(): void {
+  if (cleanupIntervalId) {
+    console.warn('[Cleanup] Scheduler already running');
+    return;
+  }
+
+  const intervalMs = CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000;
+  console.log(`[Cleanup] Starting scheduler (interval: ${String(CLEANUP_INTERVAL_HOURS)} hours)`);
+
+  // Run immediately on startup, then at interval
+  void runScheduledCleanup().catch(err => {
+    console.error('[Cleanup] Initial cleanup failed:', (err as Error).message);
+  });
+
+  cleanupIntervalId = setInterval(() => {
+    void runScheduledCleanup().catch(err => {
+      console.error('[Cleanup] Scheduled cleanup failed:', (err as Error).message);
+    });
+  }, intervalMs);
+
+  console.log('[Cleanup] Scheduler started');
+}
+
+/**
+ * Stop the cleanup scheduler
+ */
+export function stopCleanupScheduler(): void {
+  if (cleanupIntervalId) {
+    clearInterval(cleanupIntervalId);
+    cleanupIntervalId = null;
+    console.log('[Cleanup] Scheduler stopped');
+  }
+}
+
+/**
+ * Check if scheduler is running (for testing)
+ */
+export function isSchedulerRunning(): boolean {
+  return cleanupIntervalId !== null;
 }

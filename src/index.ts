@@ -19,6 +19,7 @@ import { pool } from './db/connection';
 import { ConversationLockManager } from './utils/conversation-lock';
 import { classifyAndFormatError } from './utils/error-formatter';
 import { seedDefaultCommands } from './scripts/seed-commands';
+import { startCleanupScheduler, stopCleanupScheduler } from './services/cleanup-service';
 
 async function main(): Promise<void> {
   console.log('[App] Starting Remote Coding Agent');
@@ -59,6 +60,9 @@ async function main(): Promise<void> {
     console.error('[Database] Connection failed:', error);
     process.exit(1);
   }
+
+  // Start cleanup scheduler
+  startCleanupScheduler();
 
   // Warn if WORKSPACE_PATH is inside project directory
   const workspacePath = resolve(process.env.WORKSPACE_PATH ?? '/workspace');
@@ -410,6 +414,7 @@ async function main(): Promise<void> {
   // Graceful shutdown
   const shutdown = (): void => {
     console.log('[App] Shutting down gracefully...');
+    stopCleanupScheduler();
     telegram?.stop();
     discord?.stop();
     slack?.stop();

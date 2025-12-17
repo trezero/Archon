@@ -19,6 +19,8 @@ import {
   updateMetadata,
   countByCodebase,
   getConversationsUsingEnv,
+  findStaleEnvironments,
+  listAllActiveWithCodebase,
 } from './isolation-environments';
 
 describe('isolation-environments', () => {
@@ -230,6 +232,81 @@ describe('isolation-environments', () => {
       mockQuery.mockResolvedValueOnce(createQueryResult([]));
 
       const result = await getConversationsUsingEnv('unused-env');
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('findStaleEnvironments', () => {
+    test('uses default 14 days threshold', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await findStaleEnvironments();
+
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      const [, params] = mockQuery.mock.calls[0] as [string, number[]];
+      expect(params[0]).toBe(14);
+    });
+
+    test('accepts custom staleness threshold', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await findStaleEnvironments(7);
+
+      const [, params] = mockQuery.mock.calls[0] as [string, number[]];
+      expect(params[0]).toBe(7);
+    });
+
+    test('excludes telegram environments in query', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await findStaleEnvironments();
+
+      const [query] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(query).toContain("created_by_platform != 'telegram'");
+    });
+
+    test('returns environments with codebase info', async () => {
+      const mockEnv = {
+        ...sampleEnv,
+        codebase_default_cwd: '/workspace/myapp',
+      };
+      mockQuery.mockResolvedValueOnce(createQueryResult([mockEnv]));
+
+      const result = await findStaleEnvironments();
+
+      expect(result).toHaveLength(1);
+      expect(result[0].codebase_default_cwd).toBe('/workspace/myapp');
+    });
+  });
+
+  describe('listAllActiveWithCodebase', () => {
+    test('returns all active environments with codebase info', async () => {
+      const mockEnvs = [
+        { ...sampleEnv, id: 'env-1', codebase_default_cwd: '/workspace/app1' },
+        { ...sampleEnv, id: 'env-2', codebase_default_cwd: '/workspace/app2' },
+      ];
+      mockQuery.mockResolvedValueOnce(createQueryResult(mockEnvs));
+
+      const result = await listAllActiveWithCodebase();
+
+      expect(result).toHaveLength(2);
+      expect(result[0].codebase_default_cwd).toBe('/workspace/app1');
+    });
+
+    test('filters by active status', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await listAllActiveWithCodebase();
+
+      const [query] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(query).toContain("status = 'active'");
+    });
+
+    test('returns empty array when no active environments', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      const result = await listAllActiveWithCodebase();
 
       expect(result).toEqual([]);
     });

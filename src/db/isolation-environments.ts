@@ -138,3 +138,43 @@ export async function getConversationsUsingEnv(envId: string): Promise<string[]>
   );
   return result.rows.map(r => r.id);
 }
+
+/**
+ * Find stale environments (no activity for specified days)
+ * Excludes Telegram (persistent workspaces never auto-cleanup)
+ */
+export async function findStaleEnvironments(
+  staleDays = 14
+): Promise<(IsolationEnvironmentRow & { codebase_default_cwd: string })[]> {
+  const result = await pool.query<IsolationEnvironmentRow & { codebase_default_cwd: string }>(
+    `SELECT e.*, c.default_cwd as codebase_default_cwd
+     FROM remote_agent_isolation_environments e
+     JOIN remote_agent_codebases c ON e.codebase_id = c.id
+     WHERE e.status = 'active'
+       AND e.created_by_platform != 'telegram'
+       AND NOT EXISTS (
+         SELECT 1 FROM remote_agent_conversations conv
+         WHERE conv.isolation_env_id = e.id
+           AND conv.last_activity_at > NOW() - ($1 || ' days')::INTERVAL
+       )
+       AND e.created_at < NOW() - ($1 || ' days')::INTERVAL`,
+    [staleDays]
+  );
+  return result.rows;
+}
+
+/**
+ * List all active environments with their codebase info (for cleanup)
+ */
+export async function listAllActiveWithCodebase(): Promise<
+  (IsolationEnvironmentRow & { codebase_default_cwd: string })[]
+> {
+  const result = await pool.query<IsolationEnvironmentRow & { codebase_default_cwd: string }>(
+    `SELECT e.*, c.default_cwd as codebase_default_cwd
+     FROM remote_agent_isolation_environments e
+     JOIN remote_agent_codebases c ON e.codebase_id = c.id
+     WHERE e.status = 'active'
+     ORDER BY e.created_at DESC`
+  );
+  return result.rows;
+}
