@@ -482,7 +482,7 @@ async function autoCreateIsolation(
 1. Periodic job to check worktree branch status
 2. Auto-cleanup merged branches
 3. Mark stale worktrees
-4. Archival system
+4. Removal/cleanup system (no archival - branches stay in git)
 
 **New components**:
 - `src/cleanup/worktree-cleanup.ts` - cleanup logic
