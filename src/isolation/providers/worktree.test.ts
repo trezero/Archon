@@ -28,7 +28,7 @@ describe('WorktreeProvider', () => {
     worktreeExistsSpy.mockResolvedValue(false);
     listWorktreesSpy.mockResolvedValue([]);
     findWorktreeByBranchSpy.mockResolvedValue(null);
-    getCanonicalRepoPathSpy.mockImplementation(async (path) => path);
+    getCanonicalRepoPathSpy.mockImplementation(async path => path);
   });
 
   afterEach(() => {
@@ -150,7 +150,15 @@ describe('WorktreeProvider', () => {
       // Verify git worktree add was called with -b flag
       expect(execSpy).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', '/workspace/repo', 'worktree', 'add', expect.any(String), '-b', 'issue-42']),
+        expect.arrayContaining([
+          '-C',
+          '/workspace/repo',
+          'worktree',
+          'add',
+          expect.any(String),
+          '-b',
+          'issue-42',
+        ]),
         expect.any(Object)
       );
     });
@@ -176,14 +184,28 @@ describe('WorktreeProvider', () => {
       // Verify worktree add with SHA
       expect(execSpy).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', '/workspace/repo', 'worktree', 'add', expect.any(String), 'abc123def456']),
+        expect.arrayContaining([
+          '-C',
+          '/workspace/repo',
+          'worktree',
+          'add',
+          expect.any(String),
+          'abc123def456',
+        ]),
         expect.any(Object)
       );
 
       // Verify checkout -b for tracking branch
       expect(execSpy).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', expect.any(String), 'checkout', '-b', 'pr-42-review', 'abc123def456']),
+        expect.arrayContaining([
+          '-C',
+          expect.any(String),
+          'checkout',
+          '-b',
+          'pr-42-review',
+          'abc123def456',
+        ]),
         expect.any(Object)
       );
     });
@@ -201,14 +223,27 @@ describe('WorktreeProvider', () => {
       // Verify fetch with PR ref and local branch creation
       expect(execSpy).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', '/workspace/repo', 'fetch', 'origin', 'pull/42/head:pr-42-review']),
+        expect.arrayContaining([
+          '-C',
+          '/workspace/repo',
+          'fetch',
+          'origin',
+          'pull/42/head:pr-42-review',
+        ]),
         expect.any(Object)
       );
 
       // Verify worktree add with the local branch
       expect(execSpy).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', '/workspace/repo', 'worktree', 'add', expect.any(String), 'pr-42-review']),
+        expect.arrayContaining([
+          '-C',
+          '/workspace/repo',
+          'worktree',
+          'add',
+          expect.any(String),
+          'pr-42-review',
+        ]),
         expect.any(Object)
       );
     });
@@ -262,7 +297,9 @@ describe('WorktreeProvider', () => {
         callCount++;
         // First worktree add call fails (branch exists)
         if (callCount === 1 && args.includes('-b')) {
-          const error = new Error('fatal: A branch named issue-42 already exists.') as Error & { stderr?: string };
+          const error = new Error('fatal: A branch named issue-42 already exists.') as Error & {
+            stderr?: string;
+          };
           error.stderr = 'fatal: A branch named issue-42 already exists.';
           throw error;
         }
@@ -274,14 +311,29 @@ describe('WorktreeProvider', () => {
       // Verify first call attempted new branch
       expect(execSpy).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', '/workspace/repo', 'worktree', 'add', expect.any(String), '-b', 'issue-42']),
+        expect.arrayContaining([
+          '-C',
+          '/workspace/repo',
+          'worktree',
+          'add',
+          expect.any(String),
+          '-b',
+          'issue-42',
+        ]),
         expect.any(Object)
       );
 
       // Verify second call used existing branch
       expect(execSpy).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', '/workspace/repo', 'worktree', 'add', expect.any(String), 'issue-42']),
+        expect.arrayContaining([
+          '-C',
+          '/workspace/repo',
+          'worktree',
+          'add',
+          expect.any(String),
+          'issue-42',
+        ]),
         expect.any(Object)
       );
     });
@@ -301,7 +353,9 @@ describe('WorktreeProvider', () => {
         return { stdout: '', stderr: '' };
       });
 
-      await expect(provider.create(request)).rejects.toThrow('Failed to create worktree for PR #42');
+      await expect(provider.create(request)).rejects.toThrow(
+        'Failed to create worktree for PR #42'
+      );
     });
   });
 
@@ -331,7 +385,14 @@ describe('WorktreeProvider', () => {
 
       expect(execSpy).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', '/workspace/repo', 'worktree', 'remove', '--force', worktreePath]),
+        expect.arrayContaining([
+          '-C',
+          '/workspace/repo',
+          'worktree',
+          'remove',
+          '--force',
+          worktreePath,
+        ]),
         expect.any(Object)
       );
     });

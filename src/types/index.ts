@@ -8,12 +8,52 @@ export interface Conversation {
   platform_conversation_id: string;
   codebase_id: string | null;
   cwd: string | null;
-  worktree_path: string | null;
-  isolation_env_id: string | null;
-  isolation_provider: string | null;
+  worktree_path: string | null; // Legacy field
+  isolation_env_id_legacy: string | null; // Renamed from isolation_env_id (TEXT)
+  isolation_env_id: string | null; // NEW: UUID FK to isolation_environments
+  isolation_provider: string | null; // Legacy field
   ai_assistant_type: string;
+  last_activity_at: Date | null; // NEW: for staleness detection
   created_at: Date;
   updated_at: Date;
+}
+
+/**
+ * Isolation hints provided by adapters to orchestrator
+ * Allows platform-specific context without orchestrator knowing platform internals
+ */
+export interface IsolationHints {
+  // Workflow identification (adapter knows this)
+  workflowType?: 'issue' | 'pr' | 'review' | 'thread' | 'task';
+  workflowId?: string;
+
+  // PR-specific (for reproducible reviews)
+  prBranch?: string;
+  prSha?: string;
+
+  // Cross-reference hints (for linking)
+  linkedIssues?: number[];
+  linkedPRs?: number[];
+
+  // Adoption hints
+  suggestedBranch?: string;
+}
+
+/**
+ * Database row for isolation_environments table
+ */
+export interface IsolationEnvironmentRow {
+  id: string;
+  codebase_id: string;
+  workflow_type: string;
+  workflow_id: string;
+  provider: string;
+  working_path: string;
+  branch_name: string;
+  status: string;
+  created_at: Date;
+  created_by_platform: string | null;
+  metadata: Record<string, unknown>;
 }
 
 export interface Codebase {

@@ -852,14 +852,21 @@ describe('CommandHandler', () => {
         expect(result.success).toBe(true);
         expect(result.message).toContain('Repository cloned successfully');
         expect(result.message).toContain('✓ Loaded 2 commands');
-        const updateCall = mockUpdateCodebaseCommands.mock.calls[0] as [string, Record<string, { path: string; description: string }>];
+        const updateCall = mockUpdateCodebaseCommands.mock.calls[0] as [
+          string,
+          Record<string, { path: string; description: string }>,
+        ];
         expect(updateCall[0]).toBe('cb-new');
         const commands = updateCall[1];
         expect(commands['test-command']).toBeDefined();
         expect(commands['another-command']).toBeDefined();
         // Check path ends with expected relative path (platform-agnostic)
-        expect(commands['test-command'].path).toMatch(/\.claude[\\\/]commands[\\\/]test-command\.md$/);
-        expect(commands['another-command'].path).toMatch(/\.claude[\\\/]commands[\\\/]another-command\.md$/);
+        expect(commands['test-command'].path).toMatch(
+          /\.claude[\\\/]commands[\\\/]test-command\.md$/
+        );
+        expect(commands['another-command'].path).toMatch(
+          /\.claude[\\\/]commands[\\\/]another-command\.md$/
+        );
         expect(commands['test-command'].description).toBe('From .claude/commands');
         expect(commands['another-command'].description).toBe('From .claude/commands');
       });
@@ -886,7 +893,10 @@ describe('CommandHandler', () => {
 
         expect(result.success).toBe(true);
         expect(result.message).toContain('✓ Loaded 1 commands');
-        const updateCall = mockUpdateCodebaseCommands.mock.calls[0] as [string, Record<string, { path: string; description: string }>];
+        const updateCall = mockUpdateCodebaseCommands.mock.calls[0] as [
+          string,
+          Record<string, { path: string; description: string }>,
+        ];
         expect(updateCall[0]).toBe('cb-new');
         const commands = updateCall[1];
         expect(commands.rca).toBeDefined();
@@ -1023,7 +1033,10 @@ describe('CommandHandler', () => {
 
         // Verify commands were updated
         expect(mockUpdateCodebaseCommands).toHaveBeenCalled();
-        const updateCall = mockUpdateCodebaseCommands.mock.calls[0] as [string, Record<string, { path: string; description: string }>];
+        const updateCall = mockUpdateCodebaseCommands.mock.calls[0] as [
+          string,
+          Record<string, { path: string; description: string }>,
+        ];
         const commands = updateCall[1];
 
         // Should preserve existing command

@@ -1,5 +1,7 @@
 # Worktree Orchestration
 
+> **Note**: This document describes the current architecture. See `docs/worktree-orchestration-research.md` for the planned unified architecture (Phase 2.5+) which centralizes all isolation logic in the orchestrator.
+
 ## Storage Location
 
 ```
@@ -8,6 +10,7 @@ DOCKER:  /workspace/worktrees/<project>/<branch>/ ← FIXED, no override
 ```
 
 Detection order in `getWorktreeBase()`:
+
 ```
 1. isDocker? → /workspace/worktrees (ALWAYS)
 2. WORKTREE_BASE set? → use it (local only)
@@ -52,21 +55,21 @@ Detection order in `getWorktreeBase()`:
 ```typescript
 interface IsolationRequest {
   codebaseId: string;
-  canonicalRepoPath: string;      // Main repo, never a worktree
+  canonicalRepoPath: string; // Main repo, never a worktree
   workflowType: 'issue' | 'pr' | 'review' | 'thread' | 'task';
   identifier: string;
-  prBranch?: string;              // For PR adoption
-  prSha?: string;                 // For reproducible reviews
+  prBranch?: string; // For PR adoption
+  prSha?: string; // For reproducible reviews
 }
 ```
 
-| Workflow | Identifier | Branch Name |
-|----------|------------|-------------|
-| issue | `"42"` | `issue-42` |
-| pr | `"123"` | `pr-123` |
-| pr + SHA | `"123"` | `pr-123-review` |
-| task | `"my-feature"` | `task-my-feature` |
-| thread | `"C123:ts.123"` | `thread-a1b2c3d4` (hash) |
+| Workflow | Identifier      | Branch Name              |
+| -------- | --------------- | ------------------------ |
+| issue    | `"42"`          | `issue-42`               |
+| pr       | `"123"`         | `pr-123`                 |
+| pr + SHA | `"123"`         | `pr-123-review`          |
+| task     | `"my-feature"`  | `task-my-feature`        |
+| thread   | `"C123:ts.123"` | `thread-a1b2c3d4` (hash) |
 
 ## Creation Flow
 
@@ -225,6 +228,7 @@ conversations
 ```
 
 Lookup pattern:
+
 ```typescript
 const envId = conversation.isolation_env_id ?? conversation.worktree_path;
 ```
@@ -234,6 +238,7 @@ const envId = conversation.isolation_env_id ?? conversation.worktree_path;
 The worktree-manager Claude Code skill uses `~/.claude/worktree-registry.json`.
 
 **Adoption scenarios:**
+
 1. **Path match**: Skill created worktree at expected path → adopted
 2. **Branch match**: Skill created worktree for PR's branch → adopted
 
@@ -253,11 +258,96 @@ App checks: findWorktreeByBranch("feature/auth")
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `src/isolation/types.ts` | `IIsolationProvider`, `IsolationRequest`, `IsolatedEnvironment` |
-| `src/isolation/providers/worktree.ts` | `WorktreeProvider` implementation |
-| `src/isolation/index.ts` | `getIsolationProvider()` factory |
-| `src/utils/git.ts` | `getWorktreeBase()`, `listWorktrees()`, low-level git ops |
-| `src/adapters/github.ts` | Webhook handling, `cleanupPRWorktree()` |
-| `src/handlers/command-handler.ts` | `/worktree` command handling |
+| File                                  | Purpose                                                         |
+| ------------------------------------- | --------------------------------------------------------------- |
+| `src/isolation/types.ts`              | `IIsolationProvider`, `IsolationRequest`, `IsolatedEnvironment` |
+| `src/isolation/providers/worktree.ts` | `WorktreeProvider` implementation                               |
+| `src/isolation/index.ts`              | `getIsolationProvider()` factory                                |
+| `src/utils/git.ts`                    | `getWorktreeBase()`, `listWorktrees()`, low-level git ops       |
+| `src/adapters/github.ts`              | Webhook handling, `cleanupPRWorktree()`                         |
+| `src/handlers/command-handler.ts`     | `/worktree` command handling                                    |
+
+---
+
+## Planned Architecture (Phase 2.5+)
+
+The current architecture has isolation logic split between the GitHub adapter and orchestrator. Phase 2.5 will unify all isolation in the orchestrator.
+
+### Target Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        ALL ADAPTERS (Thin)                               │
+│  GitHub, Slack, Discord, Telegram                                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│  ✓ Parse platform events                                                │
+│  ✓ Detect @mentions                                                     │
+│  ✓ Build context + IsolationHints                                       │
+│  ✓ Call handleMessage(platform, convId, message, context, hints)        │
+│  ✓ Trigger cleanup events (GitHub only: close/merge)                    │
+│  ✗ NO worktree creation                                                 │
+│  ✗ NO isolation UX messages                                             │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         ORCHESTRATOR (Authority)                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│  validateAndResolveIsolation():                                         │
+│  1. Validate existing isolation (cwd exists?)                           │
+│  2. Check for reuse (same workflow_type + workflow_id)                  │
+│  3. Check linked issues for sharing                                     │
+│  4. Check for skill adoption (findWorktreeByBranch)                     │
+│  5. Create new if needed                                                │
+│  6. Send UX message                                                     │
+│  7. Update database                                                     │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    ▼                               ▼
+┌───────────────────────────────┐   ┌───────────────────────────────────┐
+│      ISOLATION PROVIDER        │   │        CLEANUP SERVICE             │
+│  (WorktreeProvider)            │   │  src/services/cleanup-service.ts   │
+├───────────────────────────────┤   ├───────────────────────────────────┤
+│  create() → IsolatedEnv        │   │  onConversationClosed()           │
+│  destroy()                     │   │  runScheduledCleanup()            │
+│  get() / list()               │   │  isBranchMerged() - git-first     │
+│  adopt()                       │   │  hasUncommittedChanges()          │
+└───────────────────────────────┘   └───────────────────────────────────┘
+```
+
+### New Database Schema
+
+```sql
+-- Work-centric isolation (independent lifecycle)
+CREATE TABLE remote_agent_isolation_environments (
+  id                    UUID PRIMARY KEY,
+  codebase_id           UUID REFERENCES remote_agent_codebases(id),
+  workflow_type         TEXT NOT NULL,    -- 'issue', 'pr', 'thread', 'task'
+  workflow_id           TEXT NOT NULL,    -- '42', 'thread-abc123'
+  provider              TEXT DEFAULT 'worktree',
+  working_path          TEXT NOT NULL,
+  branch_name           TEXT NOT NULL,
+  status                TEXT DEFAULT 'active',
+  created_at            TIMESTAMP DEFAULT NOW(),
+  created_by_platform   TEXT,
+  metadata              JSONB DEFAULT '{}',
+  UNIQUE (codebase_id, workflow_type, workflow_id)
+);
+
+-- Conversations link to environments (many-to-one)
+ALTER TABLE remote_agent_conversations
+  ADD COLUMN isolation_env_id UUID REFERENCES remote_agent_isolation_environments(id);
+```
+
+### Implementation Phases
+
+| Phase | Description                                 | Status  |
+| ----- | ------------------------------------------- | ------- |
+| 2.5   | Unified Isolation Architecture              | Planned |
+| 3A    | Force-Thread Response Model (Slack/Discord) | Planned |
+| 3C    | Git-Based Cleanup Scheduler                 | Planned |
+| 3D    | Limits and User Feedback                    | Planned |
+| 4     | Drop Legacy Columns                         | Planned |
+
+See `docs/worktree-orchestration-research.md` for detailed implementation plans.

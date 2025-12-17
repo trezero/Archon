@@ -2,18 +2,274 @@
  * Orchestrator - Main conversation handler
  * Routes slash commands and AI messages appropriately
  */
-import { readFile, access } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import { join } from 'path';
-import { IPlatformAdapter } from '../types';
+import {
+  IPlatformAdapter,
+  IsolationHints,
+  IsolationEnvironmentRow,
+  Conversation,
+  Codebase,
+} from '../types';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
 import * as templateDb from '../db/command-templates';
+import * as isolationEnvDb from '../db/isolation-environments';
 import * as commandHandler from '../handlers/command-handler';
 import { formatToolCall } from '../utils/tool-formatter';
 import { substituteVariables } from '../utils/variable-substitution';
 import { classifyAndFormatError } from '../utils/error-formatter';
 import { getAssistantClient } from '../clients/factory';
+import { getIsolationProvider } from '../isolation';
+import {
+  worktreeExists,
+  findWorktreeByBranch,
+  getCanonicalRepoPath,
+  execFileAsync,
+} from '../utils/git';
+
+/**
+ * Validate existing isolation and create new if needed
+ * This is the single source of truth for isolation decisions
+ */
+async function validateAndResolveIsolation(
+  conversation: Conversation,
+  codebase: Codebase | null,
+  platform: IPlatformAdapter,
+  conversationId: string,
+  hints?: IsolationHints
+): Promise<{ cwd: string; env: IsolationEnvironmentRow | null; isNew: boolean }> {
+  // 1. Check existing isolation reference (new UUID model)
+  if (conversation.isolation_env_id) {
+    const env = await isolationEnvDb.getById(conversation.isolation_env_id);
+
+    if (env && (await worktreeExists(env.working_path))) {
+      // Valid - use it
+      return { cwd: env.working_path, env, isNew: false };
+    }
+
+    // Stale reference - clean up
+    console.warn(`[Orchestrator] Stale isolation: ${conversation.isolation_env_id}`);
+    await db.updateConversation(conversation.id, {
+      isolation_env_id: null,
+      worktree_path: null,
+      isolation_provider: null,
+    });
+
+    if (env) {
+      await isolationEnvDb.updateStatus(env.id, 'destroyed');
+    }
+  }
+
+  // 2. Legacy fallback (worktree_path without new UUID)
+  const legacyPath = conversation.worktree_path ?? conversation.isolation_env_id_legacy;
+  if (legacyPath && (await worktreeExists(legacyPath))) {
+    // Migrate to new model on-the-fly
+    const env = await migrateToIsolationEnvironment(conversation, codebase, legacyPath, platform);
+    if (env) {
+      return { cwd: legacyPath, env, isNew: false };
+    }
+  }
+
+  // 3. No valid isolation - check if we should create
+  if (!codebase) {
+    return { cwd: conversation.cwd ?? '/workspace', env: null, isNew: false };
+  }
+
+  // 4. Create new isolation (auto-isolation for all platforms!)
+  const env = await resolveIsolation(codebase, platform, conversationId, hints);
+  if (env) {
+    await db.updateConversation(conversation.id, {
+      isolation_env_id: env.id,
+      worktree_path: env.working_path,
+      isolation_provider: env.provider,
+      cwd: env.working_path,
+    });
+    return { cwd: env.working_path, env, isNew: true };
+  }
+
+  return { cwd: codebase.default_cwd, env: null, isNew: false };
+}
+
+/**
+ * Resolve which isolation environment to use
+ * Handles reuse, sharing, adoption, and creation
+ */
+async function resolveIsolation(
+  codebase: Codebase,
+  platform: IPlatformAdapter,
+  conversationId: string,
+  hints?: IsolationHints
+): Promise<IsolationEnvironmentRow | null> {
+  // Determine workflow identity
+  const workflowType = hints?.workflowType ?? 'thread';
+  const workflowId = hints?.workflowId ?? conversationId;
+
+  // 1. Check for existing environment with same workflow
+  const existing = await isolationEnvDb.findByWorkflow(codebase.id, workflowType, workflowId);
+  if (existing && (await worktreeExists(existing.working_path))) {
+    console.log(`[Orchestrator] Reusing environment for ${workflowType}/${workflowId}`);
+    return existing;
+  }
+
+  // 2. Check linked issues for sharing (cross-conversation)
+  if (hints?.linkedIssues?.length) {
+    for (const issueNum of hints.linkedIssues) {
+      const linkedEnv = await isolationEnvDb.findByWorkflow(codebase.id, 'issue', String(issueNum));
+      if (linkedEnv && (await worktreeExists(linkedEnv.working_path))) {
+        console.log(`[Orchestrator] Sharing worktree with linked issue #${String(issueNum)}`);
+        // Send UX message
+        await platform.sendMessage(
+          conversationId,
+          `Reusing worktree from issue #${String(issueNum)}`
+        );
+        return linkedEnv;
+      }
+    }
+  }
+
+  // 3. Try PR branch adoption (skill symbiosis)
+  if (hints?.prBranch) {
+    const canonicalPath = await getCanonicalRepoPath(codebase.default_cwd);
+    const adoptedPath = await findWorktreeByBranch(canonicalPath, hints.prBranch);
+    if (adoptedPath && (await worktreeExists(adoptedPath))) {
+      console.log(`[Orchestrator] Adopting existing worktree at ${adoptedPath}`);
+      const env = await isolationEnvDb.create({
+        codebase_id: codebase.id,
+        workflow_type: workflowType,
+        workflow_id: workflowId,
+        working_path: adoptedPath,
+        branch_name: hints.prBranch,
+        created_by_platform: platform.getPlatformType(),
+        metadata: { adopted: true, adopted_from: 'skill' },
+      });
+      return env;
+    }
+  }
+
+  // 4. Create new worktree
+  const provider = getIsolationProvider();
+  const canonicalPath = await getCanonicalRepoPath(codebase.default_cwd);
+
+  try {
+    const isolatedEnv = await provider.create({
+      codebaseId: codebase.id,
+      canonicalRepoPath: canonicalPath,
+      workflowType,
+      identifier: workflowId,
+      prBranch: hints?.prBranch,
+      prSha: hints?.prSha,
+    });
+
+    // Create database record
+    const env = await isolationEnvDb.create({
+      codebase_id: codebase.id,
+      workflow_type: workflowType,
+      workflow_id: workflowId,
+      working_path: isolatedEnv.workingPath,
+      branch_name: isolatedEnv.branchName ?? `${workflowType}-${workflowId}`,
+      created_by_platform: platform.getPlatformType(),
+      metadata: {
+        related_issues: hints?.linkedIssues ?? [],
+        related_prs: hints?.linkedPRs ?? [],
+      },
+    });
+
+    // UX message
+    if (hints?.prSha) {
+      const shortSha = hints.prSha.substring(0, 7);
+      await platform.sendMessage(
+        conversationId,
+        `Reviewing PR at commit \`${shortSha}\` (branch: \`${hints.prBranch}\`)`
+      );
+    } else {
+      await platform.sendMessage(
+        conversationId,
+        `Working in isolated branch \`${env.branch_name}\``
+      );
+    }
+
+    return env;
+  } catch (error) {
+    console.error('[Orchestrator] Failed to create isolation:', error);
+    return null;
+  }
+}
+
+/**
+ * Migrate a legacy worktree_path to the new isolation_environments model
+ */
+async function migrateToIsolationEnvironment(
+  conversation: Conversation,
+  codebase: Codebase | null,
+  legacyPath: string,
+  platform: IPlatformAdapter
+): Promise<IsolationEnvironmentRow | null> {
+  if (!codebase) return null;
+
+  try {
+    const { workflowType, workflowId } = inferWorkflowFromConversation(conversation, legacyPath);
+    const branchName = await getBranchNameFromWorktree(legacyPath);
+
+    const env = await isolationEnvDb.create({
+      codebase_id: codebase.id,
+      workflow_type: workflowType,
+      workflow_id: workflowId,
+      working_path: legacyPath,
+      branch_name: branchName,
+      created_by_platform: platform.getPlatformType(),
+      metadata: { migrated: true, migrated_at: new Date().toISOString() },
+    });
+
+    await db.updateConversation(conversation.id, {
+      isolation_env_id: env.id,
+    });
+
+    console.log(`[Orchestrator] Migrated legacy worktree to environment: ${env.id}`);
+    return env;
+  } catch (error) {
+    console.error('[Orchestrator] Failed to migrate legacy worktree:', error);
+    return null;
+  }
+}
+
+function inferWorkflowFromConversation(
+  conversation: Conversation,
+  legacyPath: string
+): { workflowType: string; workflowId: string } {
+  // Try to infer from platform conversation ID
+  if (conversation.platform_type === 'github') {
+    const match = /#(\d+)$/.exec(conversation.platform_conversation_id);
+    if (match) {
+      const isPR = legacyPath.includes('/pr-') || legacyPath.includes('-pr-');
+      return {
+        workflowType: isPR ? 'pr' : 'issue',
+        workflowId: match[1],
+      };
+    }
+  }
+
+  return {
+    workflowType: 'thread',
+    workflowId: conversation.platform_conversation_id,
+  };
+}
+
+async function getBranchNameFromWorktree(path: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync('git', [
+      '-C',
+      path,
+      'rev-parse',
+      '--abbrev-ref',
+      'HEAD',
+    ]);
+    return stdout.trim();
+  } catch {
+    return 'unknown';
+  }
+}
 
 /**
  * Wraps command content with execution context to signal the AI should execute immediately
@@ -39,7 +295,8 @@ export async function handleMessage(
   message: string,
   issueContext?: string, // Optional GitHub issue/PR context to append AFTER command loading
   threadContext?: string, // Optional thread message history for context
-  parentConversationId?: string // Optional parent channel ID for thread inheritance
+  parentConversationId?: string, // Optional parent channel ID for thread inheritance
+  isolationHints?: IsolationHints // Optional hints from adapter for isolation decisions
 ): Promise<void> {
   try {
     console.log(`[Orchestrator] Handling message for conversation ${conversationId}`);
@@ -147,9 +404,9 @@ export async function handleMessage(
           return;
         }
 
-        // Read command file
-        const cwd = conversation.isolation_env_id ?? conversation.worktree_path ?? conversation.cwd ?? codebase.default_cwd;
-        const commandFilePath = join(cwd, commandDef.path);
+        // Read command file (use worktree_path or cwd for command location)
+        const commandCwd = conversation.worktree_path ?? conversation.cwd ?? codebase.default_cwd;
+        const commandFilePath = join(commandCwd, commandDef.path);
 
         try {
           const commandText = await readFile(commandFilePath, 'utf-8');
@@ -231,41 +488,32 @@ export async function handleMessage(
     const aiClient = getAssistantClient(conversation.ai_assistant_type);
     console.log(`[Orchestrator] Using ${conversation.ai_assistant_type} assistant`);
 
-    // Get or create session (handle plan→execute transition)
-    let session = await sessionDb.getActiveSession(conversation.id);
+    // Get codebase for isolation and session management
     const codebase = conversation.codebase_id
       ? await codebaseDb.getCodebase(conversation.codebase_id)
       : null;
-    let cwd =
-      conversation.isolation_env_id ?? conversation.worktree_path ?? conversation.cwd ?? codebase?.default_cwd ?? '/workspace';
 
-    // Validate cwd exists - handle stale worktree paths gracefully
-    try {
-      await access(cwd);
-    } catch {
-      console.warn(`[Orchestrator] Working directory ${cwd} does not exist`);
+    // Validate and resolve isolation - this is the single source of truth
+    const { cwd, isNew: isNewIsolation } = await validateAndResolveIsolation(
+      conversation,
+      codebase,
+      platform,
+      conversationId,
+      isolationHints
+    );
 
-      // Deactivate stale session to force fresh start
-      if (session) {
-        await sessionDb.deactivateSession(session.id);
-        session = null;
-        console.log('[Orchestrator] Deactivated session with stale worktree');
-      }
+    // Get or create session (handle plan→execute transition)
+    let session = await sessionDb.getActiveSession(conversation.id);
 
-      // Clear stale isolation reference from conversation
-      if (conversation.isolation_env_id || conversation.worktree_path) {
-        await db.updateConversation(conversation.id, {
-          worktree_path: null,
-          isolation_env_id: null,
-          isolation_provider: null,
-          cwd: codebase?.default_cwd ?? '/workspace',
-        });
-        console.log('[Orchestrator] Cleared stale isolation environment from conversation');
-      }
-
-      // Use default cwd for this request
-      cwd = codebase?.default_cwd ?? '/workspace';
+    // If cwd changed (new isolation), deactivate stale sessions
+    if (isNewIsolation && session) {
+      console.log('[Orchestrator] New isolation, deactivating existing session');
+      await sessionDb.deactivateSession(session.id);
+      session = null;
     }
+
+    // Update last_activity_at for staleness tracking
+    await db.touchConversation(conversation.id);
 
     // Check for plan→execute transition (requires NEW session per PRD)
     // Supports both regular and GitHub workflows:

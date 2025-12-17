@@ -210,7 +210,8 @@ describe('GitHubAdapter', () => {
         });
 
         const crypto = require('crypto');
-        const signature = 'sha256=' + crypto.createHmac('sha256', 'test-secret').update(payload).digest('hex');
+        const signature =
+          'sha256=' + crypto.createHmac('sha256', 'test-secret').update(payload).digest('hex');
 
         await adapter.handleWebhook(payload, signature);
 
@@ -290,7 +291,8 @@ describe('GitHubAdapter', () => {
         });
 
         const crypto = require('crypto');
-        const signature = 'sha256=' + crypto.createHmac('sha256', 'test-secret').update(payload).digest('hex');
+        const signature =
+          'sha256=' + crypto.createHmac('sha256', 'test-secret').update(payload).digest('hex');
 
         await adapter.handleWebhook(payload, signature);
 
@@ -373,7 +375,8 @@ describe('GitHubAdapter', () => {
         });
 
         const crypto = require('crypto');
-        const signature = 'sha256=' + crypto.createHmac('sha256', 'test-secret').update(payload).digest('hex');
+        const signature =
+          'sha256=' + crypto.createHmac('sha256', 'test-secret').update(payload).digest('hex');
 
         await adapter.handleWebhook(payload, signature);
 
@@ -447,7 +450,8 @@ describe('GitHubAdapter', () => {
         });
 
         const crypto = require('crypto');
-        const signature = 'sha256=' + crypto.createHmac('sha256', 'test-secret').update(payload).digest('hex');
+        const signature =
+          'sha256=' + crypto.createHmac('sha256', 'test-secret').update(payload).digest('hex');
 
         await adapter.handleWebhook(payload, signature);
 

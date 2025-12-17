@@ -1,162 +1,532 @@
 # Worktree Orchestration Research
 
 > **Status**: Research Complete - Ready for Implementation (2025-12-17)
-> **Context**: Phase 3 of Isolation Provider Migration - extending auto-isolation to Slack/Discord/Telegram adapters
+> **Context**: Unified isolation architecture across all platforms with work-centric data model
 
 ## Executive Summary
 
-This document captures the design decisions for auto-isolation across all platform adapters. Key decisions:
+This document captures the design decisions for a **unified isolation architecture** that centralizes all worktree management in the orchestrator. Key decisions:
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| **Isolation trigger** | Auto on every @mention (for AI interactions) | Simplicity > efficiency; worktrees are cheap (0.1s, 2.5MB) |
-| **Threading model** | ALL bot responses → thread | Never pollute main channel; consistent UX |
-| **Cleanup strategy** | Git-based merge detection + background scheduler | No "close events" needed; git is source of truth |
-| **Limits** | 25 worktrees/codebase (configurable), auto-cleanup merged | Mental model limit, not resource constraint |
-| **UX message** | Verbose (branch name + instructions) | Helpful for new users |
-| **Removal** | `git worktree remove`, keep branch | Git is source of truth; branch preserved for restore |
+| Decision                   | Choice                                        | Rationale                                    |
+| -------------------------- | --------------------------------------------- | -------------------------------------------- |
+| **Isolation authority**    | Orchestrator only                             | Single source of truth; adapters are thin    |
+| **Data model**             | Work-centric (`isolation_environments` table) | Enables cross-platform sharing               |
+| **Isolation trigger**      | Auto on every @mention                        | Simplicity > efficiency; worktrees are cheap |
+| **Threading model**        | ALL bot responses → thread                    | Never pollute main channel                   |
+| **Cleanup service**        | Separate service, git-first                   | Clean separation; git is source of truth     |
+| **Cross-platform linking** | Metadata + `/worktree link` fallback          | Automated discovery with manual override     |
+| **Limits**                 | 25 worktrees/codebase (configurable)          | Mental model limit, not resource constraint  |
 
 **Implementation phases**:
-1. **3A**: Force-thread response model (Slack/Discord `createThread()`)
-2. **3B**: Auto-isolation in orchestrator (centralized logic)
-3. **3C**: Git-based cleanup scheduler
-4. **3D**: Limits and user feedback
-5. **Phase 4**: Drop `worktree_path` column
+
+1. **Phase 2.5**: Unified Isolation Architecture (schema + centralization + auto-isolation) ← **DO FIRST**
+2. **Phase 3A**: Force-thread response model (Slack/Discord)
+3. **Phase 3C**: Git-based cleanup scheduler (starts the scheduler from Phase 2.5)
+4. **Phase 3D**: Limits and user feedback
+5. **Phase 4**: Schema cleanup (drop legacy columns)
+
+> Note: Original Phase 3B ("Auto-Isolation in Orchestrator") was merged into Phase 2.5.
+
+---
 
 ## Problem Statement
 
-GitHub adapter has working auto-isolation: worktrees are created automatically on @mention and cleaned up on issue/PR close. The other adapters (Slack, Discord, Telegram) lack this automation, requiring manual `/worktree create` commands.
+The current architecture has **fragmented isolation logic**:
 
-**Goal**: Make isolation effortless across all platforms while keeping resource usage reasonable.
+- GitHub adapter has full auto-isolation (create, cleanup, UX messages)
+- Orchestrator has partial logic (cwd validation)
+- Other adapters (Slack, Discord, Telegram) have no automation
 
-## Current Architecture
+This causes:
 
-### Platform Conversation Models
+1. Code duplication and inconsistent behavior
+2. Double UX messages risk when both adapter and orchestrator act
+3. No ability to share worktrees across platforms
+4. Difficult to maintain and extend
 
-| Platform | Conversation ID | Threading Model | Natural Close Event |
-|----------|-----------------|-----------------|---------------------|
-| GitHub | `owner/repo#42` | Issue/PR as conversation | Issue/PR close/merge |
-| Telegram | `chat_id` (number) | Single persistent chat | None |
-| Slack | `channel:thread_ts` | Thread per conversation | None |
-| Discord | `channel_id` | Thread = separate channel | None |
+**Goal**: Centralize ALL isolation logic in the orchestrator with a work-centric data model.
 
-### How GitHub Auto-Isolation Works
+---
 
-```
-@bot mention detected
-       │
-       ▼
-┌─────────────────────────────────────┐
-│ Check: conversation.isolation_env_id │
-│        ?? conversation.worktree_path │
-└──────────────┬──────────────────────┘
-               │
-      exists?  │
-    ┌──YES─────┴─────NO────┐
-    ▼                      ▼
-  REUSE               CREATE via
-  existing            IsolationProvider
-       │                   │
-       └───────┬───────────┘
-               ▼
-         Work in isolated
-         worktree
-               │
-               ▼
-    Issue/PR closed → cleanupWorktree()
-```
+## Architecture Decision: Single Isolation Authority
 
-**Key insight**: GitHub's lifecycle is clean because issues/PRs have explicit close events.
-
-## Design Decision: Isolation Trigger
-
-### Options Considered
-
-| Option | Description | Pros | Cons |
-|--------|-------------|------|------|
-| **A) Auto on @mention** | Create worktree immediately | Effortless, consistent, safe | Resource-heavy for read-only queries |
-| **B) Lazy (on first write)** | Detect modifying commands | Efficient | Hard to detect intent reliably |
-| **C) User explicit** | `/worktree create` | Full control | Users forget, chaos ensues |
-
-### Decision: Option A - Auto on @mention
-
-**Rationale**:
-1. **Simplicity**: Same behavior as GitHub, easy mental model
-2. **Safety**: Users can't accidentally modify main repo
-3. **Future-proofing**: Workflow engine (planned) will have better control anyway
-4. **Resource cost is acceptable**: Worktrees are cheap (~symlinks + index), not full clones
-
-**The resource concern is overstated**:
-- Git worktrees share object database with main repo
-- Only unique files are duplicated (working tree)
-- A 500MB repo might only add 50MB per worktree
-- Disk space is cheap; developer confusion is expensive
-
-## Design Decision: Cleanup Strategy
-
-### The Key Insight: Git as Source of Truth
-
-Unlike GitHub webhooks, Slack/Discord/Telegram don't have "close" events. But we don't need them!
-
-**Git already knows**:
-- Is this branch merged to main? → `git branch --merged main`
-- Does this worktree have uncommitted changes? → `git status`
-- When was last commit? → `git log -1 --format=%ci`
-
-### Proposed Cleanup Flow
+### Current State (Problematic)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    CLEANUP TRIGGERS                          │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  1. USER EXPLICIT                                           │
-│     /worktree remove [name]                                 │
-│     /worktree done (marks current as done)                  │
-│                                                             │
-│  2. PR MERGED (detected via git)                            │
-│     Periodic check: is worktree branch merged to main?      │
-│     If yes → auto-cleanup candidate                         │
-│                                                             │
-│  3. STALE (time-based)                                      │
-│     No messages in conversation for N days                  │
-│     AND no commits in worktree for N days                   │
-│     → Mark as stale, candidate for removal                  │
-│                                                             │
-│  4. LIMIT REACHED                                           │
-│     User hits max worktrees (default: 25)                   │
-│     → Must cleanup before creating new                      │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+GitHub Adapter                    Orchestrator
+├── Auto-isolation logic    +     ├── CWD validation
+├── Worktree creation             ├── (no creation)
+├── UX messages                   └── (no UX messages)
+├── Cleanup on close
+└── 800+ lines
+
+Slack/Discord/Telegram: No isolation logic
 ```
 
-### Branch Merge Detection
+### Target State (Unified)
+
+```
+ALL Adapters (Thin)               Orchestrator (Authority)
+├── Parse platform events         ├── ALL isolation creation
+├── Detect @mentions              ├── ALL UX messages
+├── Build context                 ├── CWD validation
+├── Provide IsolationHints        ├── Reuse/sharing logic
+└── Trigger cleanup events        └── Cross-platform linking
+
+                                  Cleanup Service (Separate)
+                                  ├── Git-first checks
+                                  ├── Scheduled cleanup
+                                  └── On-demand removal
+```
+
+### Benefits
+
+1. **DRY**: Single implementation for all platforms
+2. **Consistency**: Same behavior everywhere
+3. **Testability**: Isolation logic isolated (pun intended)
+4. **Extensibility**: New platforms just need to call orchestrator
+5. **Cross-platform**: Work can span multiple conversations
+
+---
+
+## Data Model: Work-Centric Isolation
+
+### Current Schema (Platform-Centric)
+
+```sql
+conversations
+├── worktree_path        -- Path as identifier (legacy)
+├── isolation_env_id     -- Also path (redundant)
+└── isolation_provider   -- Provider type
+```
+
+**Problems**:
+
+- Worktree identified by filesystem path (implementation detail)
+- No independent lifecycle from conversations
+- Can't easily share across conversations
+- Dual-column confusion
+
+### New Schema (Work-Centric)
+
+```sql
+-- Isolated work environments (independent entities)
+CREATE TABLE remote_agent_isolation_environments (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  codebase_id           UUID NOT NULL REFERENCES remote_agent_codebases(id),
+
+  -- Workflow identification (what work this is for)
+  workflow_type         TEXT NOT NULL,        -- 'issue', 'pr', 'thread', 'task'
+  workflow_id           TEXT NOT NULL,        -- '42', 'pr-99', 'thread-abc123'
+
+  -- Implementation details
+  provider              TEXT NOT NULL DEFAULT 'worktree',
+  working_path          TEXT NOT NULL,        -- Actual filesystem path
+  branch_name           TEXT NOT NULL,        -- Git branch name
+
+  -- Lifecycle
+  status                TEXT NOT NULL DEFAULT 'active',  -- 'active', 'destroyed'
+  created_at            TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  created_by_platform   TEXT,                 -- 'github', 'slack', etc.
+
+  -- Cross-reference metadata (for linking)
+  metadata              JSONB DEFAULT '{}',
+
+  CONSTRAINT unique_workflow UNIQUE (codebase_id, workflow_type, workflow_id)
+);
+
+-- Index for common queries
+CREATE INDEX idx_isolation_env_codebase ON remote_agent_isolation_environments(codebase_id);
+CREATE INDEX idx_isolation_env_status ON remote_agent_isolation_environments(status);
+```
+
+### Migration Strategy (TEXT → UUID)
+
+**Important**: The current schema has `isolation_env_id` as TEXT (storing worktree paths).
+The new schema uses UUID FK. This requires a careful migration:
+
+```sql
+-- Step 1: Rename old column
+ALTER TABLE remote_agent_conversations
+  RENAME COLUMN isolation_env_id TO isolation_env_id_legacy;
+
+-- Step 2: Add new UUID column
+ALTER TABLE remote_agent_conversations
+  ADD COLUMN isolation_env_id UUID REFERENCES remote_agent_isolation_environments(id);
+
+-- Step 3: Backfill (done in application code, not SQL)
+-- For each conversation with isolation_env_id_legacy:
+--   1. Create isolation_environments record for the path
+--   2. Set new isolation_env_id to the created record's UUID
+
+-- Step 4 (Phase 4): Drop legacy columns
+-- ALTER TABLE remote_agent_conversations DROP COLUMN isolation_env_id_legacy;
+-- ALTER TABLE remote_agent_conversations DROP COLUMN worktree_path;
+-- ALTER TABLE remote_agent_conversations DROP COLUMN isolation_provider;
+```
+
+**Backfill logic** (application code):
 
 ```typescript
-// Check if worktree's branch is merged to main
-async function isBranchMerged(worktreePath: string, mainBranch: string = 'main'): Promise<boolean> {
-  const repoPath = await getCanonicalRepoPath(worktreePath);
-  const worktrees = await listWorktrees(repoPath);
-  const wt = worktrees.find(w => w.path === worktreePath);
+async function backfillIsolationEnvironments(): Promise<void> {
+  const conversations = await db.query(`
+    SELECT * FROM remote_agent_conversations
+    WHERE isolation_env_id_legacy IS NOT NULL
+      AND isolation_env_id IS NULL
+  `);
 
-  if (!wt?.branch) return false;
+  for (const conv of conversations.rows) {
+    const legacyPath = conv.isolation_env_id_legacy;
+    if (!(await worktreeExists(legacyPath))) {
+      // Stale reference, skip
+      continue;
+    }
 
-  // Check if branch is in merged list
-  const { stdout } = await execFileAsync('git', [
-    '-C', repoPath,
-    'branch', '--merged', mainBranch
-  ]);
+    // Infer workflow type from path or conversation context
+    const workflowType = inferWorkflowType(conv, legacyPath);
+    const workflowId = inferWorkflowId(conv, legacyPath);
 
-  return stdout.includes(wt.branch);
+    const env = await isolationEnvDb.createIsolationEnvironment({
+      codebase_id: conv.codebase_id,
+      workflow_type: workflowType,
+      workflow_id: workflowId,
+      working_path: legacyPath,
+      branch_name: await getBranchName(legacyPath),
+      created_by_platform: conv.platform_type,
+      metadata: { migrated: true },
+    });
+
+    await db.updateConversation(conv.id, { isolation_env_id: env.id });
+  }
 }
 ```
 
-**This enables cross-platform cleanup**:
-1. User creates worktree in Slack thread
-2. User works, commits, creates PR (via AI or manually)
-3. PR gets merged on GitHub
-4. Periodic cleanup job detects branch is merged
-5. Auto-cleanup the worktree (no Slack "close event" needed!)
+### Metadata Schema for Cross-Platform Linking
+
+```typescript
+interface IsolationEnvironmentMetadata {
+  // Auto-populated from context
+  related_issues?: number[]; // GitHub issues this work relates to
+  related_prs?: number[]; // GitHub PRs
+
+  // For adoption tracking
+  adopted?: boolean;
+  adopted_from?: 'skill' | 'branch' | 'path';
+
+  // For future AI-assisted discovery
+  keywords?: string[]; // Extracted from commit messages
+  ai_suggested_links?: Array<{
+    type: 'issue' | 'pr' | 'conversation';
+    id: string;
+    confidence: number;
+    reason: string;
+  }>;
+}
+```
+
+### Why This Model is Better
+
+1. **Independent lifecycle**: Environment exists even if all conversations close
+2. **Natural sharing**: Multiple conversations can reference same environment
+3. **Query-friendly**: "Find all conversations for this worktree" is trivial
+4. **Cross-platform**: Work spans platforms via shared environment reference
+5. **Future-proof**: Metadata enables smart linking without schema changes
+
+---
+
+## API Design: IsolationHints Parameter
+
+The orchestrator needs platform-specific context to make good isolation decisions. Rather than having the orchestrator know about each platform's internals, adapters provide **hints**.
+
+### Interface
+
+```typescript
+interface IsolationHints {
+  // Workflow identification (adapter knows this)
+  workflowType?: 'issue' | 'pr' | 'review' | 'thread' | 'task';
+  workflowId?: string;
+
+  // PR-specific (for reproducible reviews)
+  prBranch?: string;
+  prSha?: string;
+
+  // Cross-reference hints (for linking)
+  linkedIssues?: number[]; // From "Fixes #X" parsing
+  linkedPRs?: number[];
+
+  // Adoption hints
+  suggestedBranch?: string; // "Maybe reuse branch X"
+}
+
+// Updated handleMessage signature
+export async function handleMessage(
+  platform: IPlatformAdapter,
+  conversationId: string,
+  message: string,
+  context?: string, // Human-readable for AI
+  isolationHints?: IsolationHints // Machine-readable for orchestrator
+): Promise<void>;
+```
+
+### How Adapters Provide Hints
+
+**GitHub Adapter**:
+
+```typescript
+const hints: IsolationHints = {
+  workflowType: isPR ? 'pr' : 'issue',
+  workflowId: String(number),
+  prBranch: prHeadBranch, // From GitHub API
+  prSha: prHeadSha, // From GitHub API
+  linkedIssues: await getLinkedIssueNumbers(owner, repo, number),
+};
+await handleMessage(this, conversationId, message, contextString, hints);
+```
+
+**Slack/Discord/Telegram Adapters**:
+
+```typescript
+// No special hints needed - orchestrator infers 'thread' type
+await handleMessage(this, conversationId, message, undefined, undefined);
+```
+
+### How Orchestrator Uses Hints
+
+```typescript
+async function resolveIsolation(
+  conversation: Conversation,
+  codebase: Codebase,
+  platform: IPlatformAdapter,
+  conversationId: string,
+  hints?: IsolationHints
+): Promise<IsolatedEnvironment | null> {
+  // 1. Prefer explicit hints from adapter
+  const workflowType = hints?.workflowType ?? 'thread';
+  const workflowId = hints?.workflowId ?? conversationId;
+
+  // 2. Check for existing environment (reuse)
+  const existing = await isolationEnvDb.findByWorkflow(codebase.id, workflowType, workflowId);
+  if (existing && (await validatePath(existing.working_path))) {
+    return existing;
+  }
+
+  // 3. Check linked issues for sharing (cross-conversation)
+  if (hints?.linkedIssues?.length) {
+    for (const issueNum of hints.linkedIssues) {
+      const linkedEnv = await isolationEnvDb.findByWorkflow(codebase.id, 'issue', String(issueNum));
+      if (linkedEnv && (await validatePath(linkedEnv.working_path))) {
+        return linkedEnv; // Share with linked issue
+      }
+    }
+  }
+
+  // 4. Try PR branch adoption (skill symbiosis)
+  if (hints?.prBranch) {
+    const adoptedPath = await findWorktreeByBranch(codebase.default_cwd, hints.prBranch);
+    if (adoptedPath) {
+      return await adoptExistingWorktree(adoptedPath, codebase, workflowType, workflowId);
+    }
+  }
+
+  // 5. Create new
+  return await createNewEnvironment(codebase, workflowType, workflowId, hints);
+}
+```
+
+---
+
+## CWD Validation (Critical Safety Check)
+
+Before using any worktree path, validate it exists on disk. This prevents errors from stale database references.
+
+### Edge Case: Canonical Repo Path
+
+**Important**: `codebase.default_cwd` might itself be a worktree if someone cloned into a worktree path. The isolation provider needs the **canonical** (main) repo path to create new worktrees. Use `getCanonicalRepoPath()` to resolve this:
+
+```typescript
+const canonicalPath = await getCanonicalRepoPath(codebase.default_cwd);
+// canonicalPath is always the main repo, even if default_cwd is a worktree
+```
+
+### Validation and Resolution Logic
+
+```typescript
+async function validateAndResolveIsolation(
+  conversation: Conversation,
+  codebase: Codebase | null,
+  platform: IPlatformAdapter,
+  conversationId: string,
+  hints?: IsolationHints
+): Promise<{ cwd: string; env: IsolationEnvironmentRow | null; isNew: boolean }> {
+  // 1. Check existing isolation reference (new UUID model)
+  if (conversation.isolation_env_id) {
+    const env = await isolationEnvDb.getById(conversation.isolation_env_id);
+
+    if (env && (await worktreeExists(env.working_path))) {
+      // Valid - use it
+      return { cwd: env.working_path, env, isNew: false };
+    }
+
+    // Stale reference - clean up
+    console.warn(`[Orchestrator] Stale isolation: ${conversation.isolation_env_id}`);
+    await db.updateConversation(conversation.id, { isolation_env_id: null });
+
+    if (env) {
+      await isolationEnvDb.updateStatus(env.id, 'destroyed');
+    }
+  }
+
+  // 2. Legacy fallback (worktree_path or isolation_env_id_legacy without new UUID)
+  const legacyPath = conversation.worktree_path ?? conversation.isolation_env_id_legacy;
+  if (legacyPath && (await worktreeExists(legacyPath))) {
+    // Migrate to new model on-the-fly
+    const env = await migrateToIsolationEnvironment(conversation, codebase, legacyPath);
+    return { cwd: legacyPath, env, isNew: false };
+  }
+
+  // 3. No valid isolation - check if we should create
+  if (!codebase) {
+    return { cwd: conversation.cwd ?? '/workspace', env: null, isNew: false };
+  }
+
+  // 4. Create new isolation
+  const env = await resolveIsolation(conversation, codebase, platform, conversationId, hints);
+  if (env) {
+    await db.updateConversation(conversation.id, {
+      isolation_env_id: env.id,
+      cwd: env.working_path,
+    });
+    return { cwd: env.working_path, env, isNew: true };
+  }
+
+  return { cwd: codebase.default_cwd, env: null, isNew: false };
+}
+
+/**
+ * Migrate a legacy worktree_path to the new isolation_environments model.
+ * Creates an environment record for the existing worktree.
+ */
+async function migrateToIsolationEnvironment(
+  conversation: Conversation,
+  codebase: Codebase | null,
+  legacyPath: string
+): Promise<IsolationEnvironmentRow | null> {
+  if (!codebase) return null;
+
+  try {
+    // Infer workflow type from conversation context
+    const { workflowType, workflowId } = inferWorkflowFromConversation(conversation, legacyPath);
+
+    // Get branch name from git
+    const branchName = await getBranchNameFromWorktree(legacyPath);
+
+    const env = await isolationEnvDb.createIsolationEnvironment({
+      codebase_id: codebase.id,
+      workflow_type: workflowType,
+      workflow_id: workflowId,
+      working_path: legacyPath,
+      branch_name: branchName,
+      created_by_platform: conversation.platform_type,
+      metadata: { migrated: true, migrated_at: new Date().toISOString() },
+    });
+
+    // Update conversation to use new model
+    await db.updateConversation(conversation.id, {
+      isolation_env_id: env.id,
+    });
+
+    console.log(`[Orchestrator] Migrated legacy worktree to environment: ${env.id}`);
+    return env;
+  } catch (error) {
+    console.error('[Orchestrator] Failed to migrate legacy worktree:', error);
+    return null;
+  }
+}
+
+/**
+ * Infer workflow type and ID from conversation context and path.
+ */
+function inferWorkflowFromConversation(
+  conversation: Conversation,
+  legacyPath: string
+): { workflowType: string; workflowId: string } {
+  // Try to infer from platform conversation ID
+  if (conversation.platform_type === 'github') {
+    // Format: owner/repo#42
+    const match = /#(\d+)$/.exec(conversation.platform_conversation_id);
+    if (match) {
+      // Check path for pr- or issue- prefix
+      const isPR = legacyPath.includes('/pr-') || legacyPath.includes('-pr-');
+      return {
+        workflowType: isPR ? 'pr' : 'issue',
+        workflowId: match[1],
+      };
+    }
+  }
+
+  // Default: treat as thread with conversation ID
+  return {
+    workflowType: 'thread',
+    workflowId: conversation.platform_conversation_id,
+  };
+}
+```
+
+---
+
+## Cleanup Service Architecture
+
+### Design Principles
+
+1. **Git is source of truth**: Branch merged? Uncommitted changes? Git knows.
+2. **Separate service**: Clean separation from orchestrator
+3. **Multiple triggers**: Events, schedules, manual commands
+4. **Non-destructive by default**: Respect uncommitted changes
+
+### Configuration Constants
+
+```typescript
+// Cleanup thresholds (configurable via env vars)
+const STALE_THRESHOLD_DAYS = parseInt(process.env.STALE_THRESHOLD_DAYS ?? '14');
+const MAX_WORKTREES_PER_CODEBASE = parseInt(process.env.MAX_WORKTREES_PER_CODEBASE ?? '25');
+const CLEANUP_INTERVAL_HOURS = parseInt(process.env.CLEANUP_INTERVAL_HOURS ?? '6');
+```
+
+### Service Interface
+
+```typescript
+// src/services/cleanup-service.ts
+
+class CleanupService {
+  /**
+   * Called when a platform conversation is closed (e.g., GitHub issue/PR closed).
+   * Uses platform identifiers, not internal UUIDs.
+   */
+  async onConversationClosed(platformType: string, platformConversationId: string): Promise<void>;
+
+  /**
+   * Scheduled cleanup - runs every CLEANUP_INTERVAL_HOURS.
+   * Removes merged branches, stale environments.
+   */
+  async runScheduledCleanup(): Promise<CleanupReport>;
+
+  /**
+   * Remove specific environment (from /worktree remove command).
+   */
+  async removeEnvironment(envId: string, options?: { force?: boolean }): Promise<void>;
+
+  /**
+   * Clean up to make room when limit reached.
+   * Returns number of environments cleaned.
+   */
+  async cleanupToMakeRoom(codebaseId: string): Promise<number>;
+
+  // Git-first checks
+  private async isBranchMerged(env: IsolationEnvironment, mainBranch?: string): Promise<boolean>;
+  private async hasUncommittedChanges(workingPath: string): Promise<boolean>;
+  private async getLastCommitDate(workingPath: string): Promise<Date | null>;
+}
+```
 
 ### Cleanup State Machine
 
@@ -170,594 +540,67 @@ async function isBranchMerged(worktreePath: string, mainBranch: string = 'main')
          │                 │                 │
          ▼                 ▼                 ▼
     ┌─────────┐      ┌─────────┐      ┌─────────┐
-    │ MERGED  │      │ STALE   │      │ ORPHAN  │
-    │         │      │ (14d)*  │      │ (no DB) │
+    │ MERGED  │      │  STALE  │      │ ORPHAN  │
+    │(branch) │      │ (14d)*  │      │ (no DB) │
     └────┬────┘      └────┬────┘      └────┬────┘
          │                │                │
-         ▼                ▼                ▼
-    ┌─────────────────────────────────────────┐
-    │           REMOVE WORKTREE               │
-    │  git worktree remove <path>             │
-    │  (branch kept in git, can restore)      │
-    └─────────────────────────────────────────┘
+         │    Has uncommitted changes?     │
+         │         ┌──────┴──────┐         │
+         │        YES            NO        │
+         │         │              │        │
+         │         ▼              ▼        │
+         │    ┌─────────┐    ┌─────────┐   │
+         │    │  SKIP   │    │ REMOVE  │◀──┘
+         │    │ (warn)  │    │         │
+         │    └─────────┘    └────┬────┘
+         │                        │
+         └────────────────────────┴─────▶ git worktree remove <path>
+                                          (branch kept in git)
 
-* Telegram worktrees are NEVER marked stale (no auto-cleanup)
-* Stale = no conversation messages AND no git commits for 14 days (BOTH required)
-* Merged branches = IMMEDIATE cleanup (no waiting period)
+* STALE_THRESHOLD_DAYS = 14 (configurable)
+* Telegram worktrees are NEVER marked stale (persistent workspaces)
+* Merged branches = immediate cleanup candidate
 ```
 
-**Platform-specific cleanup behavior**:
-
-| Platform | Merged Branch | Stale (14d) | Manual |
-|----------|---------------|-------------|--------|
-| GitHub | Auto-remove | Auto-remove | Yes |
-| Slack | Auto-remove | Auto-remove | Yes |
-| Discord | Auto-remove | Auto-remove | Yes |
-| Telegram | Auto-remove | **Never** | Yes |
-
-### Cleanup = Remove Worktree, Keep Branch (Git is Source of Truth)
-
-**Principle**: Git is the source of truth. Don't overcomplicate.
-
-**Cleanup simply means**:
-```bash
-git worktree remove /path/to/worktree
-# Branch remains in repo, can restore later:
-git worktree add /new/path branch-name
-```
-
-**No special "archive" concept**. Just:
-- Remove the worktree working directory
-- Branch stays in git (commits preserved)
-- User can restore anytime with `/worktree create <branch-name>`
-
-**Why this is sufficient**:
-1. Git already tracks all commits (nothing lost)
-2. Branch name preserved (easy to find and restore)
-3. `git worktree remove` fails if uncommitted changes (safety built-in)
-4. `git worktree remove` is idempotent (safe to call on non-existent worktree)
-5. Simpler = fewer bugs
-
-## Design Decision: Limits
-
-### Proposed Limits
-
-| Limit | Value | Rationale |
-|-------|-------|-----------|
-| Max worktrees per codebase | **25** (configurable) | Mental model limit, not resource constraint |
-| Stale threshold | 14 days | Two weeks of inactivity |
-| Branch retention after removal | Forever | Git keeps branch, user can restore |
-| Auto-cleanup merged | Immediate | No reason to keep merged branch worktrees |
-
-**Configuration**:
-```env
-MAX_WORKTREES_PER_CODEBASE=25  # Default, can override for power users
-```
-
-**Rationale for limit**:
-- Not a resource constraint (worktrees are cheap: 0.1s, 2.5MB)
-- Mental model limit for users: 25+ parallel tasks becomes hard to track
-- Prevents runaway accumulation for abandoned conversations
-- **This is POC/v1** - conservative limit to test performance at scale
-- Can increase later once we verify no issues with many worktrees
-- Power users can increase via env var
-
-### What Happens at Limit
+### Cleanup Flow
 
 ```
-User: @bot help me with a new feature
-
-Bot: You have 10 active worktrees for this codebase.
-
-📊 Worktree Status:
-• 3 merged (can auto-remove)
-• 2 stale (no activity in 14+ days)
-• 5 active
-
-Options:
-• `/worktree cleanup merged` - Remove merged worktrees
-• `/worktree cleanup stale` - Remove stale worktrees
-• `/worktree list` - See all worktrees
-• `/worktree remove <name>` - Remove specific worktree
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        CLEANUP SERVICE                                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  TRIGGERS:                                                              │
+│  ├── GitHub adapter: onConversationClosed('github', 'owner/repo#42')   │
+│  ├── Scheduler: runScheduledCleanup() every 6 hours                     │
+│  ├── User command: /worktree remove [name]                              │
+│  └── Limit reached: cleanupToMakeRoom(codebaseId)                       │
+│                                                                         │
+│  GIT-FIRST CHECKS:                                                      │
+│  ├── isBranchMerged(env) → git branch --merged main                    │
+│  ├── hasUncommittedChanges(path) → git status --porcelain              │
+│  └── getLastCommitDate(path) → git log -1 --format=%ci                 │
+│                                                                         │
+│  SAFETY:                                                                │
+│  ├── Check for other conversations using same environment               │
+│  ├── Respect uncommitted changes (no force by default)                  │
+│  └── Log and continue on errors (don't crash cleanup cycle)            │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Future: Workflow Engine Integration
+### Who Calls What
 
-### Current Command System Limitations
+| Trigger            | Caller                | Method                                            |
+| ------------------ | --------------------- | ------------------------------------------------- |
+| GitHub close event | GitHub adapter        | `onConversationClosed('github', 'owner/repo#42')` |
+| Scheduled (6h)     | Scheduler in index.ts | `runScheduledCleanup()`                           |
+| `/worktree remove` | Command handler       | `removeEnvironment(envId)`                        |
+| Hit limit          | Orchestrator          | `cleanupToMakeRoom(codebaseId)`                   |
 
-Today, commands are simple markdown files executed via `/command-invoke`:
-- No metadata about read-only vs write operations
-- No control over which tools AI can use
-- Router is just another command template
+### Uncommitted Changes UX
 
-### Planned Workflow Engine
+When cleanup is blocked by uncommitted changes:
 
-The command handler will evolve into a workflow engine where:
-
-```typescript
-interface WorkflowCommand {
-  name: string;
-  description: string;
-  prompt: string;
-
-  // NEW: Metadata for orchestration
-  metadata: {
-    type: 'read' | 'write' | 'mixed';
-    requiresIsolation: boolean;
-    allowedTools?: string[];  // Restrict AI tool access
-    timeout?: number;
-  };
-}
-```
-
-**How this helps isolation**:
-1. Router receives natural language: "explain the login flow"
-2. Router routes to `explain` workflow (type: 'read')
-3. Orchestrator sees `requiresIsolation: false`
-4. AI runs on main repo (no worktree needed)
-
-**vs:**
-1. Router receives: "fix the login bug"
-2. Router routes to `fix-issue` workflow (type: 'write')
-3. Orchestrator sees `requiresIsolation: true`
-4. Worktree created automatically
-
-### Router as Gatekeeper
-
-```
-User Message
-     │
-     ▼
-┌─────────────────────────────────────┐
-│            ROUTER                    │
-│  (LLM-powered intent detection)      │
-│                                      │
-│  Analyzes message, determines:       │
-│  • Which workflow to invoke          │
-│  • Read-only vs write operation      │
-│  • Required isolation level          │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│         WORKFLOW ENGINE              │
-│                                      │
-│  Based on workflow metadata:         │
-│  • Create/reuse worktree if needed   │
-│  • Configure AI tool access          │
-│  • Execute workflow prompt           │
-│  • Track state for multi-step flows  │
-└─────────────────────────────────────┘
-```
-
-**Key insight**: The router's classification becomes the source of truth for whether isolation is needed. This moves the complexity from "detect file modifications" to "classify intent" - which LLMs are good at.
-
-## Implementation Phases
-
-### Phase 3A: Force-Thread Response Model
-
-**Scope**: Bot ALWAYS responds in threads, never in main channel
-
-**Changes needed**:
-
-1. **Add `createThread()` to adapter interfaces** (`src/types/index.ts`):
-```typescript
-interface IPlatformAdapter {
-  // ... existing ...
-  createThread?(channelId: string, initialMessage: string, parentTs?: string): Promise<string>;
-}
-```
-
-2. **Implement `createThread()` in Slack adapter** (`src/adapters/slack.ts`):
-```typescript
-async createThread(channelId: string, initialMessage: string, parentTs?: string): Promise<string> {
-  const result = await this.app.client.chat.postMessage({
-    channel: channelId,
-    thread_ts: parentTs,  // Reply to the @mention message
-    text: initialMessage,
-  });
-  return `${channelId}:${result.ts}`;  // Thread conversation ID
-}
-```
-
-3. **Implement `createThread()` in Discord adapter** (`src/adapters/discord.ts`):
-```typescript
-async createThread(channelId: string, initialMessage: string, parentMessageId?: string): Promise<string> {
-  const channel = await this.client.channels.fetch(channelId);
-  if (!channel?.isTextBased()) throw new Error('Invalid channel');
-
-  const parentMessage = parentMessageId
-    ? await (channel as TextChannel).messages.fetch(parentMessageId)
-    : null;
-
-  const thread = await parentMessage?.startThread({
-    name: `Bot conversation ${Date.now()}`,
-    autoArchiveDuration: 1440,  // 24 hours
-  }) ?? await (channel as TextChannel).threads.create({
-    name: `Bot conversation ${Date.now()}`,
-    autoArchiveDuration: 1440,
-  });
-
-  await thread.send(initialMessage);
-  return thread.id;  // Thread ID is the conversation ID
-}
-```
-
-4. **Update message handlers in `src/index.ts`**:
-```typescript
-// Slack
-slack.onMessage(async event => {
-  let conversationId = slack!.getConversationId(event);
-
-  // If NOT in a thread, force-create one
-  if (!slack!.isThread(event)) {
-    conversationId = await slack!.createThread(
-      event.channel,
-      'Starting work...',
-      event.ts  // Reply to the @mention
-    );
-  }
-
-  // Rest of handling uses thread conversationId
-});
-```
-
-**Note**: Telegram doesn't have threads - it gets special handling (next phase).
-
-**Phase 3A Checklist**:
-- [ ] Add `createThread()` method to `IPlatformAdapter` interface
-- [ ] Implement `Slack.createThread()` with thread_ts handling
-- [ ] Implement `Discord.createThread()` with thread creation
-- [ ] Update Slack message handler to force-create thread if not in thread
-- [ ] Update Discord message handler to force-create thread if not in thread
-- [ ] Test: @mention in channel → response appears in new thread
-- [ ] Test: @mention in existing thread → response appears in same thread
-- [ ] Test: conversation ID format is consistent with DB schema
-
-### Phase 3B: Auto-Isolation in Orchestrator
-
-**Scope**: Centralized isolation logic in orchestrator
-
-**Changes needed**:
-
-1. **Add auto-isolation to `handleMessage()`** (`src/orchestrator/orchestrator.ts`):
-```typescript
-// After conversation lookup, before AI invocation
-if (codebase && !conversation.isolation_env_id && !conversation.worktree_path) {
-  const env = await autoCreateIsolation(conversation, codebase, platform, conversationId);
-  if (env) {
-    await platform.sendMessage(conversationId,
-      `Working on **${codebase.name}** in isolated branch \`${env.branchName}\`\n(Use /repos to switch if this isn't the right codebase)`
-    );
-  }
-}
-```
-
-2. **New helper function**:
-```typescript
-async function autoCreateIsolation(
-  conversation: Conversation,
-  codebase: Codebase,
-  platform: IPlatformAdapter,
-  conversationId: string
-): Promise<IsolatedEnvironment | null> {
-  try {
-    const provider = getIsolationProvider();
-    const env = await provider.create({
-      codebaseId: codebase.id,
-      canonicalRepoPath: codebase.default_cwd,
-      workflowType: 'thread',
-      identifier: conversationId,
-      description: `${platform.getPlatformType()} thread`,
-    });
-
-    await db.updateConversation(conversation.id, {
-      cwd: env.workingPath,
-      worktree_path: env.workingPath,
-      isolation_env_id: env.id,
-      isolation_provider: env.provider,
-    });
-
-    return env;
-  } catch (error) {
-    console.error('[Orchestrator] Auto-isolation failed:', error);
-    return null;  // Non-fatal, continue without isolation
-  }
-}
-```
-
-**Phase 3B Checklist**:
-- [ ] Add `autoCreateIsolation()` helper function to orchestrator
-- [ ] Add auto-isolation check early in `handleMessage()` (after conversation lookup)
-- [ ] Send verbose UX message when worktree created
-- [ ] Handle Telegram specially (no thread forcing, just auto-isolate)
-- [ ] Test: First message in Slack thread → worktree created automatically
-- [ ] Test: Second message in same thread → reuses existing worktree
-- [ ] Test: Error in worktree creation → continues without isolation (non-fatal)
-- [ ] Test: Telegram chat → worktree created, persists across sessions
-
-### Phase 3C: Git-Based Cleanup
-
-**Scope**:
-1. Periodic job to check worktree branch status
-2. Auto-cleanup merged branches
-3. Mark stale worktrees
-4. Removal/cleanup system (no archival - branches stay in git)
-
-**New components**:
-- `src/cleanup/worktree-cleanup.ts` - cleanup logic
-- `src/cleanup/scheduler.ts` - periodic job runner
-- Database: Add `last_activity_at` to conversations
-
-**Cleanup scheduler** (`src/cleanup/scheduler.ts`):
-```typescript
-const CLEANUP_INTERVAL_MS = parseInt(process.env.CLEANUP_INTERVAL_HOURS ?? '6') * 60 * 60 * 1000;
-
-export async function startCleanupScheduler(): Promise<void> {
-  // Run immediately on startup
-  await runCleanupCycle();
-  // Then periodically
-  setInterval(runCleanupCycle, CLEANUP_INTERVAL_MS);
-}
-
-async function runCleanupCycle(): Promise<void> {
-  console.log('[Cleanup] Starting cleanup cycle');
-
-  // 1. Find and remove worktrees with merged branches (ALL platforms)
-  const allCodebases = await db.getAllCodebases();
-  for (const codebase of allCodebases) {
-    const merged = await findMergedWorktrees(codebase.default_cwd);
-    for (const worktreePath of merged) {
-      await safeRemoveWorktree(worktreePath);
-    }
-  }
-
-  // 2. Remove stale worktrees (14 days no activity)
-  // IMPORTANT: Skip Telegram - those are persistent workspaces
-  const staleConversations = await db.getStaleConversationsWithWorktrees(14);
-  for (const conv of staleConversations) {
-    if (conv.platform_type === 'telegram') {
-      continue;  // Telegram worktrees never auto-cleanup
-    }
-    await safeRemoveWorktree(conv.isolation_env_id ?? conv.worktree_path);
-  }
-
-  console.log('[Cleanup] Cleanup cycle complete');
-}
-```
-
-**Phase 3C Checklist**:
-- [ ] Create `src/cleanup/worktree-cleanup.ts` with cleanup logic
-- [ ] Create `src/cleanup/scheduler.ts` with `startCleanupScheduler()`
-- [ ] Add `findMergedWorktrees()` function using `git branch --merged`
-- [ ] Add `safeRemoveWorktree()` that handles errors gracefully
-- [ ] Add database migration for `last_activity_at` column
-- [ ] Add `db.getStaleConversationsWithWorktrees()` query
-- [ ] Call `startCleanupScheduler()` from `src/index.ts` on startup
-- [ ] Test: Merged branch worktree → removed immediately
-- [ ] Test: Stale Slack worktree (14d) → removed
-- [ ] Test: Stale Telegram worktree → NOT removed
-- [ ] Test: Worktree with uncommitted changes → skipped with warning
-
-### Phase 3D: Limits and User Feedback
-
-**Scope**:
-1. Enforce worktree limits
-2. User-facing cleanup commands
-3. Status dashboard in `/status` output
-
-**Phase 3D Checklist**:
-- [ ] Add limit check before auto-isolation in orchestrator
-- [ ] Add `/worktree cleanup merged` command
-- [ ] Add `/worktree cleanup stale` command
-- [ ] Update `/status` to show worktree count and status
-- [ ] Test: Hit limit → user sees helpful message with options
-- [ ] Test: `/worktree cleanup merged` → removes merged branch worktrees
-- [ ] Test: Limit is configurable via `MAX_WORKTREES_PER_CODEBASE`
-
-### Phase 4: Drop `worktree_path` Column
-
-**Prerequisites**:
-- All adapters using `isolation_env_id`
-- All queries using fallback pattern verified
-- Migration script to backfill `isolation_env_id`
-
-**Phase 4 Checklist**:
-- [ ] Verify all code uses `isolation_env_id ?? worktree_path` pattern
-- [ ] Create migration to backfill `isolation_env_id` from `worktree_path`
-- [ ] Remove fallback pattern from all queries (use only `isolation_env_id`)
-- [ ] Create migration to drop `worktree_path` column
-- [ ] Test: Existing conversations with only `worktree_path` → migrated correctly
-- [ ] Test: New conversations → only `isolation_env_id` populated
-
-## Resolved Questions
-
-### 1. Isolation in Orchestrator vs Adapters
-
-**Decision**: **Orchestrator** - centralized in `handleMessage()`
-
-**Rationale**:
-- DRY: Single implementation for all platforms
-- GitHub already has platform-specific cleanup (on close events)
-- Other platforms use git-based cleanup (branch merge detection)
-- Platform adapters remain "dumb" - just route messages
-
-**Implementation location**: Early in `src/orchestrator/orchestrator.ts:handleMessage()`, after conversation lookup but before AI invocation:
-
-```typescript
-async function handleMessage(...) {
-  const conversation = await db.getOrCreateConversation(...);
-
-  // Auto-isolation for new conversations with codebase
-  if (codebase && !conversation.isolation_env_id && !conversation.worktree_path) {
-    try {
-      const provider = getIsolationProvider();
-      const env = await provider.create({
-        codebaseId: codebase.id,
-        canonicalRepoPath: codebase.default_cwd,
-        workflowType: 'thread',
-        identifier: conversationId,
-        description: `${platform.getPlatformType()} conversation`,
-      });
-
-      await db.updateConversation(conversation.id, {
-        cwd: env.workingPath,
-        worktree_path: env.workingPath,
-        isolation_env_id: env.id,
-        isolation_provider: env.provider,
-      });
-
-      // Inform user
-      await platform.sendMessage(conversationId,
-        `Working in isolated branch \`${env.branchName}\``);
-
-    } catch (error) {
-      console.error('[Orchestrator] Auto-isolation failed:', error);
-      // Continue without isolation - not fatal
-    }
-  }
-
-  // ... rest of message handling
-}
-```
-
-### 2. Telegram: One Worktree or Many?
-
-**Decision**: **One persistent worktree per chat per codebase**
-
-**Rationale**:
-- Telegram has no threading concept (unlike Slack/Discord)
-- Each chat is a persistent 1:1 conversation
-- User expects continuity across sessions (like a workspace)
-- If user wants fresh start: `/worktree remove` + next message auto-creates new
-- Simpler than trying to invent "sessions" within Telegram
-
-**Implementation**:
-- Same `workflowType: 'thread'` with `chat_id` as identifier
-- Hash ensures deterministic branch name: `thread-{hash(chat_id)}`
-- Auto-create on first message if codebase is configured
-- Never auto-cleanup (user controls via `/worktree remove`)
-
-**Telegram-specific UX differences**:
-- No "force into thread" logic (Telegram has no threads)
-- Worktree persists forever until explicitly removed
-- Cleanup scheduler skips Telegram worktrees (no staleness concept)
-
-### 3. Thread Context Inheritance & Threading Model
-
-**Key Decision**: **ALL bot responses go to threads - never pollute main channel**
-
-This is a fundamental architectural rule:
-- **Every bot response** creates or uses a thread (no exceptions)
-- When user @mentions bot in channel → bot creates thread, responds there
-- When user @mentions bot in existing thread → bot responds in that thread
-- Each thread gets its own isolation (worktree) for AI interactions
-
-**Which commands need isolation?**
-
-| Command Type | Thread Required? | Isolation Required? |
-|-------------|------------------|---------------------|
-| `/status`, `/help`, `/repos`, `/commands` | **Yes** | No |
-| `/worktree list`, `/worktree orphans` | **Yes** | No |
-| `/clone`, `/setcwd`, `/codebase-switch` | **Yes** | No |
-| `/command-invoke *`, `/worktree create` | **Yes** | **Yes** |
-| Any AI query (natural language) | **Yes** | **Yes** |
-
-**Rationale**:
-- Main channel stays clean - all bot activity in threads
-- Consistent UX - users always know where to find bot responses
-- Natural isolation boundary: 1 thread = 1 worktree = 1 task
-- DMs are out of scope for now (handle separately later)
-
-**Implementation requirements**:
-
-1. **Slack/Discord adapters need `createThread()` capability**:
-```typescript
-interface IPlatformAdapter {
-  // ... existing methods ...
-
-  /**
-   * Create a new thread and return its conversation ID
-   * Used when bot is @mentioned in main channel
-   */
-  createThread?(
-    channelId: string,
-    initialMessage: string,
-    parentMessageTs?: string  // The message that triggered the thread
-  ): Promise<string>;  // Returns thread conversation ID
-}
-```
-
-2. **Orchestrator flow**:
-```typescript
-// If mentioned in channel (not thread), force-create thread
-if (!isThread && adapter.createThread) {
-  const threadId = await adapter.createThread(channelId, 'Starting work...');
-  conversationId = threadId;  // Use thread as conversation
-}
-// Now create isolation for this thread
-```
-
-3. **No inheritance needed** - each thread is independent:
-   - Thread = conversation = worktree
-   - Simpler model than parent/child inheritance
-   - User starts new thread for new task
-
-**Current code impact**:
-- `parentConversationId` logic becomes irrelevant for isolation
-- Still useful for inheriting `codebase_id` (so user doesn't re-clone)
-- Remove isolation field inheritance from parent
-
-### 4. Cleanup Job Timing
-
-**Decision**: **Startup + periodic (6 hours) + on-demand at limits**
-
-**Implementation**:
-```typescript
-// src/cleanup/scheduler.ts
-const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
-
-export async function startCleanupScheduler(): Promise<void> {
-  // Run immediately on startup
-  await runCleanupCycle();
-
-  // Then periodically
-  setInterval(runCleanupCycle, CLEANUP_INTERVAL_MS);
-}
-
-async function runCleanupCycle(): Promise<void> {
-  console.log('[Cleanup] Starting cleanup cycle');
-  await cleanupMergedWorktrees();
-  await removeStaleWorktrees(14); // 14 days threshold
-  console.log('[Cleanup] Cleanup cycle complete');
-}
-```
-
-**On-demand check** in auto-isolation path:
-```typescript
-const worktreeCount = await countWorktreesForCodebase(codebase.id);
-if (worktreeCount >= MAX_WORKTREES) {
-  // Attempt quick cleanup of merged branches
-  const cleaned = await cleanupMergedWorktrees(codebase.id);
-  if (cleaned === 0) {
-    // No merged branches - show limit message
-    await platform.sendMessage(conversationId, limitReachedMessage);
-    return;
-  }
-}
-```
-
-### 5. Handling Uncommitted Changes
-
-**Decision**: **Respect git** - let git refuse, show clear error
-
-**Rationale**:
-- Git's refusal is a safety feature, not a bug
-- User should consciously decide what to do with uncommitted work
-- Auto-stash risks data loss (user might forget about stash)
-- Force-delete is destructive
-
-**Error message**:
 ```
 Cannot remove worktree - you have uncommitted changes.
 
@@ -767,216 +610,561 @@ Options:
 3. Force remove: `/worktree remove --force` (LOSES CHANGES!)
 ```
 
-**Removal behavior**: Cleanup attempts `git worktree remove` without force. If it fails due to uncommitted changes, the worktree stays active and is logged for user attention.
+---
 
-### 6. Auto-Isolation UX Message
+## Cross-Platform Linking
 
-**Decision**: **Verbose message with branch name and instructions**
+### The Scenario
 
-**Format**:
 ```
-Working on **{codebase_name}** in isolated branch `{branch_name}`
-(Use /repos to switch if this isn't the right codebase)
+1. User starts work in Slack → creates thread-abc123 worktree
+2. User opens GitHub Issue #42 for same work
+3. User wants both to share the same worktree
 ```
 
-**Example**:
+### MVP Solution: Metadata + Manual Linking
+
+**Automatic metadata collection**:
+
+- When AI creates commits, extract issue/PR references from messages
+- When AI creates PRs, store PR number in environment metadata
+- Store keywords from conversation for future discovery
+
+**Manual linking fallback**:
+
 ```
-Working on **remote-coding-agent** in isolated branch `thread-a7f3b2c1`
-(Use /repos to switch if this isn't the right codebase)
+/worktree link issue-42
 ```
+
+Links current conversation's worktree to issue-42's workflow identifier.
+
+**Future: AI-assisted discovery**:
+
+- AI can search git history: `git log --all --grep="#42"`
+- AI can suggest: "Found commits mentioning issue #42 on branch thread-abc123. Link?"
+- User confirms, orchestrator updates metadata
+
+### Implementation
+
+```typescript
+// In orchestrator, when resolving isolation:
+if (hints?.linkedIssues?.length) {
+  for (const issueNum of hints.linkedIssues) {
+    const linkedEnv = await isolationEnvDb.findByWorkflow(codebase.id, 'issue', String(issueNum));
+    if (linkedEnv) {
+      // Found! Share this environment
+      console.log(`[Orchestrator] Sharing worktree with linked issue #${issueNum}`);
+      await db.updateConversation(conversation.id, {
+        isolation_env_id: linkedEnv.id,
+      });
+      return linkedEnv;
+    }
+  }
+}
+
+// /worktree link command handler
+async function handleWorktreeLink(conversation: Conversation, target: string): Promise<string> {
+  // Parse target: "issue-42", "pr-99", "thread-abc123"
+  const match = /^(issue|pr|thread|task)-(.+)$/.exec(target);
+  if (!match) return 'Invalid target format. Use: issue-42, pr-99, etc.';
+
+  const [, workflowType, workflowId] = match;
+
+  const targetEnv = await isolationEnvDb.findByWorkflow(
+    conversation.codebase_id,
+    workflowType,
+    workflowId
+  );
+
+  if (!targetEnv) return `No worktree found for ${target}`;
+
+  await db.updateConversation(conversation.id, {
+    isolation_env_id: targetEnv.id,
+    cwd: targetEnv.working_path,
+  });
+
+  return `Linked to worktree \`${targetEnv.branch_name}\``;
+}
+```
+
+---
+
+## Skill Symbiosis (Preserved)
+
+The worktree-manager Claude Code skill creates worktrees at `~/tmp/worktrees/<project>/<branch>/`. The new architecture preserves symbiosis through **adoption**.
+
+### Flow
+
+```
+1. Skill creates: ~/tmp/worktrees/myapp/feature-auth/
+   (NOT in app's database - skill has its own registry)
+
+2. App receives PR webhook for branch "feature/auth"
+
+3. Orchestrator resolves isolation:
+   a. Check existing environment → none
+   b. Check linked issues → none
+   c. Check for branch adoption via findWorktreeByBranch() → FOUND!
+
+4. Orchestrator adopts the worktree:
+   - Creates isolation_environments record pointing to skill's worktree
+   - Sets metadata: { adopted: true, adopted_from: 'skill' }
+
+5. Conversation uses skill's worktree, both systems happy
+```
+
+### Key Code
+
+```typescript
+// In resolveIsolation():
+if (hints?.prBranch) {
+  const existingPath = await findWorktreeByBranch(codebase.default_cwd, hints.prBranch);
+
+  if (existingPath && (await worktreeExists(existingPath))) {
+    // Adopt into our system
+    const env = await isolationEnvDb.create({
+      codebase_id: codebase.id,
+      workflow_type: 'pr',
+      workflow_id: hints.workflowId,
+      provider: 'worktree',
+      working_path: existingPath,
+      branch_name: hints.prBranch,
+      metadata: { adopted: true, adopted_from: 'skill' },
+    });
+
+    console.log(`[Orchestrator] Adopted skill worktree: ${existingPath}`);
+    return env;
+  }
+}
+```
+
+---
+
+## GitHub Adapter Simplification
+
+### Before (Current - Complex)
+
+```typescript
+// github.ts - 800+ lines
+async handleWebhook(...) {
+  // ... 200 lines of event parsing ...
+
+  // AUTO-ISOLATION LOGIC (REMOVE THIS)
+  if (!existingIsolation) {
+    // Check linked issues (50 lines)
+    // Fetch PR branch/SHA (30 lines)
+    // Create worktree (40 lines)
+    // Send UX messages (20 lines)
+    // Update database (15 lines)
+  }
+
+  await handleMessage(...);
+}
+```
+
+### After (Thin)
+
+```typescript
+// github.ts - ~400 lines
+async handleWebhook(...) {
+  // Signature verification
+  // Event parsing
+  // @mention detection
+
+  // Handle close events (trigger cleanup)
+  if (isCloseEvent) {
+    await cleanupService.onConversationClosed(conversationId);
+    return;
+  }
+
+  // Build hints (GitHub-specific context)
+  const hints: IsolationHints = {
+    workflowType: isPR ? 'pr' : 'issue',
+    workflowId: String(number),
+    prBranch: await this.getPRHeadBranch(owner, repo, number),
+    prSha: await this.getPRHeadSha(owner, repo, number),
+    linkedIssues: await getLinkedIssueNumbers(owner, repo, number),
+  };
+
+  // Build context for AI
+  const context = this.buildContext(event);
+
+  // Let orchestrator handle EVERYTHING else
+  await handleMessage(this, conversationId, message, context, hints);
+}
+```
+
+### What Stays in GitHub Adapter
+
+| Responsibility                 | Stays | Moves          |
+| ------------------------------ | ----- | -------------- |
+| Webhook signature verification | ✅    |                |
+| Event parsing                  | ✅    |                |
+| @mention detection             | ✅    |                |
+| Building IsolationHints        | ✅    |                |
+| Calling handleMessage()        | ✅    |                |
+| Close event → trigger cleanup  | ✅    |                |
+| Worktree creation              |       | → Orchestrator |
+| UX messages for isolation      |       | → Orchestrator |
+| Database updates for isolation |       | → Orchestrator |
+| Linked issue worktree sharing  |       | → Orchestrator |
+
+---
+
+## Implementation Phases
+
+> **Note**: The original Phase 3B ("Auto-Isolation in Orchestrator") has been merged into Phase 2.5.
+> Phase 2.5 now encompasses both the new data model AND the auto-isolation logic centralization.
+
+### Phase 2.5: Unified Isolation Architecture (DO FIRST)
+
+**Goal**: Centralize all isolation logic with new data model. This phase combines:
+
+- New work-centric database schema
+- Migration from TEXT paths to UUID FKs
+- Moving auto-isolation from GitHub adapter to orchestrator
+- Auto-isolation for ALL platforms (previously only GitHub had it)
+
+**Database Changes**:
+
+1. Create `remote_agent_isolation_environments` table
+2. Rename `isolation_env_id` → `isolation_env_id_legacy` (TEXT, for migration)
+3. Add new `isolation_env_id` UUID FK to conversations
+4. Add `last_activity_at` to conversations
+
+**New Modules**:
+
+1. `src/db/isolation-environments.ts` - CRUD for new table
+2. `src/services/cleanup-service.ts` - Cleanup logic (scheduler not started yet)
+
+**Orchestrator Changes**:
+
+1. Add `isolationHints` parameter to `handleMessage()`
+2. Add `validateAndResolveIsolation()` with cwd validation
+3. Add `resolveIsolation()` with reuse/sharing logic
+4. Add `migrateToIsolationEnvironment()` for legacy path migration
+5. Move all UX messaging for isolation here
+
+**Adapter Changes**:
+
+1. **GitHub**: Remove worktree creation, keep close event trigger, add hints
+2. **Slack/Discord/Telegram**: No changes needed (orchestrator handles)
+
+**Phase 2.5 Checklist**:
+
+- [ ] Create migration for `isolation_environments` table + column renames
+- [ ] Create `src/db/isolation-environments.ts`
+- [ ] Create `src/services/cleanup-service.ts` (without scheduler)
+- [ ] Add `IsolationHints` interface to types
+- [ ] Update `handleMessage()` signature
+- [ ] Add `validateAndResolveIsolation()` to orchestrator
+- [ ] Add `migrateToIsolationEnvironment()` for legacy support
+- [ ] Add auto-isolation logic to orchestrator
+- [ ] Refactor GitHub adapter (remove isolation logic, add hints)
+- [ ] Add `/worktree link` command
+- [ ] Update tests
+- [ ] Test: GitHub issue → worktree created by orchestrator
+- [ ] Test: GitHub PR → shares linked issue's worktree
+- [ ] Test: Slack thread → worktree created by orchestrator
+- [ ] Test: Stale path → cleaned up, new worktree created
+- [ ] Test: Skill-created worktree → adopted correctly
+- [ ] Test: Legacy worktree_path → migrated on-the-fly
+
+### Phase 3A: Force-Thread Response Model
+
+**Scope**: Bot ALWAYS responds in threads (Slack/Discord).
+
+- [ ] Add `createThread()` to `IPlatformAdapter` interface
+- [ ] Implement `Slack.createThread()`
+- [ ] Implement `Discord.createThread()`
+- [ ] Update message handlers to force-create threads
+- [ ] Test: @mention in channel → response in new thread
+
+### Phase 3C: Git-Based Cleanup Scheduler
+
+**Scope**: Scheduled cleanup using git as source of truth.
+
+- [ ] Add `startCleanupScheduler()` to index.ts
+- [ ] Implement `runScheduledCleanup()` in cleanup service
+- [ ] Add `isBranchMerged()` git check
+- [ ] Add `findStaleEnvironments()` query
+- [ ] Test: Merged branch → auto-removed
+- [ ] Test: Stale Slack worktree → removed
+- [ ] Test: Stale Telegram worktree → NOT removed
+
+### Phase 3D: Limits and User Feedback
+
+**Scope**: Enforce limits, provide helpful cleanup commands.
+
+**Limit Enforcement UX**:
+When user hits MAX_WORKTREES_PER_CODEBASE (default: 25):
+
+```
+You have 25 active worktrees for **myproject** (limit reached).
+
+📊 Worktree Status:
+• 3 merged (can auto-remove)
+• 2 stale (no activity in 14+ days)
+• 20 active
+
+Options:
+• `/worktree cleanup merged` - Remove merged worktrees (3)
+• `/worktree cleanup stale` - Remove stale worktrees (2)
+• `/worktree list` - See all worktrees
+• `/worktree remove <name>` - Remove specific worktree
+```
+
+**Checklist**:
+
+- [ ] Add limit check in orchestrator before creating new isolation
+- [ ] Attempt auto-cleanup of merged branches when limit hit
+- [ ] If auto-cleanup insufficient, show limit message with options
+- [ ] Add `/worktree cleanup merged` command
+- [ ] Add `/worktree cleanup stale` command
+- [ ] Update `/status` to show worktree count and breakdown
+- [ ] Test: Hit limit → helpful message shown
+- [ ] Test: Auto-cleanup makes room → continue without user action
+
+### Phase 4: Schema Cleanup
+
+**Scope**: Remove legacy columns after migration complete.
+
+- [ ] Verify all code uses new model
+- [ ] Create migration to drop `worktree_path` column
+- [ ] Create migration to drop `isolation_provider` column
+- [ ] Remove fallback patterns from queries
+
+---
+
+## Resolved Questions
+
+### 1. Isolation Authority Location
+
+**Decision**: **Orchestrator only**
 
 **Rationale**:
-- Helpful for new users who don't understand isolation
-- Branch name visible for debugging/reference
-- Escape hatch (/repos) if wrong codebase was auto-selected
-- Single message, not intrusive
 
-## Research Tasks
+- Single source of truth eliminates duplication
+- Adapters become thin and testable
+- Cross-platform sharing requires centralized logic
+- Easier to maintain and extend
 
-### Completed Research
+### 2. Data Model
 
-#### 1. Worktree Creation Overhead (TESTED)
+**Decision**: **Work-centric with `isolation_environments` table**
 
-**Findings** (tested on remote-coding-agent repo, 2025-12-17):
+**Rationale**:
 
-| Metric | Value | Notes |
-|--------|-------|-------|
-| Creation time | **0.099 seconds** | Sub-100ms, negligible |
-| Main repo size | 981 MB | Includes node_modules, .git |
-| Worktree size | **2.5 MB** | Only working tree files |
-| Space overhead | **0.25%** | Worktrees are extremely cheap |
+- Independent lifecycle from conversations
+- Natural sharing across conversations
+- Query-friendly for cleanup and status
+- Metadata enables future smart linking
 
-**Conclusion**: Resource concerns are completely unfounded. Creating worktrees is:
-- Fast enough to not impact UX (~100ms)
-- Space-efficient (shared .git, shared node_modules via symlinks)
-- Safe to create aggressively (auto on every @mention)
+### 3. Cross-Platform Linking
 
-#### 2. Branch Merge Detection (TESTED)
+**Decision**: **Metadata + `/worktree link` fallback**
 
-**Command that works**:
+MVP:
+
+- Store `related_issues`, `related_prs` in metadata automatically
+- Manual `/worktree link` command for explicit linking
+
+Future:
+
+- AI-assisted discovery via git log searches
+- Parse issue/PR bodies for references
+
+### 4. GitHub Adapter Role
+
+**Decision**: **Thin adapter providing hints**
+
+Keeps:
+
+- Webhook handling, event parsing
+- @mention detection
+- Building `IsolationHints`
+- Triggering cleanup on close events
+
+Removes:
+
+- All worktree creation logic
+- UX messages for isolation
+- Database updates for isolation
+
+### 5. Cleanup Service Location
+
+**Decision**: **Separate service, called by orchestrator/adapters**
+
+**Rationale**:
+
+- Clean separation of concerns
+- Git-first logic isolated
+- Multiple entry points (events, schedule, commands)
+- Easier to test
+
+### 6. Skill Symbiosis
+
+**Decision**: **Preserved through adoption**
+
+- Skill worktrees discovered via `findWorktreeByBranch()`
+- App creates DB record pointing to existing worktree
+- Both systems can coexist
+
+---
+
+## Branch Naming Strategy
+
+### Semantic Names by Workflow Type
+
+| Workflow Type | Branch Name Pattern  | Example              |
+| ------------- | -------------------- | -------------------- |
+| `issue`       | `issue-{number}`     | `issue-42`           |
+| `pr`          | `pr-{number}`        | `pr-99`              |
+| `review`      | `pr-{number}-review` | `pr-99-review`       |
+| `thread`      | `thread-{hash}`      | `thread-a7f3b2c1`    |
+| `task`        | `task-{slug}`        | `task-add-dark-mode` |
+
+### Uniqueness Constraint
+
+```sql
+UNIQUE (codebase_id, workflow_type, workflow_id)
+```
+
+This ensures:
+
+- Only one `issue-42` per codebase
+- Multiple conversations can share the same workflow
+
+---
+
+## Research Findings
+
+### Worktree Performance (Tested)
+
+| Metric         | Value                        |
+| -------------- | ---------------------------- |
+| Creation time  | 0.099 seconds                |
+| Worktree size  | 2.5 MB (vs 981 MB main repo) |
+| Space overhead | 0.25%                        |
+
+**Conclusion**: Worktrees are cheap. Create aggressively.
+
+### Branch Merge Detection
+
 ```bash
-# List all branches merged into main
-git branch --merged main
-
-# For a specific branch
 git branch --merged main | grep "issue-42"
 ```
 
-**Conclusion**: Git natively supports this. Implementation is trivial.
+Git natively supports this. Trivial to implement.
 
-#### 3. Cleanup Scheduler Design
+### Race Conditions
 
-**Options considered**:
-- `setInterval()` - Simple, no dependencies, in-process
-- `node-cron` - Cron syntax, still in-process
-- External cron - Requires separate process management
-
-**Recommendation**: `setInterval()` with configurable period (default: 6 hours)
+Existing `ConversationLockManager` handles this:
 
 ```typescript
-// In src/index.ts or new src/cleanup/scheduler.ts
-const CLEANUP_INTERVAL_MS = parseInt(process.env.CLEANUP_INTERVAL_HOURS ?? '6') * 60 * 60 * 1000;
-
-setInterval(async () => {
-  await cleanupMergedWorktrees();
-  await markStaleWorktrees();
-}, CLEANUP_INTERVAL_MS);
-
-// Also run on startup
-await cleanupMergedWorktrees();
-```
-
-**Why not cron?**:
-- Single-server deployment (no need for distributed scheduling)
-- Simpler (no additional dependencies)
-- Cleanup is idempotent (safe to run multiple times)
-
-#### 4. SDK Tool Restriction Capabilities (RESEARCHED)
-
-**Claude Agent SDK findings** (from [official docs](https://code.claude.com/docs/en/sdk/sdk-permissions) and [GitHub issues](https://github.com/anthropics/claude-agent-sdk-typescript/issues/19)):
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| `allowedTools` | **Broken** | Does not work with `bypassPermissions` mode |
-| `disallowedTools` | **Works** | Can blacklist specific tools |
-| `permissionMode` | Works | `'default'`, `'acceptEdits'`, `'bypassPermissions'` |
-| `canUseTool` callback | Works | Runtime permission check, but adds latency |
-
-**Current limitation**: When using `permissionMode: 'bypassPermissions'` (which we use), the `allowedTools` whitelist is ignored. Tools can still be used even if not in the list.
-
-**Workarounds for future workflow engine**:
-1. Use `disallowedTools` blacklist (works)
-2. Use `canUseTool` callback for runtime enforcement
-3. Wait for SDK fix (open issue since 2025)
-
-**For now**: Not blocking for Phase 3. Revisit when building workflow engine.
-
-### Remaining Research
-
-- [ ] Design workflow engine schema (deferred to future phase)
-
-## Implementation Considerations
-
-### Race Condition Prevention
-
-**Problem**: Two simultaneous messages for same conversation could both trigger worktree creation.
-
-**Solution**: The existing `ConversationLockManager` already handles this!
-
-```typescript
-// src/index.ts - already implemented
 lockManager.acquireLock(conversationId, async () => {
   await handleMessage(...);
 });
 ```
 
-**Lock scope**: From `handleMessage()` entry through `db.updateConversation()` completion. This ensures:
-1. Only one message processed per conversation at a time
-2. Auto-isolation check + creation + DB update is atomic
-3. Second message waits until first completes, then sees isolation already exists
-
-**No additional work needed** - the concurrency protection is already in place.
-
-### Database Migrations Needed
-
-**New column**: `last_activity_at` on `conversations` table
-
-```sql
--- migrations/XXX_add_last_activity_at.sql
-ALTER TABLE remote_agent_conversations
-ADD COLUMN last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-
--- Update existing rows
-UPDATE remote_agent_conversations SET last_activity_at = updated_at;
-
--- Create index for cleanup queries
-CREATE INDEX idx_conversations_last_activity ON remote_agent_conversations(last_activity_at);
-```
-
-**When to update**: On every message received (in `handleMessage()` or adapter layer).
-
-### Error Handling in Cleanup
-
-**What if cleanup fails?**
-- Log the error, continue to next worktree
-- Don't crash the cleanup cycle for one failure
-- Worktree stays active, will be retried next cycle
-
-**What if worktree has uncommitted changes?**
-- `git worktree remove` fails (expected)
-- Log warning: "Worktree X has uncommitted changes, skipping"
-- Keep worktree active
-- User must manually commit/discard or force-remove
-
-## References
-
-- `docs/worktree-orchestration.md` - Current architecture documentation
-- `src/isolation/` - Isolation provider implementation
-- `src/adapters/github.ts` - Reference implementation for auto-isolation
-- `.agents/plans/completed/isolation-provider-phase2-migration.plan.md` - Phase 2 completion
+No additional work needed.
 
 ---
 
-## Appendix: Platform-Specific Considerations
+## Platform-Specific Notes
 
 ### Telegram
 
-**Conversation model**: Single persistent chat (`chat_id`)
-**Worktree mapping**: One persistent worktree per chat per codebase
-**Cleanup trigger**: Manual only (`/worktree remove`)
-**Special considerations**:
-- No threading - each chat IS the conversation
-- Worktree persists forever (user's permanent workspace)
-- No staleness cleanup (user controls lifecycle)
-- Auto-create on first message with configured codebase
-- `/worktree remove` + next message = fresh start
+- No threads - each chat is persistent
+- Worktrees never auto-cleanup (user controls)
+- Perfect for "permanent workspace" use case
 
-### Slack
+### Slack/Discord
 
-**Conversation model**: `channel:thread_ts`
-**Worktree mapping**: One worktree per thread
-**Cleanup trigger**: Git merge detection, staleness
-**Special considerations**:
-- Threads can be revived after long time
-- Thread history available for context
-- App mention required (`@bot`)
+- Threads isolate work naturally
+- 1 thread = 1 worktree = 1 task
+- Staleness cleanup after 14 days
 
-### Discord
+### GitHub
 
-**Conversation model**: Thread = separate channel ID
-**Worktree mapping**: One worktree per thread
-**Cleanup trigger**: Git merge detection, staleness
-**Special considerations**:
-- Similar to Slack threading
-- Threads auto-archive after inactivity (Discord feature)
-- Could hook into Discord thread archive event?
+- Cleanest lifecycle (explicit close events)
+- Linked issues share worktrees ("Fixes #X")
+- Adapter triggers cleanup, orchestrator handles logic
 
-### GitHub (Reference)
+---
 
-**Conversation model**: `owner/repo#number`
-**Worktree mapping**: One worktree per issue/PR
-**Cleanup trigger**: Issue/PR close event
-**Special considerations**:
-- Linked issues share worktree (via "Fixes #X")
-- PR inherits issue worktree when linked
-- Cleanest lifecycle model
+## Future: Workflow Engine Integration
+
+The current implementation creates isolation for ALL AI interactions. In the future, a workflow engine could be smarter about this.
+
+### Planned Enhancement
+
+```typescript
+interface WorkflowCommand {
+  name: string;
+  description: string;
+  prompt: string;
+
+  // Future: Metadata for smarter orchestration
+  metadata: {
+    type: 'read' | 'write' | 'mixed';
+    requiresIsolation: boolean;
+    allowedTools?: string[]; // Restrict AI tool access
+  };
+}
+```
+
+### How This Would Work
+
+1. Router receives: "explain the login flow"
+2. Router routes to `explain` workflow (type: 'read', requiresIsolation: false)
+3. Orchestrator skips worktree creation
+4. AI runs on main repo (no isolation overhead for read-only queries)
+
+**vs:**
+
+1. Router receives: "fix the login bug"
+2. Router routes to `fix-issue` workflow (type: 'write', requiresIsolation: true)
+3. Orchestrator creates worktree
+4. AI works in isolated environment
+
+### Why Not Implement Now?
+
+- Current worktree overhead is negligible (0.1s, 2.5MB)
+- Simpler mental model: every conversation is isolated
+- Workflow engine is a larger project
+- Can add this optimization later without breaking changes
+
+---
+
+## Research Notes
+
+### SDK Tool Restriction (2025)
+
+**Claude Agent SDK findings** (from official docs and GitHub issues):
+
+| Feature               | Status     | Notes                                               |
+| --------------------- | ---------- | --------------------------------------------------- |
+| `allowedTools`        | **Broken** | Does not work with `bypassPermissions` mode         |
+| `disallowedTools`     | **Works**  | Can blacklist specific tools                        |
+| `permissionMode`      | Works      | `'default'`, `'acceptEdits'`, `'bypassPermissions'` |
+| `canUseTool` callback | Works      | Runtime permission check, but adds latency          |
+
+**Current limitation**: When using `permissionMode: 'bypassPermissions'` (which we use), the `allowedTools` whitelist is ignored.
+
+**Workarounds for future workflow engine**:
+
+1. Use `disallowedTools` blacklist (works)
+2. Use `canUseTool` callback for runtime enforcement
+3. Wait for SDK fix (open issue)
+
+**For now**: Not blocking. Revisit when building workflow engine.
+
+---
+
+## References
+
+- `docs/worktree-orchestration.md` - Architecture overview
+- `src/isolation/` - Current isolation provider
+- `src/adapters/github.ts` - Current GitHub implementation
+- `.agents/plans/phase-*.plan.md` - Detailed implementation plans

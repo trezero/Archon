@@ -315,7 +315,14 @@ branch refs/heads/feature/auth
       // Verify worktree add was called with the local branch created from PR ref
       expect(execSpy).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', repoPath, 'worktree', 'add', expect.any(String), 'pr-42-review']),
+        expect.arrayContaining([
+          '-C',
+          repoPath,
+          'worktree',
+          'add',
+          expect.any(String),
+          'pr-42-review',
+        ]),
         expect.any(Object)
       );
 
@@ -381,7 +388,9 @@ branch refs/heads/feature/auth
         callCount++;
         // First call: worktree add -b fails (branch exists)
         if (callCount === 1 && args.includes('-b')) {
-          const error = new Error('fatal: A branch named issue-42 already exists.') as Error & { stderr?: string };
+          const error = new Error('fatal: A branch named issue-42 already exists.') as Error & {
+            stderr?: string;
+          };
           error.stderr = 'fatal: A branch named issue-42 already exists.';
           throw error;
         }
@@ -394,7 +403,15 @@ branch refs/heads/feature/auth
       // Verify first call attempted to create new branch
       expect(execSpy).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', repoPath, 'worktree', 'add', expect.any(String), '-b', 'issue-42']),
+        expect.arrayContaining([
+          '-C',
+          repoPath,
+          'worktree',
+          'add',
+          expect.any(String),
+          '-b',
+          'issue-42',
+        ]),
         expect.any(Object)
       );
 
@@ -418,9 +435,9 @@ branch refs/heads/feature/auth
         return { stdout: '', stderr: '' };
       });
 
-      await expect(git.createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch)).rejects.toThrow(
-        'Failed to create worktree for PR #42'
-      );
+      await expect(
+        git.createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch)
+      ).rejects.toThrow('Failed to create worktree for PR #42');
     });
 
     test('provides helpful error message with PR number', async () => {
@@ -454,7 +471,15 @@ branch refs/heads/feature/auth
       // Verify worktree add was called with -b flag for new pr-XX branch
       expect(execSpy).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-C', repoPath, 'worktree', 'add', expect.any(String), '-b', 'pr-42']),
+        expect.arrayContaining([
+          '-C',
+          repoPath,
+          'worktree',
+          'add',
+          expect.any(String),
+          '-b',
+          'pr-42',
+        ]),
         expect.any(Object)
       );
 

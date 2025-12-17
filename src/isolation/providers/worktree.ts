@@ -278,9 +278,13 @@ export class WorktreeProvider implements IIsolationProvider {
         });
 
         // Create worktree at the specific SHA
-        await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, request.prSha], {
-          timeout: 30000,
-        });
+        await execFileAsync(
+          'git',
+          ['-C', repoPath, 'worktree', 'add', worktreePath, request.prSha],
+          {
+            timeout: 30000,
+          }
+        );
 
         // Create a local tracking branch so it's not detached HEAD
         await execFileAsync(
@@ -325,9 +329,13 @@ export class WorktreeProvider implements IIsolationProvider {
   ): Promise<void> {
     try {
       // Try to create with new branch
-      await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName], {
-        timeout: 30000,
-      });
+      await execFileAsync(
+        'git',
+        ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName],
+        {
+          timeout: 30000,
+        }
+      );
     } catch (error) {
       const err = error as Error & { stderr?: string };
       // Branch already exists - use existing branch

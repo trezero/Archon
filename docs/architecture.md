@@ -476,17 +476,17 @@ export interface IIsolationProvider {
 ```typescript
 interface IsolationRequest {
   codebaseId: string;
-  canonicalRepoPath: string;      // Main repo path, never a worktree
+  canonicalRepoPath: string; // Main repo path, never a worktree
   workflowType: 'issue' | 'pr' | 'review' | 'thread' | 'task';
-  identifier: string;             // "42", "feature-auth", etc.
-  prBranch?: string;              // For PR adoption
-  prSha?: string;                 // For reproducible PR reviews
+  identifier: string; // "42", "feature-auth", etc.
+  prBranch?: string; // For PR adoption
+  prSha?: string; // For reproducible PR reviews
 }
 
 interface IsolatedEnvironment {
-  id: string;                     // Worktree path (for worktree provider)
+  id: string; // Worktree path (for worktree provider)
   provider: 'worktree' | 'container' | 'vm' | 'remote';
-  workingPath: string;            // Where AI should work
+  workingPath: string; // Where AI should work
   branchName?: string;
   status: 'active' | 'suspended' | 'destroyed';
   createdAt: Date;
@@ -517,13 +517,13 @@ export class WorktreeProvider implements IIsolationProvider {
 
 ### Branch Naming Convention
 
-| Workflow | Identifier | Generated Branch |
-|----------|------------|------------------|
-| issue | `"42"` | `issue-42` |
-| pr | `"123"` | `pr-123` |
-| pr + SHA | `"123"` | `pr-123-review` |
-| task | `"my-feature"` | `task-my-feature` |
-| thread | `"C123:ts.123"` | `thread-a1b2c3d4` (8-char hash) |
+| Workflow | Identifier      | Generated Branch                |
+| -------- | --------------- | ------------------------------- |
+| issue    | `"42"`          | `issue-42`                      |
+| pr       | `"123"`         | `pr-123`                        |
+| pr + SHA | `"123"`         | `pr-123-review`                 |
+| task     | `"my-feature"`  | `task-my-feature`               |
+| thread   | `"C123:ts.123"` | `thread-a1b2c3d4` (8-char hash) |
 
 ### Storage Location
 
@@ -533,6 +533,7 @@ DOCKER:  /workspace/worktrees/<project>/<branch>/ ← FIXED, no override
 ```
 
 **Logic in `getWorktreeBase()`:**
+
 1. Docker detected? → `/workspace/worktrees` (always, no override)
 2. `WORKTREE_BASE` set? → use it (local only)
 3. Default → `~/tmp/worktrees`
@@ -602,6 +603,7 @@ remote_agent_conversations
 ```
 
 **Lookup pattern:**
+
 ```typescript
 const envId = conversation.isolation_env_id ?? conversation.worktree_path;
 ```

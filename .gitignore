@@ -37,6 +37,7 @@ api_sessions/
 .agents/rca-reports/
 .claude/PRPs/features
 .agents/pr-reviews
+.agents/implementation-reports
 
 # Local workspace
 workspace/

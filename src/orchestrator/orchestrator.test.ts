@@ -6,6 +6,7 @@ import { join } from 'path';
 // Setup mocks before importing the module under test
 const mockGetOrCreateConversation = mock(() => Promise.resolve(null));
 const mockUpdateConversation = mock(() => Promise.resolve());
+const mockTouchConversation = mock(() => Promise.resolve());
 const mockGetCodebase = mock(() => Promise.resolve(null));
 const mockGetActiveSession = mock(() => Promise.resolve(null));
 const mockCreateSession = mock(() => Promise.resolve(null));
@@ -20,11 +21,57 @@ const mockParseCommand = mock((message: string) => {
 });
 const mockGetAssistantClient = mock(() => null);
 const mockReadFile = mock(() => Promise.resolve(''));
-const mockAccess = mock(() => Promise.resolve());
+
+// Isolation environment mocks
+const mockIsolationEnvGetById = mock(() => Promise.resolve(null));
+const mockIsolationEnvFindByWorkflow = mock(() => Promise.resolve(null));
+const mockIsolationEnvCreate = mock(() => Promise.resolve(null));
+const mockIsolationEnvUpdateStatus = mock(() => Promise.resolve());
+
+// Git utils mocks
+const mockWorktreeExists = mock(() => Promise.resolve(false));
+const mockFindWorktreeByBranch = mock(() => Promise.resolve(null));
+const mockGetCanonicalRepoPath = mock((path: string) => Promise.resolve(path));
+const mockExecFileAsync = mock(() => Promise.resolve({ stdout: 'main', stderr: '' }));
+
+// Isolation provider mock
+const mockIsolationProviderCreate = mock(() =>
+  Promise.resolve({
+    id: 'env-123',
+    provider: 'worktree',
+    workingPath: '/workspace/worktrees/test/thread-abc',
+    branchName: 'thread-abc',
+    status: 'active',
+    createdAt: new Date(),
+    metadata: {},
+  })
+);
+const mockGetIsolationProvider = mock(() => ({
+  create: mockIsolationProviderCreate,
+}));
 
 mock.module('../db/conversations', () => ({
   getOrCreateConversation: mockGetOrCreateConversation,
   updateConversation: mockUpdateConversation,
+  touchConversation: mockTouchConversation,
+}));
+
+mock.module('../db/isolation-environments', () => ({
+  getById: mockIsolationEnvGetById,
+  findByWorkflow: mockIsolationEnvFindByWorkflow,
+  create: mockIsolationEnvCreate,
+  updateStatus: mockIsolationEnvUpdateStatus,
+}));
+
+mock.module('../utils/git', () => ({
+  worktreeExists: mockWorktreeExists,
+  findWorktreeByBranch: mockFindWorktreeByBranch,
+  getCanonicalRepoPath: mockGetCanonicalRepoPath,
+  execFileAsync: mockExecFileAsync,
+}));
+
+mock.module('../isolation', () => ({
+  getIsolationProvider: mockGetIsolationProvider,
 }));
 
 mock.module('../db/codebases', () => ({
@@ -54,7 +101,6 @@ mock.module('../clients/factory', () => ({
 
 mock.module('fs/promises', () => ({
   readFile: mockReadFile,
-  access: mockAccess,
 }));
 
 import { handleMessage } from './orchestrator';
@@ -84,7 +130,11 @@ describe('orchestrator', () => {
     ai_assistant_type: 'claude',
     codebase_id: 'codebase-789',
     cwd: '/workspace/project',
-    worktree_path: null,
+    worktree_path: '/workspace/project', // Simulate existing worktree
+    isolation_env_id_legacy: null,
+    isolation_env_id: 'env-existing', // Simulate existing isolation
+    isolation_provider: 'worktree',
+    last_activity_at: null,
     created_at: new Date(),
     updated_at: new Date(),
   };
@@ -126,6 +176,7 @@ describe('orchestrator', () => {
     platform = new MockPlatformAdapter();
     mockGetOrCreateConversation.mockClear();
     mockUpdateConversation.mockClear();
+    mockTouchConversation.mockClear();
     mockGetCodebase.mockClear();
     mockGetActiveSession.mockClear();
     mockCreateSession.mockClear();
@@ -137,9 +188,20 @@ describe('orchestrator', () => {
     mockParseCommand.mockClear();
     mockGetAssistantClient.mockClear();
     mockReadFile.mockClear();
-    mockAccess.mockClear();
     mockClient.sendQuery.mockClear();
     mockClient.getType.mockClear();
+
+    // New isolation mocks
+    mockIsolationEnvGetById.mockClear();
+    mockIsolationEnvFindByWorkflow.mockClear();
+    mockIsolationEnvCreate.mockClear();
+    mockIsolationEnvUpdateStatus.mockClear();
+    mockWorktreeExists.mockClear();
+    mockFindWorktreeByBranch.mockClear();
+    mockGetCanonicalRepoPath.mockClear();
+    mockExecFileAsync.mockClear();
+    mockIsolationProviderCreate.mockClear();
+    mockGetIsolationProvider.mockClear();
 
     // Default mocks
     mockGetOrCreateConversation.mockResolvedValue(mockConversation);
@@ -148,11 +210,42 @@ describe('orchestrator', () => {
     mockCreateSession.mockResolvedValue(mockSession);
     mockGetTemplate.mockResolvedValue(null); // No templates by default
     mockGetAssistantClient.mockReturnValue(mockClient);
-    mockAccess.mockResolvedValue(undefined); // Path exists by default
     mockParseCommand.mockImplementation((message: string) => {
       const parts = message.split(/\s+/);
       return { command: parts[0].substring(1), args: parts.slice(1) };
     });
+
+    // Default isolation mocks - simulate existing isolation env
+    mockIsolationEnvGetById.mockResolvedValue({
+      id: 'env-existing',
+      codebase_id: 'codebase-789',
+      workflow_type: 'thread',
+      workflow_id: 'chat-456',
+      provider: 'worktree',
+      working_path: '/workspace/project',
+      branch_name: 'thread-chat-456',
+      status: 'active',
+      created_at: new Date(),
+      created_by_platform: 'telegram',
+      metadata: {},
+    });
+    mockIsolationEnvFindByWorkflow.mockResolvedValue(null);
+    mockIsolationEnvCreate.mockResolvedValue({
+      id: 'env-new',
+      codebase_id: 'codebase-789',
+      workflow_type: 'thread',
+      workflow_id: 'chat-456',
+      provider: 'worktree',
+      working_path: '/workspace/worktrees/test/thread-chat-456',
+      branch_name: 'thread-chat-456',
+      status: 'active',
+      created_at: new Date(),
+      created_by_platform: 'telegram',
+      metadata: {},
+    });
+    mockWorktreeExists.mockResolvedValue(true); // Existing worktree valid
+    mockGetCanonicalRepoPath.mockImplementation((path: string) => Promise.resolve(path));
+    mockExecFileAsync.mockResolvedValue({ stdout: 'main', stderr: '' });
   });
 
   describe('slash commands (non-invoke)', () => {
@@ -538,11 +631,34 @@ describe('orchestrator', () => {
       );
     });
 
-    test('falls back to codebase default_cwd', async () => {
+    test('falls back to codebase default_cwd when no isolation env', async () => {
+      // Conversation without isolation, will get auto-created
       mockGetOrCreateConversation.mockResolvedValue({
         ...mockConversation,
+        isolation_env_id: null,
+        worktree_path: null,
         cwd: null,
       });
+
+      // No isolation env in DB, no existing worktree
+      mockIsolationEnvGetById.mockResolvedValue(null);
+      mockWorktreeExists.mockResolvedValue(false);
+
+      // Auto-create will be triggered, returns a new env
+      mockIsolationEnvCreate.mockResolvedValue({
+        id: 'env-auto-created',
+        codebase_id: 'codebase-789',
+        workflow_type: 'thread',
+        workflow_id: 'chat-456',
+        provider: 'worktree',
+        working_path: '/workspace/test-project/worktrees/thread-chat-456',
+        branch_name: 'thread-chat-456',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'telegram',
+        metadata: {},
+      });
+
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
       mockReadFile.mockResolvedValue('Plan command');
       mockClient.sendQuery.mockImplementation(async function* () {
@@ -551,20 +667,38 @@ describe('orchestrator', () => {
 
       await handleMessage(platform, 'chat-456', '/command-invoke plan');
 
+      // Uses the auto-created worktree path
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         wrapCommandForExecution('plan', 'Plan command'),
-        '/workspace/test-project', // codebase.default_cwd
-        'claude-session-xyz' // Uses existing session's ID
+        '/workspace/test-project/worktrees/thread-chat-456', // From auto-created env
+        'claude-session-xyz'
       );
     });
 
-    test('uses isolation_env_id over worktree_path and cwd', async () => {
+    test('uses isolation_env_id (UUID) to look up working path', async () => {
+      // conversation has a UUID isolation_env_id
       mockGetOrCreateConversation.mockResolvedValue({
         ...mockConversation,
-        isolation_env_id: '/workspace/isolation-env',
+        isolation_env_id: 'env-priority',
         worktree_path: '/workspace/old-worktree',
         cwd: '/workspace/project',
       });
+
+      // Mock the env lookup to return a specific working_path
+      mockIsolationEnvGetById.mockResolvedValue({
+        id: 'env-priority',
+        codebase_id: 'codebase-789',
+        workflow_type: 'thread',
+        workflow_id: 'chat-456',
+        provider: 'worktree',
+        working_path: '/workspace/isolation-env', // This is the path to use
+        branch_name: 'thread-chat-456',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'telegram',
+        metadata: {},
+      });
+
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
       mockReadFile.mockResolvedValue('Plan command');
       mockClient.sendQuery.mockImplementation(async function* () {
@@ -573,9 +707,10 @@ describe('orchestrator', () => {
 
       await handleMessage(platform, 'chat-456', '/command-invoke plan');
 
+      // Env lookup is used, working_path from env takes priority
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         wrapCommandForExecution('plan', 'Plan command'),
-        '/workspace/isolation-env', // isolation_env_id takes priority
+        '/workspace/isolation-env', // working_path from isolation env
         'claude-session-xyz'
       );
     });
@@ -604,64 +739,32 @@ describe('orchestrator', () => {
   });
 
   describe('stale worktree handling', () => {
-    test('should deactivate session and clear worktree when cwd does not exist', async () => {
-      // Setup: conversation with worktree_path that doesn't exist
-      const conversationWithStaleWorktree = {
+    test('should clear isolation fields when isolation_env_id points to non-existent path', async () => {
+      // Setup: conversation with isolation_env_id pointing to stale env
+      const conversationWithStaleIsolation = {
         ...mockConversation,
+        isolation_env_id: 'env-stale',
+        isolation_provider: 'worktree',
         worktree_path: '/nonexistent/worktree/path',
         cwd: '/nonexistent/worktree/path',
       };
-      mockGetOrCreateConversation.mockResolvedValue(conversationWithStaleWorktree);
-
-      // Mock fs.access to throw (path doesn't exist)
-      mockAccess.mockRejectedValueOnce(new Error('ENOENT: no such file or directory'));
-
-      // Mock active session
-      mockGetActiveSession.mockResolvedValue({
-        ...mockSession,
-        id: 'stale-session-id',
-      });
-
-      mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
-      mockClient.sendQuery.mockImplementation(async function* () {
-        yield { type: 'result', sessionId: 'session-id' };
-      });
-
-      await handleMessage(platform, 'chat-456', '/command-invoke plan');
-
-      // Verify session was deactivated
-      expect(mockDeactivateSession).toHaveBeenCalledWith('stale-session-id');
-
-      // Verify worktree_path was cleared
-      expect(mockUpdateConversation).toHaveBeenCalledWith(
-        'conv-123',
-        expect.objectContaining({
-          worktree_path: null,
-          cwd: '/workspace/test-project', // Falls back to codebase default_cwd
-        })
-      );
-    });
-
-    test('should clear all isolation fields when isolation_env_id is stale', async () => {
-      // Setup: conversation with isolation_env_id that doesn't exist
-      const conversationWithStaleIsolation = {
-        ...mockConversation,
-        isolation_env_id: '/nonexistent/isolation/path',
-        isolation_provider: 'worktree',
-        worktree_path: null,
-        cwd: '/workspace/project',
-      };
       mockGetOrCreateConversation.mockResolvedValue(conversationWithStaleIsolation);
 
-      // Mock fs.access to throw (path doesn't exist)
-      mockAccess.mockRejectedValueOnce(new Error('ENOENT: no such file or directory'));
-
-      // Mock active session
-      mockGetActiveSession.mockResolvedValue({
-        ...mockSession,
-        id: 'stale-session-id',
+      // Mock: env exists in DB but path doesn't exist on disk
+      mockIsolationEnvGetById.mockResolvedValue({
+        id: 'env-stale',
+        codebase_id: 'codebase-789',
+        workflow_type: 'thread',
+        workflow_id: 'chat-456',
+        provider: 'worktree',
+        working_path: '/nonexistent/worktree/path',
+        branch_name: 'thread-chat-456',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'telegram',
+        metadata: {},
       });
+      mockWorktreeExists.mockResolvedValue(false); // Path doesn't exist
 
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
       mockReadFile.mockResolvedValue('Plan command');
@@ -671,58 +774,22 @@ describe('orchestrator', () => {
 
       await handleMessage(platform, 'chat-456', '/command-invoke plan');
 
-      // Verify all isolation fields are cleared
+      // Verify isolation fields are cleared
       expect(mockUpdateConversation).toHaveBeenCalledWith(
         'conv-123',
         expect.objectContaining({
           worktree_path: null,
           isolation_env_id: null,
           isolation_provider: null,
-          cwd: '/workspace/test-project',
         })
       );
+
+      // Verify env marked as destroyed
+      expect(mockIsolationEnvUpdateStatus).toHaveBeenCalledWith('env-stale', 'destroyed');
     });
 
-    test('should use default cwd when worktree path is stale', async () => {
-      // Setup: conversation with worktree_path that doesn't exist
-      const conversationWithStaleWorktree = {
-        ...mockConversation,
-        worktree_path: '/nonexistent/worktree/path',
-        cwd: '/nonexistent/worktree/path',
-      };
-      mockGetOrCreateConversation.mockResolvedValue(conversationWithStaleWorktree);
-
-      // Mock fs.access to throw (path doesn't exist)
-      mockAccess.mockRejectedValueOnce(new Error('ENOENT'));
-
-      // Create a new session without assistant_session_id (simulating fresh start)
-      const freshSession = {
-        ...mockSession,
-        assistant_session_id: null,
-      };
-      mockCreateSession.mockResolvedValue(freshSession);
-
-      mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
-      mockClient.sendQuery.mockImplementation(async function* () {
-        yield { type: 'result', sessionId: 'session-id' };
-      });
-
-      await handleMessage(platform, 'chat-456', '/command-invoke plan');
-
-      // Verify AI client was called with the fallback cwd
-      expect(mockClient.sendQuery).toHaveBeenCalledWith(
-        wrapCommandForExecution('plan', 'Plan command'),
-        '/workspace/test-project', // Falls back to codebase default_cwd
-        undefined // New session created (assistant_session_id is null -> undefined)
-      );
-    });
-
-    test('should not deactivate session if cwd exists', async () => {
-      // Mock fs.access to succeed (path exists)
-      mockAccess.mockResolvedValue(undefined);
-
-      // Mock active session
+    test('should not clear isolation if path exists', async () => {
+      // Default setup: valid isolation env
       mockGetActiveSession.mockResolvedValue(mockSession);
 
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
@@ -733,24 +800,17 @@ describe('orchestrator', () => {
 
       await handleMessage(platform, 'chat-456', '/command-invoke plan');
 
-      // Verify session was NOT deactivated (for stale worktree reason)
-      // Note: It might be deactivated for plan→execute transition, but not for stale worktree
+      // Verify session was NOT deactivated (isolation is valid)
+      // updateConversation should NOT be called with null isolation fields
       expect(mockUpdateConversation).not.toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ worktree_path: null })
+        expect.objectContaining({ worktree_path: null, isolation_env_id: null })
       );
     });
 
-    test('should handle conversation without worktree_path gracefully', async () => {
-      // Conversation without worktree_path
-      mockGetOrCreateConversation.mockResolvedValue({
-        ...mockConversation,
-        worktree_path: null,
-        cwd: '/workspace/project',
-      });
-
-      // cwd exists
-      mockAccess.mockResolvedValue(undefined);
+    test('should use existing valid isolation environment', async () => {
+      // Default mocks already set up valid isolation
+      mockGetActiveSession.mockResolvedValue(mockSession);
 
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
       mockReadFile.mockResolvedValue('Plan command');
@@ -760,10 +820,10 @@ describe('orchestrator', () => {
 
       await handleMessage(platform, 'chat-456', '/command-invoke plan');
 
-      // Should work normally, no worktree cleanup needed
+      // Should work normally with existing isolation
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         wrapCommandForExecution('plan', 'Plan command'),
-        '/workspace/project',
+        '/workspace/project', // From existing env working_path
         'claude-session-xyz'
       );
     });

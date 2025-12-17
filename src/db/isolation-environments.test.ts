@@ -1,0 +1,237 @@
+import { mock, describe, test, expect, beforeEach } from 'bun:test';
+import { createQueryResult } from '../test/mocks/database';
+import { IsolationEnvironmentRow } from '../types';
+
+const mockQuery = mock(() => Promise.resolve(createQueryResult([])));
+
+mock.module('./connection', () => ({
+  pool: {
+    query: mockQuery,
+  },
+}));
+
+import {
+  getById,
+  findByWorkflow,
+  listByCodebase,
+  create,
+  updateStatus,
+  updateMetadata,
+  countByCodebase,
+  getConversationsUsingEnv,
+} from './isolation-environments';
+
+describe('isolation-environments', () => {
+  beforeEach(() => {
+    mockQuery.mockClear();
+  });
+
+  const sampleEnv: IsolationEnvironmentRow = {
+    id: 'env-123',
+    codebase_id: 'codebase-456',
+    workflow_type: 'issue',
+    workflow_id: '42',
+    provider: 'worktree',
+    working_path: '/workspace/worktrees/project/issue-42',
+    branch_name: 'issue-42',
+    status: 'active',
+    created_at: new Date(),
+    created_by_platform: 'github',
+    metadata: {},
+  };
+
+  describe('getById', () => {
+    test('returns environment when found', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([sampleEnv]));
+
+      const result = await getById('env-123');
+
+      expect(result).toEqual(sampleEnv);
+      expect(mockQuery).toHaveBeenCalledWith(
+        'SELECT * FROM remote_agent_isolation_environments WHERE id = $1',
+        ['env-123']
+      );
+    });
+
+    test('returns null when not found', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      const result = await getById('nonexistent');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('findByWorkflow', () => {
+    test('finds active environment by workflow identity', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([sampleEnv]));
+
+      const result = await findByWorkflow('codebase-456', 'issue', '42');
+
+      expect(result).toEqual(sampleEnv);
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('workflow_type = $2 AND workflow_id = $3'),
+        ['codebase-456', 'issue', '42']
+      );
+    });
+
+    test('returns null when no matching active environment', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      const result = await findByWorkflow('codebase-456', 'issue', '99');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('listByCodebase', () => {
+    test('returns all active environments for codebase', async () => {
+      const envs = [sampleEnv, { ...sampleEnv, id: 'env-456', workflow_id: '43' }];
+      mockQuery.mockResolvedValueOnce(createQueryResult(envs));
+
+      const result = await listByCodebase('codebase-456');
+
+      expect(result).toEqual(envs);
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('codebase_id = $1 AND status'),
+        ['codebase-456']
+      );
+    });
+
+    test('returns empty array when no environments', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      const result = await listByCodebase('empty-codebase');
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('create', () => {
+    test('creates new environment with defaults', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([sampleEnv]));
+
+      const result = await create({
+        codebase_id: 'codebase-456',
+        workflow_type: 'issue',
+        workflow_id: '42',
+        working_path: '/workspace/worktrees/project/issue-42',
+        branch_name: 'issue-42',
+      });
+
+      expect(result).toEqual(sampleEnv);
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO remote_agent_isolation_environments'),
+        expect.arrayContaining(['codebase-456', 'issue', '42', 'worktree'])
+      );
+    });
+
+    test('creates environment with custom provider and metadata', async () => {
+      const customEnv = { ...sampleEnv, provider: 'container', metadata: { custom: true } };
+      mockQuery.mockResolvedValueOnce(createQueryResult([customEnv]));
+
+      await create({
+        codebase_id: 'codebase-456',
+        workflow_type: 'issue',
+        workflow_id: '42',
+        provider: 'container',
+        working_path: '/workspace/worktrees/project/issue-42',
+        branch_name: 'issue-42',
+        created_by_platform: 'slack',
+        metadata: { custom: true },
+      });
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO remote_agent_isolation_environments'),
+        [
+          'codebase-456',
+          'issue',
+          '42',
+          'container',
+          '/workspace/worktrees/project/issue-42',
+          'issue-42',
+          'slack',
+          '{"custom":true}',
+        ]
+      );
+    });
+  });
+
+  describe('updateStatus', () => {
+    test('updates status to destroyed', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
+
+      await updateStatus('env-123', 'destroyed');
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        'UPDATE remote_agent_isolation_environments SET status = $1 WHERE id = $2',
+        ['destroyed', 'env-123']
+      );
+    });
+
+    test('updates status to active', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
+
+      await updateStatus('env-123', 'active');
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        'UPDATE remote_agent_isolation_environments SET status = $1 WHERE id = $2',
+        ['active', 'env-123']
+      );
+    });
+  });
+
+  describe('updateMetadata', () => {
+    test('merges metadata with existing', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
+
+      await updateMetadata('env-123', { pr_number: 42 });
+
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('metadata = metadata ||'), [
+        '{"pr_number":42}',
+        'env-123',
+      ]);
+    });
+  });
+
+  describe('countByCodebase', () => {
+    test('returns count of active environments', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([{ count: '5' }]));
+
+      const result = await countByCodebase('codebase-456');
+
+      expect(result).toBe(5);
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('COUNT(*)'), ['codebase-456']);
+    });
+
+    test('returns 0 when no environments', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([{ count: '0' }]));
+
+      const result = await countByCodebase('empty-codebase');
+
+      expect(result).toBe(0);
+    });
+  });
+
+  describe('getConversationsUsingEnv', () => {
+    test('returns conversation IDs using the environment', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([{ id: 'conv-1' }, { id: 'conv-2' }]));
+
+      const result = await getConversationsUsingEnv('env-123');
+
+      expect(result).toEqual(['conv-1', 'conv-2']);
+      expect(mockQuery).toHaveBeenCalledWith(
+        'SELECT id FROM remote_agent_conversations WHERE isolation_env_id = $1',
+        ['env-123']
+      );
+    });
+
+    test('returns empty array when no conversations use env', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      const result = await getConversationsUsingEnv('unused-env');
+
+      expect(result).toEqual([]);
+    });
+  });
+});

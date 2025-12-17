@@ -21,10 +21,7 @@ export async function execFileAsync(
 }
 
 // Mockable mkdir wrapper
-export async function mkdirAsync(
-  path: string,
-  options?: { recursive?: boolean }
-): Promise<void> {
+export async function mkdirAsync(path: string, options?: { recursive?: boolean }): Promise<void> {
   await fsMkdir(path, options);
 }
 
@@ -199,9 +196,13 @@ export async function createWorktreeForIssue(
       if (prHeadSha) {
         // Fetch the specific commit SHA using PR refs (works for both fork and non-fork PRs)
         // GitHub creates refs/pull/<number>/head for all PRs automatically
-        await execFileAsync('git', ['-C', repoPath, 'fetch', 'origin', `pull/${String(issueNumber)}/head`], {
-          timeout: 30000,
-        });
+        await execFileAsync(
+          'git',
+          ['-C', repoPath, 'fetch', 'origin', `pull/${String(issueNumber)}/head`],
+          {
+            timeout: 30000,
+          }
+        );
 
         // Create worktree at the specific SHA
         await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, prHeadSha], {
@@ -219,14 +220,28 @@ export async function createWorktreeForIssue(
       } else {
         // Use GitHub's PR refs which work for both fork and non-fork PRs
         // GitHub automatically creates refs/pull/<number>/head for all PRs
-        await execFileAsync('git', ['-C', repoPath, 'fetch', 'origin', `pull/${String(issueNumber)}/head:pr-${String(issueNumber)}-review`], {
-          timeout: 30000,
-        });
+        await execFileAsync(
+          'git',
+          [
+            '-C',
+            repoPath,
+            'fetch',
+            'origin',
+            `pull/${String(issueNumber)}/head:pr-${String(issueNumber)}-review`,
+          ],
+          {
+            timeout: 30000,
+          }
+        );
 
         // Create worktree using the fetched PR ref
-        await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, `pr-${String(issueNumber)}-review`], {
-          timeout: 30000,
-        });
+        await execFileAsync(
+          'git',
+          ['-C', repoPath, 'worktree', 'add', worktreePath, `pr-${String(issueNumber)}-review`],
+          {
+            timeout: 30000,
+          }
+        );
       }
     } catch (error) {
       const err = error as Error & { stderr?: string };

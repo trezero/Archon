@@ -1,0 +1,140 @@
+/**
+ * Database operations for isolation environments
+ */
+import { pool } from './connection';
+import { IsolationEnvironmentRow } from '../types';
+
+/**
+ * Get an isolation environment by UUID
+ */
+export async function getById(id: string): Promise<IsolationEnvironmentRow | null> {
+  const result = await pool.query<IsolationEnvironmentRow>(
+    'SELECT * FROM remote_agent_isolation_environments WHERE id = $1',
+    [id]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Find an isolation environment by workflow identity
+ */
+export async function findByWorkflow(
+  codebaseId: string,
+  workflowType: string,
+  workflowId: string
+): Promise<IsolationEnvironmentRow | null> {
+  const result = await pool.query<IsolationEnvironmentRow>(
+    `SELECT * FROM remote_agent_isolation_environments
+     WHERE codebase_id = $1 AND workflow_type = $2 AND workflow_id = $3 AND status = 'active'`,
+    [codebaseId, workflowType, workflowId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Find all active environments for a codebase
+ */
+export async function listByCodebase(codebaseId: string): Promise<IsolationEnvironmentRow[]> {
+  const result = await pool.query<IsolationEnvironmentRow>(
+    `SELECT * FROM remote_agent_isolation_environments
+     WHERE codebase_id = $1 AND status = 'active'
+     ORDER BY created_at DESC`,
+    [codebaseId]
+  );
+  return result.rows;
+}
+
+/**
+ * Create a new isolation environment
+ */
+export async function create(env: {
+  codebase_id: string;
+  workflow_type: string;
+  workflow_id: string;
+  provider?: string;
+  working_path: string;
+  branch_name: string;
+  created_by_platform?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<IsolationEnvironmentRow> {
+  const result = await pool.query<IsolationEnvironmentRow>(
+    `INSERT INTO remote_agent_isolation_environments
+     (codebase_id, workflow_type, workflow_id, provider, working_path, branch_name, created_by_platform, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING *`,
+    [
+      env.codebase_id,
+      env.workflow_type,
+      env.workflow_id,
+      env.provider ?? 'worktree',
+      env.working_path,
+      env.branch_name,
+      env.created_by_platform ?? null,
+      JSON.stringify(env.metadata ?? {}),
+    ]
+  );
+  return result.rows[0];
+}
+
+/**
+ * Update environment status
+ */
+export async function updateStatus(id: string, status: 'active' | 'destroyed'): Promise<void> {
+  await pool.query('UPDATE remote_agent_isolation_environments SET status = $1 WHERE id = $2', [
+    status,
+    id,
+  ]);
+}
+
+/**
+ * Update environment metadata (merge with existing)
+ */
+export async function updateMetadata(id: string, metadata: Record<string, unknown>): Promise<void> {
+  await pool.query(
+    `UPDATE remote_agent_isolation_environments
+     SET metadata = metadata || $1::jsonb
+     WHERE id = $2`,
+    [JSON.stringify(metadata), id]
+  );
+}
+
+/**
+ * Find environments by related issue (from metadata)
+ */
+export async function findByRelatedIssue(
+  codebaseId: string,
+  issueNumber: number
+): Promise<IsolationEnvironmentRow | null> {
+  const result = await pool.query<IsolationEnvironmentRow>(
+    `SELECT * FROM remote_agent_isolation_environments
+     WHERE codebase_id = $1
+       AND status = 'active'
+       AND metadata->'related_issues' ? $2
+     LIMIT 1`,
+    [codebaseId, String(issueNumber)]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Count active environments for a codebase (for limit checks)
+ */
+export async function countByCodebase(codebaseId: string): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) as count FROM remote_agent_isolation_environments
+     WHERE codebase_id = $1 AND status = 'active'`,
+    [codebaseId]
+  );
+  return parseInt(result.rows[0]?.count ?? '0', 10);
+}
+
+/**
+ * Find conversations using an isolation environment
+ */
+export async function getConversationsUsingEnv(envId: string): Promise<string[]> {
+  const result = await pool.query<{ id: string }>(
+    'SELECT id FROM remote_agent_conversations WHERE isolation_env_id = $1',
+    [envId]
+  );
+  return result.rows.map(r => r.id);
+}

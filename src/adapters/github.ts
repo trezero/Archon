@@ -4,20 +4,19 @@
  */
 import { Octokit } from '@octokit/rest';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { IPlatformAdapter } from '../types';
+import { IPlatformAdapter, IsolationHints } from '../types';
 import { handleMessage } from '../orchestrator/orchestrator';
 import { classifyAndFormatError } from '../utils/error-formatter';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
-import * as sessionDb from '../db/sessions';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { readdir, access } from 'fs/promises';
 import { join, resolve } from 'path';
 import { parseAllowedUsers, isGitHubUserAuthorized } from '../utils/github-auth';
-import { isWorktreePath } from '../utils/git';
-import { getIsolationProvider } from '../isolation';
 import { getLinkedIssueNumbers } from '../utils/github-graphql';
+import { onConversationClosed } from '../services/cleanup-service';
+import { isWorktreePath } from '../utils/git';
 
 const execAsync = promisify(exec);
 
@@ -439,80 +438,19 @@ export class GitHubAdapter implements IPlatformAdapter {
 
   /**
    * Clean up worktree when an issue/PR is closed
-   * Handles shared worktrees: only removes if no other conversations reference it
+   * Delegates to cleanup service for unified handling
    */
   private async cleanupWorktree(owner: string, repo: string, number: number): Promise<void> {
     const conversationId = this.buildConversationId(owner, repo, number);
-    const conversation = await db.getConversationByPlatformId('github', conversationId);
+    console.log(`[GitHub] Cleaning up isolation for ${conversationId}`);
 
-    // Check both old and new isolation fields for backwards compatibility
-    if (!conversation) {
-      console.log(`[GitHub] No conversation to cleanup for ${conversationId}`);
-      return;
-    }
-
-    const isolationEnvId = conversation.isolation_env_id ?? conversation.worktree_path;
-    if (!isolationEnvId) {
-      console.log(`[GitHub] No worktree to cleanup for ${conversationId}`);
-      return;
-    }
-
-    // Deactivate any active session for this conversation
-    // This prevents resume attempts with a stale cwd
-    const activeSession = await sessionDb.getActiveSession(conversation.id);
-    if (activeSession) {
-      await sessionDb.deactivateSession(activeSession.id);
-      console.log(`[GitHub] Deactivated session ${activeSession.id} for worktree cleanup`);
-    }
-
-    const { codebase } = await this.getOrCreateCodebaseForRepo(owner, repo);
-
-    // Clear isolation references from THIS conversation first
-    // This must happen before checking for other users of the worktree
-    await db.updateConversation(conversation.id, {
-      worktree_path: null,
-      isolation_env_id: null,
-      isolation_provider: null,
-      cwd: codebase.default_cwd,
-    });
-
-    // Check if any OTHER conversations still use this worktree (shared worktree case)
-    // Check both old and new fields for backwards compatibility
-    const otherConvByWorktree = await db.getConversationByWorktreePath(isolationEnvId);
-    const otherConvByEnvId = await db.getConversationByIsolationEnvId(isolationEnvId);
-    const otherConv = otherConvByWorktree ?? otherConvByEnvId;
-    if (otherConv) {
-      console.log(
-        `[GitHub] Keeping worktree ${isolationEnvId}, still used by ${otherConv.platform_conversation_id}`
-      );
-      console.log(`[GitHub] Cleanup complete for ${conversationId}`);
-      return;
-    }
-
-    // No other conversations use this worktree - safe to remove via provider
-    const provider = getIsolationProvider();
     try {
-      await provider.destroy(isolationEnvId);
-      console.log(`[GitHub] Removed worktree: ${isolationEnvId}`);
+      await onConversationClosed('github', conversationId);
+      console.log(`[GitHub] Cleanup complete for ${conversationId}`);
     } catch (error) {
       const err = error as Error;
-      // Handle already-deleted worktree gracefully (e.g., manual cleanup)
-      if (err.message.includes('is not a working tree')) {
-        console.log(`[GitHub] Worktree already removed: ${isolationEnvId}`);
-      } else {
-        console.error('[GitHub] Failed to remove worktree:', error);
-        // Notify user about orphaned worktree (likely has uncommitted changes)
-        const hasUncommittedChanges = err.message.includes('contains modified or untracked files');
-        if (hasUncommittedChanges) {
-          await this.sendMessage(
-            conversationId,
-            `Warning: Could not remove worktree at \`${isolationEnvId}\` because it contains uncommitted changes. You may want to manually commit or discard these changes.`
-          );
-        }
-      }
+      console.error(`[GitHub] Cleanup failed for ${conversationId}:`, err.message);
     }
-
-    console.log(`[GitHub] Cleanup complete for ${conversationId}`);
   }
 
   /**
@@ -626,130 +564,40 @@ ${userComment}`;
       await this.autoDetectAndLoadCommands(repoPath, codebase.id);
     }
 
-    // 10. Create worktree for this issue/PR (if conversation doesn't have one)
-    let worktreePath: string | null = null;
-    let prHeadBranch: string | undefined;
-    let prHeadSha: string | undefined;
-    // Detect PR: either pull_request event, or issue_comment on a PR (indicated by issue.pull_request or pullRequest)
+    // 10. Gather isolation hints for orchestrator
+    // The orchestrator now handles all isolation decisions
     const isPR = eventType === 'pull_request' || !!pullRequest || !!issue?.pull_request;
-    const existingIsolation = existingConv.isolation_env_id ?? existingConv.worktree_path;
-    if (!existingIsolation) {
-      // For PRs: Check if this PR is linked to an existing issue with a worktree
-      if (isPR) {
-        const linkedIssues = await getLinkedIssueNumbers(owner, repo, number);
 
-        for (const issueNum of linkedIssues) {
-          // Check if the linked issue has a worktree we can reuse
-          const issueConvId = this.buildConversationId(owner, repo, issueNum);
-          const issueConv = await db.getConversationByPlatformId('github', issueConvId);
+    // Build isolation hints for orchestrator
+    const isolationHints: IsolationHints = {
+      workflowType: isPR ? 'pr' : 'issue',
+      workflowId: String(number),
+    };
 
-          const issueIsolation = issueConv?.isolation_env_id ?? issueConv?.worktree_path;
-          if (issueIsolation) {
-            // Reuse the issue's worktree
-            worktreePath = issueIsolation;
-            console.log(
-              `[GitHub] PR #${String(number)} linked to issue #${String(issueNum)}, sharing worktree: ${worktreePath}`
-            );
-
-            // Send user feedback about shared worktree
-            await this.sendMessage(
-              conversationId,
-              `Reusing worktree from issue #${String(issueNum)}`
-            );
-
-            // Update this conversation to use the shared worktree
-            await db.updateConversation(existingConv.id, {
-              codebase_id: codebase.id,
-              cwd: worktreePath,
-              worktree_path: worktreePath,
-              isolation_env_id: issueConv?.isolation_env_id ?? worktreePath,
-              isolation_provider: issueConv?.isolation_provider ?? 'worktree',
-            });
-            break; // Use first found worktree
-          }
-        }
+    // For PRs: get linked issues and branch info
+    if (isPR) {
+      // Get linked issues for worktree sharing
+      const linkedIssues = await getLinkedIssueNumbers(owner, repo, number);
+      if (linkedIssues.length > 0) {
+        isolationHints.linkedIssues = linkedIssues;
+        console.log(`[GitHub] PR #${String(number)} linked to issues: ${linkedIssues.join(', ')}`);
       }
 
-      // If no shared worktree found, create new one via provider
-      if (!worktreePath) {
-        try {
-          // For PRs, fetch the head branch name and SHA from GitHub API
-          if (isPR) {
-            try {
-              const { data: prData } = await this.octokit.rest.pulls.get({
-                owner,
-                repo,
-                pull_number: number,
-              });
-              prHeadBranch = prData.head.ref;
-              prHeadSha = prData.head.sha;
-              console.log(
-                `[GitHub] PR #${String(number)} head branch: ${prHeadBranch}, SHA: ${prHeadSha}`
-              );
-            } catch (error) {
-              console.warn(
-                '[GitHub] Failed to fetch PR head branch, will create new branch instead:',
-                error
-              );
-            }
-          }
-
-          // Use isolation provider for worktree creation
-          const provider = getIsolationProvider();
-          const env = await provider.create({
-            codebaseId: codebase.id,
-            canonicalRepoPath: repoPath,
-            workflowType: isPR ? 'pr' : 'issue',
-            identifier: String(number),
-            prBranch: prHeadBranch,
-            prSha: prHeadSha,
-            description: `GitHub ${isPR ? 'PR' : 'issue'} #${String(number)}`,
-          });
-
-          worktreePath = env.workingPath;
-          console.log(`[GitHub] Created worktree: ${worktreePath}`);
-
-          // Send user feedback about isolation (single line, not verbose)
-          if (isPR && prHeadBranch && prHeadSha) {
-            const shortSha = prHeadSha.substring(0, 7);
-            await this.sendMessage(
-              conversationId,
-              `Reviewing PR at commit \`${shortSha}\` (branch: \`${prHeadBranch}\`)`
-            );
-          } else {
-            const branchName = isPR ? `pr-${String(number)}` : `issue-${String(number)}`;
-            await this.sendMessage(
-              conversationId,
-              `Working in isolated branch \`${branchName}\``
-            );
-          }
-
-          // Update conversation with isolation info (both old and new fields for compatibility)
-          await db.updateConversation(existingConv.id, {
-            codebase_id: codebase.id,
-            cwd: worktreePath,
-            worktree_path: worktreePath,
-            isolation_env_id: env.id,
-            isolation_provider: env.provider,
-          });
-        } catch (error) {
-          const err = error as Error;
-          console.error('[GitHub] Failed to create worktree:', error);
-          const branchName = isPR ? `pr-${String(number)}` : `issue-${String(number)}`;
-          await this.sendMessage(
-            conversationId,
-            `Failed to create isolated worktree for branch \`${branchName}\`. This may be due to a branch name conflict or filesystem issue.\n\nError: ${err.message}\n\nPlease resolve the issue and try again.`
-          );
-          return; // Don't continue without isolation
-        }
+      // Fetch PR head branch and SHA for isolation
+      try {
+        const { data: prData } = await this.octokit.rest.pulls.get({
+          owner,
+          repo,
+          pull_number: number,
+        });
+        isolationHints.prBranch = prData.head.ref;
+        isolationHints.prSha = prData.head.sha;
+        console.log(
+          `[GitHub] PR #${String(number)} head: ${prData.head.ref}@${prData.head.sha.substring(0, 7)}`
+        );
+      } catch (error) {
+        console.warn('[GitHub] Failed to fetch PR head info:', error);
       }
-    } else {
-      // Conversation already has isolation, use it
-      worktreePath = existingIsolation;
-
-      // Send user feedback about reusing existing worktree
-      const branchName = isPR ? `pr-${String(number)}` : `issue-${String(number)}`;
-      await this.sendMessage(conversationId, `Reusing worktree \`${branchName}\``);
     }
 
     // 11. Build message with context
@@ -758,38 +606,27 @@ ${userComment}`;
     let contextToAppend: string | undefined;
 
     // IMPORTANT: Slash commands must be processed deterministically (not by AI)
-    // Extract only the first line if it's a slash command
     const isSlashCommand = strippedComment.trim().startsWith('/');
-    const isCommandInvoke = strippedComment.trim().startsWith('/command-invoke');
 
     if (isSlashCommand) {
-      // For slash commands, use only the first line to avoid mixing commands with instructions
-      const firstLine = strippedComment.split('\n')[0].trim();
-      finalMessage = firstLine;
-      console.log(`[GitHub] Processing slash command: ${firstLine}`);
+      // For slash commands, use only the first line
+      finalMessage = strippedComment.split('\n')[0].trim();
+      console.log(`[GitHub] Processing slash command: ${finalMessage}`);
 
-      // For /command-invoke, pass just the issue/PR number (not full description)
-      // This avoids tempting the AI to implement before planning
-      if (isCommandInvoke) {
-        const activeSession = await sessionDb.getActiveSession(existingConv.id);
-        const isFirstCommandInvoke = !activeSession;
-
-        if (isFirstCommandInvoke) {
-          console.log('[GitHub] Adding issue/PR reference for first /command-invoke');
-          if (eventType === 'issue' && issue) {
-            contextToAppend = `GitHub Issue #${String(issue.number)}: "${issue.title}"\nUse 'gh issue view ${String(issue.number)}' for full details if needed.`;
-          } else if (eventType === 'issue_comment' && issue) {
-            contextToAppend = `GitHub Issue #${String(issue.number)}: "${issue.title}"\nUse 'gh issue view ${String(issue.number)}' for full details if needed.`;
-          } else if (eventType === 'pull_request' && pullRequest) {
-            contextToAppend = `GitHub Pull Request #${String(pullRequest.number)}: "${pullRequest.title}"\nUse 'gh pr view ${String(pullRequest.number)}' for full details if needed.`;
-          } else if (eventType === 'issue_comment' && pullRequest) {
-            contextToAppend = `GitHub Pull Request #${String(pullRequest.number)}: "${pullRequest.title}"\nUse 'gh pr view ${String(pullRequest.number)}' for full details if needed.`;
-          }
+      // Add issue/PR reference context
+      if (eventType === 'issue' && issue) {
+        contextToAppend = `GitHub Issue #${String(issue.number)}: "${issue.title}"\nUse 'gh issue view ${String(issue.number)}' for full details if needed.`;
+      } else if (eventType === 'pull_request' && pullRequest) {
+        contextToAppend = `GitHub Pull Request #${String(pullRequest.number)}: "${pullRequest.title}"\nUse 'gh pr view ${String(pullRequest.number)}' for full details if needed.`;
+      } else if (eventType === 'issue_comment') {
+        if (pullRequest) {
+          contextToAppend = `GitHub Pull Request #${String(pullRequest.number)}: "${pullRequest.title}"\nUse 'gh pr view ${String(pullRequest.number)}' for full details if needed.`;
+        } else if (issue) {
+          contextToAppend = `GitHub Issue #${String(issue.number)}: "${issue.title}"\nUse 'gh issue view ${String(issue.number)}' for full details if needed.`;
         }
       }
     } else {
-      // For non-command messages, always add issue/PR context
-      // Router needs this context to understand what the user is asking about
+      // For non-command messages, add rich context
       if (eventType === 'issue' && issue) {
         finalMessage = this.buildIssueContext(issue, strippedComment);
       } else if (eventType === 'issue_comment' && issue) {
@@ -801,35 +638,17 @@ ${userComment}`;
       }
     }
 
-    // Add worktree context if working in an isolated branch
-    if (worktreePath) {
-      // Use the actual PR head branch name if available, otherwise use the worktree naming convention
-      const branchName =
-        isPR && prHeadBranch
-          ? prHeadBranch
-          : isPR
-            ? `pr-${String(number)}`
-            : `issue-${String(number)}`;
-      let worktreeContext: string;
-
-      if (isPR && prHeadBranch && prHeadSha) {
-        // SHA-based PR review - show commit SHA for reproducibility
-        const shortSha = prHeadSha.substring(0, 7);
-        worktreeContext = `\n\n[Working in isolated worktree at commit ${shortSha} (PR #${String(number)} branch: ${branchName}). This is the exact commit that triggered the review for reproducibility.]`;
-      } else if (isPR && prHeadBranch) {
-        // Branch-based PR review (fallback)
-        worktreeContext = `\n\n[Working in isolated worktree with PR branch: ${branchName}. This is the actual PR branch with all changes.]`;
-      } else {
-        // Issue workflow
-        worktreeContext = `\n\n[Working in isolated branch: ${branchName}. When done, changes can be committed and pushed, then a PR can be created from this branch.]`;
-      }
-
-      contextToAppend = contextToAppend ? contextToAppend + worktreeContext : worktreeContext;
-    }
-
-    // 12. Route to orchestrator
+    // 12. Route to orchestrator with isolation hints
     try {
-      await handleMessage(this, conversationId, finalMessage, contextToAppend);
+      await handleMessage(
+        this,
+        conversationId,
+        finalMessage,
+        contextToAppend,
+        undefined, // threadContext
+        undefined, // parentConversationId
+        isolationHints
+      );
     } catch (error) {
       const err = error as Error;
       console.error('[GitHub] Message handling error:', error);

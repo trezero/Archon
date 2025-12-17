@@ -138,15 +138,33 @@ export async function updateConversation(
 }
 
 /**
- * Find a conversation by isolation environment ID
+ * Find a conversation by isolation environment ID (legacy - single result)
  * Used for provider-based lookup and shared environment detection
  */
-export async function getConversationByIsolationEnvId(
-  envId: string
-): Promise<Conversation | null> {
+export async function getConversationByIsolationEnvId(envId: string): Promise<Conversation | null> {
   const result = await pool.query<Conversation>(
     'SELECT * FROM remote_agent_conversations WHERE isolation_env_id = $1 LIMIT 1',
     [envId]
   );
   return result.rows[0] ?? null;
+}
+
+/**
+ * Find all conversations using a specific isolation environment (new UUID model)
+ */
+export async function getConversationsByIsolationEnvId(envId: string): Promise<Conversation[]> {
+  const result = await pool.query<Conversation>(
+    'SELECT * FROM remote_agent_conversations WHERE isolation_env_id = $1',
+    [envId]
+  );
+  return result.rows;
+}
+
+/**
+ * Update last_activity_at for staleness tracking
+ */
+export async function touchConversation(id: string): Promise<void> {
+  await pool.query('UPDATE remote_agent_conversations SET last_activity_at = NOW() WHERE id = $1', [
+    id,
+  ]);
 }
