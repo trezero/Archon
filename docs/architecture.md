@@ -2,7 +2,7 @@
 
 Comprehensive guide to understanding and extending the Remote Coding Agent platform.
 
-**Navigation:** [Overview](#system-overview) • [Adding Platforms](#adding-platform-adapters) • [Adding AI Assistants](#adding-ai-assistant-clients) • [Commands](#command-system) • [Streaming](#streaming-modes) • [Database](#database-schema)
+**Navigation:** [Overview](#system-overview) • [Platforms](#adding-platform-adapters) • [AI Assistants](#adding-ai-assistant-clients) • [Isolation](#isolation-providers) • [Commands](#command-system) • [Streaming](#streaming-modes) • [Database](#database-schema)
 
 ---
 
@@ -28,19 +28,19 @@ The Remote Coding Agent is a **platform-agnostic AI coding assistant orchestrato
 │   • Stream responses back to platforms      │
 └──────────────┬──────────────────────────────┘
                │
-       ┌───────┴────────┐
-       │                │
-       ▼                ▼
-┌─────────────┐  ┌─────────────────────┐
-│  Command    │  │  AI Assistant       │
-│  Handler    │  │  Clients            │
-│             │  │  • IAssistantClient │
-│  (Slash     │  │  • Factory pattern  │
-│  commands)  │  │  • Streaming API    │
-└─────────────┘  └────────┬────────────┘
-       │                  │
-       └────────┬─────────┘
-                ▼
+       ┌───────┼────────┐
+       │       │        │
+       ▼       ▼        ▼
+┌───────────┐ ┌───────────────┐ ┌───────────────────┐
+│ Command   │ │ AI Assistant  │ │ Isolation         │
+│ Handler   │ │ Clients       │ │ Providers         │
+│           │ │               │ │                   │
+│ (Slash    │ │ IAssistant-   │ │ IIsolationProvider│
+│ commands) │ │ Client        │ │ (worktree, etc.)  │
+└─────┬─────┘ └───────┬───────┘ └─────────┬─────────┘
+      │               │                   │
+      └───────────────┼───────────────────┘
+                      ▼
 ┌─────────────────────────────────────────────┐
 │        PostgreSQL (3 Tables)                │
 │  • Codebases  • Conversations  • Sessions   │
@@ -448,6 +448,205 @@ if (event.type === 'error') {
   }
 }
 ```
+
+---
+
+## Isolation Providers
+
+Isolation providers create isolated working environments (worktrees, containers, VMs) for concurrent workflows. The default implementation uses git worktrees.
+
+### IIsolationProvider Interface
+
+**Location:** `src/isolation/types.ts`
+
+```typescript
+export interface IIsolationProvider {
+  readonly providerType: string;
+  create(request: IsolationRequest): Promise<IsolatedEnvironment>;
+  destroy(envId: string, options?: { force?: boolean }): Promise<void>;
+  get(envId: string): Promise<IsolatedEnvironment | null>;
+  list(codebaseId: string): Promise<IsolatedEnvironment[]>;
+  adopt?(path: string): Promise<IsolatedEnvironment | null>;
+  healthCheck(envId: string): Promise<boolean>;
+}
+```
+
+### Request & Response Types
+
+```typescript
+interface IsolationRequest {
+  codebaseId: string;
+  canonicalRepoPath: string;      // Main repo path, never a worktree
+  workflowType: 'issue' | 'pr' | 'review' | 'thread' | 'task';
+  identifier: string;             // "42", "feature-auth", etc.
+  prBranch?: string;              // For PR adoption
+  prSha?: string;                 // For reproducible PR reviews
+}
+
+interface IsolatedEnvironment {
+  id: string;                     // Worktree path (for worktree provider)
+  provider: 'worktree' | 'container' | 'vm' | 'remote';
+  workingPath: string;            // Where AI should work
+  branchName?: string;
+  status: 'active' | 'suspended' | 'destroyed';
+  createdAt: Date;
+  metadata: Record<string, unknown>;
+}
+```
+
+### WorktreeProvider Implementation
+
+**Location:** `src/isolation/providers/worktree.ts`
+
+```typescript
+export class WorktreeProvider implements IIsolationProvider {
+  readonly providerType = 'worktree';
+
+  async create(request: IsolationRequest): Promise<IsolatedEnvironment> {
+    // 1. Check for existing worktree (adoption)
+    // 2. Generate branch name from workflowType + identifier
+    // 3. Create git worktree at computed path
+    // 4. Return IsolatedEnvironment
+  }
+
+  async destroy(envId: string, options?: { force?: boolean }): Promise<void> {
+    // git worktree remove <path> [--force]
+  }
+}
+```
+
+### Branch Naming Convention
+
+| Workflow | Identifier | Generated Branch |
+|----------|------------|------------------|
+| issue | `"42"` | `issue-42` |
+| pr | `"123"` | `pr-123` |
+| pr + SHA | `"123"` | `pr-123-review` |
+| task | `"my-feature"` | `task-my-feature` |
+| thread | `"C123:ts.123"` | `thread-a1b2c3d4` (8-char hash) |
+
+### Storage Location
+
+```
+LOCAL:   ~/tmp/worktrees/<project>/<branch>/     ← WORKTREE_BASE can override
+DOCKER:  /workspace/worktrees/<project>/<branch>/ ← FIXED, no override
+```
+
+**Logic in `getWorktreeBase()`:**
+1. Docker detected? → `/workspace/worktrees` (always, no override)
+2. `WORKTREE_BASE` set? → use it (local only)
+3. Default → `~/tmp/worktrees`
+
+### Usage Pattern
+
+**GitHub adapter** (`src/adapters/github.ts`):
+
+```typescript
+const provider = getIsolationProvider();
+
+// On @bot mention
+const env = await provider.create({
+  codebaseId: codebase.id,
+  canonicalRepoPath: repoPath,
+  workflowType: isPR ? 'pr' : 'issue',
+  identifier: String(number),
+  prBranch: prHeadBranch,
+  prSha: prHeadSha,
+});
+
+// Update conversation
+await db.updateConversation(conv.id, {
+  cwd: env.workingPath,
+  isolation_env_id: env.id,
+  isolation_provider: env.provider,
+});
+
+// On issue/PR close
+await provider.destroy(isolationEnvId);
+```
+
+**Command handler** (`/worktree create`):
+
+```typescript
+const provider = getIsolationProvider();
+const env = await provider.create({
+  workflowType: 'task',
+  identifier: branchName,
+  // ...
+});
+```
+
+### Worktree Adoption
+
+The provider adopts existing worktrees before creating new ones:
+
+1. **Path match**: If worktree exists at expected path → adopt
+2. **Branch match**: If PR's branch has existing worktree → adopt (skill symbiosis)
+
+```typescript
+// Inside create()
+const existing = await this.findExisting(request, branchName, worktreePath);
+if (existing) {
+  return existing; // metadata.adopted = true
+}
+// ... else create new
+```
+
+### Database Fields
+
+```sql
+remote_agent_conversations
+├── worktree_path       -- LEGACY (kept for compatibility)
+├── isolation_env_id    -- NEW: provider-assigned ID (worktree path)
+└── isolation_provider  -- NEW: 'worktree' | 'container' | ...
+```
+
+**Lookup pattern:**
+```typescript
+const envId = conversation.isolation_env_id ?? conversation.worktree_path;
+```
+
+### Adding a New Isolation Provider
+
+**1. Create provider:** `src/isolation/providers/your-provider.ts`
+
+```typescript
+export class ContainerProvider implements IIsolationProvider {
+  readonly providerType = 'container';
+
+  async create(request: IsolationRequest): Promise<IsolatedEnvironment> {
+    // Spin up Docker container with repo mounted
+    const containerId = await docker.createContainer({...});
+    return {
+      id: containerId,
+      provider: 'container',
+      workingPath: '/workspace',
+      status: 'active',
+      createdAt: new Date(),
+      metadata: { request },
+    };
+  }
+
+  async destroy(envId: string): Promise<void> {
+    await docker.removeContainer(envId);
+  }
+}
+```
+
+**2. Register in factory:** `src/isolation/index.ts`
+
+```typescript
+export function getIsolationProvider(type?: string): IIsolationProvider {
+  switch (type) {
+    case 'container':
+      return new ContainerProvider();
+    default:
+      return new WorktreeProvider();
+  }
+}
+```
+
+**See also:** [Worktree Orchestration](./worktree-orchestration.md) for detailed flow diagrams.
 
 ---
 
@@ -958,6 +1157,18 @@ Post single comment on issue with summary
 - [ ] Test session persistence across restarts
 - [ ] Test plan→execute transition (new session)
 
+### Adding a New Isolation Provider
+
+- [ ] Create `src/isolation/providers/your-provider.ts`
+- [ ] Implement `IIsolationProvider` interface
+- [ ] Handle `create()`, `destroy()`, `get()`, `list()`, `healthCheck()`
+- [ ] Optional: implement `adopt()` for existing environment discovery
+- [ ] Register in `src/isolation/index.ts` factory
+- [ ] Update database columns if needed (`isolation_provider` type)
+- [ ] Test creation and cleanup lifecycle
+- [ ] Test concurrent environments (multiple conversations)
+- [ ] Document in `docs/worktree-orchestration.md` (or create new doc)
+
 ### Modifying Command System
 
 - [ ] Update `substituteVariables()` for new variable types
@@ -1035,7 +1246,7 @@ await handleMessage(adapter, conversationId, finalMessage);
 
 ## Key Takeaways
 
-1. **Interfaces enable extensibility**: Both `IPlatformAdapter` and `IAssistantClient` allow adding platforms and AI assistants without modifying core logic
+1. **Interfaces enable extensibility**: `IPlatformAdapter`, `IAssistantClient`, and `IIsolationProvider` allow adding platforms, AI assistants, and isolation strategies without modifying core logic
 
 2. **Async generators for streaming**: All AI clients return `AsyncGenerator<MessageChunk>` for unified streaming across different SDKs
 
@@ -1047,9 +1258,11 @@ await handleMessage(adapter, conversationId, finalMessage);
 
 6. **Plan→execute is special**: Only transition requiring new session (prevents token bloat during implementation)
 
-7. **Factory pattern for clients**: Single factory function (`getAssistantClient()`) instantiates correct client based on conversation's `ai_assistant_type`
+7. **Factory pattern**: `getAssistantClient()` and `getIsolationProvider()` instantiate correct implementations based on configuration
 
 8. **Error recovery**: Always provide `/reset` escape hatch for users when sessions get stuck
+
+9. **Isolation adoption**: Providers check for existing environments before creating new ones (enables skill symbiosis)
 
 ---
 
@@ -1057,5 +1270,6 @@ await handleMessage(adapter, conversationId, finalMessage);
 
 - Platform adapter: `src/adapters/telegram.ts`, `src/adapters/github.ts`
 - AI client: `src/clients/claude.ts`, `src/clients/codex.ts`
+- Isolation provider: `src/isolation/providers/worktree.ts`
 - Orchestrator: `src/orchestrator/orchestrator.ts`
 - Command handler: `src/handlers/command-handler.ts`

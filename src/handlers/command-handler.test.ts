@@ -68,6 +68,32 @@ mock.module('../utils/git', () => ({
   createWorktreeForIssue: mock(() => Promise.resolve('/workspace/worktrees/issue-1')),
 }));
 
+// Mock isolation provider
+const mockIsolationCreate = mock(() =>
+  Promise.resolve({
+    id: '/workspace/my-repo/worktrees/task-feat-auth',
+    provider: 'worktree',
+    workingPath: '/workspace/my-repo/worktrees/task-feat-auth',
+    branchName: 'task-feat-auth',
+    status: 'active',
+    createdAt: new Date(),
+    metadata: {},
+  })
+);
+const mockIsolationDestroy = mock(() => Promise.resolve());
+
+mock.module('../isolation', () => ({
+  getIsolationProvider: () => ({
+    providerType: 'worktree',
+    create: mockIsolationCreate,
+    destroy: mockIsolationDestroy,
+    get: mock(() => Promise.resolve(null)),
+    list: mock(() => Promise.resolve([])),
+    adopt: mock(() => Promise.resolve(null)),
+    healthCheck: mock(() => Promise.resolve(true)),
+  }),
+}));
+
 mock.module('child_process', () => ({
   exec: mock(() => {}),
   execFile: mockExecFile,
@@ -101,6 +127,9 @@ function clearAllMocks(): void {
   mockListWorktrees.mockClear();
   mockRemoveWorktree.mockClear();
   mockGetWorktreeBase.mockClear();
+  // Isolation mocks
+  mockIsolationCreate.mockClear();
+  mockIsolationDestroy.mockClear();
 }
 
 describe('CommandHandler', () => {
@@ -271,6 +300,8 @@ describe('CommandHandler', () => {
       codebase_id: null,
       cwd: null,
       worktree_path: null,
+      isolation_env_id: null,
+      isolation_provider: null,
       created_at: new Date(),
       updated_at: new Date(),
     };
@@ -642,9 +673,10 @@ describe('CommandHandler', () => {
 
           expect(result.success).toBe(true);
           expect(result.message).toContain('Worktree created');
-          expect(result.message).toContain('feat-auth');
-          expect(result.message).toMatch(/worktrees[\\\/]feat-auth/);
+          expect(result.message).toContain('task-feat-auth');
+          expect(result.message).toMatch(/worktrees[\\\/]task-feat-auth/);
           expect(mockUpdateConversation).toHaveBeenCalled();
+          expect(mockIsolationCreate).toHaveBeenCalled();
         });
 
         test('should reject if already using a worktree', async () => {

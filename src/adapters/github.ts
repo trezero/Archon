@@ -15,7 +15,8 @@ import { promisify } from 'util';
 import { readdir, access } from 'fs/promises';
 import { join, resolve } from 'path';
 import { parseAllowedUsers, isGitHubUserAuthorized } from '../utils/github-auth';
-import { isWorktreePath, createWorktreeForIssue, removeWorktree } from '../utils/git';
+import { isWorktreePath } from '../utils/git';
+import { getIsolationProvider } from '../isolation';
 import { getLinkedIssueNumbers } from '../utils/github-graphql';
 
 const execAsync = promisify(exec);
@@ -444,7 +445,14 @@ export class GitHubAdapter implements IPlatformAdapter {
     const conversationId = this.buildConversationId(owner, repo, number);
     const conversation = await db.getConversationByPlatformId('github', conversationId);
 
-    if (!conversation?.worktree_path) {
+    // Check both old and new isolation fields for backwards compatibility
+    if (!conversation) {
+      console.log(`[GitHub] No conversation to cleanup for ${conversationId}`);
+      return;
+    }
+
+    const isolationEnvId = conversation.isolation_env_id ?? conversation.worktree_path;
+    if (!isolationEnvId) {
       console.log(`[GitHub] No worktree to cleanup for ${conversationId}`);
       return;
     }
@@ -458,34 +466,39 @@ export class GitHubAdapter implements IPlatformAdapter {
     }
 
     const { codebase } = await this.getOrCreateCodebaseForRepo(owner, repo);
-    const worktreePath = conversation.worktree_path;
 
-    // Clear worktree path from THIS conversation first
+    // Clear isolation references from THIS conversation first
     // This must happen before checking for other users of the worktree
     await db.updateConversation(conversation.id, {
       worktree_path: null,
+      isolation_env_id: null,
+      isolation_provider: null,
       cwd: codebase.default_cwd,
     });
 
     // Check if any OTHER conversations still use this worktree (shared worktree case)
-    const otherConv = await db.getConversationByWorktreePath(worktreePath);
+    // Check both old and new fields for backwards compatibility
+    const otherConvByWorktree = await db.getConversationByWorktreePath(isolationEnvId);
+    const otherConvByEnvId = await db.getConversationByIsolationEnvId(isolationEnvId);
+    const otherConv = otherConvByWorktree ?? otherConvByEnvId;
     if (otherConv) {
       console.log(
-        `[GitHub] Keeping worktree ${worktreePath}, still used by ${otherConv.platform_conversation_id}`
+        `[GitHub] Keeping worktree ${isolationEnvId}, still used by ${otherConv.platform_conversation_id}`
       );
       console.log(`[GitHub] Cleanup complete for ${conversationId}`);
       return;
     }
 
-    // No other conversations use this worktree - safe to remove
+    // No other conversations use this worktree - safe to remove via provider
+    const provider = getIsolationProvider();
     try {
-      await removeWorktree(codebase.default_cwd, worktreePath);
-      console.log(`[GitHub] Removed worktree: ${worktreePath}`);
+      await provider.destroy(isolationEnvId);
+      console.log(`[GitHub] Removed worktree: ${isolationEnvId}`);
     } catch (error) {
       const err = error as Error;
       // Handle already-deleted worktree gracefully (e.g., manual cleanup)
       if (err.message.includes('is not a working tree')) {
-        console.log(`[GitHub] Worktree already removed: ${worktreePath}`);
+        console.log(`[GitHub] Worktree already removed: ${isolationEnvId}`);
       } else {
         console.error('[GitHub] Failed to remove worktree:', error);
         // Notify user about orphaned worktree (likely has uncommitted changes)
@@ -493,7 +506,7 @@ export class GitHubAdapter implements IPlatformAdapter {
         if (hasUncommittedChanges) {
           await this.sendMessage(
             conversationId,
-            `Warning: Could not remove worktree at \`${worktreePath}\` because it contains uncommitted changes. You may want to manually commit or discard these changes.`
+            `Warning: Could not remove worktree at \`${isolationEnvId}\` because it contains uncommitted changes. You may want to manually commit or discard these changes.`
           );
         }
       }
@@ -647,7 +660,7 @@ ${userComment}`;
         }
       }
 
-      // If no shared worktree found, create new one
+      // If no shared worktree found, create new one via provider
       if (!worktreePath) {
         try {
           // For PRs, fetch the head branch name and SHA from GitHub API
@@ -671,20 +684,28 @@ ${userComment}`;
             }
           }
 
-          worktreePath = await createWorktreeForIssue(
-            repoPath,
-            number,
-            isPR,
-            prHeadBranch,
-            prHeadSha
-          );
+          // Use isolation provider for worktree creation
+          const provider = getIsolationProvider();
+          const env = await provider.create({
+            codebaseId: codebase.id,
+            canonicalRepoPath: repoPath,
+            workflowType: isPR ? 'pr' : 'issue',
+            identifier: String(number),
+            prBranch: prHeadBranch,
+            prSha: prHeadSha,
+            description: `GitHub ${isPR ? 'PR' : 'issue'} #${String(number)}`,
+          });
+
+          worktreePath = env.workingPath;
           console.log(`[GitHub] Created worktree: ${worktreePath}`);
 
-          // Update conversation with worktree path
+          // Update conversation with isolation info (both old and new fields for compatibility)
           await db.updateConversation(existingConv.id, {
             codebase_id: codebase.id,
             cwd: worktreePath,
             worktree_path: worktreePath,
+            isolation_env_id: env.id,
+            isolation_provider: env.provider,
           });
         } catch (error) {
           const err = error as Error;

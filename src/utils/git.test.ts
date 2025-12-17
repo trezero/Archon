@@ -71,6 +71,8 @@ describe('git utilities', () => {
 
   describe('getWorktreeBase', () => {
     const originalEnv = process.env.WORKTREE_BASE;
+    const originalWorkspacePath = process.env.WORKSPACE_PATH;
+    const originalHome = process.env.HOME;
 
     afterEach(() => {
       if (originalEnv === undefined) {
@@ -78,24 +80,71 @@ describe('git utilities', () => {
       } else {
         process.env.WORKTREE_BASE = originalEnv;
       }
+      if (originalWorkspacePath === undefined) {
+        delete process.env.WORKSPACE_PATH;
+      } else {
+        process.env.WORKSPACE_PATH = originalWorkspacePath;
+      }
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
     });
 
-    test('returns sibling worktrees dir by default', () => {
+    test('returns ~/tmp/worktrees by default for local (non-Docker)', () => {
       delete process.env.WORKTREE_BASE;
+      delete process.env.WORKSPACE_PATH;
       const result = git.getWorktreeBase('/workspace/my-repo');
-      expect(result).toBe(join('/workspace/my-repo', '..', 'worktrees'));
+      // Default for local: ~/tmp/worktrees (matches worktree-manager skill)
+      expect(result).toBe(join(homedir(), 'tmp', 'worktrees'));
     });
 
-    test('uses WORKTREE_BASE env var when set', () => {
+    test('returns /workspace/worktrees for Docker environment', () => {
+      delete process.env.WORKTREE_BASE;
+      process.env.WORKSPACE_PATH = '/workspace';
+      const result = git.getWorktreeBase('/workspace/my-repo');
+      // Docker: inside mounted volume
+      expect(result).toBe('/workspace/worktrees');
+    });
+
+    test('detects Docker by HOME=/root + WORKSPACE_PATH', () => {
+      delete process.env.WORKTREE_BASE;
+      process.env.HOME = '/root';
+      process.env.WORKSPACE_PATH = '/app/workspace';
+      const result = git.getWorktreeBase('/workspace/my-repo');
+      expect(result).toBe('/workspace/worktrees');
+    });
+
+    test('uses WORKTREE_BASE for local (non-Docker)', () => {
+      delete process.env.WORKSPACE_PATH; // Ensure not Docker
+      delete process.env.HOME; // Reset HOME to actual value
       process.env.WORKTREE_BASE = '/custom/worktrees';
       const result = git.getWorktreeBase('/workspace/my-repo');
       expect(result).toBe('/custom/worktrees');
     });
 
-    test('expands tilde to home directory', () => {
+    test('ignores WORKTREE_BASE in Docker (end user protection)', () => {
+      process.env.WORKTREE_BASE = '/custom/worktrees';
+      process.env.WORKSPACE_PATH = '/workspace'; // Docker flag
+      const result = git.getWorktreeBase('/workspace/my-repo');
+      // Docker ALWAYS uses fixed location, override IGNORED
+      expect(result).toBe('/workspace/worktrees');
+    });
+
+    test('expands tilde in WORKTREE_BASE (local only)', () => {
+      delete process.env.WORKSPACE_PATH; // Ensure not Docker
       process.env.WORKTREE_BASE = '~/tmp/worktrees';
       const result = git.getWorktreeBase('/workspace/my-repo');
-      expect(result).toBe(join(homedir(), 'tmp/worktrees'));
+      expect(result).toBe(join(homedir(), 'tmp', 'worktrees'));
+    });
+
+    test('ignores WORKTREE_BASE with tilde in Docker', () => {
+      process.env.WORKSPACE_PATH = '/workspace'; // Docker flag
+      process.env.WORKTREE_BASE = '~/custom/worktrees';
+      const result = git.getWorktreeBase('/workspace/my-repo');
+      // Tilde never expanded in Docker because override is ignored entirely
+      expect(result).toBe('/workspace/worktrees');
     });
   });
 

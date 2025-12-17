@@ -11,6 +11,7 @@ import * as sessionDb from '../db/sessions';
 import * as templateDb from '../db/command-templates';
 import { isPathWithinWorkspace } from '../utils/path-validation';
 import { listWorktrees, execFileAsync } from '../utils/git';
+import { getIsolationProvider } from '../isolation';
 
 /**
  * Convert an absolute path to a relative path from the repository root
@@ -930,7 +931,6 @@ Session:
       }
 
       const mainPath = codebase.default_cwd;
-      const worktreesDir = join(mainPath, 'worktrees');
 
       switch (subcommand) {
         case 'create': {
@@ -939,9 +939,10 @@ Session:
             return { success: false, message: 'Usage: /worktree create <branch-name>' };
           }
 
-          // Check if already using a worktree
-          if (conversation.worktree_path) {
-            const shortPath = shortenPath(conversation.worktree_path, mainPath);
+          // Check if already using a worktree (check both old and new fields)
+          const existingIsolation = conversation.isolation_env_id ?? conversation.worktree_path;
+          if (existingIsolation) {
+            const shortPath = shortenPath(existingIsolation, mainPath);
             return {
               success: false,
               message: `Already using worktree: ${shortPath}\n\nRun /worktree remove first.`,
@@ -956,19 +957,16 @@ Session:
             };
           }
 
-          const worktreePath = join(worktreesDir, branchName);
-
           try {
-            // Create worktree with new branch
-            await execFileAsync('git', [
-              '-C',
-              mainPath,
-              'worktree',
-              'add',
-              worktreePath,
-              '-b',
-              branchName,
-            ]);
+            // Use isolation provider for worktree creation
+            const provider = getIsolationProvider();
+            const env = await provider.create({
+              codebaseId: conversation.codebase_id,
+              canonicalRepoPath: mainPath,
+              workflowType: 'task',
+              identifier: branchName,
+              description: `Manual worktree: ${branchName}`,
+            });
 
             // Add to git safe.directory
             await execFileAsync('git', [
@@ -976,22 +974,23 @@ Session:
               '--global',
               '--add',
               'safe.directory',
-              worktreePath,
+              env.workingPath,
             ]);
 
-            // Update conversation to use this worktree
-            await db.updateConversation(conversation.id, { worktree_path: worktreePath });
+            // Update conversation with isolation info (both old and new fields for compatibility)
+            await db.updateConversation(conversation.id, {
+              worktree_path: env.workingPath,
+              isolation_env_id: env.id,
+              isolation_provider: env.provider,
+              cwd: env.workingPath,
+            });
 
-            // Reset session for fresh start
-            const session = await sessionDb.getActiveSession(conversation.id);
-            if (session) {
-              await sessionDb.deactivateSession(session.id);
-            }
+            // NOTE: Do NOT deactivate session - preserve AI context per plan
 
-            const shortPath = shortenPath(worktreePath, mainPath);
+            const shortPath = shortenPath(env.workingPath, mainPath);
             return {
               success: true,
-              message: `Worktree created!\n\nBranch: ${branchName}\nPath: ${shortPath}\n\nThis conversation now works in isolation.\nRun dependency install if needed (e.g., npm install).`,
+              message: `Worktree created!\n\nBranch: ${env.branchName ?? branchName}\nPath: ${shortPath}\n\nThis conversation now works in isolation.\nRun dependency install if needed (e.g., bun install).`,
               modified: true,
             };
           } catch (error) {
@@ -1017,6 +1016,9 @@ Session:
             const lines = stdout.trim().split('\n');
             let msg = 'Worktrees:\n\n';
 
+            // Check both old and new fields for current worktree
+            const currentWorktree = conversation.isolation_env_id ?? conversation.worktree_path;
+
             for (const line of lines) {
               // Extract the path (first part before whitespace)
               const parts = line.split(/\s+/);
@@ -1027,8 +1029,7 @@ Session:
               const restOfLine = parts.slice(1).join(' ');
               const shortenedLine = restOfLine ? `${shortPath} ${restOfLine}` : shortPath;
 
-              const isActive =
-                conversation.worktree_path && line.startsWith(conversation.worktree_path);
+              const isActive = currentWorktree && line.startsWith(currentWorktree);
               const marker = isActive ? ' <- active' : '';
               msg += `${shortenedLine}${marker}\n`;
             }
@@ -1041,26 +1042,24 @@ Session:
         }
 
         case 'remove': {
-          if (!conversation.worktree_path) {
+          // Check both old and new fields
+          const isolationEnvId = conversation.isolation_env_id ?? conversation.worktree_path;
+          if (!isolationEnvId) {
             return { success: false, message: 'This conversation is not using a worktree.' };
           }
 
-          const worktreePath = conversation.worktree_path;
           const forceFlag = args[1] === '--force';
 
           try {
-            // Remove worktree (--force discards uncommitted changes)
-            const gitArgs = ['-C', mainPath, 'worktree', 'remove'];
-            if (forceFlag) {
-              gitArgs.push('--force');
-            }
-            gitArgs.push(worktreePath);
+            // Use isolation provider for removal
+            const provider = getIsolationProvider();
+            await provider.destroy(isolationEnvId, { force: forceFlag });
 
-            await execFileAsync('git', gitArgs);
-
-            // Clear worktree_path, keep cwd pointing to main repo
+            // Clear all isolation references, set cwd to main repo
             await db.updateConversation(conversation.id, {
               worktree_path: null,
+              isolation_env_id: null,
+              isolation_provider: null,
               cwd: mainPath,
             });
 
@@ -1070,7 +1069,7 @@ Session:
               await sessionDb.deactivateSession(session.id);
             }
 
-            const shortPath = shortenPath(worktreePath, mainPath);
+            const shortPath = shortenPath(isolationEnvId, mainPath);
             return {
               success: true,
               message: `Worktree removed: ${shortPath}\n\nSwitched back to main repo.`,
@@ -1105,13 +1104,16 @@ Session:
             };
           }
 
+          // Check both old and new fields for current worktree
+          const currentWorktree = conversation.isolation_env_id ?? conversation.worktree_path;
+
           let msg = 'All worktrees (from git):\n\n';
           for (const wt of gitWorktrees) {
             const isMainRepo = wt.path === mainPath;
             if (isMainRepo) continue;
 
             const shortPath = shortenPath(wt.path, mainPath);
-            const isCurrent = wt.path === conversation.worktree_path;
+            const isCurrent = wt.path === currentWorktree;
             const marker = isCurrent ? ' ← current' : '';
             msg += `  ${wt.branch} → ${shortPath}${marker}\n`;
           }

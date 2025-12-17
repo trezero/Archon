@@ -30,21 +30,38 @@ export async function mkdirAsync(
 
 /**
  * Get the base directory for worktrees
- * Uses WORKTREE_BASE env var if set, otherwise defaults to sibling of repo
+ * - Docker: FIXED at /workspace/worktrees (end users can't override)
+ * - Local: ~/tmp/worktrees by default, WORKTREE_BASE env var to override
  */
-export function getWorktreeBase(repoPath: string): string {
+export function getWorktreeBase(_repoPath: string): string {
+  // 1. Docker: FIXED location, no override for end users
+  const isDocker =
+    process.env.WORKSPACE_PATH === '/workspace' ||
+    (process.env.HOME === '/root' && process.env.WORKSPACE_PATH);
+
+  if (isDocker) {
+    return '/workspace/worktrees';
+  }
+
+  // 2. Local: Check WORKTREE_BASE override (for developers with custom setups)
   const envBase = process.env.WORKTREE_BASE;
   if (envBase) {
-    // Expand ~ to home directory using os.homedir() for cross-platform support
-    if (envBase.startsWith('~')) {
-      // Use join() to normalize path separators cross-platform
-      const pathAfterTilde = envBase.slice(1).replace(/^[/\\]/, ''); // Remove leading ~ and any separator
-      return join(homedir(), pathAfterTilde);
-    }
-    return envBase;
+    return expandTilde(envBase);
   }
-  // Default: sibling to repo (original behavior)
-  return join(repoPath, '..', 'worktrees');
+
+  // 3. Local default: matches worktree-manager skill
+  return join(homedir(), 'tmp', 'worktrees');
+}
+
+/**
+ * Expand ~ to home directory
+ */
+function expandTilde(path: string): string {
+  if (path.startsWith('~')) {
+    const pathAfterTilde = path.slice(1).replace(/^[/\\]/, '');
+    return join(homedir(), pathAfterTilde);
+  }
+  return path;
 }
 
 /**

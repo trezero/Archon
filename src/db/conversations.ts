@@ -92,7 +92,12 @@ export async function getOrCreateConversation(
 
 export async function updateConversation(
   id: string,
-  updates: Partial<Pick<Conversation, 'codebase_id' | 'cwd' | 'worktree_path'>>
+  updates: Partial<
+    Pick<
+      Conversation,
+      'codebase_id' | 'cwd' | 'worktree_path' | 'isolation_env_id' | 'isolation_provider'
+    >
+  >
 ): Promise<void> {
   const fields: string[] = [];
   const values: (string | null)[] = [];
@@ -110,6 +115,14 @@ export async function updateConversation(
     fields.push(`worktree_path = $${String(i++)}`);
     values.push(updates.worktree_path);
   }
+  if (updates.isolation_env_id !== undefined) {
+    fields.push(`isolation_env_id = $${String(i++)}`);
+    values.push(updates.isolation_env_id);
+  }
+  if (updates.isolation_provider !== undefined) {
+    fields.push(`isolation_provider = $${String(i++)}`);
+    values.push(updates.isolation_provider);
+  }
 
   if (fields.length === 0) {
     return; // No updates
@@ -122,4 +135,18 @@ export async function updateConversation(
     `UPDATE remote_agent_conversations SET ${fields.join(', ')} WHERE id = $${String(i)}`,
     values
   );
+}
+
+/**
+ * Find a conversation by isolation environment ID
+ * Used for provider-based lookup and shared environment detection
+ */
+export async function getConversationByIsolationEnvId(
+  envId: string
+): Promise<Conversation | null> {
+  const result = await pool.query<Conversation>(
+    'SELECT * FROM remote_agent_conversations WHERE isolation_env_id = $1 LIMIT 1',
+    [envId]
+  );
+  return result.rows[0] ?? null;
 }
