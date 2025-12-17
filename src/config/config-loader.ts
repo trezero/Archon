@@ -8,9 +8,8 @@
  * 4. Environment variables
  */
 
-import { readFile } from 'fs/promises';
-import { join } from 'path';
-import { parse as parseYaml } from 'yaml';
+import { readFile, writeFile, mkdir } from 'fs/promises';
+import { join, dirname } from 'path';
 import {
   getArchonConfigPath,
   getArchonWorkspacesPath,
@@ -18,12 +17,57 @@ import {
 } from '../utils/archon-paths';
 import type { GlobalConfig, RepoConfig, MergedConfig } from './config-types';
 
+/**
+ * Parse YAML using Bun's native YAML parser
+ */
+function parseYaml<T>(content: string): T {
+  return Bun.YAML.parse(content) as T;
+}
+
 // Cache for loaded configs
 let cachedGlobalConfig: GlobalConfig | null = null;
 
 /**
+ * Default config file content
+ */
+const DEFAULT_CONFIG_CONTENT = `# Archon Global Configuration
+# See: https://github.com/dynamous-community/remote-coding-agent/blob/main/docs/configuration.md
+
+# Default AI assistant (claude or codex)
+# defaultAssistant: claude
+
+# Streaming mode per platform (stream or batch)
+# streaming:
+#   telegram: stream
+#   discord: batch
+#   slack: batch
+#   github: batch
+
+# Concurrency settings
+# concurrency:
+#   maxConversations: 10
+`;
+
+/**
+ * Create default config file if it doesn't exist
+ */
+async function createDefaultConfig(configPath: string): Promise<void> {
+  try {
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, DEFAULT_CONFIG_CONTENT, { flag: 'wx' }); // wx = fail if exists
+    console.log(`[Config] Created default config at ${configPath}`);
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code !== 'EEXIST') {
+      // Only log if it's not a "file exists" error
+      console.warn(`[Config] Could not create default config: ${err.message}`);
+    }
+  }
+}
+
+/**
  * Load global config from ~/.archon/config.yaml
- * Returns empty object if file doesn't exist
+ * Creates default config if file doesn't exist
  */
 export async function loadGlobalConfig(forceReload = false): Promise<GlobalConfig> {
   if (cachedGlobalConfig && !forceReload) {
@@ -34,12 +78,14 @@ export async function loadGlobalConfig(forceReload = false): Promise<GlobalConfi
 
   try {
     const content = await readFile(configPath, 'utf-8');
-    cachedGlobalConfig = parseYaml(content) as GlobalConfig;
+    cachedGlobalConfig = parseYaml<GlobalConfig>(content);
     return cachedGlobalConfig ?? {};
   } catch (error) {
-    // File doesn't exist or can't be read - return empty config
     const err = error as NodeJS.ErrnoException;
-    if (err.code !== 'ENOENT') {
+    if (err.code === 'ENOENT') {
+      // File doesn't exist - create default config
+      await createDefaultConfig(configPath);
+    } else {
       console.warn(`[Config] Failed to load global config: ${err.message}`);
     }
     cachedGlobalConfig = {};
@@ -61,7 +107,7 @@ export async function loadRepoConfig(repoPath: string): Promise<RepoConfig> {
   for (const configPath of configPaths) {
     try {
       const content = await readFile(configPath, 'utf-8');
-      return (parseYaml(content) as RepoConfig) ?? {};
+      return parseYaml<RepoConfig>(content) ?? {};
     } catch {
       // Try next path
       continue;
