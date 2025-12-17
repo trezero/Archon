@@ -45,6 +45,9 @@ export class ClaudeClient implements IAssistantClient {
         ...process.env,
       },
       permissionMode: 'bypassPermissions', // YOLO mode - auto-approve all tools
+      allowDangerouslySkipPermissions: true, // Required when bypassing permissions
+      systemPrompt: { type: 'preset', preset: 'claude_code' }, // Use Claude Code's system prompt
+      settingSources: ['project'], // Load CLAUDE.md files from project
       stderr: (data: string) => {
         // Capture and log Claude Code stderr - but filter out informational messages
         const output = data.trim();
