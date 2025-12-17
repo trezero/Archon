@@ -105,6 +105,16 @@ export interface IPlatformAdapter {
   sendMessage(conversationId: string, message: string): Promise<void>;
 
   /**
+   * Ensure responses go to a thread, creating one if needed.
+   * Returns the thread's conversation ID to use for subsequent messages.
+   *
+   * @param originalConversationId - The conversation ID from the triggering message
+   * @param messageContext - Platform-specific context (e.g., Discord Message, Slack event)
+   * @returns Thread conversation ID (may be same as original if already in thread)
+   */
+  ensureThread(originalConversationId: string, messageContext?: unknown): Promise<string>;
+
+  /**
    * Get the configured streaming mode
    */
   getStreamingMode(): 'stream' | 'batch';

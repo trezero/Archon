@@ -165,6 +165,15 @@ export class GitHubAdapter implements IPlatformAdapter {
   }
 
   /**
+   * Ensure responses go to a thread.
+   * GitHub issues/PRs are inherently threaded - all comments go to the issue.
+   * Returns original conversation ID unchanged.
+   */
+  async ensureThread(originalConversationId: string, _messageContext?: unknown): Promise<string> {
+    return originalConversationId;
+  }
+
+  /**
    * Verify webhook signature using HMAC SHA-256
    */
   private verifySignature(payload: string, signature: string): boolean {

@@ -258,6 +258,23 @@ export class SlackAdapter implements IPlatformAdapter {
   }
 
   /**
+   * Ensure responses go to a thread.
+   * For Slack, this is a no-op because:
+   * 1. getConversationId() already returns "channel:ts" for non-thread messages
+   * 2. sendMessage() parses this and uses ts as thread_ts
+   * 3. This means all replies already go to threads
+   *
+   * @returns The original conversation ID (already thread-safe)
+   */
+  async ensureThread(originalConversationId: string, _messageContext?: unknown): Promise<string> {
+    // Slack's conversation ID pattern already ensures threading:
+    // - Non-thread: "channel:ts" → sendMessage uses ts as thread_ts
+    // - In-thread: "channel:thread_ts" → sendMessage uses thread_ts
+    // No additional work needed.
+    return originalConversationId;
+  }
+
+  /**
    * Register a message handler for incoming messages
    * Must be called before start()
    */

@@ -43,6 +43,14 @@ export class TestAdapter implements IPlatformAdapter {
     return 'test';
   }
 
+  /**
+   * Ensure responses go to a thread.
+   * Test adapter has no threading - passthrough.
+   */
+  async ensureThread(originalConversationId: string, _messageContext?: unknown): Promise<string> {
+    return originalConversationId;
+  }
+
   async start(): Promise<void> {
     console.log('[Test] Test adapter ready');
   }

@@ -215,6 +215,32 @@ describe('SlackAdapter', () => {
     });
   });
 
+  describe('thread creation (ensureThread)', () => {
+    let adapter: SlackAdapter;
+
+    beforeEach(() => {
+      adapter = new SlackAdapter('xoxb-fake', 'xapp-fake');
+    });
+
+    test('should return original ID unchanged (threading via conversation ID pattern)', async () => {
+      // Slack threading works via the "channel:ts" conversation ID pattern
+      // No additional thread creation needed
+      const result = await adapter.ensureThread('C123:1234567890.123456');
+      expect(result).toBe('C123:1234567890.123456');
+    });
+
+    test('should work with thread conversation IDs', async () => {
+      const result = await adapter.ensureThread('C123:1234567890.000001');
+      expect(result).toBe('C123:1234567890.000001');
+    });
+
+    test('should work with channel-only IDs', async () => {
+      // Edge case: if somehow only channel ID is passed
+      const result = await adapter.ensureThread('C123');
+      expect(result).toBe('C123');
+    });
+  });
+
   describe('message formatting', () => {
     let adapter: SlackAdapter;
 

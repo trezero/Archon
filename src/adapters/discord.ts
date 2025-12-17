@@ -2,7 +2,14 @@
  * Discord platform adapter using discord.js v14
  * Handles message sending with 2000 character limit splitting
  */
-import { Client, GatewayIntentBits, Partials, Message, Events } from 'discord.js';
+import {
+  Client,
+  GatewayIntentBits,
+  Partials,
+  Message,
+  Events,
+  ThreadAutoArchiveDuration,
+} from 'discord.js';
 import { IPlatformAdapter } from '../types';
 import { parseAllowedUserIds, isDiscordUserAuthorized } from '../utils/discord-auth';
 
@@ -14,6 +21,7 @@ export class DiscordAdapter implements IPlatformAdapter {
   private token: string;
   private messageHandler: ((message: Message) => Promise<void>) | null = null;
   private allowedUserIds: string[];
+  private pendingThreads: Map<string, Promise<string>> = new Map();
 
   constructor(token: string, mode: 'stream' | 'batch' = 'stream') {
     this.client = new Client({
@@ -212,6 +220,98 @@ export class DiscordAdapter implements IPlatformAdapter {
    */
   getConversationId(message: Message): string {
     return message.channelId;
+  }
+
+  /**
+   * Ensure responses go to a thread, creating one if needed.
+   * If the message is already in a thread, returns the thread ID.
+   * If the message is in a channel, creates a thread from it.
+   *
+   * Uses deduplication to prevent multiple threads from concurrent calls.
+   */
+  async ensureThread(originalConversationId: string, messageContext?: unknown): Promise<string> {
+    const message = messageContext as Message | undefined;
+
+    // If no message context, assume already in correct location
+    if (!message) {
+      return originalConversationId;
+    }
+
+    // If already in a thread, use thread ID
+    if (message.channel.isThread()) {
+      return message.channelId;
+    }
+
+    // If in DM, no threading needed (or possible)
+    if (!message.guild) {
+      return originalConversationId;
+    }
+
+    // Check for pending thread creation (deduplication)
+    const pendingKey = `${message.channelId}:${message.id}`;
+    const pending = this.pendingThreads.get(pendingKey);
+    if (pending) {
+      return pending;
+    }
+
+    // Create thread from the message
+    const threadPromise = this.createThreadFromMessage(message);
+    this.pendingThreads.set(pendingKey, threadPromise);
+
+    try {
+      const threadId = await threadPromise;
+      return threadId;
+    } finally {
+      // Clean up pending map after resolution
+      this.pendingThreads.delete(pendingKey);
+    }
+  }
+
+  /**
+   * Create a thread from a message.
+   * Thread name is derived from first 100 chars of message content.
+   */
+  private async createThreadFromMessage(message: Message): Promise<string> {
+    try {
+      // Generate thread name from message content
+      const content = this.stripBotMention(message);
+      const threadName = this.generateThreadName(content);
+
+      console.log(`[Discord] Creating thread "${threadName}" from message ${message.id}`);
+
+      const thread = await message.startThread({
+        name: threadName,
+        autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
+        reason: 'Bot response thread',
+      });
+
+      console.log(`[Discord] Thread created: ${thread.id}`);
+      return thread.id;
+    } catch (error) {
+      const err = error as Error;
+      console.error('[Discord] Failed to create thread:', err.message);
+      // Fall back to channel ID if thread creation fails
+      return message.channelId;
+    }
+  }
+
+  /**
+   * Generate a thread name from message content.
+   * Truncates to 100 chars (Discord limit) with ellipsis.
+   */
+  private generateThreadName(content: string): string {
+    const maxLength = 97; // Leave room for "..."
+    const cleaned = content.replace(/\s+/g, ' ').trim();
+
+    if (!cleaned) {
+      return 'Bot Response';
+    }
+
+    if (cleaned.length <= 100) {
+      return cleaned;
+    }
+
+    return cleaned.substring(0, maxLength) + '...';
   }
 
   /**

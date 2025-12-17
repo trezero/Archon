@@ -182,6 +182,15 @@ export class TelegramAdapter implements IPlatformAdapter {
   }
 
   /**
+   * Ensure responses go to a thread.
+   * Telegram doesn't have threads - each chat is a persistent conversation.
+   * Returns original conversation ID unchanged.
+   */
+  async ensureThread(originalConversationId: string, _messageContext?: unknown): Promise<string> {
+    return originalConversationId;
+  }
+
+  /**
    * Register a message handler for incoming messages
    * Must be called before start()
    */

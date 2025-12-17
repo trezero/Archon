@@ -117,7 +117,8 @@ async function main(): Promise<void> {
 
     // Register message handler
     discord.onMessage(async message => {
-      const conversationId = discord!.getConversationId(message);
+      // Get initial conversation ID
+      let conversationId = discord!.getConversationId(message);
 
       // Skip if no content
       if (!message.content) return;
@@ -133,7 +134,11 @@ async function main(): Promise<void> {
       const content = discord!.stripBotMention(message);
       if (!content) return; // Message was only a mention with no content
 
-      // Check for thread context
+      // PHASE 3A: Ensure we're responding in a thread
+      // This creates a thread if we're not already in one
+      conversationId = await discord!.ensureThread(conversationId, message);
+
+      // Check for thread context (now we're guaranteed to be in a thread if applicable)
       let threadContext: string | undefined;
       let parentConversationId: string | undefined;
 

@@ -268,4 +268,176 @@ describe('DiscordAdapter', () => {
       expect(adapter.stripBotMention(mockMessage)).toBe('hello world');
     });
   });
+
+  describe('thread creation (ensureThread)', () => {
+    let adapter: DiscordAdapter;
+
+    beforeEach(() => {
+      adapter = new DiscordAdapter('fake-token-for-testing');
+    });
+
+    test('should return original ID when already in thread', async () => {
+      const mockMessage = {
+        id: 'msg123',
+        channelId: 'thread456',
+        channel: {
+          isThread: () => true,
+        },
+        guild: { id: 'guild123' },
+      } as unknown as import('discord.js').Message;
+
+      const result = await adapter.ensureThread('thread456', mockMessage);
+      expect(result).toBe('thread456');
+    });
+
+    test('should return original ID for DMs', async () => {
+      const mockMessage = {
+        id: 'msg123',
+        channelId: 'dm789',
+        channel: {
+          isThread: () => false,
+        },
+        guild: null, // DM has no guild
+      } as unknown as import('discord.js').Message;
+
+      const result = await adapter.ensureThread('dm789', mockMessage);
+      expect(result).toBe('dm789');
+    });
+
+    test('should return original ID when no message context', async () => {
+      const result = await adapter.ensureThread('channel123');
+      expect(result).toBe('channel123');
+    });
+
+    test('should create thread for channel message', async () => {
+      const mockStartThread = mock(() => Promise.resolve({ id: 'newthread123' }));
+      const mockMessage = {
+        id: 'msg123',
+        channelId: 'channel456',
+        content: 'Test message for thread',
+        channel: {
+          isThread: () => false,
+        },
+        guild: { id: 'guild123' },
+        startThread: mockStartThread,
+        mentions: {
+          has: () => false,
+        },
+      } as unknown as import('discord.js').Message;
+
+      const result = await adapter.ensureThread('channel456', mockMessage);
+
+      expect(mockStartThread).toHaveBeenCalledWith({
+        name: 'Test message for thread',
+        autoArchiveDuration: 1440,
+        reason: 'Bot response thread',
+      });
+      expect(result).toBe('newthread123');
+    });
+
+    test('should truncate long thread names', async () => {
+      const longContent = 'a'.repeat(150);
+      const mockStartThread = mock(() => Promise.resolve({ id: 'newthread123' }));
+      const mockMessage = {
+        id: 'msg123',
+        channelId: 'channel456',
+        content: longContent,
+        channel: {
+          isThread: () => false,
+        },
+        guild: { id: 'guild123' },
+        startThread: mockStartThread,
+        mentions: {
+          has: () => false,
+        },
+      } as unknown as import('discord.js').Message;
+
+      await adapter.ensureThread('channel456', mockMessage);
+
+      const callArgs = mockStartThread.mock.calls[0][0] as { name: string };
+      expect(callArgs.name.length).toBeLessThanOrEqual(100);
+      expect(callArgs.name.endsWith('...')).toBe(true);
+    });
+
+    test('should fall back to channel ID on thread creation error', async () => {
+      const mockStartThread = mock(() => Promise.reject(new Error('Permission denied')));
+      const mockMessage = {
+        id: 'msg123',
+        channelId: 'channel456',
+        content: 'Test message',
+        channel: {
+          isThread: () => false,
+        },
+        guild: { id: 'guild123' },
+        startThread: mockStartThread,
+        mentions: {
+          has: () => false,
+        },
+      } as unknown as import('discord.js').Message;
+
+      const result = await adapter.ensureThread('channel456', mockMessage);
+
+      expect(result).toBe('channel456'); // Falls back to channel
+    });
+
+    test('should deduplicate concurrent thread creation calls', async () => {
+      let resolveThread: (value: { id: string }) => void;
+      const threadPromise = new Promise<{ id: string }>(resolve => {
+        resolveThread = resolve;
+      });
+
+      const mockStartThread = mock(() => threadPromise);
+      const mockMessage = {
+        id: 'msg123',
+        channelId: 'channel456',
+        content: 'Test message',
+        channel: {
+          isThread: () => false,
+        },
+        guild: { id: 'guild123' },
+        startThread: mockStartThread,
+        mentions: {
+          has: () => false,
+        },
+      } as unknown as import('discord.js').Message;
+
+      // Start two concurrent calls
+      const promise1 = adapter.ensureThread('channel456', mockMessage);
+      const promise2 = adapter.ensureThread('channel456', mockMessage);
+
+      // Resolve the thread creation
+      resolveThread!({ id: 'newthread123' });
+
+      const [result1, result2] = await Promise.all([promise1, promise2]);
+
+      // Both should get the same thread ID
+      expect(result1).toBe('newthread123');
+      expect(result2).toBe('newthread123');
+
+      // startThread should only be called once
+      expect(mockStartThread).toHaveBeenCalledTimes(1);
+    });
+
+    test('should use Bot Response as thread name for empty content', async () => {
+      const mockStartThread = mock(() => Promise.resolve({ id: 'newthread123' }));
+      const mockMessage = {
+        id: 'msg123',
+        channelId: 'channel456',
+        content: '<@123456789>', // Only bot mention, stripped to empty
+        channel: {
+          isThread: () => false,
+        },
+        guild: { id: 'guild123' },
+        startThread: mockStartThread,
+        mentions: {
+          has: () => false,
+        },
+      } as unknown as import('discord.js').Message;
+
+      await adapter.ensureThread('channel456', mockMessage);
+
+      const callArgs = mockStartThread.mock.calls[0][0] as { name: string };
+      expect(callArgs.name).toBe('Bot Response');
+    });
+  });
 });

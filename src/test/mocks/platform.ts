@@ -5,6 +5,9 @@ export class MockPlatformAdapter implements IPlatformAdapter {
   public sendMessage: Mock<(conversationId: string, message: string) => Promise<void>> = mock(() =>
     Promise.resolve()
   );
+  public ensureThread: Mock<
+    (originalConversationId: string, messageContext?: unknown) => Promise<string>
+  > = mock((originalConversationId: string) => Promise.resolve(originalConversationId));
   public getStreamingMode: Mock<() => 'stream' | 'batch'> = mock(() => 'stream' as const);
   public getPlatformType: Mock<() => string> = mock(() => 'mock');
   public start: Mock<() => Promise<void>> = mock(() => Promise.resolve());
@@ -12,6 +15,7 @@ export class MockPlatformAdapter implements IPlatformAdapter {
 
   public reset(): void {
     this.sendMessage.mockClear();
+    this.ensureThread.mockClear();
     this.getStreamingMode.mockClear();
     this.getPlatformType.mockClear();
     this.start.mockClear();
