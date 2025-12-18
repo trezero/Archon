@@ -1,7 +1,7 @@
 import { readFile, access, mkdir as fsMkdir } from 'fs/promises';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { join, basename } from 'path';
+import { join } from 'path';
 import { getArchonWorktreesPath } from './archon-paths';
 
 const promisifiedExecFile = promisify(execFile);
@@ -136,9 +136,15 @@ export async function createWorktreeForIssue(
   prHeadSha?: string
 ): Promise<string> {
   const branchName = isPR ? `pr-${String(issueNumber)}` : `issue-${String(issueNumber)}`;
-  const projectName = basename(repoPath);
+
+  // Extract owner and repo name from repoPath to avoid collisions
+  // repoPath format: /.archon/workspaces/owner/repo
+  const pathParts = repoPath.split('/').filter(p => p.length > 0);
+  const repoName = pathParts[pathParts.length - 1]; // Last part: "repo"
+  const ownerName = pathParts[pathParts.length - 2]; // Second to last: "owner"
+
   const worktreeBase = getWorktreeBase(repoPath);
-  const worktreePath = join(worktreeBase, projectName, branchName);
+  const worktreePath = join(worktreeBase, ownerName, repoName, branchName);
 
   // Check if worktree already exists at expected path (possibly created by skill)
   if (await worktreeExists(worktreePath)) {
@@ -158,7 +164,7 @@ export async function createWorktreeForIssue(
   }
 
   // Ensure worktree base directory exists
-  const projectWorktreeDir = join(worktreeBase, projectName);
+  const projectWorktreeDir = join(worktreeBase, ownerName, repoName);
   await mkdirAsync(projectWorktreeDir, { recursive: true });
 
   if (isPR && prHeadBranch) {

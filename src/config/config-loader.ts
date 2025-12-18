@@ -20,8 +20,8 @@ import type { GlobalConfig, RepoConfig, MergedConfig } from './config-types';
 /**
  * Parse YAML using Bun's native YAML parser
  */
-function parseYaml<T>(content: string): T {
-  return Bun.YAML.parse(content) as T;
+function parseYaml(content: string): unknown {
+  return Bun.YAML.parse(content);
 }
 
 // Cache for loaded configs
@@ -78,7 +78,7 @@ export async function loadGlobalConfig(forceReload = false): Promise<GlobalConfi
 
   try {
     const content = await readFile(configPath, 'utf-8');
-    cachedGlobalConfig = parseYaml<GlobalConfig>(content);
+    cachedGlobalConfig = parseYaml(content) as GlobalConfig;
     return cachedGlobalConfig ?? {};
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
@@ -107,7 +107,7 @@ export async function loadRepoConfig(repoPath: string): Promise<RepoConfig> {
   for (const configPath of configPaths) {
     try {
       const content = await readFile(configPath, 'utf-8');
-      return parseYaml<RepoConfig>(content) ?? {};
+      return (parseYaml(content) as RepoConfig) ?? {};
     } catch {
       // Try next path
       continue;

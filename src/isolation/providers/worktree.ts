@@ -6,7 +6,7 @@
  */
 
 import { createHash } from 'crypto';
-import { basename, join } from 'path';
+import { join } from 'path';
 
 import {
   execFileAsync,
@@ -185,9 +185,14 @@ export class WorktreeProvider implements IIsolationProvider {
    * Get worktree path for request
    */
   getWorktreePath(request: IsolationRequest, branchName: string): string {
-    const projectName = basename(request.canonicalRepoPath);
+    // Extract owner and repo name from canonicalRepoPath to avoid collisions
+    // canonicalRepoPath format: /.archon/workspaces/owner/repo
+    const pathParts = request.canonicalRepoPath.split('/').filter(p => p.length > 0);
+    const repoName = pathParts[pathParts.length - 1]; // Last part: "repo"
+    const ownerName = pathParts[pathParts.length - 2]; // Second to last: "owner"
+
     const worktreeBase = getWorktreeBase(request.canonicalRepoPath);
-    return join(worktreeBase, projectName, branchName);
+    return join(worktreeBase, ownerName, repoName, branchName);
   }
 
   /**
@@ -246,9 +251,14 @@ export class WorktreeProvider implements IIsolationProvider {
     branchName: string
   ): Promise<void> {
     const repoPath = request.canonicalRepoPath;
-    const projectName = basename(repoPath);
+
+    // Extract owner and repo name from canonicalRepoPath to avoid collisions
+    const pathParts = repoPath.split('/').filter(p => p.length > 0);
+    const repoName = pathParts[pathParts.length - 1];
+    const ownerName = pathParts[pathParts.length - 2];
+
     const worktreeBase = getWorktreeBase(repoPath);
-    const projectWorktreeDir = join(worktreeBase, projectName);
+    const projectWorktreeDir = join(worktreeBase, ownerName, repoName);
 
     // Ensure worktree base directory exists
     await mkdirAsync(projectWorktreeDir, { recursive: true });
