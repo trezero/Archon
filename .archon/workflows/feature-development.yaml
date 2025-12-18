@@ -1,0 +1,13 @@
+name: feature-development
+description: Build a feature from plan to PR. Use when user wants to add new functionality.
+
+provider: claude
+model: sonnet
+
+steps:
+  - step: plan
+
+  - step: implement
+    clearContext: true
+
+  - step: create-pr

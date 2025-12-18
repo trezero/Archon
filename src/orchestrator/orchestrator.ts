@@ -24,6 +24,16 @@ import { getAssistantClient } from '../clients/factory';
 import { getIsolationProvider } from '../isolation';
 import { worktreeExists, findWorktreeByBranch, getCanonicalRepoPath } from '../utils/git';
 import {
+  discoverWorkflows,
+  registerWorkflows,
+  clearWorkflows,
+  getWorkflow,
+  buildRouterPrompt,
+  parseRouterResponse,
+  executeWorkflow,
+  getRegisteredWorkflows,
+} from '../workflows';
+import {
   cleanupToMakeRoom,
   getWorktreeStatusBreakdown,
   MAX_WORKTREES_PER_CODEBASE,
@@ -325,6 +335,7 @@ export async function handleMessage(
         'templates',
         'template-delete',
         'worktree',
+        'workflow',
       ];
 
       if (deterministicCommands.includes(command)) {
@@ -428,7 +439,7 @@ export async function handleMessage(
         }
       }
     } else {
-      // Regular message - route through router template
+      // Regular message - route through router template or workflows
       if (!conversation.codebase_id) {
         await platform.sendMessage(
           conversationId,
@@ -437,15 +448,38 @@ export async function handleMessage(
         return;
       }
 
-      // Load router template for natural language routing
-      const routerTemplate = await templateDb.getTemplate('router');
-      if (routerTemplate) {
-        console.log('[Orchestrator] Routing through router template');
-        commandName = 'router';
-        // Pass the entire message as $ARGUMENTS for the router
-        promptToSend = substituteVariables(routerTemplate.content, [message]);
+      // Try to discover and load workflows from codebase
+      // Clear any stale workflows from previous requests first
+      clearWorkflows();
+
+      const codebaseForWorkflows = await codebaseDb.getCodebase(conversation.codebase_id);
+      if (codebaseForWorkflows) {
+        const workflows = await discoverWorkflows(codebaseForWorkflows.default_cwd);
+        if (workflows.length > 0) {
+          registerWorkflows(workflows);
+          console.log(
+            `[Orchestrator] Registered ${String(workflows.length)} workflows from .archon/workflows/`
+          );
+        }
       }
-      // If no router template, message passes through as-is (backward compatible)
+
+      // If workflows are registered, use workflow-aware router prompt
+      const registeredWorkflows = getRegisteredWorkflows();
+      if (registeredWorkflows.length > 0) {
+        console.log('[Orchestrator] Using workflow-aware router prompt');
+        commandName = 'workflow-router';
+        promptToSend = buildRouterPrompt(message);
+      } else {
+        // Fall back to router template for natural language routing
+        const routerTemplate = await templateDb.getTemplate('router');
+        if (routerTemplate) {
+          console.log('[Orchestrator] Routing through router template');
+          commandName = 'router';
+          // Pass the entire message as $ARGUMENTS for the router
+          promptToSend = substituteVariables(routerTemplate.content, [message]);
+        }
+        // If no router template, message passes through as-is (backward compatible)
+      }
     }
 
     // Prepend thread context if provided
@@ -605,6 +639,26 @@ export async function handleMessage(
       }
 
       if (finalMessage) {
+        // Check for workflow routing in the response
+        const routerResult = parseRouterResponse(finalMessage);
+        if (routerResult.workflow) {
+          const workflow = getWorkflow(routerResult.workflow);
+          if (workflow) {
+            console.log(`[Orchestrator] Routing to workflow: ${routerResult.workflow}`);
+            await executeWorkflow(
+              platform,
+              conversationId,
+              cwd,
+              workflow,
+              routerResult.userIntent,
+              conversation.id,
+              conversation.codebase_id ?? undefined
+            );
+            return;
+          }
+        }
+
+        // No workflow routing - send the final message
         console.log(`[Orchestrator] Sending final message (${String(finalMessage.length)} chars)`);
         await platform.sendMessage(conversationId, finalMessage);
       }

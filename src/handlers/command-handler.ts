@@ -20,6 +20,7 @@ import {
   MAX_WORKTREES_PER_CODEBASE,
 } from '../services/cleanup-service';
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
+import { discoverWorkflows, registerWorkflows } from '../workflows';
 
 /**
  * Convert an absolute path to a relative path from the repository root
@@ -140,6 +141,11 @@ Worktrees:
   /worktree remove [--force] - Remove current worktree
   /worktree cleanup merged|stale - Clean up worktrees
   /worktree orphans - Show all worktrees from git
+
+Workflows:
+  /workflow list - Show available workflows
+  /workflow reload - Reload workflow definitions
+  Note: Workflows are YAML files in .archon/workflows/
 
 Session:
   /status - Show state
@@ -1204,6 +1210,60 @@ Setup:
             success: false,
             message:
               'Usage:\n  /worktree create <branch>\n  /worktree list\n  /worktree remove [--force]\n  /worktree cleanup merged|stale\n  /worktree orphans',
+          };
+      }
+    }
+
+    case 'workflow': {
+      const subcommand = args[0];
+
+      if (!conversation.codebase_id) {
+        return { success: false, message: 'No codebase configured. Use /clone first.' };
+      }
+
+      const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
+      if (!codebase) {
+        return { success: false, message: 'Codebase not found.' };
+      }
+
+      switch (subcommand) {
+        case 'list':
+        case 'ls': {
+          // Discover and list workflows
+          const workflows = await discoverWorkflows(codebase.default_cwd);
+          registerWorkflows(workflows);
+
+          if (workflows.length === 0) {
+            return {
+              success: true,
+              message:
+                'No workflows found.\n\nCreate workflows in `.archon/workflows/` as YAML files.',
+            };
+          }
+
+          let msg = 'Available Workflows:\n\n';
+          for (const w of workflows) {
+            msg += `**${w.name}**\n  ${w.description}\n  Steps: ${w.steps.map(s => s.step).join(' -> ')}\n\n`;
+          }
+
+          return { success: true, message: msg };
+        }
+
+        case 'reload': {
+          // Force reload workflows
+          const workflows = await discoverWorkflows(codebase.default_cwd);
+          registerWorkflows(workflows);
+          return {
+            success: true,
+            message: `Reloaded ${String(workflows.length)} workflow(s).`,
+          };
+        }
+
+        default:
+          return {
+            success: false,
+            message:
+              'Usage:\n  /workflow list - Show available workflows\n  /workflow reload - Reload workflow definitions',
           };
       }
     }

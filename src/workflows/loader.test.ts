@@ -1,0 +1,248 @@
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { mkdir, writeFile, rm } from 'fs/promises';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import {
+  discoverWorkflows,
+  registerWorkflows,
+  getRegisteredWorkflows,
+  getWorkflow,
+  clearWorkflows,
+} from './loader';
+import type { WorkflowDefinition } from './types';
+
+describe('Workflow Loader', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    clearWorkflows();
+    // Create unique temp directory for each test
+    testDir = join(tmpdir(), `workflow-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(testDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    clearWorkflows();
+    // Clean up temp directory
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  describe('parseWorkflow (via discoverWorkflows)', () => {
+    it('should parse valid workflow YAML', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const validYaml = `name: test-workflow
+description: A test workflow
+provider: claude
+steps:
+  - step: plan
+  - step: implement
+    clearContext: true
+`;
+      await writeFile(join(workflowDir, 'test.yaml'), validYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(1);
+      expect(workflows[0].name).toBe('test-workflow');
+      expect(workflows[0].description).toBe('A test workflow');
+      expect(workflows[0].provider).toBe('claude');
+      expect(workflows[0].steps).toHaveLength(2);
+      expect(workflows[0].steps[0].step).toBe('plan');
+      expect(workflows[0].steps[0].clearContext).toBe(false);
+      expect(workflows[0].steps[1].step).toBe('implement');
+      expect(workflows[0].steps[1].clearContext).toBe(true);
+    });
+
+    it('should return empty array for YAML missing name', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const invalidYaml = `description: Missing name
+steps:
+  - step: plan
+`;
+      await writeFile(join(workflowDir, 'invalid.yaml'), invalidYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(0);
+    });
+
+    it('should return empty array for YAML missing description', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const invalidYaml = `name: no-description
+steps:
+  - step: plan
+`;
+      await writeFile(join(workflowDir, 'invalid.yaml'), invalidYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(0);
+    });
+
+    it('should return empty array for YAML with empty steps', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const invalidYaml = `name: empty-steps
+description: Has empty steps array
+steps: []
+`;
+      await writeFile(join(workflowDir, 'invalid.yaml'), invalidYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(0);
+    });
+
+    it('should default provider to claude when not specified', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const yamlNoProvider = `name: default-provider
+description: No provider specified
+steps:
+  - step: test
+`;
+      await writeFile(join(workflowDir, 'test.yaml'), yamlNoProvider);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(1);
+      expect(workflows[0].provider).toBe('claude');
+    });
+  });
+
+  describe('discoverWorkflows', () => {
+    it('should discover workflows from .archon/workflows/', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const validYaml = `name: discovered
+description: Discovered workflow
+steps:
+  - step: test
+`;
+      await writeFile(join(workflowDir, 'workflow.yaml'), validYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(1);
+      expect(workflows[0].name).toBe('discovered');
+    });
+
+    it('should return empty array when no workflow folders exist', async () => {
+      const workflows = await discoverWorkflows(testDir);
+      expect(workflows).toHaveLength(0);
+    });
+
+    it('should load both .yaml and .yml files', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const yaml1 = `name: workflow-one
+description: First workflow
+steps:
+  - step: one
+`;
+      const yaml2 = `name: workflow-two
+description: Second workflow
+steps:
+  - step: two
+`;
+      await writeFile(join(workflowDir, 'one.yaml'), yaml1);
+      await writeFile(join(workflowDir, 'two.yml'), yaml2);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(2);
+    });
+  });
+
+  describe('registerWorkflows', () => {
+    it('should register workflows in memory', () => {
+      const workflows: WorkflowDefinition[] = [
+        {
+          name: 'test-1',
+          description: 'Test 1',
+          steps: [{ step: 'step1' }],
+        },
+        {
+          name: 'test-2',
+          description: 'Test 2',
+          steps: [{ step: 'step2' }],
+        },
+      ];
+
+      registerWorkflows(workflows);
+
+      const registered = getRegisteredWorkflows();
+      expect(registered).toHaveLength(2);
+    });
+
+    it('should overwrite existing workflow with same name', () => {
+      const workflow1: WorkflowDefinition = {
+        name: 'same-name',
+        description: 'First version',
+        steps: [{ step: 'v1' }],
+      };
+      const workflow2: WorkflowDefinition = {
+        name: 'same-name',
+        description: 'Second version',
+        steps: [{ step: 'v2' }],
+      };
+
+      registerWorkflows([workflow1]);
+      registerWorkflows([workflow2]);
+
+      const registered = getRegisteredWorkflows();
+      expect(registered).toHaveLength(1);
+      expect(registered[0].description).toBe('Second version');
+    });
+  });
+
+  describe('getWorkflow', () => {
+    it('should return workflow by name', () => {
+      const workflow: WorkflowDefinition = {
+        name: 'find-me',
+        description: 'Findable workflow',
+        steps: [{ step: 'test' }],
+      };
+
+      registerWorkflows([workflow]);
+
+      const found = getWorkflow('find-me');
+      expect(found).toBeDefined();
+      expect(found?.name).toBe('find-me');
+    });
+
+    it('should return undefined for non-existent workflow', () => {
+      const found = getWorkflow('does-not-exist');
+      expect(found).toBeUndefined();
+    });
+  });
+
+  describe('clearWorkflows', () => {
+    it('should clear all registered workflows', () => {
+      registerWorkflows([
+        { name: 'w1', description: 'd1', steps: [{ step: 's1' }] },
+        { name: 'w2', description: 'd2', steps: [{ step: 's2' }] },
+      ]);
+
+      expect(getRegisteredWorkflows()).toHaveLength(2);
+
+      clearWorkflows();
+
+      expect(getRegisteredWorkflows()).toHaveLength(0);
+    });
+  });
+});
