@@ -1,0 +1,227 @@
+import { mock, describe, test, expect, beforeEach } from 'bun:test';
+import { createQueryResult } from '../test/mocks/database';
+import type { WorkflowRun } from '../workflows/types';
+
+const mockQuery = mock(() => Promise.resolve(createQueryResult([])));
+
+// Mock the connection module before importing the module under test
+mock.module('./connection', () => ({
+  pool: {
+    query: mockQuery,
+  },
+}));
+
+import {
+  createWorkflowRun,
+  getWorkflowRun,
+  getActiveWorkflowRun,
+  updateWorkflowRun,
+  completeWorkflowRun,
+  failWorkflowRun,
+} from './workflows';
+
+describe('workflows database', () => {
+  beforeEach(() => {
+    mockQuery.mockClear();
+  });
+
+  const mockWorkflowRun: WorkflowRun = {
+    id: 'workflow-run-123',
+    workflow_name: 'feature-development',
+    conversation_id: 'conv-456',
+    codebase_id: 'codebase-789',
+    current_step_index: 0,
+    status: 'running',
+    user_message: 'Add dark mode support',
+    metadata: {},
+    started_at: new Date('2025-01-01T00:00:00Z'),
+    completed_at: null,
+  };
+
+  describe('createWorkflowRun', () => {
+    test('creates a new workflow run', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([mockWorkflowRun]));
+
+      const result = await createWorkflowRun({
+        workflow_name: 'feature-development',
+        conversation_id: 'conv-456',
+        codebase_id: 'codebase-789',
+        user_message: 'Add dark mode support',
+      });
+
+      expect(result).toEqual(mockWorkflowRun);
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO remote_agent_workflow_runs'),
+        ['feature-development', 'conv-456', 'codebase-789', 'Add dark mode support']
+      );
+    });
+
+    test('creates workflow run without codebase_id', async () => {
+      const runWithoutCodebase = { ...mockWorkflowRun, codebase_id: null };
+      mockQuery.mockResolvedValueOnce(createQueryResult([runWithoutCodebase]));
+
+      const result = await createWorkflowRun({
+        workflow_name: 'feature-development',
+        conversation_id: 'conv-456',
+        user_message: 'Add dark mode support',
+      });
+
+      expect(result.codebase_id).toBeNull();
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO remote_agent_workflow_runs'),
+        ['feature-development', 'conv-456', null, 'Add dark mode support']
+      );
+    });
+  });
+
+  describe('getWorkflowRun', () => {
+    test('returns workflow run by id', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([mockWorkflowRun]));
+
+      const result = await getWorkflowRun('workflow-run-123');
+
+      expect(result).toEqual(mockWorkflowRun);
+      expect(mockQuery).toHaveBeenCalledWith(
+        'SELECT * FROM remote_agent_workflow_runs WHERE id = $1',
+        ['workflow-run-123']
+      );
+    });
+
+    test('returns null for non-existent workflow run', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      const result = await getWorkflowRun('non-existent');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('getActiveWorkflowRun', () => {
+    test('returns active workflow run for conversation', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([mockWorkflowRun]));
+
+      const result = await getActiveWorkflowRun('conv-456');
+
+      expect(result).toEqual(mockWorkflowRun);
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining("WHERE conversation_id = $1 AND status = 'running'"),
+        ['conv-456']
+      );
+    });
+
+    test('returns null when no active workflow run', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      const result = await getActiveWorkflowRun('conv-456');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('updateWorkflowRun', () => {
+    test('updates current_step_index', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await updateWorkflowRun('workflow-run-123', { current_step_index: 2 });
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('current_step_index = $1'),
+        [2, 'workflow-run-123']
+      );
+    });
+
+    test('updates status to completed', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await updateWorkflowRun('workflow-run-123', { status: 'completed' });
+
+      const [query] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(query).toContain('status = $1');
+      expect(query).toContain('completed_at = NOW()');
+    });
+
+    test('updates status to failed', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await updateWorkflowRun('workflow-run-123', { status: 'failed' });
+
+      const [query] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(query).toContain('status = $1');
+      expect(query).toContain('completed_at = NOW()');
+    });
+
+    test('updates metadata', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await updateWorkflowRun('workflow-run-123', { metadata: { lastStep: 'plan' } });
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('metadata = metadata ||'),
+        [JSON.stringify({ lastStep: 'plan' }), 'workflow-run-123']
+      );
+    });
+
+    test('updates multiple fields', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await updateWorkflowRun('workflow-run-123', {
+        current_step_index: 1,
+        status: 'running',
+      });
+
+      const [query, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(query).toContain('current_step_index = $1');
+      expect(query).toContain('status = $2');
+      expect(params).toEqual([1, 'running', 'workflow-run-123']);
+    });
+
+    test('does nothing when no updates provided', async () => {
+      await updateWorkflowRun('workflow-run-123', {});
+
+      expect(mockQuery).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('completeWorkflowRun', () => {
+    test('marks workflow run as completed', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await completeWorkflowRun('workflow-run-123');
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining("status = 'completed'"),
+        ['workflow-run-123']
+      );
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('completed_at = NOW()'),
+        ['workflow-run-123']
+      );
+    });
+  });
+
+  describe('failWorkflowRun', () => {
+    test('marks workflow run as failed with error', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await failWorkflowRun('workflow-run-123', 'Step not found: missing.md');
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining("status = 'failed'"),
+        ['workflow-run-123', JSON.stringify({ error: 'Step not found: missing.md' })]
+      );
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('completed_at = NOW()'),
+        expect.any(Array)
+      );
+    });
+
+    test('stores error in metadata', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await failWorkflowRun('workflow-run-123', 'Timeout exceeded');
+
+      const [, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(params).toContain(JSON.stringify({ error: 'Timeout exceeded' }));
+    });
+  });
+});

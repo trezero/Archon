@@ -1,0 +1,255 @@
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { mkdir, rm, readFile } from 'fs/promises';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import {
+  logWorkflowEvent,
+  logWorkflowStart,
+  logStepStart,
+  logStepComplete,
+  logAssistant,
+  logTool,
+  logWorkflowError,
+  logWorkflowComplete,
+  type WorkflowEvent,
+} from './logger';
+
+describe('Workflow Logger', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `logger-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(testDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  async function readLogFile(workflowRunId: string): Promise<WorkflowEvent[]> {
+    const logPath = join(testDir, '.archon', 'logs', `${workflowRunId}.jsonl`);
+    const content = await readFile(logPath, 'utf-8');
+    return content
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line) as WorkflowEvent);
+  }
+
+  describe('logWorkflowEvent', () => {
+    it('should create log file and append event', async () => {
+      await logWorkflowEvent(testDir, 'test-run-1', {
+        type: 'workflow_start',
+        workflow_name: 'test-workflow',
+      });
+
+      const events = await readLogFile('test-run-1');
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('workflow_start');
+      expect(events[0].workflow_id).toBe('test-run-1');
+      expect(events[0].workflow_name).toBe('test-workflow');
+      expect(events[0].ts).toBeDefined();
+    });
+
+    it('should append multiple events to same file', async () => {
+      await logWorkflowEvent(testDir, 'test-run-2', {
+        type: 'workflow_start',
+        workflow_name: 'multi-event',
+      });
+      await logWorkflowEvent(testDir, 'test-run-2', {
+        type: 'step_start',
+        step: 'step-1',
+        step_index: 0,
+      });
+      await logWorkflowEvent(testDir, 'test-run-2', {
+        type: 'step_complete',
+        step: 'step-1',
+        step_index: 0,
+      });
+
+      const events = await readLogFile('test-run-2');
+      expect(events).toHaveLength(3);
+      expect(events[0].type).toBe('workflow_start');
+      expect(events[1].type).toBe('step_start');
+      expect(events[2].type).toBe('step_complete');
+    });
+
+    it('should include timestamp in ISO format', async () => {
+      const before = new Date().toISOString();
+      await logWorkflowEvent(testDir, 'test-run-ts', {
+        type: 'workflow_start',
+      });
+      const after = new Date().toISOString();
+
+      const events = await readLogFile('test-run-ts');
+      expect(events[0].ts >= before).toBe(true);
+      expect(events[0].ts <= after).toBe(true);
+    });
+
+    it('should create logs directory if it does not exist', async () => {
+      // testDir has no .archon/logs yet
+      await logWorkflowEvent(testDir, 'new-dir-test', {
+        type: 'workflow_start',
+      });
+
+      const events = await readLogFile('new-dir-test');
+      expect(events).toHaveLength(1);
+    });
+  });
+
+  describe('logWorkflowStart', () => {
+    it('should log workflow start with name and user message', async () => {
+      await logWorkflowStart(testDir, 'start-test', 'my-workflow', 'User wants to build feature X');
+
+      const events = await readLogFile('start-test');
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('workflow_start');
+      expect(events[0].workflow_name).toBe('my-workflow');
+      expect(events[0].content).toBe('User wants to build feature X');
+    });
+  });
+
+  describe('logStepStart', () => {
+    it('should log step start with name and index', async () => {
+      await logStepStart(testDir, 'step-start-test', 'plan', 0);
+
+      const events = await readLogFile('step-start-test');
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('step_start');
+      expect(events[0].step).toBe('plan');
+      expect(events[0].step_index).toBe(0);
+    });
+  });
+
+  describe('logStepComplete', () => {
+    it('should log step completion with name and index', async () => {
+      await logStepComplete(testDir, 'step-complete-test', 'implement', 1);
+
+      const events = await readLogFile('step-complete-test');
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('step_complete');
+      expect(events[0].step).toBe('implement');
+      expect(events[0].step_index).toBe(1);
+    });
+  });
+
+  describe('logAssistant', () => {
+    it('should log assistant message content', async () => {
+      await logAssistant(testDir, 'assistant-test', 'Here is my response to your request.');
+
+      const events = await readLogFile('assistant-test');
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('assistant');
+      expect(events[0].content).toBe('Here is my response to your request.');
+    });
+
+    it('should handle multi-line content', async () => {
+      const multiLineContent = `Line 1
+Line 2
+Line 3`;
+      await logAssistant(testDir, 'multiline-test', multiLineContent);
+
+      const events = await readLogFile('multiline-test');
+      expect(events[0].content).toBe(multiLineContent);
+    });
+  });
+
+  describe('logTool', () => {
+    it('should log tool call with name and input', async () => {
+      await logTool(testDir, 'tool-test', 'Read', { file_path: '/src/index.ts' });
+
+      const events = await readLogFile('tool-test');
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('tool');
+      expect(events[0].tool_name).toBe('Read');
+      expect(events[0].tool_input).toEqual({ file_path: '/src/index.ts' });
+    });
+
+    it('should handle complex tool input', async () => {
+      const complexInput = {
+        command: 'npm test',
+        timeout: 30000,
+        env: { NODE_ENV: 'test' },
+      };
+      await logTool(testDir, 'complex-tool-test', 'Bash', complexInput);
+
+      const events = await readLogFile('complex-tool-test');
+      expect(events[0].tool_input).toEqual(complexInput);
+    });
+  });
+
+  describe('logWorkflowError', () => {
+    it('should log error message', async () => {
+      await logWorkflowError(testDir, 'error-test', 'Step prompt not found: missing-step.md');
+
+      const events = await readLogFile('error-test');
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('workflow_error');
+      expect(events[0].error).toBe('Step prompt not found: missing-step.md');
+    });
+  });
+
+  describe('logWorkflowComplete', () => {
+    it('should log workflow completion', async () => {
+      await logWorkflowComplete(testDir, 'complete-test');
+
+      const events = await readLogFile('complete-test');
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('workflow_complete');
+    });
+  });
+
+  describe('full workflow logging scenario', () => {
+    it('should log complete workflow execution', async () => {
+      const runId = 'full-workflow-test';
+
+      // Simulate a complete workflow
+      await logWorkflowStart(testDir, runId, 'feature-dev', 'Add dark mode');
+      await logStepStart(testDir, runId, 'plan', 0);
+      await logAssistant(testDir, runId, 'I will create a plan for dark mode...');
+      await logTool(testDir, runId, 'Write', { file_path: '/plan.md' });
+      await logStepComplete(testDir, runId, 'plan', 0);
+      await logStepStart(testDir, runId, 'implement', 1);
+      await logAssistant(testDir, runId, 'Implementing dark mode...');
+      await logTool(testDir, runId, 'Edit', { file_path: '/src/theme.ts' });
+      await logStepComplete(testDir, runId, 'implement', 1);
+      await logWorkflowComplete(testDir, runId);
+
+      const events = await readLogFile(runId);
+      expect(events).toHaveLength(10);
+
+      // Verify event types in order
+      expect(events.map(e => e.type)).toEqual([
+        'workflow_start',
+        'step_start',
+        'assistant',
+        'tool',
+        'step_complete',
+        'step_start',
+        'assistant',
+        'tool',
+        'step_complete',
+        'workflow_complete',
+      ]);
+
+      // Verify all events have same workflow_id
+      expect(events.every(e => e.workflow_id === runId)).toBe(true);
+    });
+
+    it('should log workflow with error', async () => {
+      const runId = 'error-workflow-test';
+
+      await logWorkflowStart(testDir, runId, 'buggy-workflow', 'Do something');
+      await logStepStart(testDir, runId, 'failing-step', 0);
+      await logWorkflowError(testDir, runId, 'Step failed: timeout exceeded');
+
+      const events = await readLogFile(runId);
+      expect(events).toHaveLength(3);
+      expect(events[2].type).toBe('workflow_error');
+      expect(events[2].error).toBe('Step failed: timeout exceeded');
+    });
+  });
+});

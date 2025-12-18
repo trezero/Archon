@@ -151,4 +151,193 @@ Intent text here.`;
       expect(result.userIntent).toBe(response);
     });
   });
+
+  describe('edge cases', () => {
+    describe('buildRouterPrompt edge cases', () => {
+      it('should handle single workflow', () => {
+        registerWorkflows([
+          { name: 'only-one', description: 'The only workflow', steps: [{ step: 's1' }] },
+        ]);
+
+        const result = buildRouterPrompt('Do something');
+
+        expect(result).toContain('**only-one**: The only workflow');
+        expect(result.match(/\*\*only-one\*\*/g)).toHaveLength(1);
+      });
+
+      it('should handle empty user message', () => {
+        registerWorkflows([
+          { name: 'test', description: 'Test', steps: [{ step: 's1' }] },
+        ]);
+
+        const result = buildRouterPrompt('');
+
+        expect(result).toContain('## User Request');
+        expect(result).toContain('""');
+      });
+
+      it('should handle user message with special characters', () => {
+        registerWorkflows([
+          { name: 'test', description: 'Test', steps: [{ step: 's1' }] },
+        ]);
+
+        const result = buildRouterPrompt('Fix the "bug" in `code` with $variables');
+
+        expect(result).toContain('Fix the "bug" in `code` with $variables');
+      });
+
+      it('should handle workflow with multi-line description', () => {
+        registerWorkflows([
+          {
+            name: 'multi-line',
+            description: 'Line 1\nLine 2\nLine 3',
+            steps: [{ step: 's1' }],
+          },
+        ]);
+
+        const result = buildRouterPrompt('Test');
+
+        expect(result).toContain('**multi-line**: Line 1\nLine 2\nLine 3');
+      });
+
+      it('should handle many workflows', () => {
+        const workflows = Array.from({ length: 10 }, (_, i) => ({
+          name: `workflow-${String(i)}`,
+          description: `Workflow number ${String(i)}`,
+          steps: [{ step: 's1' }],
+        }));
+
+        registerWorkflows(workflows);
+
+        const result = buildRouterPrompt('Help');
+
+        for (let i = 0; i < 10; i++) {
+          expect(result).toContain(`**workflow-${String(i)}**`);
+        }
+      });
+    });
+
+    describe('parseRouterResponse edge cases', () => {
+      it('should not match WORKFLOW in middle of word', () => {
+        registerWorkflows([
+          { name: 'test', description: 'Test', steps: [{ step: 's1' }] },
+        ]);
+
+        const response = `This is myWORKFLOW: test not a real match`;
+
+        const result = parseRouterResponse(response);
+
+        expect(result.workflow).toBeNull();
+        expect(result.isConversational).toBe(true);
+      });
+
+      it('should handle WORKFLOW with newlines after', () => {
+        registerWorkflows([
+          { name: 'newline-test', description: 'Test', steps: [{ step: 's1' }] },
+        ]);
+
+        const response = `WORKFLOW: newline-test
+
+
+The intent is here after blank lines.`;
+
+        const result = parseRouterResponse(response);
+
+        expect(result.workflow).toBe('newline-test');
+        expect(result.userIntent.trim()).toContain('intent is here');
+      });
+
+      it('should handle workflow name with hyphens and underscores', () => {
+        registerWorkflows([
+          { name: 'my-complex_workflow-name', description: 'Complex', steps: [{ step: 's1' }] },
+        ]);
+
+        const response = `WORKFLOW: my-complex_workflow-name
+Intent here`;
+
+        const result = parseRouterResponse(response);
+
+        expect(result.workflow).toBe('my-complex_workflow-name');
+      });
+
+      it('should handle case-sensitive workflow names', () => {
+        registerWorkflows([
+          { name: 'CamelCase', description: 'Camel case workflow', steps: [{ step: 's1' }] },
+        ]);
+
+        // Exact case match should work
+        const resultMatch = parseRouterResponse('WORKFLOW: CamelCase\nIntent');
+        expect(resultMatch.workflow).toBe('CamelCase');
+
+        // Wrong case should not match
+        const resultNoMatch = parseRouterResponse('WORKFLOW: camelcase\nIntent');
+        expect(resultNoMatch.workflow).toBeNull();
+      });
+
+      it('should handle multiple WORKFLOW patterns (use first)', () => {
+        registerWorkflows([
+          { name: 'first', description: 'First', steps: [{ step: 's1' }] },
+          { name: 'second', description: 'Second', steps: [{ step: 's1' }] },
+        ]);
+
+        const response = `WORKFLOW: first
+Some text
+WORKFLOW: second
+More text`;
+
+        const result = parseRouterResponse(response);
+
+        expect(result.workflow).toBe('first');
+      });
+
+      it('should handle empty response', () => {
+        const result = parseRouterResponse('');
+
+        expect(result.workflow).toBeNull();
+        expect(result.isConversational).toBe(true);
+        expect(result.userIntent).toBe('');
+      });
+
+      it('should handle response with only whitespace', () => {
+        const result = parseRouterResponse('   \n\t  \n   ');
+
+        expect(result.workflow).toBeNull();
+        expect(result.isConversational).toBe(true);
+      });
+
+      it('should handle WORKFLOW: without name', () => {
+        registerWorkflows([
+          { name: 'test', description: 'Test', steps: [{ step: 's1' }] },
+        ]);
+
+        const response = `WORKFLOW:
+No name provided`;
+
+        const result = parseRouterResponse(response);
+
+        // Empty name shouldn't match
+        expect(result.workflow).toBeNull();
+      });
+
+      it('should preserve full intent text including code blocks', () => {
+        registerWorkflows([
+          { name: 'code-workflow', description: 'Code', steps: [{ step: 's1' }] },
+        ]);
+
+        const response = `WORKFLOW: code-workflow
+User wants to fix this code:
+\`\`\`javascript
+function broken() {
+  return null;
+}
+\`\`\``;
+
+        const result = parseRouterResponse(response);
+
+        expect(result.workflow).toBe('code-workflow');
+        expect(result.userIntent).toContain('```javascript');
+        expect(result.userIntent).toContain('function broken()');
+      });
+    });
+  });
 });
