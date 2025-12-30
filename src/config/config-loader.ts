@@ -33,6 +33,9 @@ let cachedGlobalConfig: GlobalConfig | null = null;
 const DEFAULT_CONFIG_CONTENT = `# Archon Global Configuration
 # See: https://github.com/dynamous-community/remote-coding-agent/blob/main/docs/configuration.md
 
+# Bot display name (shown in messages)
+# botName: Archon
+
 # Default AI assistant (claude or codex)
 # defaultAssistant: claude
 
@@ -123,6 +126,7 @@ export async function loadRepoConfig(repoPath: string): Promise<RepoConfig> {
  */
 function getDefaults(): MergedConfig {
   return {
+    botName: 'Archon',
     assistant: 'claude',
     streaming: {
       telegram: 'stream',
@@ -144,6 +148,12 @@ function getDefaults(): MergedConfig {
  * Apply environment variable overrides
  */
 function applyEnvOverrides(config: MergedConfig): MergedConfig {
+  // Bot name override
+  const envBotName = process.env.BOT_DISPLAY_NAME;
+  if (envBotName) {
+    config.botName = envBotName;
+  }
+
   // Assistant override
   const envAssistant = process.env.DEFAULT_AI_ASSISTANT;
   if (envAssistant === 'claude' || envAssistant === 'codex') {
@@ -192,6 +202,11 @@ function applyEnvOverrides(config: MergedConfig): MergedConfig {
  */
 function mergeGlobalConfig(defaults: MergedConfig, global: GlobalConfig): MergedConfig {
   const result = { ...defaults };
+
+  // Bot name preference
+  if (global.botName) {
+    result.botName = global.botName;
+  }
 
   // Assistant preference
   if (global.defaultAssistant) {

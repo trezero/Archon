@@ -12,6 +12,12 @@
  */
 export interface GlobalConfig {
   /**
+   * Bot display name (shown in messages)
+   * @default 'Archon'
+   */
+  botName?: string;
+
+  /**
    * Default AI assistant when no codebase-specific preference
    * @default 'claude'
    */
@@ -101,6 +107,7 @@ export interface RepoConfig {
  * Environment variables take precedence
  */
 export interface MergedConfig {
+  botName: string;
   assistant: 'claude' | 'codex';
   streaming: {
     telegram: 'stream' | 'batch';
