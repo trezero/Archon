@@ -1,6 +1,8 @@
 # Bun configuration for Remote Agentic Coding Platform
 
 [test]
+# Only discover tests in src/ - prevents finding duplicates in workspace/worktrees
+root = "./src"
 # Run preload script before tests
 preload = ["./src/test/setup.ts"]
 # Coverage output
