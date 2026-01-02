@@ -246,7 +246,16 @@ async function resolveIsolation(
 
     return env;
   } catch (error) {
+    const err = error as Error;
     console.error('[Orchestrator] Failed to create isolation:', error);
+
+    // Notify user they're working in shared directory instead of isolated worktree
+    await platform.sendMessage(
+      conversationId,
+      `**Warning:** Could not create isolated workspace (${err.message}). ` +
+        `Working directly in main repository at \`${codebase.default_cwd}\`. ` +
+        `Changes will affect the shared codebase.`
+    );
     return null;
   }
 }
@@ -460,6 +469,11 @@ export async function handleMessage(
         } catch (error) {
           const err = error as Error;
           console.warn(`[Orchestrator] Failed to discover workflows: ${err.message}`);
+          // Inform user that workflows are unavailable
+          await platform.sendMessage(
+            conversationId,
+            `Note: Could not load workflows (${err.message}). Falling back to direct conversation mode.`
+          );
           // Continue without workflows - graceful degradation
         }
       }

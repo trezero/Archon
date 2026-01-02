@@ -56,6 +56,13 @@ export async function getActiveWorkflowRun(conversationId: string): Promise<Work
   }
 }
 
+/**
+ * Partially update a workflow run.
+ * - Dynamically builds SQL from provided fields
+ * - Auto-sets completed_at when status becomes 'completed' or 'failed'
+ * - Merges metadata with existing (does not replace)
+ * - No-op if updates object is empty
+ */
 export async function updateWorkflowRun(
   id: string,
   updates: Partial<Pick<WorkflowRun, 'current_step_index' | 'status' | 'metadata'>>

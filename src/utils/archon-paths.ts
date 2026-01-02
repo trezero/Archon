@@ -83,7 +83,8 @@ export function getCommandFolderSearchPaths(): string[] {
 }
 
 /**
- * Get workflow folder search paths for a repository (future)
+ * Get workflow folder search paths for a repository
+ * Returns folders in priority order (first match wins)
  */
 export function getWorkflowFolderSearchPaths(): string[] {
   return ['.archon/workflows', '.claude/workflows', '.agents/workflows'];

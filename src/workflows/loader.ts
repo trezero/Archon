@@ -97,6 +97,7 @@ async function loadWorkflowsFromDir(dirPath: string): Promise<WorkflowDefinition
 /**
  * Discover and load workflows from codebase
  * Searches .archon/workflows/, .claude/workflows/, .agents/workflows/
+ * Stops at the first folder that contains workflows (priority order).
  */
 export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition[]> {
   const allWorkflows: WorkflowDefinition[] = [];

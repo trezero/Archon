@@ -2,7 +2,7 @@
  * Workflow Engine Type Definitions
  *
  * Core types for the workflow engine that chains prompts together
- * for sequential AI execution with artifacts passed between steps.
+ * for sequential AI execution. Steps share context via session continuity.
  */
 
 /**

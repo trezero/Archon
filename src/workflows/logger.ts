@@ -4,6 +4,9 @@
 import { appendFile, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 
+// Track whether we've warned about logging failures (warn once per session)
+let logWarningShown = false;
+
 export interface WorkflowEvent {
   type:
     | 'workflow_start'
@@ -56,6 +59,15 @@ export async function logWorkflowEvent(
   } catch (error) {
     const err = error as Error;
     console.error(`[WorkflowLogger] Failed to write log: ${err.message}`);
+
+    // Warn user once per session about logging failures
+    if (!logWarningShown) {
+      console.warn(
+        `[WorkflowLogger] WARNING: Workflow logs may be incomplete. ` +
+          `Check disk space and permissions at ${logPath}`
+      );
+      logWarningShown = true;
+    }
     // Don't throw - logging shouldn't break workflow execution
   }
 }
