@@ -1,15 +1,23 @@
 name: fix-github-issue
-description: Investigate and fix a GitHub issue end-to-end with code review. Use when user wants to fix an issue, bug, or implement a small enhancement.
+description: Investigate and fix a GitHub issue end-to-end. Composable workflow using reusable commands.
 
 provider: claude
 model: sonnet
 
 steps:
   - command: investigate-issue
-    # Analyzes issue, explores codebase, creates plan artifact
-    # Posts investigation to GitHub issue as comment
+    # Git setup, analyze issue, create artifact, post to GitHub
 
   - command: implement-issue
     clearContext: true
-    # Reads artifact, implements fix, creates PR
-    # Runs self-review and posts to PR
+    # Read artifact, make code changes, run validation
+
+  - command: commit
+    # Stage and commit changes
+
+  - command: create-pr
+    # Push and create PR with "Fixes #N"
+
+  - command: review-pr
+    clearContext: true
+    # Review PR and post findings as comment
