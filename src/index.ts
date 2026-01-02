@@ -17,7 +17,6 @@ import { handleMessage } from './orchestrator/orchestrator';
 import { pool } from './db/connection';
 import { ConversationLockManager } from './utils/conversation-lock';
 import { classifyAndFormatError } from './utils/error-formatter';
-import { seedDefaultCommands } from './scripts/seed-commands';
 import { startCleanupScheduler, stopCleanupScheduler } from './services/cleanup-service';
 import { logArchonPaths } from './utils/archon-paths';
 import { loadConfig, logConfig } from './config';
@@ -71,9 +70,6 @@ async function main(): Promise<void> {
   // Load and log configuration
   const config = await loadConfig();
   logConfig(config);
-
-  // Seed default command templates
-  await seedDefaultCommands();
 
   // Initialize conversation lock manager
   const maxConcurrent = parseInt(process.env.MAX_CONCURRENT_CONVERSATIONS ?? '10');
