@@ -631,7 +631,7 @@ export async function handleMessage(
 
     // Send "starting" message in batch mode to provide feedback
     if (mode === 'batch') {
-      const botName = process.env.BOT_DISPLAY_NAME ?? 'Archon';
+      const botName = process.env.BOT_DISPLAY_NAME || 'Archon';
       await platform.sendMessage(conversationId, `${botName} is on the case...`);
     }
 
