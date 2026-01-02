@@ -1,24 +1,36 @@
 /**
- * Dynamic router - builds prompts and parses responses for workflow routing
+ * Workflow Router - builds prompts and detects workflow invocation
  */
-import { getRegisteredWorkflows } from './loader';
+import type { WorkflowDefinition } from './types';
 
 /**
  * Build the router prompt with available workflows
+ * Instructs AI to use /invoke-workflow command
  */
-export function buildRouterPrompt(userMessage: string): string {
-  const workflows = getRegisteredWorkflows();
-
+export function buildRouterPrompt(
+  userMessage: string,
+  workflows: WorkflowDefinition[]
+): string {
   if (workflows.length === 0) {
     // No workflows - just respond conversationally
     return userMessage;
   }
 
-  const workflowList = workflows.map(w => `- **${w.name}**: ${w.description}`).join('\n');
+  const workflowList = workflows
+    .map(w => `- **${w.name}**: ${w.description}`)
+    .join('\n');
 
-  return `# Router
+  return `# Router Agent
 
-You route user requests to the appropriate workflow.
+You are a ROUTER ONLY. Your job is to decide which workflow to invoke based on the user's request.
+
+## CRITICAL RULES
+
+1. DO NOT explore the codebase
+2. DO NOT read files
+3. DO NOT write code
+4. DO NOT use tools
+5. ONLY output a routing decision
 
 ## Available Workflows
 
@@ -28,64 +40,65 @@ ${workflowList}
 
 "${userMessage}"
 
-## Instructions
+## Your Response
 
-Analyze the user's request carefully.
+If a workflow matches the request, respond ONLY with:
+/invoke-workflow {workflow-name}
 
-If a workflow matches:
-1. Respond with exactly: WORKFLOW: {workflow-name}
-2. Then write a clear summary of the user's intent for the workflow agents.
+If no workflow matches, respond with a brief conversational message (1-2 sentences max) asking for clarification or explaining you can help directly.
 
-If no workflow matches:
-- Respond conversationally to help the user directly.
-- You can ask clarifying questions or provide information.
-
-IMPORTANT: Only output "WORKFLOW: name" if you're confident the request matches a workflow.
-The workflow name must exactly match one from the Available Workflows list.`;
+DO NOT do anything else. No exploration. No coding. Just route.`;
 }
 
 /**
- * Parse router response to extract workflow routing
- * Returns workflow name and intent summary if routed, null otherwise
+ * Result of parsing a message for workflow invocation
  */
-export interface RouterResult {
-  workflow: string | null;
-  userIntent: string;
-  isConversational: boolean;
+export interface WorkflowInvocation {
+  workflowName: string | null;
+  remainingMessage: string;
 }
 
-export function parseRouterResponse(response: string): RouterResult {
-  // Look for WORKFLOW: pattern at start of line
-  const workflowMatch = /^WORKFLOW:\s*(\S+)/m.exec(response);
+/**
+ * Parse a message to detect /invoke-workflow command
+ */
+export function parseWorkflowInvocation(
+  message: string,
+  workflows: WorkflowDefinition[]
+): WorkflowInvocation {
+  const trimmed = message.trim();
 
-  if (workflowMatch) {
-    const workflowName = workflowMatch[1];
+  // Check for /invoke-workflow pattern at start
+  const match = /^\/invoke-workflow\s+(\S+)/i.exec(trimmed);
+
+  if (match) {
+    const workflowName = match[1];
 
     // Validate workflow exists
-    const workflows = getRegisteredWorkflows();
     const workflow = workflows.find(w => w.name === workflowName);
 
     if (workflow) {
-      // Extract intent summary (everything after the WORKFLOW line)
-      const afterMatch = response.substring(workflowMatch.index + workflowMatch[0].length).trim();
+      const remainingMessage = trimmed.slice(match[0].length).trim();
       return {
-        workflow: workflowName,
-        userIntent: afterMatch || response,
-        isConversational: false,
+        workflowName,
+        remainingMessage,
       };
     }
 
-    // Workflow not found - treat as conversational
     console.warn(`[Router] Unknown workflow: ${workflowName}`);
   }
 
-  // No workflow match - conversational response
   return {
-    workflow: null,
-    userIntent: response,
-    isConversational: true,
+    workflowName: null,
+    remainingMessage: message,
   };
 }
 
-// Re-export getWorkflow for convenience
-export { getWorkflow } from './loader';
+/**
+ * Find a workflow by name
+ */
+export function findWorkflow(
+  name: string,
+  workflows: WorkflowDefinition[]
+): WorkflowDefinition | undefined {
+  return workflows.find(w => w.name === name);
+}

@@ -76,15 +76,15 @@ describe('Workflow Executor', () => {
     mockGetAssistantClient.mockClear();
     (mockPlatform.sendMessage as ReturnType<typeof mock>).mockClear();
 
-    // Create unique temp directory for each test with step files
+    // Create unique temp directory for each test with command files
     testDir = join(tmpdir(), `executor-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    const stepsDir = join(testDir, '.archon', 'steps');
-    await mkdir(stepsDir, { recursive: true });
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
 
-    // Create step prompt files
-    await writeFile(join(stepsDir, 'step-one.md'), 'Step one prompt for $USER_MESSAGE');
-    await writeFile(join(stepsDir, 'step-two.md'), 'Step two prompt');
-    await writeFile(join(stepsDir, 'first-step.md'), 'First step prompt');
+    // Create command prompt files
+    await writeFile(join(commandsDir, 'command-one.md'), 'Command one prompt for $USER_MESSAGE');
+    await writeFile(join(commandsDir, 'command-two.md'), 'Command two prompt');
+    await writeFile(join(commandsDir, 'first-command.md'), 'First command prompt');
   });
 
   afterEach(async () => {
@@ -100,7 +100,7 @@ describe('Workflow Executor', () => {
       name: 'test-workflow',
       description: 'A test workflow',
       provider: 'claude',
-      steps: [{ step: 'step-one' }, { step: 'step-two' }],
+      steps: [{ command: 'command-one' }, { command: 'command-two' }],
     };
 
     it('should create a workflow run record', async () => {
@@ -141,7 +141,7 @@ describe('Workflow Executor', () => {
       // First call should be the workflow start notification
       expect(calls[0][1]).toContain('**Starting workflow**: test-workflow');
       expect(calls[0][1]).toContain('A test workflow');
-      expect(calls[0][1]).toContain('step-one -> step-two');
+      expect(calls[0][1]).toContain('command-one -> command-two');
     });
 
     it('should execute each step and send notifications', async () => {
@@ -159,8 +159,8 @@ describe('Workflow Executor', () => {
       const messages = calls.map((call: unknown[]) => call[1]);
 
       // Should have step notifications
-      expect(messages.some((m: string) => m.includes('**Step 1/2**: step-one'))).toBe(true);
-      expect(messages.some((m: string) => m.includes('**Step 2/2**: step-two'))).toBe(true);
+      expect(messages.some((m: string) => m.includes('**Step 1/2**: command-one'))).toBe(true);
+      expect(messages.some((m: string) => m.includes('**Step 2/2**: command-two'))).toBe(true);
     });
 
     it('should log workflow events', async () => {
@@ -238,18 +238,18 @@ describe('Workflow Executor', () => {
       expect(lastMessage).toContain('**Workflow complete**: test-workflow');
     });
 
-    it('should handle missing step prompt file', async () => {
-      const workflowWithMissingStep: WorkflowDefinition = {
-        name: 'missing-step-workflow',
-        description: 'Has a missing step',
-        steps: [{ step: 'nonexistent-step' }],
+    it('should handle missing command prompt file', async () => {
+      const workflowWithMissingCommand: WorkflowDefinition = {
+        name: 'missing-command-workflow',
+        description: 'Has a missing command',
+        steps: [{ command: 'nonexistent-command' }],
       };
 
       await executeWorkflow(
         mockPlatform,
         'conv-123',
         testDir,
-        workflowWithMissingStep,
+        workflowWithMissingCommand,
         'User message',
         'db-conv-id'
       );
@@ -298,10 +298,13 @@ describe('Workflow Executor', () => {
 
   describe('step context management', () => {
     it('should start fresh session for first step', async () => {
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'first.md'), 'First step prompt');
+
       const workflow: WorkflowDefinition = {
         name: 'fresh-context-test',
         description: 'Test fresh context',
-        steps: [{ step: 'first-step' }],
+        steps: [{ command: 'first' }],
       };
 
       await executeWorkflow(
@@ -322,17 +325,17 @@ describe('Workflow Executor', () => {
     });
 
     it('should respect clearContext flag', async () => {
-      // Create additional step files for this test
-      const stepsDir = join(testDir, '.archon', 'steps');
-      await writeFile(join(stepsDir, 'context-step-one.md'), 'Step one');
-      await writeFile(join(stepsDir, 'context-step-two.md'), 'Step two');
+      // Create additional command files for this test
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'context-one.md'), 'Command one');
+      await writeFile(join(commandsDir, 'context-two.md'), 'Command two');
 
       const workflow: WorkflowDefinition = {
         name: 'clear-context-test',
         description: 'Test clear context',
         steps: [
-          { step: 'context-step-one' },
-          { step: 'context-step-two', clearContext: true },
+          { command: 'context-one' },
+          { command: 'context-two', clearContext: true },
         ],
       };
 
@@ -357,13 +360,13 @@ describe('Workflow Executor', () => {
 
   describe('edge cases', () => {
     it('should handle workflow with single step', async () => {
-      const stepsDir = join(testDir, '.archon', 'steps');
-      await writeFile(join(stepsDir, 'single-step.md'), 'Single step prompt');
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'single.md'), 'Single command prompt');
 
       const singleStepWorkflow: WorkflowDefinition = {
         name: 'single-step-workflow',
         description: 'Only one step',
-        steps: [{ step: 'single-step' }],
+        steps: [{ command: 'single' }],
       };
 
       await executeWorkflow(
@@ -384,17 +387,17 @@ describe('Workflow Executor', () => {
     });
 
     it('should handle workflow with many steps', async () => {
-      const stepsDir = join(testDir, '.archon', 'steps');
+      const commandsDir = join(testDir, '.archon', 'commands');
 
-      // Create 5 step files
+      // Create 5 command files
       for (let i = 0; i < 5; i++) {
-        await writeFile(join(stepsDir, `step-${String(i)}.md`), `Step ${String(i)} prompt`);
+        await writeFile(join(commandsDir, `cmd-${String(i)}.md`), `Command ${String(i)} prompt`);
       }
 
       const manyStepsWorkflow: WorkflowDefinition = {
         name: 'many-steps-workflow',
         description: 'Five steps',
-        steps: Array.from({ length: 5 }, (_, i) => ({ step: `step-${String(i)}` })),
+        steps: Array.from({ length: 5 }, (_, i) => ({ command: `cmd-${String(i)}` })),
       };
 
       await executeWorkflow(
@@ -421,17 +424,17 @@ describe('Workflow Executor', () => {
       expect(completeCalls.length).toBeGreaterThan(0);
     });
 
-    it('should substitute $USER_MESSAGE in step prompt', async () => {
-      const stepsDir = join(testDir, '.archon', 'steps');
+    it('should substitute $USER_MESSAGE in command prompt', async () => {
+      const commandsDir = join(testDir, '.archon', 'commands');
       await writeFile(
-        join(stepsDir, 'substitution-test.md'),
+        join(commandsDir, 'substitution.md'),
         'User wants: $USER_MESSAGE\nWorkflow ID: $WORKFLOW_ID'
       );
 
       const workflow: WorkflowDefinition = {
         name: 'substitution-workflow',
         description: 'Test variable substitution',
-        steps: [{ step: 'substitution-test' }],
+        steps: [{ command: 'substitution' }],
       };
 
       await executeWorkflow(
@@ -455,7 +458,7 @@ describe('Workflow Executor', () => {
         {
           name: 'test-workflow',
           description: 'Test',
-          steps: [{ step: 'step-one' }],
+          steps: [{ command: 'command-one' }],
         },
         '', // Empty user message
         'db-conv-id'
@@ -476,7 +479,7 @@ describe('Workflow Executor', () => {
         {
           name: 'test-workflow',
           description: 'Test',
-          steps: [{ step: 'step-one' }],
+          steps: [{ command: 'command-one' }],
         },
         'Fix the "bug" in `src/index.ts` with $variables',
         'db-conv-id'
@@ -489,14 +492,14 @@ describe('Workflow Executor', () => {
       expect(completeCalls.length).toBeGreaterThan(0);
     });
 
-    it('should fail when step file is empty', async () => {
-      const stepsDir = join(testDir, '.archon', 'steps');
-      await writeFile(join(stepsDir, 'empty-step.md'), '');
+    it('should fail when command file is empty', async () => {
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'empty.md'), '');
 
       const workflow: WorkflowDefinition = {
-        name: 'empty-step-workflow',
-        description: 'Has empty step file',
-        steps: [{ step: 'empty-step' }],
+        name: 'empty-command-workflow',
+        description: 'Has empty command file',
+        steps: [{ command: 'empty' }],
       };
 
       await executeWorkflow(
@@ -517,14 +520,14 @@ describe('Workflow Executor', () => {
     });
 
     it('should fail on second step if it is missing', async () => {
-      const stepsDir = join(testDir, '.archon', 'steps');
-      await writeFile(join(stepsDir, 'existing-step.md'), 'This step exists');
-      // 'missing-step' file does not exist
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'existing.md'), 'This command exists');
+      // 'missing' file does not exist
 
       const workflow: WorkflowDefinition = {
         name: 'partial-workflow',
         description: 'Second step is missing',
-        steps: [{ step: 'existing-step' }, { step: 'missing-step' }],
+        steps: [{ command: 'existing' }, { command: 'missing' }],
       };
 
       await executeWorkflow(
@@ -556,7 +559,7 @@ describe('Workflow Executor', () => {
         name: 'no-provider-workflow',
         description: 'No provider specified',
         // provider is undefined
-        steps: [{ step: 'step-one' }],
+        steps: [{ command: 'command-one' }],
       };
 
       await executeWorkflow(
@@ -577,7 +580,7 @@ describe('Workflow Executor', () => {
         name: 'codex-workflow',
         description: 'Uses codex',
         provider: 'codex',
-        steps: [{ step: 'step-one' }],
+        steps: [{ command: 'command-one' }],
       };
 
       await executeWorkflow(
@@ -603,7 +606,7 @@ describe('Workflow Executor', () => {
         {
           name: 'test-workflow',
           description: 'Test',
-          steps: [{ step: 'step-one' }],
+          steps: [{ command: 'command-one' }],
         },
         'User message',
         'db-conv-id'
@@ -615,6 +618,54 @@ describe('Workflow Executor', () => {
           (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
       );
       expect(completeCalls.length).toBeGreaterThan(0);
+    });
+
+    it('should reject invalid command names with path traversal', async () => {
+      const workflow: WorkflowDefinition = {
+        name: 'path-traversal-workflow',
+        description: 'Has invalid command name',
+        steps: [{ command: '../../../etc/passwd' }],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should fail - path traversal rejected
+      const failCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
+      );
+      expect(failCalls.length).toBeGreaterThan(0);
+    });
+
+    it('should reject command names starting with dot', async () => {
+      const workflow: WorkflowDefinition = {
+        name: 'dotfile-workflow',
+        description: 'Has invalid command name',
+        steps: [{ command: '.hidden' }],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should fail - dotfile rejected
+      const failCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
+      );
+      expect(failCalls.length).toBeGreaterThan(0);
     });
   });
 });

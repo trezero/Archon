@@ -224,4 +224,58 @@ describe('workflows database', () => {
       expect(params).toContain(JSON.stringify({ error: 'Timeout exceeded' }));
     });
   });
+
+  describe('error handling', () => {
+    test('createWorkflowRun throws on database error', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('Connection refused'));
+
+      await expect(
+        createWorkflowRun({
+          workflow_name: 'test',
+          conversation_id: 'conv',
+          user_message: 'test',
+        })
+      ).rejects.toThrow('Failed to create workflow run: Connection refused');
+    });
+
+    test('getWorkflowRun throws on database error', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('Timeout'));
+
+      await expect(getWorkflowRun('test-id')).rejects.toThrow(
+        'Failed to get workflow run: Timeout'
+      );
+    });
+
+    test('getActiveWorkflowRun throws on database error', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('Invalid query'));
+
+      await expect(getActiveWorkflowRun('conv-123')).rejects.toThrow(
+        'Failed to get active workflow run: Invalid query'
+      );
+    });
+
+    test('updateWorkflowRun throws on database error', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('Update failed'));
+
+      await expect(
+        updateWorkflowRun('test-id', { status: 'completed' })
+      ).rejects.toThrow('Failed to update workflow run: Update failed');
+    });
+
+    test('completeWorkflowRun throws on database error', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('Database locked'));
+
+      await expect(completeWorkflowRun('test-id')).rejects.toThrow(
+        'Failed to complete workflow run: Database locked'
+      );
+    });
+
+    test('failWorkflowRun throws on database error', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('Network error'));
+
+      await expect(failWorkflowRun('test-id', 'Some error')).rejects.toThrow(
+        'Failed to fail workflow run: Network error'
+      );
+    });
+  });
 });

@@ -6,9 +6,6 @@ import { join } from 'path';
 import type { WorkflowDefinition } from './types';
 import { getWorkflowFolderSearchPaths } from '../utils/archon-paths';
 
-// In-memory registry of loaded workflows
-const workflowRegistry = new Map<string, WorkflowDefinition>();
-
 /**
  * Parse YAML using Bun's native YAML parser (established pattern from config-loader.ts)
  */
@@ -36,18 +33,25 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
       return null;
     }
 
+    // Parse command field (support both 'command' and 'step' for backward compat)
     const steps = raw.steps.map((s: unknown) => {
       const step = s as Record<string, unknown>;
       return {
-        step: String(step.step),
+        command: String(step.command ?? step.step),
         clearContext: Boolean(step.clearContext),
       };
     });
 
+    // Validate provider is 'claude' or 'codex'
+    const validProviders = ['claude', 'codex'];
+    const provider = typeof raw.provider === 'string' && validProviders.includes(raw.provider)
+      ? (raw.provider as 'claude' | 'codex')
+      : 'claude';
+
     return {
       name: raw.name,
       description: raw.description,
-      provider: typeof raw.provider === 'string' ? raw.provider : 'claude',
+      provider,
       model: typeof raw.model === 'string' ? raw.model : undefined,
       steps,
     };
@@ -78,9 +82,13 @@ async function loadWorkflowsFromDir(dirPath: string): Promise<WorkflowDefinition
         console.log(`[WorkflowLoader] Loaded workflow: ${workflow.name}`);
       }
     }
-  } catch {
-    // Directory doesn't exist or isn't readable
-    console.log(`[WorkflowLoader] No workflows found in ${dirPath}`);
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === 'ENOENT') {
+      console.log(`[WorkflowLoader] Directory not found: ${dirPath}`);
+    } else {
+      console.warn(`[WorkflowLoader] Error reading ${dirPath}: ${err.message}`);
+    }
   }
 
   return workflows;
@@ -105,40 +113,14 @@ export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition
         console.log(`[WorkflowLoader] Found ${String(workflows.length)} workflows in ${folder}`);
         break; // Stop at first folder with workflows
       }
-    } catch {
-      // Folder doesn't exist, try next
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') {
+        console.warn(`[WorkflowLoader] Error accessing ${fullPath}: ${err.message}`);
+      }
+      // ENOENT is expected - folder doesn't exist, try next
     }
   }
 
   return allWorkflows;
-}
-
-/**
- * Register workflows in memory
- */
-export function registerWorkflows(workflows: WorkflowDefinition[]): void {
-  for (const workflow of workflows) {
-    workflowRegistry.set(workflow.name, workflow);
-  }
-}
-
-/**
- * Get all registered workflows
- */
-export function getRegisteredWorkflows(): WorkflowDefinition[] {
-  return Array.from(workflowRegistry.values());
-}
-
-/**
- * Get a specific workflow by name
- */
-export function getWorkflow(name: string): WorkflowDefinition | undefined {
-  return workflowRegistry.get(name);
-}
-
-/**
- * Clear all registered workflows (for testing)
- */
-export function clearWorkflows(): void {
-  workflowRegistry.clear();
 }

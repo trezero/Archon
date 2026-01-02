@@ -25,14 +25,12 @@ import { getIsolationProvider } from '../isolation';
 import { worktreeExists, findWorktreeByBranch, getCanonicalRepoPath } from '../utils/git';
 import {
   discoverWorkflows,
-  registerWorkflows,
-  clearWorkflows,
-  getWorkflow,
   buildRouterPrompt,
-  parseRouterResponse,
+  parseWorkflowInvocation,
+  findWorkflow,
   executeWorkflow,
-  getRegisteredWorkflows,
 } from '../workflows';
+import type { WorkflowDefinition } from '../workflows';
 import {
   cleanupToMakeRoom,
   getWorktreeStatusBreakdown,
@@ -311,6 +309,7 @@ export async function handleMessage(
     // Parse command upfront if it's a slash command
     let promptToSend = message;
     let commandName: string | null = null;
+    let availableWorkflows: WorkflowDefinition[] = [];
 
     if (message.startsWith('/')) {
       const { command, args } = commandHandler.parseCommand(message);
@@ -448,27 +447,28 @@ export async function handleMessage(
         return;
       }
 
-      // Try to discover and load workflows from codebase
-      // Clear any stale workflows from previous requests first
-      clearWorkflows();
-
+      // Discover workflows (returns array, no global state)
       const codebaseForWorkflows = await codebaseDb.getCodebase(conversation.codebase_id);
       if (codebaseForWorkflows) {
-        const workflows = await discoverWorkflows(codebaseForWorkflows.default_cwd);
-        if (workflows.length > 0) {
-          registerWorkflows(workflows);
-          console.log(
-            `[Orchestrator] Registered ${String(workflows.length)} workflows from .archon/workflows/`
-          );
+        try {
+          availableWorkflows = await discoverWorkflows(codebaseForWorkflows.default_cwd);
+          if (availableWorkflows.length > 0) {
+            console.log(
+              `[Orchestrator] Discovered ${String(availableWorkflows.length)} workflows`
+            );
+          }
+        } catch (error) {
+          const err = error as Error;
+          console.warn(`[Orchestrator] Failed to discover workflows: ${err.message}`);
+          // Continue without workflows - graceful degradation
         }
       }
 
-      // If workflows are registered, use workflow-aware router prompt
-      const registeredWorkflows = getRegisteredWorkflows();
-      if (registeredWorkflows.length > 0) {
+      // If workflows are available, use workflow-aware router prompt
+      if (availableWorkflows.length > 0) {
         console.log('[Orchestrator] Using workflow-aware router prompt');
         commandName = 'workflow-router';
-        promptToSend = buildRouterPrompt(message);
+        promptToSend = buildRouterPrompt(message, availableWorkflows);
       } else {
         // Fall back to router template for natural language routing
         const routerTemplate = await templateDb.getTemplate('router');
@@ -565,21 +565,71 @@ export async function handleMessage(
 
     if (mode === 'stream') {
       // Stream mode: Send each chunk immediately
+      // But first accumulate response to check for workflow invocation
+      const allMessages: string[] = [];
+      let newSessionId: string | undefined;
+
       for await (const msg of aiClient.sendQuery(
         promptToSend,
         cwd,
         session.assistant_session_id ?? undefined
       )) {
         if (msg.type === 'assistant' && msg.content) {
-          await platform.sendMessage(conversationId, msg.content);
+          allMessages.push(msg.content);
         } else if (msg.type === 'tool' && msg.toolName) {
           // Format and send tool call notification
           const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
           await platform.sendMessage(conversationId, toolMessage);
         } else if (msg.type === 'result' && msg.sessionId) {
-          // Save session ID for resume
-          await sessionDb.updateSession(session.id, msg.sessionId);
+          newSessionId = msg.sessionId;
         }
+      }
+
+      // Save session ID if we got one
+      if (newSessionId) {
+        await sessionDb.updateSession(session.id, newSessionId);
+      }
+
+      // Check for workflow routing (if workflows are available)
+      if (allMessages.length > 0 && availableWorkflows.length > 0) {
+        const fullResponse = allMessages.join('');
+        const { workflowName, remainingMessage } = parseWorkflowInvocation(
+          fullResponse,
+          availableWorkflows
+        );
+
+        if (workflowName) {
+          const workflow = findWorkflow(workflowName, availableWorkflows);
+          if (workflow) {
+            console.log(`[Orchestrator] Routing to workflow: ${workflowName}`);
+
+            // Send the explanation if any
+            if (remainingMessage) {
+              await platform.sendMessage(conversationId, remainingMessage);
+            }
+
+            await executeWorkflow(
+              platform,
+              conversationId,
+              cwd,
+              workflow,
+              message, // Original user message
+              conversation.id,
+              conversation.codebase_id ?? undefined
+            );
+
+            // Track command and return early
+            if (commandName) {
+              await sessionDb.updateSessionMetadata(session.id, { lastCommand: commandName });
+            }
+            return;
+          }
+        }
+      }
+
+      // No workflow - send all accumulated messages
+      for (const content of allMessages) {
+        await platform.sendMessage(conversationId, content);
       }
     } else {
       // Batch mode: Accumulate all chunks for logging, send only final clean summary
@@ -639,22 +689,34 @@ export async function handleMessage(
       }
 
       if (finalMessage) {
-        // Check for workflow routing in the response
-        const routerResult = parseRouterResponse(finalMessage);
-        if (routerResult.workflow) {
-          const workflow = getWorkflow(routerResult.workflow);
-          if (workflow) {
-            console.log(`[Orchestrator] Routing to workflow: ${routerResult.workflow}`);
-            await executeWorkflow(
-              platform,
-              conversationId,
-              cwd,
-              workflow,
-              routerResult.userIntent,
-              conversation.id,
-              conversation.codebase_id ?? undefined
-            );
-            return;
+        // Check for workflow routing in the response (if workflows are available)
+        if (availableWorkflows.length > 0) {
+          const { workflowName, remainingMessage } = parseWorkflowInvocation(
+            finalMessage,
+            availableWorkflows
+          );
+
+          if (workflowName) {
+            const workflow = findWorkflow(workflowName, availableWorkflows);
+            if (workflow) {
+              console.log(`[Orchestrator] Routing to workflow: ${workflowName}`);
+
+              // Send the explanation if any
+              if (remainingMessage) {
+                await platform.sendMessage(conversationId, remainingMessage);
+              }
+
+              await executeWorkflow(
+                platform,
+                conversationId,
+                cwd,
+                workflow,
+                message, // Original user message
+                conversation.id,
+                conversation.codebase_id ?? undefined
+              );
+              return;
+            }
           }
         }
 

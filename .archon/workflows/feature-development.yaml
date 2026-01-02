@@ -5,9 +5,9 @@ provider: claude
 model: sonnet
 
 steps:
-  - step: plan
+  - command: plan
 
-  - step: implement
+  - command: implement
     clearContext: true
 
-  - step: create-pr
+  - command: create-pr

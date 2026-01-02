@@ -525,7 +525,7 @@ describe('orchestrator', () => {
       mockReadFile.mockResolvedValue('Plan command');
     });
 
-    test('stream mode sends each chunk immediately', async () => {
+    test('stream mode accumulates then sends each chunk after workflow check', async () => {
       platform.getStreamingMode.mockReturnValue('stream');
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'assistant', content: 'First chunk' };
@@ -536,13 +536,17 @@ describe('orchestrator', () => {
 
       await handleMessage(platform, 'chat-456', '/command-invoke plan');
 
+      // Stream mode: tool calls sent immediately, assistant messages accumulated then sent
+      // (to check for workflow invocation before sending)
       expect(platform.sendMessage).toHaveBeenCalledTimes(3);
-      expect(platform.sendMessage).toHaveBeenNthCalledWith(1, 'chat-456', 'First chunk');
+      // Tool call is sent immediately
       expect(platform.sendMessage).toHaveBeenNthCalledWith(
-        2,
+        1,
         'chat-456',
         expect.stringContaining('BASH')
       );
+      // After workflow check, each accumulated message is sent
+      expect(platform.sendMessage).toHaveBeenNthCalledWith(2, 'chat-456', 'First chunk');
       expect(platform.sendMessage).toHaveBeenNthCalledWith(3, 'chat-456', 'Second chunk');
     });
 

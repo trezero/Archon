@@ -20,7 +20,7 @@ import {
   MAX_WORKTREES_PER_CODEBASE,
 } from '../services/cleanup-service';
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
-import { discoverWorkflows, registerWorkflows } from '../workflows';
+import { discoverWorkflows } from '../workflows';
 
 /**
  * Convert an absolute path to a relative path from the repository root
@@ -1231,7 +1231,6 @@ Setup:
         case 'ls': {
           // Discover and list workflows
           const workflows = await discoverWorkflows(codebase.default_cwd);
-          registerWorkflows(workflows);
 
           if (workflows.length === 0) {
             return {
@@ -1243,19 +1242,18 @@ Setup:
 
           let msg = 'Available Workflows:\n\n';
           for (const w of workflows) {
-            msg += `**${w.name}**\n  ${w.description}\n  Steps: ${w.steps.map(s => s.step).join(' -> ')}\n\n`;
+            msg += `**${w.name}**\n  ${w.description}\n  Steps: ${w.steps.map(s => s.command).join(' -> ')}\n\n`;
           }
 
           return { success: true, message: msg };
         }
 
         case 'reload': {
-          // Force reload workflows
+          // Force reload workflows (discovery is stateless, just confirms they load correctly)
           const workflows = await discoverWorkflows(codebase.default_cwd);
-          registerWorkflows(workflows);
           return {
             success: true,
-            message: `Reloaded ${String(workflows.length)} workflow(s).`,
+            message: `Discovered ${String(workflows.length)} workflow(s).`,
           };
         }
 

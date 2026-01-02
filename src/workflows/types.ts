@@ -9,7 +9,7 @@
  * Step definition from YAML workflow file
  */
 export interface StepDefinition {
-  step: string; // Name of step (loads from {step}.md)
+  command: string; // Name of command (loads from {command}.md)
   clearContext?: boolean; // Fresh agent (default: false)
 }
 
@@ -19,7 +19,7 @@ export interface StepDefinition {
 export interface WorkflowDefinition {
   name: string;
   description: string;
-  provider?: string; // 'claude' | 'codex' (default: claude)
+  provider?: 'claude' | 'codex'; // AI provider (default: claude)
   model?: string; // Model override (future)
   steps: StepDefinition[];
 }
@@ -41,12 +41,8 @@ export interface WorkflowRun {
 }
 
 /**
- * Step execution result
+ * Step execution result - discriminated union for type safety
  */
-export interface StepResult {
-  stepName: string;
-  success: boolean;
-  sessionId?: string; // For resumption
-  artifacts?: string[]; // Files written
-  error?: string;
-}
+export type StepResult =
+  | { success: true; commandName: string; sessionId?: string; artifacts?: string[] }
+  | { success: false; commandName: string; error: string };

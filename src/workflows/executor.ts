@@ -7,7 +7,7 @@ import type { IPlatformAdapter } from '../types';
 import { getAssistantClient } from '../clients/factory';
 import * as workflowDb from '../db/workflows';
 import { formatToolCall } from '../utils/tool-formatter';
-import { getWorkflowFolderSearchPaths } from '../utils/archon-paths';
+import { getCommandFolderSearchPaths } from '../utils/archon-paths';
 import type { WorkflowDefinition, WorkflowRun, StepResult } from './types';
 import {
   logWorkflowStart,
@@ -20,30 +20,58 @@ import {
 } from './logger';
 
 /**
- * Load step prompt from file
+ * Validate command name to prevent path traversal
  */
-async function loadStepPrompt(cwd: string, stepName: string): Promise<string | null> {
-  const searchPaths = getWorkflowFolderSearchPaths();
+function isValidCommandName(name: string): boolean {
+  // Reject names with path separators or parent directory references
+  if (name.includes('/') || name.includes('\\') || name.includes('..')) {
+    return false;
+  }
+  // Reject empty names or names starting with .
+  if (!name || name.startsWith('.')) {
+    return false;
+  }
+  return true;
+}
 
-  // Change workflows/ to steps/ in each path
-  const stepPaths = searchPaths.map(p => p.replace('/workflows', '/steps'));
+/**
+ * Load command prompt from file
+ */
+async function loadCommandPrompt(cwd: string, commandName: string): Promise<string | null> {
+  // Validate command name first
+  if (!isValidCommandName(commandName)) {
+    console.error(`[WorkflowExecutor] Invalid command name: ${commandName}`);
+    return null;
+  }
 
-  for (const folder of stepPaths) {
-    const filePath = join(cwd, folder, `${stepName}.md`);
+  // Use command folder paths directly
+  const searchPaths = getCommandFolderSearchPaths();
+
+  for (const folder of searchPaths) {
+    const filePath = join(cwd, folder, `${commandName}.md`);
     try {
       await access(filePath);
-      return await readFile(filePath, 'utf-8');
-    } catch {
-      // File not found, try next location
+      const content = await readFile(filePath, 'utf-8');
+      if (!content.trim()) {
+        console.error(`[WorkflowExecutor] Empty command file: ${commandName}.md`);
+        return null;
+      }
+      return content;
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') {
+        console.warn(`[WorkflowExecutor] Error reading ${filePath}: ${err.message}`);
+      }
+      // Continue to next search path
     }
   }
 
-  console.error(`[WorkflowExecutor] Step prompt not found: ${stepName}`);
+  console.error(`[WorkflowExecutor] Command prompt not found: ${commandName}`);
   return null;
 }
 
 /**
- * Substitute workflow variables in step prompt
+ * Substitute workflow variables in command prompt
  */
 function substituteWorkflowVariables(
   prompt: string,
@@ -69,20 +97,20 @@ async function executeStep(
   currentSessionId?: string
 ): Promise<StepResult> {
   const stepDef = workflow.steps[stepIndex];
-  const stepName = stepDef.step;
+  const commandName = stepDef.command;
 
   console.log(
-    `[WorkflowExecutor] Executing step ${String(stepIndex + 1)}/${String(workflow.steps.length)}: ${stepName}`
+    `[WorkflowExecutor] Executing step ${String(stepIndex + 1)}/${String(workflow.steps.length)}: ${commandName}`
   );
-  await logStepStart(cwd, workflowRun.id, stepName, stepIndex);
+  await logStepStart(cwd, workflowRun.id, commandName, stepIndex);
 
-  // Load step prompt
-  const prompt = await loadStepPrompt(cwd, stepName);
+  // Load command prompt
+  const prompt = await loadCommandPrompt(cwd, commandName);
   if (!prompt) {
     return {
-      stepName,
+      commandName,
       success: false,
-      error: `Step prompt not found: ${stepName}.md`,
+      error: `Command prompt not found: ${commandName}.md`,
     };
   }
 
@@ -98,7 +126,7 @@ async function executeStep(
   const resumeSessionId = needsFreshSession ? undefined : currentSessionId;
 
   if (needsFreshSession) {
-    console.log(`[WorkflowExecutor] Starting fresh session for step: ${stepName}`);
+    console.log(`[WorkflowExecutor] Starting fresh session for step: ${commandName}`);
   } else if (resumeSessionId) {
     console.log(`[WorkflowExecutor] Resuming session: ${resumeSessionId}`);
   }
@@ -110,7 +138,7 @@ async function executeStep(
   // Send step start notification
   await platform.sendMessage(
     conversationId,
-    `**Step ${String(stepIndex + 1)}/${String(workflow.steps.length)}**: ${stepName}`
+    `**Step ${String(stepIndex + 1)}/${String(workflow.steps.length)}**: ${commandName}`
   );
 
   let newSessionId: string | undefined;
@@ -150,18 +178,18 @@ async function executeStep(
       }
     }
 
-    await logStepComplete(cwd, workflowRun.id, stepName, stepIndex);
+    await logStepComplete(cwd, workflowRun.id, commandName, stepIndex);
 
     return {
-      stepName,
+      commandName,
       success: true,
       sessionId: newSessionId,
     };
   } catch (error) {
     const err = error as Error;
-    console.error(`[WorkflowExecutor] Step failed: ${stepName}`, err);
+    console.error(`[WorkflowExecutor] Step failed: ${commandName}`, err);
     return {
-      stepName,
+      commandName,
       success: false,
       error: err.message,
     };
@@ -194,7 +222,7 @@ export async function executeWorkflow(
   // Notify user
   await platform.sendMessage(
     conversationId,
-    `**Starting workflow**: ${workflow.name}\n\n${workflow.description}\n\nSteps: ${workflow.steps.map(s => s.step).join(' -> ')}`
+    `**Starting workflow**: ${workflow.name}\n\n${workflow.description}\n\nSteps: ${workflow.steps.map(s => s.command).join(' -> ')}`
   );
 
   let currentSessionId: string | undefined;
@@ -213,12 +241,11 @@ export async function executeWorkflow(
     );
 
     if (!result.success) {
-      const errorMessage = result.error ?? 'Unknown error';
-      await workflowDb.failWorkflowRun(workflowRun.id, errorMessage);
-      await logWorkflowError(cwd, workflowRun.id, errorMessage);
+      await workflowDb.failWorkflowRun(workflowRun.id, result.error);
+      await logWorkflowError(cwd, workflowRun.id, result.error);
       await platform.sendMessage(
         conversationId,
-        `**Workflow failed** at step: ${result.stepName}\n\nError: ${errorMessage}`
+        `**Workflow failed** at step: ${result.commandName}\n\nError: ${result.error}`
       );
       return;
     }
