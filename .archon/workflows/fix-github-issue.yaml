@@ -11,13 +11,3 @@ steps:
   - command: implement-issue
     clearContext: true
     # Read artifact, make code changes, run validation
-
-  - command: commit
-    # Stage and commit changes
-
-  - command: create-pr
-    # Push and create PR with "Fixes #N"
-
-  - command: review-pr
-    clearContext: true
-    # Review PR and post findings as comment
