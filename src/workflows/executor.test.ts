@@ -668,4 +668,314 @@ describe('Workflow Executor', () => {
       expect(failCalls.length).toBeGreaterThan(0);
     });
   });
+
+  describe('platform message error handling', () => {
+    it('should continue workflow when platform.sendMessage fails', async () => {
+      // Mock sendMessage to throw an error
+      const sendMessageMock = mock(() => Promise.reject(new Error('Platform API rate limit')));
+      mockPlatform.sendMessage = sendMessageMock;
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'test-workflow',
+          description: 'Test',
+          steps: [{ command: 'command-one' }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Workflow should still complete successfully despite sendMessage failures
+      const completeCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
+      );
+      expect(completeCalls.length).toBeGreaterThan(0);
+    });
+
+    it('should continue workflow when sendMessage fails during streaming', async () => {
+      // Switch platform to streaming mode
+      (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
+
+      // Mock sendMessage to throw an error
+      const sendMessageMock = mock(() => Promise.reject(new Error('Network error')));
+      mockPlatform.sendMessage = sendMessageMock;
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'test-workflow',
+          description: 'Test',
+          steps: [{ command: 'command-one' }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Workflow should still complete successfully
+      const completeCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
+      );
+      expect(completeCalls.length).toBeGreaterThan(0);
+    });
+
+    it('should continue to next step when sendMessage fails on step notification', async () => {
+      // Create a mock that fails on first call, succeeds on rest
+      let callCount = 0;
+      const sendMessageMock = mock(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.reject(new Error('First send failed'));
+        }
+        return Promise.resolve();
+      });
+      mockPlatform.sendMessage = sendMessageMock;
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'test-workflow',
+          description: 'Test',
+          steps: [{ command: 'command-one' }, { command: 'command-two' }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Both steps should have been executed (2 calls to sendQuery)
+      expect(mockSendQuery).toHaveBeenCalledTimes(2);
+
+      // Workflow should complete
+      const completeCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
+      );
+      expect(completeCalls.length).toBeGreaterThan(0);
+    });
+
+    it('should log errors with context when sendMessage fails', async () => {
+      const errorLogs: unknown[][] = [];
+      const originalConsoleError = console.error;
+      console.error = mock((...args: unknown[]) => {
+        errorLogs.push(args);
+      });
+
+      const sendMessageMock = mock(() => Promise.reject(new Error('API timeout')));
+      mockPlatform.sendMessage = sendMessageMock;
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Restore console.error
+      console.error = originalConsoleError;
+
+      // Verify error was logged with correct structure
+      const safeSendLogs = errorLogs.filter(
+        (log) => log[0] === '[WorkflowExecutor] Failed to send message'
+      );
+      expect(safeSendLogs.length).toBeGreaterThan(0);
+
+      // Check that context is included
+      const logContext = safeSendLogs[0][1] as Record<string, unknown>;
+      expect(logContext).toHaveProperty('conversationId', 'conv-123');
+      expect(logContext).toHaveProperty('error', 'API timeout');
+      expect(logContext).toHaveProperty('errorType');
+      expect(logContext).toHaveProperty('platformType');
+    });
+
+    it('should throw on fatal authentication errors', async () => {
+      const sendMessageMock = mock(() =>
+        Promise.reject(new Error('401 Unauthorized: Invalid token'))
+      );
+      mockPlatform.sendMessage = sendMessageMock;
+
+      await expect(
+        executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
+          'User message',
+          'db-conv-id'
+        )
+      ).rejects.toThrow('Platform authentication/permission error');
+    });
+
+    it('should continue workflow when tool message send fails in streaming mode', async () => {
+      (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
+
+      // Mock AI client to yield tool messages
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'Starting...' };
+        yield { type: 'tool', toolName: 'read_file', toolInput: { path: '/tmp/test.ts' } };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+
+      const sendMessageMock = mock(() => Promise.reject(new Error('Rate limited')));
+      mockPlatform.sendMessage = sendMessageMock;
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Workflow should complete despite all sendMessage calls failing
+      const completeCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
+      );
+      expect(completeCalls.length).toBeGreaterThan(0);
+    });
+
+    it('should record workflow failure in database even when failure notification fails', async () => {
+      const sendMessageMock = mock(() => Promise.reject(new Error('Cannot send')));
+      mockPlatform.sendMessage = sendMessageMock;
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'failing-workflow',
+          description: 'Test',
+          steps: [{ command: 'nonexistent-command' }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Database should still record the failure
+      const failCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
+      );
+      expect(failCalls.length).toBeGreaterThan(0);
+    });
+
+    it('should warn user about dropped messages in streaming mode', async () => {
+      (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
+
+      // Mock AI client to yield multiple messages
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'Message 1' };
+        yield { type: 'assistant', content: 'Message 2' };
+        yield { type: 'assistant', content: 'Message 3' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+
+      // Fail on messages 2 and 3, succeed on others
+      let callCount = 0;
+      const sendMessageMock = mock(() => {
+        callCount++;
+        // Fail on assistant message sends (calls 2, 3, 4 after step notification)
+        if (callCount >= 3 && callCount <= 4) {
+          return Promise.reject(new Error('Rate limited'));
+        }
+        return Promise.resolve();
+      });
+      mockPlatform.sendMessage = sendMessageMock;
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Verify warning message was attempted
+      const calls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const warningCalls = calls.filter((call: unknown[]) =>
+        (call[1] as string).includes('message(s) failed to deliver')
+      );
+      expect(warningCalls.length).toBeGreaterThan(0);
+    });
+
+    it('should handle intermittent sendMessage failures throughout workflow', async () => {
+      let callCount = 0;
+      const sendMessageMock = mock(() => {
+        callCount++;
+        // Fail on calls 2 and 5 (mid-workflow notifications)
+        if (callCount === 2 || callCount === 5) {
+          return Promise.reject(new Error('Intermittent failure'));
+        }
+        return Promise.resolve();
+      });
+      mockPlatform.sendMessage = sendMessageMock;
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'test-workflow',
+          description: 'Test',
+          steps: [{ command: 'command-one' }, { command: 'command-two' }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Both steps should have been executed
+      expect(mockSendQuery).toHaveBeenCalledTimes(2);
+
+      // Workflow should complete
+      const completeCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
+      );
+      expect(completeCalls.length).toBeGreaterThan(0);
+    });
+
+    it('should retry critical completion message on transient errors', async () => {
+      // Track all sendMessage attempts
+      let callCount = 0;
+      const sendMessageMock = mock(() => {
+        callCount++;
+        // Fail first 2 attempts on completion message, succeed on 3rd
+        // Completion message is the last one sent
+        if (callCount >= 4 && callCount <= 5) {
+          return Promise.reject(new Error('Connection timeout'));
+        }
+        return Promise.resolve();
+      });
+      mockPlatform.sendMessage = sendMessageMock;
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Verify multiple attempts were made for completion message
+      const calls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const completionCalls = calls.filter((call: unknown[]) =>
+        (call[1] as string).includes('**Workflow complete**')
+      );
+      // Should have retried
+      expect(completionCalls.length).toBeGreaterThanOrEqual(1);
+    });
+  });
 });

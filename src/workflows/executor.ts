@@ -19,6 +19,172 @@ import {
   logWorkflowComplete,
 } from './logger';
 
+/** Context for platform message sending */
+interface SendMessageContext {
+  workflowId?: string;
+  stepName?: string;
+  stepIndex?: number;
+}
+
+/** Result of error classification */
+type ErrorType = 'TRANSIENT' | 'FATAL' | 'UNKNOWN';
+
+/** Fatal error patterns - authentication/authorization issues that won't resolve with retry */
+const FATAL_PATTERNS = [
+  'unauthorized',
+  'forbidden',
+  'invalid token',
+  'authentication failed',
+  'permission denied',
+  '401',
+  '403',
+];
+
+/** Transient error patterns - temporary issues that may resolve with retry */
+const TRANSIENT_PATTERNS = [
+  'timeout',
+  'econnrefused',
+  'econnreset',
+  'etimedout',
+  'rate limit',
+  'too many requests',
+  '429',
+  '503',
+  '502',
+  'network error',
+  'socket hang up',
+];
+
+/**
+ * Check if error message matches any pattern in the list
+ */
+function matchesPattern(message: string, patterns: string[]): boolean {
+  return patterns.some((pattern) => message.includes(pattern));
+}
+
+/**
+ * Classify an error to determine if it's transient (can retry) or fatal (should fail).
+ */
+function classifyError(error: Error): ErrorType {
+  const message = error.message.toLowerCase();
+
+  if (matchesPattern(message, FATAL_PATTERNS)) {
+    return 'FATAL';
+  }
+  if (matchesPattern(message, TRANSIENT_PATTERNS)) {
+    return 'TRANSIENT';
+  }
+  return 'UNKNOWN';
+}
+
+/**
+ * Log a send message failure with context
+ */
+function logSendError(
+  label: string,
+  error: Error,
+  platform: IPlatformAdapter,
+  conversationId: string,
+  message: string,
+  context?: SendMessageContext,
+  extra?: Record<string, unknown>
+): void {
+  console.error(`[WorkflowExecutor] ${label}`, {
+    conversationId,
+    messageLength: message.length,
+    error: error.message,
+    errorType: classifyError(error),
+    platformType: platform.getPlatformType(),
+    ...context,
+    ...extra,
+  });
+}
+
+/**
+ * Safely send a message to the platform without crashing on failure.
+ * Returns true if message was sent successfully, false otherwise.
+ * Only suppresses transient/unknown errors; fatal errors are rethrown.
+ */
+async function safeSendMessage(
+  platform: IPlatformAdapter,
+  conversationId: string,
+  message: string,
+  context?: SendMessageContext
+): Promise<boolean> {
+  try {
+    await platform.sendMessage(conversationId, message);
+    return true;
+  } catch (error) {
+    const err = error as Error;
+    const errorType = classifyError(err);
+
+    logSendError('Failed to send message', err, platform, conversationId, message, context, {
+      stack: err.stack,
+    });
+
+    // Fatal errors should not be suppressed - they indicate configuration issues
+    if (errorType === 'FATAL') {
+      throw new Error(`Platform authentication/permission error: ${err.message}`);
+    }
+
+    // Transient/unknown errors are suppressed to allow workflow to continue
+    return false;
+  }
+}
+
+/**
+ * Delay execution for specified milliseconds
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Send a critical message with retry logic.
+ * Used for failure/completion notifications that the user must receive.
+ */
+async function sendCriticalMessage(
+  platform: IPlatformAdapter,
+  conversationId: string,
+  message: string,
+  context?: SendMessageContext,
+  maxRetries = 3
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await platform.sendMessage(conversationId, message);
+      return true;
+    } catch (error) {
+      const err = error as Error;
+      const errorType = classifyError(err);
+
+      logSendError('Critical message send failed', err, platform, conversationId, message, context, {
+        attempt,
+        maxRetries,
+      });
+
+      // Don't retry fatal errors
+      if (errorType === 'FATAL') {
+        break;
+      }
+
+      // Wait before retry (exponential backoff: 1s, 2s, 3s...)
+      if (attempt < maxRetries) {
+        await delay(1000 * attempt);
+      }
+    }
+  }
+
+  // Log prominently so operators can manually notify user
+  console.error('[WorkflowExecutor] CRITICAL: Could not deliver message to user after retries', {
+    conversationId,
+    messagePreview: message.slice(0, 100),
+    ...context,
+  });
+
+  return false;
+}
+
 /**
  * Validate command name to prevent path traversal
  */
@@ -135,21 +301,32 @@ async function executeStep(
   const aiClient = getAssistantClient(workflow.provider ?? 'claude');
   const streamingMode = platform.getStreamingMode();
 
+  // Context for error logging
+  const messageContext: SendMessageContext = {
+    workflowId: workflowRun.id,
+    stepName: commandName,
+    stepIndex,
+  };
+
   // Send step start notification
-  await platform.sendMessage(
+  await safeSendMessage(
+    platform,
     conversationId,
-    `**Step ${String(stepIndex + 1)}/${String(workflow.steps.length)}**: ${commandName}`
+    `**Step ${String(stepIndex + 1)}/${String(workflow.steps.length)}**: ${commandName}`,
+    messageContext
   );
 
   let newSessionId: string | undefined;
 
   try {
     const assistantMessages: string[] = [];
+    let droppedMessageCount = 0;
 
     for await (const msg of aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId)) {
       if (msg.type === 'assistant' && msg.content) {
         if (streamingMode === 'stream') {
-          await platform.sendMessage(conversationId, msg.content);
+          const sent = await safeSendMessage(platform, conversationId, msg.content, messageContext);
+          if (!sent) droppedMessageCount++;
         } else {
           assistantMessages.push(msg.content);
         }
@@ -157,7 +334,8 @@ async function executeStep(
       } else if (msg.type === 'tool' && msg.toolName) {
         if (streamingMode === 'stream') {
           const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
-          await platform.sendMessage(conversationId, toolMessage);
+          const sent = await safeSendMessage(platform, conversationId, toolMessage, messageContext);
+          if (!sent) droppedMessageCount++;
         }
         await logTool(cwd, workflowRun.id, msg.toolName, msg.toolInput ?? {});
       } else if (msg.type === 'result' && msg.sessionId) {
@@ -167,7 +345,22 @@ async function executeStep(
 
     // Batch mode: send accumulated messages
     if (streamingMode === 'batch' && assistantMessages.length > 0) {
-      await platform.sendMessage(conversationId, assistantMessages.join('\n\n'));
+      await safeSendMessage(
+        platform,
+        conversationId,
+        assistantMessages.join('\n\n'),
+        messageContext
+      );
+    }
+
+    // Warn user about dropped messages in streaming mode
+    if (droppedMessageCount > 0) {
+      await safeSendMessage(
+        platform,
+        conversationId,
+        `⚠️ ${String(droppedMessageCount)} message(s) failed to deliver. Check workflow logs for full output.`,
+        messageContext
+      );
     }
 
     await logStepComplete(cwd, workflowRun.id, commandName, stepIndex);
@@ -211,10 +404,17 @@ export async function executeWorkflow(
   console.log(`[WorkflowExecutor] Starting workflow: ${workflow.name} (${workflowRun.id})`);
   await logWorkflowStart(cwd, workflowRun.id, workflow.name, userMessage);
 
+  // Context for error logging
+  const workflowContext: SendMessageContext = {
+    workflowId: workflowRun.id,
+  };
+
   // Notify user
-  await platform.sendMessage(
+  await safeSendMessage(
+    platform,
     conversationId,
-    `**Starting workflow**: ${workflow.name}\n\n${workflow.description}\n\nSteps: ${workflow.steps.map(s => s.command).join(' -> ')}`
+    `**Starting workflow**: ${workflow.name}\n\n${workflow.description}\n\nSteps: ${workflow.steps.map((s) => s.command).join(' -> ')}`,
+    workflowContext
   );
 
   let currentSessionId: string | undefined;
@@ -235,9 +435,12 @@ export async function executeWorkflow(
     if (!result.success) {
       await workflowDb.failWorkflowRun(workflowRun.id, result.error);
       await logWorkflowError(cwd, workflowRun.id, result.error);
-      await platform.sendMessage(
+      // Critical message - retry to ensure user knows about failure
+      await sendCriticalMessage(
+        platform,
         conversationId,
-        `**Workflow failed** at step: ${result.commandName}\n\nError: ${result.error}`
+        `**Workflow failed** at step: ${result.commandName}\n\nError: ${result.error}`,
+        { ...workflowContext, stepName: result.commandName }
       );
       return;
     }
@@ -256,7 +459,13 @@ export async function executeWorkflow(
   // Workflow complete
   await workflowDb.completeWorkflowRun(workflowRun.id);
   await logWorkflowComplete(cwd, workflowRun.id);
-  await platform.sendMessage(conversationId, `**Workflow complete**: ${workflow.name}`);
+  // Critical message - retry to ensure user knows about completion
+  await sendCriticalMessage(
+    platform,
+    conversationId,
+    `**Workflow complete**: ${workflow.name}`,
+    workflowContext
+  );
 
   console.log(`[WorkflowExecutor] Workflow completed: ${workflow.name}`);
 }
