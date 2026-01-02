@@ -8,6 +8,7 @@ import { getAssistantClient } from '../clients/factory';
 import * as workflowDb from '../db/workflows';
 import { formatToolCall } from '../utils/tool-formatter';
 import { getCommandFolderSearchPaths } from '../utils/archon-paths';
+import { loadRepoConfig } from '../config/config-loader';
 import type { WorkflowDefinition, WorkflowRun, StepResult } from './types';
 import {
   logWorkflowStart,
@@ -202,16 +203,24 @@ function isValidCommandName(name: string): boolean {
 
 /**
  * Load command prompt from file
+ *
+ * @param cwd - Working directory (repo root)
+ * @param commandName - Name of the command (without .md extension)
+ * @param configuredFolder - Optional additional folder from config to search
  */
-async function loadCommandPrompt(cwd: string, commandName: string): Promise<string | null> {
+async function loadCommandPrompt(
+  cwd: string,
+  commandName: string,
+  configuredFolder?: string
+): Promise<string | null> {
   // Validate command name first
   if (!isValidCommandName(commandName)) {
     console.error(`[WorkflowExecutor] Invalid command name: ${commandName}`);
     return null;
   }
 
-  // Use command folder paths directly
-  const searchPaths = getCommandFolderSearchPaths();
+  // Use command folder paths with optional configured folder
+  const searchPaths = getCommandFolderSearchPaths(configuredFolder);
 
   for (const folder of searchPaths) {
     const filePath = join(cwd, folder, `${commandName}.md`);
@@ -222,6 +231,7 @@ async function loadCommandPrompt(cwd: string, commandName: string): Promise<stri
         console.error(`[WorkflowExecutor] Empty command file: ${commandName}.md`);
         return null;
       }
+      console.log(`[WorkflowExecutor] Loaded command from: ${folder}/${commandName}.md`);
       return content;
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
@@ -232,7 +242,9 @@ async function loadCommandPrompt(cwd: string, commandName: string): Promise<stri
     }
   }
 
-  console.error(`[WorkflowExecutor] Command prompt not found: ${commandName}`);
+  console.error(
+    `[WorkflowExecutor] Command prompt not found: ${commandName}.md (searched: ${searchPaths.join(', ')})`
+  );
   return null;
 }
 
@@ -260,7 +272,8 @@ async function executeStep(
   workflow: WorkflowDefinition,
   workflowRun: WorkflowRun,
   stepIndex: number,
-  currentSessionId?: string
+  currentSessionId?: string,
+  configuredCommandFolder?: string
 ): Promise<StepResult> {
   const stepDef = workflow.steps[stepIndex];
   const commandName = stepDef.command;
@@ -271,7 +284,7 @@ async function executeStep(
   await logStepStart(cwd, workflowRun.id, commandName, stepIndex);
 
   // Load command prompt
-  const prompt = await loadCommandPrompt(cwd, commandName);
+  const prompt = await loadCommandPrompt(cwd, commandName, configuredCommandFolder);
   if (!prompt) {
     return {
       commandName,
@@ -393,6 +406,14 @@ export async function executeWorkflow(
   conversationDbId: string,
   codebaseId?: string
 ): Promise<void> {
+  // Load repo config to get configured command folder
+  const repoConfig = await loadRepoConfig(cwd);
+  const configuredCommandFolder = repoConfig.commands?.folder;
+
+  if (configuredCommandFolder) {
+    console.log(`[WorkflowExecutor] Using configured command folder: ${configuredCommandFolder}`);
+  }
+
   // Create workflow run record
   const workflowRun = await workflowDb.createWorkflowRun({
     workflow_name: workflow.name,
@@ -429,7 +450,8 @@ export async function executeWorkflow(
       workflow,
       workflowRun,
       i,
-      currentSessionId
+      currentSessionId,
+      configuredCommandFolder
     );
 
     if (!result.success) {

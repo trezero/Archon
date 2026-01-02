@@ -141,6 +141,10 @@ function getDefaults(): MergedConfig {
     concurrency: {
       maxConversations: 10,
     },
+    commands: {
+      folder: undefined,
+      autoLoad: true,
+    },
   };
 }
 
@@ -244,6 +248,15 @@ function mergeRepoConfig(merged: MergedConfig, repo: RepoConfig): MergedConfig {
   // Assistant override (repo-level takes precedence)
   if (repo.assistant) {
     result.assistant = repo.assistant;
+  }
+
+  // Commands config
+  if (repo.commands) {
+    result.commands = {
+      ...result.commands,
+      folder: repo.commands.folder ?? result.commands.folder,
+      autoLoad: repo.commands.autoLoad ?? result.commands.autoLoad,
+    };
   }
 
   return result;

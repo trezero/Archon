@@ -122,4 +122,12 @@ export interface MergedConfig {
   concurrency: {
     maxConversations: number;
   };
+  commands: {
+    /**
+     * Additional command folder to search (relative to repo root)
+     * Searched after .archon/commands/ but before .claude/commands/
+     */
+    folder?: string;
+    autoLoad: boolean;
+  };
 }

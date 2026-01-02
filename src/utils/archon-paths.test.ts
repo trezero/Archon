@@ -141,14 +141,24 @@ describe('archon-paths', () => {
   });
 
   describe('getCommandFolderSearchPaths', () => {
-    test('returns folders in priority order', () => {
+    test('returns only .archon/commands by default', () => {
       const paths = getCommandFolderSearchPaths();
-      expect(paths).toEqual(['.archon/commands', '.claude/commands', '.agents/commands']);
+      expect(paths).toEqual(['.archon/commands']);
+    });
+
+    test('includes configured folder when provided', () => {
+      const paths = getCommandFolderSearchPaths('.claude/commands/archon');
+      expect(paths).toEqual(['.archon/commands', '.claude/commands/archon']);
     });
 
     test('.archon/commands has highest priority', () => {
-      const paths = getCommandFolderSearchPaths();
+      const paths = getCommandFolderSearchPaths('.custom/commands');
       expect(paths[0]).toBe('.archon/commands');
+    });
+
+    test('does not duplicate .archon/commands if configured', () => {
+      const paths = getCommandFolderSearchPaths('.archon/commands');
+      expect(paths).toEqual(['.archon/commands']);
     });
   });
 

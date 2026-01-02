@@ -77,9 +77,22 @@ export function getArchonConfigPath(): string {
 /**
  * Get command folder search paths for a repository
  * Returns folders in priority order (first match wins)
+ *
+ * Order:
+ * 1. .archon/commands (always - user's custom commands)
+ * 2. configuredFolder (if specified in config)
+ *
+ * @param configuredFolder - Optional additional folder from config
  */
-export function getCommandFolderSearchPaths(): string[] {
-  return ['.archon/commands', '.claude/commands', '.agents/commands'];
+export function getCommandFolderSearchPaths(configuredFolder?: string): string[] {
+  const paths = ['.archon/commands'];
+
+  // Add configured folder if specified (and not already .archon/commands)
+  if (configuredFolder && configuredFolder !== '.archon/commands') {
+    paths.push(configuredFolder);
+  }
+
+  return paths;
 }
 
 /**

@@ -1,0 +1,11 @@
+# Archon Repository Configuration
+# This configures Archon for this specific repository
+
+# Commands configuration
+commands:
+  # Additional command folder to search (after .archon/commands/)
+  # This points to the Archon command library being developed
+  folder: .claude/commands/archon
+
+  # Auto-load commands on clone
+  autoLoad: true
