@@ -1,5 +1,5 @@
 ---
-description: Investigate a GitHub issue - analyze, plan, post to GitHub
+description: Investigate a GitHub issue or problem - analyze codebase, create plan, post to GitHub
 argument-hint: <issue-number|url|"description">
 ---
 
@@ -7,150 +7,501 @@ argument-hint: <issue-number|url|"description">
 
 **Input**: $ARGUMENTS
 
-You are autonomous. Make best judgments. Do not stop to ask - complete the investigation.
+---
+
+## Your Mission
+
+Investigate the issue/problem and produce a comprehensive implementation plan that:
+
+1. Can be executed by `/implement-issue`
+2. Is posted as a GitHub comment (if GH issue provided)
+3. Captures all context needed for one-pass implementation
+
+**Golden Rule**: The artifact you produce IS the specification. The implementing agent should be able to work from it without asking questions.
 
 ---
 
-## Step 1: Git Setup
+## Phase 1: PARSE - Understand Input
+
+### 1.1 Determine Input Type
+
+**Check the input format:**
+
+- Looks like a number (`123`, `#123`) → GitHub issue number
+- Starts with `http` → GitHub URL (extract issue number)
+- Anything else → Free-form description
 
 ```bash
-git status --short
-git branch --show-current
+# If GitHub issue, fetch it:
+gh issue view {number} --json title,body,labels,comments,state,url,author
 ```
 
-**Act based on state:**
-- In worktree → use it
-- On main + clean → `git checkout -b fix/issue-{number}`
-- On main + dirty → `git stash && git checkout -b fix/issue-{number}`
-- On feature branch → use it
-
----
-
-## Step 2: Parse Input
-
-**Determine type:**
-- Number (`123`, `#123`) → GitHub issue
-- URL → extract number
-- Other → free-form description
+### 1.2 Extract Context
 
 **If GitHub issue:**
-```bash
-gh issue view {number} --json title,body,labels,state,url
-```
+- Title: What's the reported problem?
+- Body: Details, reproduction steps, expected vs actual
+- Labels: bug? enhancement? documentation?
+- Comments: Additional context from discussion
+- State: Is it still open?
 
-**Classify:** BUG | ENHANCEMENT | REFACTOR | CHORE
+**If free-form:**
+- Parse as problem description
+- Note: No GitHub posting (artifact only)
+
+### 1.3 Classify Issue Type
+
+| Type | Indicators |
+|------|------------|
+| BUG | "broken", "error", "crash", "doesn't work", stack trace |
+| ENHANCEMENT | "add", "support", "feature", "would be nice" |
+| REFACTOR | "clean up", "improve", "simplify", "reorganize" |
+| CHORE | "update", "upgrade", "maintenance", "dependency" |
+| DOCUMENTATION | "docs", "readme", "clarify", "example" |
+
+**PHASE_1_CHECKPOINT:**
+- [ ] Input type identified (GH issue or free-form)
+- [ ] Issue content extracted
+- [ ] Type classified
+- [ ] If GH issue: confirmed it's open and not already has PR
 
 ---
 
-## Step 3: Explore Codebase
+## Phase 2: EXPLORE - Codebase Intelligence
+
+### 2.1 Search for Relevant Code
 
 Use Task tool with subagent_type="Explore":
 
 ```
-Find code related to: {issue description}
+Explore the codebase to understand the issue:
+
+ISSUE: {title/description}
+
+DISCOVER:
+1. Files directly related to this functionality
+2. How the current implementation works
+3. Integration points - what calls this, what it calls
+4. Similar patterns elsewhere to mirror
+5. Existing test patterns for this area
+6. Error handling patterns used
 
 Return:
-- Affected files with line numbers
-- Integration points
-- Similar patterns to mirror
-- Test patterns
+- File paths with specific line numbers
+- Actual code snippets (not summaries)
+- Dependencies and data flow
 ```
 
+### 2.2 Document Findings
+
+| Area | File:Lines | Notes |
+|------|-----------|-------|
+| Core logic | `src/x.ts:10-50` | Main function affected |
+| Callers | `src/y.ts:20-30` | Uses the core function |
+| Types | `src/types/x.ts:5-15` | Relevant interfaces |
+| Tests | `src/x.test.ts:1-100` | Existing test patterns |
+| Similar | `src/z.ts:40-60` | Pattern to mirror |
+
+**PHASE_2_CHECKPOINT:**
+- [ ] Explore agent completed successfully
+- [ ] Core files identified with line numbers
+- [ ] Integration points mapped
+- [ ] Similar patterns found to mirror
+- [ ] Test patterns documented
+
 ---
 
-## Step 4: Analyze
+## Phase 3: ANALYZE - Form Approach
 
-**For bugs:** Apply 5 Whys to find root cause
-**For enhancements:** Identify changes needed
+### 3.1 For BUG Issues - Root Cause Analysis
 
-Document:
-- Files to modify (with line numbers)
-- Implementation steps
-- Patterns to follow
-- Validation commands
+Apply the 5 Whys:
+
+```
+WHY 1: Why does [symptom] occur?
+→ Because [cause A]
+→ Evidence: `file.ts:123` - {code snippet}
+
+WHY 2: Why does [cause A] happen?
+→ Because [cause B]
+→ Evidence: {proof}
+
+... continue until you reach fixable code ...
+
+ROOT CAUSE: [the specific code/logic to change]
+Evidence: `source.ts:456` - {the problematic code}
+```
+
+**Check git history:**
+```bash
+git log --oneline -10 -- {affected-file}
+git blame -L {start},{end} {affected-file}
+```
+
+### 3.2 For ENHANCEMENT/REFACTOR Issues
+
+**Identify:**
+- What needs to be added/changed?
+- Where does it integrate?
+- What are the scope boundaries?
+- What should NOT be changed?
+
+### 3.3 For All Issues
+
+**Determine:**
+- Files to CREATE (new files)
+- Files to UPDATE (existing files)
+- Files to DELETE (if any)
+- Dependencies and order of changes
+- Edge cases and risks
+- Validation strategy
+
+**PHASE_3_CHECKPOINT:**
+- [ ] Root cause identified (for bugs) OR change rationale clear (for enhancements)
+- [ ] All affected files listed with specific changes
+- [ ] Scope boundaries defined (what NOT to change)
+- [ ] Risks and edge cases identified
+- [ ] Validation approach defined
 
 ---
 
-## Step 5: Create Artifact
+## Phase 4: GENERATE - Create Artifact
+
+### 4.1 Artifact Path
 
 ```bash
 mkdir -p .archon/artifacts/issues
 ```
 
-Write to `.archon/artifacts/issues/issue-{number}.md`:
+**Path:** `.archon/artifacts/issues/issue-{number}.md`
+
+If free-form (no issue number): `.archon/artifacts/issues/investigation-{timestamp}.md`
+
+### 4.2 Artifact Template
+
+Write this structure to the artifact file:
 
 ```markdown
-# Issue #{number}: {title}
+# Investigation: {Title}
 
-**Type**: {type} | **Complexity**: {LOW|MED|HIGH}
+**Issue**: #{number} ({url}) <!-- omit if free-form -->
+**Type**: {BUG|ENHANCEMENT|REFACTOR|CHORE|DOCUMENTATION}
+**Complexity**: {LOW|MEDIUM|HIGH}
+**Confidence**: {HIGH|MEDIUM|LOW}
+**Investigated**: {ISO timestamp}
 
-## Problem
-{2-3 sentence description}
+---
 
-## Root Cause / Rationale
-{5 Whys for bugs, change rationale for enhancements}
+## Problem Statement
 
-## Implementation
+{Clear 2-3 sentence description of what's wrong or what's needed}
 
-### Files to Change
-| File | Action | Change |
-|------|--------|--------|
-| `src/x.ts:45` | UPDATE | {description} |
+---
 
-### Steps
-1. {first change with code snippet}
-2. {second change}
-3. Add tests
+## Analysis
 
-### Patterns to Follow
+### Root Cause / Change Rationale
+
+{For BUG: The 5 Whys chain with evidence}
+{For ENHANCEMENT: Why this change and what it enables}
+
+### Evidence Chain
+
+WHY: {symptom}
+↓ BECAUSE: {cause 1}
+  Evidence: `file.ts:123` - `{code snippet}`
+
+↓ BECAUSE: {cause 2}
+  Evidence: `file.ts:456` - `{code snippet}`
+
+↓ ROOT CAUSE: {the fixable thing}
+  Evidence: `file.ts:789` - `{problematic code}`
+
+### Affected Files
+
+| File | Lines | Action | Description |
+|------|-------|--------|-------------|
+| `src/x.ts` | 45-60 | UPDATE | {what changes} |
+| `src/x.test.ts` | NEW | CREATE | {test to add} |
+
+### Integration Points
+
+- `src/y.ts:20` calls this function
+- `src/z.ts:30` depends on this behavior
+- {other dependencies}
+
+### Git History
+
+- **Introduced**: {commit} - {date} - "{message}"
+- **Last modified**: {commit} - {date}
+- **Implication**: {regression? original bug? long-standing?}
+
+---
+
+## Implementation Plan
+
+### Step 1: {First change description}
+
+**File**: `src/x.ts`
+**Lines**: 45-60
+**Action**: UPDATE
+
+**Current code:**
 ```typescript
-// From src/similar.ts:20
-{actual code from codebase}
+// Line 45-50
+{actual current code}
 ```
 
-## Validation
-```bash
-bun run type-check && bun test && bun run lint
+**Required change:**
+```typescript
+// What it should become
+{the fix/change}
 ```
+
+**Why**: {brief rationale}
+
+---
+
+### Step 2: {Second change description}
+
+{Same structure...}
+
+---
+
+### Step N: Add/Update Tests
+
+**File**: `src/x.test.ts`
+**Action**: {CREATE|UPDATE}
+
+**Test cases to add:**
+```typescript
+describe('{feature}', () => {
+  it('should {expected behavior}', () => {
+    // Test the fix
+  });
+
+  it('should handle {edge case}', () => {
+    // Test edge case
+  });
+});
 ```
 
 ---
 
-## Step 6: Post to GitHub
+## Patterns to Follow
 
-**Only if GitHub issue:**
+**From codebase - mirror these exactly:**
+
+```typescript
+// SOURCE: src/similar.ts:20-30
+// Pattern for {what this demonstrates}
+{actual code snippet from codebase}
+```
+
+---
+
+## Edge Cases & Risks
+
+| Risk/Edge Case | Mitigation |
+|----------------|------------|
+| {risk 1} | {how to handle} |
+| {edge case} | {how to handle} |
+
+---
+
+## Validation
+
+### Automated Checks
+
+```bash
+bun run type-check
+bun test {relevant-pattern}
+bun run lint
+```
+
+### Manual Verification
+
+1. {Step to verify the fix/feature works}
+2. {Step to verify no regression}
+
+---
+
+## Scope Boundaries
+
+**IN SCOPE:**
+- {what we're changing}
+
+**OUT OF SCOPE (do not touch):**
+- {what to leave alone}
+- {future improvements to defer}
+
+---
+
+## Metadata
+
+- **Investigated by**: Claude
+- **Timestamp**: {ISO timestamp}
+- **Artifact**: `.archon/artifacts/issues/issue-{number}.md`
+```
+
+**PHASE_4_CHECKPOINT:**
+- [ ] Artifact file created
+- [ ] All sections filled with specific content
+- [ ] Code snippets are actual (not invented)
+- [ ] Steps are actionable without clarification
+
+---
+
+## Phase 5: COMMIT - Save Artifact
+
+```bash
+git add .archon/artifacts/issues/
+git status
+```
+
+**If changes to commit:**
+```bash
+git commit -m "Investigate issue #{number}: {brief title}"
+```
+
+**PHASE_5_CHECKPOINT:**
+- [ ] Artifact committed to git
+
+---
+
+## Phase 6: POST - GitHub Comment
+
+**Only if input was a GitHub issue (not free-form):**
+
+Format the artifact for GitHub and post:
 
 ```bash
 gh issue comment {number} --body "$(cat <<'EOF'
-## 🔍 Investigation
+## 🔍 Investigation: {Title}
 
-**Type**: `{TYPE}` | **Complexity**: `{COMPLEXITY}`
-
-### Problem
-{problem statement}
-
-### Root Cause
-{brief analysis}
-
-### Plan
-| File | Change |
-|------|--------|
-| `src/x.ts` | {description} |
+**Type**: `{TYPE}` | **Complexity**: `{COMPLEXITY}` | **Confidence**: `{CONFIDENCE}`
 
 ---
-*Investigated by Claude*
+
+### Problem Statement
+
+{problem statement from artifact}
+
+---
+
+### Root Cause Analysis
+
+{evidence chain, formatted for GitHub}
+
+---
+
+### Implementation Plan
+
+| Step | File | Change |
+|------|------|--------|
+| 1 | `src/x.ts:45` | {description} |
+| 2 | `src/x.test.ts` | Add test for {case} |
+
+<details>
+<summary>📋 Detailed Implementation Steps</summary>
+
+{detailed steps from artifact}
+
+</details>
+
+---
+
+### Validation
+
+```bash
+bun run type-check && bun test {pattern} && bun run lint
+```
+
+---
+
+### Next Step
+
+🤖 To implement: `/implement-issue {number}`
+
+---
+*Investigated by Claude • {timestamp}*
 EOF
 )"
 ```
 
+**PHASE_6_CHECKPOINT:**
+- [ ] Comment posted to GitHub (if GH issue)
+- [ ] Formatting renders correctly
+
 ---
 
-## Output
+## Phase 7: REPORT - Output to User
 
-Report to user:
+```markdown
+## Investigation Complete
+
+**Issue**: #{number} - {title}
+**Type**: {BUG|ENHANCEMENT|REFACTOR|...}
+**Complexity**: {LOW|MEDIUM|HIGH}
+**Confidence**: {HIGH|MEDIUM|LOW}
+
+### Key Findings
+
+- **Root Cause**: {one-line summary}
+- **Files Affected**: {count} files
+- **Estimated Changes**: {brief scope}
+
+### Files to Modify
+
+| File | Action |
+|------|--------|
+| `src/x.ts` | UPDATE |
+| `src/x.test.ts` | CREATE |
+
+### Artifact
+
+📄 `.archon/artifacts/issues/issue-{number}.md`
+
+### GitHub
+
+{✅ Posted to issue | ⏭️ Skipped (free-form input)}
+
+### Next Step
+
+Run `/implement-issue {number}` to execute the plan.
+
+Or for Archon: `@archon implement issue #{number}`
 ```
-Investigated: #{number} - {title}
-Branch: {branch}
-Artifact: .archon/artifacts/issues/issue-{number}.md
-GitHub: Posted ✓
-```
+
+---
+
+## Handling Edge Cases
+
+### Issue is already closed
+- Report: "Issue #{number} is already closed"
+- Still create artifact if user wants analysis
+
+### Issue already has linked PR
+- Warn: "PR #{pr} already addresses this issue"
+- Ask if user wants to continue anyway
+
+### Can't determine root cause
+- Document what you found
+- Set confidence to LOW
+- Note uncertainty in artifact
+- Proceed with best hypothesis
+
+### Very large scope
+- Suggest breaking into smaller issues
+- Focus on core problem first
+- Note deferred items in "Out of Scope"
+
+---
+
+## Success Criteria
+
+- **ARTIFACT_COMPLETE**: All sections filled with specific, actionable content
+- **EVIDENCE_BASED**: Every claim has file:line reference or proof
+- **IMPLEMENTABLE**: Another agent can execute without questions
+- **GITHUB_POSTED**: Comment visible on issue (if GH issue)
+- **COMMITTED**: Artifact saved in git
