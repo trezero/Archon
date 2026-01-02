@@ -63,7 +63,7 @@ export async function logWorkflowEvent(
     // Warn user once per session about logging failures
     if (!logWarningShown) {
       console.warn(
-        `[WorkflowLogger] WARNING: Workflow logs may be incomplete. ` +
+        '[WorkflowLogger] WARNING: Workflow logs may be incomplete. ' +
           `Check disk space and permissions at ${logPath}`
       );
       logWarningShown = true;

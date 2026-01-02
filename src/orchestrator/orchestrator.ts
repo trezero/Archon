@@ -254,7 +254,7 @@ async function resolveIsolation(
       conversationId,
       `**Warning:** Could not create isolated workspace (${err.message}). ` +
         `Working directly in main repository at \`${codebase.default_cwd}\`. ` +
-        `Changes will affect the shared codebase.`
+        'Changes will affect the shared codebase.'
     );
     return null;
   }
