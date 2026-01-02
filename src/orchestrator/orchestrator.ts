@@ -24,6 +24,14 @@ import { getAssistantClient } from '../clients/factory';
 import { getIsolationProvider } from '../isolation';
 import { worktreeExists, findWorktreeByBranch, getCanonicalRepoPath } from '../utils/git';
 import {
+  discoverWorkflows,
+  buildRouterPrompt,
+  parseWorkflowInvocation,
+  findWorkflow,
+  executeWorkflow,
+} from '../workflows';
+import type { WorkflowDefinition } from '../workflows';
+import {
   cleanupToMakeRoom,
   getWorktreeStatusBreakdown,
   MAX_WORKTREES_PER_CODEBASE,
@@ -238,9 +246,76 @@ async function resolveIsolation(
 
     return env;
   } catch (error) {
+    const err = error as Error;
     console.error('[Orchestrator] Failed to create isolation:', error);
+
+    // Notify user they're working in shared directory instead of isolated worktree
+    await platform.sendMessage(
+      conversationId,
+      `**Warning:** Could not create isolated workspace (${err.message}). ` +
+        `Working directly in main repository at \`${codebase.default_cwd}\`. ` +
+        'Changes will affect the shared codebase.'
+    );
     return null;
   }
+}
+
+/**
+ * Context for workflow routing - avoids passing many parameters
+ */
+interface WorkflowRoutingContext {
+  platform: IPlatformAdapter;
+  conversationId: string;
+  cwd: string;
+  originalMessage: string;
+  conversationDbId: string;
+  codebaseId?: string;
+  availableWorkflows: WorkflowDefinition[];
+}
+
+/**
+ * Try to route AI response to a workflow
+ * Returns true if a workflow was executed, false otherwise
+ */
+async function tryWorkflowRouting(
+  ctx: WorkflowRoutingContext,
+  aiResponse: string
+): Promise<boolean> {
+  if (ctx.availableWorkflows.length === 0) {
+    return false;
+  }
+
+  const { workflowName, remainingMessage } = parseWorkflowInvocation(
+    aiResponse,
+    ctx.availableWorkflows
+  );
+
+  if (!workflowName) {
+    return false;
+  }
+
+  const workflow = findWorkflow(workflowName, ctx.availableWorkflows);
+  if (!workflow) {
+    return false;
+  }
+
+  console.log(`[Orchestrator] Routing to workflow: ${workflowName}`);
+
+  if (remainingMessage) {
+    await ctx.platform.sendMessage(ctx.conversationId, remainingMessage);
+  }
+
+  await executeWorkflow(
+    ctx.platform,
+    ctx.conversationId,
+    ctx.cwd,
+    workflow,
+    ctx.originalMessage,
+    ctx.conversationDbId,
+    ctx.codebaseId
+  );
+
+  return true;
 }
 
 /**
@@ -301,6 +376,7 @@ export async function handleMessage(
     // Parse command upfront if it's a slash command
     let promptToSend = message;
     let commandName: string | null = null;
+    let availableWorkflows: WorkflowDefinition[] = [];
 
     if (message.startsWith('/')) {
       const { command, args } = commandHandler.parseCommand(message);
@@ -325,6 +401,7 @@ export async function handleMessage(
         'templates',
         'template-delete',
         'worktree',
+        'workflow',
       ];
 
       if (deterministicCommands.includes(command)) {
@@ -428,7 +505,7 @@ export async function handleMessage(
         }
       }
     } else {
-      // Regular message - route through router template
+      // Regular message - route through router template or workflows
       if (!conversation.codebase_id) {
         await platform.sendMessage(
           conversationId,
@@ -437,15 +514,44 @@ export async function handleMessage(
         return;
       }
 
-      // Load router template for natural language routing
-      const routerTemplate = await templateDb.getTemplate('router');
-      if (routerTemplate) {
-        console.log('[Orchestrator] Routing through router template');
-        commandName = 'router';
-        // Pass the entire message as $ARGUMENTS for the router
-        promptToSend = substituteVariables(routerTemplate.content, [message]);
+      // Discover workflows (returns array, no global state)
+      const codebaseForWorkflows = await codebaseDb.getCodebase(conversation.codebase_id);
+      if (codebaseForWorkflows) {
+        try {
+          availableWorkflows = await discoverWorkflows(codebaseForWorkflows.default_cwd);
+          if (availableWorkflows.length > 0) {
+            console.log(
+              `[Orchestrator] Discovered ${String(availableWorkflows.length)} workflows`
+            );
+          }
+        } catch (error) {
+          const err = error as Error;
+          console.warn(`[Orchestrator] Failed to discover workflows: ${err.message}`);
+          // Inform user that workflows are unavailable
+          await platform.sendMessage(
+            conversationId,
+            `Note: Could not load workflows (${err.message}). Falling back to direct conversation mode.`
+          );
+          // Continue without workflows - graceful degradation
+        }
       }
-      // If no router template, message passes through as-is (backward compatible)
+
+      // If workflows are available, use workflow-aware router prompt
+      if (availableWorkflows.length > 0) {
+        console.log('[Orchestrator] Using workflow-aware router prompt');
+        commandName = 'workflow-router';
+        promptToSend = buildRouterPrompt(message, availableWorkflows);
+      } else {
+        // Fall back to router template for natural language routing
+        const routerTemplate = await templateDb.getTemplate('router');
+        if (routerTemplate) {
+          console.log('[Orchestrator] Routing through router template');
+          commandName = 'router';
+          // Pass the entire message as $ARGUMENTS for the router
+          promptToSend = substituteVariables(routerTemplate.content, [message]);
+        }
+        // If no router template, message passes through as-is (backward compatible)
+      }
     }
 
     // Prepend thread context if provided
@@ -529,22 +635,55 @@ export async function handleMessage(
       await platform.sendMessage(conversationId, `${botName} is on the case...`);
     }
 
+    // Build workflow routing context once
+    const routingCtx: WorkflowRoutingContext = {
+      platform,
+      conversationId,
+      cwd,
+      originalMessage: message,
+      conversationDbId: conversation.id,
+      codebaseId: conversation.codebase_id ?? undefined,
+      availableWorkflows,
+    };
+
     if (mode === 'stream') {
-      // Stream mode: Send each chunk immediately
+      // Stream mode: accumulate to check for workflow invocation, then send
+      const allMessages: string[] = [];
+      let newSessionId: string | undefined;
+
       for await (const msg of aiClient.sendQuery(
         promptToSend,
         cwd,
         session.assistant_session_id ?? undefined
       )) {
         if (msg.type === 'assistant' && msg.content) {
-          await platform.sendMessage(conversationId, msg.content);
+          allMessages.push(msg.content);
         } else if (msg.type === 'tool' && msg.toolName) {
-          // Format and send tool call notification
           const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
           await platform.sendMessage(conversationId, toolMessage);
         } else if (msg.type === 'result' && msg.sessionId) {
-          // Save session ID for resume
-          await sessionDb.updateSession(session.id, msg.sessionId);
+          newSessionId = msg.sessionId;
+        }
+      }
+
+      if (newSessionId) {
+        await sessionDb.updateSession(session.id, newSessionId);
+      }
+
+      // Try workflow routing first
+      if (allMessages.length > 0) {
+        const fullResponse = allMessages.join('');
+        const routed = await tryWorkflowRouting(routingCtx, fullResponse);
+        if (routed) {
+          if (commandName) {
+            await sessionDb.updateSessionMetadata(session.id, { lastCommand: commandName });
+          }
+          return;
+        }
+
+        // No workflow - send all accumulated messages
+        for (const content of allMessages) {
+          await platform.sendMessage(conversationId, content);
         }
       }
     } else {
@@ -605,6 +744,13 @@ export async function handleMessage(
       }
 
       if (finalMessage) {
+        // Try workflow routing first
+        const routed = await tryWorkflowRouting(routingCtx, finalMessage);
+        if (routed) {
+          return;
+        }
+
+        // No workflow routing - send the final message
         console.log(`[Orchestrator] Sending final message (${String(finalMessage.length)} chars)`);
         await platform.sendMessage(conversationId, finalMessage);
       }

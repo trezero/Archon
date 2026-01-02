@@ -21,7 +21,7 @@ export class DiscordAdapter implements IPlatformAdapter {
   private token: string;
   private messageHandler: ((message: Message) => Promise<void>) | null = null;
   private allowedUserIds: string[];
-  private pendingThreads: Map<string, Promise<string>> = new Map();
+  private pendingThreads = new Map<string, Promise<string>>();
 
   constructor(token: string, mode: 'stream' | 'batch' = 'stream') {
     this.client = new Client({

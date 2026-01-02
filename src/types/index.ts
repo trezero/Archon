@@ -163,3 +163,11 @@ export interface IAssistantClient {
    */
   getType(): string;
 }
+
+// Re-export workflow types for convenience
+export type {
+  WorkflowDefinition,
+  WorkflowRun,
+  StepDefinition,
+  StepResult,
+} from '../workflows/types';
