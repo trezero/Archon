@@ -42,11 +42,9 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
       };
     });
 
-    // Validate provider is 'claude' or 'codex'
-    const validProviders = ['claude', 'codex'];
-    const provider = typeof raw.provider === 'string' && validProviders.includes(raw.provider)
-      ? (raw.provider as 'claude' | 'codex')
-      : 'claude';
+    // Validate provider (default to 'claude')
+    const provider =
+      raw.provider === 'claude' || raw.provider === 'codex' ? raw.provider : 'claude';
 
     return {
       name: raw.name,

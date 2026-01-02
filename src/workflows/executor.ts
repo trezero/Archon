@@ -144,38 +144,30 @@ async function executeStep(
   let newSessionId: string | undefined;
 
   try {
-    if (streamingMode === 'stream') {
-      // Stream mode: send each chunk
-      for await (const msg of aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId)) {
-        if (msg.type === 'assistant' && msg.content) {
+    const assistantMessages: string[] = [];
+
+    for await (const msg of aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId)) {
+      if (msg.type === 'assistant' && msg.content) {
+        if (streamingMode === 'stream') {
           await platform.sendMessage(conversationId, msg.content);
-          await logAssistant(cwd, workflowRun.id, msg.content);
-        } else if (msg.type === 'tool' && msg.toolName) {
+        } else {
+          assistantMessages.push(msg.content);
+        }
+        await logAssistant(cwd, workflowRun.id, msg.content);
+      } else if (msg.type === 'tool' && msg.toolName) {
+        if (streamingMode === 'stream') {
           const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
           await platform.sendMessage(conversationId, toolMessage);
-          await logTool(cwd, workflowRun.id, msg.toolName, msg.toolInput ?? {});
-        } else if (msg.type === 'result' && msg.sessionId) {
-          newSessionId = msg.sessionId;
         }
+        await logTool(cwd, workflowRun.id, msg.toolName, msg.toolInput ?? {});
+      } else if (msg.type === 'result' && msg.sessionId) {
+        newSessionId = msg.sessionId;
       }
-    } else {
-      // Batch mode: accumulate then send
-      const assistantMessages: string[] = [];
+    }
 
-      for await (const msg of aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId)) {
-        if (msg.type === 'assistant' && msg.content) {
-          assistantMessages.push(msg.content);
-          await logAssistant(cwd, workflowRun.id, msg.content);
-        } else if (msg.type === 'tool' && msg.toolName) {
-          await logTool(cwd, workflowRun.id, msg.toolName, msg.toolInput ?? {});
-        } else if (msg.type === 'result' && msg.sessionId) {
-          newSessionId = msg.sessionId;
-        }
-      }
-
-      if (assistantMessages.length > 0) {
-        await platform.sendMessage(conversationId, assistantMessages.join('\n\n'));
-      }
+    // Batch mode: send accumulated messages
+    if (streamingMode === 'batch' && assistantMessages.length > 0) {
+      await platform.sendMessage(conversationId, assistantMessages.join('\n\n'));
     }
 
     await logStepComplete(cwd, workflowRun.id, commandName, stepIndex);

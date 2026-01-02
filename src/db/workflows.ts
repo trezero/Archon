@@ -69,33 +69,34 @@ export async function updateWorkflowRun(
 ): Promise<void> {
   const setClauses: string[] = [];
   const values: unknown[] = [];
-  let paramIndex = 1;
+
+  // Helper to add parameterized clause
+  function addParam(clause: string, value: unknown): void {
+    values.push(value);
+    setClauses.push(clause.replace('?', `$${String(values.length)}`));
+  }
 
   if (updates.current_step_index !== undefined) {
-    setClauses.push(`current_step_index = $${String(paramIndex)}`);
-    paramIndex++;
-    values.push(updates.current_step_index);
+    addParam('current_step_index = ?', updates.current_step_index);
   }
   if (updates.status !== undefined) {
-    setClauses.push(`status = $${String(paramIndex)}`);
-    paramIndex++;
-    values.push(updates.status);
+    addParam('status = ?', updates.status);
     if (updates.status === 'completed' || updates.status === 'failed') {
       setClauses.push('completed_at = NOW()');
     }
   }
   if (updates.metadata !== undefined) {
-    setClauses.push(`metadata = metadata || $${String(paramIndex)}::jsonb`);
-    paramIndex++;
-    values.push(JSON.stringify(updates.metadata));
+    addParam('metadata = metadata || ?::jsonb', JSON.stringify(updates.metadata));
   }
 
   if (setClauses.length === 0) return;
 
+  values.push(id);
+  const idParam = `$${String(values.length)}`;
+
   try {
-    values.push(id);
     await pool.query(
-      `UPDATE remote_agent_workflow_runs SET ${setClauses.join(', ')} WHERE id = $${String(paramIndex)}`,
+      `UPDATE remote_agent_workflow_runs SET ${setClauses.join(', ')} WHERE id = ${idParam}`,
       values
     );
   } catch (error) {
