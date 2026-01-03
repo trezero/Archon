@@ -52,6 +52,34 @@ mock.module('../db/sessions', () => ({
   deactivateSession: mockDeactivateSession,
 }));
 
+// Mock isolation-environments database
+const mockIsolationEnvDbCreate = mock(() =>
+  Promise.resolve({
+    id: 'env-uuid-123',
+    codebase_id: 'codebase-123',
+    workflow_type: 'task',
+    workflow_id: 'task-feat-auth',
+    provider: 'worktree',
+    working_path: '/workspace/my-repo/worktrees/task-feat-auth',
+    branch_name: 'task-feat-auth',
+    status: 'active',
+    created_at: new Date(),
+    created_by_platform: 'test',
+  })
+);
+const mockIsolationEnvDbGet = mock(() => Promise.resolve(null));
+const mockIsolationEnvDbUpdate = mock(() => Promise.resolve());
+
+mock.module('../db/isolation-environments', () => ({
+  create: mockIsolationEnvDbCreate,
+  getById: mockIsolationEnvDbGet,
+  getByWorkingPath: mock(() => Promise.resolve(null)),
+  updateStatus: mockIsolationEnvDbUpdate,
+  markDestroyed: mock(() => Promise.resolve()),
+  getActiveByCodebase: mock(() => Promise.resolve([])),
+  getActiveEnvironments: mock(() => Promise.resolve([])),
+}));
+
 mock.module('../utils/path-validation', () => ({
   isPathWithinWorkspace: mockIsPathWithinWorkspace,
 }));
@@ -132,6 +160,10 @@ function clearAllMocks(): void {
   // Isolation mocks
   mockIsolationCreate.mockClear();
   mockIsolationDestroy.mockClear();
+  // Isolation-environments db mocks
+  mockIsolationEnvDbCreate.mockClear();
+  mockIsolationEnvDbGet.mockClear();
+  mockIsolationEnvDbUpdate.mockClear();
 }
 
 describe('CommandHandler', () => {
@@ -742,8 +774,22 @@ describe('CommandHandler', () => {
         test('should remove worktree and switch to main', async () => {
           const convWithWorktree: Conversation = {
             ...conversationWithCodebase,
-            isolation_env_id: '/workspace/my-repo/worktrees/feat-x',
+            isolation_env_id: 'env-uuid-feat-x', // Use UUID-like ID
           };
+
+          // Mock the isolation environment lookup to return the environment
+          mockIsolationEnvDbGet.mockResolvedValue({
+            id: 'env-uuid-feat-x',
+            codebase_id: 'codebase-123',
+            workflow_type: 'task',
+            workflow_id: 'task-feat-x',
+            provider: 'worktree',
+            working_path: '/workspace/my-repo/worktrees/feat-x',
+            branch_name: 'feat-x',
+            status: 'active',
+            created_at: new Date(),
+            created_by_platform: 'test',
+          });
 
           mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
           mockGetActiveSession.mockResolvedValue(null);

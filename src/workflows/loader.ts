@@ -3,15 +3,9 @@
  */
 import { readFile, readdir, access } from 'fs/promises';
 import { join } from 'path';
+import { parse as parseYaml } from 'yaml';
 import type { WorkflowDefinition } from './types';
 import { getWorkflowFolderSearchPaths } from '../utils/archon-paths';
-
-/**
- * Parse YAML using Bun's native YAML parser (established pattern from config-loader.ts)
- */
-function parseYaml(content: string): unknown {
-  return Bun.YAML.parse(content);
-}
 
 /**
  * Parse and validate a workflow YAML file

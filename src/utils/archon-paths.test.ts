@@ -106,14 +106,14 @@ describe('archon-paths', () => {
 
     test('returns /.archon/workspaces in Docker', () => {
       process.env.ARCHON_DOCKER = 'true';
-      expect(getArchonWorkspacesPath()).toBe('/.archon/workspaces');
+      expect(getArchonWorkspacesPath()).toBe(join('/', '.archon', 'workspaces'));
     });
 
     test('uses ARCHON_HOME when set', () => {
       delete process.env.WORKSPACE_PATH;
       delete process.env.ARCHON_DOCKER;
       process.env.ARCHON_HOME = '/custom/archon';
-      expect(getArchonWorkspacesPath()).toBe('/custom/archon/workspaces');
+      expect(getArchonWorkspacesPath()).toBe(join('/custom/archon', 'workspaces'));
     });
   });
 
@@ -128,7 +128,7 @@ describe('archon-paths', () => {
 
     test('returns /.archon/worktrees in Docker', () => {
       process.env.ARCHON_DOCKER = 'true';
-      expect(getArchonWorktreesPath()).toBe('/.archon/worktrees');
+      expect(getArchonWorktreesPath()).toBe(join('/', '.archon', 'worktrees'));
     });
 
     test('uses ARCHON_HOME when set', () => {
@@ -136,7 +136,7 @@ describe('archon-paths', () => {
       delete process.env.WORKTREE_BASE;
       delete process.env.ARCHON_DOCKER;
       process.env.ARCHON_HOME = '/custom/archon';
-      expect(getArchonWorktreesPath()).toBe('/custom/archon/worktrees');
+      expect(getArchonWorktreesPath()).toBe(join('/custom/archon', 'worktrees'));
     });
   });
 

@@ -100,9 +100,15 @@ concurrency:
   });
 
   describe('loadRepoConfig', () => {
+    // Helper to check path in cross-platform way (handles both / and \ separators)
+    const pathMatches = (path: string, pattern: string): boolean => {
+      const normalizedPath = path.replace(/\\/g, '/');
+      return normalizedPath.includes(pattern);
+    };
+
     test('loads from .archon/config.yaml', async () => {
       mockReadFile.mockImplementation(async (path: string) => {
-        if (path.includes('.archon/config.yaml')) {
+        if (pathMatches(path, '.archon/config.yaml')) {
           return 'assistant: codex';
         }
         throw new Error('Not found');
@@ -114,7 +120,7 @@ concurrency:
 
     test('falls back to .claude/config.yaml', async () => {
       mockReadFile.mockImplementation(async (path: string) => {
-        if (path.includes('.claude/config.yaml')) {
+        if (pathMatches(path, '.claude/config.yaml')) {
           return 'assistant: claude';
         }
         throw new Error('Not found');
@@ -163,14 +169,22 @@ streaming:
     });
 
     test('repo config overrides global config', async () => {
-      let callCount = 0;
+      // Helper to check path in cross-platform way (handles both / and \ separators)
+      const pathMatches = (path: string, pattern: string): boolean => {
+        const normalizedPath = path.replace(/\\/g, '/');
+        return normalizedPath.includes(pattern);
+      };
+
+      let globalConfigRead = false;
       mockReadFile.mockImplementation(async (path: string) => {
-        callCount++;
-        if (path.includes('.archon/config.yaml') && callCount <= 1) {
-          return 'defaultAssistant: claude';
-        }
-        if (path.includes('/repo/.archon/config.yaml')) {
+        // First check for repo-specific config path (contains /repo/.archon/)
+        if (pathMatches(path, '/repo/.archon/config.yaml')) {
           return 'assistant: codex';
+        }
+        // Then check for global config (just .archon/config.yaml but not under /repo/)
+        if (pathMatches(path, '.archon/config.yaml') && !globalConfigRead) {
+          globalConfigRead = true;
+          return 'defaultAssistant: claude';
         }
         throw new Error('Not found');
       });

@@ -119,8 +119,8 @@ describe('git utilities', () => {
       delete process.env.ARCHON_HOME;
       process.env.WORKSPACE_PATH = '/workspace';
       const result = git.getWorktreeBase('/workspace/my-repo');
-      // Docker: inside /.archon volume
-      expect(result).toBe('/.archon/worktrees');
+      // Docker: inside /.archon volume (use join for platform-agnostic path separators)
+      expect(result).toBe(join('/', '.archon', 'worktrees'));
     });
 
     test('detects Docker by HOME=/root + WORKSPACE_PATH', () => {
@@ -130,7 +130,7 @@ describe('git utilities', () => {
       process.env.HOME = '/root';
       process.env.WORKSPACE_PATH = '/app/workspace';
       const result = git.getWorktreeBase('/workspace/my-repo');
-      expect(result).toBe('/.archon/worktrees');
+      expect(result).toBe(join('/', '.archon', 'worktrees'));
     });
 
     test('uses ARCHON_HOME for local (non-Docker)', () => {
@@ -139,14 +139,14 @@ describe('git utilities', () => {
       delete process.env.ARCHON_DOCKER;
       process.env.ARCHON_HOME = '/custom/archon';
       const result = git.getWorktreeBase('/workspace/my-repo');
-      expect(result).toBe('/custom/archon/worktrees');
+      expect(result).toBe(join('/custom/archon', 'worktrees'));
     });
 
     test('uses fixed path in Docker', () => {
       delete process.env.ARCHON_HOME;
       process.env.ARCHON_DOCKER = 'true';
       const result = git.getWorktreeBase('/workspace/my-repo');
-      expect(result).toBe('/.archon/worktrees');
+      expect(result).toBe(join('/', '.archon', 'worktrees'));
     });
   });
 

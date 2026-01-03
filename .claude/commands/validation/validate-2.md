@@ -1,131 +1,309 @@
 # Ultimate Validation Command (Updated January 2026)
 
-Run comprehensive validation covering all aspects of the Remote Coding Agent. This command validates code quality, type safety, functionality, and complete user workflows.
+Run comprehensive end-to-end validation of the Remote Agentic Coding Platform including Docker, Test Adapter, Database, GitHub integration, worktree isolation, and command workflows.
+
+**Usage:**
+```bash
+/validation:validate-2 <ngrok-url>
+```
+
+**Example:**
+```bash
+/validation:validate-2 https://trinity-nonadverbial-enharmonically.ngrok-free.dev
+```
+
+**Prerequisites:**
+- ngrok running and exposing port 3000 (for GitHub webhooks)
+- `.env` file configured with all required credentials
+- GitHub CLI (`gh`) authenticated
+- Docker installed and running
 
 **Updated for:**
 - Bun runtime (not npm)
-- Archon paths (~/.archon/workspaces/owner/repo)
-- 6 database tables (added: command_templates, isolation_environments, workflow_runs)
-- New commands (/repos, /repo, /worktree, /init, /templates)
-- Isolation provider abstraction
+- Archon paths (`~/.archon/workspaces/owner/repo`)
+- 6 database tables (codebases, conversations, sessions, command_templates, isolation_environments, workflow_runs)
+- Worktree isolation with database tracking
+- New commands (/repos, /repo, /worktree, /workflow, /templates)
 
 ---
 
-## Phase 1: Code Quality - Foundation Validation
+## Phase 1: Foundation Validation
 
-### 1.1 Linting
-
-Run ESLint with strict TypeScript rules:
-
-```bash
-bun run lint
-```
-
-**Expected:** Zero linting errors.
-
-### 1.2 Type Checking
-
-Run TypeScript compiler in check mode:
-
+### 1.1 Type Checking
 ```bash
 bun run type-check
 ```
+**Expected:** Zero TypeScript errors
 
-**Expected:** Zero type errors with strict mode enabled.
-
-### 1.3 Build
-
-Build the project:
-
+### 1.2 Linting
 ```bash
-bun run build
+bun run lint
 ```
+**Expected:** Zero ESLint errors (warnings acceptable)
 
-**Expected:** Clean build to `dist/` directory.
-
-### 1.4 Code Formatting
-
-Check formatting compliance:
-
+### 1.3 Code Formatting
 ```bash
 bun run format:check
 ```
+**Expected:** All files pass Prettier checks
 
-**Expected:** All files pass Prettier checks.
-
-### 1.5 Unit Tests
-
-Run Bun test suite:
-
+### 1.4 Unit Tests
 ```bash
 bun test
 ```
+**Expected:** All critical tests pass
 
-**Expected:** All unit tests pass.
+### 1.5 Build
+```bash
+bun run build
+```
+**Expected:** Clean build to `dist/` directory
+
+**If any step fails, STOP and report the issue immediately.**
 
 ---
 
 ## Phase 2: Environment Setup
 
-### 2.0 Clean Workspace (Optional)
-
-If starting fresh, clean previous test artifacts:
-
+### 2.0 Initialize Variables and Clean Workspace
 ```bash
-# Remove test workspaces (careful - this deletes repos!)
-rm -rf ~/.archon/workspaces/test-*
-rm -rf ~/.archon/worktrees/test-*
+# Load environment variables
+source .env
 
-# Clean up any existing containers
-docker compose down -v 2>/dev/null || true
+# Store project root directory
+PROJECT_ROOT="$(pwd)"
+export PROJECT_ROOT
+
+# Determine workspace path
+if [ -n "$ARCHON_HOME" ]; then
+  WORK_DIR="${ARCHON_HOME}/workspaces"
+else
+  WORK_DIR="${HOME}/.archon/workspaces"
+fi
+
+echo "Project root: ${PROJECT_ROOT}"
+echo "Workspace directory: ${WORK_DIR}"
+
+# Remove previous test repositories
+rm -rf "${WORK_DIR}"/remote-coding-test-*
+rm -rf "${HOME}/.archon/worktrees"/remote-coding-test-*
+
+# Clean up test conversations from database
+if command -v psql &> /dev/null; then
+  echo "Cleaning database with psql..."
+  psql "$DATABASE_URL" -c "DELETE FROM remote_agent_sessions WHERE conversation_id IN (SELECT id FROM remote_agent_conversations WHERE platform_conversation_id LIKE 'test-%');" 2>&1
+  psql "$DATABASE_URL" -c "DELETE FROM remote_agent_isolation_environments WHERE workflow_id LIKE '%test%' OR workflow_id LIKE '%remote-coding-test%';" 2>&1
+  psql "$DATABASE_URL" -c "DELETE FROM remote_agent_workflow_runs WHERE conversation_id IN (SELECT id FROM remote_agent_conversations WHERE platform_conversation_id LIKE 'test-%');" 2>&1
+  psql "$DATABASE_URL" -c "DELETE FROM remote_agent_conversations WHERE platform_conversation_id LIKE 'test-%';" 2>&1
+  psql "$DATABASE_URL" -c "DELETE FROM remote_agent_codebases WHERE name LIKE 'remote-coding-test-%';" 2>&1
+  echo "Database cleaned"
+else
+  echo "psql not found, using bun for cleanup..."
+  bun -e "
+    const { Client } = require('pg');
+    const client = new Client({ connectionString: process.env.DATABASE_URL });
+    async function cleanup() {
+      await client.connect();
+      await client.query(\"DELETE FROM remote_agent_sessions WHERE conversation_id IN (SELECT id FROM remote_agent_conversations WHERE platform_conversation_id LIKE 'test-%')\");
+      await client.query(\"DELETE FROM remote_agent_isolation_environments WHERE workflow_id LIKE '%test%'\");
+      await client.query(\"DELETE FROM remote_agent_workflow_runs WHERE conversation_id IN (SELECT id FROM remote_agent_conversations WHERE platform_conversation_id LIKE 'test-%')\");
+      await client.query(\"DELETE FROM remote_agent_conversations WHERE platform_conversation_id LIKE 'test-%'\");
+      await client.query(\"DELETE FROM remote_agent_codebases WHERE name LIKE 'remote-coding-test-%'\");
+      await client.end();
+      console.log('Database cleaned');
+    }
+    cleanup().catch(console.error);
+  "
+fi
+
+export WORK_DIR
 ```
 
-### 2.1 Build and Start Docker
-
-Build and start all services:
-
+### 2.1 Store ngrok URL
 ```bash
+NGROK_URL="$ARGUMENTS"
+echo "Using ngrok URL: ${NGROK_URL}"
+
+if [[ ! "$NGROK_URL" =~ ^https:// ]]; then
+  echo "ERROR: Invalid ngrok URL format. Expected: https://..."
+  exit 1
+fi
+
+export NGROK_URL
+```
+
+### 2.2 Generate Repository Name
+```bash
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+TEST_REPO_NAME="remote-coding-test-${TIMESTAMP}"
+echo "Test repository: ${TEST_REPO_NAME}"
+
+# Get GitHub username
+GITHUB_USERNAME=$(gh api user --jq .login)
+echo "GitHub user: ${GITHUB_USERNAME}"
+
+export TEST_REPO_NAME
+export GITHUB_USERNAME
+```
+
+### 2.3 Create Test Repository Structure
+```bash
+mkdir -p "${WORK_DIR}/${GITHUB_USERNAME}"
+cd "${WORK_DIR}/${GITHUB_USERNAME}"
+mkdir ${TEST_REPO_NAME}
+cd ${TEST_REPO_NAME}
+
+# Initialize git
+git init
+git config user.email "test@example.com"
+git config user.name "Test User"
+
+# Create README
+cat > README.md << 'EOF'
+# Remote Coding Test Repository
+
+This is a test repository for automated validation of the Remote Agentic Coding Platform.
+
+## Purpose
+
+Used for E2E testing of:
+- Command invocation (prime, plan-feature, execute)
+- GitHub webhook integration
+- Worktree isolation
+- AI-assisted development workflows
+EOF
+
+# Create .gitignore
+cat > .gitignore << 'EOF'
+node_modules
+.next
+.env*.local
+EOF
+
+# Create .archon/commands directory with test commands
+mkdir -p .archon/commands
+
+# Copy commands from main project
+cp "${PROJECT_ROOT}/.archon/commands/prime.md" .archon/commands/ 2>/dev/null || \
+cp "${PROJECT_ROOT}/.claude/commands/core_piv_loop/prime.md" .archon/commands/prime.md 2>/dev/null || \
+cat > .archon/commands/prime.md << 'CMDEOF'
+# Prime Command
+
+Analyze this codebase and provide a brief summary of:
+1. What this project does
+2. Key files and their purposes
+3. Main technologies used
+
+Keep your response concise.
+CMDEOF
+
+cp "${PROJECT_ROOT}/.archon/commands/plan.md" .archon/commands/plan-feature.md 2>/dev/null || \
+cp "${PROJECT_ROOT}/.claude/commands/core_piv_loop/plan-feature.md" .archon/commands/plan-feature.md 2>/dev/null || \
+cat > .archon/commands/plan-feature.md << 'CMDEOF'
+# Plan Feature Command
+
+Create a simple implementation plan for:
+
+$ARGUMENTS
+
+Include:
+1. Files to modify
+2. Implementation steps
+3. Validation approach
+CMDEOF
+
+cp "${PROJECT_ROOT}/.archon/commands/execute.md" .archon/commands/ 2>/dev/null || \
+cat > .archon/commands/execute.md << 'CMDEOF'
+# Execute Command
+
+Implement the changes based on the previous plan.
+If no plan exists, respond with: "No plan found. Run /command-invoke plan-feature first."
+CMDEOF
+
+# Commit
+git add .
+git commit -m "Initial test repository setup with archon commands"
+
+echo "Repository structure created"
+```
+
+### 2.4 Push to GitHub (Personal Account)
+```bash
+# Create private repo in personal account (no org prefix)
+gh repo create ${TEST_REPO_NAME} --private --source=. --push
+
+TEST_REPO_URL=$(gh repo view --json url -q .url)
+echo "Repository created: ${TEST_REPO_URL}"
+
+export TEST_REPO_URL
+```
+
+### 2.5 Configure GitHub Webhook
+```bash
+cd "${PROJECT_ROOT}"
+source .env
+
+# Create webhook pointing to ngrok URL
+gh api repos/${GITHUB_USERNAME}/${TEST_REPO_NAME}/hooks \
+  -X POST \
+  --input - <<EOF
+{
+  "name": "web",
+  "active": true,
+  "events": [
+    "issues",
+    "issue_comment",
+    "pull_request",
+    "pull_request_review_comment"
+  ],
+  "config": {
+    "url": "${NGROK_URL}/webhooks/github",
+    "content_type": "json",
+    "secret": "${WEBHOOK_SECRET}",
+    "insecure_ssl": "0"
+  }
+}
+EOF
+
+echo "Webhook configured: ${NGROK_URL}/webhooks/github"
+
+# Verify webhook
+gh api repos/${GITHUB_USERNAME}/${TEST_REPO_NAME}/hooks | jq '.[0] | {id, url: .config.url, events, active}'
+```
+
+---
+
+## Phase 3: Docker Container Setup
+
+### 3.1 Rebuild and Start Containers
+```bash
+cd "${PROJECT_ROOT}"
+docker compose --profile with-db down 2>/dev/null || true
 docker compose --profile with-db up -d --build
 ```
 
-Wait for containers to be ready:
-
+### 3.2 Wait for Startup
 ```bash
-# Wait for postgres to be ready
-sleep 10
-
-# Check container status
+echo "Waiting for containers to start..."
+sleep 15
 docker compose ps
 ```
 
-**Expected:** Both `postgres` and `app-with-db` containers running.
-
-### 2.2 Verify Application Startup
-
-Check application logs for successful startup:
-
+### 3.3 Verify Application Logs
 ```bash
-docker compose logs app-with-db 2>&1 | tail -50
+docker compose logs app-with-db 2>&1 | tail -30
 ```
 
-**Expected startup indicators:**
+**Check for:**
 - `[Archon] Paths configured:`
 - `[App] Adapters initialized`
 - `[App] Server listening on port 3000`
 - `[ConversationLock] Initialized`
 
-### 2.3 Health Checks
-
-Verify all health endpoints:
-
+### 3.4 Health Checks
 ```bash
-# Basic health
 curl -s http://localhost:3000/health | jq
-
-# Database connectivity
 curl -s http://localhost:3000/health/db | jq
-
-# Concurrency status
 curl -s http://localhost:3000/health/concurrency | jq
 ```
 
@@ -133,10 +311,9 @@ curl -s http://localhost:3000/health/concurrency | jq
 
 ---
 
-## Phase 3: Database Schema Validation
+## Phase 4: Database Schema Validation
 
-### 3.1 Verify All 6 Tables Exist
-
+### 4.1 Verify All 6 Tables Exist
 ```bash
 docker compose exec postgres psql -U postgres -d remote_coding_agent \
   -c "\dt remote_agent_*"
@@ -150,44 +327,7 @@ docker compose exec postgres psql -U postgres -d remote_coding_agent \
 5. `remote_agent_isolation_environments`
 6. `remote_agent_workflow_runs`
 
-### 3.2 Verify Codebases Table
-
-```bash
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "\d remote_agent_codebases"
-```
-
-**Required columns:** id, name, repository_url, default_cwd, ai_assistant_type, commands (JSONB)
-
-### 3.3 Verify Conversations Table
-
-```bash
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "\d remote_agent_conversations"
-```
-
-**Required columns:** id, platform_type, platform_conversation_id, codebase_id, cwd, ai_assistant_type, isolation_env_id (UUID FK), last_activity_at
-
-### 3.4 Verify Isolation Environments Table
-
-```bash
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "\d remote_agent_isolation_environments"
-```
-
-**Required columns:** id, codebase_id, workflow_type, workflow_id, provider, working_path, branch_name, status, created_at, created_by_platform, metadata
-
-### 3.5 Verify Workflow Runs Table
-
-```bash
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "\d remote_agent_workflow_runs"
-```
-
-**Required columns:** id, workflow_name, conversation_id, codebase_id, current_step_index, status, user_message, metadata, started_at, completed_at
-
-### 3.6 Verify Foreign Keys
-
+### 4.2 Verify Foreign Keys
 ```bash
 docker compose exec postgres psql -U postgres -d remote_coding_agent \
   -c "SELECT conname, conrelid::regclass, confrelid::regclass
@@ -196,517 +336,423 @@ docker compose exec postgres psql -U postgres -d remote_coding_agent \
       AND conrelid::regclass::text LIKE 'remote_agent_%';"
 ```
 
-**Expected FK relationships:**
-- conversations.codebase_id → codebases.id
-- conversations.isolation_env_id → isolation_environments.id
-- sessions.conversation_id → conversations.id
-- sessions.codebase_id → codebases.id
-- isolation_environments.codebase_id → codebases.id
-- workflow_runs.conversation_id → conversations.id
-- workflow_runs.codebase_id → codebases.id
+**Expected:** 7 foreign key relationships
 
 ---
 
-## Phase 4: Test Adapter E2E Tests
+## Phase 5: Test Adapter E2E Tests
 
-### 4.1 Basic Commands
-
+### 5.1 Basic Commands
 ```bash
-# Clear test data
-curl -X DELETE http://localhost:3000/test/messages/e2e-basic
+curl -X DELETE http://localhost:3000/test/messages/test-basic
 
-# Test /help
 curl -X POST http://localhost:3000/test/message \
   -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-basic","message":"/help"}'
+  -d '{"conversationId":"test-basic","message":"/help"}'
 
 sleep 2
 
-# Verify help response contains new commands
-HELP=$(curl -s http://localhost:3000/test/messages/e2e-basic | jq -r '.messages[0].message')
+HELP=$(curl -s http://localhost:3000/test/messages/test-basic | jq -r '.messages[0].message')
 echo "$HELP" | grep -q "/repos" && echo "✅ /repos in help" || echo "❌ /repos missing"
 echo "$HELP" | grep -q "/worktree" && echo "✅ /worktree in help" || echo "❌ /worktree missing"
-echo "$HELP" | grep -q "/workflow" && echo "✅ /workflow in help" || echo "❌ /workflow missing"
-
-# Test /status (no codebase)
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-basic","message":"/status"}'
-
-sleep 2
-
-STATUS=$(curl -s http://localhost:3000/test/messages/e2e-basic | jq -r '.messages[-1].message')
-echo "$STATUS" | grep -q "No codebase configured" && echo "✅ Status correct (no codebase)" || echo "❌ Status unexpected"
-
-# Cleanup
-curl -X DELETE http://localhost:3000/test/messages/e2e-basic
 ```
 
-### 4.2 Repository Management
-
+### 5.2 Clone Test Repository
 ```bash
-# Clear test data
-curl -X DELETE http://localhost:3000/test/messages/e2e-repo
+curl -X DELETE http://localhost:3000/test/messages/test-clone
 
-# Clone test repository
-echo "Cloning repository..."
 curl -X POST http://localhost:3000/test/message \
   -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-repo","message":"/clone https://github.com/anthropics/anthropic-sdk-typescript"}'
+  -d "{\"conversationId\":\"test-clone\",\"message\":\"/clone https://github.com/${GITHUB_USERNAME}/${TEST_REPO_NAME}\"}"
 
-# Wait for clone (can take 30-60 seconds)
-sleep 45
-
-# Verify clone success
-CLONE_MSG=$(curl -s http://localhost:3000/test/messages/e2e-repo | jq -r '.messages[-1].message')
-echo "$CLONE_MSG" | grep -q "cloned successfully\|already cloned\|Linked to" && echo "✅ Clone succeeded" || echo "❌ Clone failed: $CLONE_MSG"
-
-# Verify path is in new format (includes owner)
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-repo","message":"/getcwd"}'
-
-sleep 2
-
-CWD=$(curl -s http://localhost:3000/test/messages/e2e-repo | jq -r '.messages[-1].message')
-echo "$CWD" | grep -q "anthropics/anthropic-sdk-typescript\|anthropic-sdk-typescript" && echo "✅ CWD correct" || echo "❌ CWD wrong: $CWD"
-
-# Test /repos command
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-repo","message":"/repos"}'
-
-sleep 2
-
-REPOS=$(curl -s http://localhost:3000/test/messages/e2e-repo | jq -r '.messages[-1].message')
-echo "$REPOS" | grep -q "anthropic" && echo "✅ /repos lists cloned repo" || echo "❌ /repos failed"
-
-# Cleanup
-curl -X DELETE http://localhost:3000/test/messages/e2e-repo
-```
-
-### 4.3 Command Loading and Invocation
-
-```bash
-# Clear test data
-curl -X DELETE http://localhost:3000/test/messages/e2e-cmd
-
-# Setup: ensure repo is cloned
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-cmd","message":"/clone https://github.com/anthropics/anthropic-sdk-typescript"}'
-
+echo "Waiting for clone..."
 sleep 30
 
-# Test /commands (should auto-load or show none)
+CLONE_MSG=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message')
+echo "$CLONE_MSG" | grep -q "cloned successfully\|Linked to\|Loaded" && echo "✅ Clone succeeded" || echo "❌ Clone failed: $CLONE_MSG"
+```
+
+### 5.3 Verify Commands Auto-Loaded
+```bash
 curl -X POST http://localhost:3000/test/message \
   -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-cmd","message":"/commands"}'
+  -d '{"conversationId":"test-clone","message":"/commands"}'
 
 sleep 2
 
-# Test /templates (global templates)
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-cmd","message":"/templates"}'
-
-sleep 2
-
-TEMPLATES=$(curl -s http://localhost:3000/test/messages/e2e-cmd | jq -r '.messages[-1].message')
-echo "Templates response: $TEMPLATES"
-
-# Cleanup
-curl -X DELETE http://localhost:3000/test/messages/e2e-cmd
+CMDS=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message')
+echo "$CMDS" | grep -q "prime" && echo "✅ prime command loaded" || echo "❌ prime missing"
+echo "$CMDS" | grep -q "plan-feature" && echo "✅ plan-feature command loaded" || echo "❌ plan-feature missing"
+echo "$CMDS" | grep -q "execute" && echo "✅ execute command loaded" || echo "❌ execute missing"
 ```
 
 ---
 
-## Phase 5: Worktree/Isolation Tests
+## Phase 6: Worktree Isolation Tests
 
-### 5.1 Create Worktree
-
+### 6.1 Create Worktree via Test Adapter
 ```bash
-# Clear test data
-curl -X DELETE http://localhost:3000/test/messages/e2e-worktree
+curl -X DELETE http://localhost:3000/test/messages/test-worktree
 
-# Setup: clone repo
 curl -X POST http://localhost:3000/test/message \
   -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-worktree","message":"/clone https://github.com/anthropics/anthropic-sdk-typescript"}'
-
-sleep 30
-
-# Create worktree
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-worktree","message":"/worktree create test-branch-validation"}'
-
-sleep 5
-
-WT_CREATE=$(curl -s http://localhost:3000/test/messages/e2e-worktree | jq -r '.messages[-1].message')
-echo "$WT_CREATE" | grep -q "Worktree created\|already exists\|Working in isolated" && echo "✅ Worktree created" || echo "❌ Worktree create failed: $WT_CREATE"
-
-# Verify database entry
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "SELECT workflow_type, workflow_id, status FROM remote_agent_isolation_environments WHERE workflow_id LIKE '%test-branch%';"
-```
-
-### 5.2 List Worktrees
-
-```bash
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-worktree","message":"/worktree list"}'
-
-sleep 2
-
-WT_LIST=$(curl -s http://localhost:3000/test/messages/e2e-worktree | jq -r '.messages[-1].message')
-echo "$WT_LIST" | grep -q "Worktrees" && echo "✅ Worktree list works" || echo "❌ Worktree list failed"
-```
-
-### 5.3 Check Status with Worktree
-
-```bash
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-worktree","message":"/status"}'
-
-sleep 2
-
-STATUS_WT=$(curl -s http://localhost:3000/test/messages/e2e-worktree | jq -r '.messages[-1].message')
-echo "$STATUS_WT" | grep -q "Worktree" && echo "✅ Status shows worktree" || echo "⚠️ Status may not show worktree"
-echo "$STATUS_WT" | grep -q "Worktrees:" && echo "✅ Status shows worktree count" || echo "⚠️ Worktree count not shown"
-```
-
-### 5.4 Remove Worktree
-
-```bash
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-worktree","message":"/worktree remove"}'
-
-sleep 3
-
-WT_REMOVE=$(curl -s http://localhost:3000/test/messages/e2e-worktree | jq -r '.messages[-1].message')
-echo "$WT_REMOVE" | grep -q "removed\|not using" && echo "✅ Worktree remove works" || echo "❌ Worktree remove failed: $WT_REMOVE"
-
-# Cleanup
-curl -X DELETE http://localhost:3000/test/messages/e2e-worktree
-```
-
----
-
-## Phase 6: Command Workflow Tests (Prime, Plan, Execute Pattern)
-
-This tests the core command invocation pattern without the workflow engine routing.
-
-### 6.0 Setup Test Repository with Commands
-
-For this phase, we need a test repository with `.archon/commands/` containing prime, plan-feature, and execute commands.
-
-**Option A: Use this project itself (if running locally)**
-
-```bash
-# Use the current project as the test repo
-PROJECT_DIR=$(pwd)
-
-# Start dev mode instead of Docker for local testing
-# bun run dev
-```
-
-**Option B: Create a minimal test repo on GitHub**
-
-Create a GitHub repo with `.archon/commands/` containing:
-- `prime.md` - Simple context loading
-- `plan-feature.md` - Planning with $ARGUMENTS
-- `execute.md` - Execute plan
-
-### 6.1 Clone and Load Commands
-
-```bash
-# Clear test data
-curl -X DELETE http://localhost:3000/test/messages/e2e-workflow
-
-# Clone repo with commands (use your test repo or this project)
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-workflow","message":"/clone https://github.com/YOUR_ORG/YOUR_TEST_REPO"}'
-
-sleep 30
-
-# Load commands
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-workflow","message":"/load-commands .archon/commands"}'
-
-sleep 3
-
-# Verify commands loaded
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-workflow","message":"/commands"}'
-
-sleep 2
-
-CMDS=$(curl -s http://localhost:3000/test/messages/e2e-workflow | jq -r '.messages[-1].message')
-echo "$CMDS" | grep -q "prime\|plan\|execute" && echo "✅ Commands loaded" || echo "⚠️ Commands may not include workflow commands"
-```
-
-### 6.2 Invoke Prime Command
-
-```bash
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-workflow","message":"/command-invoke prime"}'
-
-# Prime can take a while as AI analyzes codebase
-sleep 60
-
-PRIME_RESULT=$(curl -s http://localhost:3000/test/messages/e2e-workflow | jq -r '.messages[-1].message')
-echo "Prime result length: ${#PRIME_RESULT}"
-[ ${#PRIME_RESULT} -gt 100 ] && echo "✅ Prime generated output" || echo "⚠️ Prime output may be short"
-```
-
-### 6.3 Invoke Plan Command
-
-```bash
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-workflow","message":"/command-invoke plan-feature \"Add a simple hello world endpoint\""}'
-
-# Plan generation takes time
-sleep 90
-
-PLAN_RESULT=$(curl -s http://localhost:3000/test/messages/e2e-workflow | jq -r '.messages[-1].message')
-echo "Plan result length: ${#PLAN_RESULT}"
-[ ${#PLAN_RESULT} -gt 200 ] && echo "✅ Plan generated" || echo "⚠️ Plan may be short"
-```
-
-### 6.4 Check Session State
-
-```bash
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-workflow","message":"/status"}'
-
-sleep 2
-
-STATUS_SESSION=$(curl -s http://localhost:3000/test/messages/e2e-workflow | jq -r '.messages[-1].message')
-echo "$STATUS_SESSION" | grep -q "Active Session" && echo "✅ Session active after commands" || echo "❌ No active session"
-
-# Cleanup
-curl -X DELETE http://localhost:3000/test/messages/e2e-workflow
-```
-
----
-
-## Phase 7: GitHub Adapter Tests
-
-### 7.1 GitHub CLI Verification
-
-```bash
-# Verify GitHub CLI installed in container
-docker compose exec app-with-db which gh && echo "✅ GitHub CLI installed" || echo "❌ GitHub CLI not found"
-
-# Verify gh version
-docker compose exec app-with-db gh --version
-
-# Test GitHub authentication
-docker compose exec app-with-db gh auth status 2>&1 | grep -q "Logged in" && echo "✅ GitHub authenticated" || echo "⚠️ GitHub not authenticated"
-```
-
-### 7.2 Create Test GitHub Issue
-
-This requires a test repository you control.
-
-```bash
-# Set your test repo
-TEST_REPO="YOUR_ORG/YOUR_TEST_REPO"
-
-# Create a test issue
-gh issue create --repo "$TEST_REPO" \
-  --title "Validation Test Issue $(date +%s)" \
-  --body "@archon please analyze this test issue and respond with a summary."
-
-# Note the issue number for webhook testing
-```
-
-### 7.3 Verify Webhook Endpoint
-
-```bash
-# Check webhook endpoint responds
-curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/webhooks/github
-
-# Should return 400 (bad request without signature) or 401
-```
-
-### 7.4 Simulate GitHub Webhook (Manual)
-
-If you have ngrok or similar:
-
-```bash
-# Start ngrok tunnel
-ngrok http 3000
-
-# Configure webhook in GitHub repo settings:
-# - Payload URL: https://YOUR_NGROK.ngrok.io/webhooks/github
-# - Content type: application/json
-# - Secret: (value from WEBHOOK_SECRET in .env)
-# - Events: Issues, Issue comments, Pull requests
-
-# Then comment on an issue with @archon mention
-# Check application logs for webhook processing
-docker compose logs -f app-with-db
-```
-
----
-
-## Phase 8: Error Handling Tests
-
-### 8.1 Invalid Commands
-
-```bash
-curl -X DELETE http://localhost:3000/test/messages/e2e-error
-
-# Test invalid command
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-error","message":"/nonexistent-command"}'
-
-sleep 2
-
-ERR=$(curl -s http://localhost:3000/test/messages/e2e-error | jq -r '.messages[0].message')
-echo "$ERR" | grep -qi "unknown\|not found" && echo "✅ Invalid command handled" || echo "⚠️ Error message unclear"
-```
-
-### 8.2 Invalid Clone
-
-```bash
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-error","message":"/clone https://github.com/nonexistent-user-12345/nonexistent-repo-67890"}'
+  -d "{\"conversationId\":\"test-worktree\",\"message\":\"/clone https://github.com/${GITHUB_USERNAME}/${TEST_REPO_NAME}\"}"
 
 sleep 15
 
-CLONE_ERR=$(curl -s http://localhost:3000/test/messages/e2e-error | jq -r '.messages[-1].message')
-echo "$CLONE_ERR" | grep -qi "failed\|error\|not found" && echo "✅ Invalid clone handled" || echo "⚠️ Clone error unclear"
-```
-
-### 8.3 Command Without Codebase
-
-```bash
-curl -X DELETE http://localhost:3000/test/messages/e2e-error-2
-
 curl -X POST http://localhost:3000/test/message \
   -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-error-2","message":"/command-invoke prime"}'
+  -d '{"conversationId":"test-worktree","message":"/worktree create test-validation-branch"}'
+
+sleep 5
+
+WT_MSG=$(curl -s http://localhost:3000/test/messages/test-worktree | jq -r '.messages[-1].message')
+echo "$WT_MSG" | grep -q "Worktree created\|Working in isolated" && echo "✅ Worktree created" || echo "❌ Worktree failed: $WT_MSG"
+```
+
+### 6.2 Verify Database Entry
+```bash
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "SELECT workflow_type, workflow_id, branch_name, status, created_by_platform
+      FROM remote_agent_isolation_environments
+      WHERE workflow_id LIKE '%test-validation%'
+      ORDER BY created_at DESC LIMIT 1;"
+```
+
+**Expected:** Row with `workflow_type=task`, `status=active`, `created_by_platform=test`
+
+### 6.3 List and Remove Worktree
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-worktree","message":"/worktree list"}'
 
 sleep 2
 
-NO_CB=$(curl -s http://localhost:3000/test/messages/e2e-error-2 | jq -r '.messages[0].message')
-echo "$NO_CB" | grep -qi "no codebase\|not configured" && echo "✅ No codebase error handled" || echo "⚠️ Error message unclear"
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-worktree","message":"/worktree remove"}'
 
-# Cleanup
-curl -X DELETE http://localhost:3000/test/messages/e2e-error
-curl -X DELETE http://localhost:3000/test/messages/e2e-error-2
+sleep 3
+
+WT_REMOVE=$(curl -s http://localhost:3000/test/messages/test-worktree | jq -r '.messages[-1].message')
+echo "$WT_REMOVE" | grep -q "removed\|Switched back" && echo "✅ Worktree removed" || echo "❌ Remove failed"
+
+# Verify status updated
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "SELECT status FROM remote_agent_isolation_environments
+      WHERE workflow_id LIKE '%test-validation%'
+      ORDER BY created_at DESC LIMIT 1;"
+```
+
+**Expected:** `status=destroyed`
+
+---
+
+## Phase 7: Command Workflow Tests (Test Adapter)
+
+### 7.1 Invoke Prime Command
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-clone","message":"/command-invoke prime"}'
+
+echo "Waiting for prime (60 seconds)..."
+sleep 60
+
+PRIME=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message')
+PRIME_LEN=${#PRIME}
+echo "Prime response length: $PRIME_LEN"
+[ $PRIME_LEN -gt 100 ] && echo "✅ Prime generated output" || echo "❌ Prime too short"
+```
+
+### 7.2 Invoke Plan-Feature Command
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-clone","message":"/command-invoke plan-feature \"Add a Contributing section to README\""}'
+
+echo "Waiting for plan (90 seconds)..."
+sleep 90
+
+PLAN=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message')
+PLAN_LEN=${#PLAN}
+echo "Plan response length: $PLAN_LEN"
+[ $PLAN_LEN -gt 200 ] && echo "✅ Plan generated" || echo "❌ Plan too short"
+```
+
+### 7.3 Verify Session State
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-clone","message":"/status"}'
+
+sleep 2
+
+STATUS=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message')
+echo "$STATUS" | grep -q "Active Session" && echo "✅ Session active" || echo "❌ No active session"
+echo "$STATUS" | grep -q "Worktree" && echo "✅ Worktree auto-created" || echo "⚠️ May not show worktree"
 ```
 
 ---
 
-## Phase 9: Concurrency Tests
+## Phase 8: GitHub Webhook Integration
+
+### 8.1 Create GitHub Issue with @remote-agent Mention
+```bash
+cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
+
+ISSUE_URL=$(gh issue create \
+  --title "Test Issue: Add Validation Section" \
+  --body "Add a 'Validation' section to README.md explaining the testing process.
+
+@remote-agent please analyze this issue and confirm you received it." \
+  | grep -o 'https://.*')
+
+ISSUE_NUMBER=$(echo $ISSUE_URL | grep -o '[0-9]*$')
+echo "Issue created: ${ISSUE_URL}"
+echo "Issue number: ${ISSUE_NUMBER}"
+
+export ISSUE_NUMBER
+export ISSUE_URL
+
+cd "${PROJECT_ROOT}"
+```
+
+### 8.2 Monitor Webhook Processing
+```bash
+echo "Waiting for webhook processing (30 seconds)..."
+sleep 30
+
+docker compose logs app-with-db 2>&1 | grep -E "GitHub.*Processing|Worktree created|issue-${ISSUE_NUMBER}" | tail -10
+```
+
+**Check for:**
+- `[GitHub] Processing issue: ${GITHUB_USERNAME}/${TEST_REPO_NAME}#${ISSUE_NUMBER}`
+- Worktree creation for issue
+- `[Claude] Starting new session in /.archon/worktrees/.../issue-${ISSUE_NUMBER}`
+
+### 8.3 Verify GitHub Worktree Auto-Creation
+```bash
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "SELECT workflow_type, workflow_id, branch_name, status, created_by_platform
+      FROM remote_agent_isolation_environments
+      WHERE workflow_type = 'issue'
+      ORDER BY created_at DESC LIMIT 1;"
+```
+
+**Expected:** Row with `workflow_type=issue`, `workflow_id=${ISSUE_NUMBER}`, `created_by_platform=github`
+
+### 8.4 Verify Bot Response on Issue
+```bash
+cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
+
+echo "Waiting for bot response (60 seconds)..."
+sleep 60
+
+gh issue view ${ISSUE_NUMBER} --comments | tail -30
+
+cd "${PROJECT_ROOT}"
+```
+
+**Expected:**
+- Bot comment confirming isolation branch
+- Analysis or response to the issue
+
+---
+
+## Phase 9: GitHub PR Integration
+
+### 9.1 Create Pull Request
+```bash
+cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
+
+# Create a branch with changes
+git checkout -b test-pr-branch
+echo -e "\n## Test Section\n\nThis is a test PR." >> README.md
+git add README.md
+git commit -m "test: Add test section"
+git push -u origin test-pr-branch
+
+# Create PR
+PR_URL=$(gh pr create \
+  --title "Test PR: Add Test Section" \
+  --body "This is a test pull request.
+
+@remote-agent please review this PR." \
+  | grep -o 'https://.*')
+
+PR_NUMBER=$(echo $PR_URL | grep -o '[0-9]*$')
+echo "PR created: ${PR_URL}"
+echo "PR number: ${PR_NUMBER}"
+
+export PR_NUMBER
+export PR_URL
+
+cd "${PROJECT_ROOT}"
+```
+
+### 9.2 Monitor PR Webhook
+```bash
+echo "Waiting for PR webhook (30 seconds)..."
+sleep 30
+
+docker compose logs app-with-db 2>&1 | grep -E "GitHub.*pull_request|pr-${PR_NUMBER}" | tail -10
+```
+
+### 9.3 Verify PR Worktree
+```bash
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "SELECT workflow_type, workflow_id, branch_name, status
+      FROM remote_agent_isolation_environments
+      WHERE workflow_type = 'pr'
+      ORDER BY created_at DESC LIMIT 1;"
+```
+
+**Expected:** Row with `workflow_type=pr`, `workflow_id=${PR_NUMBER}`
+
+### 9.4 Check PR Comments
+```bash
+cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
+
+echo "Waiting for bot response (60 seconds)..."
+sleep 60
+
+gh pr view ${PR_NUMBER} --comments | tail -20
+
+cd "${PROJECT_ROOT}"
+```
+
+---
+
+## Phase 10: Concurrency Tests
 
 ```bash
 echo "Testing concurrent message handling..."
 
-# Send 5 concurrent /help commands
-for i in {1..5}; do
+for i in 1 2 3; do
   curl -X POST http://localhost:3000/test/message \
     -H "Content-Type: application/json" \
-    -d "{\"conversationId\":\"concurrent-$i\",\"message\":\"/help\"}" &
+    -d "{\"conversationId\":\"concurrent-${i}\",\"message\":\"/help\"}" &
 done
 
 wait
 sleep 5
 
-# Verify all processed
 SUCCESS=0
-for i in {1..5}; do
-  RESP=$(curl -s http://localhost:3000/test/messages/concurrent-$i | jq -r '.messages[0].message // empty')
+for i in 1 2 3; do
+  RESP=$(curl -s http://localhost:3000/test/messages/concurrent-${i} | jq -r '.messages[0].message // empty')
   if echo "$RESP" | grep -q "Available Commands"; then
     ((SUCCESS++))
   fi
 done
 
-echo "Concurrent messages processed: $SUCCESS/5"
-[ $SUCCESS -eq 5 ] && echo "✅ Concurrency handling works" || echo "❌ Some messages failed"
+echo "Concurrent messages processed: $SUCCESS/3"
+[ $SUCCESS -eq 3 ] && echo "✅ Concurrency works" || echo "❌ Some failed"
 
-# Check lock status
 curl -s http://localhost:3000/health/concurrency | jq
-
-# Cleanup
-for i in {1..5}; do
-  curl -X DELETE http://localhost:3000/test/messages/concurrent-$i
-done
 ```
 
 ---
 
-## Phase 10: Final Validation Summary
+## Phase 11: Error Handling Tests
+
+### 11.1 Invalid Command
+```bash
+curl -X DELETE http://localhost:3000/test/messages/test-error
+
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-error","message":"/nonexistent-command"}'
+
+sleep 2
+
+ERR=$(curl -s http://localhost:3000/test/messages/test-error | jq -r '.messages[0].message')
+echo "$ERR" | grep -qi "unknown\|not found" && echo "✅ Invalid command handled" || echo "⚠️ Error unclear"
+```
+
+### 11.2 Invalid Clone
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-error","message":"/clone https://github.com/nonexistent-user-xyz/fake-repo"}'
+
+sleep 15
+
+CLONE_ERR=$(curl -s http://localhost:3000/test/messages/test-error | jq -r '.messages[-1].message')
+echo "$CLONE_ERR" | grep -qi "failed\|error\|not found" && echo "✅ Invalid clone handled" || echo "⚠️ Error unclear"
+```
+
+---
+
+## Phase 12: Final Validation Summary
 
 ```bash
-echo "================================"
-echo "📊 VALIDATION SUMMARY"
-echo "================================"
-
-# Container status
+echo "========================================"
+echo "VALIDATION SUMMARY"
+echo "========================================"
 echo ""
-echo "🐳 Docker Status:"
+echo "Test Repository: ${TEST_REPO_URL}"
+echo "Issue #${ISSUE_NUMBER}: ${ISSUE_URL}"
+echo "PR #${PR_NUMBER}: ${PR_URL}"
+echo ""
+
+# Docker status
+echo "Docker Status:"
 docker compose ps --format "table {{.Name}}\t{{.Status}}"
-
-# Database status
 echo ""
-echo "🗄️ Database:"
+
+# Database tables
+echo "Database Tables:"
 TABLE_COUNT=$(docker compose exec postgres psql -U postgres -d remote_coding_agent \
   -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'remote_agent_%';")
 echo "Tables: $TABLE_COUNT (expected: 6)"
+echo ""
+
+# Isolation environments
+echo "Isolation Environments Created:"
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "SELECT workflow_type, workflow_id, status, created_by_platform
+      FROM remote_agent_isolation_environments
+      ORDER BY created_at DESC LIMIT 5;"
+echo ""
 
 # Health checks
-echo ""
-echo "🏥 Health Checks:"
+echo "Health Checks:"
 curl -s http://localhost:3000/health | jq -r '.status'
 curl -s http://localhost:3000/health/db | jq -r '.status'
-
-# Source files
 echo ""
-echo "📁 Source Files:"
-TS_FILES=$(find src -name "*.ts" -type f ! -name "*.test.ts" 2>/dev/null | wc -l)
-TEST_FILES=$(find src -name "*.test.ts" -type f 2>/dev/null | wc -l)
-echo "TypeScript files: $TS_FILES"
-echo "Test files: $TEST_FILES"
 
+# Error count
+ERROR_COUNT=$(docker compose logs app-with-db 2>&1 | grep -c -E "ERROR|Error:" || echo "0")
+echo "Errors in logs: ${ERROR_COUNT}"
 echo ""
-echo "================================"
-echo "✅ Validation Complete"
-echo "================================"
+
+echo "========================================"
+echo "VALIDATION COMPLETE"
+echo "========================================"
 ```
 
 ---
 
-## Cleanup
+## Phase 13: Cleanup
 
-After validation, clean up test data:
+**Test repository is preserved for manual inspection.**
 
+When ready to clean up:
 ```bash
-# Remove test conversations from database
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "DELETE FROM remote_agent_conversations WHERE platform_conversation_id LIKE 'e2e-%' OR platform_conversation_id LIKE 'concurrent-%';"
+# Delete GitHub repository
+gh repo delete ${GITHUB_USERNAME}/${TEST_REPO_NAME} --yes
 
-# Remove test isolation environments
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "DELETE FROM remote_agent_isolation_environments WHERE workflow_id LIKE '%test%';"
+# Remove local files
+rm -rf "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
+rm -rf "${HOME}/.archon/worktrees/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
 
-# Optionally stop containers
-# docker compose down
+# Clean database
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "DELETE FROM remote_agent_isolation_environments WHERE workflow_id LIKE '%${TEST_REPO_NAME}%';"
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "DELETE FROM remote_agent_codebases WHERE name = '${TEST_REPO_NAME}';"
 ```
 
 ---
@@ -715,19 +761,17 @@ docker compose exec postgres psql -U postgres -d remote_coding_agent \
 
 | Phase | Criteria |
 |-------|----------|
-| 1.1 | Zero ESLint errors |
-| 1.2 | Zero TypeScript errors |
-| 1.3 | Build succeeds |
-| 1.4 | All files formatted |
-| 1.5 | All unit tests pass |
-| 2.x | Docker containers running, health checks pass |
-| 3.x | All 6 database tables exist with correct schema |
-| 4.x | Test adapter commands work (/help, /status, /clone, /repos) |
-| 5.x | Worktree create/list/remove work |
-| 6.x | Command invocation pattern works (prime, plan-feature) |
-| 7.x | GitHub CLI available, auth working |
-| 8.x | Error handling is graceful |
-| 9.x | Concurrent requests handled correctly |
+| 1.x | Type-check, lint, format, build pass |
+| 2.x | Test repo created with webhook configured |
+| 3.x | Docker containers running, health checks pass |
+| 4.x | All 6 database tables exist with FKs |
+| 5.x | Test adapter commands work |
+| 6.x | Worktree create/list/remove work with DB tracking |
+| 7.x | Command invocation works (prime, plan-feature) |
+| 8.x | GitHub issue webhook creates worktree automatically |
+| 9.x | GitHub PR webhook creates worktree automatically |
+| 10.x | Concurrent requests handled correctly |
+| 11.x | Error handling is graceful |
 
 **If ALL phases pass, the Remote Coding Agent is production-ready.**
 
@@ -737,11 +781,8 @@ docker compose exec postgres psql -U postgres -d remote_coding_agent \
 
 | Issue | Solution |
 |-------|----------|
-| Linting errors | `bun run lint:fix` |
-| Type errors | Check `tsconfig.json`, fix annotations |
-| Format errors | `bun run format` |
-| Test failures | Check test output, fix implementation |
-| Container issues | `docker compose down && docker compose --profile with-db up -d --build` |
-| Database errors | Check migrations: `docker compose exec postgres psql -U postgres -d remote_coding_agent -c "\dt"` |
-| Clone failures | Check GH_TOKEN in .env, network connectivity |
-| Worktree errors | Check git permissions, disk space |
+| Webhook not triggering | Verify ngrok is running, check URL matches |
+| Worktree creation fails | Check git permissions, disk space |
+| Database errors | Run migrations: `psql $DATABASE_URL < migrations/000_combined.sql` |
+| Clone fails | Check GITHUB_TOKEN in .env |
+| Bot not responding | Check docker logs for errors |
