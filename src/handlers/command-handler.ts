@@ -10,6 +10,7 @@ import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
 import * as templateDb from '../db/command-templates';
 import { isPathWithinWorkspace } from '../utils/path-validation';
+import { sanitizeError } from '../utils/credential-sanitizer';
 import { listWorktrees, execFileAsync } from '../utils/git';
 import { getIsolationProvider } from '../isolation';
 import * as isolationEnvDb from '../db/isolation-environments';
@@ -460,10 +461,11 @@ Setup:
         };
       } catch (error) {
         const err = error as Error;
-        console.error('[Clone] Failed:', err);
+        const safeErr = sanitizeError(err);
+        console.error('[Clone] Failed:', safeErr.message);
         return {
           success: false,
-          message: `Failed to clone repository: ${err.message}`,
+          message: `Failed to clone repository: ${safeErr.message}`,
         };
       }
     }
