@@ -1,13 +1,15 @@
 name: fix-github-issue
-description: Investigate and fix a GitHub issue end-to-end. Composable workflow using reusable commands.
+description: |
+  Use when: User wants to FIX, RESOLVE, or IMPLEMENT a solution for a GitHub issue.
+  Triggers: "fix this issue", "implement issue #123", "resolve this bug", "fix it".
+  NOT for: Questions about issues, CI failures, PR reviews, general exploration.
+  Does: Investigates root cause -> creates implementation plan -> makes code changes -> creates PR.
 
 provider: claude
 model: sonnet
 
 steps:
   - command: investigate-issue
-    # Git setup, analyze issue, create artifact, post to GitHub
 
   - command: implement-issue
     clearContext: true
-    # Read artifact, make code changes, run validation

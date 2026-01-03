@@ -469,8 +469,6 @@ EOF
 ### Next Step
 
 Run `/implement-issue {number}` to execute the plan.
-
-Or for Archon: `@archon implement issue #{number}`
 ```
 
 ---

@@ -1,5 +1,9 @@
 name: feature-development
-description: Build a feature from plan to PR. Use when user wants to add new functionality.
+description: |
+  Use when: User wants to BUILD or ADD new functionality from scratch.
+  Triggers: "add dark mode", "implement authentication", "build a feature", "create new endpoint".
+  NOT for: Bug fixes, issue resolution, code reviews, questions.
+  Does: Creates implementation plan -> implements code -> creates pull request.
 
 provider: claude
 model: sonnet

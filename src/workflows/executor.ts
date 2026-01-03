@@ -259,6 +259,7 @@ function substituteWorkflowVariables(
   let result = prompt;
   result = result.replace(/\$WORKFLOW_ID/g, workflowId);
   result = result.replace(/\$USER_MESSAGE/g, userMessage);
+  result = result.replace(/\$ARGUMENTS/g, userMessage);
   return result;
 }
 

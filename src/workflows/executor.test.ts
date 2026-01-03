@@ -450,6 +450,37 @@ describe('Workflow Executor', () => {
       expect(mockSendQuery).toHaveBeenCalled();
     });
 
+    it('should substitute $ARGUMENTS in command prompt (same as $USER_MESSAGE)', async () => {
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'arguments-test.md'), 'Request: $ARGUMENTS');
+
+      // Track calls before this test
+      const callCountBefore = mockSendQuery.mock.calls.length;
+
+      const workflow: WorkflowDefinition = {
+        name: 'arguments-workflow',
+        description: 'Test $ARGUMENTS substitution',
+        steps: [{ command: 'arguments-test' }],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'Help me debug this issue',
+        'db-conv-id'
+      );
+
+      // The AI client should receive the substituted prompt
+      expect(mockSendQuery.mock.calls.length).toBeGreaterThan(callCountBefore);
+      // $ARGUMENTS should be replaced with the user message from the mock database row
+      // (which is 'test user message' - see mockQuery setup at top of file)
+      const callArg = mockSendQuery.mock.calls[callCountBefore][0] as string;
+      expect(callArg).toContain('test user message');
+      expect(callArg).not.toContain('$ARGUMENTS');
+    });
+
     it('should handle empty user message', async () => {
       await executeWorkflow(
         mockPlatform,

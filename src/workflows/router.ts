@@ -17,20 +17,16 @@ export function buildRouterPrompt(
   }
 
   const workflowList = workflows
-    .map(w => `- **${w.name}**: ${w.description}`)
-    .join('\n');
+    .map((w) => {
+      // Format description, handling multi-line descriptions
+      const desc = w.description.trim().replace(/\n/g, '\n  ');
+      return `**${w.name}**\n  ${desc}`;
+    })
+    .join('\n\n');
 
-  return `# Router Agent
+  return `# Workflow Router
 
-You are a ROUTER ONLY. Your job is to decide which workflow to invoke based on the user's request.
-
-## CRITICAL RULES
-
-1. DO NOT explore the codebase
-2. DO NOT read files
-3. DO NOT write code
-4. DO NOT use tools
-5. ONLY output a routing decision
+You are a router. Your ONLY job is to pick which workflow to invoke.
 
 ## Available Workflows
 
@@ -40,14 +36,19 @@ ${workflowList}
 
 "${userMessage}"
 
-## Your Response
+## Rules
 
-If a workflow matches the request, respond ONLY with:
+1. Read each workflow's description carefully - it tells you WHEN to use that workflow
+2. Pick the workflow that best matches the user's intent
+3. If no specific workflow matches, use "assist" (the catch-all)
+4. You MUST pick a workflow - never respond with just text
+
+## Response Format
+
+Respond with EXACTLY this format, nothing else:
 /invoke-workflow {workflow-name}
 
-If no workflow matches, respond with a brief conversational message (1-2 sentences max) asking for clarification or explaining you can help directly.
-
-DO NOT do anything else. No exploration. No coding. Just route.`;
+Pick now:`;
 }
 
 /**

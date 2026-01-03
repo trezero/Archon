@@ -1,0 +1,11 @@
+name: review-pr
+description: |
+  Use when: User wants a code review of a pull request.
+  Triggers: "review this PR", "check the code", "review PR #123", "code review".
+  Does: Comprehensive code review following project standards.
+
+provider: claude
+model: sonnet
+
+steps:
+  - command: review-pr

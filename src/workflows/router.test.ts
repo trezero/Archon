@@ -32,15 +32,16 @@ describe('Workflow Router', () => {
     it('should include workflow list when workflows are provided', () => {
       const result = buildRouterPrompt('Help me fix this bug', testWorkflows);
 
-      expect(result).toContain('# Router Agent');
-      expect(result).toContain('ROUTER ONLY');
+      expect(result).toContain('# Workflow Router');
+      expect(result).toContain('Your ONLY job is to pick which workflow to invoke');
       expect(result).toContain('## Available Workflows');
-      expect(result).toContain('**fix-bug**: Fix a bug in the codebase');
-      expect(result).toContain('**add-feature**: Add a new feature');
+      expect(result).toContain('**fix-bug**');
+      expect(result).toContain('Fix a bug in the codebase');
+      expect(result).toContain('**add-feature**');
+      expect(result).toContain('Add a new feature');
       expect(result).toContain('Help me fix this bug');
       expect(result).toContain('/invoke-workflow');
-      expect(result).toContain('DO NOT explore');
-      expect(result).toContain('DO NOT use tools');
+      expect(result).toContain('You MUST pick a workflow');
     });
 
     it('should include user message in request section', () => {
@@ -54,7 +55,8 @@ describe('Workflow Router', () => {
       const singleWorkflow = [testWorkflows[0]];
       const result = buildRouterPrompt('Do something', singleWorkflow);
 
-      expect(result).toContain('**fix-bug**: Fix a bug in the codebase');
+      expect(result).toContain('**fix-bug**');
+      expect(result).toContain('Fix a bug in the codebase');
       expect(result.match(/\*\*fix-bug\*\*/g)).toHaveLength(1);
     });
 
@@ -69,6 +71,25 @@ describe('Workflow Router', () => {
       const result = buildRouterPrompt('Fix the "bug" in `code` with $variables', testWorkflows);
 
       expect(result).toContain('Fix the "bug" in `code` with $variables');
+    });
+
+    it('should format multi-line descriptions correctly', () => {
+      const multiLineWorkflows: WorkflowDefinition[] = [
+        {
+          name: 'assist',
+          description: `Use when: No other workflow matches.
+Handles: Questions, debugging, exploration.
+Capability: Full Claude Code agent.`,
+          steps: [{ command: 'assist' }],
+        },
+      ];
+
+      const result = buildRouterPrompt('What is this codebase?', multiLineWorkflows);
+
+      expect(result).toContain('**assist**');
+      expect(result).toContain('Use when: No other workflow matches.');
+      expect(result).toContain('Handles: Questions, debugging, exploration.');
+      expect(result).toContain('Capability: Full Claude Code agent.');
     });
   });
 
