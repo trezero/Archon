@@ -794,18 +794,18 @@ describe('CommandHandler', () => {
         mockUpdateCodebaseCommands.mockResolvedValue();
       });
 
-      test('should auto-load commands from .claude/commands/ when present', async () => {
-        // Reset and mock .claude/commands folder exists (platform-agnostic path check)
+      test('should auto-load commands from .archon/commands/ when present', async () => {
+        // Reset and mock .archon/commands folder exists (platform-agnostic path check)
         mockAccess.mockReset();
         mockAccess.mockImplementation((path: unknown) => {
           const pathStr = String(path);
-          if (pathStr.includes('.claude/commands') || pathStr.includes('.claude\\commands')) {
+          if (pathStr.includes('.archon/commands') || pathStr.includes('.archon\\commands')) {
             return Promise.resolve();
           }
           return Promise.reject(new Error('ENOENT'));
         });
 
-        // Mock markdown files in .claude/commands
+        // Mock markdown files in .archon/commands
         mockReaddir.mockResolvedValue([
           { name: 'test-command.md', isFile: () => true, isDirectory: () => false },
           { name: 'another-command.md', isFile: () => true, isDirectory: () => false },
@@ -829,47 +829,13 @@ describe('CommandHandler', () => {
         expect(commands['another-command']).toBeDefined();
         // Check path ends with expected relative path (platform-agnostic)
         expect(commands['test-command'].path).toMatch(
-          /\.claude[\\\/]commands[\\\/]test-command\.md$/
+          /\.archon[\\\/]commands[\\\/]test-command\.md$/
         );
         expect(commands['another-command'].path).toMatch(
-          /\.claude[\\\/]commands[\\\/]another-command\.md$/
+          /\.archon[\\\/]commands[\\\/]another-command\.md$/
         );
-        expect(commands['test-command'].description).toBe('From .claude/commands');
-        expect(commands['another-command'].description).toBe('From .claude/commands');
-      });
-
-      test('should auto-load commands from .agents/commands/ when .claude absent', async () => {
-        // Reset and mock only .agents/commands exists (platform-agnostic path check)
-        mockAccess.mockReset();
-        mockAccess.mockImplementation((path: unknown) => {
-          const pathStr = String(path);
-          if (pathStr.includes('.agents/commands') || pathStr.includes('.agents\\commands')) {
-            return Promise.resolve();
-          }
-          return Promise.reject(new Error('ENOENT'));
-        });
-
-        mockReaddir.mockResolvedValue([
-          { name: 'rca.md', isFile: () => true, isDirectory: () => false },
-        ] as unknown as never[]);
-
-        const result = await handleCommand(
-          baseConversation,
-          '/clone https://github.com/user/test-repo'
-        );
-
-        expect(result.success).toBe(true);
-        expect(result.message).toContain('✓ Loaded 1 commands');
-        const updateCall = mockUpdateCodebaseCommands.mock.calls[0] as [
-          string,
-          Record<string, { path: string; description: string }>,
-        ];
-        expect(updateCall[0]).toBe('cb-new');
-        const commands = updateCall[1];
-        expect(commands.rca).toBeDefined();
-        // Check path ends with expected relative path (platform-agnostic)
-        expect(commands.rca.path).toMatch(/\.agents[\\\/]commands[\\\/]rca\.md$/);
-        expect(commands.rca.description).toBe('From .agents/commands');
+        expect(commands['test-command'].description).toBe('From .archon/commands');
+        expect(commands['another-command'].description).toBe('From .archon/commands');
       });
 
       test('should not show loaded message when no command folders exist', async () => {
@@ -889,7 +855,7 @@ describe('CommandHandler', () => {
         // Reset and mock command folder exists but has no markdown files
         mockAccess.mockReset();
         mockAccess.mockImplementation((path: unknown) => {
-          if (String(path).includes('.claude/commands')) {
+          if (String(path).includes('.archon/commands')) {
             return Promise.resolve();
           }
           return Promise.reject(new Error('ENOENT'));
@@ -909,38 +875,12 @@ describe('CommandHandler', () => {
         expect(mockUpdateCodebaseCommands).not.toHaveBeenCalled();
       });
 
-      test('should check .claude/commands before .agents/commands (priority order)', async () => {
-        // Reset and test that .claude/commands is checked first
-        mockAccess.mockReset();
-        mockAccess.mockImplementation((path: unknown) => {
-          const pathStr = String(path);
-          if (pathStr.includes('.claude/commands') || pathStr.includes('.claude\\commands')) {
-            return Promise.resolve();
-          }
-          // Reject .agents/commands to ensure we stop at .claude
-          return Promise.reject(new Error('ENOENT'));
-        });
-
-        mockReaddir.mockResolvedValue([
-          { name: 'priority-test.md', isFile: () => true, isDirectory: () => false },
-        ] as unknown as never[]);
-
-        const result = await handleCommand(
-          baseConversation,
-          '/clone https://github.com/user/test-repo'
-        );
-
-        expect(result.success).toBe(true);
-        // Should successfully load from .claude/commands
-        expect(result.message).toMatch(/✓ Loaded \d+ command/);
-      });
-
       test('should recursively find commands in subdirectories', async () => {
         // Reset and test recursive directory traversal
         mockAccess.mockReset();
         mockAccess.mockImplementation((path: unknown) => {
           const pathStr = String(path);
-          if (pathStr.includes('.claude/commands') || pathStr.includes('.claude\\commands')) {
+          if (pathStr.includes('.archon/commands') || pathStr.includes('.archon\\commands')) {
             return Promise.resolve();
           }
           return Promise.reject(new Error('ENOENT'));
@@ -972,7 +912,7 @@ describe('CommandHandler', () => {
         // Mock existing commands in the codebase
         mockGetCodebaseCommands.mockResolvedValue({
           'existing-cmd': {
-            path: '.claude/existing.md',
+            path: '.archon/existing.md',
             description: 'Existing command',
           },
         });
@@ -981,7 +921,7 @@ describe('CommandHandler', () => {
         mockAccess.mockReset();
         mockAccess.mockImplementation((path: unknown) => {
           const pathStr = String(path);
-          if (pathStr.includes('.claude/commands') || pathStr.includes('.claude\\commands')) {
+          if (pathStr.includes('.archon/commands') || pathStr.includes('.archon\\commands')) {
             return Promise.resolve();
           }
           return Promise.reject(new Error('ENOENT'));
@@ -1008,7 +948,7 @@ describe('CommandHandler', () => {
 
         // Should preserve existing command
         expect(commands).toHaveProperty('existing-cmd');
-        expect(commands['existing-cmd'].path).toBe('.claude/existing.md');
+        expect(commands['existing-cmd'].path).toBe('.archon/existing.md');
 
         // Should add new command (name depends on what readdir returned)
         expect(Object.keys(commands).length).toBeGreaterThan(1);
