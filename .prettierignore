@@ -25,9 +25,16 @@ package-lock.json
 # Agent commands and documentation (user-managed)
 .agents/
 .claude/
+.archon/
+
+# GitHub templates (don't auto-format)
+.github/
 
 # Project documentation (don't auto-format)
+docs/
 CLAUDE.md
 README.md
+CHANGELOG.md
+CONTRIBUTING.md
 *.yml
 *.yaml

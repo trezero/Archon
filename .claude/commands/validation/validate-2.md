@@ -1,137 +1,122 @@
-# Ultimate Validation Command
+# Ultimate Validation Command (Updated January 2026)
 
 Run comprehensive validation covering all aspects of the Remote Coding Agent. This command validates code quality, type safety, functionality, and complete user workflows.
 
-## Phase 1: Code Quality - Linting
+**Updated for:**
+- Bun runtime (not npm)
+- Archon paths (~/.archon/workspaces/owner/repo)
+- 6 database tables (added: command_templates, isolation_environments, workflow_runs)
+- New commands (/repos, /repo, /worktree, /init, /templates)
+- Isolation provider abstraction
 
-**Objective:** Ensure code follows project style guidelines and best practices.
+---
+
+## Phase 1: Code Quality - Foundation Validation
+
+### 1.1 Linting
 
 Run ESLint with strict TypeScript rules:
 
 ```bash
-npm run lint
+bun run lint
 ```
 
-**Expected outcome:** Zero linting errors. All TypeScript files must pass:
-- Explicit function return types
-- No `any` types
-- Proper naming conventions (interfaces, functions, variables)
-- TypeScript strict type checking rules
+**Expected:** Zero linting errors.
 
-**Critical files to validate:**
-- `src/adapters/*.ts` - Platform adapters (Telegram, GitHub, Test)
-- `src/clients/*.ts` - AI assistant clients (Claude, Codex)
-- `src/handlers/*.ts` - Command handler logic
-- `src/orchestrator/*.ts` - Message orchestration
-- `src/db/*.ts` - Database operations
-- `src/utils/*.ts` - Utility functions
+### 1.2 Type Checking
 
-## Phase 2: Type Safety - TypeScript Compilation
-
-**Objective:** Verify complete type safety across the entire codebase.
-
-Run TypeScript compiler in check mode (no emit):
+Run TypeScript compiler in check mode:
 
 ```bash
-npm run type-check
+bun run type-check
 ```
 
-**Expected outcome:** Zero type errors. All files must compile with:
-- `strict: true` enabled
-- `noUnusedLocals: true`
-- `noUnusedParameters: true`
-- `noImplicitReturns: true`
-- `noFallthroughCasesInSwitch: true`
+**Expected:** Zero type errors with strict mode enabled.
 
-**Then build the project:**
+### 1.3 Build
+
+Build the project:
 
 ```bash
-npm run build
+bun run build
 ```
 
-**Expected outcome:** Clean build to `dist/` directory with no errors.
+**Expected:** Clean build to `dist/` directory.
 
-## Phase 3: Code Formatting - Prettier
-
-**Objective:** Ensure consistent code formatting across all files.
+### 1.4 Code Formatting
 
 Check formatting compliance:
 
 ```bash
-npm run format:check
+bun run format:check
 ```
 
-**Expected outcome:** All files pass Prettier checks with:
-- Single quotes
-- Semicolons
-- 2-space indentation
-- 100 character line width
-- Trailing commas (ES5 style)
+**Expected:** All files pass Prettier checks.
 
-## Phase 4: Unit Testing
+### 1.5 Unit Tests
 
-**Objective:** Verify isolated component functionality with comprehensive test coverage.
-
-Run Jest test suite:
+Run Bun test suite:
 
 ```bash
-npm test
+bun test
 ```
 
-**Expected outcome:** All unit tests pass covering:
+**Expected:** All unit tests pass.
 
-1. **Command Parser Tests** (`src/handlers/command-handler.test.ts`):
-   - Parse `/clone` with URL
-   - Parse `/help`, `/status`, `/reset`
-   - Parse `/setcwd` with paths (including spaces)
-   - Parse `/command-invoke` with quoted arguments
-   - Parse `/command-set` with multiple args
-   - Parse `/load-commands` with folder path
-   - Handle mixed quoted/unquoted arguments
+---
 
-2. **Variable Substitution Tests** (`src/utils/variable-substitution.test.ts`):
-   - Substitute positional args: `$1`, `$2`, `$3`
-   - Substitute `$ARGUMENTS` with all args
-   - Substitute `$PLAN` from session metadata
-   - Substitute `$IMPLEMENTATION_SUMMARY` from metadata
-   - Handle missing variables gracefully
+## Phase 2: Environment Setup
 
-3. **Adapter Tests** (`src/adapters/*.test.ts`):
-   - Telegram adapter message sending
-   - GitHub adapter webhook signature verification
-   - Test adapter message storage and retrieval
+### 2.0 Clean Workspace (Optional)
 
-4. **Client Tests** (`src/clients/*.test.ts`):
-   - Claude client session management
-   - Codex client session management
-   - Streaming response handling
+If starting fresh, clean previous test artifacts:
 
-5. **Conversation Lock Tests** (`src/utils/conversation-lock.test.ts`):
-   - Lock acquisition and release
-   - Concurrent conversation limiting
-   - Queue management
+```bash
+# Remove test workspaces (careful - this deletes repos!)
+rm -rf ~/.archon/workspaces/test-*
+rm -rf ~/.archon/worktrees/test-*
 
-**Coverage target:** Aim for >80% coverage on core logic (handlers, utils, db).
+# Clean up any existing containers
+docker compose down -v 2>/dev/null || true
+```
 
-## Phase 5: End-to-End Testing - Complete User Workflows
+### 2.1 Build and Start Docker
 
-**Objective:** Validate complete user journeys exactly as documented in README.md, testing external integrations and real-world scenarios.
-
-### Prerequisites
-
-Ensure Docker containers are running:
+Build and start all services:
 
 ```bash
 docker compose --profile with-db up -d --build
 ```
 
-Wait for startup (check logs):
+Wait for containers to be ready:
 
 ```bash
-docker compose logs -f app | head -n 50
+# Wait for postgres to be ready
+sleep 10
+
+# Check container status
+docker compose ps
 ```
 
-Verify health checks:
+**Expected:** Both `postgres` and `app-with-db` containers running.
+
+### 2.2 Verify Application Startup
+
+Check application logs for successful startup:
+
+```bash
+docker compose logs app-with-db 2>&1 | tail -50
+```
+
+**Expected startup indicators:**
+- `[Archon] Paths configured:`
+- `[App] Adapters initialized`
+- `[App] Server listening on port 3000`
+- `[ConversationLock] Initialized`
+
+### 2.3 Health Checks
+
+Verify all health endpoints:
 
 ```bash
 # Basic health
@@ -144,690 +129,619 @@ curl -s http://localhost:3000/health/db | jq
 curl -s http://localhost:3000/health/concurrency | jq
 ```
 
-**Expected:** All health checks return `{"status":"ok",...}`
+**Expected:** All return `{"status":"ok",...}`
 
 ---
 
-### E2E Test 1: Basic Command Execution (Test Adapter)
+## Phase 3: Database Schema Validation
 
-**User Journey:** Send commands through test adapter, verify bot responses.
-
-**Test execution:**
+### 3.1 Verify All 6 Tables Exist
 
 ```bash
-# Clear any existing test data
-curl -X DELETE http://localhost:3000/test/messages/e2e-test-1
-
-# Test 1: Help command
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-test-1","message":"/help"}'
-
-sleep 2
-
-# Verify bot sent help message
-HELP_RESPONSE=$(curl -s http://localhost:3000/test/messages/e2e-test-1 | jq -r '.messages[0].message')
-echo "$HELP_RESPONSE" | grep -q "Available Commands" && echo "✅ Help command works" || echo "❌ Help command failed"
-
-# Test 2: Status command (before any codebase)
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-test-1","message":"/status"}'
-
-sleep 2
-
-# Verify status response
-STATUS_RESPONSE=$(curl -s http://localhost:3000/test/messages/e2e-test-1 | jq -r '.messages[1].message')
-echo "$STATUS_RESPONSE" | grep -q "Conversation Status" && echo "✅ Status command works" || echo "❌ Status command failed"
-
-# Cleanup
-curl -X DELETE http://localhost:3000/test/messages/e2e-test-1
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "\dt remote_agent_*"
 ```
 
-**Expected outcome:**
-- Help message contains command list
-- Status shows conversation details
-- All commands execute without errors
+**Expected tables:**
+1. `remote_agent_codebases`
+2. `remote_agent_conversations`
+3. `remote_agent_sessions`
+4. `remote_agent_command_templates`
+5. `remote_agent_isolation_environments`
+6. `remote_agent_workflow_runs`
 
----
-
-### E2E Test 2: Repository Clone Workflow
-
-**User Journey:** Clone a public repository, auto-detect commands, verify filesystem state.
-
-**Test execution:**
+### 3.2 Verify Codebases Table
 
 ```bash
-# Clear test data
-curl -X DELETE http://localhost:3000/test/messages/e2e-test-2
-
-# Clone a small public repo with .claude/commands
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-test-2","message":"/clone https://github.com/anthropics/anthropic-sdk-typescript"}'
-
-# Wait for clone operation (can take 10-30 seconds)
-sleep 30
-
-# Verify bot response indicates success
-CLONE_RESPONSE=$(curl -s http://localhost:3000/test/messages/e2e-test-2 | jq -r '.messages[-1].message')
-echo "$CLONE_RESPONSE" | grep -q "cloned successfully\|Detected .claude/commands" && echo "✅ Clone works" || echo "❌ Clone failed"
-
-# Verify repository exists on filesystem
-docker compose exec app ls -la /workspace/anthropic-sdk-typescript && echo "✅ Repo exists on disk" || echo "❌ Repo not found"
-
-# Verify database entry was created
 docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "SELECT name, repository_url FROM remote_agent_codebases WHERE name = 'anthropic-sdk-typescript';" \
-  | grep -q "anthropic-sdk-typescript" && echo "✅ Database entry created" || echo "❌ Database entry missing"
-
-# Test getcwd command
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-test-2","message":"/getcwd"}'
-
-sleep 2
-
-# Verify working directory
-GETCWD_RESPONSE=$(curl -s http://localhost:3000/test/messages/e2e-test-2 | jq -r '.messages[-1].message')
-echo "$GETCWD_RESPONSE" | grep -q "/workspace/anthropic-sdk-typescript" && echo "✅ Working directory correct" || echo "❌ Working directory incorrect"
-
-# Cleanup
-curl -X DELETE http://localhost:3000/test/messages/e2e-test-2
-docker compose exec app rm -rf /workspace/anthropic-sdk-typescript
+  -c "\d remote_agent_codebases"
 ```
 
-**Expected outcome:**
-- Repository cloned to `/workspace/anthropic-sdk-typescript`
-- Database entry created in `remote_agent_codebases`
-- `.claude/commands/` folder auto-detected
-- Working directory set correctly
+**Required columns:** id, name, repository_url, default_cwd, ai_assistant_type, commands (JSONB)
 
----
-
-### E2E Test 3: Command Registration & Invocation
-
-**User Journey:** Load commands from folder, invoke custom command, verify AI response.
-
-**Test execution:**
+### 3.3 Verify Conversations Table
 
 ```bash
-# Clear test data
-curl -X DELETE http://localhost:3000/test/messages/e2e-test-3
-
-# Clone repo (reuse if already cloned)
-docker compose exec app test -d /workspace/anthropic-sdk-typescript || \
-  curl -X POST http://localhost:3000/test/message \
-    -H "Content-Type: application/json" \
-    -d '{"conversationId":"e2e-test-3","message":"/clone https://github.com/anthropics/anthropic-sdk-typescript"}' && sleep 30
-
-# Load commands from .claude/commands
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-test-3","message":"/load-commands .claude/commands"}'
-
-sleep 3
-
-# Verify commands loaded
-LOAD_RESPONSE=$(curl -s http://localhost:3000/test/messages/e2e-test-3 | jq -r '.messages[-1].message')
-echo "$LOAD_RESPONSE" | grep -q "Loaded.*command" && echo "✅ Commands loaded" || echo "❌ Commands not loaded"
-
-# List registered commands
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-test-3","message":"/commands"}'
-
-sleep 2
-
-# Verify command list
-COMMANDS_RESPONSE=$(curl -s http://localhost:3000/test/messages/e2e-test-3 | jq -r '.messages[-1].message')
-echo "$COMMANDS_RESPONSE" | grep -q "Registered Commands" && echo "✅ Commands listed" || echo "❌ Commands list failed"
-
-# Cleanup
-curl -X DELETE http://localhost:3000/test/messages/e2e-test-3
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "\d remote_agent_conversations"
 ```
 
-**Expected outcome:**
-- Commands loaded from `.claude/commands/` folder
-- Database updated with command metadata in JSONB
-- Commands listed when requested
+**Required columns:** id, platform_type, platform_conversation_id, codebase_id, cwd, ai_assistant_type, isolation_env_id (UUID FK), last_activity_at
 
----
-
-### E2E Test 4: Session Management & Persistence
-
-**User Journey:** Create AI session, verify persistence across container restart.
-
-**Test execution:**
+### 3.4 Verify Isolation Environments Table
 
 ```bash
-# Clear test data
-curl -X DELETE http://localhost:3000/test/messages/e2e-test-4
-
-# Setup: Clone repo and load commands
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-test-4","message":"/clone https://github.com/anthropics/anthropic-sdk-typescript"}' && sleep 30
-
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-test-4","message":"/load-commands .claude/commands"}' && sleep 3
-
-# Check status before AI interaction
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-test-4","message":"/status"}' && sleep 2
-
-STATUS_BEFORE=$(curl -s http://localhost:3000/test/messages/e2e-test-4 | jq -r '.messages[-1].message')
-echo "$STATUS_BEFORE" | grep -q "No active session" && echo "✅ No session initially" || echo "⚠️ Session exists unexpectedly"
-
-# Ask AI a question (creates session)
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-test-4","message":"What is this repository about?"}' && sleep 10
-
-# Verify AI responded
-AI_RESPONSE=$(curl -s http://localhost:3000/test/messages/e2e-test-4 | jq -r '.messages[-1].message')
-echo "$AI_RESPONSE" | grep -q "Anthropic\|SDK\|TypeScript" && echo "✅ AI responded" || echo "❌ No AI response"
-
-# Check status after AI interaction
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-test-4","message":"/status"}' && sleep 2
-
-STATUS_AFTER=$(curl -s http://localhost:3000/test/messages/e2e-test-4 | jq -r '.messages[-1].message')
-echo "$STATUS_AFTER" | grep -q "Active Session" && echo "✅ Session created" || echo "❌ Session not found"
-
-# Verify session in database
 docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "SELECT active, assistant_session_id FROM remote_agent_sessions WHERE active = true;" \
-  | grep -q "t.*sess_" && echo "✅ Session persisted in DB" || echo "❌ Session not in DB"
-
-# Restart container to test session persistence
-echo "🔄 Restarting container to test session persistence..."
-docker compose restart app && sleep 15
-
-# Verify session still exists after restart
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "SELECT active, assistant_session_id FROM remote_agent_sessions WHERE active = true;" \
-  | grep -q "t.*sess_" && echo "✅ Session survived restart" || echo "❌ Session lost after restart"
-
-# Test /reset command
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"e2e-test-4","message":"/reset"}' && sleep 2
-
-RESET_RESPONSE=$(curl -s http://localhost:3000/test/messages/e2e-test-4 | jq -r '.messages[-1].message')
-echo "$RESET_RESPONSE" | grep -q "Session cleared" && echo "✅ Reset works" || echo "❌ Reset failed"
-
-# Verify session marked inactive in DB
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "SELECT COUNT(*) FROM remote_agent_sessions WHERE active = true;" \
-  | grep -q "0" && echo "✅ Session deactivated" || echo "❌ Session still active"
-
-# Cleanup
-curl -X DELETE http://localhost:3000/test/messages/e2e-test-4
+  -c "\d remote_agent_isolation_environments"
 ```
 
-**Expected outcome:**
-- AI session created on first AI message
-- Session ID stored in database with `active = true`
-- Session persists across container restarts
-- `/reset` command marks session as inactive
+**Required columns:** id, codebase_id, workflow_type, workflow_id, provider, working_path, branch_name, status, created_at, created_by_platform, metadata
 
----
-
-### E2E Test 5: Database Integrity
-
-**User Journey:** Verify database schema, foreign keys, indexes, and data consistency.
-
-**Test execution:**
+### 3.5 Verify Workflow Runs Table
 
 ```bash
-echo "🔍 Validating database schema..."
-
-# Verify all 3 tables exist with correct prefix
 docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "\dt remote_agent_*" \
-  | grep -E "remote_agent_codebases|remote_agent_conversations|remote_agent_sessions" \
-  && echo "✅ All tables exist" || echo "❌ Missing tables"
+  -c "\d remote_agent_workflow_runs"
+```
 
-# Verify codebases table structure
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "\d remote_agent_codebases" \
-  | grep -E "id.*uuid|name.*varchar|repository_url|default_cwd|ai_assistant_type|commands.*jsonb" \
-  && echo "✅ Codebases schema correct" || echo "❌ Codebases schema incorrect"
+**Required columns:** id, workflow_name, conversation_id, codebase_id, current_step_index, status, user_message, metadata, started_at, completed_at
 
-# Verify conversations table structure
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "\d remote_agent_conversations" \
-  | grep -E "id.*uuid|platform_type|platform_conversation_id|codebase_id|cwd|ai_assistant_type" \
-  && echo "✅ Conversations schema correct" || echo "❌ Conversations schema incorrect"
+### 3.6 Verify Foreign Keys
 
-# Verify sessions table structure
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "\d remote_agent_sessions" \
-  | grep -E "id.*uuid|conversation_id|codebase_id|ai_assistant_type|assistant_session_id|active|metadata.*jsonb" \
-  && echo "✅ Sessions schema correct" || echo "❌ Sessions schema incorrect"
-
-# Verify foreign key constraints
+```bash
 docker compose exec postgres psql -U postgres -d remote_coding_agent \
   -c "SELECT conname, conrelid::regclass, confrelid::regclass
       FROM pg_constraint
-      WHERE contype = 'f' AND connamespace = 'public'::regnamespace;" \
-  | grep -E "remote_agent_conversations.*remote_agent_codebases|remote_agent_sessions.*remote_agent_conversations|remote_agent_sessions.*remote_agent_codebases" \
-  && echo "✅ Foreign keys correct" || echo "❌ Foreign keys missing"
-
-# Verify indexes exist
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "\di" \
-  | grep -E "idx_remote_agent_conversations_codebase|idx_remote_agent_sessions_conversation|idx_remote_agent_sessions_codebase" \
-  && echo "✅ Indexes exist" || echo "❌ Indexes missing"
-
-# Verify unique constraint on platform_type + platform_conversation_id
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "SELECT conname FROM pg_constraint
-      WHERE conrelid = 'remote_agent_conversations'::regclass AND contype = 'u';" \
-  | grep -q "." && echo "✅ Unique constraint exists" || echo "❌ Unique constraint missing"
-
-echo "✅ Database integrity validated"
+      WHERE contype = 'f' AND connamespace = 'public'::regnamespace
+      AND conrelid::regclass::text LIKE 'remote_agent_%';"
 ```
 
-**Expected outcome:**
-- All 3 tables present with `remote_agent_` prefix
-- Correct column types (UUID, VARCHAR, JSONB, TIMESTAMP)
-- Foreign keys properly configured
-- Indexes on critical columns
-- Unique constraint on conversation platform+ID
+**Expected FK relationships:**
+- conversations.codebase_id → codebases.id
+- conversations.isolation_env_id → isolation_environments.id
+- sessions.conversation_id → conversations.id
+- sessions.codebase_id → codebases.id
+- isolation_environments.codebase_id → codebases.id
+- workflow_runs.conversation_id → conversations.id
+- workflow_runs.codebase_id → codebases.id
 
 ---
 
-### E2E Test 6: GitHub CLI Integration
+## Phase 4: Test Adapter E2E Tests
 
-**User Journey:** Verify GitHub CLI operations work inside container.
-
-**Test execution:**
+### 4.1 Basic Commands
 
 ```bash
-echo "🔍 Testing GitHub CLI integration..."
+# Clear test data
+curl -X DELETE http://localhost:3000/test/messages/e2e-basic
 
-# Verify GitHub CLI installed
-docker compose exec app which gh && echo "✅ GitHub CLI installed" || echo "❌ GitHub CLI not found"
+# Test /help
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-basic","message":"/help"}'
 
-# Verify gh version
-docker compose exec app gh --version && echo "✅ GitHub CLI version OK" || echo "❌ GitHub CLI version check failed"
+sleep 2
 
-# Test GitHub authentication (requires GITHUB_TOKEN or GH_TOKEN in .env)
-docker compose exec app gh auth status 2>&1 | grep -q "Logged in\|Token:" && echo "✅ GitHub authenticated" || echo "⚠️ GitHub not authenticated (check GITHUB_TOKEN)"
+# Verify help response contains new commands
+HELP=$(curl -s http://localhost:3000/test/messages/e2e-basic | jq -r '.messages[0].message')
+echo "$HELP" | grep -q "/repos" && echo "✅ /repos in help" || echo "❌ /repos missing"
+echo "$HELP" | grep -q "/worktree" && echo "✅ /worktree in help" || echo "❌ /worktree missing"
+echo "$HELP" | grep -q "/workflow" && echo "✅ /workflow in help" || echo "❌ /workflow missing"
 
-# Test git is installed and configured
-docker compose exec app git --version && echo "✅ Git installed" || echo "❌ Git not found"
+# Test /status (no codebase)
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-basic","message":"/status"}'
 
-# Verify git safe directory config (prevents dubious ownership errors)
-docker compose exec app git config --global --get-all safe.directory | grep -q "/workspace" && echo "✅ Git safe.directory configured" || echo "❌ Git safe.directory not configured"
+sleep 2
 
-echo "✅ GitHub CLI integration validated"
-```
-
-**Expected outcome:**
-- GitHub CLI (`gh`) installed in container
-- Git installed and configured
-- Safe directory config prevents ownership errors
-- GitHub authentication working (if token provided)
-
----
-
-### E2E Test 7: Concurrency & Lock Management
-
-**User Journey:** Verify system handles concurrent conversations correctly.
-
-**Test execution:**
-
-```bash
-echo "🔍 Testing concurrency and lock management..."
-
-# Get initial concurrency stats
-INITIAL_STATS=$(curl -s http://localhost:3000/health/concurrency)
-echo "Initial stats: $INITIAL_STATS"
-
-# Send 5 concurrent messages to different conversations
-for i in {1..5}; do
-  curl -X POST http://localhost:3000/test/message \
-    -H "Content-Type: application/json" \
-    -d "{\"conversationId\":\"concurrent-test-$i\",\"message\":\"/help\"}" &
-done
-
-# Wait for all to complete
-wait
-sleep 5
-
-# Verify all conversations processed
-for i in {1..5}; do
-  RESPONSE=$(curl -s http://localhost:3000/test/messages/concurrent-test-$i | jq -r '.messages[0].message')
-  if echo "$RESPONSE" | grep -q "Available Commands"; then
-    echo "✅ Conversation $i processed"
-  else
-    echo "❌ Conversation $i failed"
-  fi
-done
-
-# Check concurrency stats (should be 0 active now, all processed)
-FINAL_STATS=$(curl -s http://localhost:3000/health/concurrency)
-echo "Final stats: $FINAL_STATS"
-echo "$FINAL_STATS" | jq -r '.active' | grep -q "0" && echo "✅ All conversations unlocked" || echo "⚠️ Some conversations still locked"
+STATUS=$(curl -s http://localhost:3000/test/messages/e2e-basic | jq -r '.messages[-1].message')
+echo "$STATUS" | grep -q "No codebase configured" && echo "✅ Status correct (no codebase)" || echo "❌ Status unexpected"
 
 # Cleanup
-for i in {1..5}; do
-  curl -X DELETE http://localhost:3000/test/messages/concurrent-test-$i
-done
-
-echo "✅ Concurrency management validated"
+curl -X DELETE http://localhost:3000/test/messages/e2e-basic
 ```
 
-**Expected outcome:**
-- All 5 concurrent messages processed successfully
-- Lock manager prevents race conditions
-- Active locks return to 0 after processing
-- No deadlocks or stuck conversations
-
----
-
-### E2E Test 8: Streaming Modes (Batch vs Stream)
-
-**User Journey:** Verify platform-specific streaming modes work correctly.
-
-**Test execution:**
+### 4.2 Repository Management
 
 ```bash
-echo "🔍 Testing streaming modes..."
+# Clear test data
+curl -X DELETE http://localhost:3000/test/messages/e2e-repo
 
-# Test uses the test adapter which defaults to stream mode
-# Verify test adapter streaming mode
-docker compose exec app grep -q "STREAMING_MODE" /app/.env && echo "ℹ️ Streaming mode configured" || echo "ℹ️ Using default streaming mode"
-
-# Test 1: Stream mode (should send multiple messages as AI responds)
-curl -X DELETE http://localhost:3000/test/messages/stream-test
-
+# Clone test repository
+echo "Cloning repository..."
 curl -X POST http://localhost:3000/test/message \
   -H "Content-Type: application/json" \
-  -d '{"conversationId":"stream-test","message":"Explain TypeScript in 2 sentences"}' && sleep 10
+  -d '{"conversationId":"e2e-repo","message":"/clone https://github.com/anthropics/anthropic-sdk-typescript"}'
 
-# Count messages sent (stream mode may send multiple chunks)
-MESSAGE_COUNT=$(curl -s http://localhost:3000/test/messages/stream-test | jq '.messages | length')
-echo "Messages sent: $MESSAGE_COUNT"
+# Wait for clone (can take 30-60 seconds)
+sleep 45
 
-# Verify at least one message received
-if [ "$MESSAGE_COUNT" -gt 0 ]; then
-  echo "✅ Streaming mode working (sent $MESSAGE_COUNT messages)"
-else
-  echo "❌ No messages received"
-fi
+# Verify clone success
+CLONE_MSG=$(curl -s http://localhost:3000/test/messages/e2e-repo | jq -r '.messages[-1].message')
+echo "$CLONE_MSG" | grep -q "cloned successfully\|already cloned\|Linked to" && echo "✅ Clone succeeded" || echo "❌ Clone failed: $CLONE_MSG"
+
+# Verify path is in new format (includes owner)
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-repo","message":"/getcwd"}'
+
+sleep 2
+
+CWD=$(curl -s http://localhost:3000/test/messages/e2e-repo | jq -r '.messages[-1].message')
+echo "$CWD" | grep -q "anthropics/anthropic-sdk-typescript\|anthropic-sdk-typescript" && echo "✅ CWD correct" || echo "❌ CWD wrong: $CWD"
+
+# Test /repos command
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-repo","message":"/repos"}'
+
+sleep 2
+
+REPOS=$(curl -s http://localhost:3000/test/messages/e2e-repo | jq -r '.messages[-1].message')
+echo "$REPOS" | grep -q "anthropic" && echo "✅ /repos lists cloned repo" || echo "❌ /repos failed"
 
 # Cleanup
-curl -X DELETE http://localhost:3000/test/messages/stream-test
-
-echo "✅ Streaming modes validated"
+curl -X DELETE http://localhost:3000/test/messages/e2e-repo
 ```
 
-**Expected outcome:**
-- Test adapter uses stream mode by default
-- AI responses delivered (stream may send multiple chunks or single message)
-- No errors during streaming
-
----
-
-### E2E Test 9: Error Handling & Recovery
-
-**User Journey:** Verify system handles errors gracefully.
-
-**Test execution:**
+### 4.3 Command Loading and Invocation
 
 ```bash
-echo "🔍 Testing error handling..."
+# Clear test data
+curl -X DELETE http://localhost:3000/test/messages/e2e-cmd
 
-# Test 1: Invalid command
-curl -X DELETE http://localhost:3000/test/messages/error-test
-
+# Setup: ensure repo is cloned
 curl -X POST http://localhost:3000/test/message \
   -H "Content-Type: application/json" \
-  -d '{"conversationId":"error-test","message":"/nonexistent-command"}' && sleep 2
-
-INVALID_CMD_RESPONSE=$(curl -s http://localhost:3000/test/messages/error-test | jq -r '.messages[0].message')
-echo "$INVALID_CMD_RESPONSE" | grep -qi "unknown\|not found\|error" && echo "✅ Invalid command handled" || echo "⚠️ Invalid command response unclear"
-
-# Test 2: Clone invalid repository
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"error-test","message":"/clone https://github.com/nonexistent/repo-12345"}' && sleep 10
-
-INVALID_CLONE_RESPONSE=$(curl -s http://localhost:3000/test/messages/error-test | jq -r '.messages[-1].message')
-echo "$INVALID_CLONE_RESPONSE" | grep -qi "failed\|error\|not found" && echo "✅ Invalid clone handled" || echo "⚠️ Invalid clone response unclear"
-
-# Test 3: setcwd to non-existent directory
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"error-test","message":"/setcwd /nonexistent/path"}' && sleep 2
-
-INVALID_CWD_RESPONSE=$(curl -s http://localhost:3000/test/messages/error-test | jq -r '.messages[-1].message')
-echo "$INVALID_CWD_RESPONSE" | grep -qi "error\|not found\|does not exist" && echo "✅ Invalid setcwd handled" || echo "⚠️ Invalid setcwd response unclear"
-
-# Test 4: Invoke command before setting codebase
-curl -X DELETE http://localhost:3000/test/messages/error-test-2
-
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"error-test-2","message":"/command-invoke prime"}' && sleep 2
-
-NO_CODEBASE_RESPONSE=$(curl -s http://localhost:3000/test/messages/error-test-2 | jq -r '.messages[0].message')
-echo "$NO_CODEBASE_RESPONSE" | grep -qi "no codebase\|register\|command not found" && echo "✅ No codebase error handled" || echo "⚠️ No codebase error response unclear"
-
-# Cleanup
-curl -X DELETE http://localhost:3000/test/messages/error-test
-curl -X DELETE http://localhost:3000/test/messages/error-test-2
-
-echo "✅ Error handling validated"
-```
-
-**Expected outcome:**
-- Invalid commands return helpful error messages
-- Invalid clone attempts fail gracefully
-- Invalid paths handled without crashes
-- Commands without codebase return clear errors
-
----
-
-### E2E Test 10: Complete Telegram-Like Workflow
-
-**User Journey:** Simulate complete Telegram workflow from README - clone, load commands, ask AI, invoke commands.
-
-**Test execution:**
-
-```bash
-echo "🚀 Testing complete Telegram-like workflow..."
-
-# Conversation ID for this test
-CONV_ID="telegram-workflow-test"
-
-# Cleanup any previous test data
-curl -X DELETE http://localhost:3000/test/messages/$CONV_ID
-docker compose exec app rm -rf /workspace/anthropic-sdk-typescript 2>/dev/null || true
-
-# Step 1: User clones repository
-echo "Step 1: Clone repository..."
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d "{\"conversationId\":\"$CONV_ID\",\"message\":\"/clone https://github.com/anthropics/anthropic-sdk-typescript\"}"
+  -d '{"conversationId":"e2e-cmd","message":"/clone https://github.com/anthropics/anthropic-sdk-typescript"}'
 
 sleep 30
 
-# Verify clone success
-CLONE_MSG=$(curl -s http://localhost:3000/test/messages/$CONV_ID | jq -r '.messages[-1].message')
-echo "$CLONE_MSG" | grep -q "cloned successfully" && echo "✅ Repository cloned" || echo "❌ Clone failed"
-
-# Step 2: Bot suggests loading commands (auto-detected)
-echo "$CLONE_MSG" | grep -q "Detected .claude/commands" && echo "✅ Commands auto-detected" || echo "⚠️ Commands not auto-detected"
-
-# Step 3: User loads commands
-echo "Step 2: Load commands..."
+# Test /commands (should auto-load or show none)
 curl -X POST http://localhost:3000/test/message \
   -H "Content-Type: application/json" \
-  -d "{\"conversationId\":\"$CONV_ID\",\"message\":\"/load-commands .claude/commands\"}"
+  -d '{"conversationId":"e2e-cmd","message":"/commands"}'
+
+sleep 2
+
+# Test /templates (global templates)
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-cmd","message":"/templates"}'
+
+sleep 2
+
+TEMPLATES=$(curl -s http://localhost:3000/test/messages/e2e-cmd | jq -r '.messages[-1].message')
+echo "Templates response: $TEMPLATES"
+
+# Cleanup
+curl -X DELETE http://localhost:3000/test/messages/e2e-cmd
+```
+
+---
+
+## Phase 5: Worktree/Isolation Tests
+
+### 5.1 Create Worktree
+
+```bash
+# Clear test data
+curl -X DELETE http://localhost:3000/test/messages/e2e-worktree
+
+# Setup: clone repo
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-worktree","message":"/clone https://github.com/anthropics/anthropic-sdk-typescript"}'
+
+sleep 30
+
+# Create worktree
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-worktree","message":"/worktree create test-branch-validation"}'
+
+sleep 5
+
+WT_CREATE=$(curl -s http://localhost:3000/test/messages/e2e-worktree | jq -r '.messages[-1].message')
+echo "$WT_CREATE" | grep -q "Worktree created\|already exists\|Working in isolated" && echo "✅ Worktree created" || echo "❌ Worktree create failed: $WT_CREATE"
+
+# Verify database entry
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "SELECT workflow_type, workflow_id, status FROM remote_agent_isolation_environments WHERE workflow_id LIKE '%test-branch%';"
+```
+
+### 5.2 List Worktrees
+
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-worktree","message":"/worktree list"}'
+
+sleep 2
+
+WT_LIST=$(curl -s http://localhost:3000/test/messages/e2e-worktree | jq -r '.messages[-1].message')
+echo "$WT_LIST" | grep -q "Worktrees" && echo "✅ Worktree list works" || echo "❌ Worktree list failed"
+```
+
+### 5.3 Check Status with Worktree
+
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-worktree","message":"/status"}'
+
+sleep 2
+
+STATUS_WT=$(curl -s http://localhost:3000/test/messages/e2e-worktree | jq -r '.messages[-1].message')
+echo "$STATUS_WT" | grep -q "Worktree" && echo "✅ Status shows worktree" || echo "⚠️ Status may not show worktree"
+echo "$STATUS_WT" | grep -q "Worktrees:" && echo "✅ Status shows worktree count" || echo "⚠️ Worktree count not shown"
+```
+
+### 5.4 Remove Worktree
+
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-worktree","message":"/worktree remove"}'
+
+sleep 3
+
+WT_REMOVE=$(curl -s http://localhost:3000/test/messages/e2e-worktree | jq -r '.messages[-1].message')
+echo "$WT_REMOVE" | grep -q "removed\|not using" && echo "✅ Worktree remove works" || echo "❌ Worktree remove failed: $WT_REMOVE"
+
+# Cleanup
+curl -X DELETE http://localhost:3000/test/messages/e2e-worktree
+```
+
+---
+
+## Phase 6: Command Workflow Tests (Prime, Plan, Execute Pattern)
+
+This tests the core command invocation pattern without the workflow engine routing.
+
+### 6.0 Setup Test Repository with Commands
+
+For this phase, we need a test repository with `.archon/commands/` containing prime, plan-feature, and execute commands.
+
+**Option A: Use this project itself (if running locally)**
+
+```bash
+# Use the current project as the test repo
+PROJECT_DIR=$(pwd)
+
+# Start dev mode instead of Docker for local testing
+# bun run dev
+```
+
+**Option B: Create a minimal test repo on GitHub**
+
+Create a GitHub repo with `.archon/commands/` containing:
+- `prime.md` - Simple context loading
+- `plan-feature.md` - Planning with $ARGUMENTS
+- `execute.md` - Execute plan
+
+### 6.1 Clone and Load Commands
+
+```bash
+# Clear test data
+curl -X DELETE http://localhost:3000/test/messages/e2e-workflow
+
+# Clone repo with commands (use your test repo or this project)
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-workflow","message":"/clone https://github.com/YOUR_ORG/YOUR_TEST_REPO"}'
+
+sleep 30
+
+# Load commands
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-workflow","message":"/load-commands .archon/commands"}'
 
 sleep 3
 
 # Verify commands loaded
-LOAD_MSG=$(curl -s http://localhost:3000/test/messages/$CONV_ID | jq -r '.messages[-1].message')
-echo "$LOAD_MSG" | grep -q "Loaded.*command" && echo "✅ Commands loaded" || echo "❌ Commands not loaded"
-
-# Step 4: User asks a question
-echo "Step 3: Ask AI question..."
 curl -X POST http://localhost:3000/test/message \
   -H "Content-Type: application/json" \
-  -d "{\"conversationId\":\"$CONV_ID\",\"message\":\"What files are in this repo?\"}"
-
-sleep 15
-
-# Verify AI responded with file information
-AI_MSG=$(curl -s http://localhost:3000/test/messages/$CONV_ID | jq -r '.messages[-1].message')
-echo "$AI_MSG" | grep -qi "file\|directory\|src\|package" && echo "✅ AI answered question" || echo "❌ AI did not answer"
-
-# Step 5: Check status
-echo "Step 4: Check status..."
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d "{\"conversationId\":\"$CONV_ID\",\"message\":\"/status\"}"
+  -d '{"conversationId":"e2e-workflow","message":"/commands"}'
 
 sleep 2
 
-# Verify status shows complete context
-STATUS_MSG=$(curl -s http://localhost:3000/test/messages/$CONV_ID | jq -r '.messages[-1].message')
-echo "$STATUS_MSG" | grep -q "anthropic-sdk-typescript" && echo "✅ Status shows codebase" || echo "❌ Status incomplete"
-echo "$STATUS_MSG" | grep -q "Active Session" && echo "✅ Status shows active session" || echo "❌ No active session"
-echo "$STATUS_MSG" | grep -q "Registered Commands" && echo "✅ Status shows commands" || echo "❌ No commands shown"
-
-# Step 6: List commands
-echo "Step 5: List commands..."
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d "{\"conversationId\":\"$CONV_ID\",\"message\":\"/commands\"}"
-
-sleep 2
-
-# Verify commands listed
-CMD_LIST=$(curl -s http://localhost:3000/test/messages/$CONV_ID | jq -r '.messages[-1].message')
-echo "$CMD_LIST" | grep -q "Registered Commands" && echo "✅ Commands listed" || echo "❌ Commands list failed"
-
-# Step 7: Reset session
-echo "Step 6: Reset session..."
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d "{\"conversationId\":\"$CONV_ID\",\"message\":\"/reset\"}"
-
-sleep 2
-
-# Verify reset confirmation
-RESET_MSG=$(curl -s http://localhost:3000/test/messages/$CONV_ID | jq -r '.messages[-1].message')
-echo "$RESET_MSG" | grep -q "Session cleared" && echo "✅ Session reset" || echo "❌ Reset failed"
-echo "$RESET_MSG" | grep -q "Codebase configuration preserved" && echo "✅ Codebase preserved" || echo "⚠️ Codebase may be cleared"
-
-# Verify complete workflow
-echo ""
-echo "📊 Complete Workflow Summary:"
-MESSAGE_COUNT=$(curl -s http://localhost:3000/test/messages/$CONV_ID | jq '.messages | length')
-echo "Total messages exchanged: $MESSAGE_COUNT"
-echo "Workflow steps completed: 6/6"
-
-# Cleanup
-curl -X DELETE http://localhost:3000/test/messages/$CONV_ID
-docker compose exec app rm -rf /workspace/anthropic-sdk-typescript
-
-echo "✅ Complete workflow validated"
+CMDS=$(curl -s http://localhost:3000/test/messages/e2e-workflow | jq -r '.messages[-1].message')
+echo "$CMDS" | grep -q "prime\|plan\|execute" && echo "✅ Commands loaded" || echo "⚠️ Commands may not include workflow commands"
 ```
 
-**Expected outcome:**
-- User successfully clones repository
-- Commands auto-detected and loaded
-- AI answers questions about the codebase
-- Status shows complete context (codebase, session, commands)
-- Session can be reset while preserving codebase
-- All 6 workflow steps complete successfully
+### 6.2 Invoke Prime Command
+
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-workflow","message":"/command-invoke prime"}'
+
+# Prime can take a while as AI analyzes codebase
+sleep 60
+
+PRIME_RESULT=$(curl -s http://localhost:3000/test/messages/e2e-workflow | jq -r '.messages[-1].message')
+echo "Prime result length: ${#PRIME_RESULT}"
+[ ${#PRIME_RESULT} -gt 100 ] && echo "✅ Prime generated output" || echo "⚠️ Prime output may be short"
+```
+
+### 6.3 Invoke Plan Command
+
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-workflow","message":"/command-invoke plan-feature \"Add a simple hello world endpoint\""}'
+
+# Plan generation takes time
+sleep 90
+
+PLAN_RESULT=$(curl -s http://localhost:3000/test/messages/e2e-workflow | jq -r '.messages[-1].message')
+echo "Plan result length: ${#PLAN_RESULT}"
+[ ${#PLAN_RESULT} -gt 200 ] && echo "✅ Plan generated" || echo "⚠️ Plan may be short"
+```
+
+### 6.4 Check Session State
+
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-workflow","message":"/status"}'
+
+sleep 2
+
+STATUS_SESSION=$(curl -s http://localhost:3000/test/messages/e2e-workflow | jq -r '.messages[-1].message')
+echo "$STATUS_SESSION" | grep -q "Active Session" && echo "✅ Session active after commands" || echo "❌ No active session"
+
+# Cleanup
+curl -X DELETE http://localhost:3000/test/messages/e2e-workflow
+```
 
 ---
 
-## Final Validation Summary
+## Phase 7: GitHub Adapter Tests
 
-After running all 10 E2E tests, verify:
+### 7.1 GitHub CLI Verification
 
 ```bash
-echo "📊 Final Validation Summary"
-echo "=========================="
+# Verify GitHub CLI installed in container
+docker compose exec app-with-db which gh && echo "✅ GitHub CLI installed" || echo "❌ GitHub CLI not found"
 
-# Count Docker containers
-CONTAINERS=$(docker compose ps -q | wc -l)
-echo "Docker containers running: $CONTAINERS"
+# Verify gh version
+docker compose exec app-with-db gh --version
 
-# Database connection
-curl -s http://localhost:3000/health/db | jq -r '.status' && echo "✅ Database connected"
+# Test GitHub authentication
+docker compose exec app-with-db gh auth status 2>&1 | grep -q "Logged in" && echo "✅ GitHub authenticated" || echo "⚠️ GitHub not authenticated"
+```
 
-# Count tables
+### 7.2 Create Test GitHub Issue
+
+This requires a test repository you control.
+
+```bash
+# Set your test repo
+TEST_REPO="YOUR_ORG/YOUR_TEST_REPO"
+
+# Create a test issue
+gh issue create --repo "$TEST_REPO" \
+  --title "Validation Test Issue $(date +%s)" \
+  --body "@archon please analyze this test issue and respond with a summary."
+
+# Note the issue number for webhook testing
+```
+
+### 7.3 Verify Webhook Endpoint
+
+```bash
+# Check webhook endpoint responds
+curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/webhooks/github
+
+# Should return 400 (bad request without signature) or 401
+```
+
+### 7.4 Simulate GitHub Webhook (Manual)
+
+If you have ngrok or similar:
+
+```bash
+# Start ngrok tunnel
+ngrok http 3000
+
+# Configure webhook in GitHub repo settings:
+# - Payload URL: https://YOUR_NGROK.ngrok.io/webhooks/github
+# - Content type: application/json
+# - Secret: (value from WEBHOOK_SECRET in .env)
+# - Events: Issues, Issue comments, Pull requests
+
+# Then comment on an issue with @archon mention
+# Check application logs for webhook processing
+docker compose logs -f app-with-db
+```
+
+---
+
+## Phase 8: Error Handling Tests
+
+### 8.1 Invalid Commands
+
+```bash
+curl -X DELETE http://localhost:3000/test/messages/e2e-error
+
+# Test invalid command
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-error","message":"/nonexistent-command"}'
+
+sleep 2
+
+ERR=$(curl -s http://localhost:3000/test/messages/e2e-error | jq -r '.messages[0].message')
+echo "$ERR" | grep -qi "unknown\|not found" && echo "✅ Invalid command handled" || echo "⚠️ Error message unclear"
+```
+
+### 8.2 Invalid Clone
+
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-error","message":"/clone https://github.com/nonexistent-user-12345/nonexistent-repo-67890"}'
+
+sleep 15
+
+CLONE_ERR=$(curl -s http://localhost:3000/test/messages/e2e-error | jq -r '.messages[-1].message')
+echo "$CLONE_ERR" | grep -qi "failed\|error\|not found" && echo "✅ Invalid clone handled" || echo "⚠️ Clone error unclear"
+```
+
+### 8.3 Command Without Codebase
+
+```bash
+curl -X DELETE http://localhost:3000/test/messages/e2e-error-2
+
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"e2e-error-2","message":"/command-invoke prime"}'
+
+sleep 2
+
+NO_CB=$(curl -s http://localhost:3000/test/messages/e2e-error-2 | jq -r '.messages[0].message')
+echo "$NO_CB" | grep -qi "no codebase\|not configured" && echo "✅ No codebase error handled" || echo "⚠️ Error message unclear"
+
+# Cleanup
+curl -X DELETE http://localhost:3000/test/messages/e2e-error
+curl -X DELETE http://localhost:3000/test/messages/e2e-error-2
+```
+
+---
+
+## Phase 9: Concurrency Tests
+
+```bash
+echo "Testing concurrent message handling..."
+
+# Send 5 concurrent /help commands
+for i in {1..5}; do
+  curl -X POST http://localhost:3000/test/message \
+    -H "Content-Type: application/json" \
+    -d "{\"conversationId\":\"concurrent-$i\",\"message\":\"/help\"}" &
+done
+
+wait
+sleep 5
+
+# Verify all processed
+SUCCESS=0
+for i in {1..5}; do
+  RESP=$(curl -s http://localhost:3000/test/messages/concurrent-$i | jq -r '.messages[0].message // empty')
+  if echo "$RESP" | grep -q "Available Commands"; then
+    ((SUCCESS++))
+  fi
+done
+
+echo "Concurrent messages processed: $SUCCESS/5"
+[ $SUCCESS -eq 5 ] && echo "✅ Concurrency handling works" || echo "❌ Some messages failed"
+
+# Check lock status
+curl -s http://localhost:3000/health/concurrency | jq
+
+# Cleanup
+for i in {1..5}; do
+  curl -X DELETE http://localhost:3000/test/messages/concurrent-$i
+done
+```
+
+---
+
+## Phase 10: Final Validation Summary
+
+```bash
+echo "================================"
+echo "📊 VALIDATION SUMMARY"
+echo "================================"
+
+# Container status
+echo ""
+echo "🐳 Docker Status:"
+docker compose ps --format "table {{.Name}}\t{{.Status}}"
+
+# Database status
+echo ""
+echo "🗄️ Database:"
 TABLE_COUNT=$(docker compose exec postgres psql -U postgres -d remote_coding_agent \
   -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'remote_agent_%';")
-echo "Database tables: $TABLE_COUNT (expected: 3)"
+echo "Tables: $TABLE_COUNT (expected: 6)"
 
-# Count TypeScript files
-TS_FILES=$(find src -name "*.ts" -type f ! -name "*.test.ts" | wc -l)
-echo "TypeScript source files: $TS_FILES"
+# Health checks
+echo ""
+echo "🏥 Health Checks:"
+curl -s http://localhost:3000/health | jq -r '.status'
+curl -s http://localhost:3000/health/db | jq -r '.status'
 
-# Test files
-TEST_FILES=$(find src -name "*.test.ts" -type f | wc -l)
-echo "Unit test files: $TEST_FILES"
-
-# Build artifacts
-BUILD_FILES=$(find dist -name "*.js" -type f 2>/dev/null | wc -l)
-echo "Compiled JavaScript files: $BUILD_FILES"
+# Source files
+echo ""
+echo "📁 Source Files:"
+TS_FILES=$(find src -name "*.ts" -type f ! -name "*.test.ts" 2>/dev/null | wc -l)
+TEST_FILES=$(find src -name "*.test.ts" -type f 2>/dev/null | wc -l)
+echo "TypeScript files: $TS_FILES"
+echo "Test files: $TEST_FILES"
 
 echo ""
-echo "✅ All validation phases complete!"
-echo "If all tests passed, the Remote Coding Agent is production-ready."
+echo "================================"
+echo "✅ Validation Complete"
+echo "================================"
 ```
+
+---
+
+## Cleanup
+
+After validation, clean up test data:
+
+```bash
+# Remove test conversations from database
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "DELETE FROM remote_agent_conversations WHERE platform_conversation_id LIKE 'e2e-%' OR platform_conversation_id LIKE 'concurrent-%';"
+
+# Remove test isolation environments
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "DELETE FROM remote_agent_isolation_environments WHERE workflow_id LIKE '%test%';"
+
+# Optionally stop containers
+# docker compose down
+```
+
+---
 
 ## Success Criteria
 
-**The validation passes if:**
+| Phase | Criteria |
+|-------|----------|
+| 1.1 | Zero ESLint errors |
+| 1.2 | Zero TypeScript errors |
+| 1.3 | Build succeeds |
+| 1.4 | All files formatted |
+| 1.5 | All unit tests pass |
+| 2.x | Docker containers running, health checks pass |
+| 3.x | All 6 database tables exist with correct schema |
+| 4.x | Test adapter commands work (/help, /status, /clone, /repos) |
+| 5.x | Worktree create/list/remove work |
+| 6.x | Command invocation pattern works (prime, plan-feature) |
+| 7.x | GitHub CLI available, auth working |
+| 8.x | Error handling is graceful |
+| 9.x | Concurrent requests handled correctly |
 
-1. ✅ **Linting:** Zero ESLint errors
-2. ✅ **Type Safety:** Zero TypeScript compilation errors
-3. ✅ **Formatting:** All files pass Prettier checks
-4. ✅ **Unit Tests:** All Jest tests pass with >80% coverage
-5. ✅ **E2E Test 1:** Test adapter command execution works
-6. ✅ **E2E Test 2:** Repository clone and filesystem operations work
-7. ✅ **E2E Test 3:** Command registration and invocation work
-8. ✅ **E2E Test 4:** Session persistence survives restarts
-9. ✅ **E2E Test 5:** Database schema integrity validated
-10. ✅ **E2E Test 6:** GitHub CLI integration works
-11. ✅ **E2E Test 7:** Concurrency management prevents race conditions
-12. ✅ **E2E Test 8:** Streaming modes deliver AI responses
-13. ✅ **E2E Test 9:** Error handling is graceful and informative
-14. ✅ **E2E Test 10:** Complete Telegram-like workflow succeeds
+**If ALL phases pass, the Remote Coding Agent is production-ready.**
 
-**If ALL criteria pass, the application is production-ready with 100% confidence.**
+---
 
 ## Troubleshooting
 
-If any phase fails:
-
-1. **Linting failures:** Run `npm run lint:fix` to auto-fix issues
-2. **Type errors:** Check `tsconfig.json` and fix type annotations
-3. **Formatting:** Run `npm run format` to auto-format files
-4. **Unit test failures:** Check test output and fix implementation
-5. **E2E test failures:** Check Docker logs with `docker compose logs -f app`
-6. **Database errors:** Verify migrations with `docker compose exec postgres psql ...`
-7. **Container issues:** Rebuild with `docker compose down && docker compose --profile with-db up -d --build`
-
-## Notes
-
-- Run this validation before every commit and PR
-- E2E tests use the test adapter for speed and reliability
-- GitHub webhook tests are excluded (require external setup)
-- Production deployment should run phases 1-5 in CI/CD
-- E2E tests can be extended with actual Telegram/GitHub integration
+| Issue | Solution |
+|-------|----------|
+| Linting errors | `bun run lint:fix` |
+| Type errors | Check `tsconfig.json`, fix annotations |
+| Format errors | `bun run format` |
+| Test failures | Check test output, fix implementation |
+| Container issues | `docker compose down && docker compose --profile with-db up -d --build` |
+| Database errors | Check migrations: `docker compose exec postgres psql -U postgres -d remote_coding_agent -c "\dt"` |
+| Clone failures | Check GH_TOKEN in .env, network connectivity |
+| Worktree errors | Check git permissions, disk space |

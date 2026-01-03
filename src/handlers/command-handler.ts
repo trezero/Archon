@@ -1019,9 +1019,20 @@ Setup:
               env.workingPath,
             ]);
 
-            // Update conversation with isolation info
+            // Create database record for isolation environment
+            const dbEnv = await isolationEnvDb.create({
+              codebase_id: conversation.codebase_id,
+              workflow_type: 'task',
+              workflow_id: `task-${branchName}`,
+              provider: 'worktree',
+              working_path: env.workingPath,
+              branch_name: env.branchName ?? branchName,
+              created_by_platform: conversation.platform_type,
+            });
+
+            // Update conversation with isolation info (use database UUID)
             await db.updateConversation(conversation.id, {
-              isolation_env_id: env.id,
+              isolation_env_id: dbEnv.id,
               cwd: env.workingPath,
             });
 
@@ -1086,12 +1097,21 @@ Setup:
             return { success: false, message: 'This conversation is not using a worktree.' };
           }
 
+          // Look up the isolation environment to get the working path
+          const isolationEnv = await isolationEnvDb.getById(isolationEnvId);
+          if (!isolationEnv) {
+            return { success: false, message: 'Isolation environment not found in database.' };
+          }
+
           const forceFlag = args[1] === '--force';
 
           try {
-            // Use isolation provider for removal
+            // Use isolation provider for removal (pass the working path, not UUID)
             const provider = getIsolationProvider();
-            await provider.destroy(isolationEnvId, { force: forceFlag });
+            await provider.destroy(isolationEnv.working_path, { force: forceFlag });
+
+            // Update database record status
+            await isolationEnvDb.updateStatus(isolationEnvId, 'destroyed');
 
             // Clear isolation reference, set cwd to main repo
             await db.updateConversation(conversation.id, {
@@ -1105,7 +1125,7 @@ Setup:
               await sessionDb.deactivateSession(session.id);
             }
 
-            const shortPath = shortenPath(isolationEnvId, mainPath);
+            const shortPath = shortenPath(isolationEnv.working_path, mainPath);
             return {
               success: true,
               message: `Worktree removed: ${shortPath}\n\nSwitched back to main repo.`,
