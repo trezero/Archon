@@ -30,6 +30,10 @@ Run comprehensive end-to-end validation of the Remote Agentic Coding Platform in
 - 6 database tables (codebases, conversations, sessions, command_templates, isolation_environments, workflow_runs)
 - Worktree isolation with database tracking
 - Full GitHub workflow: Issue → Prime → Plan → Execute → PR → Review
+- Comprehensive command testing (/help, /clone, /repos, /templates, /status, /getcwd, /setcwd, /init, /reset, /worktree cleanup, /worktree orphans)
+- PR/Issue worktree sharing verification
+- GitHub close event cleanup trigger
+- Database consistency checks (orphaned records)
 
 ---
 
@@ -392,6 +396,96 @@ echo "$CMDS" | grep -q "plan-feature" && echo "✅ plan-feature command loaded" 
 echo "$CMDS" | grep -q "execute" && echo "✅ execute command loaded" || echo "❌ execute missing"
 ```
 
+### 5.4 Test /getcwd Command
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-clone","message":"/getcwd"}'
+
+sleep 2
+
+CWD_MSG=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message')
+echo "$CWD_MSG" | grep -q "archon\|workspaces" && echo "✅ /getcwd works" || echo "❌ /getcwd failed"
+```
+
+### 5.5 Test /repos Command
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-clone","message":"/repos"}'
+
+sleep 2
+
+REPOS_MSG=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message')
+echo "$REPOS_MSG" | grep -q "remote-coding-test\|Repositories" && echo "✅ /repos works" || echo "❌ /repos failed"
+```
+
+### 5.6 Test /templates Command
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-clone","message":"/templates"}'
+
+sleep 2
+
+TEMPLATES_MSG=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message')
+echo "$TEMPLATES_MSG" | grep -q "commit\|review-pr\|plan\|Template" && echo "✅ /templates works" || echo "❌ /templates failed"
+```
+
+### 5.7 Test /status Command
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-clone","message":"/status"}'
+
+sleep 2
+
+STATUS_MSG=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message')
+echo "$STATUS_MSG" | grep -q "Platform:\|Codebase:\|Working Directory" && echo "✅ /status works" || echo "❌ /status failed"
+```
+
+### 5.8 Test /setcwd Command
+```bash
+# Get current cwd first
+ORIGINAL_CWD=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message' | grep -o '/[^ ]*archon[^ ]*' | head -1)
+
+# Test setcwd with valid path
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d "{\"conversationId\":\"test-clone\",\"message\":\"/setcwd /.archon/workspaces/${GITHUB_USERNAME}/${TEST_REPO_NAME}\"}"
+
+sleep 2
+
+SETCWD_MSG=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message')
+echo "$SETCWD_MSG" | grep -qi "set to\|working directory\|changed" && echo "✅ /setcwd works" || echo "❌ /setcwd failed"
+```
+
+### 5.9 Test /init Command (in test conversation)
+```bash
+curl -X DELETE http://localhost:3000/test/messages/test-init
+
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-init","message":"/init"}'
+
+sleep 2
+
+INIT_MSG=$(curl -s http://localhost:3000/test/messages/test-init | jq -r '.messages[-1].message')
+echo "$INIT_MSG" | grep -qi "created\|initialized\|already exists\|no codebase" && echo "✅ /init works" || echo "❌ /init failed"
+```
+
+### 5.10 Test /reset Command
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-clone","message":"/reset"}'
+
+sleep 2
+
+RESET_MSG=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message')
+echo "$RESET_MSG" | grep -qi "reset\|cleared\|session" && echo "✅ /reset works" || echo "❌ /reset failed"
+```
+
 ---
 
 ## Phase 6: Worktree Isolation Tests
@@ -452,6 +546,30 @@ docker compose exec postgres psql -U postgres -d remote_coding_agent \
 ```
 
 **Expected:** `status=destroyed`
+
+### 6.4 Test /worktree cleanup Command
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-worktree","message":"/worktree cleanup merged"}'
+
+sleep 3
+
+CLEANUP_MSG=$(curl -s http://localhost:3000/test/messages/test-worktree | jq -r '.messages[-1].message')
+echo "$CLEANUP_MSG" | grep -qi "cleanup\|removed\|no.*merged\|worktree" && echo "✅ /worktree cleanup works" || echo "❌ /worktree cleanup failed"
+```
+
+### 6.5 Test /worktree orphans Command
+```bash
+curl -X POST http://localhost:3000/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test-worktree","message":"/worktree orphans"}'
+
+sleep 2
+
+ORPHANS_MSG=$(curl -s http://localhost:3000/test/messages/test-worktree | jq -r '.messages[-1].message')
+echo "$ORPHANS_MSG" | grep -q "worktree\|main\|branch" && echo "✅ /worktree orphans works" || echo "❌ /worktree orphans failed"
+```
 
 ---
 
@@ -639,6 +757,26 @@ docker compose logs app-with-db 2>&1 | grep -E "Tool call:|Bash|Read|Edit|Write"
 
 **Expected:** Multiple tool calls showing the bot actually executed tools (Read, Edit/Write, Bash for git)
 
+### 8.8 Verify PR Shares Worktree with Linked Issue
+```bash
+# This test verifies the intelligent worktree sharing behavior
+# When a PR references an issue (e.g., "Closes #1"), it should share the issue's worktree
+
+# Get isolation env ID for the issue
+ISSUE_ENV_ID=$(docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -t -c "SELECT isolation_env_id FROM remote_agent_conversations
+         WHERE platform_conversation_id LIKE '%${GITHUB_USERNAME}/${TEST_REPO_NAME}#${ISSUE_NUMBER}';" | tr -d ' ')
+
+echo "Issue #${ISSUE_NUMBER} isolation env: $ISSUE_ENV_ID"
+
+# After PR is created, check if it shares the same env (will be verified in Phase 9)
+if [ -n "$ISSUE_ENV_ID" ]; then
+  echo "✅ Issue has isolation environment"
+else
+  echo "⚠️ Issue isolation env not found (may be expected)"
+fi
+```
+
 ---
 
 ## Phase 9: GitHub PR Review (Review Bot-Created PR)
@@ -725,6 +863,45 @@ cd "${PROJECT_ROOT}"
 - Bot review comment visible
 - PR ready for merge (if review passed)
 
+### 9.6 Verify PR Shares Worktree with Issue (Completion)
+```bash
+# Complete the verification started in Phase 8.8
+PR_ENV_ID=$(docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -t -c "SELECT isolation_env_id FROM remote_agent_conversations
+         WHERE platform_conversation_id LIKE '%${GITHUB_USERNAME}/${TEST_REPO_NAME}#${PR_NUMBER}';" | tr -d ' ')
+
+echo "PR #${PR_NUMBER} isolation env: $PR_ENV_ID"
+
+if [ -n "$ISSUE_ENV_ID" ] && [ "$ISSUE_ENV_ID" = "$PR_ENV_ID" ]; then
+  echo "✅ PR shares worktree with linked issue (intelligent sharing)"
+elif [ -n "$PR_ENV_ID" ]; then
+  echo "⚠️ PR has different isolation env (may be expected if not linked)"
+else
+  echo "⚠️ PR isolation env not found"
+fi
+```
+
+### 9.7 Test GitHub Issue Close Event (Cleanup Trigger)
+```bash
+cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
+
+# Close the issue to trigger cleanup event
+echo "Closing issue #${ISSUE_NUMBER} to test cleanup trigger..."
+gh issue close ${ISSUE_NUMBER}
+
+sleep 10
+
+# Check logs for cleanup trigger
+docker compose logs app-with-db 2>&1 | tail -30 | grep -qi "closed\|cleanup\|onConversationClosed" && \
+  echo "✅ Close event detected in logs" || echo "⚠️ Close event not clearly logged (may still work)"
+
+# Reopen the issue for manual inspection
+echo "Reopening issue for manual inspection..."
+gh issue reopen ${ISSUE_NUMBER}
+
+cd "${PROJECT_ROOT}"
+```
+
 ---
 
 ## Phase 10: Concurrency Tests
@@ -787,7 +964,71 @@ echo "$CLONE_ERR" | grep -qi "failed\|error\|not found" && echo "✅ Invalid clo
 
 ---
 
-## Phase 12: Final Validation Summary
+## Phase 12: Database Consistency Checks
+
+### 12.1 Check for Orphaned Sessions
+```bash
+echo "=== Database Consistency Checks ==="
+
+# Check for sessions without a valid conversation
+ORPHAN_SESSIONS=$(docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -t -c "SELECT COUNT(*) FROM remote_agent_sessions
+         WHERE conversation_id NOT IN (SELECT id FROM remote_agent_conversations);" | tr -d ' ')
+
+echo "Orphaned sessions (no conversation): $ORPHAN_SESSIONS"
+[ "$ORPHAN_SESSIONS" = "0" ] && echo "✅ No orphaned sessions" || echo "❌ Found orphaned sessions"
+```
+
+### 12.2 Check for Orphaned Isolation Environments
+```bash
+# Check for isolation envs without a valid codebase
+ORPHAN_ENVS=$(docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -t -c "SELECT COUNT(*) FROM remote_agent_isolation_environments
+         WHERE codebase_id NOT IN (SELECT id FROM remote_agent_codebases);" | tr -d ' ')
+
+echo "Orphaned isolation envs (no codebase): $ORPHAN_ENVS"
+[ "$ORPHAN_ENVS" = "0" ] && echo "✅ No orphaned isolation envs" || echo "❌ Found orphaned isolation envs"
+```
+
+### 12.3 Check for Orphaned Workflow Runs
+```bash
+# Check for workflow runs without a valid conversation
+ORPHAN_RUNS=$(docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -t -c "SELECT COUNT(*) FROM remote_agent_workflow_runs
+         WHERE conversation_id NOT IN (SELECT id FROM remote_agent_conversations);" | tr -d ' ')
+
+echo "Orphaned workflow runs (no conversation): $ORPHAN_RUNS"
+[ "$ORPHAN_RUNS" = "0" ] && echo "✅ No orphaned workflow runs" || echo "❌ Found orphaned workflow runs"
+```
+
+### 12.4 Check Active Isolation Envs Have Filesystem Worktrees
+```bash
+echo "Checking active isolation envs have filesystem worktrees..."
+MISSING_WT=0
+
+# Get all active working paths for test repo
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -t -c "SELECT working_path FROM remote_agent_isolation_environments
+         WHERE status = 'active' AND working_path LIKE '%${TEST_REPO_NAME}%';" | \
+while read -r path; do
+  path=$(echo "$path" | tr -d ' ')
+  if [ -n "$path" ]; then
+    docker compose exec app-with-db sh -c "[ -d '$path' ]" 2>/dev/null
+    if [ $? -eq 0 ]; then
+      echo "  ✅ Exists: $path"
+    else
+      echo "  ❌ MISSING: $path"
+      MISSING_WT=$((MISSING_WT + 1))
+    fi
+  fi
+done
+
+[ "$MISSING_WT" = "0" ] && echo "✅ All active worktrees exist on filesystem" || echo "❌ Some worktrees missing"
+```
+
+---
+
+## Phase 13: Final Validation Summary
 
 ```bash
 echo "========================================"
@@ -857,7 +1098,7 @@ echo "  [ ] Zero errors in logs"
 
 ---
 
-## Phase 13: Cleanup
+## Phase 14: Cleanup
 
 **Test repository is preserved for manual inspection.**
 
@@ -887,13 +1128,14 @@ docker compose exec postgres psql -U postgres -d remote_coding_agent \
 | 2.x | Test repo created with webhook configured |
 | 3.x | Docker containers running, health checks pass |
 | 4.x | All 6 database tables exist with FKs |
-| 5.x | Test adapter commands work (/help, /clone, /commands) |
-| 6.x | Worktree create/list/remove work with DB tracking |
+| 5.x | Test adapter commands work (/help, /clone, /commands, /repos, /templates, /status, /getcwd, /setcwd, /init, /reset) |
+| 6.x | Worktree create/list/remove/cleanup/orphans work with DB tracking |
 | 7.x | Command invocation works via Test Adapter (prime) |
-| 8.x | **Full GitHub Issue Workflow:** prime → plan-feature → execute → PR created |
-| 9.x | **PR Review via GitHub:** Bot reviews the created PR |
+| 8.x | **Full GitHub Issue Workflow:** prime → plan-feature → execute → PR created, worktree sharing verified |
+| 9.x | **PR Review via GitHub:** Bot reviews the created PR, close event triggers cleanup |
 | 10.x | Concurrent requests handled correctly |
 | 11.x | Error handling is graceful |
+| 12.x | Database consistency: no orphaned sessions, isolation envs, or workflow runs |
 
 **If ALL phases pass, the Remote Coding Agent is production-ready.**
 
