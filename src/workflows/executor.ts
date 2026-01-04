@@ -60,7 +60,7 @@ const TRANSIENT_PATTERNS = [
  * Check if error message matches any pattern in the list
  */
 function matchesPattern(message: string, patterns: string[]): boolean {
-  return patterns.some((pattern) => message.includes(pattern));
+  return patterns.some(pattern => message.includes(pattern));
 }
 
 /**
@@ -137,7 +137,7 @@ async function safeSendMessage(
  * Delay execution for specified milliseconds
  */
 function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
@@ -159,10 +159,18 @@ async function sendCriticalMessage(
       const err = error as Error;
       const errorType = classifyError(err);
 
-      logSendError('Critical message send failed', err, platform, conversationId, message, context, {
-        attempt,
-        maxRetries,
-      });
+      logSendError(
+        'Critical message send failed',
+        err,
+        platform,
+        conversationId,
+        message,
+        context,
+        {
+          attempt,
+          maxRetries,
+        }
+      );
 
       // Don't retry fatal errors
       if (errorType === 'FATAL') {
@@ -435,7 +443,7 @@ export async function executeWorkflow(
   await safeSendMessage(
     platform,
     conversationId,
-    `**Starting workflow**: ${workflow.name}\n\n${workflow.description}\n\nSteps: ${workflow.steps.map((s) => s.command).join(' -> ')}`,
+    `**Starting workflow**: ${workflow.name}\n\n${workflow.description}\n\nSteps: ${workflow.steps.map(s => s.command).join(' -> ')}`,
     workflowContext
   );
 

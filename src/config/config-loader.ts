@@ -8,7 +8,12 @@
  * 4. Environment variables
  */
 
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile as fsReadFile, writeFile, mkdir } from 'fs/promises';
+
+// Wrapper function for reading files - allows mocking without polluting fs/promises globally
+export async function readConfigFile(path: string): Promise<string> {
+  return fsReadFile(path, 'utf-8');
+}
 import { join, dirname } from 'path';
 import { parse as parseYaml } from 'yaml';
 import {
@@ -74,7 +79,7 @@ export async function loadGlobalConfig(forceReload = false): Promise<GlobalConfi
   const configPath = getArchonConfigPath();
 
   try {
-    const content = await readFile(configPath, 'utf-8');
+    const content = await readConfigFile(configPath);
     cachedGlobalConfig = parseYaml(content) as GlobalConfig;
     return cachedGlobalConfig ?? {};
   } catch (error) {
@@ -103,7 +108,7 @@ export async function loadRepoConfig(repoPath: string): Promise<RepoConfig> {
 
   for (const configPath of configPaths) {
     try {
-      const content = await readFile(configPath, 'utf-8');
+      const content = await readConfigFile(configPath);
       return (parseYaml(content) as RepoConfig) ?? {};
     } catch {
       // Try next path

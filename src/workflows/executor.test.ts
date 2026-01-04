@@ -115,8 +115,8 @@ describe('Workflow Executor', () => {
       );
 
       // Verify INSERT query was called with correct parameters
-      const insertCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) => (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
+      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
+        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
       );
       expect(insertCalls.length).toBeGreaterThan(0);
       const params = insertCalls[0][1] as string[];
@@ -176,7 +176,10 @@ describe('Workflow Executor', () => {
       // Verify logging by reading the JSONL log file
       const logPath = join(testDir, '.archon', 'logs', 'test-workflow-run-id.jsonl');
       const logContent = await readFile(logPath, 'utf-8');
-      const events = logContent.trim().split('\n').map(line => JSON.parse(line));
+      const events = logContent
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line));
 
       const eventTypes = events.map((e: { type: string }) => e.type);
       expect(eventTypes).toContain('workflow_start');
@@ -198,7 +201,8 @@ describe('Workflow Executor', () => {
       // Should have UPDATE queries for step progress
       const updateCalls = mockQuery.mock.calls.filter(
         (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes('current_step_index')
+          (call[0] as string).includes('UPDATE') &&
+          (call[0] as string).includes('current_step_index')
       );
       expect(updateCalls.length).toBeGreaterThan(0);
     });
@@ -264,7 +268,10 @@ describe('Workflow Executor', () => {
       // Verify error was logged by reading log file
       const logPath = join(testDir, '.archon', 'logs', 'test-workflow-run-id.jsonl');
       const logContent = await readFile(logPath, 'utf-8');
-      const events = logContent.trim().split('\n').map(line => JSON.parse(line));
+      const events = logContent
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line));
       expect(events.some((e: { type: string }) => e.type === 'workflow_error')).toBe(true);
 
       const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
@@ -286,8 +293,8 @@ describe('Workflow Executor', () => {
       );
 
       // Verify INSERT was called with null for codebase_id
-      const insertCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) => (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
+      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
+        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
       );
       expect(insertCalls.length).toBeGreaterThan(0);
       const params = insertCalls[0][1] as (string | null)[];
@@ -333,10 +340,7 @@ describe('Workflow Executor', () => {
       const workflow: WorkflowDefinition = {
         name: 'clear-context-test',
         description: 'Test clear context',
-        steps: [
-          { command: 'context-one' },
-          { command: 'context-two', clearContext: true },
-        ],
+        steps: [{ command: 'context-one' }, { command: 'context-two', clearContext: true }],
       };
 
       await executeWorkflow(
@@ -413,7 +417,8 @@ describe('Workflow Executor', () => {
       // Verify multiple UPDATE queries for step progress
       const updateCalls = mockQuery.mock.calls.filter(
         (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes('current_step_index')
+          (call[0] as string).includes('UPDATE') &&
+          (call[0] as string).includes('current_step_index')
       );
       expect(updateCalls.length).toBeGreaterThan(0);
       // Verify completion
@@ -573,7 +578,10 @@ describe('Workflow Executor', () => {
       // First step should succeed - verify by reading log file
       const logPath = join(testDir, '.archon', 'logs', 'test-workflow-run-id.jsonl');
       const logContent = await readFile(logPath, 'utf-8');
-      const events = logContent.trim().split('\n').map(line => JSON.parse(line));
+      const events = logContent
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line));
       const stepCompleteEvents = events.filter((e: { type: string }) => e.type === 'step_complete');
       expect(stepCompleteEvents).toHaveLength(1);
 
@@ -816,7 +824,7 @@ describe('Workflow Executor', () => {
 
       // Verify error was logged with correct structure
       const safeSendLogs = errorLogs.filter(
-        (log) => log[0] === '[WorkflowExecutor] Failed to send message'
+        log => log[0] === '[WorkflowExecutor] Failed to send message'
       );
       expect(safeSendLogs.length).toBeGreaterThan(0);
 

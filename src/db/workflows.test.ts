@@ -124,10 +124,10 @@ describe('workflows database', () => {
 
       await updateWorkflowRun('workflow-run-123', { current_step_index: 2 });
 
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining('current_step_index = $1'),
-        [2, 'workflow-run-123']
-      );
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('current_step_index = $1'), [
+        2,
+        'workflow-run-123',
+      ]);
     });
 
     test('updates status to completed', async () => {
@@ -155,10 +155,10 @@ describe('workflows database', () => {
 
       await updateWorkflowRun('workflow-run-123', { metadata: { lastStep: 'plan' } });
 
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining('metadata = metadata ||'),
-        [JSON.stringify({ lastStep: 'plan' }), 'workflow-run-123']
-      );
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('metadata = metadata ||'), [
+        JSON.stringify({ lastStep: 'plan' }),
+        'workflow-run-123',
+      ]);
     });
 
     test('updates multiple fields', async () => {
@@ -188,14 +188,12 @@ describe('workflows database', () => {
 
       await completeWorkflowRun('workflow-run-123');
 
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining("status = 'completed'"),
-        ['workflow-run-123']
-      );
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining('completed_at = NOW()'),
-        ['workflow-run-123']
-      );
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining("status = 'completed'"), [
+        'workflow-run-123',
+      ]);
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('completed_at = NOW()'), [
+        'workflow-run-123',
+      ]);
     });
   });
 
@@ -205,10 +203,10 @@ describe('workflows database', () => {
 
       await failWorkflowRun('workflow-run-123', 'Step not found: missing.md');
 
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining("status = 'failed'"),
-        ['workflow-run-123', JSON.stringify({ error: 'Step not found: missing.md' })]
-      );
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), [
+        'workflow-run-123',
+        JSON.stringify({ error: 'Step not found: missing.md' }),
+      ]);
       expect(mockQuery).toHaveBeenCalledWith(
         expect.stringContaining('completed_at = NOW()'),
         expect.any(Array)
@@ -257,9 +255,9 @@ describe('workflows database', () => {
     test('updateWorkflowRun throws on database error', async () => {
       mockQuery.mockRejectedValueOnce(new Error('Update failed'));
 
-      await expect(
-        updateWorkflowRun('test-id', { status: 'completed' })
-      ).rejects.toThrow('Failed to update workflow run: Update failed');
+      await expect(updateWorkflowRun('test-id', { status: 'completed' })).rejects.toThrow(
+        'Failed to update workflow run: Update failed'
+      );
     });
 
     test('completeWorkflowRun throws on database error', async () => {

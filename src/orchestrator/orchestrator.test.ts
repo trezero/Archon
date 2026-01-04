@@ -2,7 +2,7 @@ import { mock, describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { MockPlatformAdapter } from '../test/mocks/platform';
 import { Conversation, Codebase, Session } from '../types';
 import { join } from 'path';
-import * as fsPromises from 'fs/promises';
+import * as gitUtils from '../utils/git';
 
 // Setup mocks before importing the module under test
 const mockGetOrCreateConversation = mock(() => Promise.resolve(null));
@@ -22,9 +22,8 @@ const mockParseCommand = mock((message: string) => {
 });
 const mockGetAssistantClient = mock(() => null);
 
-// Store original readFile for passthrough
-const originalReadFile = fsPromises.readFile;
-const mockReadFile = mock(originalReadFile);
+// Mock for reading command files (replaces fs/promises mock)
+const mockReadCommandFile = mock(() => Promise.resolve(''));
 
 // Isolation environment mocks
 const mockIsolationEnvGetById = mock(() => Promise.resolve(null));
@@ -70,6 +69,7 @@ mock.module('../db/isolation-environments', () => ({
 }));
 
 mock.module('../utils/git', () => ({
+  ...gitUtils,
   worktreeExists: mockWorktreeExists,
   findWorktreeByBranch: mockFindWorktreeByBranch,
   getCanonicalRepoPath: mockGetCanonicalRepoPath,
@@ -105,9 +105,11 @@ mock.module('../clients/factory', () => ({
   getAssistantClient: mockGetAssistantClient,
 }));
 
-mock.module('fs/promises', () => ({
-  ...fsPromises,
-  readFile: mockReadFile,
+// Import real orchestrator to spread its exports, then override readCommandFile
+import * as realOrchestrator from './orchestrator';
+mock.module('./orchestrator', () => ({
+  ...realOrchestrator,
+  readCommandFile: mockReadCommandFile,
 }));
 
 import { handleMessage } from './orchestrator';
@@ -191,7 +193,7 @@ describe('orchestrator', () => {
     mockHandleCommand.mockClear();
     mockParseCommand.mockClear();
     mockGetAssistantClient.mockClear();
-    mockReadFile.mockClear();
+    mockReadCommandFile.mockClear();
     mockClient.sendQuery.mockClear();
     mockClient.getType.mockClear();
 
@@ -254,8 +256,8 @@ describe('orchestrator', () => {
   });
 
   afterEach(() => {
-    // Restore mock to passthrough mode for other test files
-    mockReadFile.mockImplementation(originalReadFile);
+    // No need to restore - we're mocking at orchestrator level, not fs/promises
+    mockReadCommandFile.mockClear();
   });
 
   describe('slash commands (non-invoke)', () => {
@@ -327,7 +329,7 @@ describe('orchestrator', () => {
 
     test('sends error when file read fails', async () => {
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockRejectedValue(new Error('ENOENT: no such file'));
+      mockReadCommandFile.mockRejectedValue(new Error('ENOENT: no such file'));
 
       await handleMessage(platform, 'chat-456', '/command-invoke plan');
 
@@ -342,7 +344,7 @@ describe('orchestrator', () => {
         command: 'command-invoke',
         args: ['plan', 'Add dark mode'],
       });
-      mockReadFile.mockResolvedValue('Plan the following: $1');
+      mockReadCommandFile.mockResolvedValue('Plan the following: $1');
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'assistant', content: 'I will plan this feature.' };
         yield { type: 'result', sessionId: 'new-session-id' };
@@ -352,7 +354,7 @@ describe('orchestrator', () => {
 
       // Use join() for platform-agnostic path construction
       const expectedPath = join('/workspace/project', '.claude/commands/plan.md');
-      expect(mockReadFile).toHaveBeenCalledWith(expectedPath, 'utf-8');
+      expect(mockReadCommandFile).toHaveBeenCalledWith(expectedPath);
       // Session has assistant_session_id so it's passed to sendQuery
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         wrapCommandForExecution('plan', 'Plan the following: Add dark mode'),
@@ -363,7 +365,7 @@ describe('orchestrator', () => {
 
     test('appends issueContext after command text', async () => {
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Command text here');
+      mockReadCommandFile.mockResolvedValue('Command text here');
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
       });
@@ -442,7 +444,7 @@ describe('orchestrator', () => {
   describe('session management', () => {
     test('creates new session when none exists', async () => {
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
+      mockReadCommandFile.mockResolvedValue('Plan command');
       mockGetActiveSession.mockResolvedValue(null);
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
@@ -459,7 +461,7 @@ describe('orchestrator', () => {
 
     test('resumes existing session', async () => {
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
+      mockReadCommandFile.mockResolvedValue('Plan command');
       mockGetActiveSession.mockResolvedValue(mockSession);
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
@@ -477,7 +479,7 @@ describe('orchestrator', () => {
 
     test('creates new session for plan-feature→execute transition', async () => {
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['execute'] });
-      mockReadFile.mockResolvedValue('Execute command');
+      mockReadCommandFile.mockResolvedValue('Execute command');
       mockGetActiveSession.mockResolvedValue({
         ...mockSession,
         metadata: { lastCommand: 'plan-feature' },
@@ -494,7 +496,7 @@ describe('orchestrator', () => {
 
     test('updates session with AI session ID', async () => {
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
+      mockReadCommandFile.mockResolvedValue('Plan command');
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'ai-session-123' };
       });
@@ -506,7 +508,7 @@ describe('orchestrator', () => {
 
     test('tracks lastCommand in metadata', async () => {
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
+      mockReadCommandFile.mockResolvedValue('Plan command');
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
       });
@@ -522,7 +524,7 @@ describe('orchestrator', () => {
   describe('streaming modes', () => {
     beforeEach(() => {
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
+      mockReadCommandFile.mockResolvedValue('Plan command');
     });
 
     test('stream mode accumulates then sends each chunk after workflow check', async () => {
@@ -631,7 +633,7 @@ describe('orchestrator', () => {
   describe('cwd resolution', () => {
     test('uses conversation cwd when set', async () => {
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
+      mockReadCommandFile.mockResolvedValue('Plan command');
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
       });
@@ -673,7 +675,7 @@ describe('orchestrator', () => {
       });
 
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
+      mockReadCommandFile.mockResolvedValue('Plan command');
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
       });
@@ -712,7 +714,7 @@ describe('orchestrator', () => {
       });
 
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
+      mockReadCommandFile.mockResolvedValue('Plan command');
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
       });
@@ -755,7 +757,7 @@ describe('orchestrator', () => {
       mockWorktreeExists.mockResolvedValue(false); // Path doesn't exist
 
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
+      mockReadCommandFile.mockResolvedValue('Plan command');
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
       });
@@ -779,7 +781,7 @@ describe('orchestrator', () => {
       mockGetActiveSession.mockResolvedValue(mockSession);
 
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
+      mockReadCommandFile.mockResolvedValue('Plan command');
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
       });
@@ -799,7 +801,7 @@ describe('orchestrator', () => {
       mockGetActiveSession.mockResolvedValue(mockSession);
 
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
-      mockReadFile.mockResolvedValue('Plan command');
+      mockReadCommandFile.mockResolvedValue('Plan command');
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
       });

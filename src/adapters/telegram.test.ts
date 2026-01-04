@@ -3,6 +3,7 @@
  */
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 import type { Mock } from 'bun:test';
+import * as telegramMarkdown from '../utils/telegram-markdown';
 
 // Create mock functions
 const mockConvertToTelegramMarkdown = mock((text: string) => text);
@@ -10,6 +11,7 @@ const mockStripMarkdown = mock((text: string) => text);
 
 // Mock the telegram-markdown module
 mock.module('../utils/telegram-markdown', () => ({
+  ...telegramMarkdown,
   convertToTelegramMarkdown: mockConvertToTelegramMarkdown,
   stripMarkdown: mockStripMarkdown,
 }));

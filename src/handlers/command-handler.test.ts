@@ -5,6 +5,8 @@ import { describe, test, expect, mock, beforeEach, type Mock } from 'bun:test';
 import { Conversation } from '../types';
 import { resolve, join } from 'path';
 import * as fsPromises from 'fs/promises';
+import * as gitUtils from '../utils/git';
+import * as pathValidation from '../utils/path-validation';
 
 // Create mock functions
 const mockUpdateConversation = mock(() => Promise.resolve());
@@ -81,10 +83,12 @@ mock.module('../db/isolation-environments', () => ({
 }));
 
 mock.module('../utils/path-validation', () => ({
+  ...pathValidation,
   isPathWithinWorkspace: mockIsPathWithinWorkspace,
 }));
 
 mock.module('../utils/git', () => ({
+  ...gitUtils,
   execFileAsync: mockExecFileAsync,
   mkdirAsync: mock(() => Promise.resolve()),
   worktreeExists: mockWorktreeExists,
@@ -128,11 +132,11 @@ mock.module('child_process', () => ({
   execFile: mockExecFile,
 }));
 
+// Keep mkdir as real implementation to avoid breaking other tests
 mock.module('fs/promises', () => ({
   ...fsPromises,
   access: mockAccess,
   readdir: mockReaddir,
-  mkdir: mock(() => Promise.resolve()),
 }));
 
 import { parseCommand, handleCommand } from './command-handler';

@@ -7,17 +7,14 @@ import type { WorkflowDefinition } from './types';
  * Build the router prompt with available workflows
  * Instructs AI to use /invoke-workflow command
  */
-export function buildRouterPrompt(
-  userMessage: string,
-  workflows: WorkflowDefinition[]
-): string {
+export function buildRouterPrompt(userMessage: string, workflows: WorkflowDefinition[]): string {
   if (workflows.length === 0) {
     // No workflows - just respond conversationally
     return userMessage;
   }
 
   const workflowList = workflows
-    .map((w) => {
+    .map(w => {
       // Format description, handling multi-line descriptions
       const desc = w.description.trim().replace(/\n/g, '\n  ');
       return `**${w.name}**\n  ${desc}`;

@@ -1,16 +1,15 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { homedir } from 'os';
 import { join } from 'path';
-import * as fsPromises from 'fs/promises';
 
-// Store original readFile for passthrough
-const originalReadFile = fsPromises.readFile;
+// Mock for reading config files (replaces fs/promises mock)
+const mockReadConfigFile = mock(() => Promise.resolve(''));
 
-// Mock readFile - defaults to calling original implementation
-const mockReadFile = mock(originalReadFile);
-mock.module('fs/promises', () => ({
-  ...fsPromises,
-  readFile: mockReadFile,
+// Import real config-loader to spread its exports, then override readConfigFile
+import * as realConfigLoader from './config-loader';
+mock.module('./config-loader', () => ({
+  ...realConfigLoader,
+  readConfigFile: mockReadConfigFile,
 }));
 
 import { loadGlobalConfig, loadRepoConfig, loadConfig, clearConfigCache } from './config-loader';
@@ -31,7 +30,7 @@ describe('config-loader', () => {
 
   beforeEach(() => {
     clearConfigCache();
-    mockReadFile.mockReset();
+    mockReadConfigFile.mockReset();
 
     // Save original env vars
     envVars.forEach(key => {
@@ -50,22 +49,22 @@ describe('config-loader', () => {
       }
     });
 
-    // Restore mock to passthrough mode for other test files
-    mockReadFile.mockImplementation(originalReadFile);
+    // No need to restore - we're mocking at config-loader level, not fs/promises
+    mockReadConfigFile.mockClear();
   });
 
   describe('loadGlobalConfig', () => {
     test('returns empty object when file does not exist', async () => {
       const error = new Error('ENOENT') as NodeJS.ErrnoException;
       error.code = 'ENOENT';
-      mockReadFile.mockRejectedValue(error);
+      mockReadConfigFile.mockRejectedValue(error);
 
       const config = await loadGlobalConfig();
       expect(config).toEqual({});
     });
 
     test('parses valid YAML config', async () => {
-      mockReadFile.mockResolvedValue(`
+      mockReadConfigFile.mockResolvedValue(`
 defaultAssistant: codex
 streaming:
   telegram: batch
@@ -80,22 +79,22 @@ concurrency:
     });
 
     test('caches config on subsequent calls', async () => {
-      mockReadFile.mockResolvedValue('defaultAssistant: claude');
+      mockReadConfigFile.mockResolvedValue('defaultAssistant: claude');
 
       await loadGlobalConfig();
       await loadGlobalConfig();
 
       // Should only read file once
-      expect(mockReadFile).toHaveBeenCalledTimes(1);
+      expect(mockReadConfigFile).toHaveBeenCalledTimes(1);
     });
 
     test('reloads config when forceReload is true', async () => {
-      mockReadFile.mockResolvedValue('defaultAssistant: claude');
+      mockReadConfigFile.mockResolvedValue('defaultAssistant: claude');
 
       await loadGlobalConfig();
       await loadGlobalConfig(true);
 
-      expect(mockReadFile).toHaveBeenCalledTimes(2);
+      expect(mockReadConfigFile).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -107,7 +106,7 @@ concurrency:
     };
 
     test('loads from .archon/config.yaml', async () => {
-      mockReadFile.mockImplementation(async (path: string) => {
+      mockReadConfigFile.mockImplementation(async (path: string) => {
         if (pathMatches(path, '.archon/config.yaml')) {
           return 'assistant: codex';
         }
@@ -119,7 +118,7 @@ concurrency:
     });
 
     test('falls back to .claude/config.yaml', async () => {
-      mockReadFile.mockImplementation(async (path: string) => {
+      mockReadConfigFile.mockImplementation(async (path: string) => {
         if (pathMatches(path, '.claude/config.yaml')) {
           return 'assistant: claude';
         }
@@ -131,7 +130,7 @@ concurrency:
     });
 
     test('returns empty object when no config found', async () => {
-      mockReadFile.mockRejectedValue(new Error('Not found'));
+      mockReadConfigFile.mockRejectedValue(new Error('Not found'));
 
       const config = await loadRepoConfig('/test/repo');
       expect(config).toEqual({});
@@ -142,7 +141,7 @@ concurrency:
     test('returns defaults when no configs exist', async () => {
       const error = new Error('ENOENT') as NodeJS.ErrnoException;
       error.code = 'ENOENT';
-      mockReadFile.mockRejectedValue(error);
+      mockReadConfigFile.mockRejectedValue(error);
 
       const config = await loadConfig();
 
@@ -153,7 +152,7 @@ concurrency:
     });
 
     test('env vars override config files', async () => {
-      mockReadFile.mockResolvedValue(`
+      mockReadConfigFile.mockResolvedValue(`
 defaultAssistant: claude
 streaming:
   telegram: stream
@@ -176,7 +175,7 @@ streaming:
       };
 
       let globalConfigRead = false;
-      mockReadFile.mockImplementation(async (path: string) => {
+      mockReadConfigFile.mockImplementation(async (path: string) => {
         // First check for repo-specific config path (contains /repo/.archon/)
         if (pathMatches(path, '/repo/.archon/config.yaml')) {
           return 'assistant: codex';
@@ -196,7 +195,7 @@ streaming:
     test('paths use archon defaults', async () => {
       const error = new Error('ENOENT') as NodeJS.ErrnoException;
       error.code = 'ENOENT';
-      mockReadFile.mockRejectedValue(error);
+      mockReadConfigFile.mockRejectedValue(error);
 
       const config = await loadConfig();
 

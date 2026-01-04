@@ -1,8 +1,10 @@
 import { mock, describe, test, expect, beforeEach, afterAll } from 'bun:test';
+import * as gitUtils from '../utils/git';
 
 // Mock git utility
 const mockExecFileAsync = mock(() => Promise.resolve({ stdout: '', stderr: '' }));
 mock.module('../utils/git', () => ({
+  ...gitUtils,
   execFileAsync: mockExecFileAsync,
 }));
 

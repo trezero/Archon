@@ -2,7 +2,12 @@
  * Orchestrator - Main conversation handler
  * Routes slash commands and AI messages appropriately
  */
-import { readFile } from 'fs/promises';
+import { readFile as fsReadFile } from 'fs/promises';
+
+// Wrapper function for reading files - allows mocking without polluting fs/promises globally
+export async function readCommandFile(path: string): Promise<string> {
+  return fsReadFile(path, 'utf-8');
+}
 import { join } from 'path';
 import {
   IPlatformAdapter,
@@ -458,7 +463,7 @@ export async function handleMessage(
         const commandFilePath = join(commandCwd, commandDef.path);
 
         try {
-          const commandText = await readFile(commandFilePath, 'utf-8');
+          const commandText = await readCommandFile(commandFilePath);
 
           // Substitute variables (no metadata needed - file-based workflow)
           const substituted = substituteVariables(commandText, commandArgs);
@@ -520,9 +525,7 @@ export async function handleMessage(
         try {
           availableWorkflows = await discoverWorkflows(codebaseForWorkflows.default_cwd);
           if (availableWorkflows.length > 0) {
-            console.log(
-              `[Orchestrator] Discovered ${String(availableWorkflows.length)} workflows`
-            );
+            console.log(`[Orchestrator] Discovered ${String(availableWorkflows.length)} workflows`);
           }
         } catch (error) {
           const err = error as Error;
