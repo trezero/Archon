@@ -1,14 +1,21 @@
 /**
  * Unit tests for command handler
+ *
+ * Note: We avoid using mock.module() for internal modules (utils/git, utils/path-validation)
+ * that have their own test files. Mocking internal modules causes test isolation issues
+ * since Bun's mock.module() persists globally across test files.
+ *
+ * Instead, we use spyOn for internal modules, which allows spying on specific functions
+ * without replacing the entire module in the global cache.
  */
-import { describe, test, expect, mock, beforeEach, type Mock } from 'bun:test';
+import { describe, test, expect, mock, beforeEach, afterAll, spyOn, type Mock } from 'bun:test';
 import { Conversation } from '../types';
 import { resolve, join } from 'path';
 import * as fsPromises from 'fs/promises';
 import * as gitUtils from '../utils/git';
 import * as pathValidation from '../utils/path-validation';
 
-// Create mock functions
+// Create mock functions for database modules (safe to mock - no standalone tests)
 const mockUpdateConversation = mock(() => Promise.resolve());
 const mockGetCodebase = mock(() => Promise.resolve(null));
 const mockFindCodebaseByDefaultCwd = mock(() => Promise.resolve(null));
@@ -17,26 +24,25 @@ const mockGetCodebaseCommands = mock(() => Promise.resolve({}));
 const mockUpdateCodebaseCommands = mock(() => Promise.resolve());
 const mockGetActiveSession = mock(() => Promise.resolve(null));
 const mockDeactivateSession = mock(() => Promise.resolve());
-const mockIsPathWithinWorkspace = mock(() => true);
-const mockExecFile = mock(
-  (_cmd: string, _args: string[], optionsOrCallback: unknown, callback?: unknown) => {
-    const cb = typeof optionsOrCallback === 'function' ? optionsOrCallback : callback;
-    if (typeof cb === 'function') {
-      cb(null, { stdout: '', stderr: '' });
-    }
-  }
-);
-const mockAccess = mock(() => Promise.reject(new Error('ENOENT')));
-const mockReaddir = mock(() => Promise.resolve([]));
 
-// Git utility mocks
-const mockExecFileAsync = mock(() => Promise.resolve({ stdout: '', stderr: '' }));
-const mockWorktreeExists = mock(() => Promise.resolve(false));
-const mockListWorktrees = mock(() => Promise.resolve([]));
-const mockRemoveWorktree = mock(() => Promise.resolve());
-const mockGetWorktreeBase = mock((repoPath: string) => join(repoPath, 'worktrees'));
+// Spies for internal modules (use spyOn instead of mock.module to avoid global pollution)
+let spyIsPathWithinWorkspace: ReturnType<typeof spyOn>;
+let spyExecFileAsync: ReturnType<typeof spyOn>;
+let spyWorktreeExists: ReturnType<typeof spyOn>;
+let spyListWorktrees: ReturnType<typeof spyOn>;
+let spyRemoveWorktree: ReturnType<typeof spyOn>;
+let spyGetWorktreeBase: ReturnType<typeof spyOn>;
+let spyGetCanonicalRepoPath: ReturnType<typeof spyOn>;
+let spyIsWorktreePath: ReturnType<typeof spyOn>;
+let spyFindWorktreeByBranch: ReturnType<typeof spyOn>;
+let spyCreateWorktreeForIssue: ReturnType<typeof spyOn>;
+let spyMkdirAsync: ReturnType<typeof spyOn>;
 
-// Mock all modules
+// Spies for fs/promises (avoid global mock.module pollution)
+let spyFsAccess: ReturnType<typeof spyOn>;
+let spyFsReaddir: ReturnType<typeof spyOn>;
+
+// Mock database modules (safe - these don't have standalone tests that would be affected)
 mock.module('../db/conversations', () => ({
   updateConversation: mockUpdateConversation,
 }));
@@ -82,25 +88,6 @@ mock.module('../db/isolation-environments', () => ({
   getActiveEnvironments: mock(() => Promise.resolve([])),
 }));
 
-mock.module('../utils/path-validation', () => ({
-  ...pathValidation,
-  isPathWithinWorkspace: mockIsPathWithinWorkspace,
-}));
-
-mock.module('../utils/git', () => ({
-  ...gitUtils,
-  execFileAsync: mockExecFileAsync,
-  mkdirAsync: mock(() => Promise.resolve()),
-  worktreeExists: mockWorktreeExists,
-  listWorktrees: mockListWorktrees,
-  removeWorktree: mockRemoveWorktree,
-  getWorktreeBase: mockGetWorktreeBase,
-  getCanonicalRepoPath: mock((path: string) => Promise.resolve(path)),
-  isWorktreePath: mock(() => Promise.resolve(false)),
-  findWorktreeByBranch: mock(() => Promise.resolve(null)),
-  createWorktreeForIssue: mock(() => Promise.resolve('/workspace/worktrees/issue-1')),
-}));
-
 // Mock isolation provider
 const mockIsolationCreate = mock(() =>
   Promise.resolve({
@@ -127,17 +114,12 @@ mock.module('../isolation', () => ({
   }),
 }));
 
-mock.module('child_process', () => ({
-  exec: mock(() => {}),
-  execFile: mockExecFile,
-}));
-
-// Keep mkdir as real implementation to avoid breaking other tests
-mock.module('fs/promises', () => ({
-  ...fsPromises,
-  access: mockAccess,
-  readdir: mockReaddir,
-}));
+// Note: We removed mock.module('child_process') because:
+// 1. We already spy on gitUtils.execFileAsync which covers git operations
+// 2. mock.module('child_process') pollutes other test files that use child_process
+//
+// We also use spyOn for fs/promises and internal modules to avoid polluting
+// other test files (like git.test.ts)
 
 import { parseCommand, handleCommand } from './command-handler';
 
@@ -151,16 +133,6 @@ function clearAllMocks(): void {
   mockUpdateCodebaseCommands.mockClear();
   mockGetActiveSession.mockClear();
   mockDeactivateSession.mockClear();
-  mockIsPathWithinWorkspace.mockClear();
-  mockExecFile.mockClear();
-  mockAccess.mockClear();
-  mockReaddir.mockClear();
-  // Git utility mocks
-  mockExecFileAsync.mockClear();
-  mockWorktreeExists.mockClear();
-  mockListWorktrees.mockClear();
-  mockRemoveWorktree.mockClear();
-  mockGetWorktreeBase.mockClear();
   // Isolation mocks
   mockIsolationCreate.mockClear();
   mockIsolationDestroy.mockClear();
@@ -170,11 +142,64 @@ function clearAllMocks(): void {
   mockIsolationEnvDbUpdate.mockClear();
 }
 
+// Setup spies for internal modules
+function setupSpies(): void {
+  // Path validation spy
+  spyIsPathWithinWorkspace = spyOn(pathValidation, 'isPathWithinWorkspace').mockReturnValue(true);
+
+  // Git utility spies
+  spyExecFileAsync = spyOn(gitUtils, 'execFileAsync').mockResolvedValue({ stdout: '', stderr: '' });
+  spyWorktreeExists = spyOn(gitUtils, 'worktreeExists').mockResolvedValue(false);
+  spyListWorktrees = spyOn(gitUtils, 'listWorktrees').mockResolvedValue([]);
+  spyRemoveWorktree = spyOn(gitUtils, 'removeWorktree').mockResolvedValue();
+  spyGetWorktreeBase = spyOn(gitUtils, 'getWorktreeBase').mockImplementation((repoPath: string) =>
+    join(repoPath, 'worktrees')
+  );
+  spyGetCanonicalRepoPath = spyOn(gitUtils, 'getCanonicalRepoPath').mockImplementation(
+    (path: string) => Promise.resolve(path)
+  );
+  spyIsWorktreePath = spyOn(gitUtils, 'isWorktreePath').mockResolvedValue(false);
+  spyFindWorktreeByBranch = spyOn(gitUtils, 'findWorktreeByBranch').mockResolvedValue(null);
+  spyCreateWorktreeForIssue = spyOn(gitUtils, 'createWorktreeForIssue').mockResolvedValue(
+    '/workspace/worktrees/issue-1'
+  );
+  spyMkdirAsync = spyOn(gitUtils, 'mkdirAsync').mockResolvedValue();
+
+  // fs/promises spies (avoid global mock.module pollution)
+  spyFsAccess = spyOn(fsPromises, 'access').mockImplementation(() =>
+    Promise.reject(new Error('ENOENT'))
+  );
+  spyFsReaddir = spyOn(fsPromises, 'readdir').mockImplementation(() => Promise.resolve([]));
+}
+
+// Restore all spies
+function restoreSpies(): void {
+  spyIsPathWithinWorkspace?.mockRestore();
+  spyExecFileAsync?.mockRestore();
+  spyWorktreeExists?.mockRestore();
+  spyListWorktrees?.mockRestore();
+  spyRemoveWorktree?.mockRestore();
+  spyGetWorktreeBase?.mockRestore();
+  spyGetCanonicalRepoPath?.mockRestore();
+  spyIsWorktreePath?.mockRestore();
+  spyFindWorktreeByBranch?.mockRestore();
+  spyCreateWorktreeForIssue?.mockRestore();
+  spyMkdirAsync?.mockRestore();
+  spyFsAccess?.mockRestore();
+  spyFsReaddir?.mockRestore();
+}
+
 describe('CommandHandler', () => {
   beforeEach(() => {
     clearAllMocks();
-    mockIsPathWithinWorkspace.mockReturnValue(true);
+    restoreSpies();
+    setupSpies();
     delete process.env.WORKSPACE_PATH;
+  });
+
+  // Clean up spies after all tests in this file to prevent contamination
+  afterAll(() => {
+    restoreSpies();
   });
 
   describe('parseCommand', () => {
@@ -376,24 +401,17 @@ describe('CommandHandler', () => {
       });
 
       test('should reject path traversal attempts', async () => {
-        mockIsPathWithinWorkspace.mockReturnValue(false);
+        spyIsPathWithinWorkspace.mockReturnValue(false);
         const result = await handleCommand(baseConversation, '/setcwd ../etc/passwd');
         expect(result.success).toBe(false);
         expect(result.message).toContain('Path must be within');
       });
 
       test('should update cwd for valid path', async () => {
-        mockIsPathWithinWorkspace.mockReturnValue(true);
+        spyIsPathWithinWorkspace.mockReturnValue(true);
         mockUpdateConversation.mockResolvedValue(undefined);
         mockGetActiveSession.mockResolvedValue(null);
-        mockExecFile.mockImplementation(
-          (_cmd: string, _args: string[], optionsOrCallback: unknown, callback?: unknown) => {
-            const cb = typeof optionsOrCallback === 'function' ? optionsOrCallback : callback;
-            if (typeof cb === 'function') {
-              cb(null, { stdout: '', stderr: '' });
-            }
-          }
-        );
+        // spyExecFileAsync is already set up in setupSpies() to handle git operations
 
         const result = await handleCommand(baseConversation, '/setcwd /workspace/repo');
         expect(result.success).toBe(true);
@@ -571,7 +589,7 @@ describe('CommandHandler', () => {
           codebase_id: 'cb-123',
           cwd: '/workspace/repo',
         };
-        mockIsPathWithinWorkspace.mockReturnValue(false);
+        spyIsPathWithinWorkspace.mockReturnValue(false);
 
         const result = await handleCommand(conversation, '/command-set evil ../../../etc/passwd');
         expect(result.success).toBe(false);
@@ -599,7 +617,7 @@ describe('CommandHandler', () => {
           codebase_id: 'cb-123',
           cwd: '/workspace/repo',
         };
-        mockIsPathWithinWorkspace.mockReturnValue(false);
+        spyIsPathWithinWorkspace.mockReturnValue(false);
 
         const result = await handleCommand(conversation, '/load-commands ../../../etc');
         expect(result.success).toBe(false);
@@ -715,7 +733,7 @@ describe('CommandHandler', () => {
         });
 
         test('should create worktree with valid name', async () => {
-          mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
+          spyExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
           mockGetActiveSession.mockResolvedValue(null);
 
           const result = await handleCommand(
@@ -748,12 +766,12 @@ describe('CommandHandler', () => {
 
       describe('list', () => {
         test('should list worktrees', async () => {
-          mockExecFileAsync.mockResolvedValue({
+          spyExecFileAsync.mockResolvedValue({
             stdout:
               '/workspace/my-repo  abc1234 [main]\n/workspace/my-repo/worktrees/feat-x  def5678 [feat-x]\n',
             stderr: '',
           });
-          mockListWorktrees.mockResolvedValue([
+          spyListWorktrees.mockResolvedValue([
             { path: '/workspace/my-repo', branch: 'main' },
             { path: '/workspace/my-repo/worktrees/feat-x', branch: 'feat-x' },
           ]);
@@ -795,7 +813,7 @@ describe('CommandHandler', () => {
             created_by_platform: 'test',
           });
 
-          mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
+          spyExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
           mockGetActiveSession.mockResolvedValue(null);
 
           const result = await handleCommand(convWithWorktree, '/worktree remove');
@@ -819,15 +837,17 @@ describe('CommandHandler', () => {
     describe('/clone', () => {
       beforeEach(() => {
         clearAllMocks();
+        restoreSpies();
+        setupSpies();
 
-        // Setup default mocks for git operations
-        mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
+        // Setup default spies for git operations
+        spyExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
 
         // Default: no command folders exist - use mockImplementation for consistency
-        mockAccess.mockImplementation(() => Promise.reject(new Error('ENOENT')));
-        mockReaddir.mockResolvedValue([]);
+        spyFsAccess.mockImplementation(() => Promise.reject(new Error('ENOENT')));
+        spyFsReaddir.mockImplementation(() => Promise.resolve([]));
 
-        mockIsPathWithinWorkspace.mockReturnValue(true);
+        spyIsPathWithinWorkspace.mockReturnValue(true);
         mockCreateCodebase.mockResolvedValue({
           id: 'cb-new',
           name: 'test-repo',
@@ -846,8 +866,8 @@ describe('CommandHandler', () => {
 
       test('should auto-load commands from .archon/commands/ when present', async () => {
         // Reset and mock .archon/commands folder exists (platform-agnostic path check)
-        mockAccess.mockReset();
-        mockAccess.mockImplementation((path: unknown) => {
+        spyFsAccess.mockReset();
+        spyFsAccess.mockImplementation((path: unknown) => {
           const pathStr = String(path);
           if (pathStr.includes('.archon/commands') || pathStr.includes('.archon\\commands')) {
             return Promise.resolve();
@@ -856,10 +876,12 @@ describe('CommandHandler', () => {
         });
 
         // Mock markdown files in .archon/commands
-        mockReaddir.mockResolvedValue([
-          { name: 'test-command.md', isFile: () => true, isDirectory: () => false },
-          { name: 'another-command.md', isFile: () => true, isDirectory: () => false },
-        ] as unknown as never[]);
+        spyFsReaddir.mockImplementation(() =>
+          Promise.resolve([
+            { name: 'test-command.md', isFile: () => true, isDirectory: () => false },
+            { name: 'another-command.md', isFile: () => true, isDirectory: () => false },
+          ] as unknown as never[])
+        );
 
         const result = await handleCommand(
           baseConversation,
@@ -903,17 +925,19 @@ describe('CommandHandler', () => {
 
       test('should not show loaded message when command folder is empty', async () => {
         // Reset and mock command folder exists but has no markdown files
-        mockAccess.mockReset();
-        mockAccess.mockImplementation((path: unknown) => {
+        spyFsAccess.mockReset();
+        spyFsAccess.mockImplementation((path: unknown) => {
           if (String(path).includes('.archon/commands')) {
             return Promise.resolve();
           }
           return Promise.reject(new Error('ENOENT'));
         });
 
-        mockReaddir.mockResolvedValue([
-          { name: '.gitkeep', isFile: () => true, isDirectory: () => false },
-        ] as unknown as never[]);
+        spyFsReaddir.mockImplementation(() =>
+          Promise.resolve([
+            { name: '.gitkeep', isFile: () => true, isDirectory: () => false },
+          ] as unknown as never[])
+        );
 
         const result = await handleCommand(
           baseConversation,
@@ -927,8 +951,8 @@ describe('CommandHandler', () => {
 
       test('should recursively find commands in subdirectories', async () => {
         // Reset and test recursive directory traversal
-        mockAccess.mockReset();
-        mockAccess.mockImplementation((path: unknown) => {
+        spyFsAccess.mockReset();
+        spyFsAccess.mockImplementation((path: unknown) => {
           const pathStr = String(path);
           if (pathStr.includes('.archon/commands') || pathStr.includes('.archon\\commands')) {
             return Promise.resolve();
@@ -936,15 +960,20 @@ describe('CommandHandler', () => {
           return Promise.reject(new Error('ENOENT'));
         });
 
-        // Mock a directory with a subdirectory
-        mockReaddir
-          .mockResolvedValueOnce([
-            { name: 'cmd1.md', isFile: () => true, isDirectory: () => false },
-            { name: 'subfolder', isFile: () => false, isDirectory: () => true },
-          ] as unknown as never[])
-          .mockResolvedValueOnce([
+        // Mock a directory with a subdirectory using counter-based implementation
+        let readdirCallCount = 0;
+        spyFsReaddir.mockImplementation(() => {
+          readdirCallCount++;
+          if (readdirCallCount === 1) {
+            return Promise.resolve([
+              { name: 'cmd1.md', isFile: () => true, isDirectory: () => false },
+              { name: 'subfolder', isFile: () => false, isDirectory: () => true },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([
             { name: 'cmd2.md', isFile: () => true, isDirectory: () => false },
           ] as unknown as never[]);
+        });
 
         const result = await handleCommand(
           baseConversation,
@@ -955,7 +984,7 @@ describe('CommandHandler', () => {
         // Should successfully load commands
         expect(result.message).toMatch(/✓ Loaded \d+ command/);
         // Verify readdir was called multiple times (once for root, once for subdirectory)
-        expect(mockReaddir).toHaveBeenCalledTimes(2);
+        expect(spyFsReaddir).toHaveBeenCalledTimes(2);
       });
 
       test('should preserve existing commands when auto-loading', async () => {
@@ -968,8 +997,8 @@ describe('CommandHandler', () => {
         });
 
         // Reset and mock access
-        mockAccess.mockReset();
-        mockAccess.mockImplementation((path: unknown) => {
+        spyFsAccess.mockReset();
+        spyFsAccess.mockImplementation((path: unknown) => {
           const pathStr = String(path);
           if (pathStr.includes('.archon/commands') || pathStr.includes('.archon\\commands')) {
             return Promise.resolve();
@@ -977,9 +1006,11 @@ describe('CommandHandler', () => {
           return Promise.reject(new Error('ENOENT'));
         });
 
-        mockReaddir.mockResolvedValue([
-          { name: 'new-cmd.md', isFile: () => true, isDirectory: () => false },
-        ] as unknown as never[]);
+        spyFsReaddir.mockImplementation(() =>
+          Promise.resolve([
+            { name: 'new-cmd.md', isFile: () => true, isDirectory: () => false },
+          ] as unknown as never[])
+        );
 
         const result = await handleCommand(
           baseConversation,

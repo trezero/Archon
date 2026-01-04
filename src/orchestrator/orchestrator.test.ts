@@ -1,8 +1,14 @@
-import { mock, describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { mock, describe, test, expect, beforeEach, afterEach, afterAll, spyOn } from 'bun:test';
 import { MockPlatformAdapter } from '../test/mocks/platform';
 import { Conversation, Codebase, Session } from '../types';
 import { join } from 'path';
 import * as gitUtils from '../utils/git';
+
+/**
+ * Note: We use spyOn for internal modules (utils/git) that have their own tests.
+ * Using mock.module() for internal modules causes test isolation issues since
+ * Bun's mock.module() persists globally across test files.
+ */
 
 // Setup mocks before importing the module under test
 const mockGetOrCreateConversation = mock(() => Promise.resolve(null));
@@ -32,11 +38,11 @@ const mockIsolationEnvCreate = mock(() => Promise.resolve(null));
 const mockIsolationEnvUpdateStatus = mock(() => Promise.resolve());
 const mockIsolationEnvCountByCodebase = mock(() => Promise.resolve(0)); // Phase 3D: limit check
 
-// Git utils mocks
-const mockWorktreeExists = mock(() => Promise.resolve(false));
-const mockFindWorktreeByBranch = mock(() => Promise.resolve(null));
-const mockGetCanonicalRepoPath = mock((path: string) => Promise.resolve(path));
-const mockExecFileAsync = mock(() => Promise.resolve({ stdout: 'main', stderr: '' }));
+// Git utils spies (use spyOn instead of mock.module to avoid global pollution)
+let spyWorktreeExists: ReturnType<typeof spyOn>;
+let spyFindWorktreeByBranch: ReturnType<typeof spyOn>;
+let spyGetCanonicalRepoPath: ReturnType<typeof spyOn>;
+let spyExecFileAsync: ReturnType<typeof spyOn>;
 
 // Isolation provider mock
 const mockIsolationProviderCreate = mock(() =>
@@ -68,13 +74,7 @@ mock.module('../db/isolation-environments', () => ({
   countByCodebase: mockIsolationEnvCountByCodebase, // Phase 3D: limit check
 }));
 
-mock.module('../utils/git', () => ({
-  ...gitUtils,
-  worktreeExists: mockWorktreeExists,
-  findWorktreeByBranch: mockFindWorktreeByBranch,
-  getCanonicalRepoPath: mockGetCanonicalRepoPath,
-  execFileAsync: mockExecFileAsync,
-}));
+// Note: We use spyOn for ../utils/git instead of mock.module to avoid global pollution
 
 mock.module('../isolation', () => ({
   getIsolationProvider: mockGetIsolationProvider,
@@ -129,8 +129,21 @@ ${content}
 Remember: The user already decided to run this command. Take action now.`;
 }
 
+// Helper to restore all git utility spies
+function restoreGitSpies(): void {
+  spyWorktreeExists?.mockRestore();
+  spyFindWorktreeByBranch?.mockRestore();
+  spyGetCanonicalRepoPath?.mockRestore();
+  spyExecFileAsync?.mockRestore();
+}
+
 describe('orchestrator', () => {
   let platform: MockPlatformAdapter;
+
+  // Clean up spies after all tests in this file
+  afterAll(() => {
+    restoreGitSpies();
+  });
 
   const mockConversation: Conversation = {
     id: 'conv-123',
@@ -203,12 +216,23 @@ describe('orchestrator', () => {
     mockIsolationEnvCreate.mockClear();
     mockIsolationEnvUpdateStatus.mockClear();
     mockIsolationEnvCountByCodebase.mockClear(); // Phase 3D: limit check
-    mockWorktreeExists.mockClear();
-    mockFindWorktreeByBranch.mockClear();
-    mockGetCanonicalRepoPath.mockClear();
-    mockExecFileAsync.mockClear();
     mockIsolationProviderCreate.mockClear();
     mockGetIsolationProvider.mockClear();
+
+    // Restore and setup git utility spies (avoids global pollution)
+    spyWorktreeExists?.mockRestore();
+    spyFindWorktreeByBranch?.mockRestore();
+    spyGetCanonicalRepoPath?.mockRestore();
+    spyExecFileAsync?.mockRestore();
+    spyWorktreeExists = spyOn(gitUtils, 'worktreeExists').mockResolvedValue(false);
+    spyFindWorktreeByBranch = spyOn(gitUtils, 'findWorktreeByBranch').mockResolvedValue(null);
+    spyGetCanonicalRepoPath = spyOn(gitUtils, 'getCanonicalRepoPath').mockImplementation(
+      (path: string) => Promise.resolve(path)
+    );
+    spyExecFileAsync = spyOn(gitUtils, 'execFileAsync').mockResolvedValue({
+      stdout: 'main',
+      stderr: '',
+    });
 
     // Default mocks
     mockGetOrCreateConversation.mockResolvedValue(mockConversation);
@@ -250,9 +274,9 @@ describe('orchestrator', () => {
       created_by_platform: 'telegram',
       metadata: {},
     });
-    mockWorktreeExists.mockResolvedValue(true); // Existing worktree valid
-    mockGetCanonicalRepoPath.mockImplementation((path: string) => Promise.resolve(path));
-    mockExecFileAsync.mockResolvedValue({ stdout: 'main', stderr: '' });
+    spyWorktreeExists.mockResolvedValue(true); // Existing worktree valid
+    spyGetCanonicalRepoPath.mockImplementation((path: string) => Promise.resolve(path));
+    spyExecFileAsync.mockResolvedValue({ stdout: 'main', stderr: '' });
   });
 
   afterEach(() => {
@@ -657,7 +681,7 @@ describe('orchestrator', () => {
 
       // No isolation env in DB, no existing worktree
       mockIsolationEnvGetById.mockResolvedValue(null);
-      mockWorktreeExists.mockResolvedValue(false);
+      spyWorktreeExists.mockResolvedValue(false);
 
       // Auto-create will be triggered, returns a new env
       mockIsolationEnvCreate.mockResolvedValue({
@@ -754,7 +778,7 @@ describe('orchestrator', () => {
         created_by_platform: 'telegram',
         metadata: {},
       });
-      mockWorktreeExists.mockResolvedValue(false); // Path doesn't exist
+      spyWorktreeExists.mockResolvedValue(false); // Path doesn't exist
 
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
       mockReadCommandFile.mockResolvedValue('Plan command');

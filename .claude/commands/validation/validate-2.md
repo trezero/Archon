@@ -1,6 +1,12 @@
 # Ultimate Validation Command (Updated January 2026)
 
-Run comprehensive end-to-end validation of the Remote Agentic Coding Platform including Docker, Test Adapter, Database, GitHub integration, worktree isolation, and command workflows.
+Run comprehensive end-to-end validation of the Remote Agentic Coding Platform including Docker, Test Adapter, Database, and **full GitHub workflow execution**.
+
+**The key test (Phase 8):** Creates a GitHub issue, then invokes the full workflow via issue comments:
+1. `@remote-agent /command-invoke prime` - Analyze codebase
+2. `@remote-agent /command-invoke plan-feature` - Create implementation plan
+3. `@remote-agent /command-invoke execute` - Implement changes and create PR
+4. (Phase 9) `@remote-agent /command-invoke review-pr` - Review the created PR
 
 **Usage:**
 ```bash
@@ -23,7 +29,7 @@ Run comprehensive end-to-end validation of the Remote Agentic Coding Platform in
 - Archon paths (`~/.archon/workspaces/owner/repo`)
 - 6 database tables (codebases, conversations, sessions, command_templates, isolation_environments, workflow_runs)
 - Worktree isolation with database tracking
-- New commands (/repos, /repo, /worktree, /workflow, /templates)
+- Full GitHub workflow: Issue → Prime → Plan → Execute → PR → Review
 
 ---
 
@@ -449,7 +455,9 @@ docker compose exec postgres psql -U postgres -d remote_coding_agent \
 
 ---
 
-## Phase 7: Command Workflow Tests (Test Adapter)
+## Phase 7: Command Workflow Tests (Test Adapter - Quick Validation)
+
+This phase validates that commands work via the Test Adapter. Phase 8 tests the full workflow via GitHub.
 
 ### 7.1 Invoke Prime Command
 ```bash
@@ -466,22 +474,7 @@ echo "Prime response length: $PRIME_LEN"
 [ $PRIME_LEN -gt 100 ] && echo "✅ Prime generated output" || echo "❌ Prime too short"
 ```
 
-### 7.2 Invoke Plan-Feature Command
-```bash
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"test-clone","message":"/command-invoke plan-feature \"Add a Contributing section to README\""}'
-
-echo "Waiting for plan (90 seconds)..."
-sleep 90
-
-PLAN=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message')
-PLAN_LEN=${#PLAN}
-echo "Plan response length: $PLAN_LEN"
-[ $PLAN_LEN -gt 200 ] && echo "✅ Plan generated" || echo "❌ Plan too short"
-```
-
-### 7.3 Verify Session State
+### 7.2 Verify Session State
 ```bash
 curl -X POST http://localhost:3000/test/message \
   -H "Content-Type: application/json" \
@@ -491,22 +484,39 @@ sleep 2
 
 STATUS=$(curl -s http://localhost:3000/test/messages/test-clone | jq -r '.messages[-1].message')
 echo "$STATUS" | grep -q "Active Session" && echo "✅ Session active" || echo "❌ No active session"
-echo "$STATUS" | grep -q "Worktree" && echo "✅ Worktree auto-created" || echo "⚠️ May not show worktree"
 ```
 
 ---
 
-## Phase 8: GitHub Webhook Integration
+## Phase 8: GitHub Issue Full Workflow (Prime → Plan → Execute → PR)
 
-### 8.1 Create GitHub Issue with @remote-agent Mention
+**This is the critical E2E test.** It validates the complete workflow through GitHub webhooks:
+1. Create issue with feature request
+2. Invoke `prime` via issue comment
+3. Invoke `plan-feature` via issue comment
+4. Invoke `execute` via issue comment
+5. Verify bot creates a PR to resolve the issue
+
+### 8.1 Create GitHub Issue (No Bot Mention)
 ```bash
 cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
 
+# Create issue WITHOUT @remote-agent mention - workflow starts with comments
 ISSUE_URL=$(gh issue create \
-  --title "Test Issue: Add Validation Section" \
-  --body "Add a 'Validation' section to README.md explaining the testing process.
+  --title "Add Validation Section to README" \
+  --body "## Feature Request
 
-@remote-agent please analyze this issue and confirm you received it." \
+Please add a 'Validation' section to README.md that explains:
+- How to run the test suite
+- How to validate the platform is working
+- Basic troubleshooting steps
+
+This section should be added after the 'Purpose' section.
+
+## Acceptance Criteria
+- [ ] New 'Validation' section exists in README.md
+- [ ] Section includes test commands
+- [ ] Section includes troubleshooting tips" \
   | grep -o 'https://.*')
 
 ISSUE_NUMBER=$(echo $ISSUE_URL | grep -o '[0-9]*$')
@@ -519,72 +529,137 @@ export ISSUE_URL
 cd "${PROJECT_ROOT}"
 ```
 
-### 8.2 Monitor Webhook Processing
-```bash
-echo "Waiting for webhook processing (30 seconds)..."
-sleep 30
-
-docker compose logs app-with-db 2>&1 | grep -E "GitHub.*Processing|Worktree created|issue-${ISSUE_NUMBER}" | tail -10
-```
-
-**Check for:**
-- `[GitHub] Processing issue: ${GITHUB_USERNAME}/${TEST_REPO_NAME}#${ISSUE_NUMBER}`
-- Worktree creation for issue
-- `[Claude] Starting new session in /.archon/worktrees/.../issue-${ISSUE_NUMBER}`
-
-### 8.3 Verify GitHub Worktree Auto-Creation
-```bash
-docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "SELECT workflow_type, workflow_id, branch_name, status, created_by_platform
-      FROM remote_agent_isolation_environments
-      WHERE workflow_type = 'issue'
-      ORDER BY created_at DESC LIMIT 1;"
-```
-
-**Expected:** Row with `workflow_type=issue`, `workflow_id=${ISSUE_NUMBER}`, `created_by_platform=github`
-
-### 8.4 Verify Bot Response on Issue
+### 8.2 Invoke Prime Command via GitHub Comment (Starts Workflow)
 ```bash
 cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
 
-echo "Waiting for bot response (60 seconds)..."
-sleep 60
+# This is the first @remote-agent mention - triggers worktree creation
+gh issue comment ${ISSUE_NUMBER} --body "@remote-agent /command-invoke prime"
 
-gh issue view ${ISSUE_NUMBER} --comments | tail -30
+echo "Waiting for prime to complete (90 seconds)..."
+sleep 90
+
+# Check for prime response
+gh issue view ${ISSUE_NUMBER} --comments | tail -40
 
 cd "${PROJECT_ROOT}"
 ```
 
 **Expected:**
-- Bot comment confirming isolation branch
-- Analysis or response to the issue
+- Bot creates worktree for issue
+- Bot responds with codebase analysis (project purpose, key files, technologies)
 
----
-
-## Phase 9: GitHub PR Integration
-
-### 9.1 Create Pull Request
+### 8.3 Invoke Plan-Feature Command via GitHub Comment
 ```bash
 cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
 
-# Create a branch with changes
-git checkout -b test-pr-branch
-echo -e "\n## Test Section\n\nThis is a test PR." >> README.md
-git add README.md
-git commit -m "test: Add test section"
-git push -u origin test-pr-branch
+gh issue comment ${ISSUE_NUMBER} --body "@remote-agent /command-invoke plan-feature \"Add a Validation section to README.md after the Purpose section, explaining how to run tests and validate the platform\""
 
-# Create PR
-PR_URL=$(gh pr create \
-  --title "Test PR: Add Test Section" \
-  --body "This is a test pull request.
+echo "Waiting for plan to complete (120 seconds)..."
+sleep 120
 
-@remote-agent please review this PR." \
-  | grep -o 'https://.*')
+# Check for plan response
+gh issue view ${ISSUE_NUMBER} --comments | tail -50
 
-PR_NUMBER=$(echo $PR_URL | grep -o '[0-9]*$')
-echo "PR created: ${PR_URL}"
-echo "PR number: ${PR_NUMBER}"
+cd "${PROJECT_ROOT}"
+```
+
+**Expected:** Bot responds with implementation plan including:
+- Files to modify
+- Implementation steps
+- Validation approach
+
+### 8.4 Invoke Execute Command via GitHub Comment
+```bash
+cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
+
+gh issue comment ${ISSUE_NUMBER} --body "@remote-agent /command-invoke execute"
+
+echo "Waiting for execute to complete (180 seconds)..."
+sleep 180
+
+# Check for execute response and PR creation
+gh issue view ${ISSUE_NUMBER} --comments | tail -60
+
+cd "${PROJECT_ROOT}"
+```
+
+**Expected:** Bot:
+1. Implements the changes to README.md
+2. Creates a commit
+3. Creates a pull request
+4. Comments with PR link
+
+### 8.5 Verify PR Was Created
+```bash
+cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
+
+# List PRs to find the one created by the bot
+BOT_PR=$(gh pr list --state open --json number,title,headRefName --jq '.[0]')
+echo "Bot-created PR: ${BOT_PR}"
+
+# Get PR number if exists
+BOT_PR_NUMBER=$(echo $BOT_PR | jq -r '.number // empty')
+
+if [ -n "$BOT_PR_NUMBER" ]; then
+  echo "✅ PR #${BOT_PR_NUMBER} created by bot"
+  gh pr view ${BOT_PR_NUMBER}
+else
+  echo "⚠️ No PR found - check issue comments for errors"
+  gh issue view ${ISSUE_NUMBER} --comments | tail -30
+fi
+
+cd "${PROJECT_ROOT}"
+```
+
+### 8.6 Verify Worktree and Database State
+```bash
+# Check isolation environment
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "SELECT workflow_type, workflow_id, branch_name, status, created_by_platform
+      FROM remote_agent_isolation_environments
+      WHERE workflow_type = 'issue' AND workflow_id = '${ISSUE_NUMBER}'
+      ORDER BY created_at DESC LIMIT 1;"
+
+# Check workflow runs
+docker compose exec postgres psql -U postgres -d remote_coding_agent \
+  -c "SELECT id, status, started_at, completed_at
+      FROM remote_agent_workflow_runs
+      ORDER BY created_at DESC LIMIT 3;"
+```
+
+**Expected:**
+- `workflow_type=issue`, `status=active`, `created_by_platform=github`
+- Workflow runs showing completed status
+
+### 8.7 Verify Tool Execution in Logs
+```bash
+docker compose logs app-with-db 2>&1 | grep -E "Tool call:|Bash|Read|Edit|Write" | tail -20
+```
+
+**Expected:** Multiple tool calls showing the bot actually executed tools (Read, Edit/Write, Bash for git)
+
+---
+
+## Phase 9: GitHub PR Review (Review Bot-Created PR)
+
+This phase reviews the PR that was created by the execute command in Phase 8.
+
+### 9.1 Get PR Number from Phase 8
+```bash
+cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
+
+# Get the PR created by the bot in Phase 8
+PR_NUMBER=$(gh pr list --state open --json number --jq '.[0].number')
+
+if [ -z "$PR_NUMBER" ]; then
+  echo "❌ No open PR found - Phase 8 may have failed"
+  exit 1
+fi
+
+echo "PR to review: #${PR_NUMBER}"
+PR_URL=$(gh pr view ${PR_NUMBER} --json url --jq '.url')
+echo "PR URL: ${PR_URL}"
 
 export PR_NUMBER
 export PR_URL
@@ -592,36 +667,63 @@ export PR_URL
 cd "${PROJECT_ROOT}"
 ```
 
-### 9.2 Monitor PR Webhook
+### 9.2 Invoke PR Review via Comment
 ```bash
-echo "Waiting for PR webhook (30 seconds)..."
-sleep 30
+cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
 
-docker compose logs app-with-db 2>&1 | grep -E "GitHub.*pull_request|pr-${PR_NUMBER}" | tail -10
+gh pr comment ${PR_NUMBER} --body "@remote-agent /command-invoke review-pr"
+
+echo "Waiting for PR review to complete (120 seconds)..."
+sleep 120
+
+# Check for review response
+gh pr view ${PR_NUMBER} --comments | tail -50
+
+cd "${PROJECT_ROOT}"
 ```
 
-### 9.3 Verify PR Worktree
+**Expected:** Bot responds with code review including:
+- Summary of changes
+- Code quality assessment
+- Any issues or suggestions
+- Approval or request for changes
+
+### 9.3 Verify PR Worktree Created
 ```bash
 docker compose exec postgres psql -U postgres -d remote_coding_agent \
-  -c "SELECT workflow_type, workflow_id, branch_name, status
+  -c "SELECT workflow_type, workflow_id, branch_name, status, created_by_platform
       FROM remote_agent_isolation_environments
       WHERE workflow_type = 'pr'
       ORDER BY created_at DESC LIMIT 1;"
 ```
 
-**Expected:** Row with `workflow_type=pr`, `workflow_id=${PR_NUMBER}`
+**Expected:** Row with `workflow_type=pr`, `workflow_id=${PR_NUMBER}`, `created_by_platform=github`
 
-### 9.4 Check PR Comments
+### 9.4 Verify Review Tool Execution
+```bash
+docker compose logs app-with-db 2>&1 | grep -E "pr-${PR_NUMBER}|Tool call:" | tail -15
+```
+
+**Expected:** Tool calls showing the bot read files, ran diff commands, etc.
+
+### 9.5 Check Full PR State
 ```bash
 cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
 
-echo "Waiting for bot response (60 seconds)..."
-sleep 60
+echo "=== PR Details ==="
+gh pr view ${PR_NUMBER}
 
-gh pr view ${PR_NUMBER} --comments | tail -20
+echo ""
+echo "=== PR Diff ==="
+gh pr diff ${PR_NUMBER} | head -50
 
 cd "${PROJECT_ROOT}"
 ```
+
+**Expected:**
+- PR shows the README.md changes
+- Bot review comment visible
+- PR ready for merge (if review passed)
 
 ---
 
@@ -694,7 +796,7 @@ echo "========================================"
 echo ""
 echo "Test Repository: ${TEST_REPO_URL}"
 echo "Issue #${ISSUE_NUMBER}: ${ISSUE_URL}"
-echo "PR #${PR_NUMBER}: ${PR_URL}"
+echo "Bot-Created PR #${PR_NUMBER}: ${PR_URL}"
 echo ""
 
 # Docker status
@@ -717,6 +819,17 @@ docker compose exec postgres psql -U postgres -d remote_coding_agent \
       ORDER BY created_at DESC LIMIT 5;"
 echo ""
 
+# Workflow summary
+echo "GitHub Workflow Results:"
+cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
+echo "  Issue comments: $(gh issue view ${ISSUE_NUMBER} --json comments --jq '.comments | length')"
+echo "  PR created: $(gh pr list --state all --json number --jq 'length > 0')"
+if [ -n "$PR_NUMBER" ]; then
+  echo "  PR #${PR_NUMBER} status: $(gh pr view ${PR_NUMBER} --json state --jq '.state')"
+fi
+cd "${PROJECT_ROOT}"
+echo ""
+
 # Health checks
 echo "Health Checks:"
 curl -s http://localhost:3000/health | jq -r '.status'
@@ -731,6 +844,15 @@ echo ""
 echo "========================================"
 echo "VALIDATION COMPLETE"
 echo "========================================"
+
+# Final checklist
+echo ""
+echo "CHECKLIST:"
+echo "  [ ] Phase 1: Foundation tests passed"
+echo "  [ ] Phase 8: Bot created PR from issue workflow"
+echo "  [ ] Phase 9: Bot reviewed the PR"
+echo "  [ ] All health checks OK"
+echo "  [ ] Zero errors in logs"
 ```
 
 ---
@@ -765,11 +887,11 @@ docker compose exec postgres psql -U postgres -d remote_coding_agent \
 | 2.x | Test repo created with webhook configured |
 | 3.x | Docker containers running, health checks pass |
 | 4.x | All 6 database tables exist with FKs |
-| 5.x | Test adapter commands work |
+| 5.x | Test adapter commands work (/help, /clone, /commands) |
 | 6.x | Worktree create/list/remove work with DB tracking |
-| 7.x | Command invocation works (prime, plan-feature) |
-| 8.x | GitHub issue webhook creates worktree automatically |
-| 9.x | GitHub PR webhook creates worktree automatically |
+| 7.x | Command invocation works via Test Adapter (prime) |
+| 8.x | **Full GitHub Issue Workflow:** prime → plan-feature → execute → PR created |
+| 9.x | **PR Review via GitHub:** Bot reviews the created PR |
 | 10.x | Concurrent requests handled correctly |
 | 11.x | Error handling is graceful |
 
