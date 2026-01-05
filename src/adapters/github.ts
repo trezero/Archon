@@ -18,6 +18,7 @@ import { getLinkedIssueNumbers } from '../utils/github-graphql';
 import { onConversationClosed } from '../services/cleanup-service';
 import { isWorktreePath } from '../utils/git';
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
+import { ConversationLockManager } from '../utils/conversation-lock';
 
 const execAsync = promisify(exec);
 
@@ -61,10 +62,17 @@ export class GitHubAdapter implements IPlatformAdapter {
   private webhookSecret: string;
   private allowedUsers: string[];
   private botMention: string;
+  private lockManager: ConversationLockManager;
 
-  constructor(token: string, webhookSecret: string, botMention?: string) {
+  constructor(
+    token: string,
+    webhookSecret: string,
+    lockManager: ConversationLockManager,
+    botMention?: string
+  ) {
     this.octokit = new Octokit({ auth: token });
     this.webhookSecret = webhookSecret;
+    this.lockManager = lockManager;
     this.botMention = botMention ?? 'remote-agent';
 
     // Parse GitHub user whitelist (optional - empty = open access)
@@ -656,22 +664,28 @@ ${userComment}`;
       }
     }
 
-    // 12. Route to orchestrator with isolation hints
-    try {
-      await handleMessage(
-        this,
-        conversationId,
-        finalMessage,
-        contextToAppend,
-        undefined, // threadContext
-        undefined, // parentConversationId
-        isolationHints
-      );
-    } catch (error) {
-      const err = error as Error;
-      console.error('[GitHub] Message handling error:', error);
-      const userMessage = classifyAndFormatError(err);
-      await this.sendMessage(conversationId, userMessage);
-    }
+    // 12. Route to orchestrator with isolation hints (with lock for concurrency control)
+    await this.lockManager.acquireLock(conversationId, async () => {
+      try {
+        await handleMessage(
+          this,
+          conversationId,
+          finalMessage,
+          contextToAppend,
+          undefined, // threadContext
+          undefined, // parentConversationId
+          isolationHints
+        );
+      } catch (error) {
+        const err = error as Error;
+        console.error('[GitHub] Message handling error:', error);
+        try {
+          const userMessage = classifyAndFormatError(err);
+          await this.sendMessage(conversationId, userMessage);
+        } catch (sendError) {
+          console.error('[GitHub] Failed to send error message to user:', sendError);
+        }
+      }
+    });
   }
 }

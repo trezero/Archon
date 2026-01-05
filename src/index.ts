@@ -99,7 +99,12 @@ async function main(): Promise<void> {
   if (process.env.GITHUB_TOKEN && process.env.WEBHOOK_SECRET) {
     const botMention =
       process.env.GITHUB_BOT_MENTION || process.env.BOT_DISPLAY_NAME || config.botName;
-    github = new GitHubAdapter(process.env.GITHUB_TOKEN, process.env.WEBHOOK_SECRET, botMention);
+    github = new GitHubAdapter(
+      process.env.GITHUB_TOKEN,
+      process.env.WEBHOOK_SECRET,
+      lockManager,
+      botMention
+    );
     await github.start();
   } else {
     console.log('[GitHub] Adapter not initialized (missing GITHUB_TOKEN or WEBHOOK_SECRET)');

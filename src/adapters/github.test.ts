@@ -23,13 +23,22 @@ mock.module('child_process', () => ({
 }));
 
 import { GitHubAdapter } from './github';
+import { ConversationLockManager } from '../utils/conversation-lock';
+
+// Create a mock lock manager that immediately executes handlers
+const mockLockManager = {
+  acquireLock: mock(async (_id: string, handler: () => Promise<void>) => {
+    await handler();
+  }),
+  getStats: () => ({ active: 0, queuedTotal: 0, queuedByConversation: [], maxConcurrent: 10, activeConversationIds: [] }),
+} as unknown as ConversationLockManager;
 
 describe('GitHubAdapter', () => {
   let adapter: GitHubAdapter;
 
   beforeEach(() => {
     mockExecFile.mockClear();
-    adapter = new GitHubAdapter('fake-token-for-testing', 'fake-webhook-secret');
+    adapter = new GitHubAdapter('fake-token-for-testing', 'fake-webhook-secret', mockLockManager);
   });
 
   describe('streaming mode', () => {
@@ -56,7 +65,7 @@ describe('GitHubAdapter', () => {
 
   describe('bot mention detection', () => {
     test('should detect mention case-insensitively', () => {
-      const adapterWithMention = new GitHubAdapter('token', 'secret', 'Dylan');
+      const adapterWithMention = new GitHubAdapter('token', 'secret', mockLockManager, 'Dylan');
       const hasMention = (
         adapterWithMention as unknown as { hasMention: (text: string) => boolean }
       ).hasMention;
@@ -71,7 +80,7 @@ describe('GitHubAdapter', () => {
     });
 
     test('should detect mention when it is the entire message', () => {
-      const adapterWithMention = new GitHubAdapter('token', 'secret', 'remote-agent');
+      const adapterWithMention = new GitHubAdapter('token', 'secret', mockLockManager, 'remote-agent');
       const hasMention = (
         adapterWithMention as unknown as { hasMention: (text: string) => boolean }
       ).hasMention;
@@ -82,7 +91,7 @@ describe('GitHubAdapter', () => {
     });
 
     test('should strip mention case-insensitively', () => {
-      const adapterWithMention = new GitHubAdapter('token', 'secret', 'Dylan');
+      const adapterWithMention = new GitHubAdapter('token', 'secret', mockLockManager, 'Dylan');
       const stripMention = (
         adapterWithMention as unknown as { stripMention: (text: string) => string }
       ).stripMention;
