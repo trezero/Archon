@@ -220,6 +220,13 @@ export class GitHubAdapter implements IPlatformAdapter {
 
   /**
    * Parse webhook event and extract relevant data
+   *
+   * Handles:
+   * - issues.closed / pull_request.closed → cleanup (isCloseEvent: true)
+   * - issue_comment.created → bot @mention detection
+   *
+   * Does NOT handle:
+   * - issues.opened / pull_request.opened → returns null (see #96)
    */
   private parseEvent(event: WebhookEvent): {
     owner: string;
@@ -275,29 +282,11 @@ export class GitHubAdapter implements IPlatformAdapter {
       };
     }
 
-    // issues.opened
-    if (event.issue && event.action === 'opened') {
-      return {
-        owner,
-        repo,
-        number: event.issue.number,
-        comment: event.issue.body ?? '',
-        eventType: 'issue',
-        issue: event.issue,
-      };
-    }
-
-    // pull_request.opened
-    if (event.pull_request && event.action === 'opened') {
-      return {
-        owner,
-        repo,
-        number: event.pull_request.number,
-        comment: event.pull_request.body ?? '',
-        eventType: 'pull_request',
-        pullRequest: event.pull_request,
-      };
-    }
+    // Note: We intentionally do NOT handle issues.opened or pull_request.opened
+    // events here. Issue/PR descriptions often contain example commands or
+    // documentation about how to use the bot - these are NOT command invocations.
+    // Only actual comments (issue_comment events) trigger bot responses.
+    // See issue #96 for details.
 
     return null;
   }

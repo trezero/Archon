@@ -663,14 +663,15 @@ gh pr review 15 --comment -b "Looks good!"
 ```
 
 **@Mention Detection:**
-- Parse `@coding-assistant` in issue/PR descriptions and comments
-- Events: `issues`, `issue_comment`, `pull_request`
+- Parse `@coding-assistant` in issue/PR **comments only** (not descriptions)
+- Events: `issue_comment` only
+- Note: Descriptions often contain example commands or documentation - these are NOT command invocations (see #96)
 
 ## Common Workflows
 
 **Fix Issue (GitHub):**
-1. User: `@coding-assistant fix this` on issue #42
-2. Webhook: Trigger detected, conversationId = `user/repo#42`
+1. User: Comments `@coding-assistant fix this` on issue #42
+2. Webhook: `issue_comment` event triggers, conversationId = `user/repo#42`
 3. Clone repo if needed
 4. AI: Analyze issue, make changes, commit
 5. `gh pr create` with "Fixes #42"
