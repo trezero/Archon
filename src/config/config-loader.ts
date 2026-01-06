@@ -15,13 +15,19 @@ export async function readConfigFile(path: string): Promise<string> {
   return fsReadFile(path, 'utf-8');
 }
 import { join, dirname } from 'path';
-import { parse as parseYaml } from 'yaml';
 import {
   getArchonConfigPath,
   getArchonWorkspacesPath,
   getArchonWorktreesPath,
 } from '../utils/archon-paths';
 import type { GlobalConfig, RepoConfig, MergedConfig } from './config-types';
+
+/**
+ * Parse YAML using Bun's native YAML parser
+ */
+function parseYaml(content: string): unknown {
+  return Bun.YAML.parse(content);
+}
 
 // Cache for loaded configs
 let cachedGlobalConfig: GlobalConfig | null = null;
