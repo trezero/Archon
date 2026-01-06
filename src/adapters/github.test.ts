@@ -80,14 +80,14 @@ describe('GitHubAdapter', () => {
     });
 
     test('should detect mention when it is the entire message', () => {
-      const adapterWithMention = new GitHubAdapter('token', 'secret', mockLockManager, 'remote-agent');
+      const adapterWithMention = new GitHubAdapter('token', 'secret', mockLockManager, 'Archon');
       const hasMention = (
         adapterWithMention as unknown as { hasMention: (text: string) => boolean }
       ).hasMention;
 
-      expect(hasMention.call(adapterWithMention, '@remote-agent')).toBe(true);
-      expect(hasMention.call(adapterWithMention, '@REMOTE-AGENT')).toBe(true);
-      expect(hasMention.call(adapterWithMention, '@Remote-Agent')).toBe(true);
+      expect(hasMention.call(adapterWithMention, '@Archon')).toBe(true);
+      expect(hasMention.call(adapterWithMention, '@ARCHON')).toBe(true);
+      expect(hasMention.call(adapterWithMention, '@archon')).toBe(true);
     });
 
     test('should strip mention case-insensitively', () => {
@@ -204,7 +204,7 @@ describe('GitHubAdapter', () => {
           pull_request: {
             number: 42,
             title: 'Awesome Feature',
-            body: '@remote-agent review this',
+            body: '@Archon review this',
             user: { login: 'testuser' },
             state: 'open',
           },
@@ -285,7 +285,7 @@ describe('GitHubAdapter', () => {
           pull_request: {
             number: 42,
             title: 'Test PR',
-            body: '@remote-agent review',
+            body: '@Archon review',
             user: { login: 'testuser' },
             state: 'open',
           },
@@ -369,7 +369,7 @@ describe('GitHubAdapter', () => {
           pull_request: {
             number: 42,
             title: 'New UI',
-            body: '@remote-agent review',
+            body: '@Archon review',
             user: { login: 'testuser' },
             state: 'open',
           },
@@ -444,7 +444,7 @@ describe('GitHubAdapter', () => {
           pull_request: {
             number: 42,
             title: 'Test PR',
-            body: '@remote-agent review',
+            body: '@Archon review',
             user: { login: 'testuser' },
             state: 'open',
           },

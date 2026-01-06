@@ -304,6 +304,29 @@ The app can work alongside the worktree-manager Claude Code skill. Both use git 
 
 Git (`git worktree list`) is the source of truth for what actually exists on disk.
 
+### Running the App in Worktrees
+
+Agents working in worktrees can run the app for self-testing (make changes → run app → test via curl → fix). To avoid port conflicts with other instances:
+
+```bash
+# Run with unique port in worktree
+PORT=3091 bun dev &
+
+# Test via test adapter
+curl -X POST http://localhost:3091/test/message \
+  -H "Content-Type: application/json" \
+  -d '{"conversationId":"test","message":"/status"}'
+
+# Check response
+curl http://localhost:3091/test/messages/test
+```
+
+**Important:**
+- Use unique PORT per worktree (3091, 3092, etc.)
+- Only use test adapter - Telegram/Slack/Discord tokens conflict across instances
+- Database is shared (same conversations/codebases available)
+- Kill the server when done: `pkill -f "bun.*dev"` or use the specific port
+
 ### Archon Directory Structure
 
 All Archon-managed files are organized under a dedicated namespace:

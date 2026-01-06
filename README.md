@@ -479,12 +479,12 @@ GITHUB_STREAMING_MODE=batch  # batch (default) | stream
 
 **Usage:**
 
-Interact by @mentioning `@remote-agent` in issues or PRs:
+Interact by @mentioning `@Archon` in issues or PRs:
 
 ```
-@remote-agent can you analyze this bug?
-@remote-agent /command-invoke prime
-@remote-agent review this implementation
+@Archon can you analyze this bug?
+@Archon /command-invoke prime
+@Archon review this implementation
 ```
 
 **First mention behavior:**

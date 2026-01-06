@@ -1,6 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test';
 
+import * as configLoader from '../../config/config-loader';
 import * as git from '../../utils/git';
+import * as worktreeCopy from '../../utils/worktree-copy';
 import type { IsolationRequest } from '../types';
 import { WorktreeProvider } from './worktree';
 
@@ -480,6 +482,107 @@ describe('WorktreeProvider', () => {
       worktreeExistsSpy.mockResolvedValue(false);
       const result = await provider.adopt('/workspace/worktrees/repo/nonexistent');
       expect(result).toBeNull();
+    });
+  });
+
+  describe('file copying', () => {
+    let loadRepoConfigSpy: Mock<typeof configLoader.loadRepoConfig>;
+    let copyWorktreeFilesSpy: Mock<typeof worktreeCopy.copyWorktreeFiles>;
+
+    const baseRequest: IsolationRequest = {
+      codebaseId: 'cb-123',
+      canonicalRepoPath: '/.archon/workspaces/owner/repo',
+      workflowType: 'issue',
+      identifier: '42',
+    };
+
+    beforeEach(() => {
+      loadRepoConfigSpy = spyOn(configLoader, 'loadRepoConfig');
+      copyWorktreeFilesSpy = spyOn(worktreeCopy, 'copyWorktreeFiles');
+
+      // Default: no config, no copies
+      loadRepoConfigSpy.mockResolvedValue({});
+      copyWorktreeFilesSpy.mockResolvedValue([]);
+    });
+
+    afterEach(() => {
+      loadRepoConfigSpy.mockRestore();
+      copyWorktreeFilesSpy.mockRestore();
+    });
+
+    test('copies configured files after worktree creation', async () => {
+      loadRepoConfigSpy.mockResolvedValue({
+        worktree: {
+          copyFiles: ['.env.example -> .env', '.vscode/settings.json'],
+        },
+      });
+      copyWorktreeFilesSpy.mockResolvedValue([
+        { source: '.env.example', destination: '.env' },
+        { source: '.vscode/settings.json', destination: '.vscode/settings.json' },
+      ]);
+
+      await provider.create(baseRequest);
+
+      expect(copyWorktreeFilesSpy).toHaveBeenCalledWith(
+        '/.archon/workspaces/owner/repo',
+        expect.stringContaining('issue-42'),
+        ['.env.example -> .env', '.vscode/settings.json']
+      );
+    });
+
+    test('does not call copyWorktreeFiles when no copyFiles configured', async () => {
+      loadRepoConfigSpy.mockResolvedValue({});
+
+      await provider.create(baseRequest);
+
+      expect(copyWorktreeFilesSpy).not.toHaveBeenCalled();
+    });
+
+    test('does not call copyWorktreeFiles when copyFiles is empty', async () => {
+      loadRepoConfigSpy.mockResolvedValue({
+        worktree: {
+          copyFiles: [],
+        },
+      });
+
+      await provider.create(baseRequest);
+
+      expect(copyWorktreeFilesSpy).not.toHaveBeenCalled();
+    });
+
+    test('does not fail worktree creation if config load fails', async () => {
+      loadRepoConfigSpy.mockRejectedValue(new Error('Config load failed'));
+
+      // Should not throw
+      const env = await provider.create(baseRequest);
+      expect(env.workingPath).toContain('issue-42');
+    });
+
+    test('does not fail worktree creation if file copying fails', async () => {
+      loadRepoConfigSpy.mockResolvedValue({
+        worktree: {
+          copyFiles: ['.env'],
+        },
+      });
+      copyWorktreeFilesSpy.mockRejectedValue(new Error('Copy failed'));
+
+      // Should not throw
+      const env = await provider.create(baseRequest);
+      expect(env.workingPath).toContain('issue-42');
+    });
+
+    test('does not copy files when adopting existing worktree', async () => {
+      worktreeExistsSpy.mockResolvedValue(true);
+      loadRepoConfigSpy.mockResolvedValue({
+        worktree: {
+          copyFiles: ['.env.example -> .env'],
+        },
+      });
+
+      await provider.create(baseRequest);
+
+      // File copying should NOT be called for adopted worktrees
+      expect(copyWorktreeFilesSpy).not.toHaveBeenCalled();
     });
   });
 });

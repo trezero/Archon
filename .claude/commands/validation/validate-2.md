@@ -3,10 +3,10 @@
 Run comprehensive end-to-end validation of the Remote Agentic Coding Platform including Docker, Test Adapter, Database, and **full GitHub workflow execution**.
 
 **The key test (Phase 8):** Creates a GitHub issue, then invokes the full workflow via issue comments:
-1. `@remote-agent /command-invoke prime` - Analyze codebase
-2. `@remote-agent /command-invoke plan-feature` - Create implementation plan
-3. `@remote-agent /command-invoke execute` - Implement changes and create PR
-4. (Phase 9) `@remote-agent /command-invoke review-pr` - Review the created PR
+1. `@Archon /command-invoke prime` - Analyze codebase
+2. `@Archon /command-invoke plan-feature` - Create implementation plan
+3. `@Archon /command-invoke execute` - Implement changes and create PR
+4. (Phase 9) `@Archon /command-invoke review-pr` - Review the created PR
 
 **Usage:**
 ```bash
@@ -619,7 +619,7 @@ echo "$STATUS" | grep -q "Active Session" && echo "✅ Session active" || echo "
 ```bash
 cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
 
-# Create issue WITHOUT @remote-agent mention - workflow starts with comments
+# Create issue WITHOUT @Archon mention - workflow starts with comments
 ISSUE_URL=$(gh issue create \
   --title "Add Validation Section to README" \
   --body "## Feature Request
@@ -651,8 +651,8 @@ cd "${PROJECT_ROOT}"
 ```bash
 cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
 
-# This is the first @remote-agent mention - triggers worktree creation
-gh issue comment ${ISSUE_NUMBER} --body "@remote-agent /command-invoke prime"
+# This is the first @Archon mention - triggers worktree creation
+gh issue comment ${ISSUE_NUMBER} --body "@Archon /command-invoke prime"
 
 echo "Waiting for prime to complete (90 seconds)..."
 sleep 90
@@ -671,7 +671,7 @@ cd "${PROJECT_ROOT}"
 ```bash
 cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
 
-gh issue comment ${ISSUE_NUMBER} --body "@remote-agent /command-invoke plan-feature \"Add a Validation section to README.md after the Purpose section, explaining how to run tests and validate the platform\""
+gh issue comment ${ISSUE_NUMBER} --body "@Archon /command-invoke plan-feature \"Add a Validation section to README.md after the Purpose section, explaining how to run tests and validate the platform\""
 
 echo "Waiting for plan to complete (120 seconds)..."
 sleep 120
@@ -691,7 +691,7 @@ cd "${PROJECT_ROOT}"
 ```bash
 cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
 
-gh issue comment ${ISSUE_NUMBER} --body "@remote-agent /command-invoke execute"
+gh issue comment ${ISSUE_NUMBER} --body "@Archon /command-invoke execute"
 
 echo "Waiting for execute to complete (180 seconds)..."
 sleep 180
@@ -809,7 +809,7 @@ cd "${PROJECT_ROOT}"
 ```bash
 cd "${WORK_DIR}/${GITHUB_USERNAME}/${TEST_REPO_NAME}"
 
-gh pr comment ${PR_NUMBER} --body "@remote-agent /command-invoke review-pr"
+gh pr comment ${PR_NUMBER} --body "@Archon /command-invoke review-pr"
 
 echo "Waiting for PR review to complete (120 seconds)..."
 sleep 120

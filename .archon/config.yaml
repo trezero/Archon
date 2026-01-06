@@ -9,3 +9,11 @@ commands:
 
   # Auto-load commands on clone
   autoLoad: true
+
+# Worktree configuration
+worktree:
+  # Files to copy from main repo to new worktrees
+  # Git-ignored files (like .env) aren't included in worktrees by default
+  copyFiles:
+    - .env.example -> .env  # Copy example to .env for local dev
+    - .env                   # Also copy .env if it exists

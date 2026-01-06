@@ -8,6 +8,7 @@
 import { createHash } from 'crypto';
 import { join } from 'path';
 
+import { loadRepoConfig } from '../../config/config-loader';
 import {
   execFileAsync,
   findWorktreeByBranch,
@@ -17,6 +18,7 @@ import {
   mkdirAsync,
   worktreeExists,
 } from '../../utils/git';
+import { copyWorktreeFiles } from '../../utils/worktree-copy';
 import type { IIsolationProvider, IsolatedEnvironment, IsolationRequest } from '../types';
 
 export class WorktreeProvider implements IIsolationProvider {
@@ -269,6 +271,62 @@ export class WorktreeProvider implements IIsolationProvider {
     } else {
       // For issues, tasks, threads: create new branch
       await this.createNewBranch(repoPath, worktreePath, branchName);
+    }
+
+    // Copy git-ignored files based on repo config
+    await this.copyConfiguredFiles(repoPath, worktreePath);
+  }
+
+  /**
+   * Copy git-ignored files to worktree based on repo config
+   */
+  private async copyConfiguredFiles(
+    canonicalRepoPath: string,
+    worktreePath: string
+  ): Promise<void> {
+    // Load config - log errors but don't fail worktree creation
+    let copyFiles: string[] | undefined;
+    try {
+      const repoConfig = await loadRepoConfig(canonicalRepoPath);
+      copyFiles = repoConfig.worktree?.copyFiles;
+    } catch (error) {
+      const err = error as Error;
+      // Config errors are more serious - log as error, not warning
+      console.error('[WorktreeProvider] Failed to load repo config', {
+        canonicalRepoPath,
+        error: err.message,
+      });
+      return;
+    }
+
+    if (!copyFiles || copyFiles.length === 0) {
+      return;
+    }
+
+    // Copy files - errors are handled inside copyWorktreeFiles, but wrap in
+    // try/catch for defense against unexpected errors
+    try {
+      const copied = await copyWorktreeFiles(canonicalRepoPath, worktreePath, copyFiles);
+      if (copied.length > 0) {
+        console.log(`[WorktreeProvider] Copied ${copied.length} file(s) to worktree`);
+      }
+
+      // Log summary if some files were configured but not all were copied
+      const attemptedCount = copyFiles.length;
+      const copiedCount = copied.length;
+      if (copiedCount < attemptedCount) {
+        console.log(
+          `[WorktreeProvider] File copy summary: ${copiedCount}/${attemptedCount} succeeded (check logs above for details)`
+        );
+      }
+    } catch (error) {
+      // Should not happen as copyWorktreeFiles handles errors internally,
+      // but guard against unexpected errors
+      const err = error as Error;
+      console.error('[WorktreeProvider] Unexpected error in file copying', {
+        worktreePath,
+        error: err.message,
+      });
     }
   }
 
