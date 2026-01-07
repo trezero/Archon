@@ -33,6 +33,9 @@ Caddyfile
 sessions/
 api_sessions/
 
+# Archon logs (generated at runtime)
+.archon/logs/
+
 # RCA reports (generated, local only)
 .agents/rca-reports/
 .claude/PRPs/features
