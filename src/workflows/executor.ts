@@ -9,7 +9,7 @@ import * as workflowDb from '../db/workflows';
 import { formatToolCall } from '../utils/tool-formatter';
 import { getCommandFolderSearchPaths } from '../utils/archon-paths';
 import { loadRepoConfig } from '../config/config-loader';
-import type { WorkflowDefinition, WorkflowRun, StepResult } from './types';
+import type { WorkflowDefinition, WorkflowRun, StepResult, LoadCommandResult } from './types';
 import {
   logWorkflowStart,
   logStepStart,
@@ -197,7 +197,7 @@ async function sendCriticalMessage(
 /**
  * Validate command name to prevent path traversal
  */
-function isValidCommandName(name: string): boolean {
+export function isValidCommandName(name: string): boolean {
   // Reject names with path separators or parent directory references
   if (name.includes('/') || name.includes('\\') || name.includes('..')) {
     return false;
@@ -220,11 +220,15 @@ async function loadCommandPrompt(
   cwd: string,
   commandName: string,
   configuredFolder?: string
-): Promise<string | null> {
+): Promise<LoadCommandResult> {
   // Validate command name first
   if (!isValidCommandName(commandName)) {
     console.error(`[WorkflowExecutor] Invalid command name: ${commandName}`);
-    return null;
+    return {
+      success: false,
+      reason: 'invalid_name',
+      message: `Invalid command name (potential path traversal): ${commandName}`,
+    };
   }
 
   // Use command folder paths with optional configured folder
@@ -237,23 +241,46 @@ async function loadCommandPrompt(
       const content = await readFile(filePath, 'utf-8');
       if (!content.trim()) {
         console.error(`[WorkflowExecutor] Empty command file: ${commandName}.md`);
-        return null;
+        return {
+          success: false,
+          reason: 'empty_file',
+          message: `Command file is empty: ${commandName}.md`,
+        };
       }
       console.log(`[WorkflowExecutor] Loaded command from: ${folder}/${commandName}.md`);
-      return content;
+      return { success: true, content };
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
-      if (err.code !== 'ENOENT') {
-        console.warn(`[WorkflowExecutor] Error reading ${filePath}: ${err.message}`);
+      if (err.code === 'ENOENT') {
+        // File doesn't exist - try next path
+        continue;
       }
-      // Continue to next search path
+      if (err.code === 'EACCES') {
+        console.error(`[WorkflowExecutor] Permission denied reading ${filePath}`);
+        return {
+          success: false,
+          reason: 'permission_denied',
+          message: `Permission denied reading command: ${commandName}.md`,
+        };
+      }
+      // Other unexpected errors
+      console.error(`[WorkflowExecutor] Unexpected error reading ${filePath}: ${err.message}`);
+      return {
+        success: false,
+        reason: 'read_error',
+        message: `Error reading command ${commandName}.md: ${err.message}`,
+      };
     }
   }
 
   console.error(
     `[WorkflowExecutor] Command prompt not found: ${commandName}.md (searched: ${searchPaths.join(', ')})`
   );
-  return null;
+  return {
+    success: false,
+    reason: 'not_found',
+    message: `Command prompt not found: ${commandName}.md (searched: ${searchPaths.join(', ')})`,
+  };
 }
 
 /**
@@ -293,18 +320,18 @@ async function executeStep(
   await logStepStart(cwd, workflowRun.id, commandName, stepIndex);
 
   // Load command prompt
-  const prompt = await loadCommandPrompt(cwd, commandName, configuredCommandFolder);
-  if (!prompt) {
+  const promptResult = await loadCommandPrompt(cwd, commandName, configuredCommandFolder);
+  if (!promptResult.success) {
     return {
       commandName,
       success: false,
-      error: `Command prompt not found: ${commandName}.md`,
+      error: promptResult.message,
     };
   }
 
   // Substitute variables
   const substitutedPrompt = substituteWorkflowVariables(
-    prompt,
+    promptResult.content,
     workflowRun.id,
     workflowRun.user_message
   );
@@ -394,11 +421,40 @@ async function executeStep(
     };
   } catch (error) {
     const err = error as Error;
-    console.error(`[WorkflowExecutor] Step failed: ${commandName}`, err);
+    const errorType = classifyError(err);
+    console.error(`[WorkflowExecutor] Step failed: ${commandName}`, {
+      error: err.message,
+      errorType,
+    });
+
+    // Add user-friendly hints based on error classification
+    let userHint = '';
+    const lowerMessage = err.message.toLowerCase();
+
+    if (errorType === 'TRANSIENT') {
+      if (lowerMessage.includes('rate') || lowerMessage.includes('429')) {
+        userHint = ' (Hint: Rate limited - wait a few minutes and try again)';
+      } else if (
+        lowerMessage.includes('timeout') ||
+        lowerMessage.includes('etimedout') ||
+        lowerMessage.includes('network')
+      ) {
+        userHint = ' (Hint: Network issue - try again)';
+      } else {
+        userHint = ' (Hint: Temporary error - try again)';
+      }
+    } else if (errorType === 'FATAL') {
+      if (lowerMessage.includes('401') || lowerMessage.includes('auth')) {
+        userHint = ' (Hint: Check your API key configuration)';
+      } else if (lowerMessage.includes('403') || lowerMessage.includes('permission')) {
+        userHint = ' (Hint: Permission denied - check API access)';
+      }
+    }
+
     return {
       commandName,
       success: false,
-      error: err.message,
+      error: err.message + userHint,
     };
   }
 }
@@ -424,12 +480,28 @@ export async function executeWorkflow(
   }
 
   // Create workflow run record
-  const workflowRun = await workflowDb.createWorkflowRun({
-    workflow_name: workflow.name,
-    conversation_id: conversationDbId,
-    codebase_id: codebaseId,
-    user_message: userMessage,
-  });
+  let workflowRun;
+  try {
+    workflowRun = await workflowDb.createWorkflowRun({
+      workflow_name: workflow.name,
+      conversation_id: conversationDbId,
+      codebase_id: codebaseId,
+      user_message: userMessage,
+    });
+  } catch (error) {
+    const err = error as Error;
+    console.error('[WorkflowExecutor] Database error creating workflow run', {
+      error: err.message,
+      workflow: workflow.name,
+      conversationId,
+    });
+    await sendCriticalMessage(
+      platform,
+      conversationId,
+      '**Workflow failed**: Unable to start workflow (database error). Please try again later.'
+    );
+    return;
+  }
 
   console.log(`[WorkflowExecutor] Starting workflow: ${workflow.name} (${workflowRun.id})`);
   await logWorkflowStart(cwd, workflowRun.id, workflow.name, userMessage);
@@ -464,7 +536,14 @@ export async function executeWorkflow(
     );
 
     if (!result.success) {
-      await workflowDb.failWorkflowRun(workflowRun.id, result.error);
+      try {
+        await workflowDb.failWorkflowRun(workflowRun.id, result.error);
+      } catch (dbError) {
+        console.error('[WorkflowExecutor] Database error recording workflow failure', {
+          error: (dbError as Error).message,
+          workflowId: workflowRun.id,
+        });
+      }
       await logWorkflowError(cwd, workflowRun.id, result.error);
       // Critical message - retry to ensure user knows about failure
       await sendCriticalMessage(
@@ -481,14 +560,29 @@ export async function executeWorkflow(
       currentSessionId = result.sessionId;
     }
 
-    // Update progress
-    await workflowDb.updateWorkflowRun(workflowRun.id, {
-      current_step_index: i + 1,
-    });
+    // Update progress (non-critical - log but don't fail workflow on db error)
+    try {
+      await workflowDb.updateWorkflowRun(workflowRun.id, {
+        current_step_index: i + 1,
+      });
+    } catch (dbError) {
+      console.error('[WorkflowExecutor] Database error updating workflow progress', {
+        error: (dbError as Error).message,
+        workflowId: workflowRun.id,
+        stepIndex: i + 1,
+      });
+    }
   }
 
   // Workflow complete
-  await workflowDb.completeWorkflowRun(workflowRun.id);
+  try {
+    await workflowDb.completeWorkflowRun(workflowRun.id);
+  } catch (dbError) {
+    console.error('[WorkflowExecutor] Database error recording workflow completion', {
+      error: (dbError as Error).message,
+      workflowId: workflowRun.id,
+    });
+  }
   await logWorkflowComplete(cwd, workflowRun.id);
   // Critical message - retry to ensure user knows about completion
   await sendCriticalMessage(

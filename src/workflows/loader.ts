@@ -5,6 +5,7 @@ import { readFile, readdir, access } from 'fs/promises';
 import { join } from 'path';
 import type { WorkflowDefinition } from './types';
 import { getWorkflowFolderSearchPaths } from '../utils/archon-paths';
+import { isValidCommandName } from './executor';
 
 /**
  * Parse YAML using Bun's native YAML parser
@@ -34,13 +35,31 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
     }
 
     // Parse command field (support both 'command' and 'step' for backward compat)
-    const steps = raw.steps.map((s: unknown) => {
-      const step = s as Record<string, unknown>;
-      return {
-        command: String(step.command ?? step.step),
-        clearContext: Boolean(step.clearContext),
-      };
-    });
+    const steps = raw.steps
+      .map((s: unknown, index: number) => {
+        const step = s as Record<string, unknown>;
+        const command = String(step.command ?? step.step);
+
+        // Validate command name at parse time (Issue #129)
+        if (!isValidCommandName(command)) {
+          console.warn(
+            `[WorkflowLoader] Invalid command name in ${filename} step ${String(index + 1)}: ${command}`
+          );
+          return null;
+        }
+
+        return {
+          command,
+          clearContext: Boolean(step.clearContext),
+        };
+      })
+      .filter((step): step is NonNullable<typeof step> => step !== null);
+
+    // Reject workflow if any steps were invalid
+    if (steps.length !== raw.steps.length) {
+      console.warn(`[WorkflowLoader] Workflow ${filename} has invalid command names, skipping`);
+      return null;
+    }
 
     // Validate provider (default to 'claude')
     const provider =

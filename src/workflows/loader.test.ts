@@ -246,6 +246,96 @@ steps:
     });
   });
 
+  describe('command name validation (Issue #129)', () => {
+    it('should reject workflow with path traversal command name', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const pathTraversalYaml = `name: path-traversal
+description: Has invalid command name
+steps:
+  - command: ../../../etc/passwd
+`;
+      await writeFile(join(workflowDir, 'invalid.yaml'), pathTraversalYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(0);
+    });
+
+    it('should reject workflow with dotfile command name', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const dotfileYaml = `name: dotfile-workflow
+description: Has dotfile command name
+steps:
+  - command: .hidden
+`;
+      await writeFile(join(workflowDir, 'dotfile.yaml'), dotfileYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(0);
+    });
+
+    it('should reject workflow with backslash in command name', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const backslashYaml = `name: backslash-workflow
+description: Has backslash in command
+steps:
+  - command: foo\\bar
+`;
+      await writeFile(join(workflowDir, 'backslash.yaml'), backslashYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(0);
+    });
+
+    it('should accept valid command names', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const validYaml = `name: valid-commands
+description: Has valid command names
+steps:
+  - command: plan
+  - command: implement
+  - command: commit
+  - command: review-pr
+  - command: my_command_123
+`;
+      await writeFile(join(workflowDir, 'valid.yaml'), validYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(1);
+      expect(workflows[0].steps).toHaveLength(5);
+    });
+
+    it('should reject workflow if any step has invalid command name', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const partiallyInvalidYaml = `name: partial-invalid
+description: Has one invalid command among valid ones
+steps:
+  - command: valid-step
+  - command: ../../../etc/passwd
+  - command: another-valid
+`;
+      await writeFile(join(workflowDir, 'partial.yaml'), partiallyInvalidYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      // Entire workflow should be rejected
+      expect(workflows).toHaveLength(0);
+    });
+  });
+
   describe('edge cases', () => {
     it('should ignore non-yaml files in workflows directory', async () => {
       const workflowDir = join(testDir, '.archon', 'workflows');

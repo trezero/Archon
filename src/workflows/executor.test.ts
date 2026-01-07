@@ -63,7 +63,7 @@ function createMockPlatform(): IPlatformAdapter {
 }
 
 // Import after mocks are set up
-import { executeWorkflow } from './executor';
+import { executeWorkflow, isValidCommandName } from './executor';
 
 describe('Workflow Executor', () => {
   let mockPlatform: IPlatformAdapter;
@@ -706,6 +706,229 @@ describe('Workflow Executor', () => {
       );
       expect(failCalls.length).toBeGreaterThan(0);
     });
+
+    it('should return specific error message for empty command file (Issue #128)', async () => {
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'empty-cmd.md'), '   \n   ');
+
+      const workflow: WorkflowDefinition = {
+        name: 'empty-file-workflow',
+        description: 'Has empty command file',
+        steps: [{ command: 'empty-cmd' }],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should fail with specific "empty_file" error message
+      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const failureMessages = sendMessageCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' && (call[1] as string).includes('Command file is empty')
+      );
+      expect(failureMessages.length).toBeGreaterThan(0);
+    });
+
+    it('should return specific error message for path traversal (Issue #128)', async () => {
+      const workflow: WorkflowDefinition = {
+        name: 'path-traversal-workflow',
+        description: 'Has path traversal command',
+        steps: [{ command: '../../../etc/passwd' }],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should fail with specific "invalid_name" error message
+      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const failureMessages = sendMessageCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' &&
+          (call[1] as string).includes('Invalid command name (potential path traversal)')
+      );
+      expect(failureMessages.length).toBeGreaterThan(0);
+    });
+
+    it('should return specific error message for missing command file (Issue #128)', async () => {
+      const workflow: WorkflowDefinition = {
+        name: 'missing-cmd-workflow',
+        description: 'Has missing command file',
+        steps: [{ command: 'totally-nonexistent-cmd' }],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should fail with specific "not_found" error message that includes searched paths
+      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const failureMessages = sendMessageCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' &&
+          (call[1] as string).includes('Command prompt not found') &&
+          (call[1] as string).includes('searched:')
+      );
+      expect(failureMessages.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('AI client error hints (Issue #126)', () => {
+    it('should include rate limit hint for 429 errors', async () => {
+      // Mock AI client to throw rate limit error
+      mockSendQuery.mockImplementation(function* () {
+        throw new Error('API returned 429: Too many requests');
+      });
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'rate-limit-workflow',
+          description: 'Test rate limit handling',
+          steps: [{ command: 'command-one' }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should include hint about rate limiting
+      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const hintMessages = sendMessageCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' &&
+          (call[1] as string).includes('Rate limited') &&
+          (call[1] as string).includes('wait')
+      );
+      expect(hintMessages.length).toBeGreaterThan(0);
+
+      // Reset mock for other tests
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should include auth hint for 401 errors', async () => {
+      // Mock AI client to throw auth error
+      mockSendQuery.mockImplementation(function* () {
+        throw new Error('401 Unauthorized: Invalid API key');
+      });
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'auth-error-workflow',
+          description: 'Test auth error handling',
+          steps: [{ command: 'command-one' }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should include hint about checking API key
+      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const hintMessages = sendMessageCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' &&
+          (call[1] as string).includes('API key')
+      );
+      expect(hintMessages.length).toBeGreaterThan(0);
+
+      // Reset mock for other tests
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should include permission hint for 403 errors', async () => {
+      // Mock AI client to throw 403 error
+      mockSendQuery.mockImplementation(function* () {
+        throw new Error('403 Forbidden: Insufficient permissions');
+      });
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'forbidden-workflow',
+          description: 'Test 403 error handling',
+          steps: [{ command: 'command-one' }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should include hint about checking API access
+      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const hintMessages = sendMessageCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' && (call[1] as string).includes('Permission denied')
+      );
+      expect(hintMessages.length).toBeGreaterThan(0);
+
+      // Reset mock for other tests
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should include network hint for timeout errors', async () => {
+      // Mock AI client to throw timeout error
+      mockSendQuery.mockImplementation(function* () {
+        throw new Error('Request timeout: ETIMEDOUT');
+      });
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'timeout-workflow',
+          description: 'Test timeout handling',
+          steps: [{ command: 'command-one' }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should include hint about network issues
+      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const hintMessages = sendMessageCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' &&
+          (call[1] as string).includes('Network issue')
+      );
+      expect(hintMessages.length).toBeGreaterThan(0);
+
+      // Reset mock for other tests
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
   });
 
   describe('platform message error handling', () => {
@@ -1016,5 +1239,51 @@ describe('Workflow Executor', () => {
       // Should have retried
       expect(completionCalls.length).toBeGreaterThanOrEqual(1);
     });
+  });
+});
+
+describe('isValidCommandName', () => {
+  it('should reject empty string', () => {
+    expect(isValidCommandName('')).toBe(false);
+  });
+
+  it('should reject forward slashes (path traversal)', () => {
+    expect(isValidCommandName('foo/bar')).toBe(false);
+    expect(isValidCommandName('../etc/passwd')).toBe(false);
+  });
+
+  it('should reject backslashes (Windows path separator)', () => {
+    expect(isValidCommandName('foo\\bar')).toBe(false);
+  });
+
+  it('should reject double dots (parent directory reference)', () => {
+    expect(isValidCommandName('..')).toBe(false);
+    expect(isValidCommandName('..test')).toBe(false);
+  });
+
+  it('should reject names starting with dot (hidden files)', () => {
+    expect(isValidCommandName('.hidden')).toBe(false);
+    expect(isValidCommandName('.gitignore')).toBe(false);
+  });
+
+  it('should accept valid names with hyphens', () => {
+    expect(isValidCommandName('my-command')).toBe(true);
+    expect(isValidCommandName('review-pr')).toBe(true);
+  });
+
+  it('should accept valid names with underscores', () => {
+    expect(isValidCommandName('my_command')).toBe(true);
+    expect(isValidCommandName('my_command_123')).toBe(true);
+  });
+
+  it('should accept simple alphanumeric names', () => {
+    expect(isValidCommandName('plan')).toBe(true);
+    expect(isValidCommandName('execute')).toBe(true);
+    expect(isValidCommandName('commit')).toBe(true);
+  });
+
+  it('should accept names with numbers', () => {
+    expect(isValidCommandName('step1')).toBe(true);
+    expect(isValidCommandName('v2release')).toBe(true);
   });
 });

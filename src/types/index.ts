@@ -170,4 +170,5 @@ export type {
   WorkflowRun,
   StepDefinition,
   StepResult,
+  LoadCommandResult,
 } from '../workflows/types';

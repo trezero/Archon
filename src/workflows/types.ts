@@ -46,3 +46,16 @@ export interface WorkflowRun {
 export type StepResult =
   | { success: true; commandName: string; sessionId?: string; artifacts?: string[] }
   | { success: false; commandName: string; error: string };
+
+/**
+ * Result of loading a command prompt - discriminated union for specific error handling
+ *
+ * On success, `content` is guaranteed to be non-empty (validated at load time).
+ */
+export type LoadCommandResult =
+  | { success: true; content: string }
+  | {
+      success: false;
+      reason: 'invalid_name' | 'empty_file' | 'not_found' | 'permission_denied' | 'read_error';
+      message: string;
+    };

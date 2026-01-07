@@ -116,8 +116,14 @@ export async function loadRepoConfig(repoPath: string): Promise<RepoConfig> {
     try {
       const content = await readConfigFile(configPath);
       return (parseYaml(content) as RepoConfig) ?? {};
-    } catch {
-      // Try next path
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === 'ENOENT') {
+        // File doesn't exist - expected, try next path
+        continue;
+      }
+      // Unexpected error (syntax error, permission denied, etc) - log so users know their config has issues
+      console.warn(`[Config] Failed to load repo config from ${configPath}: ${err.message}`);
       continue;
     }
   }
