@@ -520,10 +520,12 @@ export async function handleMessage(
       }
 
       // Discover workflows (returns array, no global state)
+      // Use conversation.cwd if set, otherwise codebase default
       const codebaseForWorkflows = await codebaseDb.getCodebase(conversation.codebase_id);
       if (codebaseForWorkflows) {
         try {
-          availableWorkflows = await discoverWorkflows(codebaseForWorkflows.default_cwd);
+          const workflowCwd = conversation.cwd ?? codebaseForWorkflows.default_cwd;
+          availableWorkflows = await discoverWorkflows(workflowCwd);
           if (availableWorkflows.length > 0) {
             console.log(`[Orchestrator] Discovered ${String(availableWorkflows.length)} workflows`);
           }

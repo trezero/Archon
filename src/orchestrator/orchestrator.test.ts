@@ -31,6 +31,9 @@ const mockGetAssistantClient = mock(() => null);
 // Mock for reading command files (replaces fs/promises mock)
 const mockReadCommandFile = mock(() => Promise.resolve(''));
 
+// Mock for workflow discovery
+const mockDiscoverWorkflows = mock(() => Promise.resolve([]));
+
 // Isolation environment mocks
 const mockIsolationEnvGetById = mock(() => Promise.resolve(null));
 const mockIsolationEnvFindByWorkflow = mock(() => Promise.resolve(null));
@@ -103,6 +106,10 @@ mock.module('../handlers/command-handler', () => ({
 
 mock.module('../clients/factory', () => ({
   getAssistantClient: mockGetAssistantClient,
+}));
+
+mock.module('../workflows/loader', () => ({
+  discoverWorkflows: mockDiscoverWorkflows,
 }));
 
 // Import real orchestrator to spread its exports, then override readCommandFile
@@ -207,6 +214,7 @@ describe('orchestrator', () => {
     mockParseCommand.mockClear();
     mockGetAssistantClient.mockClear();
     mockReadCommandFile.mockClear();
+    mockDiscoverWorkflows.mockClear();
     mockClient.sendQuery.mockClear();
     mockClient.getType.mockClear();
 
@@ -838,6 +846,58 @@ describe('orchestrator', () => {
         '/workspace/project', // From existing env working_path
         'claude-session-xyz'
       );
+    });
+  });
+
+  describe('workflow discovery cwd resolution', () => {
+    test('discovers workflows from conversation.cwd when set', async () => {
+      // Setup: conversation has cwd set (e.g., worktree or /setcwd)
+      mockGetOrCreateConversation.mockResolvedValue({
+        ...mockConversation,
+        cwd: '/worktree/custom-path',
+      });
+      mockDiscoverWorkflows.mockResolvedValue([]);
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'help me with this feature');
+
+      // Verify discoverWorkflows was called with conversation.cwd
+      expect(mockDiscoverWorkflows).toHaveBeenCalledWith('/worktree/custom-path');
+    });
+
+    test('discovers workflows from codebase.default_cwd when conversation.cwd is null', async () => {
+      // Setup: conversation.cwd is null
+      mockGetOrCreateConversation.mockResolvedValue({
+        ...mockConversation,
+        cwd: null,
+        isolation_env_id: null,
+      });
+
+      // No isolation env - skip auto-creation by simulating limit reached
+      mockIsolationEnvGetById.mockResolvedValue(null);
+      mockIsolationEnvCountByCodebase.mockResolvedValue(100); // Over limit
+
+      mockDiscoverWorkflows.mockResolvedValue([]);
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'help me with this feature');
+
+      // Verify discoverWorkflows was called with codebase.default_cwd as fallback
+      expect(mockDiscoverWorkflows).toHaveBeenCalledWith('/workspace/test-project');
+    });
+
+    test('does not call discoverWorkflows when codebase not found', async () => {
+      // Setup: codebase lookup returns null
+      mockGetCodebase.mockResolvedValue(null);
+
+      await handleMessage(platform, 'chat-456', 'help me with this feature');
+
+      // Should not attempt workflow discovery
+      expect(mockDiscoverWorkflows).not.toHaveBeenCalled();
     });
   });
 });
