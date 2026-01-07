@@ -59,10 +59,50 @@ gh issue view {number} --json title,body,labels,comments,state,url,author
 | CHORE | "update", "upgrade", "maintenance", "dependency" |
 | DOCUMENTATION | "docs", "readme", "clarify", "example" |
 
+### 1.4 Assess Severity/Priority, Complexity, and Confidence
+
+Each assessment requires a **one-sentence reasoning** explaining WHY you chose that value. This reasoning must be based on concrete findings from your investigation (codebase exploration, git history, integration analysis).
+
+**For BUG issues - Severity:**
+
+| Severity | Criteria |
+|----------|----------|
+| CRITICAL | System down, data loss, security vulnerability, no workaround |
+| HIGH | Major feature broken, significant user impact, difficult workaround |
+| MEDIUM | Feature partially broken, moderate impact, workaround exists |
+| LOW | Minor issue, cosmetic, edge case, easy workaround |
+
+**For ENHANCEMENT/REFACTOR/CHORE/DOCUMENTATION - Priority:**
+
+| Priority | Criteria |
+|----------|----------|
+| HIGH | Blocking other work, frequently requested, high user value |
+| MEDIUM | Important but not urgent, moderate user value |
+| LOW | Nice to have, low urgency, minimal user impact |
+
+**Complexity** (based on codebase findings):
+
+| Complexity | Criteria |
+|------------|----------|
+| HIGH | 5+ files, multiple integration points, architectural changes, high risk |
+| MEDIUM | 2-4 files, some integration points, moderate risk |
+| LOW | 1-2 files, isolated change, low risk |
+
+**Confidence** (based on evidence quality):
+
+| Confidence | Criteria |
+|------------|----------|
+| HIGH | Clear root cause, strong evidence, well-understood code path |
+| MEDIUM | Likely root cause, some assumptions, partially understood |
+| LOW | Uncertain root cause, limited evidence, many unknowns |
+
 **PHASE_1_CHECKPOINT:**
 - [ ] Input type identified (GH issue or free-form)
 - [ ] Issue content extracted
 - [ ] Type classified
+- [ ] Severity (bug) or Priority (other) assessed with reasoning
+- [ ] Complexity assessed with reasoning (after Phase 2)
+- [ ] Confidence assessed with reasoning (after Phase 3)
 - [ ] If GH issue: confirmed it's open and not already has PR
 
 ---
@@ -179,16 +219,32 @@ If free-form (no issue number): `.archon/artifacts/issues/investigation-{timesta
 
 ### 4.2 Artifact Template
 
-Write this structure to the artifact file:
+Write this structure to the artifact file.
+
+**Note on Severity vs Priority:**
+- Use **Severity** for BUG type (CRITICAL, HIGH, MEDIUM, LOW)
+- Use **Priority** for all other types (HIGH, MEDIUM, LOW)
+
+**Important:** Each assessment must include a one-sentence reasoning based on your investigation findings.
 
 ```markdown
 # Investigation: {Title}
 
-**Issue**: #{number} ({url}) <!-- omit if free-form -->
+**Issue**: #{number} ({url})
 **Type**: {BUG|ENHANCEMENT|REFACTOR|CHORE|DOCUMENTATION}
-**Complexity**: {LOW|MEDIUM|HIGH}
-**Confidence**: {HIGH|MEDIUM|LOW}
 **Investigated**: {ISO timestamp}
+
+### Assessment
+
+| Metric | Value | Reasoning |
+|--------|-------|-----------|
+| Severity | {CRITICAL\|HIGH\|MEDIUM\|LOW} | {Why this severity? Based on user impact, workarounds, scope of failure} |
+| Complexity | {LOW\|MEDIUM\|HIGH} | {Why this complexity? Based on files affected, integration points, risk} |
+| Confidence | {HIGH\|MEDIUM\|LOW} | {Why this confidence? Based on evidence quality, unknowns, assumptions} |
+
+<!-- For non-BUG types, replace Severity row with Priority:
+| Priority | {HIGH\|MEDIUM\|LOW} | {Why this priority? Based on user value, blocking status, frequency} |
+-->
 
 ---
 
@@ -379,7 +435,15 @@ Format the artifact for GitHub and post:
 gh issue comment {number} --body "$(cat <<'EOF'
 ## 🔍 Investigation: {Title}
 
-**Type**: `{TYPE}` | **Complexity**: `{COMPLEXITY}` | **Confidence**: `{CONFIDENCE}`
+**Type**: `{TYPE}`
+
+### Assessment
+
+| Metric | Value | Reasoning |
+|--------|-------|-----------|
+| {Severity or Priority} | `{VALUE}` | {one-sentence why} |
+| Complexity | `{COMPLEXITY}` | {one-sentence why} |
+| Confidence | `{CONFIDENCE}` | {one-sentence why} |
 
 ---
 
@@ -421,7 +485,7 @@ bun run type-check && bun test {pattern} && bun run lint
 
 ### Next Step
 
-🤖 To implement: `/implement-issue {number}`
+To implement: `/implement-issue {number}`
 
 ---
 *Investigated by Claude • {timestamp}*
@@ -442,8 +506,14 @@ EOF
 
 **Issue**: #{number} - {title}
 **Type**: {BUG|ENHANCEMENT|REFACTOR|...}
-**Complexity**: {LOW|MEDIUM|HIGH}
-**Confidence**: {HIGH|MEDIUM|LOW}
+
+### Assessment
+
+| Metric | Value | Reasoning |
+|--------|-------|-----------|
+| {Severity or Priority} | {value} | {why - based on investigation} |
+| Complexity | {LOW\|MEDIUM\|HIGH} | {why - based on files/integration/risk} |
+| Confidence | {HIGH\|MEDIUM\|LOW} | {why - based on evidence/unknowns} |
 
 ### Key Findings
 

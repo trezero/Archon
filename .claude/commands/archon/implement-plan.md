@@ -155,7 +155,14 @@ If lint errors:
 
 ### 4.2 Unit Tests
 
-**Write tests specified in the plan**, then:
+**You MUST write or update tests for new code.** This is not optional.
+
+**Test requirements:**
+1. Every new function/feature needs at least one test
+2. Edge cases identified in the plan need tests
+3. Update existing tests if behavior changed
+
+**Write tests**, then run:
 
 ```bash
 bun test
@@ -226,6 +233,7 @@ mkdir -p .archon/artifacts/reports
 # Implementation Report
 
 **Plan**: `$ARGUMENTS`
+**Source Issue**: #{number} (if applicable)
 **Branch**: `{branch-name}`
 **Date**: {YYYY-MM-DD}
 **Status**: {COMPLETE | PARTIAL}
@@ -235,6 +243,20 @@ mkdir -p .archon/artifacts/reports
 ## Summary
 
 {Brief description of what was implemented}
+
+---
+
+## Assessment vs Reality
+
+Compare the original investigation's assessment with what actually happened:
+
+| Metric | Predicted | Actual | Reasoning |
+|--------|-----------|--------|-----------|
+| Complexity | {from plan} | {actual} | {Why it matched or differed - e.g., "discovered additional integration point"} |
+| Confidence | {from plan} | {actual} | {e.g., "root cause was correct" or "had to pivot because X"} |
+
+**If implementation deviated from the plan, explain why:**
+- {What changed and why - based on what you discovered during implementation}
 
 ---
 
@@ -314,6 +336,7 @@ mv $ARGUMENTS .archon/artifacts/plans/completed/
 ## Implementation Complete
 
 **Plan**: `$ARGUMENTS`
+**Source Issue**: #{number} (if applicable)
 **Branch**: `{branch-name}`
 **Status**: ✅ Complete
 
@@ -332,6 +355,11 @@ mv $ARGUMENTS .archon/artifacts/plans/completed/
 - {M} files updated
 - {K} tests written
 
+### Deviations
+
+{If none: "Implementation matched the plan."}
+{If any: Brief summary of what changed and why}
+
 ### Artifacts
 
 - 📋 Report: `.archon/artifacts/reports/{name}-report.md`
@@ -339,7 +367,7 @@ mv $ARGUMENTS .archon/artifacts/plans/completed/
 
 ### Next Steps
 
-1. Review the report
+1. Review the report (especially if deviations noted)
 2. Create PR: `gh pr create` or `/archon:create-pr`
 3. Merge when approved
 ```
