@@ -22,6 +22,7 @@ const mockFindCodebaseByDefaultCwd = mock(() => Promise.resolve(null));
 const mockCreateCodebase = mock(() => Promise.resolve(null));
 const mockGetCodebaseCommands = mock(() => Promise.resolve({}));
 const mockUpdateCodebaseCommands = mock(() => Promise.resolve());
+const mockDeleteCodebase = mock(() => Promise.resolve());
 const mockGetActiveSession = mock(() => Promise.resolve(null));
 const mockDeactivateSession = mock(() => Promise.resolve());
 
@@ -41,6 +42,7 @@ let spyMkdirAsync: ReturnType<typeof spyOn>;
 // Spies for fs/promises (avoid global mock.module pollution)
 let spyFsAccess: ReturnType<typeof spyOn>;
 let spyFsReaddir: ReturnType<typeof spyOn>;
+let spyFsRm: ReturnType<typeof spyOn>;
 
 // Mock database modules (safe - these don't have standalone tests that would be affected)
 mock.module('../db/conversations', () => ({
@@ -53,6 +55,7 @@ mock.module('../db/codebases', () => ({
   createCodebase: mockCreateCodebase,
   getCodebaseCommands: mockGetCodebaseCommands,
   updateCodebaseCommands: mockUpdateCodebaseCommands,
+  deleteCodebase: mockDeleteCodebase,
 }));
 
 mock.module('../db/sessions', () => ({
@@ -131,6 +134,7 @@ function clearAllMocks(): void {
   mockCreateCodebase.mockClear();
   mockGetCodebaseCommands.mockClear();
   mockUpdateCodebaseCommands.mockClear();
+  mockDeleteCodebase.mockClear();
   mockGetActiveSession.mockClear();
   mockDeactivateSession.mockClear();
   // Isolation mocks
@@ -170,6 +174,7 @@ function setupSpies(): void {
     Promise.reject(new Error('ENOENT'))
   );
   spyFsReaddir = spyOn(fsPromises, 'readdir').mockImplementation(() => Promise.resolve([]));
+  spyFsRm = spyOn(fsPromises, 'rm').mockImplementation(() => Promise.resolve());
 }
 
 // Restore all spies
@@ -187,6 +192,7 @@ function restoreSpies(): void {
   spyMkdirAsync?.mockRestore();
   spyFsAccess?.mockRestore();
   spyFsReaddir?.mockRestore();
+  spyFsRm?.mockRestore();
 }
 
 describe('CommandHandler', () => {
@@ -1127,6 +1133,450 @@ describe('CommandHandler', () => {
 
         expect(ownerName).toBe('alice');
         expect(repoName).toBe('utils');
+      });
+    });
+
+    describe('/repos and /repo nested structure (Issue #95)', () => {
+      test('/repos should list repositories in owner/repo format', async () => {
+        // Mock nested directory structure:
+        // workspaces/
+        //   octocat/
+        //     Hello-World/
+        //     Spoon-Knife/
+        //   github/
+        //     docs/
+        let readdirCallCount = 0;
+        spyFsReaddir.mockImplementation((path: string) => {
+          readdirCallCount++;
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'github', isDirectory: () => true, isFile: () => false },
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+              { name: 'Spoon-Knife', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('github')) {
+            return Promise.resolve([
+              { name: 'docs', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        const result = await handleCommand(baseConversation, '/repos');
+
+        expect(result.success).toBe(true);
+        // Should show owner/repo format
+        expect(result.message).toContain('github/docs');
+        expect(result.message).toContain('octocat/Hello-World');
+        expect(result.message).toContain('octocat/Spoon-Knife');
+        // Should NOT show just the owner name
+        expect(result.message).not.toMatch(/^\d+\. octocat$/m);
+        expect(result.message).not.toMatch(/^\d+\. github$/m);
+      });
+
+      test('/repos should mark correct repo as active using full path', async () => {
+        // Mock nested directory structure
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        // Mock a codebase that matches the nested path
+        mockGetCodebase.mockResolvedValue({
+          id: 'codebase-123',
+          name: 'octocat/Hello-World',
+          default_cwd: `${process.env.HOME ?? '/home/user'}/.archon/workspaces/octocat/Hello-World`,
+        } as never);
+
+        const conversationWithCodebase = {
+          ...baseConversation,
+          codebase_id: 'codebase-123',
+        };
+
+        const result = await handleCommand(conversationWithCodebase, '/repos');
+
+        expect(result.success).toBe(true);
+        // Should show the active marker with full path
+        expect(result.message).toContain('octocat/Hello-World');
+      });
+
+      test('/repo should match by repo name', async () => {
+        // Mock nested directory structure
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        // Mock codebase lookup returning an existing codebase
+        mockFindCodebaseByDefaultCwd.mockResolvedValue({
+          id: 'codebase-hw',
+          name: 'octocat/Hello-World',
+          default_cwd: `${process.env.HOME ?? '/home/user'}/.archon/workspaces/octocat/Hello-World`,
+        } as never);
+
+        // Use the repo name (not the full path)
+        const result = await handleCommand(baseConversation, '/repo Hello-World');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Switched to: octocat/Hello-World');
+      });
+
+      test('/repo should match by full owner/repo path', async () => {
+        // Mock nested directory structure
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        mockFindCodebaseByDefaultCwd.mockResolvedValue({
+          id: 'codebase-hw',
+          name: 'octocat/Hello-World',
+          default_cwd: `${process.env.HOME ?? '/home/user'}/.archon/workspaces/octocat/Hello-World`,
+        } as never);
+
+        // Use the full owner/repo path
+        const result = await handleCommand(baseConversation, '/repo octocat/Hello-World');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Switched to: octocat/Hello-World');
+      });
+
+      test('/repo should match by number', async () => {
+        // Mock nested directory structure with multiple repos
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'github', isDirectory: () => true, isFile: () => false },
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('github')) {
+            return Promise.resolve([
+              { name: 'docs', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        mockFindCodebaseByDefaultCwd.mockResolvedValue({
+          id: 'codebase-docs',
+          name: 'github/docs',
+          default_cwd: `${process.env.HOME ?? '/home/user'}/.archon/workspaces/github/docs`,
+        } as never);
+
+        // github/docs should be #1 (alphabetically sorted)
+        const result = await handleCommand(baseConversation, '/repo 1');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Switched to: github/docs');
+      });
+
+      test('/repo should fail gracefully with empty workspace', async () => {
+        // Mock empty workspace
+        spyFsReaddir.mockImplementation(() => Promise.resolve([]));
+
+        const result = await handleCommand(baseConversation, '/repo some-repo');
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('No repositories found');
+      });
+
+      test('/repo should fail if repo name not found', async () => {
+        // Mock nested directory structure
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        const result = await handleCommand(baseConversation, '/repo NonExistent');
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('Repository not found: NonExistent');
+      });
+
+      test('/repo should match by prefix on full path', async () => {
+        // Mock nested directory structure
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        mockFindCodebaseByDefaultCwd.mockResolvedValue({
+          id: 'codebase-hw',
+          name: 'octocat/Hello-World',
+          default_cwd: `${process.env.HOME ?? '/home/user'}/.archon/workspaces/octocat/Hello-World`,
+        } as never);
+
+        // Use prefix of full path "oct" should match "octocat/Hello-World"
+        const result = await handleCommand(baseConversation, '/repo oct');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Switched to: octocat/Hello-World');
+      });
+
+      test('/repo should match by prefix on repo name', async () => {
+        // Mock nested directory structure
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        mockFindCodebaseByDefaultCwd.mockResolvedValue({
+          id: 'codebase-hw',
+          name: 'octocat/Hello-World',
+          default_cwd: `${process.env.HOME ?? '/home/user'}/.archon/workspaces/octocat/Hello-World`,
+        } as never);
+
+        // Use prefix of repo name "Hel" should match "Hello-World"
+        const result = await handleCommand(baseConversation, '/repo Hel');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Switched to: octocat/Hello-World');
+      });
+
+      test('/repo should select first alphabetically when same repo name exists in different owners', async () => {
+        // Mock nested directory structure with same repo name under different owners:
+        // workspaces/
+        //   alice/
+        //     utils/
+        //   bob/
+        //     utils/
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'alice', isDirectory: () => true, isFile: () => false },
+              { name: 'bob', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('alice')) {
+            return Promise.resolve([
+              { name: 'utils', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('bob')) {
+            return Promise.resolve([
+              { name: 'utils', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        mockFindCodebaseByDefaultCwd.mockResolvedValue({
+          id: 'codebase-alice-utils',
+          name: 'alice/utils',
+          default_cwd: `${process.env.HOME ?? '/home/user'}/.archon/workspaces/alice/utils`,
+        } as never);
+
+        // "utils" matches both, should select alice/utils (first alphabetically)
+        const result = await handleCommand(baseConversation, '/repo utils');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Switched to: alice/utils');
+      });
+    });
+
+    describe('/repo-remove with nested structure (Issue #95)', () => {
+      test('/repo-remove should match by repo name', async () => {
+        // Mock nested directory structure
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        // Mock rm to succeed
+        spyFsRm.mockResolvedValue(undefined);
+
+        // Mock codebase lookup
+        mockFindCodebaseByDefaultCwd.mockResolvedValue({
+          id: 'codebase-hw',
+          name: 'octocat/Hello-World',
+          default_cwd: `${process.env.HOME ?? '/home/user'}/.archon/workspaces/octocat/Hello-World`,
+        } as never);
+
+        // Use the repo name (not the full path)
+        const result = await handleCommand(baseConversation, '/repo-remove Hello-World');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Removed: octocat/Hello-World');
+      });
+
+      test('/repo-remove should match by full owner/repo path', async () => {
+        // Mock nested directory structure
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        // Mock rm to succeed
+        spyFsRm.mockResolvedValue(undefined);
+
+        mockFindCodebaseByDefaultCwd.mockResolvedValue({
+          id: 'codebase-hw',
+          name: 'octocat/Hello-World',
+          default_cwd: `${process.env.HOME ?? '/home/user'}/.archon/workspaces/octocat/Hello-World`,
+        } as never);
+
+        // Use the full owner/repo path
+        const result = await handleCommand(baseConversation, '/repo-remove octocat/Hello-World');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Removed: octocat/Hello-World');
+      });
+
+      test('/repo-remove should match by number', async () => {
+        // Mock nested directory structure with multiple repos
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'github', isDirectory: () => true, isFile: () => false },
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('github')) {
+            return Promise.resolve([
+              { name: 'docs', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        // Mock rm to succeed
+        spyFsRm.mockResolvedValue(undefined);
+
+        mockFindCodebaseByDefaultCwd.mockResolvedValue({
+          id: 'codebase-docs',
+          name: 'github/docs',
+          default_cwd: `${process.env.HOME ?? '/home/user'}/.archon/workspaces/github/docs`,
+        } as never);
+
+        // github/docs should be #1 (alphabetically sorted)
+        const result = await handleCommand(baseConversation, '/repo-remove 1');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Removed: github/docs');
+      });
+
+      test('/repo-remove should fail if repo name not found', async () => {
+        // Mock nested directory structure
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        const result = await handleCommand(baseConversation, '/repo-remove NonExistent');
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('Repository not found: NonExistent');
       });
     });
   });

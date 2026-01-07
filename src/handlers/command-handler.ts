@@ -82,6 +82,66 @@ async function findMarkdownFilesRecursive(
   return results;
 }
 
+/**
+ * Represents a repository with nested owner/repo structure
+ */
+interface RepoEntry {
+  displayName: string; // "owner/repo" format for display
+  repoName: string; // Just the repo name for matching
+  fullPath: string; // Full filesystem path
+}
+
+/**
+ * List all repositories with nested owner/repo structure
+ * Recurses one level into owner folders to find actual repo directories
+ */
+async function listRepositories(workspacePath: string): Promise<RepoEntry[]> {
+  const repos: RepoEntry[] = [];
+
+  try {
+    const ownerEntries = await readdir(workspacePath, { withFileTypes: true });
+    const ownerFolders = ownerEntries.filter(entry => entry.isDirectory());
+
+    for (const owner of ownerFolders) {
+      const ownerPath = join(workspacePath, owner.name);
+      try {
+        const repoEntries = await readdir(ownerPath, { withFileTypes: true });
+        const repoFolders = repoEntries.filter(entry => entry.isDirectory());
+
+        for (const repo of repoFolders) {
+          repos.push({
+            displayName: `${owner.name}/${repo.name}`,
+            repoName: repo.name,
+            fullPath: join(ownerPath, repo.name),
+          });
+        }
+      } catch (error) {
+        // Log skipped owner folders so issues can be diagnosed
+        const err = error as NodeJS.ErrnoException;
+        console.warn('[listRepositories] Skipping owner folder:', {
+          owner: owner.name,
+          path: ownerPath,
+          code: err.code,
+          message: err.message,
+        });
+      }
+    }
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    // ENOENT is expected when workspace hasn't been created yet
+    if (err.code !== 'ENOENT') {
+      console.error('[listRepositories] Failed to read workspace:', {
+        path: workspacePath,
+        code: err.code,
+        message: err.message,
+      });
+      throw err;
+    }
+  }
+
+  return repos.sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
 export function parseCommand(text: string): { command: string; args: string[] } {
   // Match quoted strings or non-whitespace sequences
   const matches = text.match(/"[^"]+"|'[^']+'|\S+/g) ?? [];
@@ -588,13 +648,9 @@ Setup:
       const workspacePath = getArchonWorkspacesPath();
 
       try {
-        const entries = await readdir(workspacePath, { withFileTypes: true });
-        const folders = entries
-          .filter(entry => entry.isDirectory())
-          .map(entry => entry.name)
-          .sort();
+        const repos = await listRepositories(workspacePath);
 
-        if (!folders.length) {
+        if (!repos.length) {
           return {
             success: true,
             message: 'No repositories found in /workspace\n\nUse /clone <repo-url> to add one.',
@@ -613,13 +669,12 @@ Setup:
 
         let msg = 'Repositories:\n\n';
 
-        for (let i = 0; i < folders.length; i++) {
-          const folder = folders[i];
-          const folderPath = join(workspacePath, folder);
-          // Mark as active only if current codebase's default_cwd matches this folder
-          const isActive = currentCodebase?.default_cwd === folderPath;
+        for (let i = 0; i < repos.length; i++) {
+          const repo = repos[i];
+          // Mark as active if current codebase's default_cwd matches this repo's path
+          const isActive = currentCodebase?.default_cwd === repo.fullPath;
           const marker = isActive ? ' ← active' : '';
-          msg += `${String(i + 1)}. ${folder}${marker}\n`;
+          msg += `${String(i + 1)}. ${repo.displayName}${marker}\n`;
         }
 
         msg += '\nUse /repo <number|name> to switch';
@@ -675,39 +730,43 @@ Setup:
       const shouldPull = args[1]?.toLowerCase() === 'pull';
 
       try {
-        // Get sorted list of repos (same as /repos)
-        const entries = await readdir(workspacePath, { withFileTypes: true });
-        const folders = entries
-          .filter(entry => entry.isDirectory())
-          .map(entry => entry.name)
-          .sort();
+        // Get sorted list of repos with nested structure
+        const repos = await listRepositories(workspacePath);
 
-        if (!folders.length) {
+        if (!repos.length) {
           return {
             success: false,
             message: 'No repositories found. Use /clone <repo-url> first.',
           };
         }
 
-        // Find the target folder by number or name
-        let targetFolder: string | undefined;
+        // Find the target repo by number or name
+        let targetRepo: RepoEntry | undefined;
         const num = parseInt(identifier, 10);
-        if (!isNaN(num) && num >= 1 && num <= folders.length) {
-          targetFolder = folders[num - 1];
+        if (!isNaN(num) && num >= 1 && num <= repos.length) {
+          targetRepo = repos[num - 1];
         } else {
-          // Try exact match first, then prefix match
-          targetFolder =
-            folders.find(f => f === identifier) ?? folders.find(f => f.startsWith(identifier));
+          // Match priority:
+          // 1. Exact full path match (e.g., "octocat/Hello-World")
+          // 2. Exact repo name match (e.g., "Hello-World")
+          // 3. Prefix match on full path
+          // 4. Prefix match on repo name
+          targetRepo =
+            repos.find(r => r.displayName === identifier) ??
+            repos.find(r => r.repoName === identifier) ??
+            repos.find(r => r.displayName.startsWith(identifier)) ??
+            repos.find(r => r.repoName.startsWith(identifier));
         }
 
-        if (!targetFolder) {
+        if (!targetRepo) {
           return {
             success: false,
             message: `Repository not found: ${identifier}\n\nUse /repos to see available repositories.`,
           };
         }
 
-        const targetPath = join(workspacePath, targetFolder);
+        const targetPath = targetRepo.fullPath;
+        const targetFolder = targetRepo.displayName;
 
         // Git pull if requested
         if (shouldPull) {
@@ -809,39 +868,43 @@ Setup:
       const identifier = args[0];
 
       try {
-        // Get sorted list of repos (same as /repos)
-        const entries = await readdir(workspacePath, { withFileTypes: true });
-        const folders = entries
-          .filter(entry => entry.isDirectory())
-          .map(entry => entry.name)
-          .sort();
+        // Get sorted list of repos with nested structure
+        const repos = await listRepositories(workspacePath);
 
-        if (!folders.length) {
+        if (!repos.length) {
           return {
             success: false,
             message: 'No repositories found. Nothing to remove.',
           };
         }
 
-        // Find the target folder by number or name
-        let targetFolder: string | undefined;
+        // Find the target repo by number or name
+        let targetRepo: RepoEntry | undefined;
         const num = parseInt(identifier, 10);
-        if (!isNaN(num) && num >= 1 && num <= folders.length) {
-          targetFolder = folders[num - 1];
+        if (!isNaN(num) && num >= 1 && num <= repos.length) {
+          targetRepo = repos[num - 1];
         } else {
-          // Try exact match first, then prefix match
-          targetFolder =
-            folders.find(f => f === identifier) ?? folders.find(f => f.startsWith(identifier));
+          // Match priority:
+          // 1. Exact full path match (e.g., "octocat/Hello-World")
+          // 2. Exact repo name match (e.g., "Hello-World")
+          // 3. Prefix match on full path
+          // 4. Prefix match on repo name
+          targetRepo =
+            repos.find(r => r.displayName === identifier) ??
+            repos.find(r => r.repoName === identifier) ??
+            repos.find(r => r.displayName.startsWith(identifier)) ??
+            repos.find(r => r.repoName.startsWith(identifier));
         }
 
-        if (!targetFolder) {
+        if (!targetRepo) {
           return {
             success: false,
             message: `Repository not found: ${identifier}\n\nUse /repos to see available repositories.`,
           };
         }
 
-        const targetPath = join(workspacePath, targetFolder);
+        const targetPath = targetRepo.fullPath;
+        const targetFolder = targetRepo.displayName;
 
         // Find codebase by path
         const codebase = await codebaseDb.findCodebaseByDefaultCwd(targetPath);
