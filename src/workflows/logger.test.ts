@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdir, rm, readFile } from 'fs/promises';
+import { mkdir, rm, readFile, chmod } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -250,6 +250,51 @@ Line 3`;
       expect(events).toHaveLength(3);
       expect(events[2].type).toBe('workflow_error');
       expect(events[2].error).toBe('Step failed: timeout exceeded');
+    });
+  });
+
+  describe('filesystem error handling', () => {
+    it('should not throw when log directory is not writable', async () => {
+      // Create logs directory first, then make parent read-only
+      const logsDir = join(testDir, '.archon', 'logs');
+      await mkdir(logsDir, { recursive: true });
+
+      // Make logs directory read-only (can't write files)
+      await chmod(logsDir, 0o444);
+
+      try {
+        // Should not throw - logging shouldn't break workflow
+        await expect(
+          logWorkflowEvent(testDir, 'readonly-test', {
+            type: 'workflow_start',
+            workflow_name: 'test',
+          })
+        ).resolves.toBeUndefined();
+      } finally {
+        // Restore permissions for cleanup
+        await chmod(logsDir, 0o755);
+      }
+    });
+
+    it('should not throw when cwd does not exist', async () => {
+      const nonExistentDir = join(testDir, 'does-not-exist', 'nested');
+
+      // Make parent read-only so mkdir fails
+      await mkdir(join(testDir, 'does-not-exist'));
+      await chmod(join(testDir, 'does-not-exist'), 0o444);
+
+      try {
+        // Should not throw even when directory creation fails
+        await expect(
+          logWorkflowEvent(nonExistentDir, 'nonexistent-test', {
+            type: 'workflow_start',
+            workflow_name: 'test',
+          })
+        ).resolves.toBeUndefined();
+      } finally {
+        // Restore permissions for cleanup
+        await chmod(join(testDir, 'does-not-exist'), 0o755);
+      }
     });
   });
 });
