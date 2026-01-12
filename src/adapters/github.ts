@@ -363,7 +363,7 @@ export class GitHubAdapter implements IPlatformAdapter {
   }
 
   /**
-   * Auto-detect and load commands from .archon/commands, .claude/commands or .agents/commands
+   * Auto-detect and load commands from .archon/commands/ (or configured folder)
    */
   private async autoDetectAndLoadCommands(repoPath: string, codebaseId: string): Promise<void> {
     const commandFolders = getCommandFolderSearchPaths();

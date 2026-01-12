@@ -1327,7 +1327,10 @@ Setup:
 
           let msg = 'Available Workflows:\n\n';
           for (const w of workflows) {
-            msg += `**${w.name}**\n  ${w.description}\n  Steps: ${w.steps.map(s => s.command).join(' -> ')}\n\n`;
+            const stepsOrLoop = w.loop
+              ? `Loop: until "${w.loop.until}" (max ${String(w.loop.max_iterations)} iterations)`
+              : `Steps: ${w.steps?.map(s => s.command).join(' -> ') ?? 'none'}`;
+            msg += `**${w.name}**\n  ${w.description}\n  ${stepsOrLoop}\n\n`;
           }
 
           return { success: true, message: msg };

@@ -300,7 +300,7 @@ DEFAULT_AI_ASSISTANT=codex
 </details>
 
 **How Assistant Selection Works:**
-- Assistant type is set per codebase (auto-detected from `.claude/commands/` or `.codex/` folders)
+- Assistant type is set per codebase (auto-detected from `.codex/` or `.claude/` folders)
 - Once a conversation starts, the assistant type is locked for that conversation
 - `DEFAULT_AI_ASSISTANT` (optional) is used only for new conversations without codebase context
 
@@ -489,7 +489,7 @@ Interact by @mentioning `@Archon` in issues or PRs:
 
 **First mention behavior:**
 - Automatically clones the repository to `/.archon/workspaces/`
-- Detects and loads commands from `.claude/commands/` or `.agents/commands/`
+- Detects and loads commands from `.archon/commands/` if present
 - Injects full issue/PR context for the AI assistant
 
 **Subsequent mentions:**

@@ -1240,6 +1240,434 @@ describe('Workflow Executor', () => {
       expect(completionCalls.length).toBeGreaterThanOrEqual(1);
     });
   });
+
+  describe('loop workflow execution', () => {
+    it('should execute loop and complete on signal', async () => {
+      // Mock AI to return COMPLETE on 3rd iteration
+      let callCount = 0;
+      mockSendQuery.mockImplementation(function* () {
+        callCount++;
+        if (callCount >= 3) {
+          yield { type: 'assistant', content: 'All done! <promise>COMPLETE</promise>' };
+        } else {
+          yield { type: 'assistant', content: `Working on iteration ${String(callCount)}...` };
+        }
+        yield { type: 'result', sessionId: `session-${String(callCount)}` };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'test-loop',
+        description: 'Test loop workflow',
+        loop: { until: 'COMPLETE', max_iterations: 10, fresh_context: false },
+        prompt: 'Do the thing. Output <promise>COMPLETE</promise> when done.',
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Implement everything',
+        'db-conv-id'
+      );
+
+      // Should have run 3 iterations
+      expect(mockSendQuery).toHaveBeenCalledTimes(3);
+
+      // Should complete successfully
+      const completeCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
+      );
+      expect(completeCalls.length).toBeGreaterThan(0);
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should fail when max iterations reached without completion', async () => {
+      // Mock AI to never return completion signal
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'Still working...' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'endless-loop',
+        description: 'Never completes',
+        loop: { until: 'COMPLETE', max_iterations: 3, fresh_context: false },
+        prompt: 'Do something that never finishes.',
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Try forever',
+        'db-conv-id'
+      );
+
+      // Should have run exactly max_iterations times
+      expect(mockSendQuery).toHaveBeenCalledTimes(3);
+
+      // Should fail
+      const failCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
+      );
+      expect(failCalls.length).toBeGreaterThan(0);
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should detect completion signal in <promise> tags', async () => {
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'Done! <promise>DONE</promise>' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'promise-test',
+        description: 'Test promise tag detection',
+        loop: { until: 'DONE', max_iterations: 5, fresh_context: false },
+        prompt: 'Output <promise>DONE</promise> when finished.',
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
+
+      // Should complete on first iteration
+      expect(mockSendQuery).toHaveBeenCalledTimes(1);
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should update metadata with iteration count', async () => {
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: '<promise>COMPLETE</promise>' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'metadata-test',
+        description: 'Test metadata updates',
+        loop: { until: 'COMPLETE', max_iterations: 10, fresh_context: false },
+        prompt: 'Complete immediately.',
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
+
+      // Should have UPDATE with metadata
+      const metadataCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes('metadata')
+      );
+      expect(metadataCalls.length).toBeGreaterThan(0);
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should handle single iteration loop (max_iterations = 1)', async () => {
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'No completion signal here' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'single-iteration',
+        description: 'Single iteration limit',
+        loop: { until: 'COMPLETE', max_iterations: 1, fresh_context: false },
+        prompt: 'Try once.',
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
+
+      // Should have run exactly 1 time
+      expect(mockSendQuery).toHaveBeenCalledTimes(1);
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should detect plain completion signal (backwards compatibility)', async () => {
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'All tasks done! COMPLETE' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'plain-signal-test',
+        description: 'Test plain signal detection',
+        loop: { until: 'COMPLETE', max_iterations: 5, fresh_context: false },
+        prompt: 'Output COMPLETE when finished.',
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
+
+      // Should complete on first iteration (plain signal detected)
+      expect(mockSendQuery).toHaveBeenCalledTimes(1);
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should handle AI error during iteration', async () => {
+      let callCount = 0;
+      mockSendQuery.mockImplementation(function* () {
+        callCount++;
+        if (callCount === 2) {
+          throw new Error('AI service unavailable');
+        }
+        yield { type: 'assistant', content: `Iteration ${String(callCount)}` };
+        yield { type: 'result', sessionId: `session-${String(callCount)}` };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'error-test',
+        description: 'Test error handling',
+        loop: { until: 'COMPLETE', max_iterations: 5, fresh_context: false },
+        prompt: 'Work until done.',
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
+
+      // Should have run 2 iterations (failed on 2nd)
+      expect(mockSendQuery).toHaveBeenCalledTimes(2);
+
+      // Should fail
+      const failCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
+      );
+      expect(failCalls.length).toBeGreaterThan(0);
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should substitute $USER_MESSAGE in loop prompt', async () => {
+      // Track the prompt passed to sendQuery
+      let receivedPrompt = '';
+      mockSendQuery.mockImplementation(function* (prompt: string) {
+        receivedPrompt = prompt;
+        yield { type: 'assistant', content: '<promise>COMPLETE</promise>' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'substitution-test',
+        description: 'Test variable substitution',
+        loop: { until: 'COMPLETE', max_iterations: 5, fresh_context: false },
+        prompt: 'User wants: $USER_MESSAGE',
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'build a feature',
+        'db-conv-id'
+      );
+
+      // User message from the mock database row is 'test user message'
+      expect(receivedPrompt).toContain('test user message');
+      expect(receivedPrompt).not.toContain('$USER_MESSAGE');
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should start fresh session each iteration when fresh_context is true', async () => {
+      // Track session IDs passed to each iteration
+      const receivedSessionIds: (string | undefined)[] = [];
+      let callCount = 0;
+
+      mockSendQuery.mockImplementation(function* (_prompt: string, _cwd: string, sessionId?: string) {
+        receivedSessionIds.push(sessionId);
+        callCount++;
+        if (callCount >= 3) {
+          yield { type: 'assistant', content: '<promise>COMPLETE</promise>' };
+        } else {
+          yield { type: 'assistant', content: `Iteration ${String(callCount)}` };
+        }
+        yield { type: 'result', sessionId: `session-${String(callCount)}` };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'fresh-context-loop',
+        description: 'Test fresh_context: true',
+        loop: { until: 'COMPLETE', max_iterations: 5, fresh_context: true },
+        prompt: 'Do work with fresh context each time.',
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
+
+      // Should have run 3 iterations
+      expect(mockSendQuery).toHaveBeenCalledTimes(3);
+
+      // ALL iterations should have undefined session ID (fresh context)
+      expect(receivedSessionIds).toEqual([undefined, undefined, undefined]);
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should detect completion signal split across multiple chunks', async () => {
+      // Simulate AI returning completion signal across multiple yield statements
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'Processing complete. ' };
+        yield { type: 'assistant', content: '<prom' };
+        yield { type: 'assistant', content: 'ise>COMPLETE</promise>' };
+        yield { type: 'assistant', content: ' Done!' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'split-signal-test',
+        description: 'Test signal detection across chunks',
+        loop: { until: 'COMPLETE', max_iterations: 5, fresh_context: false },
+        prompt: 'Output completion signal.',
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
+
+      // Should complete on first iteration (signal accumulated across chunks)
+      expect(mockSendQuery).toHaveBeenCalledTimes(1);
+
+      // Should have marked as completed
+      const completeCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
+      );
+      expect(completeCalls.length).toBeGreaterThan(0);
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should NOT detect false positive plain signal in middle of text', async () => {
+      // This tests that "not COMPLETE yet" doesn't match "COMPLETE"
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'The task is not COMPLETE yet, more work needed.' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'false-positive-test',
+        description: 'Test false positive prevention',
+        loop: { until: 'COMPLETE', max_iterations: 2, fresh_context: false },
+        prompt: 'Work until done.',
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
+
+      // Should have run max_iterations times (NOT detected as complete)
+      expect(mockSendQuery).toHaveBeenCalledTimes(2);
+
+      // Should have FAILED (not completed)
+      const failCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
+      );
+      expect(failCalls.length).toBeGreaterThan(0);
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+  });
 });
 
 describe('isValidCommandName', () => {

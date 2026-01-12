@@ -172,15 +172,18 @@ src/
 
 ### Database Schema
 
-**3 Tables:**
-1. **`conversations`** - Track platform conversations (Slack thread, Telegram chat, GitHub issue)
-2. **`codebases`** - Define codebases and their commands (JSONB)
+**5 Tables (all prefixed with `remote_agent_`):**
+1. **`codebases`** - Repository metadata and commands (JSONB)
+2. **`conversations`** - Track platform conversations (Slack thread, Telegram chat, GitHub issue)
 3. **`sessions`** - Track AI SDK sessions with resume capability
+4. **`command_templates`** - Global command templates (manually added via `/template-add`)
+5. **`isolation_environments`** - Git worktree isolation tracking
 
 **Key Patterns:**
 - Conversation ID format: Platform-specific (`thread_ts`, `chat_id`, `user/repo#123`)
 - One active session per conversation
-- Commands stored in codebase filesystem, paths in `codebases.commands` JSONB
+- Codebase commands stored in filesystem, paths in `codebases.commands` JSONB
+- Global templates stored in database, added via `/template-add`
 - Session persistence: Sessions survive restarts, loaded from database
 
 **Session Transitions:**
@@ -238,9 +241,9 @@ src/
 DATABASE_URL=postgresql://user:pass@host:5432/dbname
 
 # AI Assistants
-CLAUDE_API_KEY=sk-ant-...
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
 # OR
-CLAUDE_OAUTH_TOKEN=sk-ant-oat01-...
+CLAUDE_API_KEY=sk-ant-...
 
 CODEX_ID_TOKEN=eyJ...
 CODEX_ACCESS_TOKEN=eyJ...
@@ -253,23 +256,22 @@ TELEGRAM_ALLOWED_USER_IDS=123456789,987654321  # Optional: Restrict bot to speci
 DISCORD_BOT_TOKEN=<from Discord Developer Portal>
 DISCORD_ALLOWED_USER_IDS=123456789012345678  # Optional: Restrict bot to specific user IDs
 SLACK_BOT_TOKEN=xoxb-...
-GITHUB_TOKEN=ghp_...
-GITHUB_APP_ID=12345
-GITHUB_PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----...
+SLACK_APP_TOKEN=xapp-...  # Required for Socket Mode
+GH_TOKEN=ghp_...          # For git operations and GitHub CLI
+GITHUB_TOKEN=ghp_...      # Same as GH_TOKEN
 WEBHOOK_SECRET=<random string>
 GITHUB_ALLOWED_USERS=octocat,monalisa  # Optional: Restrict webhook processing to specific users
 
 # Platform Streaming Mode (stream | batch)
 TELEGRAM_STREAMING_MODE=stream  # Default: stream
-SLACK_STREAMING_MODE=stream     # Default: stream
+SLACK_STREAMING_MODE=batch      # Default: batch
+DISCORD_STREAMING_MODE=batch    # Default: batch
 GITHUB_STREAMING_MODE=batch     # Default: batch
 
 # Optional
 ARCHON_HOME=~/.archon  # Override the base directory
 PORT=3000
-
-# Builtin Commands (default: true)
-LOAD_BUILTIN_COMMANDS=true  # Load maintained workflow templates on startup
+MAX_CONCURRENT_CONVERSATIONS=10
 ```
 
 **Loading:** Use `dotenv` package, load in `src/index.ts`
@@ -355,10 +357,14 @@ All Archon-managed files are organized under a dedicated namespace:
 **Configuration:**
 - `ARCHON_HOME` - Override the base directory (default: `~/.archon`)
 
-**Command folder detection priority:**
-1. `.archon/commands/` - Archon-specific commands
-2. `.claude/commands/` - Claude Code standard location
-3. `.agents/commands/` - Alternative location
+**Command folder detection:**
+- `.archon/commands/` - Primary location for repo commands
+- Additional folder can be configured in `.archon/config.yaml`
+
+**Workflow folder search paths (in priority order):**
+1. `.archon/workflows/`
+2. `.claude/workflows/`
+3. `.agents/workflows/`
 
 ## Development Guidelines
 
@@ -575,29 +581,44 @@ if (streamingMode === 'batch') {
 - `$IMPLEMENTATION_SUMMARY` - Previous execution summary
 
 **Command Files:**
-- Stored in codebase (e.g., `.claude/commands/plan.md`)
+- Stored in codebase (e.g., `.archon/commands/plan.md`)
 - Plain text/markdown format
 - Users edit with Git version control
 - Paths stored in `codebases.commands` JSONB
 
 **Auto-detection:**
-- On `/clone`, detect `.claude/commands/` or `.agents/commands/`
-- Offer to bulk load with `/load-commands`
+- On `/clone`, auto-load commands from `.archon/commands/` if present
+- Commands are registered per-codebase (not global)
 
-### Builtin Command Templates
+### Command Types
 
-The repo ships with maintained workflow commands in `.claude/commands/exp-piv-loop/`:
-- `/plan` - Deep implementation planning
-- `/implement` - Execute implementation plans
-- `/commit` - Quick commits with natural language targeting
-- `/review-pr` - Comprehensive PR code review
-- `/create-pr`, `/merge-pr` - PR lifecycle
-- `/rca`, `/fix-rca` - Root cause analysis workflow
-- `/prd` - Product requirements documents
-- `/worktree` - Parallel branch development
+**1. Codebase Commands** (per-repo):
+- Stored in filesystem (e.g., `.archon/commands/plan.md`)
+- Loaded via `/clone` (auto) or `/load-commands <folder>` (manual)
+- Invoked via `/command-invoke <name> [args]`
+- Paths stored in `codebases.commands` JSONB
 
-These are loaded as global templates on startup (controlled by `LOAD_BUILTIN_COMMANDS`).
-To disable: `LOAD_BUILTIN_COMMANDS=false`
+**2. Global Templates** (database):
+- Stored in `remote_agent_command_templates` table
+- Added manually via `/template-add <name> <file-path>`
+- Invoked directly via `/<name> [args]`
+- Shared across all codebases
+
+**3. Workflows** (YAML-based):
+- Stored in `.archon/workflows/` (or `.claude/workflows/`, `.agents/workflows/`)
+- Multi-step AI execution chains
+- Discovered at runtime, routed by AI
+
+### Example Commands in This Repo
+
+This repo includes example commands in `.archon/commands/` and `.claude/commands/` for reference:
+- `plan.md`, `implement.md`, `create-pr.md` - Feature development
+- `investigate-issue.md`, `implement-issue.md` - GitHub issue workflow
+- `assist.md` - General assistance
+
+These are **not auto-loaded globally**. To use them:
+1. Clone a repo that contains them, or
+2. Manually add as global templates: `/template-add plan .archon/commands/plan.md`
 
 ### Error Handling
 

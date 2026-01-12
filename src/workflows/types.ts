@@ -1,8 +1,12 @@
 /**
  * Workflow Engine Type Definitions
  *
- * Core types for the workflow engine that chains prompts together
- * for sequential AI execution. Steps share context via session continuity.
+ * Core types for the workflow engine supporting two execution modes:
+ * 1. Step-based: Sequential prompt chains with session continuity
+ * 2. Loop-based: Autonomous iteration until completion signal (Ralph pattern)
+ *
+ * The WorkflowDefinition type uses a discriminated union pattern with `never`
+ * types to enforce mutual exclusivity between steps and loop at compile time.
  */
 
 /**
@@ -14,15 +18,46 @@ export interface StepDefinition {
 }
 
 /**
- * Workflow definition parsed from YAML
+ * Loop configuration for Ralph-style autonomous iteration
  */
-export interface WorkflowDefinition {
+export interface LoopConfig {
+  /** Completion signal to detect in AI output (e.g., "COMPLETE") */
+  until: string;
+  /** Maximum iterations allowed; exceeding this fails the workflow with an error */
+  max_iterations: number;
+  /** Whether to start fresh session each iteration (default: false) */
+  fresh_context?: boolean;
+}
+
+/** Common fields shared by all workflow types */
+interface WorkflowBase {
   name: string;
   description: string;
   provider?: 'claude' | 'codex'; // AI provider (default: claude)
   model?: string; // Model override (future)
-  steps: StepDefinition[];
 }
+
+/** Step-based workflow - sequential command execution */
+interface StepWorkflow extends WorkflowBase {
+  steps: StepDefinition[];
+  loop?: never;
+  prompt?: never;
+}
+
+/** Loop-based workflow - autonomous iteration until completion */
+interface LoopWorkflow extends WorkflowBase {
+  steps?: never;
+  loop: LoopConfig;
+  prompt: string;
+}
+
+/**
+ * Workflow definition parsed from YAML - discriminated union
+ *
+ * Either step-based (with `steps`) or loop-based (with `loop` + `prompt`).
+ * The `never` types ensure TypeScript enforces mutual exclusivity at compile time.
+ */
+export type WorkflowDefinition = StepWorkflow | LoopWorkflow;
 
 /**
  * Runtime workflow run state stored in database

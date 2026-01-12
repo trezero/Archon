@@ -57,6 +57,39 @@ const TRANSIENT_PATTERNS = [
 ];
 
 /**
+ * Escape special regex characters in string
+ */
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Check if AI output contains completion signal
+ *
+ * Supports two formats:
+ * 1. <promise>SIGNAL</promise> - Recommended; prevents false positives in prose
+ * 2. Plain SIGNAL - Backwards compatibility; only at end of output or on own line
+ *
+ * The <promise> tag format uses case-insensitive matching for the tags.
+ * Plain signal detection is restrictive to prevent false positives.
+ */
+function detectCompletionSignal(output: string, signal: string): boolean {
+  // Check for <promise>SIGNAL</promise> format (recommended - prevents false positives)
+  // Case-insensitive for tags
+  const promisePattern = new RegExp(`<promise>\\s*${escapeRegExp(signal)}\\s*</promise>`, 'i');
+  if (promisePattern.test(output)) {
+    return true;
+  }
+  // Plain signal detection - restrictive to prevent false positives like "not COMPLETE yet"
+  // Only matches if signal is:
+  // 1. At the very end of output (with optional trailing whitespace/punctuation)
+  // 2. On its own line
+  const endPattern = new RegExp(`${escapeRegExp(signal)}[\\s.,;:!?]*$`);
+  const ownLinePattern = new RegExp(`^\\s*${escapeRegExp(signal)}\\s*$`, 'm');
+  return endPattern.test(output) || ownLinePattern.test(output);
+}
+
+/**
  * Check if error message matches any pattern in the list
  */
 function matchesPattern(message: string, patterns: string[]): boolean {
@@ -311,11 +344,13 @@ async function executeStep(
   currentSessionId?: string,
   configuredCommandFolder?: string
 ): Promise<StepResult> {
-  const stepDef = workflow.steps[stepIndex];
+  // steps is guaranteed to exist when executeStep is called (guarded in executeWorkflow)
+  const steps = workflow.steps!;
+  const stepDef = steps[stepIndex];
   const commandName = stepDef.command;
 
   console.log(
-    `[WorkflowExecutor] Executing step ${String(stepIndex + 1)}/${String(workflow.steps.length)}: ${commandName}`
+    `[WorkflowExecutor] Executing step ${String(stepIndex + 1)}/${String(steps.length)}: ${commandName}`
   );
   await logStepStart(cwd, workflowRun.id, commandName, stepIndex);
 
@@ -361,7 +396,7 @@ async function executeStep(
   await safeSendMessage(
     platform,
     conversationId,
-    `**Step ${String(stepIndex + 1)}/${String(workflow.steps.length)}**: ${commandName}`,
+    `**Step ${String(stepIndex + 1)}/${String(steps.length)}**: ${commandName}`,
     messageContext
   );
 
@@ -460,6 +495,165 @@ async function executeStep(
 }
 
 /**
+ * Execute a loop-based workflow (Ralph-style autonomous iteration)
+ */
+async function executeLoopWorkflow(
+  platform: IPlatformAdapter,
+  conversationId: string,
+  cwd: string,
+  workflow: WorkflowDefinition,
+  workflowRun: WorkflowRun
+): Promise<void> {
+  const loop = workflow.loop!;
+  const prompt = workflow.prompt!;
+
+  console.log(
+    `[WorkflowExecutor] Starting loop workflow: ${workflow.name} (max ${String(loop.max_iterations)} iterations)`
+  );
+
+  const workflowContext: SendMessageContext = { workflowId: workflowRun.id };
+  let currentSessionId: string | undefined;
+
+  for (let i = 1; i <= loop.max_iterations; i++) {
+    // Update metadata with current iteration (non-critical - log but don't fail on db error)
+    try {
+      await workflowDb.updateWorkflowRun(workflowRun.id, {
+        current_step_index: i,
+        metadata: { iteration_count: i, max_iterations: loop.max_iterations },
+      });
+    } catch (dbError) {
+      console.error('[WorkflowExecutor] Database error updating loop iteration metadata', {
+        error: (dbError as Error).message,
+        workflowId: workflowRun.id,
+        iteration: i,
+      });
+      // Continue - metadata update is non-critical
+    }
+
+    await safeSendMessage(
+      platform,
+      conversationId,
+      `**Iteration ${String(i)}/${String(loop.max_iterations)}**`,
+      workflowContext
+    );
+
+    // Determine session handling
+    const needsFreshSession = loop.fresh_context === true || i === 1;
+    const resumeSessionId = needsFreshSession ? undefined : currentSessionId;
+
+    if (needsFreshSession && i > 1) {
+      console.log(`[WorkflowExecutor] Starting fresh session for iteration ${String(i)}`);
+    } else if (resumeSessionId) {
+      console.log(`[WorkflowExecutor] Resuming session for iteration ${String(i)}: ${resumeSessionId}`);
+    }
+
+    // Substitute variables in prompt
+    const substitutedPrompt = substituteWorkflowVariables(
+      prompt,
+      workflowRun.id,
+      workflowRun.user_message
+    );
+
+    // Execute iteration
+    const aiClient = getAssistantClient(workflow.provider ?? 'claude');
+    const streamingMode = platform.getStreamingMode();
+
+    try {
+      const assistantMessages: string[] = [];
+      let fullOutput = '';
+      let droppedMessageCount = 0;
+
+      for await (const msg of aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId)) {
+        if (msg.type === 'assistant' && msg.content) {
+          fullOutput += msg.content;
+          if (streamingMode === 'stream') {
+            const sent = await safeSendMessage(platform, conversationId, msg.content, workflowContext);
+            if (!sent) droppedMessageCount++;
+          } else {
+            assistantMessages.push(msg.content);
+          }
+          await logAssistant(cwd, workflowRun.id, msg.content);
+        } else if (msg.type === 'tool' && msg.toolName) {
+          if (streamingMode === 'stream') {
+            const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
+            const sent = await safeSendMessage(platform, conversationId, toolMessage, workflowContext);
+            if (!sent) droppedMessageCount++;
+          }
+          await logTool(cwd, workflowRun.id, msg.toolName, msg.toolInput ?? {});
+        } else if (msg.type === 'result' && msg.sessionId) {
+          currentSessionId = msg.sessionId;
+        }
+      }
+
+      // Batch mode: send accumulated messages
+      if (streamingMode === 'batch' && assistantMessages.length > 0) {
+        await safeSendMessage(
+          platform,
+          conversationId,
+          assistantMessages.join('\n\n'),
+          workflowContext
+        );
+      }
+
+      // Warn user about dropped messages in streaming mode
+      if (droppedMessageCount > 0) {
+        await safeSendMessage(
+          platform,
+          conversationId,
+          `⚠️ ${String(droppedMessageCount)} message(s) failed to deliver in iteration ${String(i)}. Check workflow logs for full output.`,
+          workflowContext
+        );
+      }
+
+      // Check for completion signal
+      if (detectCompletionSignal(fullOutput, loop.until)) {
+        console.log(`[WorkflowExecutor] Completion signal detected at iteration ${String(i)}`);
+        await workflowDb.completeWorkflowRun(workflowRun.id);
+        await logWorkflowComplete(cwd, workflowRun.id);
+        await sendCriticalMessage(
+          platform,
+          conversationId,
+          `**Loop complete**: ${workflow.name} (${String(i)} iterations)`,
+          workflowContext
+        );
+        return;
+      }
+
+      await logStepComplete(cwd, workflowRun.id, `iteration-${String(i)}`, i - 1);
+    } catch (error) {
+      const err = error as Error;
+      console.error(`[WorkflowExecutor] Loop iteration ${String(i)} failed:`, err.message);
+      await workflowDb.failWorkflowRun(workflowRun.id, `Iteration ${String(i)}: ${err.message}`);
+      await logWorkflowError(cwd, workflowRun.id, err.message);
+      await sendCriticalMessage(
+        platform,
+        conversationId,
+        `**Loop failed** at iteration ${String(i)}: ${err.message}`,
+        workflowContext
+      );
+      return;
+    }
+  }
+
+  // Max iterations reached without completion
+  const errorMsg = `Max iterations (${String(loop.max_iterations)}) reached without completion signal "${loop.until}"`;
+  console.warn(`[WorkflowExecutor] ${errorMsg}`);
+  await workflowDb.failWorkflowRun(workflowRun.id, errorMsg);
+  await logWorkflowError(cwd, workflowRun.id, errorMsg);
+
+  const userMsg = `**Loop incomplete**: ${workflow.name}
+
+${errorMsg}
+
+**Possible actions:**
+- Increase \`max_iterations\` in your workflow YAML
+- Verify your prompt instructs AI to output \`<promise>${loop.until}</promise>\` when done
+- Review logs at \`.archon/logs/${workflowRun.id}.jsonl\``;
+
+  await sendCriticalMessage(platform, conversationId, userMsg, workflowContext);
+}
+
+/**
  * Execute a complete workflow
  */
 export async function executeWorkflow(
@@ -511,18 +705,29 @@ export async function executeWorkflow(
     workflowId: workflowRun.id,
   };
 
-  // Notify user
+  // Notify user - use type narrowing from discriminated union
+  const stepsInfo = workflow.steps
+    ? `Steps: ${workflow.steps.map(s => s.command).join(' -> ')}`
+    : `Loop: until "${workflow.loop.until}" (max ${String(workflow.loop.max_iterations)} iterations)`;
   await safeSendMessage(
     platform,
     conversationId,
-    `**Starting workflow**: ${workflow.name}\n\n${workflow.description}\n\nSteps: ${workflow.steps.map(s => s.command).join(' -> ')}`,
+    `**Starting workflow**: ${workflow.name}\n\n${workflow.description}\n\n${stepsInfo}`,
     workflowContext
   );
 
+  // Dispatch to appropriate execution mode
+  if (workflow.loop) {
+    await executeLoopWorkflow(platform, conversationId, cwd, workflow, workflowRun);
+    return;
+  }
+
   let currentSessionId: string | undefined;
 
-  // Execute steps sequentially
-  for (let i = 0; i < workflow.steps.length; i++) {
+  // Execute steps sequentially (for step-based workflows)
+  // After the loop check above, TypeScript knows workflow.steps exists
+  const steps = workflow.steps;
+  for (let i = 0; i < steps.length; i++) {
     // Execute step
     const result = await executeStep(
       platform,
