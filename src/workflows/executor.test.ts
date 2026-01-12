@@ -139,9 +139,9 @@ describe('Workflow Executor', () => {
       const calls = sendMessage.mock.calls;
 
       // First call should be the workflow start notification
-      expect(calls[0][1]).toContain('🚀 **Starting workflow**: test-workflow');
+      expect(calls[0][1]).toContain('🚀 **Starting workflow**: `test-workflow`');
       expect(calls[0][1]).toContain('A test workflow');
-      expect(calls[0][1]).toContain('command-one -> command-two');
+      expect(calls[0][1]).toContain('`command-one` -> `command-two`');
     });
 
     it('should execute each step and send notifications', async () => {
@@ -159,8 +159,8 @@ describe('Workflow Executor', () => {
       const messages = calls.map((call: unknown[]) => call[1]);
 
       // Should have step notifications
-      expect(messages.some((m: string) => m.includes('⏳ **Step 1/2**: command-one'))).toBe(true);
-      expect(messages.some((m: string) => m.includes('⏳ **Step 2/2**: command-two'))).toBe(true);
+      expect(messages.some((m: string) => m.includes('⏳ **Step 1/2**: `command-one`'))).toBe(true);
+      expect(messages.some((m: string) => m.includes('⏳ **Step 2/2**: `command-two`'))).toBe(true);
     });
 
     it('should log workflow events', async () => {
@@ -239,7 +239,7 @@ describe('Workflow Executor', () => {
       const calls = sendMessage.mock.calls;
       const lastMessage = calls[calls.length - 1][1];
 
-      expect(lastMessage).toContain('✅ **Workflow complete**: test-workflow');
+      expect(lastMessage).toContain('✅ **Workflow complete**: `test-workflow`');
     });
 
     // Platform-specific completion message behavior
