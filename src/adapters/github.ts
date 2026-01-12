@@ -22,6 +22,8 @@ import { ConversationLockManager } from '../utils/conversation-lock';
 
 const execAsync = promisify(exec);
 
+const MAX_LENGTH = 65000; // GitHub comment limit (~65,536, leave buffer for safety)
+
 interface WebhookEvent {
   action: string;
   issue?: {
@@ -108,8 +110,9 @@ export class GitHubAdapter implements IPlatformAdapter {
   }
 
   /**
-   * Send a message to a GitHub issue or PR
-   * Includes retry logic for transient network failures
+   * Send a message to a GitHub issue or PR.
+   * Splits long messages into paragraph-based chunks.
+   * Throws on failure so caller can handle appropriately.
    */
   async sendMessage(conversationId: string, message: string): Promise<void> {
     const parsed = this.parseConversationId(conversationId);
@@ -118,7 +121,51 @@ export class GitHubAdapter implements IPlatformAdapter {
       return;
     }
 
+    console.log(`[GitHub] sendMessage called, length=${String(message.length)}`);
+
+    // Check if message needs splitting
+    if (message.length <= MAX_LENGTH) {
+      await this.postComment(parsed, message);
+    } else {
+      console.log(
+        `[GitHub] Message too long (${String(message.length)}), splitting by paragraphs`
+      );
+      const chunks = this.splitIntoParagraphChunks(message, MAX_LENGTH - 500);
+
+      // Fail-fast: if any chunk fails, stop and propagate error with context
+      for (let i = 0; i < chunks.length; i++) {
+        try {
+          await this.postComment(parsed, chunks[i]);
+        } catch (error) {
+          const err = error as Error;
+          console.error(
+            `[GitHub] Failed to post chunk ${String(i + 1)}/${String(chunks.length)}:`,
+            err.message
+          );
+          // Wrap error with context about partial delivery
+          const partialError = new Error(
+            `Failed to post comment chunk ${String(i + 1)}/${String(chunks.length)}. ` +
+              `${String(i)} chunk(s) were posted before failure.`
+          );
+          partialError.cause = error;
+          throw partialError;
+        }
+      }
+    }
+  }
+
+  /**
+   * Post a single comment to a GitHub issue or PR.
+   * Includes retry logic with exponential backoff (3 attempts max).
+   * Throws on failure after exhausting retries so caller can handle appropriately.
+   */
+  private async postComment(
+    parsed: { owner: string; repo: string; number: number },
+    message: string
+  ): Promise<void> {
     const maxRetries = 3;
+    const conversationId = `${parsed.owner}/${parsed.repo}#${String(parsed.number)}`;
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         await this.octokit.rest.issues.createComment({
@@ -139,10 +186,50 @@ export class GitHubAdapter implements IPlatformAdapter {
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
         }
-        console.error('[GitHub] Failed to post comment:', { error, conversationId });
-        return;
+        // Log with full context for debugging
+        console.error('[GitHub] Failed to post comment after retries:', {
+          error,
+          conversationId,
+          attempt,
+          maxRetries,
+          wasRetryable: isRetryable,
+          messageLength: message.length,
+        });
+        // Re-throw so caller can handle (e.g., notify user, stop chunk loop)
+        throw error;
       }
     }
+  }
+
+  /**
+   * Split message into paragraph-based chunks that fit within maxLength.
+   * Preserves paragraph boundaries to maintain context and readability.
+   */
+  private splitIntoParagraphChunks(message: string, maxLength: number): string[] {
+    const paragraphs = message.split(/\n\n+/);
+    const chunks: string[] = [];
+    let currentChunk = '';
+
+    for (const para of paragraphs) {
+      const newLength = currentChunk.length + para.length + 2; // +2 for \n\n separator
+
+      if (newLength > maxLength && currentChunk) {
+        // Current chunk is full, start new chunk
+        chunks.push(currentChunk);
+        currentChunk = para;
+      } else {
+        // Add paragraph to current chunk
+        currentChunk += (currentChunk ? '\n\n' : '') + para;
+      }
+    }
+
+    // Add remaining chunk
+    if (currentChunk) {
+      chunks.push(currentChunk);
+    }
+
+    console.log(`[GitHub] Split into ${String(chunks.length)} paragraph chunks`);
+    return chunks;
   }
 
   /**

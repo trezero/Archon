@@ -33,6 +33,30 @@ const mockLockManager = {
   getStats: () => ({ active: 0, queuedTotal: 0, queuedByConversation: [], maxConcurrent: 10, activeConversationIds: [] }),
 } as unknown as ConversationLockManager;
 
+/**
+ * Helper to create a test adapter with mocked Octokit createComment method.
+ * Reduces duplication across tests that need to verify comment posting behavior.
+ */
+async function createTestAdapterWithMockedOctokit(
+  mockCreateComment: ReturnType<typeof mock>
+): Promise<GitHubAdapter> {
+  const testAdapter = new GitHubAdapter(
+    'fake-token-for-testing',
+    'fake-webhook-secret',
+    mockLockManager
+  );
+  await testAdapter.start();
+  // @ts-expect-error - accessing private property for testing
+  testAdapter.octokit = {
+    rest: {
+      issues: {
+        createComment: mockCreateComment,
+      },
+    },
+  };
+  return testAdapter;
+}
+
 describe('GitHubAdapter', () => {
   let adapter: GitHubAdapter;
 
@@ -103,14 +127,27 @@ describe('GitHubAdapter', () => {
   });
 
   describe('conversationId format', () => {
-    test('should use owner/repo#number format for issues', () => {
-      const validFormat = 'owner/repo#123';
-      expect(() => adapter.sendMessage(validFormat, 'test')).not.toThrow();
+    test('should parse valid owner/repo#number format', async () => {
+      const mockCreateComment = mock(() => Promise.resolve({ data: {} }));
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+
+      await testAdapter.sendMessage('owner/repo#123', 'test');
+
+      expect(mockCreateComment).toHaveBeenCalledWith({
+        owner: 'owner',
+        repo: 'repo',
+        issue_number: 123,
+        body: 'test',
+      });
     });
 
-    test('should use owner/repo#pr-number format for PRs', () => {
-      const validFormat = 'owner/repo#pr-42';
-      expect(() => adapter.sendMessage(validFormat, 'test')).not.toThrow();
+    test('should reject invalid conversationId format', async () => {
+      const mockCreateComment = mock(() => Promise.resolve({ data: {} }));
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+
+      // Invalid format (pr-42 is not a number) should return early without calling API
+      await testAdapter.sendMessage('owner/repo#pr-42', 'test');
+      expect(mockCreateComment).not.toHaveBeenCalled();
     });
   });
 
@@ -580,6 +617,127 @@ describe('GitHubAdapter', () => {
       // Note: These resolve to different paths
       // /workspace/alice/worktrees/issue-33 vs /workspace/bob/worktrees/issue-33
       expect(aliceWorktree).not.toBe(bobWorktree);
+    });
+  });
+
+  describe('message splitting', () => {
+    test('should split long messages into multiple chunks', async () => {
+      const mockCreateComment = mock(() => Promise.resolve({ data: {} }));
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+
+      // Create message exceeding MAX_LENGTH (65000)
+      const paragraph1 = 'a'.repeat(40000);
+      const paragraph2 = 'b'.repeat(30000);
+      const message = `${paragraph1}\n\n${paragraph2}`;
+
+      await testAdapter.sendMessage('owner/repo#123', message);
+
+      // Should have sent 2 separate comments
+      expect(mockCreateComment).toHaveBeenCalledTimes(2);
+
+      // First chunk should contain paragraph1
+      expect(mockCreateComment).toHaveBeenNthCalledWith(1, {
+        owner: 'owner',
+        repo: 'repo',
+        issue_number: 123,
+        body: expect.stringContaining('aaa'),
+      });
+
+      // Second chunk should contain paragraph2
+      expect(mockCreateComment).toHaveBeenNthCalledWith(2, {
+        owner: 'owner',
+        repo: 'repo',
+        issue_number: 123,
+        body: expect.stringContaining('bbb'),
+      });
+
+      // Verify chunk sizes are within limits
+      const firstChunkBody = mockCreateComment.mock.calls[0][0].body as string;
+      const secondChunkBody = mockCreateComment.mock.calls[1][0].body as string;
+      expect(firstChunkBody.length).toBeLessThanOrEqual(65000);
+      expect(secondChunkBody.length).toBeLessThanOrEqual(65000);
+    });
+
+    test('should not split message at exactly MAX_LENGTH', async () => {
+      const mockCreateComment = mock(() => Promise.resolve({ data: {} }));
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+
+      // Message exactly at MAX_LENGTH (65000) should not be split
+      const message = 'a'.repeat(65000);
+      await testAdapter.sendMessage('owner/repo#123', message);
+
+      expect(mockCreateComment).toHaveBeenCalledTimes(1);
+    });
+
+    test('should handle message without paragraph breaks', async () => {
+      const mockCreateComment = mock(() => Promise.resolve({ data: {} }));
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+
+      // Message under MAX_LENGTH with no paragraph breaks
+      const message = 'a'.repeat(50000);
+      await testAdapter.sendMessage('owner/repo#123', message);
+
+      expect(mockCreateComment).toHaveBeenCalledTimes(1);
+    });
+
+    test('should throw error when chunk posting fails', async () => {
+      const mockCreateComment = mock()
+        .mockResolvedValueOnce({ data: {} }) // First chunk succeeds
+        .mockRejectedValueOnce(new Error('API rate limit exceeded')); // Second chunk fails
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+
+      // Create message that will be split into 2 chunks
+      const paragraph1 = 'a'.repeat(40000);
+      const paragraph2 = 'b'.repeat(30000);
+      const message = `${paragraph1}\n\n${paragraph2}`;
+
+      // Should throw with context about partial delivery
+      await expect(testAdapter.sendMessage('owner/repo#123', message)).rejects.toThrow(
+        /Failed to post comment chunk 2\/2/
+      );
+
+      // First chunk should have been posted
+      expect(mockCreateComment).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('retry logic', () => {
+    test('should retry on transient network errors', async () => {
+      const mockCreateComment = mock()
+        .mockRejectedValueOnce(new Error('fetch failed')) // First attempt fails
+        .mockResolvedValueOnce({ data: {} }); // Second attempt succeeds
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+
+      await testAdapter.sendMessage('owner/repo#123', 'test message');
+
+      // Should have retried once
+      expect(mockCreateComment).toHaveBeenCalledTimes(2);
+    });
+
+    test('should not retry on non-retryable errors', async () => {
+      const mockCreateComment = mock().mockRejectedValue(new Error('Bad credentials'));
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+
+      // Should throw immediately without retry
+      await expect(testAdapter.sendMessage('owner/repo#123', 'test message')).rejects.toThrow(
+        'Bad credentials'
+      );
+
+      // Should only have tried once (no retry for auth errors)
+      expect(mockCreateComment).toHaveBeenCalledTimes(1);
+    });
+
+    test('should throw after exhausting retries', async () => {
+      const mockCreateComment = mock().mockRejectedValue(new Error('fetch failed'));
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+
+      // Should throw after 3 attempts
+      await expect(testAdapter.sendMessage('owner/repo#123', 'test message')).rejects.toThrow(
+        'fetch failed'
+      );
+
+      // Should have tried 3 times (max retries)
+      expect(mockCreateComment).toHaveBeenCalledTimes(3);
     });
   });
 });
