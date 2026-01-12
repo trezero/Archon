@@ -1,6 +1,6 @@
 ---
 description: "Comprehensive PR review using specialized agents"
-argument-hint: "[review-aspects]"
+argument-hint: "<pr-number> [review-aspects]"
 allowed-tools: ["Bash", "Glob", "Grep", "Read", "Task"]
 ---
 
@@ -8,13 +8,15 @@ allowed-tools: ["Bash", "Glob", "Grep", "Read", "Task"]
 
 Run a comprehensive pull request review using multiple specialized agents, each focusing on a different aspect of code quality.
 
-**Review Aspects (optional):** "$ARGUMENTS"
+**Arguments:** "$ARGUMENTS"
 
 ## Review Workflow:
 
 1. **Determine Review Scope**
-   - Check git status to identify changed files
-   - Parse arguments to see if user requested specific review aspects
+   - Parse arguments: first numeric argument is the PR number, remaining are review aspects
+   - If PR number provided: fetch PR details with `gh pr view <number>`
+   - If no PR number: check for existing PR on current branch with `gh pr view`
+   - Identify changed files from PR diff
    - Default: Run all applicable reviews
 
 2. **Available Review Aspects:**
@@ -61,24 +63,32 @@ Run a comprehensive pull request review using multiple specialized agents, each 
    - **Suggestions** (nice to have)
    - **Positive Observations** (what's good)
 
-7. **Provide Action Plan**
+7. **Post Review to GitHub**
 
-   Organize findings:
+   **IMPORTANT**: When a PR number is provided as an argument, ALWAYS post the review summary as a GitHub PR comment using `gh pr comment <number>`.
+
+   Use this exact format for the comment:
 
    ```markdown
    # PR Review Summary
 
    ## Critical Issues (X found)
 
-   - [agent-name]: Issue description [file:line]
+   | Source | Issue | Location |
+   |--------|-------|----------|
+   | **agent-name** | Issue description | `file.ts:line` |
 
    ## Important Issues (X found)
 
-   - [agent-name]: Issue description [file:line]
+   | Source | Issue | Location |
+   |--------|-------|----------|
+   | **agent-name** | Issue description | `file.ts:line` |
 
    ## Suggestions (X found)
 
-   - [agent-name]: Suggestion [file:line]
+   | Source | Suggestion | Location |
+   |--------|------------|----------|
+   | **agent-name** | Suggestion description | `file.ts:line` |
 
    ## Strengths
 
@@ -90,33 +100,53 @@ Run a comprehensive pull request review using multiple specialized agents, each 
    2. Address important issues
    3. Consider suggestions
    4. Re-run review after fixes
+
+   ---
+
+   **Verdict**: [Summary of whether PR is ready to merge or needs changes]
+   ```
+
+   Post the comment:
+   ```bash
+   gh pr comment <PR_NUMBER> --body "<review_summary>"
    ```
 
 ## Usage Examples:
 
-**Full review (default):**
+**Review specific PR (posts comment to GitHub):**
 
 ```
-/pr-review-toolkit:review-pr
+/review-pr-agents 163
+# Full review of PR #163, posts summary as PR comment
+
+/review-pr-agents 163 tests errors
+# Reviews only test coverage and error handling for PR #163
+```
+
+**Review current branch's PR:**
+
+```
+/review-pr-agents
+# Detects PR for current branch, runs full review
+
+/review-pr-agents comments
+# Reviews only code comments for current branch's PR
 ```
 
 **Specific aspects:**
 
 ```
-/pr-review-toolkit:review-pr tests errors
+/review-pr-agents 42 tests errors
 # Reviews only test coverage and error handling
 
-/pr-review-toolkit:review-pr comments
-# Reviews only code comments
-
-/pr-review-toolkit:review-pr simplify
+/review-pr-agents 42 simplify
 # Simplifies code after passing review
 ```
 
 **Parallel review:**
 
 ```
-/pr-review-toolkit:review-pr all parallel
+/review-pr-agents 42 all parallel
 # Launches all agents in parallel
 ```
 
@@ -199,6 +229,7 @@ Run a comprehensive pull request review using multiple specialized agents, each 
 
 ## Notes:
 
+- **Always posts to GitHub**: When reviewing a PR, the summary is automatically posted as a PR comment
 - Agents run autonomously and return detailed reports
 - Each agent focuses on its specialty for deep analysis
 - Results are actionable with specific file:line references
