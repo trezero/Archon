@@ -242,6 +242,42 @@ describe('Workflow Executor', () => {
       expect(lastMessage).toContain('**Workflow complete**: test-workflow');
     });
 
+    // Platform-specific completion message behavior
+    // GitHub suppresses completion messages (comment-based interface makes them redundant)
+    // All other platforms receive completion messages
+    it.each([
+      { platform: 'telegram', shouldSendCompletion: true },
+      { platform: 'slack', shouldSendCompletion: true },
+      { platform: 'discord', shouldSendCompletion: true },
+      { platform: 'github', shouldSendCompletion: false },
+    ])(
+      '$platform platform: completion message should be $shouldSendCompletion',
+      async ({ platform, shouldSendCompletion }) => {
+        (mockPlatform.getPlatformType as ReturnType<typeof mock>).mockReturnValue(platform);
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          testWorkflow,
+          'User message',
+          'db-conv-id'
+        );
+
+        const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+        const calls = sendMessage.mock.calls;
+        const completionCalls = calls.filter((call: unknown[]) =>
+          (call[1] as string).includes('**Workflow complete**')
+        );
+
+        if (shouldSendCompletion) {
+          expect(completionCalls.length).toBeGreaterThan(0);
+        } else {
+          expect(completionCalls).toHaveLength(0);
+        }
+      }
+    );
+
     it('should handle missing command prompt file', async () => {
       const workflowWithMissingCommand: WorkflowDefinition = {
         name: 'missing-command-workflow',

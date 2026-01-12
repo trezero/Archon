@@ -790,12 +790,24 @@ export async function executeWorkflow(
   }
   await logWorkflowComplete(cwd, workflowRun.id);
   // Critical message - retry to ensure user knows about completion
-  await sendCriticalMessage(
-    platform,
-    conversationId,
-    `**Workflow complete**: ${workflow.name}`,
-    workflowContext
-  );
+  // Only send completion message for non-GitHub platforms
+  // GitHub's comment-based interface makes explicit completion messages redundant
+  // (the final step's output already signals completion)
+  const platformType = platform.getPlatformType();
+  if (platformType !== 'github') {
+    await sendCriticalMessage(
+      platform,
+      conversationId,
+      `**Workflow complete**: ${workflow.name}`,
+      workflowContext
+    );
+  } else {
+    console.log('[WorkflowExecutor] Suppressing completion message for GitHub', {
+      workflowName: workflow.name,
+      workflowId: workflowRun.id,
+      conversationId,
+    });
+  }
 
   console.log(`[WorkflowExecutor] Workflow completed: ${workflow.name}`);
 }
