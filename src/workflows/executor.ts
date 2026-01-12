@@ -397,7 +397,7 @@ async function executeStep(
     await safeSendMessage(
       platform,
       conversationId,
-      `**Step ${String(stepIndex + 1)}/${String(steps.length)}**: ${commandName}`,
+      `⏳ **Step ${String(stepIndex + 1)}/${String(steps.length)}**: ${commandName}`,
       messageContext
     );
   }
@@ -535,7 +535,7 @@ async function executeLoopWorkflow(
     await safeSendMessage(
       platform,
       conversationId,
-      `**Iteration ${String(i)}/${String(loop.max_iterations)}**`,
+      `⏳ **Iteration ${String(i)}/${String(loop.max_iterations)}**`,
       workflowContext
     );
 
@@ -615,7 +615,7 @@ async function executeLoopWorkflow(
         await sendCriticalMessage(
           platform,
           conversationId,
-          `**Loop complete**: ${workflow.name} (${String(i)} iterations)`,
+          `✅ **Loop complete**: ${workflow.name} (${String(i)} iterations)`,
           workflowContext
         );
         return;
@@ -630,7 +630,7 @@ async function executeLoopWorkflow(
       await sendCriticalMessage(
         platform,
         conversationId,
-        `**Loop failed** at iteration ${String(i)}: ${err.message}`,
+        `❌ **Loop failed** at iteration ${String(i)}: ${err.message}`,
         workflowContext
       );
       return;
@@ -643,7 +643,7 @@ async function executeLoopWorkflow(
   await workflowDb.failWorkflowRun(workflowRun.id, errorMsg);
   await logWorkflowError(cwd, workflowRun.id, errorMsg);
 
-  const userMsg = `**Loop incomplete**: ${workflow.name}
+  const userMsg = `❌ **Loop incomplete**: ${workflow.name}
 
 ${errorMsg}
 
@@ -694,7 +694,7 @@ export async function executeWorkflow(
     await sendCriticalMessage(
       platform,
       conversationId,
-      '**Workflow failed**: Unable to start workflow (database error). Please try again later.'
+      '❌ **Workflow failed**: Unable to start workflow (database error). Please try again later.'
     );
     return;
   }
@@ -714,7 +714,7 @@ export async function executeWorkflow(
   await safeSendMessage(
     platform,
     conversationId,
-    `**Starting workflow**: ${workflow.name}\n\n${workflow.description}\n\n${stepsInfo}`,
+    `🚀 **Starting workflow**: ${workflow.name}\n\n${workflow.description}\n\n${stepsInfo}`,
     workflowContext
   );
 
@@ -756,7 +756,7 @@ export async function executeWorkflow(
       await sendCriticalMessage(
         platform,
         conversationId,
-        `**Workflow failed** at step: ${result.commandName}\n\nError: ${result.error}`,
+        `❌ **Workflow failed** at step: ${result.commandName}\n\nError: ${result.error}`,
         { ...workflowContext, stepName: result.commandName }
       );
       return;
@@ -800,7 +800,7 @@ export async function executeWorkflow(
     await sendCriticalMessage(
       platform,
       conversationId,
-      `**Workflow complete**: ${workflow.name}`,
+      `✅ **Workflow complete**: ${workflow.name}`,
       workflowContext
     );
   } else {
