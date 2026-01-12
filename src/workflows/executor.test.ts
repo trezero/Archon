@@ -424,6 +424,13 @@ describe('Workflow Executor', () => {
           (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
       );
       expect(completeCalls.length).toBeGreaterThan(0);
+
+      // Verify workflow start notification IS sent, but no "Step 1/1" notification
+      const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+      const calls = sendMessage.mock.calls;
+      const messages = calls.map((call: unknown[]) => call[1]);
+      expect(messages.some((m: string) => m.includes('Starting workflow'))).toBe(true);
+      expect(messages.some((m: string) => m.includes('**Step 1/1**'))).toBe(false);
     });
 
     it('should handle workflow with many steps', async () => {

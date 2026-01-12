@@ -392,13 +392,15 @@ async function executeStep(
     stepIndex,
   };
 
-  // Send step start notification
-  await safeSendMessage(
-    platform,
-    conversationId,
-    `**Step ${String(stepIndex + 1)}/${String(steps.length)}**: ${commandName}`,
-    messageContext
-  );
+  // Send step start notification (only for multi-step workflows)
+  if (steps.length > 1) {
+    await safeSendMessage(
+      platform,
+      conversationId,
+      `**Step ${String(stepIndex + 1)}/${String(steps.length)}**: ${commandName}`,
+      messageContext
+    );
+  }
 
   let newSessionId: string | undefined;
 
