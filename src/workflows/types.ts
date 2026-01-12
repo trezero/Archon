@@ -39,7 +39,7 @@ interface WorkflowBase {
 
 /** Step-based workflow - sequential command execution */
 interface StepWorkflow extends WorkflowBase {
-  steps: StepDefinition[];
+  readonly steps: readonly StepDefinition[];
   loop?: never;
   prompt?: never;
 }
