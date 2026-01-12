@@ -35,7 +35,7 @@ import {
   findWorkflow,
   executeWorkflow,
 } from '../workflows';
-import type { WorkflowDefinition } from '../workflows';
+import type { WorkflowDefinition, RouterContext } from '../workflows';
 import {
   cleanupToMakeRoom,
   getWorktreeStatusBreakdown,
@@ -545,7 +545,51 @@ export async function handleMessage(
       if (availableWorkflows.length > 0) {
         console.log('[Orchestrator] Using workflow-aware router prompt');
         commandName = 'workflow-router';
-        promptToSend = buildRouterPrompt(message, availableWorkflows);
+
+        // Build router context from available data
+        const routerContext: RouterContext = {
+          platformType: platform.getPlatformType(),
+          threadHistory: threadContext,
+        };
+
+        // Extract GitHub-specific context from issueContext if present
+        if (issueContext) {
+          // Parse title from issueContext (format: "Issue #N: "Title"" or "PR #N: "Title"")
+          const titlePattern = /(?:Issue|PR) #\d+: "([^"]+)"/;
+          const titleMatch = titlePattern.exec(issueContext);
+          if (titleMatch?.[1]) {
+            routerContext.title = titleMatch[1];
+          } else {
+            console.log('[Orchestrator] Could not extract title from issueContext (format mismatch)');
+          }
+
+          // Detect if it's a PR vs issue
+          routerContext.isPullRequest = issueContext.includes('[GitHub Pull Request Context]');
+
+          // Extract labels if present
+          const labelsPattern = /Labels: ([^\n]+)/;
+          const labelsMatch = labelsPattern.exec(issueContext);
+          if (labelsMatch?.[1]?.trim()) {
+            routerContext.labels = labelsMatch[1].split(',').map(l => l.trim());
+          } else {
+            console.log('[Orchestrator] No labels found in issueContext');
+          }
+        }
+
+        // Add workflow type from isolation hints
+        if (isolationHints?.workflowType) {
+          routerContext.workflowType = isolationHints.workflowType;
+        }
+
+        promptToSend = buildRouterPrompt(message, availableWorkflows, routerContext);
+        console.log('[Orchestrator] Router context:', {
+          platformType: routerContext.platformType,
+          isPullRequest: routerContext.isPullRequest,
+          hasTitle: !!routerContext.title,
+          hasLabels: !!(routerContext.labels && routerContext.labels.length > 0),
+          hasThreadHistory: !!routerContext.threadHistory,
+          hasIssueContext: !!issueContext, // Helps distinguish "no context" vs "extraction failed"
+        });
       } else {
         // Fall back to router template for natural language routing
         const routerTemplate = await templateDb.getTemplate('router');

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { buildRouterPrompt, parseWorkflowInvocation, findWorkflow } from './router';
 import type { WorkflowDefinition } from './types';
+import type { RouterContext } from './router';
 
 describe('Workflow Router', () => {
   // Sample workflows for testing
@@ -33,7 +34,7 @@ describe('Workflow Router', () => {
       const result = buildRouterPrompt('Help me fix this bug', testWorkflows);
 
       expect(result).toContain('# Workflow Router');
-      expect(result).toContain('Your ONLY job is to pick which workflow to invoke');
+      expect(result).toContain('Your job is to pick the best workflow');
       expect(result).toContain('## Available Workflows');
       expect(result).toContain('**fix-bug**');
       expect(result).toContain('Fix a bug in the codebase');
@@ -248,6 +249,140 @@ function broken() {
 
       // Workflow names are case-sensitive
       expect(workflow).toBeUndefined();
+    });
+  });
+
+  describe('buildRouterPrompt with context', () => {
+    it('should include context section when context provided', () => {
+      const context: RouterContext = {
+        platformType: 'github',
+        isPullRequest: true,
+        title: 'fix: add cloud deployment support',
+        labels: ['bug', 'ci'],
+      };
+      const result = buildRouterPrompt('fix the ci failures', testWorkflows, context);
+
+      expect(result).toContain('## Context');
+      expect(result).toContain('Platform: github');
+      expect(result).toContain('Type: Pull Request');
+      expect(result).toContain('Title: fix: add cloud deployment support');
+      expect(result).toContain('Labels: bug, ci');
+    });
+
+    it('should include thread history when provided', () => {
+      const context: RouterContext = {
+        platformType: 'slack',
+        threadHistory: '[Bot]: Archon is on the case...\n<@user>: check the CI',
+      };
+      const result = buildRouterPrompt('what is happening?', testWorkflows, context);
+
+      expect(result).toContain('## Context');
+      expect(result).toContain('Thread History:');
+      expect(result).toContain('Archon is on the case');
+    });
+
+    it('should work without context (backward compatible)', () => {
+      const result = buildRouterPrompt('help me', testWorkflows);
+
+      expect(result).toContain('## Available Workflows');
+      expect(result).not.toContain('## Context');
+    });
+
+    it('should skip empty context', () => {
+      const result = buildRouterPrompt('help me', testWorkflows, {});
+
+      expect(result).not.toContain('## Context');
+    });
+
+    it('should show Issue type when isPullRequest is false', () => {
+      const context: RouterContext = {
+        platformType: 'github',
+        isPullRequest: false,
+        title: 'Bug: login fails',
+      };
+      const result = buildRouterPrompt('fix this', testWorkflows, context);
+
+      expect(result).toContain('Type: Issue');
+      expect(result).toContain('Title: Bug: login fails');
+    });
+
+    it('should use workflowType when isPullRequest is not set', () => {
+      const context: RouterContext = {
+        platformType: 'telegram',
+        workflowType: 'task',
+      };
+      const result = buildRouterPrompt('do something', testWorkflows, context);
+
+      expect(result).toContain('Type: task');
+    });
+
+    it('should only include platformType when that is all provided', () => {
+      const context: RouterContext = {
+        platformType: 'discord',
+      };
+      const result = buildRouterPrompt('help', testWorkflows, context);
+
+      expect(result).toContain('## Context');
+      expect(result).toContain('Platform: discord');
+      expect(result).not.toContain('Type:');
+      expect(result).not.toContain('Title:');
+      expect(result).not.toContain('Labels:');
+    });
+
+    it('should include improved routing rules', () => {
+      const result = buildRouterPrompt('fix ci', testWorkflows);
+
+      expect(result).toContain('CI failures, test failures, build errors');
+      expect(result).toContain('assist');
+      expect(result).toContain('NOT for');
+    });
+
+    it('should prefer isPullRequest over workflowType when both are set', () => {
+      const context: RouterContext = {
+        platformType: 'github',
+        isPullRequest: true,
+        workflowType: 'issue', // Should be ignored in favor of isPullRequest
+      };
+      const result = buildRouterPrompt('test', testWorkflows, context);
+
+      expect(result).toContain('Type: Pull Request');
+      expect(result).not.toContain('Type: issue');
+    });
+
+    it('should not include labels line when labels array is empty', () => {
+      const context: RouterContext = {
+        platformType: 'github',
+        labels: [], // Empty array
+      };
+      const result = buildRouterPrompt('test', testWorkflows, context);
+
+      expect(result).toContain('## Context');
+      expect(result).toContain('Platform: github');
+      expect(result).not.toContain('Labels:');
+    });
+
+    it('should not include thread history when it is empty string', () => {
+      const context: RouterContext = {
+        platformType: 'slack',
+        threadHistory: '', // Empty string, not undefined
+      };
+      const result = buildRouterPrompt('test', testWorkflows, context);
+
+      expect(result).toContain('## Context');
+      expect(result).toContain('Platform: slack');
+      expect(result).not.toContain('Thread History:');
+    });
+
+    it('should handle all workflowType values correctly', () => {
+      const types = ['issue', 'pr', 'review', 'thread', 'task'] as const;
+      for (const type of types) {
+        const context: RouterContext = {
+          platformType: 'github',
+          workflowType: type,
+        };
+        const result = buildRouterPrompt('test', testWorkflows, context);
+        expect(result).toContain(`Type: ${type}`);
+      }
     });
   });
 });

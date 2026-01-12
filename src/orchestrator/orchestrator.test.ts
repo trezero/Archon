@@ -900,4 +900,116 @@ describe('orchestrator', () => {
       expect(mockDiscoverWorkflows).not.toHaveBeenCalled();
     });
   });
+
+  describe('router context extraction', () => {
+    const testWorkflows = [
+      {
+        name: 'assist',
+        description: 'General assistance',
+        steps: [{ command: 'assist' }],
+      },
+      {
+        name: 'fix-github-issue',
+        description: 'Fix a GitHub issue',
+        steps: [{ command: 'fix' }],
+      },
+    ];
+
+    beforeEach(() => {
+      // Enable workflow discovery to trigger router context code path
+      mockDiscoverWorkflows.mockResolvedValue(testWorkflows);
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+    });
+
+    test('extracts title from Issue context', async () => {
+      const issueContext = 'Issue #42: "Fix the login bug"\nThis is the body.';
+
+      await handleMessage(platform, 'chat-456', 'fix this', issueContext);
+
+      // Verify the prompt sent to AI contains the extracted title
+      expect(mockClient.sendQuery).toHaveBeenCalled();
+      const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
+      expect(promptArg).toContain('Title: Fix the login bug');
+    });
+
+    test('extracts title from PR context', async () => {
+      const issueContext = 'PR #15: "Add dark mode feature"\n[GitHub Pull Request Context]';
+
+      await handleMessage(platform, 'chat-456', 'review this', issueContext);
+
+      const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
+      expect(promptArg).toContain('Title: Add dark mode feature');
+    });
+
+    test('detects isPullRequest correctly for PR', async () => {
+      const issueContext = 'PR #15: "Some PR"\n[GitHub Pull Request Context]\nDiff here...';
+
+      await handleMessage(platform, 'chat-456', 'check this', issueContext);
+
+      const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
+      expect(promptArg).toContain('Type: Pull Request');
+    });
+
+    test('detects isPullRequest correctly for Issue', async () => {
+      const issueContext = 'Issue #42: "Some Issue"\nBody without PR marker.';
+
+      await handleMessage(platform, 'chat-456', 'check this', issueContext);
+
+      const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
+      expect(promptArg).toContain('Type: Issue');
+    });
+
+    test('extracts labels from context', async () => {
+      const issueContext = 'Issue #42: "Bug report"\nLabels: bug, priority-high, needs-triage\nBody text.';
+
+      await handleMessage(platform, 'chat-456', 'fix this', issueContext);
+
+      const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
+      expect(promptArg).toContain('Labels: bug, priority-high, needs-triage');
+    });
+
+    test('extracts single label from context', async () => {
+      const issueContext = 'Issue #42: "Simple bug"\nLabels: bug\nBody text.';
+
+      await handleMessage(platform, 'chat-456', 'fix this', issueContext);
+
+      const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
+      expect(promptArg).toContain('Labels: bug');
+    });
+
+    test('passes workflowType from isolationHints', async () => {
+      // Note: When isPullRequest is not set, workflowType is used for Type display
+      // isolationHints is the 7th parameter (after parentConversationId)
+      const isolationHints = { workflowType: 'review' as const };
+
+      await handleMessage(platform, 'chat-456', 'do something', undefined, undefined, undefined, isolationHints);
+
+      const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
+      expect(promptArg).toContain('Type: review');
+    });
+
+    test('handles malformed issueContext gracefully (no title match)', async () => {
+      // Missing quotes around title - doesn't match the pattern
+      const issueContext = 'Issue #42: Fix the bug without quotes';
+
+      await handleMessage(platform, 'chat-456', 'help', issueContext);
+
+      // Should still work, just without title
+      expect(mockClient.sendQuery).toHaveBeenCalled();
+      const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
+      // Should NOT contain Title: since extraction failed
+      expect(promptArg).not.toContain('Title:');
+      // But should still contain Type: Issue (isPullRequest detection still works)
+      expect(promptArg).toContain('Type: Issue');
+    });
+
+    test('includes platformType in context', async () => {
+      await handleMessage(platform, 'chat-456', 'help me');
+
+      const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
+      expect(promptArg).toContain('Platform: mock');
+    });
+  });
 });
