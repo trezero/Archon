@@ -119,10 +119,13 @@ ${workflowList}
 
 ## Response Format
 
-Respond with EXACTLY this format, nothing else:
+Your ENTIRE response must be ONLY this single line - no analysis, no explanation, no context:
 /invoke-workflow {workflow-name}
 
-Pick now:`;
+Do NOT include any other text before or after. Just the command.`;
+  // NOTE: We emphasize "ONLY this single line" because AI models sometimes add analysis
+  // before the command. The parseWorkflowInvocation regex uses multiline mode as a fallback,
+  // but cleaner output is preferred for GitHub comments where the full response is posted.
 }
 
 /**
@@ -142,8 +145,10 @@ export function parseWorkflowInvocation(
 ): WorkflowInvocation {
   const trimmed = message.trim();
 
-  // Check for /invoke-workflow pattern at start
-  const match = /^\/invoke-workflow\s+(\S+)/i.exec(trimmed);
+  // Check for /invoke-workflow pattern (at start of any line)
+  // Uses multiline flag ('m') because AI models sometimes add analysis text before the command
+  // despite instructions to only output the command. This ensures routing still works.
+  const match = /^\/invoke-workflow\s+(\S+)/im.exec(trimmed);
 
   if (match) {
     const workflowName = match[1];
@@ -152,7 +157,8 @@ export function parseWorkflowInvocation(
     const workflow = workflows.find(w => w.name === workflowName);
 
     if (workflow) {
-      const remainingMessage = trimmed.slice(match[0].length).trim();
+      // Use match.index to handle multiline matches where command isn't at position 0
+      const remainingMessage = trimmed.slice(match.index + match[0].length).trim();
       return {
         workflowName,
         remainingMessage,

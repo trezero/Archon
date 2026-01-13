@@ -163,15 +163,17 @@ Some text`;
       expect(result.workflowName).toBe('fix-bug');
     });
 
-    it('should not match /invoke-workflow in middle of text', () => {
+    it('should match /invoke-workflow at start of any line (multiline mode)', () => {
+      // AI models sometimes add analysis before the command, so we use multiline mode
+      // to match /invoke-workflow at the start of any line, not just the start of the message
       const response = `Some text before
 /invoke-workflow fix-bug
 Some text after`;
 
       const result = parseWorkflowInvocation(response, testWorkflows);
 
-      // Only matches at start of trimmed string
-      expect(result.workflowName).toBeNull();
+      expect(result.workflowName).toBe('fix-bug');
+      expect(result.remainingMessage).toBe('Some text after');
     });
 
     it('should handle workflow name with hyphens', () => {
