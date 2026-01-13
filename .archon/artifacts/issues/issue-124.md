@@ -226,3 +226,12 @@ bun run type-check && bun test src/handlers/command-handler.test.ts && bun run l
 | reload empty | `/workflow reload` | success: true, "Discovered 0 workflow(s)" |
 | unknown subcommand | `/workflow unknown` | success: false, usage message |
 | no subcommand | `/workflow` | success: false, usage message |
+
+---
+
+## Metadata
+
+- **Investigated by**: Claude
+- **Timestamp**: 2026-01-13T07:35:00Z
+- **Artifact**: `.archon/artifacts/issues/issue-124.md`
+- **Git History**: Commands added in commit 759cb30 (Dec 18, 2025) - "Add workflow engine for multi-step AI orchestration"
