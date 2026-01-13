@@ -108,11 +108,15 @@ Environment variables still work and override defaults.
 
 When cloning or switching repositories, Archon looks for commands in this priority order:
 
-1. `.archon/commands/` - Archon-specific commands
-2. `.claude/commands/` - Claude Code standard location
-3. `.agents/commands/` - Alternative location
+1. `.archon/commands/` - Always searched first
+2. Configured folder from `commands.folder` in `.archon/config.yaml` (if specified)
 
-First found folder is used.
+Example `.archon/config.yaml`:
+```yaml
+commands:
+  folder: .claude/commands/archon  # Additional folder to search
+  autoLoad: true
+```
 
 ## Examples
 

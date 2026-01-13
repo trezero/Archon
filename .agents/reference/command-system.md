@@ -13,7 +13,7 @@ User: /command-invoke plan "Add dark mode"
        ↓
 Orchestrator: Parse command + args
        ↓
-Read file: .claude/commands/plan.md
+Read file: .archon/commands/plan.md
        ↓
 Variable substitution: $1 → "Add dark mode"
        ↓
@@ -27,11 +27,11 @@ Send to AI client
 ```json
 {
   "prime": {
-    "path": ".claude/commands/prime.md",
+    "path": ".archon/commands/prime.md",
     "description": "Research codebase"
   },
   "plan": {
-    "path": ".claude/commands/plan-feature.md",
+    "path": ".archon/commands/plan.md",
     "description": "Create implementation plan"
   }
 }
@@ -45,10 +45,10 @@ Send to AI client
 
 ```bash
 # Register existing file
-/command-set prime .claude/commands/prime.md
+/command-set prime .archon/commands/prime.md
 
 # Create file inline
-/command-set analyze .claude/commands/analyze.md "You are an expert analyzer. Analyze: $1"
+/command-set analyze .archon/commands/analyze.md "You are an expert analyzer. Analyze: $1"
 ```
 
 **Implementation:** `src/handlers/command-handler.ts:249-280`
@@ -57,16 +57,19 @@ Send to AI client
 
 ```bash
 # Load all .md files from folder
-/load-commands .claude/commands
+/load-commands .archon/commands
 ```
 
 **Implementation:** `src/handlers/command-handler.ts:282-317`
 
 ### Auto-Detection
 
-Triggered by `/clone` command or GitHub webhook. Detects `.claude/commands/` or `.agents/commands/` folders.
+Triggered by `/clone` command or GitHub webhook. Searches for command folders in priority order:
 
-**Reference:** `src/adapters/github.ts:266-293`
+1. `.archon/commands/` - Always searched first
+2. Configured folder from `commands.folder` in `.archon/config.yaml` (if specified)
+
+**Reference:** `src/utils/archon-paths.ts:87-96`
 
 ## Variable Substitution
 
@@ -191,14 +194,14 @@ const commands = await codebaseDb.getCodebaseCommands(codebaseId);
 
 // Register single command
 await codebaseDb.registerCommand(codebaseId, 'analyze', {
-  path: '.claude/commands/analyze.md',
+  path: '.archon/commands/analyze.md',
   description: 'Analyze codebase',
 });
 
 // Bulk update commands
 await codebaseDb.updateCodebaseCommands(codebaseId, {
-  prime: { path: '.claude/commands/prime.md', description: 'Research' },
-  plan: { path: '.claude/commands/plan.md', description: 'Plan feature' },
+  prime: { path: '.archon/commands/prime.md', description: 'Research' },
+  plan: { path: '.archon/commands/plan.md', description: 'Plan feature' },
 });
 ```
 

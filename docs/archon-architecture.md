@@ -43,7 +43,7 @@ any-repo/.archon/
 ```
 
 **Purpose:**
-- `commands/` - Slash command templates (priority over `.claude/commands/`, `.agents/commands/`)
+- `commands/` - Slash command templates (auto-loaded on clone)
 - `workflows/` - Future workflow engine definitions
 - `config.yaml` - Project-specific settings
 
@@ -77,8 +77,8 @@ getArchonConfigPath(): string
 // Returns: ${ARCHON_HOME}/config.yaml
 
 // Get command folder search paths (priority order)
-getCommandFolderSearchPaths(): string[]
-// Returns: ['.archon/commands', '.claude/commands', '.agents/commands']
+getCommandFolderSearchPaths(configuredFolder?: string): string[]
+// Returns: ['.archon/commands'] + configuredFolder if specified
 ```
 
 ### Docker Detection
@@ -143,11 +143,15 @@ Key configuration options:
 
 Command detection searches in priority order:
 
-1. `.archon/commands/` - Archon-specific commands
-2. `.claude/commands/` - Claude Code standard location
-3. `.agents/commands/` - Alternative location
+1. `.archon/commands/` - Always searched first
+2. Configured folder from `commands.folder` in `.archon/config.yaml` (if specified)
 
-First match wins. No migration required.
+Example configuration:
+```yaml
+# .archon/config.yaml
+commands:
+  folder: .claude/commands/archon  # Additional folder to search
+```
 
 ## Extension Points
 

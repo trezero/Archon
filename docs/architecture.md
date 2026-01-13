@@ -709,18 +709,18 @@ Stream responses back to platform
 **Auto-detection** (on `/clone` or GitHub webhook):
 
 ```typescript
-// Detect command folders
-const commandFolders = ['.claude/commands', '.agents/commands'];
+// Get command folders from config
+const searchPaths = getCommandFolderSearchPaths(config?.commands?.folder);
+// Returns: ['.archon/commands'] + configuredFolder if specified
 
-for (const folder of commandFolders) {
+for (const folder of searchPaths) {
   if (await folderExists(join(repoPath, folder))) {
     await autoLoadCommands(folder, codebaseId);
-    break;
   }
 }
 ```
 
-**Reference:** `src/adapters/github.ts:266-293`
+**Reference:** `src/utils/archon-paths.ts:87-96`
 
 ### Variable Substitution
 
