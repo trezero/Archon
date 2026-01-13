@@ -552,28 +552,42 @@ export async function handleMessage(
           threadHistory: threadContext,
         };
 
-        // Extract GitHub-specific context from issueContext if present
-        if (issueContext) {
-          // Parse title from issueContext (format: "Issue #N: "Title"" or "PR #N: "Title"")
+        // Extract GitHub-specific context from issueContext OR message
+        // Priority: issueContext (slash commands) > message with markers (non-slash commands)
+        const hasGitHubMarkersInMessage =
+          message.includes('[GitHub Issue Context]') ||
+          message.includes('[GitHub Pull Request Context]');
+
+        // Determine context source:
+        // - issueContext: always use when provided (slash command mode)
+        // - message: only use when it has GitHub markers (non-slash command mode)
+        const contextSource = issueContext || (hasGitHubMarkersInMessage ? message : null);
+
+        if (contextSource) {
+          // Parse title from context (format: "Issue #N: "Title"" or "PR #N: "Title"")
           const titlePattern = /(?:Issue|PR) #\d+: "([^"]+)"/;
-          const titleMatch = titlePattern.exec(issueContext);
+          const titleMatch = titlePattern.exec(contextSource);
           if (titleMatch?.[1]) {
             routerContext.title = titleMatch[1];
           } else {
-            console.log('[Orchestrator] Could not extract title from issueContext (format mismatch)');
+            console.log('[Orchestrator] GitHub context present but could not extract title (format mismatch)');
           }
 
-          // Detect if it's a PR vs issue
-          routerContext.isPullRequest = issueContext.includes('[GitHub Pull Request Context]');
+          // Detect if it's a PR vs issue (only when markers are present)
+          const hasGitHubMarkers =
+            contextSource.includes('[GitHub Issue Context]') ||
+            contextSource.includes('[GitHub Pull Request Context]');
+          if (hasGitHubMarkers) {
+            routerContext.isPullRequest = contextSource.includes('[GitHub Pull Request Context]');
+          }
 
           // Extract labels if present
           const labelsPattern = /Labels: ([^\n]+)/;
-          const labelsMatch = labelsPattern.exec(issueContext);
+          const labelsMatch = labelsPattern.exec(contextSource);
           if (labelsMatch?.[1]?.trim()) {
             routerContext.labels = labelsMatch[1].split(',').map(l => l.trim());
-          } else {
-            console.log('[Orchestrator] No labels found in issueContext');
           }
+          // Note: No warning if labels missing - many issues/PRs don't have labels
         }
 
         // Add workflow type from isolation hints
@@ -588,7 +602,7 @@ export async function handleMessage(
           hasTitle: !!routerContext.title,
           hasLabels: !!(routerContext.labels && routerContext.labels.length > 0),
           hasThreadHistory: !!routerContext.threadHistory,
-          hasIssueContext: !!issueContext, // Helps distinguish "no context" vs "extraction failed"
+          contextSource: issueContext ? 'issueContext' : hasGitHubMarkersInMessage ? 'message' : 'none',
         });
       } else {
         // Fall back to router template for natural language routing

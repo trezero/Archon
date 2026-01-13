@@ -953,7 +953,7 @@ describe('orchestrator', () => {
     });
 
     test('detects isPullRequest correctly for Issue', async () => {
-      const issueContext = 'Issue #42: "Some Issue"\nBody without PR marker.';
+      const issueContext = 'Issue #42: "Some Issue"\n[GitHub Issue Context]\nBody without PR marker.';
 
       await handleMessage(platform, 'chat-456', 'check this', issueContext);
 
@@ -992,7 +992,7 @@ describe('orchestrator', () => {
 
     test('handles malformed issueContext gracefully (no title match)', async () => {
       // Missing quotes around title - doesn't match the pattern
-      const issueContext = 'Issue #42: Fix the bug without quotes';
+      const issueContext = '[GitHub Issue Context]\nIssue #42: Fix the bug without quotes';
 
       await handleMessage(platform, 'chat-456', 'help', issueContext);
 
@@ -1010,6 +1010,60 @@ describe('orchestrator', () => {
 
       const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
       expect(promptArg).toContain('Platform: mock');
+    });
+
+    test('extracts context from message when issueContext is undefined (non-slash command)', async () => {
+      const message = `[GitHub Issue Context]
+Issue #42: "Bug in router"
+Author: user
+Labels: bug, priority: high
+Status: open
+
+Description:
+The router is broken.
+
+---
+
+Please fix this`;
+
+      // Call handleMessage with message containing context, but no issueContext parameter
+      await handleMessage(platform, 'chat-456', message, undefined);
+
+      // Verify RouterContext was extracted from message
+      expect(mockClient.sendQuery).toHaveBeenCalled();
+      const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
+      expect(promptArg).toContain('Title: Bug in router');
+      expect(promptArg).toContain('Labels: bug, priority: high');
+      expect(promptArg).toContain('Type: Issue');
+    });
+
+    test('prioritizes issueContext over message when both are present', async () => {
+      const message = `[GitHub Issue Context]
+Issue #42: "Wrong Title"
+Author: user
+Labels: wrong
+Status: open
+
+Description:
+Wrong description
+
+---
+
+/help`;
+
+      const issueContext = `Issue #42: "Correct Title"
+Labels: correct`;
+
+      // Call handleMessage with both message and issueContext
+      await handleMessage(platform, 'chat-456', message, issueContext);
+
+      // Verify RouterContext was extracted from issueContext (not message)
+      expect(mockClient.sendQuery).toHaveBeenCalled();
+      const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
+      // Check that the Context section uses the correct title/labels from issueContext
+      expect(promptArg).toContain('Title: Correct Title');
+      expect(promptArg).toContain('Labels: correct');
+      // The full message is still sent (as User Request), but the extracted context is from issueContext
     });
   });
 });
