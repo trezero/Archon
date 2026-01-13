@@ -7,25 +7,52 @@ argument-hint: (none - reads from consolidated review artifact)
 
 ---
 
+## IMPORTANT: Output Behavior
+
+**Your output will be posted as a GitHub comment.** Keep your working output minimal:
+- Do NOT narrate each step ("Now I'll read the file...", "Let me check...")
+- Do NOT output verbose progress updates
+- Only output the final structured report at the end
+- Use the TodoWrite tool to track progress silently
+
+---
+
 ## Your Mission
 
-Read the consolidated review artifact and implement all CRITICAL and HIGH priority fixes. Add tests for fixed code if missing. Commit changes. Report what was fixed, what wasn't (and why), and suggest follow-up issues for remaining items.
+Read the consolidated review artifact and implement all CRITICAL and HIGH priority fixes. Add tests for fixed code if missing. Commit and push changes. Report what was fixed, what wasn't (and why), and suggest follow-up issues for remaining items.
 
 **Output artifact**: `.archon/artifacts/reviews/pr-{number}/fix-report.md`
-**Git action**: Commit fixes (don't push)
+**Git action**: Commit AND push fixes to the PR branch
 **GitHub action**: Post fix report comment
 
 ---
 
 ## Phase 1: LOAD - Get Fix List
 
-### 1.1 Find PR Number
+### 1.1 Find PR Number and Branch
 
 ```bash
-ls -d .archon/artifacts/reviews/pr-* 2>/dev/null | tail -1
+# Find PR number from artifacts
+PR_DIR=$(ls -d .archon/artifacts/reviews/pr-* 2>/dev/null | tail -1)
+PR_NUMBER=$(basename $PR_DIR | sed 's/pr-//')
+
+# Get the PR's head branch name
+HEAD_BRANCH=$(gh pr view $PR_NUMBER --json headRefName --jq '.headRefName')
+echo "PR: $PR_NUMBER, Branch: $HEAD_BRANCH"
 ```
 
-### 1.2 Read Consolidated Review
+### 1.2 Checkout the PR Branch
+
+**CRITICAL: Work on the PR's actual branch, not a new branch.**
+
+```bash
+# Fetch and checkout the PR's branch
+git fetch origin $HEAD_BRANCH
+git checkout $HEAD_BRANCH
+git pull origin $HEAD_BRANCH
+```
+
+### 1.3 Read Consolidated Review
 
 ```bash
 cat .archon/artifacts/reviews/pr-{number}/consolidated-review.md
@@ -37,7 +64,7 @@ Extract:
 - MEDIUM issues (for reporting)
 - LOW issues (for reporting)
 
-### 1.3 Read Individual Artifacts for Details
+### 1.4 Read Individual Artifacts for Details
 
 If consolidated doesn't have full fix code, read original artifacts:
 
@@ -45,20 +72,23 @@ If consolidated doesn't have full fix code, read original artifacts:
 cat .archon/artifacts/reviews/pr-{number}/code-review-findings.md
 cat .archon/artifacts/reviews/pr-{number}/error-handling-findings.md
 cat .archon/artifacts/reviews/pr-{number}/test-coverage-findings.md
+cat .archon/artifacts/reviews/pr-{number}/docs-impact-findings.md
 ```
 
-### 1.4 Check Current Git State
+### 1.5 Check Current Git State
 
 ```bash
 git status --porcelain
 git branch --show-current
 ```
 
+Verify you are on the correct PR branch (should be `$HEAD_BRANCH`).
+
 **PHASE_1_CHECKPOINT:**
+- [ ] PR number identified
+- [ ] On the correct PR branch (NOT main, NOT a new branch)
 - [ ] Consolidated review loaded
 - [ ] CRITICAL/HIGH issues extracted
-- [ ] Fix code available for each
-- [ ] Git state clean
 
 ---
 
@@ -143,7 +173,7 @@ Must succeed.
 
 ---
 
-## Phase 4: COMMIT - Save Changes
+## Phase 4: COMMIT AND PUSH - Save and Push Changes
 
 ### 4.1 Stage Changes
 
@@ -155,28 +185,38 @@ git status
 ### 4.2 Commit
 
 ```bash
-git commit -m "fix: Address CRITICAL and HIGH issues from comprehensive review
+git commit -m "fix: Address review findings (CRITICAL/HIGH)
 
 Fixes applied:
 - {brief list of fixes}
 
 Tests added:
-- {list of new tests}
+- {list of new tests if any}
 
 Skipped (see review artifacts):
-- {brief list of unfixable}
+- {brief list of unfixable if any}
 
 Review artifacts: .archon/artifacts/reviews/pr-{number}/"
 ```
 
-### 4.3 Do NOT Push
+### 4.3 Push to PR Branch
 
-Leave for user to review and push.
+**Push the fixes to the PR branch so they appear in the PR.**
+
+```bash
+git push origin $HEAD_BRANCH
+```
+
+If push fails due to divergence:
+```bash
+git pull --rebase origin $HEAD_BRANCH
+git push origin $HEAD_BRANCH
+```
 
 **PHASE_4_CHECKPOINT:**
 - [ ] Changes committed
-- [ ] Commit message descriptive
-- [ ] Not pushed (user will review)
+- [ ] Changes pushed to PR branch
+- [ ] PR now shows the fixes
 
 ---
 
@@ -189,6 +229,7 @@ Write to `.archon/artifacts/reviews/pr-{number}/fix-report.md`:
 
 **Date**: {ISO timestamp}
 **Status**: {COMPLETE | PARTIAL}
+**Branch**: {HEAD_BRANCH}
 
 ---
 
@@ -207,22 +248,13 @@ Write to `.archon/artifacts/reviews/pr-{number}/fix-report.md`:
 | {title} | `file:line` | ✅ FIXED | {what was done} |
 | {title} | `file:line` | ❌ SKIPPED | {why} |
 
-#### Fix Details
-
-**{Issue Title}**
-- **Location**: `{file}:{line}`
-- **Original Issue**: {brief description}
-- **Fix Applied**:
-```typescript
-{the fix that was applied}
-```
-- **Test Added**: {yes/no - test file if yes}
-
 ---
 
 ### HIGH Fixes ({n}/{total})
 
-{Same structure as CRITICAL}
+| Issue | Location | Status | Details |
+|-------|----------|--------|---------|
+| {title} | `file:line` | ✅ FIXED | {what was done} |
 
 ---
 
@@ -231,7 +263,6 @@ Write to `.archon/artifacts/reviews/pr-{number}/fix-report.md`:
 | Test File | Test Cases | For Issue |
 |-----------|------------|-----------|
 | `src/x.test.ts` | `it('should...')` | {issue title} |
-| ... | ... | ... |
 
 ---
 
@@ -244,29 +275,15 @@ Write to `.archon/artifacts/reviews/pr-{number}/fix-report.md`:
 **Reason Not Fixed**: {reason}
 
 **Suggested Action**:
-{What the user should do:
-- Manual fix required because...
-- Needs architectural decision...
-- Conflicts with...}
+{What the user should do}
 
 ---
 
 ## MEDIUM Issues (User Decision Required)
 
-These were not auto-fixed. User should decide:
-
 | Issue | Location | Options |
 |-------|----------|---------|
 | {title} | `file:line` | Fix now / Create issue / Skip |
-| ... | ... | ... |
-
-<details>
-<summary>Details for each MEDIUM issue</summary>
-
-### {Issue Title}
-{Full details from consolidated review}
-
-</details>
 
 ---
 
@@ -275,28 +292,14 @@ These were not auto-fixed. User should decide:
 | Issue | Location | Suggestion |
 |-------|----------|------------|
 | {title} | `file:line` | {brief suggestion} |
-| ... | ... | ... |
 
 ---
 
 ## Suggested Follow-up Issues
 
-If not addressing in this PR, create these issues:
-
-### Issue 1: {Suggested Title}
-
-**Priority**: P1 / P2 / P3
-**Related Finding**: {which review finding}
-**Description**:
-{What the issue should contain}
-
-**Suggested Labels**: `bug`, `enhancement`, `tech-debt`
-
----
-
-### Issue 2: {Suggested Title}
-
-{Same structure...}
+| Issue Title | Priority | Related Finding |
+|-------------|----------|-----------------|
+| "{title}" | P{1/2/3} | {which finding} |
 
 ---
 
@@ -313,44 +316,14 @@ If not addressing in this PR, create these issues:
 
 ## Git Status
 
-- **Branch**: {branch-name}
+- **Branch**: {HEAD_BRANCH}
 - **Commit**: {commit-hash}
-- **Status**: Committed, not pushed
-
-**To review changes**:
-```bash
-git diff HEAD~1
-```
-
-**To push when ready**:
-```bash
-git push
-```
-
----
-
-## Next Steps
-
-1. Review the fixes: `git diff HEAD~1`
-2. Address MEDIUM issues (fix, create issue, or skip)
-3. Push when satisfied: `git push`
-4. Create follow-up issues for deferred items
-
----
-
-## Metadata
-
-- **Fixes Applied**: {n}
-- **Tests Added**: {n}
-- **Issues Skipped**: {n}
-- **Artifact**: `.archon/artifacts/reviews/pr-{number}/fix-report.md`
+- **Pushed**: ✅ Yes
 ```
 
 **PHASE_5_CHECKPOINT:**
 - [ ] Fix report created
 - [ ] All fixes documented
-- [ ] Unfixed items explained
-- [ ] Follow-up issues suggested
 
 ---
 
@@ -363,6 +336,7 @@ gh pr comment {number} --body "$(cat <<'EOF'
 # ⚡ Auto-Fix Report
 
 **Status**: {COMPLETE | PARTIAL}
+**Pushed**: ✅ Changes pushed to PR
 
 ---
 
@@ -380,6 +354,7 @@ gh pr comment {number} --body "$(cat <<'EOF'
 
 ### Tests Added
 
+{If any:}
 - `{test-file}`: {n} new test cases
 
 ---
@@ -393,8 +368,7 @@ gh pr comment {number} --body "$(cat <<'EOF'
 
 ## 🟡 MEDIUM Issues (Your Decision)
 
-These require your decision:
-
+{If any:}
 | Issue | Options |
 |-------|---------|
 | {title} | Fix now / Create issue / Skip |
@@ -404,9 +378,7 @@ These require your decision:
 ## 📋 Suggested Follow-up Issues
 
 {If any items should become issues:}
-
-1. **{Issue Title}** (P{1/2/3})
-   - {brief description}
+1. **{Issue Title}** (P{1/2/3}) - {brief description}
 
 ---
 
@@ -416,63 +388,37 @@ These require your decision:
 
 ---
 
-## Next Steps
-
-1. Review changes: `git diff HEAD~1`
-2. Address MEDIUM issues
-3. Push when ready: `git push`
-4. Create follow-up issues if needed
-
----
-
 *Auto-fixed by Archon comprehensive-pr-review workflow*
+*Fixes pushed to branch `{HEAD_BRANCH}`*
 EOF
 )"
 ```
 
 **PHASE_6_CHECKPOINT:**
 - [ ] GitHub comment posted
-- [ ] Fix summary clear
-- [ ] Next steps provided
 
 ---
 
 ## Phase 7: OUTPUT - Final Report
 
+Output only this summary (keep it brief):
+
 ```markdown
-## Fix Implementation Complete
+## ✅ Fix Implementation Complete
 
 **PR**: #{number}
+**Branch**: {HEAD_BRANCH}
 **Status**: {COMPLETE | PARTIAL}
 
-### Fixes Applied
-- CRITICAL: {n}/{total}
-- HIGH: {n}/{total}
-- Tests added: {n}
+| Severity | Fixed |
+|----------|-------|
+| CRITICAL | {n}/{total} |
+| HIGH | {n}/{total} |
 
-### Validation
-| Check | Status |
-|-------|--------|
-| Type check | ✅ |
-| Lint | ✅ |
-| Tests | ✅ |
-| Build | ✅ |
+**Validation**: ✅ All checks pass
+**Pushed**: ✅ Changes pushed to PR
 
-### Git
-- Commit: {hash}
-- Status: Committed (not pushed)
-
-### Artifacts
-- Fix report: `.archon/artifacts/reviews/pr-{number}/fix-report.md`
-
-### User Actions Required
-1. Review changes: `git diff HEAD~1`
-2. Address {n} MEDIUM issues
-3. Push when ready
-4. Consider {n} suggested follow-up issues
-
-### GitHub
-✅ Fix report posted to PR #{number}
+See fix report: `.archon/artifacts/reviews/pr-{number}/fix-report.md`
 ```
 
 ---
@@ -492,20 +438,19 @@ EOF
 2. Either: fix the implementation, or fix the test
 3. If unclear, mark as "Not Fixed" for manual review
 
-### Conflicting Fixes
+### Push Fails
 
-If two fixes conflict:
-1. Apply the higher-severity fix
-2. Note the conflict in report
-3. Mark lower-severity as "Skipped - conflicts with fix for {X}"
+1. Pull with rebase: `git pull --rebase origin $HEAD_BRANCH`
+2. Resolve any conflicts
+3. Push again
 
 ---
 
 ## Success Criteria
 
+- **ON_CORRECT_BRANCH**: Working on PR's head branch, not main or new branch
 - **CRITICAL_ADDRESSED**: All CRITICAL issues attempted
 - **HIGH_ADDRESSED**: All HIGH issues attempted
-- **TESTS_ADDED**: Tests for fixed code where needed
 - **VALIDATION_PASSED**: Type check, lint, tests, build all pass
-- **COMMITTED**: Changes committed (not pushed)
+- **COMMITTED_AND_PUSHED**: Changes committed AND pushed to PR branch
 - **REPORTED**: Fix report artifact and GitHub comment created

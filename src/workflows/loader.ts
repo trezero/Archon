@@ -240,25 +240,33 @@ export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition
   const allWorkflows: WorkflowDefinition[] = [];
   const searchPaths = getWorkflowFolderSearchPaths();
 
+  console.log(`[WorkflowLoader] Searching for workflows in: ${cwd}`);
+  console.log(`[WorkflowLoader] Search paths: ${searchPaths.join(', ')}`);
+
   for (const folder of searchPaths) {
     const fullPath = join(cwd, folder);
     try {
       await access(fullPath);
+      console.log(`[WorkflowLoader] Found workflow folder: ${fullPath}`);
       const workflows = await loadWorkflowsFromDir(fullPath);
       allWorkflows.push(...workflows);
 
       if (workflows.length > 0) {
-        console.log(`[WorkflowLoader] Found ${String(workflows.length)} workflows in ${folder}`);
+        console.log(`[WorkflowLoader] Loaded ${String(workflows.length)} workflows from ${folder}`);
         break; // Stop at first folder with workflows
+      } else {
+        console.log(`[WorkflowLoader] Folder exists but no valid workflows: ${fullPath}`);
       }
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
-      if (err.code !== 'ENOENT') {
+      if (err.code === 'ENOENT') {
+        console.log(`[WorkflowLoader] Folder not found (expected): ${fullPath}`);
+      } else {
         console.warn(`[WorkflowLoader] Error accessing ${fullPath}: ${err.message}`);
       }
-      // ENOENT is expected - folder doesn't exist, try next
     }
   }
 
+  console.log(`[WorkflowLoader] Discovery complete: ${String(allWorkflows.length)} total workflows`);
   return allWorkflows;
 }

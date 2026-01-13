@@ -530,11 +530,17 @@ export async function handleMessage(
       // Use conversation.cwd if set, otherwise codebase default
       const codebaseForWorkflows = await codebaseDb.getCodebase(conversation.codebase_id);
       if (codebaseForWorkflows) {
+        const workflowCwd = conversation.cwd ?? codebaseForWorkflows.default_cwd;
+        console.log(`[Orchestrator] Discovering workflows from: ${workflowCwd}`);
         try {
-          const workflowCwd = conversation.cwd ?? codebaseForWorkflows.default_cwd;
           availableWorkflows = await discoverWorkflows(workflowCwd);
+          console.log(
+            `[Orchestrator] Workflow discovery result: ${String(availableWorkflows.length)} workflows found`
+          );
           if (availableWorkflows.length > 0) {
-            console.log(`[Orchestrator] Discovered ${String(availableWorkflows.length)} workflows`);
+            console.log(
+              `[Orchestrator] Available workflows: ${availableWorkflows.map(w => w.name).join(', ')}`
+            );
           }
         } catch (error) {
           const err = error as Error;
@@ -546,6 +552,10 @@ export async function handleMessage(
           );
           // Continue without workflows - graceful degradation
         }
+      } else {
+        console.warn(
+          `[Orchestrator] Codebase not found for ID: ${conversation.codebase_id ?? 'null'}`
+        );
       }
 
       // If workflows are available, use workflow-aware router prompt
@@ -613,12 +623,17 @@ export async function handleMessage(
         });
       } else {
         // Fall back to router template for natural language routing
+        console.log(
+          `[Orchestrator] No workflows available (count: ${String(availableWorkflows.length)}), checking router template`
+        );
         const routerTemplate = await templateDb.getTemplate('router');
         if (routerTemplate) {
           console.log('[Orchestrator] Routing through router template');
           commandName = 'router';
           // Pass the entire message as $ARGUMENTS for the router
           promptToSend = substituteVariables(routerTemplate.content, [message]);
+        } else {
+          console.log('[Orchestrator] No router template found, using raw message');
         }
         // If no router template, message passes through as-is (backward compatible)
       }

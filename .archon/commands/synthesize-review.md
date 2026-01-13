@@ -379,31 +379,12 @@ EOF
 
 ---
 
-## Phase 5: OUTPUT - Report to User
+## Phase 5: OUTPUT - Confirmation
 
-```markdown
-## Review Synthesis Complete
+Output only a brief confirmation (this will be posted as a comment):
 
-**PR**: #{number}
-**Findings**: {total} across 5 agents
-
-### Summary
-| Severity | Count | Action |
-|----------|-------|--------|
-| CRITICAL | {n} | Auto-fix |
-| HIGH | {n} | Auto-fix |
-| MEDIUM | {n} | User decision |
-| LOW | {n} | Optional |
-
-### Artifacts
-- Consolidated: `.archon/artifacts/reviews/pr-{number}/consolidated-review.md`
-- Individual: `*-findings.md` (5 files)
-
-### GitHub
-✅ Review comment posted to PR #{number}
-
-### Next Step
-Auto-fix step will now implement CRITICAL + HIGH fixes...
+```
+✅ Review synthesis complete. Proceeding to auto-fix step...
 ```
 
 ---
