@@ -1,17 +1,14 @@
 name: feature-development
 description: |
-  Use when: User wants to BUILD or ADD new functionality from scratch.
-  Triggers: "add dark mode", "implement authentication", "build a feature", "create new endpoint".
-  NOT for: Bug fixes, issue resolution, code reviews, questions.
-  Does: Creates implementation plan -> implements code -> creates pull request.
+  Use when: Implementing a feature from an existing plan.
+  Input: Path to a plan file (.archon/artifacts/*/plan.md) or GitHub issue containing a plan.
+  Does: Implements the plan with validation loops -> creates pull request.
+  NOT for: Creating plans (plans should be created separately), bug fixes, code reviews.
 
 provider: claude
 model: sonnet
 
 steps:
-  - command: plan
-
   - command: implement
-    clearContext: true
 
   - command: create-pr
