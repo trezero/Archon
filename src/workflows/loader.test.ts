@@ -3,6 +3,7 @@ import { mkdir, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { discoverWorkflows } from './loader';
+import { isParallelBlock } from './types';
 
 describe('Workflow Loader', () => {
   let testDir: string;
@@ -681,6 +682,198 @@ prompt: ""
       const workflows = await discoverWorkflows(testDir);
 
       expect(workflows).toHaveLength(0);
+    });
+  });
+
+  describe('Parallel block parsing', () => {
+    it('should parse workflow with valid parallel block', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const parallelYaml = `name: parallel-test
+description: Test workflow with parallel block
+steps:
+  - command: scope
+
+  - parallel:
+      - command: code-reviewer
+      - command: test-analyzer
+      - command: error-hunter
+
+  - command: aggregate
+`;
+      await writeFile(join(workflowDir, 'parallel.yaml'), parallelYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(1);
+      expect(workflows[0].name).toBe('parallel-test');
+      expect(workflows[0].steps).toHaveLength(3);
+
+      // First step is a regular step
+      expect(workflows[0].steps[0]).toHaveProperty('command', 'scope');
+
+      // Second step is a parallel block - use type guard for type safety
+      const parallelBlock = workflows[0].steps[1];
+      expect(isParallelBlock(parallelBlock)).toBe(true);
+      if (isParallelBlock(parallelBlock)) {
+        expect(parallelBlock.parallel).toHaveLength(3);
+        expect(parallelBlock.parallel[0].command).toBe('code-reviewer');
+        expect(parallelBlock.parallel[1].command).toBe('test-analyzer');
+        expect(parallelBlock.parallel[2].command).toBe('error-hunter');
+      }
+
+      // Third step is a regular step
+      expect(workflows[0].steps[2]).toHaveProperty('command', 'aggregate');
+    });
+
+    it('should parse workflow with mixed sequential and parallel steps', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const mixedYaml = `name: mixed-workflow
+description: Sequential and parallel steps
+steps:
+  - command: step1
+  - parallel:
+      - command: parallel1
+      - command: parallel2
+  - command: step2
+  - parallel:
+      - command: parallel3
+  - command: step3
+`;
+      await writeFile(join(workflowDir, 'mixed.yaml'), mixedYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(1);
+      expect(workflows[0].steps).toHaveLength(5);
+    });
+
+    it('should reject workflow with empty parallel block', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const emptyParallelYaml = `name: empty-parallel
+description: Empty parallel block
+steps:
+  - command: step1
+  - parallel: []
+  - command: step2
+`;
+      await writeFile(join(workflowDir, 'empty-parallel.yaml'), emptyParallelYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(0);
+    });
+
+    it('should reject workflow with nested parallel blocks', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const nestedYaml = `name: nested-parallel
+description: Nested parallel blocks (not allowed)
+steps:
+  - command: step1
+  - parallel:
+      - command: outer1
+      - parallel:
+          - command: inner1
+`;
+      await writeFile(join(workflowDir, 'nested.yaml'), nestedYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(0);
+    });
+
+    it('should support clearContext in parallel block steps', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const clearContextYaml = `name: parallel-clear-context
+description: Parallel with clearContext
+steps:
+  - parallel:
+      - command: step1
+        clearContext: true
+      - command: step2
+`;
+      await writeFile(join(workflowDir, 'parallel-clear.yaml'), clearContextYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(1);
+      expect(workflows[0].steps).toHaveLength(1);
+      const parallelBlock = workflows[0].steps[0];
+      expect(isParallelBlock(parallelBlock)).toBe(true);
+      if (isParallelBlock(parallelBlock)) {
+        expect(parallelBlock.parallel[0].clearContext).toBe(true);
+        expect(parallelBlock.parallel[1].clearContext).toBe(false);
+      }
+    });
+
+    it('should reject parallel block with invalid command names', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const invalidCommandYaml = `name: invalid-parallel-command
+description: Parallel block with invalid command
+steps:
+  - parallel:
+      - command: valid-command
+      - command: ../../../etc/passwd
+`;
+      await writeFile(join(workflowDir, 'invalid-command.yaml'), invalidCommandYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(0);
+    });
+
+    it('should handle workflow with only parallel blocks', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const onlyParallelYaml = `name: only-parallel
+description: Only parallel blocks
+steps:
+  - parallel:
+      - command: step1
+      - command: step2
+`;
+      await writeFile(join(workflowDir, 'only-parallel.yaml'), onlyParallelYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(1);
+      expect(workflows[0].steps).toHaveLength(1);
+      expect(workflows[0].steps[0]).toHaveProperty('parallel');
+    });
+
+    it('should handle single step in parallel block (pointless but allowed)', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const singleParallelYaml = `name: single-parallel
+description: Single step in parallel block
+steps:
+  - parallel:
+      - command: lonely-step
+`;
+      await writeFile(join(workflowDir, 'single-parallel.yaml'), singleParallelYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      expect(workflows).toHaveLength(1);
+      expect(workflows[0].steps).toHaveLength(1);
+      const parallelBlock = workflows[0].steps[0];
+      expect(isParallelBlock(parallelBlock)).toBe(true);
+      if (isParallelBlock(parallelBlock)) {
+        expect(parallelBlock.parallel).toHaveLength(1);
+      }
     });
   });
 });

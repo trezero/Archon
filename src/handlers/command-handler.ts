@@ -22,6 +22,7 @@ import {
 } from '../services/cleanup-service';
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
 import { discoverWorkflows } from '../workflows';
+import { isSingleStep } from '../workflows/types';
 
 /**
  * Convert an absolute path to a relative path from the repository root
@@ -1329,7 +1330,7 @@ Setup:
           for (const w of workflows) {
             const stepsOrLoop = w.loop
               ? `Loop: until \`${w.loop.until}\` (max ${String(w.loop.max_iterations)} iterations)`
-              : `Steps: ${w.steps?.map(s => `\`${s.command}\``).join(' -> ') ?? 'none'}`;
+              : `Steps: ${w.steps?.map(s => isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`).join(' -> ') ?? 'none'}`;
             msg += `**\`${w.name}\`**\n  ${w.description}\n  ${stepsOrLoop}\n\n`;
           }
 

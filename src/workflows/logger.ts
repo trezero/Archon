@@ -16,11 +16,16 @@ export interface WorkflowEvent {
     | 'step_complete'
     | 'step_error'
     | 'assistant'
-    | 'tool';
+    | 'tool'
+    | 'parallel_block_start'
+    | 'parallel_block_complete';
   workflow_id: string;
   workflow_name?: string;
   step?: string;
   step_index?: number;
+  block_index?: number;
+  steps?: string[];
+  results?: { command: string; success: boolean }[];
   content?: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
@@ -170,5 +175,37 @@ export async function logWorkflowError(
 export async function logWorkflowComplete(cwd: string, workflowRunId: string): Promise<void> {
   await logWorkflowEvent(cwd, workflowRunId, {
     type: 'workflow_complete',
+  });
+}
+
+/**
+ * Log parallel block start
+ */
+export async function logParallelBlockStart(
+  cwd: string,
+  workflowRunId: string,
+  blockIndex: number,
+  stepCommands: string[]
+): Promise<void> {
+  await logWorkflowEvent(cwd, workflowRunId, {
+    type: 'parallel_block_start',
+    block_index: blockIndex,
+    steps: stepCommands,
+  });
+}
+
+/**
+ * Log parallel block completion
+ */
+export async function logParallelBlockComplete(
+  cwd: string,
+  workflowRunId: string,
+  blockIndex: number,
+  results: { command: string; success: boolean }[]
+): Promise<void> {
+  await logWorkflowEvent(cwd, workflowRunId, {
+    type: 'parallel_block_complete',
+    block_index: blockIndex,
+    results,
   });
 }

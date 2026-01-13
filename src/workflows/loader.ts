@@ -3,7 +3,7 @@
  */
 import { readFile, readdir, access } from 'fs/promises';
 import { join } from 'path';
-import type { WorkflowDefinition, LoopConfig } from './types';
+import type { WorkflowDefinition, LoopConfig, SingleStep, WorkflowStep } from './types';
 import { getWorkflowFolderSearchPaths } from '../utils/archon-paths';
 import { isValidCommandName } from './executor';
 
@@ -12,6 +12,78 @@ import { isValidCommandName } from './executor';
  */
 function parseYaml(content: string): unknown {
   return Bun.YAML.parse(content);
+}
+
+/**
+ * Parse a single step (helper for parseStep)
+ * @param errors - Array to collect validation errors for aggregated reporting
+ */
+function parseSingleStep(
+  s: unknown,
+  indexPath: string,
+  errors: string[]
+): SingleStep | null {
+  const step = s as Record<string, unknown>;
+  const command = String(step.command ?? step.step);
+
+  if (!isValidCommandName(command)) {
+    errors.push(`Step ${indexPath}: invalid command name "${command}"`);
+    return null;
+  }
+
+  return {
+    command,
+    clearContext: Boolean(step.clearContext),
+  };
+}
+
+/**
+ * Parse a workflow step (either single step or parallel block)
+ * @param errors - Array to collect validation errors for aggregated reporting
+ */
+function parseStep(
+  s: unknown,
+  index: number,
+  errors: string[]
+): WorkflowStep | null {
+  const step = s as Record<string, unknown>;
+
+  // Check for parallel block
+  if (Array.isArray(step.parallel)) {
+    const rawParallelSteps = step.parallel;
+
+    // Check for nested parallel BEFORE parsing (raw input still has parallel property)
+    if (
+      rawParallelSteps.some((ps: unknown) => {
+        const pstep = ps as Record<string, unknown>;
+        return Array.isArray(pstep.parallel);
+      })
+    ) {
+      errors.push(`Step ${String(index + 1)}: nested parallel blocks not allowed`);
+      return null;
+    }
+
+    const parallelSteps = rawParallelSteps
+      .map((ps: unknown, pi: number) =>
+        parseSingleStep(ps, `${String(index + 1)}.${String(pi + 1)}`, errors)
+      )
+      .filter((ps): ps is SingleStep => ps !== null);
+
+    if (parallelSteps.length === 0) {
+      errors.push(`Step ${String(index + 1)}: empty parallel block`);
+      return null;
+    }
+
+    // If any steps were invalid (filtered out), the errors were already collected
+    if (parallelSteps.length !== rawParallelSteps.length) {
+      return null;
+    }
+
+    return { parallel: parallelSteps };
+  }
+
+  // Regular single step
+  return parseSingleStep(step, String(index + 1), errors);
 }
 
 /**
@@ -72,32 +144,18 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
     }
 
     // Parse steps if present (for step-based workflows)
-    let steps: { command: string; clearContext: boolean }[] | undefined;
+    let steps: WorkflowStep[] | undefined;
     if (hasSteps) {
-      // Parse command field (support both 'command' and 'step' for backward compat)
+      // Collect validation errors for aggregated reporting
+      const validationErrors: string[] = [];
+
       steps = (raw.steps as unknown[])
-        .map((s: unknown, index: number) => {
-          const step = s as Record<string, unknown>;
-          const command = String(step.command ?? step.step);
+        .map((s: unknown, index: number) => parseStep(s, index, validationErrors))
+        .filter((step): step is WorkflowStep => step !== null);
 
-          // Validate command name at parse time (Issue #129)
-          if (!isValidCommandName(command)) {
-            console.warn(
-              `[WorkflowLoader] Invalid command name in ${filename} step ${String(index + 1)}: ${command}`
-            );
-            return null;
-          }
-
-          return {
-            command,
-            clearContext: Boolean(step.clearContext),
-          };
-        })
-        .filter((step): step is NonNullable<typeof step> => step !== null);
-
-      // Reject workflow if any steps were invalid
+      // Reject workflow if any steps were invalid - report all errors at once
       if (steps.length !== (raw.steps as unknown[]).length) {
-        console.warn(`[WorkflowLoader] Workflow ${filename} has invalid command names, skipping`);
+        console.warn(`[WorkflowLoader] Workflow ${filename} failed validation:`, validationErrors);
         return null;
       }
     }

@@ -2039,6 +2039,425 @@ describe('Workflow Executor', () => {
       });
     });
   });
+
+  describe('parallel block execution', () => {
+    beforeEach(async () => {
+      // Create command files for parallel block tests
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'parallel-a.md'), 'Parallel step A prompt');
+      await writeFile(join(commandsDir, 'parallel-b.md'), 'Parallel step B prompt');
+      await writeFile(join(commandsDir, 'parallel-c.md'), 'Parallel step C prompt');
+      await writeFile(join(commandsDir, 'step-before.md'), 'Step before parallel');
+      await writeFile(join(commandsDir, 'step-after.md'), 'Step after parallel');
+
+      // Reset mock to default behavior
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should execute all parallel steps concurrently', async () => {
+      const parallelWorkflow: WorkflowDefinition = {
+        name: 'parallel-test',
+        description: 'Test workflow with parallel block',
+        steps: [
+          {
+            parallel: [{ command: 'parallel-a' }, { command: 'parallel-b' }, { command: 'parallel-c' }],
+          },
+        ],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        parallelWorkflow,
+        'Run parallel',
+        'db-conv-id'
+      );
+
+      // AI client should be called 3 times (once for each parallel step)
+      expect(mockSendQuery).toHaveBeenCalledTimes(3);
+
+      // Workflow should complete successfully
+      const completeCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
+      );
+      expect(completeCalls.length).toBeGreaterThan(0);
+    });
+
+    it('should fail workflow if any parallel step fails', async () => {
+      // Mock AI client to fail on 'parallel-b'
+      let callCount = 0;
+      mockSendQuery.mockImplementation(function* (prompt: string) {
+        callCount++;
+        // Fail the second call (parallel-b)
+        if (prompt.includes('Parallel step B')) {
+          throw new Error('Parallel step B failed unexpectedly');
+        }
+        yield { type: 'assistant', content: `Response ${String(callCount)}` };
+        yield { type: 'result', sessionId: `session-${String(callCount)}` };
+      });
+
+      const parallelWorkflow: WorkflowDefinition = {
+        name: 'parallel-fail-test',
+        description: 'Test parallel failure handling',
+        steps: [
+          {
+            parallel: [{ command: 'parallel-a' }, { command: 'parallel-b' }, { command: 'parallel-c' }],
+          },
+        ],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        parallelWorkflow,
+        'Run parallel',
+        'db-conv-id'
+      );
+
+      // Workflow should fail
+      const failCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
+      );
+      expect(failCalls.length).toBeGreaterThan(0);
+
+      // Should send failure message to user
+      const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+      const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1]);
+      expect(messages.some((m: string) => m.includes('**Workflow failed** in parallel block'))).toBe(
+        true
+      );
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should execute sequential step, then parallel block, then sequential step', async () => {
+      const mixedWorkflow: WorkflowDefinition = {
+        name: 'mixed-workflow',
+        description: 'Test sequential and parallel mix',
+        steps: [
+          { command: 'step-before' },
+          {
+            parallel: [{ command: 'parallel-a' }, { command: 'parallel-b' }],
+          },
+          { command: 'step-after' },
+        ],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        mixedWorkflow,
+        'Run mixed',
+        'db-conv-id'
+      );
+
+      // AI client should be called 4 times total:
+      // 1 (step-before) + 2 (parallel) + 1 (step-after)
+      expect(mockSendQuery).toHaveBeenCalledTimes(4);
+
+      // Workflow should complete successfully
+      const completeCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
+      );
+      expect(completeCalls.length).toBeGreaterThan(0);
+
+      // Verify step notifications were sent for all steps
+      const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+      const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1]);
+
+      // Sequential step notifications
+      expect(messages.some((m: string) => m.includes('**Step 1/3**: `step-before`'))).toBe(true);
+      expect(messages.some((m: string) => m.includes('**Step 3/3**: `step-after`'))).toBe(true);
+
+      // Parallel block notification
+      expect(
+        messages.some(
+          (m: string) =>
+            m.includes('**Parallel block**') && m.includes('`parallel-a`') && m.includes('`parallel-b`')
+        )
+      ).toBe(true);
+    });
+
+    it('should send correct notification format for parallel blocks', async () => {
+      const parallelWorkflow: WorkflowDefinition = {
+        name: 'parallel-notification-test',
+        description: 'Test parallel block notification',
+        steps: [
+          {
+            parallel: [{ command: 'parallel-a' }, { command: 'parallel-b' }],
+          },
+        ],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        parallelWorkflow,
+        'Run parallel',
+        'db-conv-id'
+      );
+
+      const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+      const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1]);
+
+      // Should have parallel block notification with correct format
+      const parallelNotification = messages.find(
+        (m: string) => typeof m === 'string' && m.includes('**Parallel block**')
+      );
+      expect(parallelNotification).toBeDefined();
+      expect(parallelNotification).toContain('(2 steps)');
+      expect(parallelNotification).toContain('`parallel-a`');
+      expect(parallelNotification).toContain('`parallel-b`');
+    });
+
+    it('should give each parallel step a fresh session (no resume)', async () => {
+      // Track session IDs passed to each parallel step
+      const receivedSessionIds: (string | undefined)[] = [];
+
+      mockSendQuery.mockImplementation(function* (_prompt: string, _cwd: string, sessionId?: string) {
+        receivedSessionIds.push(sessionId);
+        yield { type: 'assistant', content: 'Response' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      const parallelWorkflow: WorkflowDefinition = {
+        name: 'parallel-session-test',
+        description: 'Test parallel session handling',
+        steps: [
+          {
+            parallel: [{ command: 'parallel-a' }, { command: 'parallel-b' }],
+          },
+        ],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        parallelWorkflow,
+        'Run parallel',
+        'db-conv-id'
+      );
+
+      // All parallel steps should have undefined session ID (fresh session)
+      expect(receivedSessionIds).toEqual([undefined, undefined]);
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should execute workflow with multiple parallel blocks', async () => {
+      // Create additional command files
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'parallel-d.md'), 'Parallel step D prompt');
+
+      const multiParallelWorkflow: WorkflowDefinition = {
+        name: 'multi-parallel-test',
+        description: 'Test multiple parallel blocks',
+        steps: [
+          { command: 'step-before' },
+          {
+            parallel: [{ command: 'parallel-a' }, { command: 'parallel-b' }],
+          },
+          { command: 'step-after' },
+          {
+            parallel: [{ command: 'parallel-c' }, { command: 'parallel-d' }],
+          },
+        ],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        multiParallelWorkflow,
+        'Run multi-parallel',
+        'db-conv-id'
+      );
+
+      // AI client should be called 6 times total:
+      // 1 (step-before) + 2 (first parallel) + 1 (step-after) + 2 (second parallel)
+      expect(mockSendQuery).toHaveBeenCalledTimes(6);
+
+      // Workflow should complete successfully
+      const completeCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
+      );
+      expect(completeCalls.length).toBeGreaterThan(0);
+    });
+
+    it('should report all failures when multiple parallel steps fail', async () => {
+      // Mock AI client to fail on all parallel steps
+      mockSendQuery.mockImplementation(function* (prompt: string) {
+        if (prompt.includes('Parallel step A')) {
+          throw new Error('Step A: Connection timeout');
+        }
+        if (prompt.includes('Parallel step B')) {
+          throw new Error('Step B: Rate limit exceeded');
+        }
+        if (prompt.includes('Parallel step C')) {
+          throw new Error('Step C: Authentication failed');
+        }
+        yield { type: 'assistant', content: 'Response' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      const parallelWorkflow: WorkflowDefinition = {
+        name: 'all-fail-test',
+        description: 'Test all parallel steps failing',
+        steps: [
+          {
+            parallel: [{ command: 'parallel-a' }, { command: 'parallel-b' }, { command: 'parallel-c' }],
+          },
+        ],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        parallelWorkflow,
+        'Run parallel',
+        'db-conv-id'
+      );
+
+      // Workflow should fail
+      const failCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
+      );
+      expect(failCalls.length).toBeGreaterThan(0);
+
+      // Should send failure message containing ALL errors
+      const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+      const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1]);
+      const failureMessage = messages.find((m: string) =>
+        typeof m === 'string' && m.includes('**Workflow failed** in parallel block')
+      );
+
+      expect(failureMessage).toBeDefined();
+      // All three errors should be reported
+      expect(failureMessage).toContain('parallel-a');
+      expect(failureMessage).toContain('parallel-b');
+      expect(failureMessage).toContain('parallel-c');
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should execute step-only workflow unchanged (backward compatibility)', async () => {
+      // Create sequential-only workflow (no parallel blocks)
+      const sequentialWorkflow: WorkflowDefinition = {
+        name: 'sequential-only',
+        description: 'Test backward compatibility with sequential workflows',
+        steps: [
+          { command: 'step-before' },
+          { command: 'step-after' },
+        ],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        sequentialWorkflow,
+        'Run sequential',
+        'db-conv-id'
+      );
+
+      // AI client should be called 2 times (once per step)
+      expect(mockSendQuery).toHaveBeenCalledTimes(2);
+
+      // Workflow should complete successfully
+      const completeCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
+      );
+      expect(completeCalls.length).toBeGreaterThan(0);
+
+      // Should have step notifications (not parallel block notifications)
+      const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+      const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1]);
+      expect(messages.some((m: string) => m.includes('**Step 1/2**'))).toBe(true);
+      expect(messages.some((m: string) => m.includes('**Step 2/2**'))).toBe(true);
+      // No parallel block notifications
+      expect(messages.some((m: string) => m.includes('**Parallel block**'))).toBe(false);
+    });
+
+    it('should reset session after parallel block (next sequential step gets fresh session)', async () => {
+      // Track session IDs passed to each step
+      const receivedSessionIds: (string | undefined)[] = [];
+
+      mockSendQuery.mockImplementation(function* (_prompt: string, _cwd: string, sessionId?: string) {
+        receivedSessionIds.push(sessionId);
+        yield { type: 'assistant', content: 'Response' };
+        yield { type: 'result', sessionId: 'step-session-id' };
+      });
+
+      // Workflow: step-before -> [parallel-a, parallel-b] -> step-after
+      const mixedWorkflow: WorkflowDefinition = {
+        name: 'session-reset-test',
+        description: 'Test session reset after parallel block',
+        steps: [
+          { command: 'step-before' },
+          {
+            parallel: [{ command: 'parallel-a' }, { command: 'parallel-b' }],
+          },
+          { command: 'step-after' },
+        ],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        mixedWorkflow,
+        'Run mixed',
+        'db-conv-id'
+      );
+
+      // Should have 4 calls: step-before, parallel-a, parallel-b, step-after
+      expect(receivedSessionIds).toHaveLength(4);
+
+      // step-before: first step always gets fresh session (undefined)
+      expect(receivedSessionIds[0]).toBeUndefined();
+
+      // parallel-a and parallel-b: always get fresh sessions (undefined)
+      expect(receivedSessionIds[1]).toBeUndefined();
+      expect(receivedSessionIds[2]).toBeUndefined();
+
+      // step-after: should get fresh session after parallel block (undefined, not step-before's session)
+      // This verifies that currentSessionId is reset to undefined after parallel block
+      expect(receivedSessionIds[3]).toBeUndefined();
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+  });
 });
 
 describe('isValidCommandName', () => {

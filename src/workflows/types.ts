@@ -10,11 +10,46 @@
  */
 
 /**
- * Step definition from YAML workflow file
+ * A single step with a command
  */
-export interface StepDefinition {
-  command: string; // Name of command (loads from {command}.md)
-  clearContext?: boolean; // Fresh agent (default: false)
+export interface SingleStep {
+  command: string;
+  clearContext?: boolean; // For sequential: controls session. For parallel: always fresh (ignored)
+}
+
+/**
+ * Step definition from YAML workflow file (alias for backward compatibility)
+ */
+export type StepDefinition = SingleStep;
+
+/**
+ * A block of steps that execute in parallel (separate agents, same worktree)
+ */
+export interface ParallelBlock {
+  parallel: readonly SingleStep[];
+}
+
+/**
+ * A workflow step is either a single step or a parallel block
+ */
+export type WorkflowStep = SingleStep | ParallelBlock;
+
+/**
+ * Type guard: check if step is a parallel block
+ */
+export function isParallelBlock(step: WorkflowStep): step is ParallelBlock {
+  return 'parallel' in step && Array.isArray(step.parallel);
+}
+
+/**
+ * Type guard: check if step is a single step
+ */
+export function isSingleStep(step: WorkflowStep): step is SingleStep {
+  return (
+    'command' in step &&
+    typeof step.command === 'string' &&
+    !('parallel' in step)
+  );
 }
 
 /**
@@ -39,7 +74,7 @@ interface WorkflowBase {
 
 /** Step-based workflow - sequential command execution */
 interface StepWorkflow extends WorkflowBase {
-  readonly steps: readonly StepDefinition[];
+  readonly steps: readonly WorkflowStep[]; // Changed from StepDefinition[]
   loop?: never;
   prompt?: never;
 }
