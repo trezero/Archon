@@ -316,19 +316,89 @@ async function loadCommandPrompt(
   };
 }
 
+/** Pattern string for context variables - used to create fresh regex instances */
+const CONTEXT_VAR_PATTERN_STR = '\\$(?:CONTEXT|EXTERNAL_CONTEXT|ISSUE_CONTEXT)';
+
 /**
- * Substitute workflow variables in command prompt
+ * Substitute workflow variables in command prompt.
+ *
+ * Supported variables:
+ * - $WORKFLOW_ID - The workflow run ID
+ * - $USER_MESSAGE, $ARGUMENTS - The user's trigger message
+ * - $CONTEXT, $EXTERNAL_CONTEXT, $ISSUE_CONTEXT - GitHub issue/PR context (if available)
+ *
+ * When issueContext is undefined, context variables are replaced with empty string
+ * to avoid sending literal "$CONTEXT" to the AI.
+ *
+ * @param prompt - The command prompt template with variable placeholders
+ * @param workflowId - The workflow run ID for $WORKFLOW_ID substitution
+ * @param userMessage - The user's trigger message for $USER_MESSAGE and $ARGUMENTS
+ * @param issueContext - Optional GitHub issue/PR context for $CONTEXT variables
+ * @returns Object with substituted prompt and whether context variables were found and substituted
  */
 function substituteWorkflowVariables(
   prompt: string,
   workflowId: string,
-  userMessage: string
+  userMessage: string,
+  issueContext?: string
+): { prompt: string; contextSubstituted: boolean } {
+  // Substitute basic variables
+  let result = prompt
+    .replace(/\$WORKFLOW_ID/g, workflowId)
+    .replace(/\$USER_MESSAGE/g, userMessage)
+    .replace(/\$ARGUMENTS/g, userMessage);
+
+  // Check if context variables exist (use fresh regex to avoid lastIndex issues)
+  const hasContextVariables = new RegExp(CONTEXT_VAR_PATTERN_STR).test(result);
+
+  // Substitute or clear context variables (use fresh global regex for replace)
+  const contextValue = issueContext ?? '';
+  if (!issueContext && hasContextVariables) {
+    console.log('[WorkflowExecutor] Context variables found but no issueContext provided', {
+      action: 'clearing variables',
+      variables: ['$CONTEXT', '$EXTERNAL_CONTEXT', '$ISSUE_CONTEXT'],
+    });
+  }
+  result = result.replace(new RegExp(CONTEXT_VAR_PATTERN_STR, 'g'), contextValue);
+
+  return {
+    prompt: result,
+    contextSubstituted: hasContextVariables && !!issueContext,
+  };
+}
+
+/**
+ * Apply variable substitution and optionally append issue context.
+ * Appends context only if it wasn't already substituted via $CONTEXT variables.
+ * This prevents duplicate context being sent to the AI.
+ *
+ * @param template - The command prompt template with variable placeholders
+ * @param workflowId - The workflow run ID for variable substitution
+ * @param userMessage - The user's trigger message for variable substitution
+ * @param issueContext - Optional GitHub issue/PR context to substitute or append
+ * @param logLabel - Human-readable label for logging (e.g., 'workflow step prompt')
+ * @returns The final prompt with variables substituted and context optionally appended
+ */
+function buildPromptWithContext(
+  template: string,
+  workflowId: string,
+  userMessage: string,
+  issueContext: string | undefined,
+  logLabel: string
 ): string {
-  let result = prompt;
-  result = result.replace(/\$WORKFLOW_ID/g, workflowId);
-  result = result.replace(/\$USER_MESSAGE/g, userMessage);
-  result = result.replace(/\$ARGUMENTS/g, userMessage);
-  return result;
+  const { prompt, contextSubstituted } = substituteWorkflowVariables(
+    template,
+    workflowId,
+    userMessage,
+    issueContext
+  );
+
+  if (issueContext && !contextSubstituted) {
+    console.log(`[WorkflowExecutor] Appended issue/PR context to ${logLabel}`);
+    return prompt + '\n\n---\n\n' + issueContext;
+  }
+
+  return prompt;
 }
 
 /**
@@ -342,7 +412,8 @@ async function executeStep(
   workflowRun: WorkflowRun,
   stepIndex: number,
   currentSessionId?: string,
-  configuredCommandFolder?: string
+  configuredCommandFolder?: string,
+  issueContext?: string
 ): Promise<StepResult> {
   // steps is guaranteed to exist when executeStep is called (guarded in executeWorkflow)
   const steps = workflow.steps!;
@@ -364,11 +435,13 @@ async function executeStep(
     };
   }
 
-  // Substitute variables
-  const substitutedPrompt = substituteWorkflowVariables(
+  // Substitute variables and append context if needed
+  const substitutedPrompt = buildPromptWithContext(
     promptResult.content,
     workflowRun.id,
-    workflowRun.user_message
+    workflowRun.user_message,
+    issueContext,
+    'workflow step prompt'
   );
 
   // Determine if we need fresh context
@@ -504,7 +577,8 @@ async function executeLoopWorkflow(
   conversationId: string,
   cwd: string,
   workflow: WorkflowDefinition,
-  workflowRun: WorkflowRun
+  workflowRun: WorkflowRun,
+  issueContext?: string
 ): Promise<void> {
   const loop = workflow.loop!;
   const prompt = workflow.prompt!;
@@ -515,6 +589,7 @@ async function executeLoopWorkflow(
 
   const workflowContext: SendMessageContext = { workflowId: workflowRun.id };
   let currentSessionId: string | undefined;
+  let metadataTrackingFailed = false;
 
   for (let i = 1; i <= loop.max_iterations; i++) {
     // Update metadata with current iteration (non-critical - log but don't fail on db error)
@@ -529,7 +604,16 @@ async function executeLoopWorkflow(
         workflowId: workflowRun.id,
         iteration: i,
       });
-      // Continue - metadata update is non-critical
+      // Warn user once about tracking issues
+      if (!metadataTrackingFailed) {
+        metadataTrackingFailed = true;
+        await safeSendMessage(
+          platform,
+          conversationId,
+          '⚠️ Progress tracking unavailable (database issue). Workflow continues but may not resume correctly if interrupted.',
+          workflowContext
+        );
+      }
     }
 
     await safeSendMessage(
@@ -549,11 +633,13 @@ async function executeLoopWorkflow(
       console.log(`[WorkflowExecutor] Resuming session for iteration ${String(i)}: ${resumeSessionId}`);
     }
 
-    // Substitute variables in prompt
-    const substitutedPrompt = substituteWorkflowVariables(
+    // Substitute variables and append context if needed
+    const substitutedPrompt = buildPromptWithContext(
       prompt,
       workflowRun.id,
-      workflowRun.user_message
+      workflowRun.user_message,
+      issueContext,
+      'workflow loop prompt'
     );
 
     // Execute iteration
@@ -656,7 +742,20 @@ ${errorMsg}
 }
 
 /**
- * Execute a complete workflow
+ * Execute a complete workflow (step-based or loop-based).
+ *
+ * @param platform - The platform adapter for sending messages
+ * @param conversationId - The platform-specific conversation ID
+ * @param cwd - The working directory for command execution
+ * @param workflow - The workflow definition to execute
+ * @param userMessage - The user's trigger message
+ * @param conversationDbId - The database conversation ID
+ * @param codebaseId - Optional codebase ID for context
+ * @param issueContext - Optional GitHub issue/PR context. When provided:
+ *   - Stored in WorkflowRun.metadata as { github_context: issueContext }
+ *   - Used to substitute $CONTEXT, $EXTERNAL_CONTEXT, $ISSUE_CONTEXT variables in prompts
+ *   - Appended to prompts if no context variables are present (to ensure AI receives context)
+ *   Expected format: Markdown with issue title, author, labels, and body
  */
 export async function executeWorkflow(
   platform: IPlatformAdapter,
@@ -665,7 +764,8 @@ export async function executeWorkflow(
   workflow: WorkflowDefinition,
   userMessage: string,
   conversationDbId: string,
-  codebaseId?: string
+  codebaseId?: string,
+  issueContext?: string
 ): Promise<void> {
   // Load repo config to get configured command folder
   const repoConfig = await loadRepoConfig(cwd);
@@ -694,6 +794,7 @@ export async function executeWorkflow(
       conversation_id: conversationDbId,
       codebase_id: codebaseId,
       user_message: userMessage,
+      metadata: issueContext ? { github_context: issueContext } : {},
     });
   } catch (error) {
     const err = error as Error;
@@ -731,7 +832,7 @@ export async function executeWorkflow(
 
   // Dispatch to appropriate execution mode
   if (workflow.loop) {
-    await executeLoopWorkflow(platform, conversationId, cwd, workflow, workflowRun);
+    await executeLoopWorkflow(platform, conversationId, cwd, workflow, workflowRun, issueContext);
     return;
   }
 
@@ -750,7 +851,8 @@ export async function executeWorkflow(
       workflowRun,
       i,
       currentSessionId,
-      configuredCommandFolder
+      configuredCommandFolder,
+      issueContext
     );
 
     if (!result.success) {

@@ -1720,6 +1720,325 @@ describe('Workflow Executor', () => {
       });
     });
   });
+
+  describe('issueContext handling', () => {
+    describe('step workflow with context', () => {
+      it('should pass issueContext to workflow step', async () => {
+        const workflow: WorkflowDefinition = {
+          name: 'context-workflow',
+          description: 'Test workflow with context',
+          provider: 'claude',
+          steps: [{ command: 'command-one' }],
+        };
+
+        const issueContext =
+          '[GitHub Issue Context]\nIssue #42: "Test Issue"\nAuthor: testuser\n\nDescription:\nTest issue body';
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          workflow,
+          'test user message',
+          'db-conv-id',
+          'codebase-id',
+          issueContext
+        );
+
+        // Verify AI client received the context appended to prompt
+        expect(mockSendQuery.mock.calls.length).toBeGreaterThan(0);
+        const promptArg = mockSendQuery.mock.calls[0][0] as string;
+        expect(promptArg).toContain('[GitHub Issue Context]');
+        expect(promptArg).toContain('Issue #42');
+      });
+
+      it('should substitute $CONTEXT variable in step workflow', async () => {
+        // Create command file that uses $CONTEXT variable
+        const commandsDir = join(testDir, '.archon', 'commands');
+        await writeFile(
+          join(commandsDir, 'context-command.md'),
+          'Process the following context:\n\n$CONTEXT\n\nNow execute the task.'
+        );
+
+        const workflow: WorkflowDefinition = {
+          name: 'context-var-workflow',
+          description: 'Test workflow with $CONTEXT variable',
+          provider: 'claude',
+          steps: [{ command: 'context-command' }],
+        };
+
+        const issueContext = 'GitHub Issue #123 content here';
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          workflow,
+          'test message',
+          'db-conv-id',
+          'codebase-id',
+          issueContext
+        );
+
+        const promptArg = mockSendQuery.mock.calls[0][0] as string;
+        // Should have substituted $CONTEXT but NOT appended again (to avoid duplication)
+        expect(promptArg).toContain('Process the following context:');
+        expect(promptArg).toContain('GitHub Issue #123 content here');
+        // Count occurrences - should appear only once (substituted, not appended)
+        const matches = promptArg.match(/GitHub Issue #123 content here/g);
+        expect(matches?.length).toBe(1);
+      });
+
+      it('should clear $CONTEXT variable when issueContext is undefined', async () => {
+        // Create command file that uses $CONTEXT variable
+        const commandsDir = join(testDir, '.archon', 'commands');
+        await writeFile(
+          join(commandsDir, 'context-command.md'),
+          'Process: $CONTEXT and $EXTERNAL_CONTEXT then continue'
+        );
+
+        const workflow: WorkflowDefinition = {
+          name: 'context-var-workflow',
+          description: 'Test workflow with $CONTEXT variable',
+          provider: 'claude',
+          steps: [{ command: 'context-command' }],
+        };
+
+        // No issueContext provided
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          workflow,
+          'test message',
+          'db-conv-id',
+          'codebase-id'
+        );
+
+        const promptArg = mockSendQuery.mock.calls[0][0] as string;
+        // Variables should be cleared (replaced with empty string)
+        expect(promptArg).not.toContain('$CONTEXT');
+        expect(promptArg).not.toContain('$EXTERNAL_CONTEXT');
+        expect(promptArg).toContain('Process:  and  then continue');
+      });
+
+      it('should handle context with special regex characters', async () => {
+        // Create command file that uses $CONTEXT variable
+        const commandsDir = join(testDir, '.archon', 'commands');
+        await writeFile(join(commandsDir, 'context-command.md'), 'Context: $CONTEXT');
+
+        const workflow: WorkflowDefinition = {
+          name: 'regex-test-workflow',
+          description: 'Test special characters in context',
+          provider: 'claude',
+          steps: [{ command: 'context-command' }],
+        };
+
+        // Context with regex special characters that could break naive substitution
+        const issueContext =
+          'Issue: Add dark mode with $20 budget & (regex) patterns like .* and [a-z]+ and $CONTEXT literal';
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          workflow,
+          'test message',
+          'db-conv-id',
+          'codebase-id',
+          issueContext
+        );
+
+        const promptArg = mockSendQuery.mock.calls[0][0] as string;
+        // All special characters should be preserved exactly
+        expect(promptArg).toContain('$20 budget');
+        expect(promptArg).toContain('(regex)');
+        expect(promptArg).toContain('.*');
+        expect(promptArg).toContain('[a-z]+');
+        expect(promptArg).toContain('$CONTEXT literal');
+      });
+
+      it('should handle multiple context variables in same prompt', async () => {
+        // Create command file with multiple context variables
+        const commandsDir = join(testDir, '.archon', 'commands');
+        await writeFile(
+          join(commandsDir, 'multi-context.md'),
+          'First: $CONTEXT\n\nSecond: $EXTERNAL_CONTEXT\n\nThird: $ISSUE_CONTEXT'
+        );
+
+        const workflow: WorkflowDefinition = {
+          name: 'multi-var-workflow',
+          description: 'Test multiple context variables',
+          provider: 'claude',
+          steps: [{ command: 'multi-context' }],
+        };
+
+        const issueContext = 'Shared context value';
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          workflow,
+          'test message',
+          'db-conv-id',
+          'codebase-id',
+          issueContext
+        );
+
+        const promptArg = mockSendQuery.mock.calls[0][0] as string;
+        // All three variables should be substituted with the same context
+        expect(promptArg).toContain('First: Shared context value');
+        expect(promptArg).toContain('Second: Shared context value');
+        expect(promptArg).toContain('Third: Shared context value');
+        // Context should NOT be appended since variables were substituted
+        expect(promptArg).not.toContain('---');
+        // Should appear exactly 3 times (once per variable)
+        const matches = promptArg.match(/Shared context value/g);
+        expect(matches?.length).toBe(3);
+      });
+    });
+
+    describe('loop workflow with context', () => {
+      it('should pass issueContext to loop workflow iterations', async () => {
+        // Override mock to return exit phrase
+        mockSendQuery.mockImplementation(function* () {
+          yield { type: 'assistant', content: '<promise>LOOP_COMPLETE</promise>' };
+          yield { type: 'result', sessionId: 'session-id' };
+        });
+
+        const loopWorkflow: WorkflowDefinition = {
+          name: 'loop-context-workflow',
+          description: 'Test loop workflow with context',
+          provider: 'claude',
+          loop: {
+            until: 'LOOP_COMPLETE',
+            max_iterations: 2,
+            fresh_context: false,
+          },
+          prompt: 'Process the task based on the provided context. User message: $USER_MESSAGE',
+        };
+
+        const issueContext =
+          '[GitHub Issue Context]\nIssue #99: "Loop Test"\nAuthor: loopuser\n\nBody content';
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          loopWorkflow,
+          'test trigger',
+          'db-conv-id',
+          'codebase-id',
+          issueContext
+        );
+
+        // Verify AI received context in the prompt
+        expect(mockSendQuery.mock.calls.length).toBeGreaterThan(0);
+        const promptArg = mockSendQuery.mock.calls[0][0] as string;
+        expect(promptArg).toContain('[GitHub Issue Context]');
+        expect(promptArg).toContain('Issue #99');
+      });
+
+      it('should substitute $ISSUE_CONTEXT in loop workflow', async () => {
+        mockSendQuery.mockImplementation(function* () {
+          yield { type: 'assistant', content: '<promise>DONE</promise>' };
+          yield { type: 'result', sessionId: 'session-id' };
+        });
+
+        const loopWorkflow: WorkflowDefinition = {
+          name: 'loop-var-workflow',
+          description: 'Test loop with $ISSUE_CONTEXT',
+          provider: 'claude',
+          loop: {
+            until: 'DONE',
+            max_iterations: 1,
+            fresh_context: false,
+          },
+          prompt: 'Given this context:\n$ISSUE_CONTEXT\n\nExecute: $USER_MESSAGE',
+        };
+
+        const issueContext = 'PR #555 details here';
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          loopWorkflow,
+          'implement feature',
+          'db-conv-id',
+          'codebase-id',
+          issueContext
+        );
+
+        const promptArg = mockSendQuery.mock.calls[0][0] as string;
+        expect(promptArg).toContain('Given this context:');
+        expect(promptArg).toContain('PR #555 details here');
+        // Should appear only once (substituted, not appended)
+        const matches = promptArg.match(/PR #555 details here/g);
+        expect(matches?.length).toBe(1);
+      });
+    });
+
+    describe('metadata storage', () => {
+      it('should store issueContext in workflow run metadata', async () => {
+        const workflow: WorkflowDefinition = {
+          name: 'metadata-workflow',
+          description: 'Test metadata storage',
+          provider: 'claude',
+          steps: [{ command: 'command-one' }],
+        };
+
+        const issueContext = 'Issue #77 context';
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          workflow,
+          'test message',
+          'db-conv-id',
+          'codebase-id',
+          issueContext
+        );
+
+        // Check that createWorkflowRun was called with metadata containing github_context
+        const insertCalls = mockQuery.mock.calls.filter(
+          (call) => typeof call[0] === 'string' && call[0].includes('INSERT')
+        );
+        expect(insertCalls.length).toBeGreaterThan(0);
+        const insertParams = insertCalls[0][1] as string[];
+        // The 5th parameter should be the metadata JSON
+        expect(insertParams[4]).toBe(JSON.stringify({ github_context: 'Issue #77 context' }));
+      });
+
+      it('should store empty metadata when issueContext is undefined', async () => {
+        const workflow: WorkflowDefinition = {
+          name: 'no-metadata-workflow',
+          description: 'Test without context',
+          provider: 'claude',
+          steps: [{ command: 'command-one' }],
+        };
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          workflow,
+          'test message',
+          'db-conv-id',
+          'codebase-id'
+        );
+
+        const insertCalls = mockQuery.mock.calls.filter(
+          (call) => typeof call[0] === 'string' && call[0].includes('INSERT')
+        );
+        expect(insertCalls.length).toBeGreaterThan(0);
+        const insertParams = insertCalls[0][1] as string[];
+        expect(insertParams[4]).toBe('{}');
+      });
+    });
+  });
 });
 
 describe('isValidCommandName', () => {

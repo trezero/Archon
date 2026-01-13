@@ -276,6 +276,12 @@ interface WorkflowRoutingContext {
   conversationDbId: string;
   codebaseId?: string;
   availableWorkflows: WorkflowDefinition[];
+  /**
+   * GitHub issue/PR context built from webhook events.
+   * Contains formatted markdown with: issue title, author, labels, and body.
+   * Passed to workflow executor for substitution into $CONTEXT variables.
+   */
+  issueContext?: string;
 }
 
 /**
@@ -317,7 +323,8 @@ async function tryWorkflowRouting(
     workflow,
     ctx.originalMessage,
     ctx.conversationDbId,
-    ctx.codebaseId
+    ctx.codebaseId,
+    ctx.issueContext
   );
 
   return true;
@@ -707,6 +714,7 @@ export async function handleMessage(
       conversationDbId: conversation.id,
       codebaseId: conversation.codebase_id ?? undefined,
       availableWorkflows,
+      issueContext,
     };
 
     if (mode === 'stream') {

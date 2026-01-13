@@ -52,7 +52,32 @@ describe('workflows database', () => {
       expect(result).toEqual(mockWorkflowRun);
       expect(mockQuery).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO remote_agent_workflow_runs'),
-        ['feature-development', 'conv-456', 'codebase-789', 'Add dark mode support']
+        ['feature-development', 'conv-456', 'codebase-789', 'Add dark mode support', '{}']
+      );
+    });
+
+    test('creates workflow run with metadata', async () => {
+      const runWithMetadata = { ...mockWorkflowRun, metadata: { github_context: 'Issue #42 context' } };
+      mockQuery.mockResolvedValueOnce(createQueryResult([runWithMetadata]));
+
+      const result = await createWorkflowRun({
+        workflow_name: 'feature-development',
+        conversation_id: 'conv-456',
+        codebase_id: 'codebase-789',
+        user_message: 'Add dark mode support',
+        metadata: { github_context: 'Issue #42 context' },
+      });
+
+      expect(result.metadata).toEqual({ github_context: 'Issue #42 context' });
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO remote_agent_workflow_runs'),
+        [
+          'feature-development',
+          'conv-456',
+          'codebase-789',
+          'Add dark mode support',
+          JSON.stringify({ github_context: 'Issue #42 context' }),
+        ]
       );
     });
 
@@ -69,7 +94,7 @@ describe('workflows database', () => {
       expect(result.codebase_id).toBeNull();
       expect(mockQuery).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO remote_agent_workflow_runs'),
-        ['feature-development', 'conv-456', null, 'Add dark mode support']
+        ['feature-development', 'conv-456', null, 'Add dark mode support', '{}']
       );
     });
   });

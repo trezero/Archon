@@ -9,14 +9,29 @@ export async function createWorkflowRun(data: {
   conversation_id: string;
   codebase_id?: string;
   user_message: string;
+  metadata?: Record<string, unknown>;
 }): Promise<WorkflowRun> {
+  // Serialize metadata with validation to catch circular references early
+  let metadataJson: string;
+  try {
+    metadataJson = JSON.stringify(data.metadata ?? {});
+  } catch (serializeError) {
+    const err = serializeError as Error;
+    console.error('[DB:Workflows] Failed to serialize metadata:', {
+      error: err.message,
+      metadataKeys: data.metadata ? Object.keys(data.metadata) : [],
+    });
+    // Fall back to empty object rather than failing the workflow
+    metadataJson = '{}';
+  }
+
   try {
     const result = await pool.query<WorkflowRun>(
       `INSERT INTO remote_agent_workflow_runs
-       (workflow_name, conversation_id, codebase_id, user_message)
-       VALUES ($1, $2, $3, $4)
+       (workflow_name, conversation_id, codebase_id, user_message, metadata)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [data.workflow_name, data.conversation_id, data.codebase_id ?? null, data.user_message]
+      [data.workflow_name, data.conversation_id, data.codebase_id ?? null, data.user_message, metadataJson]
     );
     return result.rows[0];
   } catch (error) {
