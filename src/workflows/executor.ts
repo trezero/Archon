@@ -675,6 +675,17 @@ export async function executeWorkflow(
     console.log(`[WorkflowExecutor] Using configured command folder: ${configuredCommandFolder}`);
   }
 
+  // Check for concurrent workflow execution
+  const activeWorkflow = await workflowDb.getActiveWorkflowRun(conversationDbId);
+  if (activeWorkflow) {
+    await sendCriticalMessage(
+      platform,
+      conversationId,
+      `❌ **Workflow already running**: A \`${activeWorkflow.workflow_name}\` workflow is already running for this issue. Please wait for it to complete before starting another.`
+    );
+    return;
+  }
+
   // Create workflow run record
   let workflowRun;
   try {

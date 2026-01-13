@@ -7,24 +7,33 @@ import type { WorkflowDefinition } from './types';
 import { createQueryResult } from '../test/mocks/database';
 
 // Mock at the connection level to avoid polluting db/workflows module
-const mockQuery = mock(() =>
-  Promise.resolve(
-    createQueryResult([
-      {
-        id: 'test-workflow-run-id',
-        workflow_name: 'test-workflow',
-        conversation_id: 'conv-123',
-        codebase_id: 'codebase-456',
-        current_step_index: 0,
-        status: 'running' as const,
-        user_message: 'test user message',
-        metadata: {},
-        started_at: new Date(),
-        completed_at: null,
-      },
-    ])
-  )
-);
+const mockQuery = mock((query: string) => {
+  // For getActiveWorkflowRun query, return no active workflow by default
+  if (query.includes("status = 'running'")) {
+    return Promise.resolve(createQueryResult([]));
+  }
+  // For createWorkflowRun INSERT, return the new workflow run
+  if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
+    return Promise.resolve(
+      createQueryResult([
+        {
+          id: 'test-workflow-run-id',
+          workflow_name: 'test-workflow',
+          conversation_id: 'conv-123',
+          codebase_id: 'codebase-456',
+          current_step_index: 0,
+          status: 'running' as const,
+          user_message: 'test user message',
+          metadata: {},
+          started_at: new Date(),
+          completed_at: null,
+        },
+      ])
+    );
+  }
+  // Default: empty result for UPDATE queries and other operations
+  return Promise.resolve(createQueryResult([]));
+});
 
 mock.module('../db/connection', () => ({
   pool: {
