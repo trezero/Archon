@@ -33,11 +33,17 @@ cat .archon/artifacts/reviews/pr-{number}/scope.md
 
 Get branch names: `HEAD_BRANCH` and `BASE_BRANCH`.
 
-### 1.3 Fetch Latest
+### 1.3 Fetch and Checkout PR Branch
 
 ```bash
 git fetch origin $BASE_BRANCH
 git fetch origin $HEAD_BRANCH
+```
+
+Confirm you are on the PR's branch (`$HEAD_BRANCH`). If not, checkout it:
+
+```bash
+git checkout $HEAD_BRANCH
 ```
 
 ### 1.4 Check if Behind
@@ -205,7 +211,9 @@ bun run lint
 
 ## Phase 5: PUSH - Update Remote
 
-### 5.1 Force Push with Lease
+### 5.1 Confirm Branch and Push
+
+Confirm you're on `$HEAD_BRANCH`, then push:
 
 ```bash
 git push --force-with-lease origin $HEAD_BRANCH
