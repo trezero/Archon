@@ -45,11 +45,7 @@ export function isParallelBlock(step: WorkflowStep): step is ParallelBlock {
  * Type guard: check if step is a single step
  */
 export function isSingleStep(step: WorkflowStep): step is SingleStep {
-  return (
-    'command' in step &&
-    typeof step.command === 'string' &&
-    !('parallel' in step)
-  );
+  return 'command' in step && typeof step.command === 'string' && !('parallel' in step);
 }
 
 /**

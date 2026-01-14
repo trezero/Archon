@@ -953,7 +953,8 @@ describe('orchestrator', () => {
     });
 
     test('detects isPullRequest correctly for Issue', async () => {
-      const issueContext = 'Issue #42: "Some Issue"\n[GitHub Issue Context]\nBody without PR marker.';
+      const issueContext =
+        'Issue #42: "Some Issue"\n[GitHub Issue Context]\nBody without PR marker.';
 
       await handleMessage(platform, 'chat-456', 'check this', issueContext);
 
@@ -962,7 +963,8 @@ describe('orchestrator', () => {
     });
 
     test('extracts labels from context', async () => {
-      const issueContext = 'Issue #42: "Bug report"\nLabels: bug, priority-high, needs-triage\nBody text.';
+      const issueContext =
+        'Issue #42: "Bug report"\nLabels: bug, priority-high, needs-triage\nBody text.';
 
       await handleMessage(platform, 'chat-456', 'fix this', issueContext);
 
@@ -984,7 +986,15 @@ describe('orchestrator', () => {
       // isolationHints is the 7th parameter (after parentConversationId)
       const isolationHints = { workflowType: 'review' as const };
 
-      await handleMessage(platform, 'chat-456', 'do something', undefined, undefined, undefined, isolationHints);
+      await handleMessage(
+        platform,
+        'chat-456',
+        'do something',
+        undefined,
+        undefined,
+        undefined,
+        isolationHints
+      );
 
       const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
       expect(promptArg).toContain('Type: review');

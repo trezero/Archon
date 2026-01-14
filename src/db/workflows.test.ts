@@ -57,7 +57,10 @@ describe('workflows database', () => {
     });
 
     test('creates workflow run with metadata', async () => {
-      const runWithMetadata = { ...mockWorkflowRun, metadata: { github_context: 'Issue #42 context' } };
+      const runWithMetadata = {
+        ...mockWorkflowRun,
+        metadata: { github_context: 'Issue #42 context' },
+      };
       mockQuery.mockResolvedValueOnce(createQueryResult([runWithMetadata]));
 
       const result = await createWorkflowRun({

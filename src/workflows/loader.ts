@@ -18,11 +18,7 @@ function parseYaml(content: string): unknown {
  * Parse a single step (helper for parseStep)
  * @param errors - Array to collect validation errors for aggregated reporting
  */
-function parseSingleStep(
-  s: unknown,
-  indexPath: string,
-  errors: string[]
-): SingleStep | null {
+function parseSingleStep(s: unknown, indexPath: string, errors: string[]): SingleStep | null {
   const step = s as Record<string, unknown>;
   const command = String(step.command ?? step.step);
 
@@ -41,11 +37,7 @@ function parseSingleStep(
  * Parse a workflow step (either single step or parallel block)
  * @param errors - Array to collect validation errors for aggregated reporting
  */
-function parseStep(
-  s: unknown,
-  index: number,
-  errors: string[]
-): WorkflowStep | null {
+function parseStep(s: unknown, index: number, errors: string[]): WorkflowStep | null {
   const step = s as Record<string, unknown>;
 
   // Check for parallel block
@@ -267,6 +259,8 @@ export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition
     }
   }
 
-  console.log(`[WorkflowLoader] Discovery complete: ${String(allWorkflows.length)} total workflows`);
+  console.log(
+    `[WorkflowLoader] Discovery complete: ${String(allWorkflows.length)} total workflows`
+  );
   return allWorkflows;
 }

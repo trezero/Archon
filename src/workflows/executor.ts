@@ -9,7 +9,13 @@ import * as workflowDb from '../db/workflows';
 import { formatToolCall } from '../utils/tool-formatter';
 import { getCommandFolderSearchPaths } from '../utils/archon-paths';
 import { loadRepoConfig } from '../config/config-loader';
-import type { WorkflowDefinition, WorkflowRun, StepResult, LoadCommandResult, SingleStep } from './types';
+import type {
+  WorkflowDefinition,
+  WorkflowRun,
+  StepResult,
+  LoadCommandResult,
+  SingleStep,
+} from './types';
 import { isParallelBlock, isSingleStep } from './types';
 import {
   logWorkflowStart,
@@ -425,9 +431,7 @@ async function executeStepInternal(
 ): Promise<StepResult> {
   const commandName = stepDef.command;
 
-  console.log(
-    `[WorkflowExecutor] Executing step ${stepId}: ${commandName}`
-  );
+  console.log(`[WorkflowExecutor] Executing step ${stepId}: ${commandName}`);
   await logStepStart(cwd, workflowRun.id, commandName, Number(stepId.split('.')[0]));
 
   // Load command prompt
@@ -599,12 +603,16 @@ async function executeParallelBlock(
   configuredCommandFolder?: string,
   issueContext?: string
 ): Promise<ParallelStepResult[]> {
-  console.log(`[WorkflowExecutor] Starting parallel block with ${String(parallelSteps.length)} agents on ${cwd}`);
+  console.log(
+    `[WorkflowExecutor] Starting parallel block with ${String(parallelSteps.length)} agents on ${cwd}`
+  );
 
   // Spawn all agents concurrently - each gets its own fresh session
   const results = await Promise.all(
     parallelSteps.map(async (step, i) => {
-      console.log(`[WorkflowExecutor] Spawning agent ${String(blockIndex)}.${String(i)}: ${step.command}`);
+      console.log(
+        `[WorkflowExecutor] Spawning agent ${String(blockIndex)}.${String(i)}: ${step.command}`
+      );
 
       // Each parallel step is an independent agent
       // clearContext is always effectively true (fresh session)
@@ -625,7 +633,9 @@ async function executeParallelBlock(
     })
   );
 
-  console.log(`[WorkflowExecutor] Parallel block complete: ${String(results.filter(r => r.result.success).length)}/${String(results.length)} succeeded`);
+  console.log(
+    `[WorkflowExecutor] Parallel block complete: ${String(results.filter(r => r.result.success).length)}/${String(results.length)} succeeded`
+  );
   return results;
 }
 
@@ -690,7 +700,9 @@ async function executeLoopWorkflow(
     if (needsFreshSession && i > 1) {
       console.log(`[WorkflowExecutor] Starting fresh session for iteration ${String(i)}`);
     } else if (resumeSessionId) {
-      console.log(`[WorkflowExecutor] Resuming session for iteration ${String(i)}: ${resumeSessionId}`);
+      console.log(
+        `[WorkflowExecutor] Resuming session for iteration ${String(i)}: ${resumeSessionId}`
+      );
     }
 
     // Substitute variables and append context if needed
@@ -715,7 +727,12 @@ async function executeLoopWorkflow(
         if (msg.type === 'assistant' && msg.content) {
           fullOutput += msg.content;
           if (streamingMode === 'stream') {
-            const sent = await safeSendMessage(platform, conversationId, msg.content, workflowContext);
+            const sent = await safeSendMessage(
+              platform,
+              conversationId,
+              msg.content,
+              workflowContext
+            );
             if (!sent) droppedMessageCount++;
           } else {
             assistantMessages.push(msg.content);
@@ -724,7 +741,12 @@ async function executeLoopWorkflow(
         } else if (msg.type === 'tool' && msg.toolName) {
           if (streamingMode === 'stream') {
             const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
-            const sent = await safeSendMessage(platform, conversationId, toolMessage, workflowContext);
+            const sent = await safeSendMessage(
+              platform,
+              conversationId,
+              toolMessage,
+              workflowContext
+            );
             if (!sent) droppedMessageCount++;
           }
           await logTool(cwd, workflowRun.id, msg.toolName, msg.toolInput ?? {});
@@ -881,7 +903,7 @@ export async function executeWorkflow(
 
   // Notify user - use type narrowing from discriminated union
   const stepsInfo = workflow.steps
-    ? `Steps: ${workflow.steps.map(s => isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`).join(' -> ')}`
+    ? `Steps: ${workflow.steps.map(s => (isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`)).join(' -> ')}`
     : `Loop: until \`${workflow.loop.until}\` (max ${String(workflow.loop.max_iterations)} iterations)`;
   await safeSendMessage(
     platform,
@@ -926,8 +948,15 @@ export async function executeWorkflow(
 
       // Execute all in parallel
       const results = await executeParallelBlock(
-        platform, conversationId, cwd, workflow, workflowRun,
-        parallelSteps, i, configuredCommandFolder, issueContext
+        platform,
+        conversationId,
+        cwd,
+        workflow,
+        workflowRun,
+        parallelSteps,
+        i,
+        configuredCommandFolder,
+        issueContext
       );
 
       // Check for failures - report ALL failures, not just the first one
@@ -957,7 +986,8 @@ export async function executeWorkflow(
 
         // Always attempt to notify user with all failure details
         await sendCriticalMessage(
-          platform, conversationId,
+          platform,
+          conversationId,
           `❌ **Workflow failed** in parallel block:\n\n${failureDetails.join('\n')}`
         );
         return;
@@ -972,7 +1002,6 @@ export async function executeWorkflow(
 
       // All parallel steps succeeded - no session to carry forward
       currentSessionId = undefined;
-
     } else {
       // Single step execution (existing logic)
       stepNumber++;
@@ -982,15 +1011,24 @@ export async function executeWorkflow(
       // Send step notification
       if (steps.length > 1) {
         await safeSendMessage(
-          platform, conversationId,
+          platform,
+          conversationId,
           `⏳ **Step ${String(stepNumber)}/${String(steps.length)}**: \`${step.command}\``,
           workflowContext
         );
       }
 
       const result = await executeStepInternal(
-        platform, conversationId, cwd, workflow, workflowRun,
-        step, String(i), resumeSessionId, configuredCommandFolder, issueContext
+        platform,
+        conversationId,
+        cwd,
+        workflow,
+        workflowRun,
+        step,
+        String(i),
+        resumeSessionId,
+        configuredCommandFolder,
+        issueContext
       );
 
       if (!result.success) {
@@ -1009,7 +1047,8 @@ export async function executeWorkflow(
 
         // Always attempt to notify user
         await sendCriticalMessage(
-          platform, conversationId,
+          platform,
+          conversationId,
           `❌ **Workflow failed** at step: \`${result.commandName}\`\n\nError: ${result.error}`,
           { ...workflowContext, stepName: result.commandName }
         );

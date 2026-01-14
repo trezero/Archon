@@ -127,9 +127,7 @@ export class GitHubAdapter implements IPlatformAdapter {
     if (message.length <= MAX_LENGTH) {
       await this.postComment(parsed, message);
     } else {
-      console.log(
-        `[GitHub] Message too long (${String(message.length)}), splitting by paragraphs`
-      );
+      console.log(`[GitHub] Message too long (${String(message.length)}), splitting by paragraphs`);
       const chunks = this.splitIntoParagraphChunks(message, MAX_LENGTH - 500);
 
       // Fail-fast: if any chunk fails, stop and propagate error with context

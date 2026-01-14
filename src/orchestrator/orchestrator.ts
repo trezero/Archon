@@ -587,7 +587,9 @@ export async function handleMessage(
           if (titleMatch?.[1]) {
             routerContext.title = titleMatch[1];
           } else {
-            console.log('[Orchestrator] GitHub context present but could not extract title (format mismatch)');
+            console.log(
+              '[Orchestrator] GitHub context present but could not extract title (format mismatch)'
+            );
           }
 
           // Detect if it's a PR vs issue (only when markers are present)
@@ -619,7 +621,11 @@ export async function handleMessage(
           hasTitle: !!routerContext.title,
           hasLabels: !!(routerContext.labels && routerContext.labels.length > 0),
           hasThreadHistory: !!routerContext.threadHistory,
-          contextSource: issueContext ? 'issueContext' : hasGitHubMarkersInMessage ? 'message' : 'none',
+          contextSource: issueContext
+            ? 'issueContext'
+            : hasGitHubMarkersInMessage
+              ? 'message'
+              : 'none',
         });
       } else {
         // Fall back to router template for natural language routing

@@ -900,9 +900,7 @@ describe('Workflow Executor', () => {
       // Should include hint about checking API key
       const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
       const hintMessages = sendMessageCalls.filter(
-        (call: unknown[]) =>
-          typeof call[1] === 'string' &&
-          (call[1] as string).includes('API key')
+        (call: unknown[]) => typeof call[1] === 'string' && (call[1] as string).includes('API key')
       );
       expect(hintMessages.length).toBeGreaterThan(0);
 
@@ -970,8 +968,7 @@ describe('Workflow Executor', () => {
       const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
       const hintMessages = sendMessageCalls.filter(
         (call: unknown[]) =>
-          typeof call[1] === 'string' &&
-          (call[1] as string).includes('Network issue')
+          typeof call[1] === 'string' && (call[1] as string).includes('Network issue')
       );
       expect(hintMessages.length).toBeGreaterThan(0);
 
@@ -1393,14 +1390,7 @@ describe('Workflow Executor', () => {
         prompt: 'Output <promise>DONE</promise> when finished.',
       };
 
-      await executeWorkflow(
-        mockPlatform,
-        'conv-123',
-        testDir,
-        loopWorkflow,
-        'Test',
-        'db-conv-id'
-      );
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
 
       // Should complete on first iteration
       expect(mockSendQuery).toHaveBeenCalledTimes(1);
@@ -1425,14 +1415,7 @@ describe('Workflow Executor', () => {
         prompt: 'Complete immediately.',
       };
 
-      await executeWorkflow(
-        mockPlatform,
-        'conv-123',
-        testDir,
-        loopWorkflow,
-        'Test',
-        'db-conv-id'
-      );
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
 
       // Should have UPDATE with metadata
       const metadataCalls = mockQuery.mock.calls.filter(
@@ -1461,14 +1444,7 @@ describe('Workflow Executor', () => {
         prompt: 'Try once.',
       };
 
-      await executeWorkflow(
-        mockPlatform,
-        'conv-123',
-        testDir,
-        loopWorkflow,
-        'Test',
-        'db-conv-id'
-      );
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
 
       // Should have run exactly 1 time
       expect(mockSendQuery).toHaveBeenCalledTimes(1);
@@ -1493,14 +1469,7 @@ describe('Workflow Executor', () => {
         prompt: 'Output COMPLETE when finished.',
       };
 
-      await executeWorkflow(
-        mockPlatform,
-        'conv-123',
-        testDir,
-        loopWorkflow,
-        'Test',
-        'db-conv-id'
-      );
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
 
       // Should complete on first iteration (plain signal detected)
       expect(mockSendQuery).toHaveBeenCalledTimes(1);
@@ -1530,14 +1499,7 @@ describe('Workflow Executor', () => {
         prompt: 'Work until done.',
       };
 
-      await executeWorkflow(
-        mockPlatform,
-        'conv-123',
-        testDir,
-        loopWorkflow,
-        'Test',
-        'db-conv-id'
-      );
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
 
       // Should have run 2 iterations (failed on 2nd)
       expect(mockSendQuery).toHaveBeenCalledTimes(2);
@@ -1597,7 +1559,11 @@ describe('Workflow Executor', () => {
       const receivedSessionIds: (string | undefined)[] = [];
       let callCount = 0;
 
-      mockSendQuery.mockImplementation(function* (_prompt: string, _cwd: string, sessionId?: string) {
+      mockSendQuery.mockImplementation(function* (
+        _prompt: string,
+        _cwd: string,
+        sessionId?: string
+      ) {
         receivedSessionIds.push(sessionId);
         callCount++;
         if (callCount >= 3) {
@@ -1615,14 +1581,7 @@ describe('Workflow Executor', () => {
         prompt: 'Do work with fresh context each time.',
       };
 
-      await executeWorkflow(
-        mockPlatform,
-        'conv-123',
-        testDir,
-        loopWorkflow,
-        'Test',
-        'db-conv-id'
-      );
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
 
       // Should have run 3 iterations
       expect(mockSendQuery).toHaveBeenCalledTimes(3);
@@ -1654,14 +1613,7 @@ describe('Workflow Executor', () => {
         prompt: 'Output completion signal.',
       };
 
-      await executeWorkflow(
-        mockPlatform,
-        'conv-123',
-        testDir,
-        loopWorkflow,
-        'Test',
-        'db-conv-id'
-      );
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
 
       // Should complete on first iteration (signal accumulated across chunks)
       expect(mockSendQuery).toHaveBeenCalledTimes(1);
@@ -1694,14 +1646,7 @@ describe('Workflow Executor', () => {
         prompt: 'Work until done.',
       };
 
-      await executeWorkflow(
-        mockPlatform,
-        'conv-123',
-        testDir,
-        loopWorkflow,
-        'Test',
-        'db-conv-id'
-      );
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
 
       // Should have run max_iterations times (NOT detected as complete)
       expect(mockSendQuery).toHaveBeenCalledTimes(2);
@@ -2004,7 +1949,7 @@ describe('Workflow Executor', () => {
 
         // Check that createWorkflowRun was called with metadata containing github_context
         const insertCalls = mockQuery.mock.calls.filter(
-          (call) => typeof call[0] === 'string' && call[0].includes('INSERT')
+          call => typeof call[0] === 'string' && call[0].includes('INSERT')
         );
         expect(insertCalls.length).toBeGreaterThan(0);
         const insertParams = insertCalls[0][1] as string[];
@@ -2031,7 +1976,7 @@ describe('Workflow Executor', () => {
         );
 
         const insertCalls = mockQuery.mock.calls.filter(
-          (call) => typeof call[0] === 'string' && call[0].includes('INSERT')
+          call => typeof call[0] === 'string' && call[0].includes('INSERT')
         );
         expect(insertCalls.length).toBeGreaterThan(0);
         const insertParams = insertCalls[0][1] as string[];
@@ -2063,7 +2008,11 @@ describe('Workflow Executor', () => {
         description: 'Test workflow with parallel block',
         steps: [
           {
-            parallel: [{ command: 'parallel-a' }, { command: 'parallel-b' }, { command: 'parallel-c' }],
+            parallel: [
+              { command: 'parallel-a' },
+              { command: 'parallel-b' },
+              { command: 'parallel-c' },
+            ],
           },
         ],
       };
@@ -2106,7 +2055,11 @@ describe('Workflow Executor', () => {
         description: 'Test parallel failure handling',
         steps: [
           {
-            parallel: [{ command: 'parallel-a' }, { command: 'parallel-b' }, { command: 'parallel-c' }],
+            parallel: [
+              { command: 'parallel-a' },
+              { command: 'parallel-b' },
+              { command: 'parallel-c' },
+            ],
           },
         ],
       };
@@ -2130,9 +2083,9 @@ describe('Workflow Executor', () => {
       // Should send failure message to user
       const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
       const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1]);
-      expect(messages.some((m: string) => m.includes('**Workflow failed** in parallel block'))).toBe(
-        true
-      );
+      expect(
+        messages.some((m: string) => m.includes('**Workflow failed** in parallel block'))
+      ).toBe(true);
 
       // Reset mock
       mockSendQuery.mockImplementation(function* () {
@@ -2186,7 +2139,9 @@ describe('Workflow Executor', () => {
       expect(
         messages.some(
           (m: string) =>
-            m.includes('**Parallel block**') && m.includes('`parallel-a`') && m.includes('`parallel-b`')
+            m.includes('**Parallel block**') &&
+            m.includes('`parallel-a`') &&
+            m.includes('`parallel-b`')
         )
       ).toBe(true);
     });
@@ -2228,7 +2183,11 @@ describe('Workflow Executor', () => {
       // Track session IDs passed to each parallel step
       const receivedSessionIds: (string | undefined)[] = [];
 
-      mockSendQuery.mockImplementation(function* (_prompt: string, _cwd: string, sessionId?: string) {
+      mockSendQuery.mockImplementation(function* (
+        _prompt: string,
+        _cwd: string,
+        sessionId?: string
+      ) {
         receivedSessionIds.push(sessionId);
         yield { type: 'assistant', content: 'Response' };
         yield { type: 'result', sessionId: 'session-id' };
@@ -2325,7 +2284,11 @@ describe('Workflow Executor', () => {
         description: 'Test all parallel steps failing',
         steps: [
           {
-            parallel: [{ command: 'parallel-a' }, { command: 'parallel-b' }, { command: 'parallel-c' }],
+            parallel: [
+              { command: 'parallel-a' },
+              { command: 'parallel-b' },
+              { command: 'parallel-c' },
+            ],
           },
         ],
       };
@@ -2349,8 +2312,8 @@ describe('Workflow Executor', () => {
       // Should send failure message containing ALL errors
       const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
       const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1]);
-      const failureMessage = messages.find((m: string) =>
-        typeof m === 'string' && m.includes('**Workflow failed** in parallel block')
+      const failureMessage = messages.find(
+        (m: string) => typeof m === 'string' && m.includes('**Workflow failed** in parallel block')
       );
 
       expect(failureMessage).toBeDefined();
@@ -2371,10 +2334,7 @@ describe('Workflow Executor', () => {
       const sequentialWorkflow: WorkflowDefinition = {
         name: 'sequential-only',
         description: 'Test backward compatibility with sequential workflows',
-        steps: [
-          { command: 'step-before' },
-          { command: 'step-after' },
-        ],
+        steps: [{ command: 'step-before' }, { command: 'step-after' }],
       };
 
       await executeWorkflow(
@@ -2409,7 +2369,11 @@ describe('Workflow Executor', () => {
       // Track session IDs passed to each step
       const receivedSessionIds: (string | undefined)[] = [];
 
-      mockSendQuery.mockImplementation(function* (_prompt: string, _cwd: string, sessionId?: string) {
+      mockSendQuery.mockImplementation(function* (
+        _prompt: string,
+        _cwd: string,
+        sessionId?: string
+      ) {
         receivedSessionIds.push(sessionId);
         yield { type: 'assistant', content: 'Response' };
         yield { type: 'result', sessionId: 'step-session-id' };

@@ -1330,7 +1330,7 @@ Setup:
           for (const w of workflows) {
             const stepsOrLoop = w.loop
               ? `Loop: until \`${w.loop.until}\` (max ${String(w.loop.max_iterations)} iterations)`
-              : `Steps: ${w.steps?.map(s => isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`).join(' -> ') ?? 'none'}`;
+              : `Steps: ${w.steps?.map(s => (isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`)).join(' -> ') ?? 'none'}`;
             msg += `**\`${w.name}\`**\n  ${w.description}\n  ${stepsOrLoop}\n\n`;
           }
 

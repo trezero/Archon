@@ -336,7 +336,10 @@ describe('worktree-copy', () => {
         .mockResolvedValueOnce({ isDirectory: () => false } as Stats)
         .mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
 
-      const result = await copyWorktreeFiles('/repo', '/worktree', ['.env.example -> .env', '.env']);
+      const result = await copyWorktreeFiles('/repo', '/worktree', [
+        '.env.example -> .env',
+        '.env',
+      ]);
 
       expect(result).toHaveLength(1);
       expect(result[0]).toEqual({ source: '.env.example', destination: '.env' });

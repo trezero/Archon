@@ -30,7 +30,13 @@ const mockLockManager = {
   acquireLock: mock(async (_id: string, handler: () => Promise<void>) => {
     await handler();
   }),
-  getStats: () => ({ active: 0, queuedTotal: 0, queuedByConversation: [], maxConcurrent: 10, activeConversationIds: [] }),
+  getStats: () => ({
+    active: 0,
+    queuedTotal: 0,
+    queuedByConversation: [],
+    maxConcurrent: 10,
+    activeConversationIds: [],
+  }),
 } as unknown as ConversationLockManager;
 
 /**

@@ -31,7 +31,13 @@ export async function createWorkflowRun(data: {
        (workflow_name, conversation_id, codebase_id, user_message, metadata)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [data.workflow_name, data.conversation_id, data.codebase_id ?? null, data.user_message, metadataJson]
+      [
+        data.workflow_name,
+        data.conversation_id,
+        data.codebase_id ?? null,
+        data.user_message,
+        metadataJson,
+      ]
     );
     return result.rows[0];
   } catch (error) {

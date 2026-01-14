@@ -113,7 +113,7 @@ ${workflowList}
    - CI failures, test failures, build errors, linting issues → use "assist" (debugging help)
    - "Fix this GitHub issue" (implement a solution to a tracked issue) → use "fix-github-issue"
    - Questions, exploration, explanations → use "assist"
-   - PR reviews → use "review-pr"
+   - PR reviews, code reviews → check for a PR review workflow in the list above
 5. If unsure, prefer "assist" (the catch-all)
 6. You MUST pick a workflow - never respond with just text
 
