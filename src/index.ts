@@ -38,8 +38,8 @@ async function main(): Promise<void> {
   // CLAUDE_USE_GLOBAL_AUTH=true: Use Claude Code's built-in OAuth (from `claude /login`)
   const hasClaudeCredentials = Boolean(
     process.env.CLAUDE_API_KEY ||
-      process.env.CLAUDE_CODE_OAUTH_TOKEN ||
-      process.env.CLAUDE_USE_GLOBAL_AUTH
+    process.env.CLAUDE_CODE_OAUTH_TOKEN ||
+    process.env.CLAUDE_USE_GLOBAL_AUTH
   );
   const hasCodexCredentials = process.env.CODEX_ID_TOKEN && process.env.CODEX_ACCESS_TOKEN;
 

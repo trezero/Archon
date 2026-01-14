@@ -7,6 +7,11 @@
  * - SDK message types (SDKMessage, SDKAssistantMessage, etc.) have strict
  *   type checking that requires explicit type handling for content blocks
  * - Content blocks are typed via inline assertions for clarity
+ *
+ * Authentication:
+ * - By default (CLAUDE_USE_GLOBAL_AUTH=true), uses global auth from `claude /login`
+ * - Auth env vars are filtered to prevent Bun's auto-loaded .env from overriding
+ * - Set CLAUDE_USE_GLOBAL_AUTH=false and provide explicit tokens to override
  */
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { IAssistantClient, MessageChunk } from '../types';
@@ -20,6 +25,37 @@ interface ContentBlock {
   text?: string;
   name?: string;
   input?: Record<string, unknown>;
+}
+
+/**
+ * Build environment for Claude subprocess
+ * When CLAUDE_USE_GLOBAL_AUTH=true (default), filters out auth tokens
+ * so Claude uses the globally logged-in credentials
+ */
+function buildSubprocessEnv(): NodeJS.ProcessEnv {
+  const useGlobalAuth = process.env.CLAUDE_USE_GLOBAL_AUTH !== 'false';
+
+  if (useGlobalAuth) {
+    // Filter out auth tokens - let Claude use global auth from `claude /login`
+    const { CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_API_KEY, ANTHROPIC_API_KEY, ...envWithoutAuth } =
+      process.env;
+
+    // Log if we're filtering out tokens (helps debug auth issues)
+    const filtered = [
+      CLAUDE_CODE_OAUTH_TOKEN && 'CLAUDE_CODE_OAUTH_TOKEN',
+      CLAUDE_API_KEY && 'CLAUDE_API_KEY',
+      ANTHROPIC_API_KEY && 'ANTHROPIC_API_KEY',
+    ].filter(Boolean);
+
+    if (filtered.length > 0) {
+      console.log(`[Claude] Using global auth (filtered: ${filtered.join(', ')})`);
+    }
+
+    return envWithoutAuth;
+  }
+
+  // Pass through all env vars including auth tokens
+  return { ...process.env };
 }
 
 /**
@@ -40,10 +76,7 @@ export class ClaudeClient implements IAssistantClient {
   ): AsyncGenerator<MessageChunk> {
     const options: Options = {
       cwd,
-      env: {
-        PATH: process.env.PATH,
-        ...process.env,
-      },
+      env: buildSubprocessEnv(),
       permissionMode: 'bypassPermissions', // YOLO mode - auto-approve all tools
       allowDangerouslySkipPermissions: true, // Required when bypassing permissions
       systemPrompt: { type: 'preset', preset: 'claude_code' }, // Use Claude Code's system prompt
