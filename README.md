@@ -221,7 +221,17 @@ You must configure **at least one** AI assistant. Both can be configured if desi
 
 **Recommended for Claude Pro/Max subscribers.**
 
-**Get OAuth Token (Preferred Method):**
+**Option 1: Global Auth (Recommended)**
+
+If you've already logged in with Claude Code CLI, use global auth:
+
+```env
+CLAUDE_USE_GLOBAL_AUTH=true
+```
+
+This uses credentials from `claude /login` and avoids conflicts with Bun's automatic `.env` loading in worktrees.
+
+**Option 2: OAuth Token**
 
 ```bash
 # Install Claude Code CLI first: https://docs.claude.com/claude-code/installation
@@ -230,17 +240,14 @@ claude setup-token
 # Copy the token starting with sk-ant-oat01-...
 ```
 
-**Set environment variable:**
-
 ```env
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xxxxx
 ```
 
-**Alternative: API Key** (if you prefer pay-per-use credits):
+**Option 3: API Key (Pay-per-use)**
 
 1. Visit [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
 2. Create a new key (starts with `sk-ant-`)
-3. Set environment variable:
 
 ```env
 CLAUDE_API_KEY=sk-ant-xxxxx
