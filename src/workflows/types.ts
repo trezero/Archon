@@ -104,6 +104,7 @@ export interface WorkflowRun {
   metadata: Record<string, unknown>;
   started_at: Date;
   completed_at: Date | null;
+  last_activity_at: Date | null; // For staleness detection
 }
 
 /**

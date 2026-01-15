@@ -480,6 +480,9 @@ async function executeStepInternal(
     let droppedMessageCount = 0;
 
     for await (const msg of aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId)) {
+      // Update activity timestamp on each message (non-blocking, non-critical)
+      void workflowDb.updateWorkflowActivity(workflowRun.id);
+
       if (msg.type === 'assistant' && msg.content) {
         if (streamingMode === 'stream') {
           const sent = await safeSendMessage(platform, conversationId, msg.content, messageContext);
@@ -724,6 +727,9 @@ async function executeLoopWorkflow(
       let droppedMessageCount = 0;
 
       for await (const msg of aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId)) {
+        // Update activity timestamp on each message (non-blocking, non-critical)
+        void workflowDb.updateWorkflowActivity(workflowRun.id);
+
         if (msg.type === 'assistant' && msg.content) {
           fullOutput += msg.content;
           if (streamingMode === 'stream') {
@@ -857,15 +863,44 @@ export async function executeWorkflow(
     console.log(`[WorkflowExecutor] Using configured command folder: ${configuredCommandFolder}`);
   }
 
-  // Check for concurrent workflow execution
+  // Check for concurrent workflow execution with staleness detection
   const activeWorkflow = await workflowDb.getActiveWorkflowRun(conversationDbId);
   if (activeWorkflow) {
-    await sendCriticalMessage(
-      platform,
-      conversationId,
-      `❌ **Workflow already running**: A \`${activeWorkflow.workflow_name}\` workflow is already running for this issue. Please wait for it to complete before starting another.`
-    );
-    return;
+    // Check staleness based on last activity, not start time
+    const lastActivity = activeWorkflow.last_activity_at ?? activeWorkflow.started_at;
+    const minutesSinceActivity = (Date.now() - new Date(lastActivity).getTime()) / (1000 * 60);
+
+    const STALE_MINUTES = 15; // Workflow is stale if no activity for 15 minutes
+    if (minutesSinceActivity > STALE_MINUTES) {
+      console.log(
+        `[WorkflowExecutor] Marking stale workflow as failed: ${activeWorkflow.id} (${Math.floor(minutesSinceActivity)} min inactive)`
+      );
+      try {
+        await workflowDb.failWorkflowRun(
+          activeWorkflow.id,
+          `Workflow timed out after ${Math.floor(minutesSinceActivity)} minutes of inactivity`
+        );
+      } catch (cleanupError) {
+        console.error('[WorkflowExecutor] Failed to cleanup stale workflow:', {
+          staleWorkflowId: activeWorkflow.id,
+          error: (cleanupError as Error).message,
+        });
+        await sendCriticalMessage(
+          platform,
+          conversationId,
+          '❌ **Workflow blocked**: A stale workflow exists but cleanup failed. Try `/workflow cancel` first.'
+        );
+        return;
+      }
+      // Continue to create new workflow
+    } else {
+      await sendCriticalMessage(
+        platform,
+        conversationId,
+        `❌ **Workflow already running**: A \`${activeWorkflow.workflow_name}\` workflow is already running for this issue. Please wait for it to complete before starting another.`
+      );
+      return;
+    }
   }
 
   // Create workflow run record
@@ -893,13 +928,15 @@ export async function executeWorkflow(
     return;
   }
 
-  console.log(`[WorkflowExecutor] Starting workflow: ${workflow.name} (${workflowRun.id})`);
-  await logWorkflowStart(cwd, workflowRun.id, workflow.name, userMessage);
+  // Wrap execution in try-catch to ensure workflow is marked as failed on any error
+  try {
+    console.log(`[WorkflowExecutor] Starting workflow: ${workflow.name} (${workflowRun.id})`);
+    await logWorkflowStart(cwd, workflowRun.id, workflow.name, userMessage);
 
-  // Context for error logging
-  const workflowContext: SendMessageContext = {
-    workflowId: workflowRun.id,
-  };
+    // Context for error logging
+    const workflowContext: SendMessageContext = {
+      workflowId: workflowRun.id,
+    };
 
   // Notify user - use type narrowing from discriminated union
   const stepsInfo = workflow.steps
@@ -1105,5 +1142,52 @@ export async function executeWorkflow(
     });
   }
 
-  console.log(`[WorkflowExecutor] Workflow completed: ${workflow.name}`);
+    console.log(`[WorkflowExecutor] Workflow completed: ${workflow.name}`);
+  } catch (error) {
+    // Top-level error handler: ensure workflow is marked as failed
+    const err = error as Error;
+    console.error('[WorkflowExecutor] Workflow execution failed with unhandled error:', {
+      error: err.message,
+      errorName: err.name,
+      stack: err.stack,
+      cause: err.cause,
+      workflow: workflow.name,
+      workflowId: workflowRun.id,
+    });
+
+    // Record failure in database (non-blocking - log but don't re-throw on DB error)
+    try {
+      await workflowDb.failWorkflowRun(workflowRun.id, err.message);
+    } catch (dbError) {
+      console.error('[WorkflowExecutor] Failed to record workflow failure in database:', {
+        workflowId: workflowRun.id,
+        originalError: err.message,
+        dbError: (dbError as Error).message,
+      });
+    }
+
+    // Log to file (separate from database - non-blocking)
+    try {
+      await logWorkflowError(cwd, workflowRun.id, err.message);
+    } catch (logError) {
+      console.error('[WorkflowExecutor] Failed to write workflow error to log file:', {
+        workflowId: workflowRun.id,
+        logError: (logError as Error).message,
+      });
+    }
+
+    // Notify user about the failure
+    const delivered = await sendCriticalMessage(
+      platform,
+      conversationId,
+      `❌ **Workflow failed**: ${err.message}`
+    );
+    if (!delivered) {
+      console.error('[WorkflowExecutor] ALERT: User was NOT notified of workflow failure', {
+        workflowId: workflowRun.id,
+        originalError: err.message,
+      });
+    }
+    // Don't re-throw - orchestrator already has error handling
+  }
 }

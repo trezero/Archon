@@ -610,6 +610,7 @@ if (streamingMode === 'batch') {
 - Stored in `.archon/workflows/` (or `.claude/workflows/`, `.agents/workflows/`)
 - Multi-step AI execution chains
 - Discovered at runtime, routed by AI
+- Commands: `/workflow list`, `/workflow reload`, `/workflow cancel`
 
 ### Example Commands in This Repo
 

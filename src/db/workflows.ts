@@ -156,3 +156,26 @@ export async function failWorkflowRun(id: string, error: string): Promise<void> 
     throw new Error(`Failed to fail workflow run: ${err.message}`);
   }
 }
+
+/**
+ * Update last_activity_at timestamp for a workflow run.
+ * Used for activity-based staleness detection.
+ * Non-throwing: logs errors but doesn't fail the workflow.
+ */
+export async function updateWorkflowActivity(id: string): Promise<void> {
+  try {
+    await pool.query(
+      'UPDATE remote_agent_workflow_runs SET last_activity_at = NOW() WHERE id = $1',
+      [id]
+    );
+  } catch (error) {
+    const err = error as Error;
+    // Non-critical - log with full context but don't throw
+    // Note: If this fails repeatedly, staleness detection may be degraded
+    console.error('[DB:Workflows] Failed to update activity:', {
+      workflowId: id,
+      error: err.message,
+      errorName: err.name,
+    });
+  }
+}

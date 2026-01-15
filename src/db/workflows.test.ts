@@ -18,6 +18,7 @@ import {
   updateWorkflowRun,
   completeWorkflowRun,
   failWorkflowRun,
+  updateWorkflowActivity,
 } from './workflows';
 
 describe('workflows database', () => {
@@ -36,6 +37,7 @@ describe('workflows database', () => {
     metadata: {},
     started_at: new Date('2025-01-01T00:00:00Z'),
     completed_at: null,
+    last_activity_at: new Date('2025-01-01T00:00:00Z'),
   };
 
   describe('createWorkflowRun', () => {
@@ -302,6 +304,29 @@ describe('workflows database', () => {
       await expect(failWorkflowRun('test-id', 'Some error')).rejects.toThrow(
         'Failed to fail workflow run: Network error'
       );
+    });
+  });
+
+  describe('updateWorkflowActivity', () => {
+    test('updates last_activity_at timestamp', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await updateWorkflowActivity('workflow-run-123');
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        'UPDATE remote_agent_workflow_runs SET last_activity_at = NOW() WHERE id = $1',
+        ['workflow-run-123']
+      );
+    });
+
+    test('does not throw on database error (non-throwing design)', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('Connection lost'));
+
+      // Should not throw - just logs the error
+      await updateWorkflowActivity('workflow-run-123');
+
+      // Verify the query was attempted
+      expect(mockQuery).toHaveBeenCalled();
     });
   });
 });

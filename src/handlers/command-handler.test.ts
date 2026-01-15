@@ -26,6 +26,10 @@ const mockDeleteCodebase = mock(() => Promise.resolve());
 const mockGetActiveSession = mock(() => Promise.resolve(null));
 const mockDeactivateSession = mock(() => Promise.resolve());
 
+// Workflow database mocks
+const mockGetActiveWorkflowRun = mock(() => Promise.resolve(null));
+const mockFailWorkflowRun = mock(() => Promise.resolve());
+
 // Spies for internal modules (use spyOn instead of mock.module to avoid global pollution)
 let spyIsPathWithinWorkspace: ReturnType<typeof spyOn>;
 let spyExecFileAsync: ReturnType<typeof spyOn>;
@@ -61,6 +65,11 @@ mock.module('../db/codebases', () => ({
 mock.module('../db/sessions', () => ({
   getActiveSession: mockGetActiveSession,
   deactivateSession: mockDeactivateSession,
+}));
+
+mock.module('../db/workflows', () => ({
+  getActiveWorkflowRun: mockGetActiveWorkflowRun,
+  failWorkflowRun: mockFailWorkflowRun,
 }));
 
 // Mock isolation-environments database
@@ -137,6 +146,9 @@ function clearAllMocks(): void {
   mockDeleteCodebase.mockClear();
   mockGetActiveSession.mockClear();
   mockDeactivateSession.mockClear();
+  // Workflow db mocks
+  mockGetActiveWorkflowRun.mockClear();
+  mockFailWorkflowRun.mockClear();
   // Isolation mocks
   mockIsolationCreate.mockClear();
   mockIsolationDestroy.mockClear();
@@ -1577,6 +1589,64 @@ describe('CommandHandler', () => {
 
         expect(result.success).toBe(false);
         expect(result.message).toContain('Repository not found: NonExistent');
+      });
+    });
+
+    describe('/workflow cancel', () => {
+      const conversationWithCodebase: Conversation = {
+        ...baseConversation,
+        codebase_id: 'codebase-123',
+      };
+
+      beforeEach(() => {
+        // Mock getCodebase to return a valid codebase
+        mockGetCodebase.mockResolvedValue({
+          id: 'codebase-123',
+          repository_url: 'https://github.com/test/repo',
+          default_cwd: '/workspace/test-repo',
+          commands: {},
+          created_at: new Date(),
+          updated_at: new Date(),
+        });
+      });
+
+      test('should cancel active workflow and return success message', async () => {
+        mockGetActiveWorkflowRun.mockResolvedValueOnce({
+          id: 'wf-123',
+          workflow_name: 'test-workflow',
+          conversation_id: 'conv-123',
+          status: 'running',
+          started_at: new Date(),
+          completed_at: null,
+          current_step_index: 0,
+          user_message: 'test',
+          metadata: {},
+          last_activity_at: new Date(),
+        });
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow cancel');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Cancelled workflow');
+        expect(result.message).toContain('test-workflow');
+        expect(mockFailWorkflowRun).toHaveBeenCalledWith('wf-123', 'Cancelled by user');
+      });
+
+      test('should return message when no active workflow exists', async () => {
+        mockGetActiveWorkflowRun.mockResolvedValueOnce(null);
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow cancel');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toBe('No active workflow to cancel.');
+        expect(mockFailWorkflowRun).not.toHaveBeenCalled();
+      });
+
+      test('should fail when no codebase is configured', async () => {
+        const result = await handleCommand(baseConversation, '/workflow cancel');
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('No codebase configured');
       });
     });
   });

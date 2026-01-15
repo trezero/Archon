@@ -23,6 +23,7 @@ import {
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
 import { discoverWorkflows } from '../workflows';
 import { isSingleStep } from '../workflows/types';
+import * as workflowDb from '../db/workflows';
 
 /**
  * Convert an absolute path to a relative path from the repository root
@@ -207,6 +208,7 @@ Worktrees:
 Workflows:
   /workflow list - Show available workflows
   /workflow reload - Reload workflow definitions
+  /workflow cancel - Cancel running workflow
   Note: Workflows are YAML files in .archon/workflows/
 
 Session:
@@ -1346,11 +1348,28 @@ Setup:
           };
         }
 
+        case 'cancel': {
+          // Cancel (force-fail) any running workflow for this conversation
+          const activeWorkflow = await workflowDb.getActiveWorkflowRun(conversation.id);
+          if (!activeWorkflow) {
+            return {
+              success: true,
+              message: 'No active workflow to cancel.',
+            };
+          }
+
+          await workflowDb.failWorkflowRun(activeWorkflow.id, 'Cancelled by user');
+          return {
+            success: true,
+            message: `Cancelled workflow: \`${activeWorkflow.workflow_name}\``,
+          };
+        }
+
         default:
           return {
             success: false,
             message:
-              'Usage:\n  /workflow list - Show available workflows\n  /workflow reload - Reload workflow definitions',
+              'Usage:\n  /workflow list - Show available workflows\n  /workflow reload - Reload workflow definitions\n  /workflow cancel - Cancel running workflow',
           };
       }
     }

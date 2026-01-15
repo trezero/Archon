@@ -1108,22 +1108,29 @@ describe('Workflow Executor', () => {
       expect(logContext).toHaveProperty('platformType');
     });
 
-    it('should throw on fatal authentication errors', async () => {
+    it('should mark workflow as failed on fatal authentication errors (no throw)', async () => {
       const sendMessageMock = mock(() =>
         Promise.reject(new Error('401 Unauthorized: Invalid token'))
       );
       mockPlatform.sendMessage = sendMessageMock;
 
-      await expect(
-        executeWorkflow(
-          mockPlatform,
-          'conv-123',
-          testDir,
-          { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
-          'User message',
-          'db-conv-id'
-        )
-      ).rejects.toThrow('Platform authentication/permission error');
+      // With top-level error handling, executeWorkflow should NOT throw
+      // Instead it marks the workflow as failed and returns normally
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Verify workflow was marked as failed in database
+      const failCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
+      );
+      expect(failCalls.length).toBeGreaterThan(0);
     });
 
     it('should continue workflow when tool message send fails in streaming mode', async () => {
@@ -1287,6 +1294,346 @@ describe('Workflow Executor', () => {
       );
       // Should have retried
       expect(completionCalls.length).toBeGreaterThanOrEqual(1);
+    });
+
+    describe('staleness detection', () => {
+      it('should fail stale workflow and start new one when last_activity_at > 15 min ago', async () => {
+        // Mock getActiveWorkflowRun to return a stale workflow (20 min inactive)
+        const staleTime = new Date(Date.now() - 20 * 60 * 1000); // 20 minutes ago
+        mockQuery.mockImplementation((query: string) => {
+          if (query.includes("status = 'running'")) {
+            return Promise.resolve(
+              createQueryResult([
+                {
+                  id: 'stale-workflow-id',
+                  workflow_name: 'old-workflow',
+                  conversation_id: 'conv-123',
+                  status: 'running' as const,
+                  started_at: staleTime,
+                  last_activity_at: staleTime,
+                  completed_at: null,
+                  current_step_index: 0,
+                  user_message: 'old message',
+                  metadata: {},
+                },
+              ])
+            );
+          }
+          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
+            return Promise.resolve(
+              createQueryResult([
+                {
+                  id: 'new-workflow-run-id',
+                  workflow_name: 'test-workflow',
+                  conversation_id: 'conv-123',
+                  status: 'running' as const,
+                  started_at: new Date(),
+                  last_activity_at: new Date(),
+                  completed_at: null,
+                  current_step_index: 0,
+                  user_message: 'test user message',
+                  metadata: {},
+                },
+              ])
+            );
+          }
+          return Promise.resolve(createQueryResult([]));
+        });
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
+          'User message',
+          'db-conv-id'
+        );
+
+        // Verify stale workflow was marked as failed
+        const failCalls = mockQuery.mock.calls.filter(
+          (call: unknown[]) =>
+            (call[0] as string).includes('UPDATE') &&
+            (call[0] as string).includes("'failed'") &&
+            (call[1] as string[])?.includes('stale-workflow-id')
+        );
+        expect(failCalls.length).toBeGreaterThan(0);
+
+        // Verify new workflow was created
+        const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
+          (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
+        );
+        expect(insertCalls.length).toBeGreaterThan(0);
+
+        // Reset mock
+        mockQuery.mockImplementation((query: string) => {
+          if (query.includes("status = 'running'")) {
+            return Promise.resolve(createQueryResult([]));
+          }
+          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
+            return Promise.resolve(
+              createQueryResult([
+                {
+                  id: 'test-workflow-run-id',
+                  workflow_name: 'test-workflow',
+                  conversation_id: 'conv-123',
+                  status: 'running' as const,
+                  started_at: new Date(),
+                  completed_at: null,
+                  current_step_index: 0,
+                  user_message: 'test user message',
+                  metadata: {},
+                },
+              ])
+            );
+          }
+          return Promise.resolve(createQueryResult([]));
+        });
+      });
+
+      it('should block new workflow when active workflow is not stale', async () => {
+        // Mock getActiveWorkflowRun to return a recent workflow (5 min inactive)
+        const recentTime = new Date(Date.now() - 5 * 60 * 1000); // 5 minutes ago
+        mockQuery.mockImplementation((query: string) => {
+          if (query.includes("status = 'running'")) {
+            return Promise.resolve(
+              createQueryResult([
+                {
+                  id: 'active-workflow-id',
+                  workflow_name: 'active-workflow',
+                  conversation_id: 'conv-123',
+                  status: 'running' as const,
+                  started_at: recentTime,
+                  last_activity_at: recentTime,
+                  completed_at: null,
+                  current_step_index: 0,
+                  user_message: 'active message',
+                  metadata: {},
+                },
+              ])
+            );
+          }
+          return Promise.resolve(createQueryResult([]));
+        });
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
+          'User message',
+          'db-conv-id'
+        );
+
+        // Verify rejection message was sent
+        const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+        const calls = sendMessage.mock.calls;
+        const blockingMessages = calls.filter((call: unknown[]) =>
+          (call[1] as string).includes('Workflow already running')
+        );
+        expect(blockingMessages.length).toBe(1);
+
+        // Verify no INSERT was made (new workflow not created)
+        const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
+          (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
+        );
+        expect(insertCalls.length).toBe(0);
+
+        // Reset mock
+        mockQuery.mockImplementation((query: string) => {
+          if (query.includes("status = 'running'")) {
+            return Promise.resolve(createQueryResult([]));
+          }
+          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
+            return Promise.resolve(
+              createQueryResult([
+                {
+                  id: 'test-workflow-run-id',
+                  workflow_name: 'test-workflow',
+                  conversation_id: 'conv-123',
+                  status: 'running' as const,
+                  started_at: new Date(),
+                  completed_at: null,
+                  current_step_index: 0,
+                  user_message: 'test user message',
+                  metadata: {},
+                },
+              ])
+            );
+          }
+          return Promise.resolve(createQueryResult([]));
+        });
+      });
+
+      it('should fallback to started_at when last_activity_at is null', async () => {
+        // Mock getActiveWorkflowRun to return a workflow with null last_activity_at but old started_at
+        const staleTime = new Date(Date.now() - 20 * 60 * 1000); // 20 minutes ago
+        mockQuery.mockImplementation((query: string) => {
+          if (query.includes("status = 'running'")) {
+            return Promise.resolve(
+              createQueryResult([
+                {
+                  id: 'stale-workflow-id',
+                  workflow_name: 'old-workflow',
+                  conversation_id: 'conv-123',
+                  status: 'running' as const,
+                  started_at: staleTime,
+                  last_activity_at: null, // null - should fallback to started_at
+                  completed_at: null,
+                  current_step_index: 0,
+                  user_message: 'old message',
+                  metadata: {},
+                },
+              ])
+            );
+          }
+          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
+            return Promise.resolve(
+              createQueryResult([
+                {
+                  id: 'new-workflow-run-id',
+                  workflow_name: 'test-workflow',
+                  conversation_id: 'conv-123',
+                  status: 'running' as const,
+                  started_at: new Date(),
+                  last_activity_at: new Date(),
+                  completed_at: null,
+                  current_step_index: 0,
+                  user_message: 'test user message',
+                  metadata: {},
+                },
+              ])
+            );
+          }
+          return Promise.resolve(createQueryResult([]));
+        });
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
+          'User message',
+          'db-conv-id'
+        );
+
+        // Verify stale workflow was marked as failed (fallback to started_at worked)
+        const failCalls = mockQuery.mock.calls.filter(
+          (call: unknown[]) =>
+            (call[0] as string).includes('UPDATE') &&
+            (call[0] as string).includes("'failed'") &&
+            (call[1] as string[])?.includes('stale-workflow-id')
+        );
+        expect(failCalls.length).toBeGreaterThan(0);
+
+        // Reset mock
+        mockQuery.mockImplementation((query: string) => {
+          if (query.includes("status = 'running'")) {
+            return Promise.resolve(createQueryResult([]));
+          }
+          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
+            return Promise.resolve(
+              createQueryResult([
+                {
+                  id: 'test-workflow-run-id',
+                  workflow_name: 'test-workflow',
+                  conversation_id: 'conv-123',
+                  status: 'running' as const,
+                  started_at: new Date(),
+                  completed_at: null,
+                  current_step_index: 0,
+                  user_message: 'test user message',
+                  metadata: {},
+                },
+              ])
+            );
+          }
+          return Promise.resolve(createQueryResult([]));
+        });
+      });
+
+      it('should show cleanup error message when failWorkflowRun fails for stale workflow', async () => {
+        // Mock getActiveWorkflowRun to return a stale workflow
+        const staleTime = new Date(Date.now() - 20 * 60 * 1000);
+        let failWorkflowCallCount = 0;
+        mockQuery.mockImplementation((query: string) => {
+          if (query.includes("status = 'running'")) {
+            return Promise.resolve(
+              createQueryResult([
+                {
+                  id: 'stale-workflow-id',
+                  workflow_name: 'old-workflow',
+                  conversation_id: 'conv-123',
+                  status: 'running' as const,
+                  started_at: staleTime,
+                  last_activity_at: staleTime,
+                  completed_at: null,
+                  current_step_index: 0,
+                  user_message: 'old message',
+                  metadata: {},
+                },
+              ])
+            );
+          }
+          // Fail the staleness cleanup query
+          if (query.includes('UPDATE') && query.includes("'failed'")) {
+            failWorkflowCallCount++;
+            if (failWorkflowCallCount === 1) {
+              // First fail call is for staleness cleanup
+              return Promise.reject(new Error('Database connection lost'));
+            }
+          }
+          return Promise.resolve(createQueryResult([]));
+        });
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
+          'User message',
+          'db-conv-id'
+        );
+
+        // Verify user received cleanup error message
+        const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+        const calls = sendMessage.mock.calls;
+        const cleanupErrorMessages = calls.filter((call: unknown[]) =>
+          (call[1] as string).includes('Workflow blocked') &&
+          (call[1] as string).includes('/workflow cancel')
+        );
+        expect(cleanupErrorMessages.length).toBe(1);
+
+        // Verify no new workflow was created
+        const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
+          (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
+        );
+        expect(insertCalls.length).toBe(0);
+
+        // Reset mock
+        mockQuery.mockImplementation((query: string) => {
+          if (query.includes("status = 'running'")) {
+            return Promise.resolve(createQueryResult([]));
+          }
+          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
+            return Promise.resolve(
+              createQueryResult([
+                {
+                  id: 'test-workflow-run-id',
+                  workflow_name: 'test-workflow',
+                  conversation_id: 'conv-123',
+                  status: 'running' as const,
+                  started_at: new Date(),
+                  completed_at: null,
+                  current_step_index: 0,
+                  user_message: 'test user message',
+                  metadata: {},
+                },
+              ])
+            );
+          }
+          return Promise.resolve(createQueryResult([]));
+        });
+      });
     });
   });
 
