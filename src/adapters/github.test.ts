@@ -4,7 +4,7 @@
  * Note: These tests focus on adapter-specific functionality without mocking
  * database modules to avoid test pollution issues with Bun's mock.module.
  */
-import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 
 // Only mock what's needed for the adapter's direct functionality
 const mockExecFile = mock(
@@ -129,6 +129,130 @@ describe('GitHubAdapter', () => {
       expect(stripMention.call(adapterWithMention, '@Dylan please help')).toBe('please help');
       expect(stripMention.call(adapterWithMention, '@dylan please help')).toBe('please help');
       expect(stripMention.call(adapterWithMention, '@DYLAN please help')).toBe('please help');
+    });
+  });
+
+  describe('self-filtering', () => {
+    // Test context for self-filtering tests
+    let originalAllowedUsers: string | undefined;
+    let originalLog: typeof console.log;
+    let logs: string[];
+
+    /**
+     * Creates an adapter with mocked signature verification for self-filtering tests.
+     */
+    function createSelfFilterAdapter(botMention = 'archon'): GitHubAdapter {
+      const adapter = new GitHubAdapter(
+        'fake-token-for-testing',
+        'fake-webhook-secret',
+        mockLockManager,
+        botMention
+      );
+      // @ts-expect-error - accessing private method for testing
+      adapter.verifySignature = mock(() => true);
+      return adapter;
+    }
+
+    /**
+     * Creates a webhook payload for issue comment events.
+     */
+    function createCommentPayload(
+      commentBody: string,
+      commentAuthor: string | undefined
+    ): string {
+      const comment: { body: string; user?: { login: string } } = { body: commentBody };
+      if (commentAuthor !== undefined) {
+        comment.user = { login: commentAuthor };
+      }
+      return JSON.stringify({
+        action: 'created',
+        issue: {
+          number: 42,
+          title: 'Test Issue',
+          body: 'Description',
+          user: { login: 'user123' },
+          labels: [],
+          state: 'open',
+        },
+        comment,
+        repository: {
+          owner: { login: 'testuser' },
+          name: 'testrepo',
+          full_name: 'testuser/testrepo',
+          html_url: 'https://github.com/testuser/testrepo',
+          default_branch: 'main',
+        },
+        sender: { login: commentAuthor ?? 'user123' },
+      });
+    }
+
+    beforeEach(() => {
+      originalAllowedUsers = process.env.GITHUB_ALLOWED_USERS;
+      delete process.env.GITHUB_ALLOWED_USERS;
+      logs = [];
+      originalLog = console.log;
+      console.log = mock((...args: unknown[]) => {
+        logs.push(args.join(' '));
+      });
+    });
+
+    afterEach(() => {
+      console.log = originalLog;
+      if (originalAllowedUsers !== undefined) {
+        process.env.GITHUB_ALLOWED_USERS = originalAllowedUsers;
+      }
+    });
+
+    test('should ignore comments from the bot itself', async () => {
+      const adapter = createSelfFilterAdapter();
+      const payload = createCommentPayload('@archon fix this', 'archon');
+
+      await adapter.handleWebhook(payload, 'mock-signature');
+
+      expect(logs.some(log => log.includes('[GitHub] Ignoring own comment from @archon'))).toBe(
+        true
+      );
+      expect(logs.some(log => log.includes('[GitHub] Processing'))).toBe(false);
+    });
+
+    test('should handle case-insensitive username matching', async () => {
+      const adapter = createSelfFilterAdapter('Archon'); // Mixed case config
+      const payload = createCommentPayload('@archon test', 'archon'); // Lowercase author
+
+      await adapter.handleWebhook(payload, 'mock-signature');
+
+      expect(logs.some(log => log.includes('[GitHub] Ignoring own comment from @archon'))).toBe(
+        true
+      );
+      expect(logs.some(log => log.includes('[GitHub] Processing'))).toBe(false);
+    });
+
+    test('should NOT filter comments from real users', async () => {
+      const adapter = createSelfFilterAdapter();
+      const payload = createCommentPayload('@archon please help', 'user123');
+
+      // handleWebhook will error on DB operations, but self-filtering runs first
+      try {
+        await adapter.handleWebhook(payload, 'mock-signature');
+      } catch {
+        // Expected - database not mocked
+      }
+
+      expect(logs.some(log => log.includes('[GitHub] Ignoring own comment'))).toBe(false);
+    });
+
+    test('should handle missing comment.user gracefully', async () => {
+      const adapter = createSelfFilterAdapter();
+      const payload = createCommentPayload('@archon help', undefined); // No user field
+
+      // Should not crash on undefined user
+      try {
+        await adapter.handleWebhook(payload, 'mock-signature');
+      } catch {
+        // Expected - database not mocked, but no TypeError from undefined user
+      }
+
+      expect(logs.some(log => log.includes('[GitHub] Ignoring own comment'))).toBe(false);
     });
   });
 

@@ -625,7 +625,14 @@ ${userComment}`;
       return; // Don't process as a message
     }
 
-    // 4. Check @mention
+    // 4. Ignore bot's own comments to prevent self-triggering
+    const commentAuthor = event.comment?.user?.login;
+    if (commentAuthor && commentAuthor.toLowerCase() === this.botMention.toLowerCase()) {
+      console.log(`[GitHub] Ignoring own comment from @${commentAuthor}`);
+      return;
+    }
+
+    // 5. Check @mention
     if (!this.hasMention(comment)) return;
 
     console.log(`[GitHub] Processing ${eventType}: ${owner}/${repo}#${String(number)}`);
