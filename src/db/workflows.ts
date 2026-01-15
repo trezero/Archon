@@ -94,7 +94,7 @@ export async function updateWorkflowRun(
   // Helper to add parameterized clause
   function addParam(clause: string, value: unknown): void {
     values.push(value);
-    setClauses.push(clause.replace('?', `$${String(values.length)}`));
+    setClauses.push(clause.replace('?', `$${values.length}`));
   }
 
   if (updates.current_step_index !== undefined) {
@@ -113,7 +113,7 @@ export async function updateWorkflowRun(
   if (setClauses.length === 0) return;
 
   values.push(id);
-  const idParam = `$${String(values.length)}`;
+  const idParam = `$${values.length}`;
 
   try {
     await pool.query(
