@@ -29,7 +29,8 @@
 
 **Git as First-Class Citizen**
 - Let git handle what git does best (conflicts, uncommitted changes, branch management)
-- Don't wrap git errors - surface them directly to users
+- Surface git errors to users for actionable issues (conflicts, uncommitted changes)
+- Handle expected failure cases gracefully (missing directories during cleanup)
 - Trust git's natural guardrails (e.g., refuse to remove worktree with uncommitted changes)
 - Use `execFileAsync` for git commands (not `exec`) to prevent command injection
 - Worktrees enable parallel development per conversation without branch conflicts
@@ -610,6 +611,7 @@ if (streamingMode === 'batch') {
 - Stored in `.archon/workflows/` (or `.claude/workflows/`, `.agents/workflows/`)
 - Multi-step AI execution chains
 - Discovered at runtime, routed by AI
+- Concurrent execution prevented - only one workflow can run per conversation at a time
 - Commands: `/workflow list`, `/workflow reload`, `/workflow cancel`
 
 ### Example Commands in This Repo
@@ -652,6 +654,23 @@ try {
 } catch (error) {
   console.error('[Claude] Session error', { error, sessionId });
   await platform.sendMessage(conversationId, '❌ AI error. Try /reset');
+}
+```
+
+**Git Operation Errors (Graceful Handling):**
+```typescript
+// Handle expected failure cases gracefully (don't throw to users)
+try {
+  await execFileAsync('git', ['worktree', 'remove', path]);
+} catch (error) {
+  // Missing directories are expected during cleanup (manual deletion, OS cleanup)
+  if (error.message.includes('No such file or directory')) {
+    console.log('[Cleanup] Directory already removed, marking as destroyed');
+    await db.markEnvironmentDestroyed(envId);
+    return; // Success - goal achieved
+  }
+  // Surface unexpected git errors (permission issues, git repo corruption)
+  throw error;
 }
 ```
 

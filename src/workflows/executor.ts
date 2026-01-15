@@ -864,7 +864,23 @@ export async function executeWorkflow(
   }
 
   // Check for concurrent workflow execution with staleness detection
-  const activeWorkflow = await workflowDb.getActiveWorkflowRun(conversationDbId);
+  let activeWorkflow;
+  try {
+    activeWorkflow = await workflowDb.getActiveWorkflowRun(conversationDbId);
+  } catch (error) {
+    const err = error as Error;
+    console.error('[WorkflowExecutor] Failed to check for active workflow:', {
+      error: err.message,
+      conversationId,
+    });
+    // Do NOT proceed when we can't verify safety - block workflow execution
+    await sendCriticalMessage(
+      platform,
+      conversationId,
+      '❌ **Workflow blocked**: Unable to verify if another workflow is running (database error). Please try again in a moment.'
+    );
+    return;
+  }
   if (activeWorkflow) {
     // Check staleness based on last activity, not start time
     const lastActivity = activeWorkflow.last_activity_at ?? activeWorkflow.started_at;
@@ -894,10 +910,11 @@ export async function executeWorkflow(
       }
       // Continue to create new workflow
     } else {
+      const startedAt = new Date(activeWorkflow.started_at).toLocaleString();
       await sendCriticalMessage(
         platform,
         conversationId,
-        `❌ **Workflow already running**: A \`${activeWorkflow.workflow_name}\` workflow is already running for this issue. Please wait for it to complete before starting another.`
+        `❌ **Workflow already running**: A \`${activeWorkflow.workflow_name}\` workflow (ID: ${activeWorkflow.id.slice(0, 8)}) has been running since ${startedAt}. Please wait for it to complete or use \`/workflow cancel\` to stop it.`
       );
       return;
     }

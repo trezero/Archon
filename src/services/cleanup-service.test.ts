@@ -1,7 +1,8 @@
 import { mock, describe, test, expect, beforeEach, afterAll } from 'bun:test';
 import * as gitUtils from '../utils/git';
 
-// Mock git utility
+// Mock git utility - note: cleanup-service.ts has its own internal worktreeExists function
+// that uses execFileAsync, so we only need to mock execFileAsync
 const mockExecFileAsync = mock(() => Promise.resolve({ stdout: '', stderr: '' }));
 mock.module('../utils/git', () => ({
   ...gitUtils,
@@ -57,6 +58,7 @@ import {
   getWorktreeStatusBreakdown,
   cleanupMergedWorktrees,
   cleanupStaleWorktrees,
+  removeEnvironment,
   MAX_WORKTREES_PER_CODEBASE,
 } from './cleanup-service';
 
@@ -64,6 +66,8 @@ describe('cleanup-service', () => {
   beforeEach(() => {
     mockExecFileAsync.mockClear();
     mockDestroy.mockClear();
+    mockUpdateStatus.mockClear();
+    mockGetById.mockClear();
   });
 
   describe('hasUncommittedChanges', () => {
@@ -211,6 +215,100 @@ describe('cleanup-service', () => {
       expect(result?.getFullYear()).toBe(2024);
     });
   });
+
+  describe('removeEnvironment', () => {
+    test('marks missing directory as destroyed', async () => {
+      const envId = 'env-missing-dir';
+
+      mockGetById.mockResolvedValueOnce({
+        id: envId,
+        codebase_id: 'codebase-123',
+        workflow_type: 'issue',
+        workflow_id: '187',
+        provider: 'worktree',
+        working_path: '/path/that/does/not/exist',
+        branch_name: 'issue-187',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'github',
+        metadata: {},
+      });
+
+      // Internal worktreeExists returns false (git rev-parse fails)
+      mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+
+      await removeEnvironment(envId);
+
+      // Should mark as destroyed without calling provider.destroy()
+      expect(mockUpdateStatus).toHaveBeenCalledWith(envId, 'destroyed');
+      expect(mockDestroy).not.toHaveBeenCalled();
+    });
+
+    test('handles git worktree remove failure for missing path', async () => {
+      const envId = 'env-git-fail';
+
+      mockGetById.mockResolvedValueOnce({
+        id: envId,
+        codebase_id: 'codebase-123',
+        workflow_type: 'issue',
+        workflow_id: '187',
+        provider: 'worktree',
+        working_path: '/path/exists/but/git/fails',
+        branch_name: 'issue-187',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'github',
+        metadata: {},
+      });
+
+      // Internal worktreeExists succeeds (path exists)
+      mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
+
+      // hasUncommittedChanges returns false
+      mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+      // provider.destroy fails with "No such file or directory"
+      mockDestroy.mockRejectedValueOnce(new Error('fatal: cannot change to \'/path/exists/but/git/fails\': No such file or directory'));
+
+      await removeEnvironment(envId);
+
+      // Should mark as destroyed despite provider.destroy failure
+      expect(mockUpdateStatus).toHaveBeenCalledWith(envId, 'destroyed');
+    });
+
+    test('re-throws non-directory errors from provider.destroy', async () => {
+      const envId = 'env-real-error';
+
+      mockGetById.mockResolvedValueOnce({
+        id: envId,
+        codebase_id: 'codebase-123',
+        workflow_type: 'issue',
+        workflow_id: '187',
+        provider: 'worktree',
+        working_path: '/path/exists',
+        branch_name: 'issue-187',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'github',
+        metadata: {},
+      });
+
+      // Internal worktreeExists succeeds (path exists)
+      mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
+
+      // hasUncommittedChanges returns false
+      mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+      // provider.destroy fails with a different error (uncommitted changes)
+      mockDestroy.mockRejectedValueOnce(new Error('fatal: cannot remove: You have local modifications'));
+
+      // Should re-throw the error
+      await expect(removeEnvironment(envId)).rejects.toThrow('local modifications');
+
+      // Should NOT mark as destroyed
+      expect(mockUpdateStatus).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('runScheduledCleanup', () => {
@@ -249,7 +347,7 @@ describe('runScheduledCleanup', () => {
         metadata: {},
       },
     ]);
-    // git rev-parse fails for missing path (worktreeExists returns false)
+    // Internal worktreeExists returns false (git rev-parse fails)
     mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
 
     const report = await runScheduledCleanup();
@@ -275,13 +373,13 @@ describe('runScheduledCleanup', () => {
         metadata: {},
       },
     ]);
-    // Path exists (worktreeExists)
+    // Internal worktreeExists returns true (path exists)
     mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
     // Get main branch (getMainBranch)
     mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
     // Branch is merged (isBranchMerged)
     mockExecFileAsync.mockResolvedValueOnce({ stdout: '  pr-99\n  main\n', stderr: '' });
-    // No uncommitted changes (hasUncommittedChanges)
+    // No uncommitted changes (hasUncommittedChanges in runScheduledCleanup)
     mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
     // No conversations using it
     mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
@@ -291,6 +389,8 @@ describe('runScheduledCleanup', () => {
       working_path: '/workspace/repo/worktrees/pr-99',
       status: 'active',
     });
+    // removeEnvironment: internal worktreeExists check
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
     // removeEnvironment: hasUncommittedChanges
     mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
 
@@ -316,13 +416,13 @@ describe('runScheduledCleanup', () => {
         metadata: {},
       },
     ]);
-    // Path exists
+    // Internal worktreeExists returns true (path exists)
     mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
     // Get main branch
     mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
     // Branch is merged
     mockExecFileAsync.mockResolvedValueOnce({ stdout: '  issue-10\n  main\n', stderr: '' });
-    // Has uncommitted changes
+    // Has uncommitted changes (in runScheduledCleanup, before attempting removeEnvironment)
     mockExecFileAsync.mockResolvedValueOnce({ stdout: ' M file.ts', stderr: '' });
 
     const report = await runScheduledCleanup();
@@ -351,7 +451,7 @@ describe('runScheduledCleanup', () => {
         metadata: {},
       },
     ]);
-    // Path exists
+    // Internal worktreeExists returns true (path exists)
     mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
     // Get main branch
     mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
@@ -395,9 +495,9 @@ describe('runScheduledCleanup', () => {
         metadata: {},
       },
     ]);
-    // First env: worktreeExists - path doesn't exist
+    // First env: internal worktreeExists returns false
     mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
-    // Second env: worktreeExists - also doesn't exist
+    // Second env: internal worktreeExists returns false
     mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
 
     const report = await runScheduledCleanup();
@@ -566,7 +666,7 @@ describe('cleanupMergedWorktrees', () => {
     mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
     // Is merged
     mockExecFileAsync.mockResolvedValueOnce({ stdout: '  merged-branch\n  main\n', stderr: '' });
-    // No uncommitted changes
+    // No uncommitted changes (cleanupMergedWorktrees check)
     mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
     // No conversations
     mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
@@ -576,6 +676,9 @@ describe('cleanupMergedWorktrees', () => {
       working_path: '/workspace/repo/worktrees/merged-branch',
       status: 'active',
     });
+    // removeEnvironment: internal worktreeExists check (path exists)
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
+    // removeEnvironment: hasUncommittedChanges
     mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
 
     const result = await cleanupMergedWorktrees('codebase-1', '/workspace/repo');
@@ -660,7 +763,7 @@ describe('cleanupStaleWorktrees', () => {
       },
     ]);
 
-    // No uncommitted changes
+    // No uncommitted changes (cleanupStaleWorktrees check)
     mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
     // No conversations
     mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
@@ -670,6 +773,9 @@ describe('cleanupStaleWorktrees', () => {
       working_path: '/workspace/repo/worktrees/stale-branch',
       status: 'active',
     });
+    // removeEnvironment: internal worktreeExists check (path exists)
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
+    // removeEnvironment: hasUncommittedChanges
     mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
 
     const result = await cleanupStaleWorktrees('codebase-1', '/workspace/repo');

@@ -1,9 +1,16 @@
-import { describe, test, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, spyOn, mock, type Mock } from 'bun:test';
 
 import * as configLoader from '../../config/config-loader';
 import * as git from '../../utils/git';
 import * as worktreeCopy from '../../utils/worktree-copy';
 import type { IsolationRequest } from '../types';
+
+// Mock fs.promises.access for destroy() existence check
+const mockAccess = mock(() => Promise.resolve());
+mock.module('node:fs/promises', () => ({
+  access: mockAccess,
+}));
+
 import { WorktreeProvider } from './worktree';
 
 describe('WorktreeProvider', () => {
@@ -31,6 +38,7 @@ describe('WorktreeProvider', () => {
     listWorktreesSpy.mockResolvedValue([]);
     findWorktreeByBranchSpy.mockResolvedValue(null);
     getCanonicalRepoPathSpy.mockImplementation(async path => path);
+    mockAccess.mockResolvedValue(undefined); // Path exists by default
   });
 
   afterEach(() => {
@@ -40,6 +48,7 @@ describe('WorktreeProvider', () => {
     listWorktreesSpy.mockRestore();
     findWorktreeByBranchSpy.mockRestore();
     getCanonicalRepoPathSpy.mockRestore();
+    mockAccess.mockClear();
   });
 
   describe('generateBranchName', () => {
@@ -397,6 +406,75 @@ describe('WorktreeProvider', () => {
         ]),
         expect.any(Object)
       );
+    });
+
+    test('returns gracefully when path does not exist (ENOENT)', async () => {
+      const worktreePath = '/workspace/worktrees/repo/nonexistent';
+
+      // access() throws ENOENT
+      const enoentError = new Error('ENOENT: no such file or directory') as NodeJS.ErrnoException;
+      enoentError.code = 'ENOENT';
+      mockAccess.mockRejectedValueOnce(enoentError);
+
+      // Should not throw
+      await provider.destroy(worktreePath);
+
+      // Should NOT call git worktree remove
+      expect(execSpy).not.toHaveBeenCalled();
+    });
+
+    test('re-throws non-ENOENT errors from access check', async () => {
+      const worktreePath = '/workspace/worktrees/repo/nopermission';
+
+      // access() throws EACCES (permission denied)
+      const eaccesError = new Error('EACCES: permission denied') as NodeJS.ErrnoException;
+      eaccesError.code = 'EACCES';
+      mockAccess.mockRejectedValueOnce(eaccesError);
+
+      // Should throw the error
+      await expect(provider.destroy(worktreePath)).rejects.toThrow('EACCES: permission denied');
+
+      // Should NOT call git worktree remove
+      expect(execSpy).not.toHaveBeenCalled();
+    });
+
+    test('returns gracefully when git worktree remove fails with "No such file or directory"', async () => {
+      const worktreePath = '/workspace/worktrees/repo/issue-42';
+
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+      // git worktree remove fails
+      execSpy.mockRejectedValueOnce(
+        new Error("fatal: cannot change to '/workspace/worktrees/repo/issue-42': No such file or directory")
+      );
+
+      // Should not throw
+      await provider.destroy(worktreePath);
+    });
+
+    test('returns gracefully when git worktree remove fails with "is not a working tree"', async () => {
+      const worktreePath = '/workspace/worktrees/repo/issue-42';
+
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+      // git worktree remove fails because it's not a working tree
+      const error = new Error('fatal: some error') as Error & { stderr?: string };
+      error.stderr = "fatal: '/workspace/worktrees/repo/issue-42' is not a working tree";
+      execSpy.mockRejectedValueOnce(error);
+
+      // Should not throw
+      await provider.destroy(worktreePath);
+    });
+
+    test('re-throws non-directory errors from git worktree remove', async () => {
+      const worktreePath = '/workspace/worktrees/repo/issue-42';
+
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+      // git worktree remove fails with uncommitted changes error
+      execSpy.mockRejectedValueOnce(
+        new Error('fatal: cannot remove: You have local modifications')
+      );
+
+      // Should throw the error
+      await expect(provider.destroy(worktreePath)).rejects.toThrow('local modifications');
     });
   });
 

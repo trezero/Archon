@@ -512,6 +512,7 @@ class CleanupService {
 
   /**
    * Remove specific environment (from /worktree remove command).
+   * Handles missing directories gracefully - marks as destroyed without throwing.
    */
   async removeEnvironment(envId: string, options?: { force?: boolean }): Promise<void>;
 
@@ -597,8 +598,12 @@ class CleanupService {
 | `/worktree remove` | Command handler       | `removeEnvironment(envId)`                        |
 | Hit limit          | Orchestrator          | `cleanupToMakeRoom(codebaseId)`                   |
 
-### Uncommitted Changes UX
+### Cleanup Behavior
 
+**Missing Directories:**
+If a worktree directory is removed externally (manually or by OS), the cleanup service handles this gracefully by marking the database record as 'destroyed' instead of throwing errors. This prevents false worktree limits.
+
+**Uncommitted Changes:**
 When cleanup is blocked by uncommitted changes:
 
 ```

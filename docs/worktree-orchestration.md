@@ -166,14 +166,15 @@ IsolationRequest
 │                          │                            │
 │                          ▼                            │
 │                  ┌───────────────────┐                │
-│                  │ uncommitted       │                │
-│                  │ changes?          │                │
+│                  │ directory         │                │
+│                  │ exists?           │                │
 │                  └─────────┬─────────┘                │
 │                     YES    │    NO                    │
 │                  ┌─────────┴─────────┐                │
 │                  ▼                   ▼                │
-│               FAIL              git worktree         │
-│               (notify user)     remove <path>        │
+│          Check uncommitted    Mark as destroyed      │
+│          changes, then        (DB only)              │
+│          git worktree remove                          │
 │                                                       │
 └───────────────────────────────────────────────────────┘
 ```
@@ -311,8 +312,9 @@ The current architecture has isolation logic split between the GitHub adapter an
 ├───────────────────────────────┤   ├───────────────────────────────────┤
 │  create() → IsolatedEnv        │   │  onConversationClosed()           │
 │  destroy()                     │   │  runScheduledCleanup()            │
-│  get() / list()               │   │  isBranchMerged() - git-first     │
-│  adopt()                       │   │  hasUncommittedChanges()          │
+│  get() / list()               │   │  removeEnvironment() - graceful   │
+│  adopt()                       │   │  isBranchMerged() - git-first     │
+│                                │   │  hasUncommittedChanges()          │
 └───────────────────────────────┘   └───────────────────────────────────┘
 ```
 

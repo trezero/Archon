@@ -100,6 +100,15 @@ export async function removeEnvironment(
     return;
   }
 
+  // Check if directory exists before attempting removal
+  const pathExists = await worktreeExists(env.working_path);
+  if (!pathExists) {
+    // Path doesn't exist - mark as destroyed in DB
+    await isolationEnvDb.updateStatus(envId, 'destroyed');
+    console.log(`[Cleanup] Marked ${envId} as destroyed (path missing)`);
+    return;
+  }
+
   const provider = getIsolationProvider();
 
   try {
@@ -120,7 +129,24 @@ export async function removeEnvironment(
 
     console.log(`[Cleanup] Removed environment ${envId} at ${env.working_path}`);
   } catch (error) {
-    const err = error as Error;
+    const err = error as Error & { code?: string; stderr?: string };
+    const errorText = `${err.message} ${err.stderr ?? ''}`;
+
+    // Handle "directory not found" errors gracefully
+    // Be specific: check that the error is about the worktree path, not unrelated paths
+    const isPathNotFoundError =
+      err.code === 'ENOENT' ||
+      (errorText.includes(env.working_path) &&
+        (errorText.includes('No such file or directory') ||
+          errorText.includes('does not exist') ||
+          errorText.includes('is not a working tree')));
+
+    if (isPathNotFoundError) {
+      await isolationEnvDb.updateStatus(envId, 'destroyed');
+      console.log(`[Cleanup] Directory removed externally for ${envId}, marked as destroyed`);
+      return;
+    }
+
     console.error(`[Cleanup] Failed to remove environment ${envId}:`, err.message);
     throw err;
   }
@@ -341,14 +367,37 @@ async function getMainBranch(repoPath: string): Promise<string> {
 }
 
 /**
- * Check if a worktree path exists
+ * Check if a worktree path exists and is functional
+ * Returns false for: path not found, not a git repo, or git directory missing
+ * Only throws on truly unexpected errors (e.g., EACCES permission denied)
  */
 async function worktreeExists(path: string): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', path, 'rev-parse', '--git-dir']);
     return stdout.trim().length > 0;
-  } catch {
-    return false;
+  } catch (error) {
+    const err = error as Error & { code?: string };
+    const errorText = err.message.toLowerCase();
+
+    // Return false for expected "not found" scenarios:
+    // - ENOENT: path doesn't exist
+    // - "No such file or directory": path or .git missing
+    // - "not a git repo/repository": path exists but .git is missing/corrupted
+    if (
+      err.code === 'ENOENT' ||
+      errorText.includes('no such file or directory') ||
+      errorText.includes('not a git repo')
+    ) {
+      return false;
+    }
+
+    // Log and re-throw unexpected errors (EACCES, timeout, etc.)
+    console.error('[Cleanup] Unexpected error checking worktree existence:', {
+      path,
+      error: err.message,
+      code: err.code,
+    });
+    throw err;
   }
 }
 

@@ -5,6 +5,7 @@
  * Migrated from src/utils/git.ts with consistent semantics.
  */
 
+import { access } from 'node:fs/promises';
 import { createHash } from 'crypto';
 import { join } from 'path';
 
@@ -61,6 +62,21 @@ export class WorktreeProvider implements IIsolationProvider {
     // For worktrees, envId is the worktree path
     const worktreePath = envId;
 
+    // Check if worktree path exists before attempting removal (optimization to avoid spawning git)
+    try {
+      await access(worktreePath);
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === 'ENOENT') {
+        // Path genuinely doesn't exist - nothing to remove
+        console.log(`[WorktreeProvider] Path ${worktreePath} already removed`);
+        return;
+      }
+      // Re-throw other errors (permission issues, etc.) with context
+      console.error(`[WorktreeProvider] Access check failed for ${worktreePath}:`, err.message);
+      throw new Error(`Failed to destroy worktree at ${worktreePath}: ${err.message}`);
+    }
+
     // Get canonical repo path to run git commands
     const repoPath = await getCanonicalRepoPath(worktreePath);
 
@@ -70,7 +86,24 @@ export class WorktreeProvider implements IIsolationProvider {
     }
     gitArgs.push(worktreePath);
 
-    await execFileAsync('git', gitArgs, { timeout: 30000 });
+    try {
+      await execFileAsync('git', gitArgs, { timeout: 30000 });
+    } catch (error) {
+      const err = error as Error & { stderr?: string };
+
+      // Handle "directory not found" errors gracefully
+      // Check both message and stderr for robustness across git versions/locales
+      const errorText = `${err.message} ${err.stderr ?? ''}`;
+      if (errorText.includes('No such file or directory') ||
+          errorText.includes('does not exist') ||
+          errorText.includes('is not a working tree')) {
+        console.log(`[WorktreeProvider] Worktree ${worktreePath} already removed`);
+        return;
+      }
+
+      // Re-throw other errors
+      throw err;
+    }
   }
 
   /**
