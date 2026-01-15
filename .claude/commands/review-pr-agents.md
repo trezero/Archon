@@ -25,6 +25,7 @@ Run a comprehensive pull request review using multiple specialized agents, each 
    - **errors** - Check error handling for silent failures
    - **types** - Analyze type design and invariants (if new types added)
    - **code** - General code review for project guidelines
+   - **docs** - Update stale documentation (CLAUDE.md, README, /docs)
    - **simplify** - Simplify code for clarity and maintainability
    - **all** - Run all applicable reviews (default)
 
@@ -41,6 +42,7 @@ Run a comprehensive pull request review using multiple specialized agents, each 
    - **If comments/docs added**: comment-analyzer
    - **If error handling changed**: silent-failure-hunter
    - **If types added/modified**: type-design-analyzer
+   - **If behavior/features changed**: docs-impact-agent (updates project docs)
    - **After passing review**: code-simplifier (polish and refine)
 
 5. **Launch Review Agents**
@@ -188,6 +190,13 @@ Run a comprehensive pull request review using multiple specialized agents, each 
 - Improves clarity and readability
 - Applies project standards
 - Preserves functionality
+
+**docs-impact-agent**:
+
+- Scans CLAUDE.md, README, /docs for staleness
+- **Directly updates** docs that are out of date
+- Fixes everything: incorrect info, missing features, typos
+- Keeps updates concise and natural
 
 ## Tips:
 
