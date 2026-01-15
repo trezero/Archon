@@ -10,7 +10,7 @@
  * For Docker: /.archon/
  */
 
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { homedir } from 'os';
 
 /**
@@ -101,6 +101,34 @@ export function getCommandFolderSearchPaths(configuredFolder?: string): string[]
  */
 export function getWorkflowFolderSearchPaths(): string[] {
   return ['.archon/workflows', '.claude/workflows', '.agents/workflows'];
+}
+
+/**
+ * Get the path to the app's base directory
+ * This is where default commands/workflows are stored for copying to new repos
+ *
+ * In Docker: /app/.archon
+ * Locally: {repo_root}/.archon
+ */
+export function getAppArchonBasePath(): string {
+  // This file is at src/utils/archon-paths.ts
+  // Go up from src/utils to repo root
+  const srcDir = dirname(dirname(import.meta.dir));
+  return join(srcDir, '.archon');
+}
+
+/**
+ * Get the path to the app's bundled default commands directory
+ */
+export function getDefaultCommandsPath(): string {
+  return join(getAppArchonBasePath(), 'commands', 'defaults');
+}
+
+/**
+ * Get the path to the app's bundled default workflows directory
+ */
+export function getDefaultWorkflowsPath(): string {
+  return join(getAppArchonBasePath(), 'workflows', 'defaults');
 }
 
 /**

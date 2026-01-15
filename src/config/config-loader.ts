@@ -156,6 +156,9 @@ function getDefaults(): MergedConfig {
       folder: undefined,
       autoLoad: true,
     },
+    defaults: {
+      copyDefaults: true,
+    },
   };
 }
 
@@ -267,6 +270,14 @@ function mergeRepoConfig(merged: MergedConfig, repo: RepoConfig): MergedConfig {
       ...result.commands,
       folder: repo.commands.folder ?? result.commands.folder,
       autoLoad: repo.commands.autoLoad ?? result.commands.autoLoad,
+    };
+  }
+
+  // Defaults config
+  if (repo.defaults) {
+    result.defaults = {
+      ...result.defaults,
+      copyDefaults: repo.defaults.copyDefaults ?? result.defaults.copyDefaults,
     };
   }
 

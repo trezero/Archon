@@ -79,9 +79,15 @@ worktree:
   copyFiles:  # Optional: Additional files to copy to worktrees
     - .env.example -> .env  # Rename during copy
     - .vscode               # Copy entire directory
+
+# Defaults configuration
+defaults:
+  copyDefaults: false  # Set to false to skip copying bundled commands/workflows on clone
 ```
 
 **Default behavior:** The `.archon/` directory is always copied to worktrees automatically (contains artifacts, plans, workflows). Use `copyFiles` only for additional files like `.env` or `.vscode`.
+
+**Defaults behavior:** When you `/clone` a repository, bundled default commands and workflows are automatically copied to `.archon/commands/` and `.archon/workflows/` if those directories don't exist. Set `defaults.copyDefaults: false` to skip this.
 
 ## Environment Variables
 

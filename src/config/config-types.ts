@@ -108,6 +108,18 @@ export interface RepoConfig {
      */
     copyFiles?: string[];
   };
+
+  /**
+   * Default commands/workflows configuration
+   */
+  defaults?: {
+    /**
+     * Copy bundled default commands and workflows on clone
+     * Set to false to skip copying defaults
+     * @default true
+     */
+    copyDefaults?: boolean;
+  };
 }
 
 /**
@@ -137,5 +149,8 @@ export interface MergedConfig {
      */
     folder?: string;
     autoLoad: boolean;
+  };
+  defaults: {
+    copyDefaults: boolean;
   };
 }

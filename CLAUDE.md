@@ -593,6 +593,12 @@ if (streamingMode === 'batch') {
 - On `/clone`, auto-load commands from `.archon/commands/` if present
 - Commands are registered per-codebase (not global)
 
+**Default Commands/Workflows:**
+- Bundled defaults are stored in `.archon/commands/defaults/` and `.archon/workflows/defaults/`
+- On `/clone`, if target repo has no `.archon/commands/`, defaults are copied automatically
+- Defaults are copied flat (not into a `defaults/` subfolder in target)
+- Opt-out: Set `defaults.copyDefaults: false` in target's `.archon/config.yaml`
+
 ### Command Types
 
 **1. Codebase Commands** (per-repo):
@@ -614,16 +620,28 @@ if (streamingMode === 'batch') {
 - Concurrent execution prevented - only one workflow can run per conversation at a time
 - Commands: `/workflow list`, `/workflow reload`, `/workflow cancel`
 
+### Default Commands and Workflows
+
+This repo includes bundled default commands in `.archon/commands/defaults/` and workflows in `.archon/workflows/defaults/`. These serve two purposes:
+
+1. **For this repo**: Loaded via recursive search (developers working on Archon can use these)
+2. **For target repos**: Copied automatically on `/clone` to give users a starting point
+
+To opt out of automatic copying, add to target repo's `.archon/config.yaml`:
+```yaml
+defaults:
+  copyDefaults: false
+```
+
 ### Example Commands in This Repo
 
-This repo includes example commands in `.archon/commands/` and `.claude/commands/` for reference:
-- `plan.md`, `implement.md`, `create-pr.md` - Feature development
-- `investigate-issue.md`, `implement-issue.md` - GitHub issue workflow
-- `assist.md` - General assistance
+This repo includes 16 default commands in `.archon/commands/defaults/` and 8 default workflows in `.archon/workflows/defaults/`. Key examples:
+- Feature development: `implement.md`, `create-pr.md`
+- GitHub issue workflow: `investigate-issue.md`, `implement-issue.md`
+- Code review: `code-review-agent.md`, `synthesize-review.md`
+- General assistance: `assist.md`
 
-These are **not auto-loaded globally**. To use them:
-1. Clone a repo that contains them, or
-2. Manually add as global templates: `/template-add plan .archon/commands/plan.md`
+These are **automatically copied** to new repos on `/clone` (unless opted out).
 
 ### Error Handling
 

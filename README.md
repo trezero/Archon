@@ -710,13 +710,15 @@ Bot: Repository cloned successfully!
 
      Codebase: my-project
      Path: ~/.archon/workspaces/user/my-project
+     ✓ Copied 16 default commands
+     ✓ Copied 8 default workflows
 
      Session reset - starting fresh on next message.
 
      You can now start asking questions about the code.
 ```
 
-> **Note:** If the repo has `.archon/commands/` or `.claude/commands/`, commands are auto-loaded. Otherwise, you start with no commands (just direct AI chat).
+> **Note:** Default commands and workflows are automatically copied to new repos. If the repo already has `.archon/commands/` or `.archon/workflows/`, existing files are preserved. To opt out, set `defaults.copyDefaults: false` in the repo's `.archon/config.yaml`.
 
 **Ask Questions Directly**
 ```

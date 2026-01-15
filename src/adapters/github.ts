@@ -18,6 +18,7 @@ import { getLinkedIssueNumbers } from '../utils/github-graphql';
 import { onConversationClosed } from '../services/cleanup-service';
 import { isWorktreePath } from '../utils/git';
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
+import { copyDefaultsToRepo } from '../utils/defaults-copy';
 import { ConversationLockManager } from '../utils/conversation-lock';
 
 const execAsync = promisify(exec);
@@ -666,8 +667,28 @@ ${userComment}`;
     // 8. Ensure repo ready (clone if needed, sync if new conversation)
     await this.ensureRepoReady(owner, repo, defaultBranch, repoPath, isNewConversation);
 
-    // 9. Auto-load commands if new codebase
+    // 9. Copy defaults and auto-load commands if new codebase
     if (isNewCodebase) {
+      // Copy default commands/workflows if target doesn't have them (non-fatal)
+      try {
+        const copyResult = await copyDefaultsToRepo(repoPath);
+        if (copyResult.commandsCopied > 0 || copyResult.workflowsCopied > 0) {
+          console.log('[GitHub] Copied defaults', copyResult);
+        }
+        if (copyResult.commandsFailed > 0 || copyResult.workflowsFailed > 0) {
+          console.warn('[GitHub] Some defaults failed to copy', {
+            commandsFailed: copyResult.commandsFailed,
+            workflowsFailed: copyResult.workflowsFailed,
+          });
+        }
+      } catch (copyError) {
+        const err = copyError as Error;
+        console.error('[GitHub] Failed to copy defaults (continuing with setup):', {
+          repoPath,
+          error: err.message,
+        });
+      }
+
       await this.autoDetectAndLoadCommands(repoPath, codebase.id);
     }
 
