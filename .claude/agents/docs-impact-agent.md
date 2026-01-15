@@ -166,7 +166,11 @@ When writing updates:
 **When reviewing an open PR**, commit and push your documentation updates to the PR branch:
 
 ```bash
-# Checkout the PR branch
+# First, check which branch you're on
+git branch --show-current
+
+# If already on the PR branch (common in worktrees), skip checkout
+# If on main, checkout the PR branch first
 git checkout <pr-branch>
 
 # Stage only documentation files
@@ -180,6 +184,7 @@ git push origin <pr-branch>
 ```
 
 **CRITICAL RULES:**
+- **Check branch first**: You may already be on the PR branch (especially in worktrees) - don't checkout unnecessarily
 - **PR branch**: Always commit and push doc updates to the PR branch
 - **Never push to main**: Do not commit directly to main without explicit user approval
 - **No PR context**: If there's no open PR, leave changes uncommitted and report what was changed
