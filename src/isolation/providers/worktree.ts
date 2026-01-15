@@ -94,9 +94,11 @@ export class WorktreeProvider implements IIsolationProvider {
       // Handle "directory not found" errors gracefully
       // Check both message and stderr for robustness across git versions/locales
       const errorText = `${err.message} ${err.stderr ?? ''}`;
-      if (errorText.includes('No such file or directory') ||
-          errorText.includes('does not exist') ||
-          errorText.includes('is not a working tree')) {
+      if (
+        errorText.includes('No such file or directory') ||
+        errorText.includes('does not exist') ||
+        errorText.includes('is not a working tree')
+      ) {
         console.log(`[WorktreeProvider] Worktree ${worktreePath} already removed`);
         return;
       }

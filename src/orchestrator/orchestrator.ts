@@ -45,6 +45,17 @@ import {
 } from '../services/cleanup-service';
 
 /**
+ * Error thrown when isolation is required but cannot be provided (e.g., limit reached)
+ * This error signals that workflow execution should be blocked.
+ */
+class IsolationBlockedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'IsolationBlockedError';
+  }
+}
+
+/**
  * Format the worktree limit reached message
  */
 function formatWorktreeLimitMessage(
@@ -114,7 +125,12 @@ async function validateAndResolveIsolation(
     return { cwd: env.working_path, env, isNew: true };
   }
 
-  return { cwd: codebase.default_cwd, env: null, isNew: false };
+  // When resolveIsolation returns null, it means isolation was required but blocked (e.g., limit reached)
+  // The limit message has already been sent to the user by resolveIsolation
+  // We must block execution by throwing an error
+  throw new IsolationBlockedError(
+    'Isolation environment required but could not be created (limit reached or other blocking condition)'
+  );
 }
 
 /**
@@ -254,12 +270,12 @@ async function resolveIsolation(
     const err = error as Error;
     console.error('[Orchestrator] Failed to create isolation:', error);
 
-    // Notify user they're working in shared directory instead of isolated worktree
+    // Notify user that execution is blocked due to isolation failure
     await platform.sendMessage(
       conversationId,
-      `**Warning:** Could not create isolated workspace (${err.message}). ` +
-        `Working directly in main repository at \`${codebase.default_cwd}\`. ` +
-        'Changes will affect the shared codebase.'
+      `**Error:** Could not create isolated workspace (${err.message}). ` +
+        'Execution blocked to prevent changes to shared codebase. ' +
+        'Please resolve the issue and try again.'
     );
     return null;
   }
@@ -663,13 +679,29 @@ export async function handleMessage(
       : null;
 
     // Validate and resolve isolation - this is the single source of truth
-    const { cwd, isNew: isNewIsolation } = await validateAndResolveIsolation(
-      conversation,
-      codebase,
-      platform,
-      conversationId,
-      isolationHints
-    );
+    let cwd: string;
+    let isNewIsolation: boolean;
+    try {
+      const result = await validateAndResolveIsolation(
+        conversation,
+        codebase,
+        platform,
+        conversationId,
+        isolationHints
+      );
+      cwd = result.cwd;
+      isNewIsolation = result.isNew;
+    } catch (error) {
+      if (error instanceof IsolationBlockedError) {
+        // Isolation was blocked (e.g., worktree limit reached)
+        // User has already been informed by validateAndResolveIsolation
+        // Stop execution by returning early
+        console.log(`[Orchestrator] Isolation blocked: ${error.message}`);
+        return;
+      }
+      // Re-throw other errors
+      throw error;
+    }
 
     // Get or create session (handle plan→execute transition)
     let session = await sessionDb.getActiveSession(conversation.id);

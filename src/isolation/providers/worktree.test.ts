@@ -444,7 +444,9 @@ describe('WorktreeProvider', () => {
       getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
       // git worktree remove fails
       execSpy.mockRejectedValueOnce(
-        new Error("fatal: cannot change to '/workspace/worktrees/repo/issue-42': No such file or directory")
+        new Error(
+          "fatal: cannot change to '/workspace/worktrees/repo/issue-42': No such file or directory"
+        )
       );
 
       // Should not throw

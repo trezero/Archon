@@ -268,7 +268,9 @@ describe('cleanup-service', () => {
       mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
 
       // provider.destroy fails with "No such file or directory"
-      mockDestroy.mockRejectedValueOnce(new Error('fatal: cannot change to \'/path/exists/but/git/fails\': No such file or directory'));
+      mockDestroy.mockRejectedValueOnce(
+        new Error("fatal: cannot change to '/path/exists/but/git/fails': No such file or directory")
+      );
 
       await removeEnvironment(envId);
 
@@ -300,7 +302,9 @@ describe('cleanup-service', () => {
       mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
 
       // provider.destroy fails with a different error (uncommitted changes)
-      mockDestroy.mockRejectedValueOnce(new Error('fatal: cannot remove: You have local modifications'));
+      mockDestroy.mockRejectedValueOnce(
+        new Error('fatal: cannot remove: You have local modifications')
+      );
 
       // Should re-throw the error
       await expect(removeEnvironment(envId)).rejects.toThrow('local modifications');

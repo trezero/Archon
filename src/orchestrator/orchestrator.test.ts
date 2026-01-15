@@ -112,6 +112,25 @@ mock.module('../workflows/loader', () => ({
   discoverWorkflows: mockDiscoverWorkflows,
 }));
 
+// Cleanup service mocks for worktree limit tests
+const mockCleanupToMakeRoom = mock(() => Promise.resolve({ removed: [], skipped: [] }));
+const mockGetWorktreeStatusBreakdown = mock(() =>
+  Promise.resolve({
+    total: 0,
+    limit: 25,
+    merged: 0,
+    stale: 0,
+    active: 0,
+  })
+);
+
+mock.module('../services/cleanup-service', () => ({
+  cleanupToMakeRoom: mockCleanupToMakeRoom,
+  getWorktreeStatusBreakdown: mockGetWorktreeStatusBreakdown,
+  MAX_WORKTREES_PER_CODEBASE: 25,
+  STALE_THRESHOLD_DAYS: 7,
+}));
+
 // Import real orchestrator to spread its exports, then override readCommandFile
 import * as realOrchestrator from './orchestrator';
 mock.module('./orchestrator', () => ({
@@ -1074,6 +1093,198 @@ Labels: correct`;
       expect(promptArg).toContain('Title: Correct Title');
       expect(promptArg).toContain('Labels: correct');
       // The full message is still sent (as User Request), but the extracted context is from issueContext
+    });
+  });
+
+  describe('worktree limit blocking', () => {
+    // Shared fixtures for worktree limit tests
+    const limitTestConversation: Conversation = {
+      id: 'conv-1',
+      platform_type: 'github',
+      platform_conversation_id: 'owner/repo#42',
+      ai_assistant_type: 'claude',
+      codebase_id: 'codebase-1',
+      isolation_env_id: null,
+      cwd: null,
+      last_activity_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+
+    const limitTestCodebase: Codebase = {
+      id: 'codebase-1',
+      name: 'test-repo',
+      repository_url: 'https://github.com/owner/repo',
+      default_cwd: '/workspace/test-repo',
+      ai_assistant_type: 'claude',
+      commands: {},
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+
+    function createMockAiClient(): { sendQuery: ReturnType<typeof mock> } {
+      return {
+        sendQuery: mock(async function* () {
+          yield { type: 'text', content: 'AI response' };
+        }),
+      };
+    }
+
+    function getSentMessages(): string[] {
+      return platform.sendMessage.mock.calls.map(call => call[1] as string);
+    }
+
+    function setupBaseWorktreeLimitTest(): void {
+      mockGetOrCreateConversation.mockResolvedValue(limitTestConversation);
+      mockGetCodebase.mockResolvedValue(limitTestCodebase);
+      mockIsolationEnvFindByWorkflow.mockResolvedValue(null);
+    }
+
+    beforeEach(() => {
+      platform = new MockPlatformAdapter();
+
+      // Reset all mocks
+      mockGetOrCreateConversation.mockClear();
+      mockUpdateConversation.mockClear();
+      mockGetCodebase.mockClear();
+      mockGetActiveSession.mockClear();
+      mockCreateSession.mockClear();
+      mockUpdateSession.mockClear();
+      mockDeactivateSession.mockClear();
+      mockGetAssistantClient.mockClear();
+      mockIsolationEnvGetById.mockClear();
+      mockIsolationEnvFindByWorkflow.mockClear();
+      mockIsolationEnvCreate.mockClear();
+      mockIsolationEnvCountByCodebase.mockClear();
+      mockCleanupToMakeRoom.mockClear();
+      mockGetWorktreeStatusBreakdown.mockClear();
+      mockIsolationProviderCreate.mockClear();
+
+      // Setup git spies
+      spyWorktreeExists = spyOn(gitUtils, 'worktreeExists').mockResolvedValue(false);
+      spyFindWorktreeByBranch = spyOn(gitUtils, 'findWorktreeByBranch').mockResolvedValue(null);
+      spyGetCanonicalRepoPath = spyOn(gitUtils, 'getCanonicalRepoPath').mockResolvedValue(
+        '/workspace'
+      );
+    });
+
+    afterEach(() => {
+      restoreGitSpies();
+    });
+
+    test('should block execution when worktree limit is reached and cannot be cleaned up', async () => {
+      setupBaseWorktreeLimitTest();
+      mockIsolationEnvCountByCodebase.mockResolvedValue(25);
+      mockCleanupToMakeRoom.mockResolvedValue({ removed: [], skipped: [] });
+      mockGetWorktreeStatusBreakdown.mockResolvedValue({
+        total: 25,
+        limit: 25,
+        merged: 0,
+        stale: 0,
+        active: 25,
+      });
+
+      const mockClient = createMockAiClient();
+      mockGetAssistantClient.mockReturnValue(mockClient);
+
+      await handleMessage(platform, 'owner/repo#42', 'Test message to trigger workflow');
+
+      const sentMessages = getSentMessages();
+      const limitMessage = sentMessages.find(m => m.includes('Worktree limit reached'));
+      expect(limitMessage).toBeDefined();
+      expect(limitMessage).toContain('25/25');
+      expect(limitMessage).toContain('test-repo');
+      expect(limitMessage).toContain('/worktree');
+
+      expect(mockClient.sendQuery).not.toHaveBeenCalled();
+      expect(mockIsolationEnvCreate).not.toHaveBeenCalled();
+    });
+
+    test('should continue execution after successful auto-cleanup', async () => {
+      setupBaseWorktreeLimitTest();
+      mockIsolationEnvCountByCodebase.mockResolvedValueOnce(25).mockResolvedValueOnce(24);
+      mockCleanupToMakeRoom.mockResolvedValue({ removed: ['branch-1'], skipped: [] });
+      mockGetWorktreeStatusBreakdown.mockResolvedValue({
+        total: 24,
+        limit: 25,
+        merged: 1,
+        stale: 0,
+        active: 23,
+      });
+
+      const isolationEnv = {
+        id: 'env-123',
+        provider: 'worktree',
+        working_path: '/workspace/worktrees/test-repo/issue-42',
+        branch_name: 'issue-42',
+        status: 'active',
+        codebase_id: 'codebase-1',
+        created_at: new Date(),
+        updated_at: new Date(),
+        metadata: {},
+      };
+      mockIsolationProviderCreate.mockResolvedValue(isolationEnv);
+      mockIsolationEnvCreate.mockResolvedValue(isolationEnv);
+
+      const mockClient = createMockAiClient();
+      mockGetAssistantClient.mockReturnValue(mockClient);
+
+      await handleMessage(platform, 'owner/repo#42', 'Test message to trigger workflow');
+
+      const sentMessages = getSentMessages();
+      const cleanupMessage = sentMessages.find(m => m.includes('Cleaned up'));
+      expect(cleanupMessage).toBeDefined();
+      expect(cleanupMessage).toContain('1');
+
+      expect(mockClient.sendQuery).toHaveBeenCalled();
+      expect(mockIsolationEnvCreate).toHaveBeenCalled();
+    });
+
+    test('should block execution when cleanup succeeds but count still at limit', async () => {
+      setupBaseWorktreeLimitTest();
+      mockIsolationEnvCountByCodebase.mockResolvedValueOnce(25).mockResolvedValueOnce(25);
+      mockCleanupToMakeRoom.mockResolvedValue({ removed: ['branch-1'], skipped: [] });
+      mockGetWorktreeStatusBreakdown.mockResolvedValue({
+        total: 25,
+        limit: 25,
+        merged: 0,
+        stale: 0,
+        active: 25,
+      });
+
+      const mockClient = createMockAiClient();
+      mockGetAssistantClient.mockReturnValue(mockClient);
+
+      await handleMessage(platform, 'owner/repo#42', 'Test message to trigger workflow');
+
+      const sentMessages = getSentMessages();
+      expect(sentMessages.some(m => m.includes('Cleaned up'))).toBe(true);
+      expect(sentMessages.some(m => m.includes('Worktree limit reached'))).toBe(true);
+
+      expect(mockClient.sendQuery).not.toHaveBeenCalled();
+      expect(mockIsolationEnvCreate).not.toHaveBeenCalled();
+    });
+
+    test('should block execution when isolation provider fails', async () => {
+      setupBaseWorktreeLimitTest();
+      mockIsolationEnvCountByCodebase.mockResolvedValue(10);
+      mockIsolationProviderCreate.mockRejectedValue(new Error('Git worktree creation failed'));
+
+      const mockClient = createMockAiClient();
+      mockGetAssistantClient.mockReturnValue(mockClient);
+
+      await handleMessage(platform, 'owner/repo#42', 'Test message to trigger workflow');
+
+      const sentMessages = getSentMessages();
+      const errorMessage = sentMessages.find(m =>
+        m.includes('Could not create isolated workspace')
+      );
+      expect(errorMessage).toBeDefined();
+      expect(errorMessage).toContain('Execution blocked');
+      expect(errorMessage).toContain('Git worktree creation failed');
+
+      expect(mockClient.sendQuery).not.toHaveBeenCalled();
+      expect(mockIsolationEnvCreate).not.toHaveBeenCalled();
     });
   });
 });

@@ -1597,9 +1597,10 @@ describe('Workflow Executor', () => {
         // Verify user received cleanup error message
         const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
         const calls = sendMessage.mock.calls;
-        const cleanupErrorMessages = calls.filter((call: unknown[]) =>
-          (call[1] as string).includes('Workflow blocked') &&
-          (call[1] as string).includes('/workflow cancel')
+        const cleanupErrorMessages = calls.filter(
+          (call: unknown[]) =>
+            (call[1] as string).includes('Workflow blocked') &&
+            (call[1] as string).includes('/workflow cancel')
         );
         expect(cleanupErrorMessages.length).toBe(1);
 

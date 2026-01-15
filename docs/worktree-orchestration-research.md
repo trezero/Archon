@@ -399,7 +399,11 @@ async function validateAndResolveIsolation(
     return { cwd: env.working_path, env, isNew: true };
   }
 
-  return { cwd: codebase.default_cwd, env: null, isNew: false };
+  // When resolveIsolation returns null, isolation was required but blocked (e.g., limit reached)
+  // Throw error to block execution - do not fall back to main repo
+  throw new IsolationBlockedError(
+    'Isolation environment required but could not be created (limit reached or other blocking condition)'
+  );
 }
 
 /**
@@ -876,9 +880,15 @@ async handleWebhook(...) {
 
 **Scope**: Enforce limits, provide helpful cleanup commands.
 
-**Limit Enforcement UX**:
+**Limit Enforcement Behavior**:
 When user hits MAX_WORKTREES_PER_CODEBASE (default: 25):
+1. Auto-cleanup attempts to remove merged branches
+2. If auto-cleanup succeeds, execution continues with a new worktree
+3. If auto-cleanup fails or is insufficient, **execution is blocked** (user sees limit message)
 
+**Note**: The system does NOT fall back to running in the main repo directory when the limit is hit. This prevents race conditions and branch contamination from multiple workflows running in the same directory.
+
+**Limit Message UX**:
 ```
 You have 25 active worktrees for **myproject** (limit reached).
 
