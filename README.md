@@ -630,98 +630,151 @@ docker compose --profile with-db down      # If using Option B
 
 ### Available Commands
 
-Once your platform adapter is running, you can use these commands:
+Once your platform adapter is running, you can use these commands. Type `/help` to see this list.
 
-| Command | Description | Example |
-|---------|-------------|---------|
-| `/help` | Show available commands | `/help` |
-| `/clone <url>` | Clone a GitHub repository | `/clone https://github.com/user/repo` |
-| `/repos` | List cloned repositories | `/repos` |
-| `/status` | Show conversation state | `/status` |
-| `/getcwd` | Show current working directory | `/getcwd` |
-| `/setcwd <path>` | Change working directory | `/setcwd ~/.archon/workspaces/repo` |
-| `/command-set <name> <path>` | Register a custom command | `/command-set analyze .claude/commands/analyze.md` |
-| `/load-commands <folder>` | Bulk load commands from folder | `/load-commands .claude/commands` |
-| `/command-invoke <name> [args]` | Execute custom command | `/command-invoke plan "Add dark mode"` |
-| `/commands` | List registered commands | `/commands` |
-| `/reset` | Clear active session | `/reset` |
+#### Command Templates (Global)
+
+| Command | Description |
+|---------|-------------|
+| `/<name> [args]` | Invoke a template directly (e.g., `/plan "Add dark mode"`) |
+| `/templates` | List all available templates |
+| `/template-add <name> <path>` | Add template from file |
+| `/template-delete <name>` | Remove a template |
+
+#### Codebase Commands (Per-Project)
+
+| Command | Description |
+|---------|-------------|
+| `/command-set <name> <path> [text]` | Register a command from file |
+| `/load-commands <folder>` | Bulk load commands (recursive) |
+| `/command-invoke <name> [args]` | Execute a codebase command |
+| `/commands` | List registered commands |
+
+> **Note:** Commands use relative paths (e.g., `.archon/commands/plan.md`)
+
+#### Codebase Management
+
+| Command | Description |
+|---------|-------------|
+| `/clone <repo-url>` | Clone repository |
+| `/repos` | List repositories (numbered) |
+| `/repo <#\|name> [pull]` | Switch repo (auto-loads commands) |
+| `/repo-remove <#\|name>` | Remove repo and codebase record |
+| `/getcwd` | Show working directory |
+| `/setcwd <path>` | Set working directory |
+
+> **Tip:** Use `/repo` for quick switching between cloned repos, `/setcwd` for manual paths.
+
+#### Worktrees (Isolation)
+
+| Command | Description |
+|---------|-------------|
+| `/worktree create <branch>` | Create isolated worktree |
+| `/worktree list` | Show worktrees for this repo |
+| `/worktree remove [--force]` | Remove current worktree |
+| `/worktree cleanup merged\|stale` | Clean up worktrees |
+| `/worktree orphans` | Show all worktrees from git |
+
+#### Workflows
+
+| Command | Description |
+|---------|-------------|
+| `/workflow list` | Show available workflows |
+| `/workflow reload` | Reload workflow definitions |
+| `/workflow cancel` | Cancel running workflow |
+
+> **Note:** Workflows are YAML files in `.archon/workflows/`
+
+#### Session Management
+
+| Command | Description |
+|---------|-------------|
+| `/status` | Show conversation state |
+| `/reset` | Clear session completely |
+| `/reset-context` | Reset AI context, keep worktree |
+| `/help` | Show all commands |
+
+#### Setup
+
+| Command | Description |
+|---------|-------------|
+| `/init` | Create `.archon` structure in current repo |
 
 ### Example Workflow (Telegram)
 
-**🚀 Initial Setup**
+**Clone a Repository**
 ```
-You: /clone https://github.com/anthropics/anthropic-sdk-typescript
+You: /clone https://github.com/user/my-project
 
-Bot: ✅ Repository cloned successfully!
+Bot: Repository cloned successfully!
 
-     📁 Codebase: anthropic-sdk-typescript
-     📂 Path: ~/.archon/workspaces/anthropics/anthropic-sdk-typescript
+     Codebase: my-project
+     Path: ~/.archon/workspaces/user/my-project
 
-     🔍 Detected .claude/commands/ folder
+     Session reset - starting fresh on next message.
 
-You: /load-commands .claude/commands
-
-Bot: ✅ Loaded 5 commands:
-     • prime - Research codebase
-     • plan - Create implementation plan
-     • execute - Implement feature
-     • validate - Run validation
-     • commit - Create git commit
+     You can now start asking questions about the code.
 ```
 
-**💬 Asking Questions**
+> **Note:** If the repo has `.archon/commands/` or `.claude/commands/`, commands are auto-loaded. Otherwise, you start with no commands (just direct AI chat).
+
+**Ask Questions Directly**
 ```
-You: What files are in this repo?
+You: What's the structure of this repo?
 
-Bot: 📋 Let me analyze the repository structure for you...
-
-     [Claude streams detailed analysis]
-```
-
-**🔧 Working with Commands**
-```
-You: /command-invoke prime
-
-Bot: 🔍 Starting codebase research...
-
-     [Claude analyzes codebase structure, dependencies, patterns]
-
-You: /command-invoke plan "Add retry logic to API calls"
-
-Bot: 📝 Creating implementation plan...
-
-     [Claude creates detailed plan with steps]
+Bot: [Claude analyzes and responds...]
 ```
 
-**ℹ️ Checking Status**
+**Create Custom Commands (Optional)**
+```
+You: /init
+
+Bot: Created .archon structure:
+       .archon/
+       ├── config.yaml
+       └── commands/
+           └── example.md
+
+     Use /load-commands .archon/commands to register commands.
+```
+
+You can then create your own commands in `.archon/commands/` and load them with `/load-commands`.
+
+**Check Status**
 ```
 You: /status
 
-Bot: 📊 Conversation Status
+Bot: Platform: telegram
+     AI Assistant: claude
 
-     🤖 Platform: telegram
-     🧠 AI Assistant: claude
+     Codebase: my-project
+     Repository: https://github.com/user/my-project
 
-     📦 Codebase: anthropic-sdk-typescript
-     🔗 Repository: https://github.com/anthropics/anthropic-sdk-typescript
-     📂 Working Directory: ~/.archon/workspaces/anthropics/anthropic-sdk-typescript
+     Current Working Directory: ~/.archon/workspaces/user/my-project
 
-     🔄 Active Session: a1b2c3d4...
-
-     📋 Registered Commands:
-       • prime - Research codebase
-       • plan - Create implementation plan
-       • execute - Implement feature
-       • validate - Run validation
-       • commit - Create git commit
+     Worktrees: 0/10
 ```
 
-**🔄 Reset Session**
+**Work in Isolation with Worktrees**
+```
+You: /worktree create feature-auth
+
+Bot: Worktree created!
+
+     Branch: feature-auth
+     Path: feature-auth/
+
+     This conversation now works in isolation.
+     Run dependency install if needed (e.g., bun install).
+```
+
+**Reset Session**
 ```
 You: /reset
 
-Bot: ✅ Session cleared. Starting fresh on next message.
-     📦 Codebase configuration preserved.
+Bot: Session cleared. Starting fresh on next message.
+
+     Codebase configuration preserved.
 ```
 
 ### Example Workflow (GitHub)
@@ -868,8 +921,8 @@ Create your own commands by adding markdown files to your codebase:
 
 **1. Create command file:**
 ```bash
-mkdir -p .claude/commands
-cat > .claude/commands/analyze.md << 'EOF'
+mkdir -p .archon/commands
+cat > .archon/commands/analyze.md << 'EOF'
 You are an expert code analyzer.
 
 Analyze the following aspect of the codebase: $1
@@ -885,7 +938,7 @@ EOF
 
 **2. Load commands:**
 ```
-/load-commands .claude/commands
+/load-commands .archon/commands
 ```
 
 **3. Invoke your command:**
@@ -903,6 +956,62 @@ Commands are version-controlled with your codebase, not stored in the database.
 
 </details>
 
+<details>
+<summary><b>Workflows (Multi-Step Automation)</b></summary>
+
+Workflows are YAML files that define multi-step AI processes. They can be step-based (sequential commands) or loop-based (autonomous iteration).
+
+**Location:** `.archon/workflows/`
+
+**Example step-based workflow** (`.archon/workflows/fix-github-issue.yaml`):
+```yaml
+name: fix-github-issue
+description: |
+  Use when: User wants to FIX or RESOLVE a GitHub issue.
+  Does: Investigates root cause -> creates plan -> makes code changes -> creates PR.
+
+provider: claude
+model: sonnet
+
+steps:
+  - command: investigate-issue
+
+  - command: implement-issue
+    clearContext: true
+```
+
+**Example loop-based workflow** (autonomous iteration):
+```yaml
+name: ralph-loop
+description: Execute plan until all validations pass
+
+provider: claude
+model: sonnet
+
+loop:
+  until: "All validations pass"
+  max_iterations: 10
+  fresh_context: true
+
+prompt: |
+  Continue implementing the plan. Run validation after each change.
+  Signal completion with: "All validations pass"
+```
+
+**How workflows are invoked:**
+- AI routes to workflows automatically based on user intent
+- Workflows use commands defined in `.archon/commands/`
+- Only one workflow can run per conversation at a time
+
+**Managing workflows:**
+```
+/workflow list    # Show available workflows
+/workflow reload  # Reload definitions after editing
+/workflow cancel  # Cancel a running workflow
+```
+
+</details>
+
 ---
 
 ## Architecture
@@ -913,29 +1022,30 @@ Commands are version-controlled with your codebase, not stored in the database.
 ┌─────────────────────────────────────────────────────────┐
 │   Platform Adapters (Telegram, Slack, Discord, GitHub) │
 └──────────────────────────┬──────────────────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────────────┐
-│            Orchestrator                     │
-│   (Message Routing & Context Management)    │
-└──────────────┬──────────────────────────────┘
-               │
-       ┌───────┴────────┐
-       │                │
-       ▼                ▼
-┌─────────────┐  ┌──────────────────┐
-│  Command    │  │  AI Assistant    │
-│  Handler    │  │  Clients         │
-│  (Slash)    │  │  (Claude/Codex)  │
-└─────────────┘  └────────┬─────────┘
-       │                  │
-       └────────┬─────────┘
-                ▼
-┌─────────────────────────────────────────────┐
-│        PostgreSQL (5 Tables)                │
-│  Codebases • Conversations • Sessions       │
-│  Command Templates • Isolation Environments │
-└─────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                     Orchestrator                        │
+│          (Message Routing & Context Management)         │
+└─────────────┬───────────────────────────┬───────────────┘
+              │                           │
+      ┌───────┴────────┐          ┌───────┴────────┐
+      │                │          │                │
+      ▼                ▼          ▼                ▼
+┌───────────┐  ┌────────────┐  ┌──────────────────────────┐
+│  Command  │  │  Workflow  │  │    AI Assistant Clients  │
+│  Handler  │  │  Executor  │  │      (Claude / Codex)    │
+│  (Slash)  │  │  (YAML)    │  │                          │
+└───────────┘  └────────────┘  └──────────────────────────┘
+      │              │                      │
+      └──────────────┴──────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                   PostgreSQL (6 Tables)                 │
+│   Codebases • Conversations • Sessions • Workflow Runs  │
+│        Command Templates • Isolation Environments       │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ### Key Design Patterns
@@ -944,12 +1054,14 @@ Commands are version-controlled with your codebase, not stored in the database.
 - **Strategy Pattern**: Swappable AI assistants via `IAssistantClient` interface
 - **Session Persistence**: AI context survives restarts via database storage
 - **Generic Commands**: User-defined markdown commands versioned with Git
+- **Workflow Engine**: YAML-based multi-step automation with step and loop modes
+- **Worktree Isolation**: Git worktrees enable parallel work per conversation
 - **Concurrency Control**: Lock manager prevents race conditions
 
 ### Database Schema
 
 <details>
-<summary><b>5 tables with `remote_agent_` prefix</b></summary>
+<summary><b>6 tables with `remote_agent_` prefix</b></summary>
 
 1. **`remote_agent_codebases`** - Repository metadata
    - Commands stored as JSONB: `{command_name: {path, description}}`
@@ -973,6 +1085,11 @@ Commands are version-controlled with your codebase, not stored in the database.
 5. **`remote_agent_isolation_environments`** - Worktree isolation
    - Tracks git worktrees per issue/PR
    - Enables worktree sharing between linked issues and PRs
+
+6. **`remote_agent_workflow_runs`** - Workflow execution tracking
+   - Tracks active workflows per conversation
+   - Prevents concurrent workflow execution
+   - Stores workflow state and step progress
 
 </details>
 
