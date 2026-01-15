@@ -38,12 +38,20 @@ Run a comprehensive pull request review using multiple specialized agents, each 
 
    Based on changes:
    - **Always applicable**: code-reviewer (general quality)
+   - **Always applicable**: docs-impact-agent (updates project docs) - see exceptions below
    - **If test files changed**: pr-test-analyzer
    - **If comments/docs added**: comment-analyzer
    - **If error handling changed**: silent-failure-hunter
    - **If types added/modified**: type-design-analyzer
-   - **If behavior/features changed**: docs-impact-agent (updates project docs)
    - **After passing review**: code-simplifier (polish and refine)
+
+   **docs-impact-agent exceptions** (skip only for trivial PRs):
+   - Typo fixes (comments, strings, variable names)
+   - Test-only changes (no production code modified)
+   - Documentation-only changes (already updating docs)
+   - Config file tweaks (CI, linting, formatting)
+
+   When in doubt, run docs-impact-agent. It's better to check and find nothing than miss stale docs.
 
 5. **Launch Review Agents**
 
@@ -197,6 +205,7 @@ Run a comprehensive pull request review using multiple specialized agents, each 
 - **Directly updates** docs that are out of date
 - Fixes everything: incorrect info, missing features, typos
 - Keeps updates concise and natural
+- **MUST commit and push** changes to the PR branch when reviewing an open PR
 
 ## Tips:
 
@@ -235,6 +244,20 @@ Run a comprehensive pull request review using multiple specialized agents, each 
 3. Verify issues are resolved
 4. Push updates
 ```
+
+## docs-impact-agent Commit Behavior
+
+When the docs-impact-agent makes documentation updates while reviewing an open PR:
+
+1. **Checkout the PR branch**: `git checkout <pr-branch>`
+2. **Stage documentation changes**: `git add <changed-docs>`
+3. **Commit with clear message**: `git commit -m "docs: Update documentation for <feature>"`
+4. **Push to PR branch**: `git push origin <pr-branch>`
+
+This ensures documentation fixes are included in the PR rather than left as uncommitted changes.
+
+**Important**: Tell the docs-impact-agent to commit and push when you invoke it:
+> "...If you make any documentation updates, commit and push them to the PR branch (`<branch-name>`)."
 
 ## Notes:
 
