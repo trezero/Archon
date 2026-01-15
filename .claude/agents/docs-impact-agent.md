@@ -161,6 +161,31 @@ When writing updates:
 +   remove with appropriate flags based on their state.
 ```
 
+### 5. Commit and Push (PR Reviews Only)
+
+**When reviewing an open PR**, commit and push your documentation updates to the PR branch:
+
+```bash
+# Checkout the PR branch
+git checkout <pr-branch>
+
+# Stage only documentation files
+git add CLAUDE.md README.md docs/ CONTRIBUTING.md .env.example
+
+# Commit with clear message
+git commit -m "docs: Update documentation for <feature-or-change>"
+
+# Push to PR branch
+git push origin <pr-branch>
+```
+
+**CRITICAL RULES:**
+- **PR branch**: Always commit and push doc updates to the PR branch
+- **Never push to main**: Do not commit directly to main without explicit user approval
+- **No PR context**: If there's no open PR, leave changes uncommitted and report what was changed
+
+This ensures documentation updates go through the same review process as code changes.
+
 ## Output
 
 After making updates, provide a brief summary:
