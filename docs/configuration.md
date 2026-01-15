@@ -76,7 +76,12 @@ commands:
 # Worktree settings
 worktree:
   baseBranch: main
+  copyFiles:  # Optional: Additional files to copy to worktrees
+    - .env.example -> .env  # Rename during copy
+    - .vscode               # Copy entire directory
 ```
+
+**Default behavior:** The `.archon/` directory is always copied to worktrees automatically (contains artifacts, plans, workflows). Use `copyFiles` only for additional files like `.env` or `.vscode`.
 
 ## Environment Variables
 

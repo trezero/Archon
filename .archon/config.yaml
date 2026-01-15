@@ -14,7 +14,7 @@ commands:
 worktree:
   # Files to copy from main repo to new worktrees
   # Git-ignored files (like .env) aren't included in worktrees by default
+  # Note: .archon is ALWAYS copied automatically (no need to specify)
   copyFiles:
     - .env.example -> .env  # Copy example to .env for local dev
     - .env                   # Also copy .env if it exists
-    - .archon                # Copy all .archon files (ralph PRDs, artifacts, etc.)

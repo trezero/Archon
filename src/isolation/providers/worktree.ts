@@ -284,11 +284,14 @@ export class WorktreeProvider implements IIsolationProvider {
     canonicalRepoPath: string,
     worktreePath: string
   ): Promise<void> {
-    // Load config - log errors but don't fail worktree creation
-    let copyFiles: string[] | undefined;
+    // Default files to always copy
+    const defaultCopyFiles = ['.archon'];
+
+    // Load user config - log errors but don't fail worktree creation
+    let userCopyFiles: string[] = [];
     try {
       const repoConfig = await loadRepoConfig(canonicalRepoPath);
-      copyFiles = repoConfig.worktree?.copyFiles;
+      userCopyFiles = repoConfig.worktree?.copyFiles ?? [];
     } catch (error) {
       const err = error as Error;
       // Config errors are more serious - log as error, not warning
@@ -296,10 +299,13 @@ export class WorktreeProvider implements IIsolationProvider {
         canonicalRepoPath,
         error: err.message,
       });
-      return;
+      // Don't return - still copy default files even if config fails
     }
 
-    if (!copyFiles || copyFiles.length === 0) {
+    // Merge defaults with user config (Set deduplicates)
+    const copyFiles = [...new Set([...defaultCopyFiles, ...userCopyFiles])];
+
+    if (copyFiles.length === 0) {
       return;
     }
 
