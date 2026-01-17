@@ -18,7 +18,7 @@ Control AI coding assistants (Claude Code, Codex) remotely from Telegram, GitHub
 
 **System Requirements:**
 - Docker & Docker Compose (for deployment)
-- Node.js 20+ (for local development only)
+- [Bun](https://bun.sh) 1.0+ (for local development)
 
 **Accounts Required:**
 - GitHub account (for repository cloning via `/clone` command)
