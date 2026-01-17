@@ -394,6 +394,33 @@ export class GitHubAdapter implements IPlatformAdapter {
   }
 
   /**
+   * Fetch comment history from issue or PR
+   * Returns comments in chronological order (oldest first)
+   */
+  private async fetchCommentHistory(owner: string, repo: string, number: number): Promise<string[]> {
+    try {
+      const { data: comments } = await this.octokit.rest.issues.listComments({
+        owner,
+        repo,
+        issue_number: number,
+        per_page: 20, // Last 20 comments for context
+        sort: 'created',
+        direction: 'desc',
+      });
+
+      // Reverse to get chronological order (oldest first)
+      return [...comments].reverse().map(comment => {
+        const author = comment.user?.login ?? 'unknown';
+        const body = comment.body ?? '';
+        return `${author}: ${body}`;
+      });
+    } catch (error) {
+      console.error('[GitHub] Failed to fetch comment history:', error);
+      return [];
+    }
+  }
+
+  /**
    * Build conversationId from owner, repo, and number
    */
   private buildConversationId(owner: string, repo: string, number: number): string {
@@ -869,7 +896,14 @@ ${userComment}`;
       }
     }
 
-    // 12. Route to orchestrator with isolation hints (with lock for concurrency control)
+    // 12. Fetch comment history for thread context
+    const commentHistory = await this.fetchCommentHistory(owner, repo, number);
+    const threadContext = commentHistory.length > 0 ? commentHistory.join('\n') : undefined;
+    console.log(
+      `[GitHub] Thread context: ${threadContext ? `${String(commentHistory.length)} comments` : 'none'}`
+    );
+
+    // 13. Route to orchestrator with isolation hints (with lock for concurrency control)
     await this.lockManager.acquireLock(conversationId, async () => {
       try {
         await handleMessage(
@@ -877,7 +911,7 @@ ${userComment}`;
           conversationId,
           finalMessage,
           contextToAppend,
-          undefined, // threadContext
+          threadContext, // Pass comment history as thread context
           undefined, // parentConversationId
           isolationHints
         );

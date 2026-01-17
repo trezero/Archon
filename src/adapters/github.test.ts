@@ -918,4 +918,112 @@ describe('GitHubAdapter', () => {
       expect(isForkPR).toBe(true);
     });
   });
+
+  describe('fetchCommentHistory', () => {
+    /**
+     * Helper to create adapter with mocked listComments for fetchCommentHistory tests.
+     */
+    function createAdapterWithListComments(
+      mockListComments: ReturnType<typeof mock>
+    ): GitHubAdapter {
+      const testAdapter = new GitHubAdapter(
+        'fake-token-for-testing',
+        'fake-webhook-secret',
+        mockLockManager
+      );
+      // @ts-expect-error - accessing private property for testing
+      testAdapter.octokit = { rest: { issues: { listComments: mockListComments } } };
+      return testAdapter;
+    }
+
+    /**
+     * Helper to call the private fetchCommentHistory method.
+     */
+    async function callFetchCommentHistory(adapter: GitHubAdapter): Promise<string[]> {
+      // @ts-expect-error - calling private method for testing
+      return adapter.fetchCommentHistory('owner', 'repo', 123);
+    }
+
+    test('should fetch and format comment history', async () => {
+      const mockListComments = mock(() =>
+        Promise.resolve({
+          data: [
+            // API returns in desc order (newest first) because direction: 'desc'
+            { user: { login: 'user3' }, body: 'Third comment' },
+            { user: { login: 'user2' }, body: 'Second comment' },
+            { user: { login: 'user1' }, body: 'First comment' },
+          ],
+        })
+      );
+
+      const testAdapter = createAdapterWithListComments(mockListComments);
+      const history = await callFetchCommentHistory(testAdapter);
+
+      expect(mockListComments).toHaveBeenCalledWith({
+        owner: 'owner',
+        repo: 'repo',
+        issue_number: 123,
+        per_page: 20,
+        sort: 'created',
+        direction: 'desc',
+      });
+
+      // Should return in chronological order (oldest first) after reverse
+      expect(history).toEqual([
+        'user1: First comment',
+        'user2: Second comment',
+        'user3: Third comment',
+      ]);
+    });
+
+    test('should preserve full comment content without truncation', async () => {
+      const longBody = 'a'.repeat(5000);
+      const mockListComments = mock(() =>
+        Promise.resolve({ data: [{ user: { login: 'user1' }, body: longBody }] })
+      );
+
+      const testAdapter = createAdapterWithListComments(mockListComments);
+      const history = await callFetchCommentHistory(testAdapter);
+
+      expect(history).toHaveLength(1);
+      expect(history[0]).toBe(`user1: ${longBody}`);
+      expect(history[0]).toHaveLength(5007); // 'user1: ' (7 chars) + 5000 chars
+    });
+
+    test('should handle comments without user or body (null and undefined)', async () => {
+      const mockListComments = mock(() =>
+        Promise.resolve({
+          data: [
+            { user: null, body: 'Comment without user' },
+            { user: { login: 'user1' }, body: null },
+            { user: { login: 'user2' } }, // body property not present (undefined)
+          ],
+        })
+      );
+
+      const testAdapter = createAdapterWithListComments(mockListComments);
+      const history = await callFetchCommentHistory(testAdapter);
+
+      // Reversed from desc order, handles null user, null body, and undefined body
+      expect(history).toEqual(['user2: ', 'user1: ', 'unknown: Comment without user']);
+    });
+
+    test('should return empty array on API error', async () => {
+      const mockListComments = mock(() => Promise.reject(new Error('API rate limit exceeded')));
+
+      const testAdapter = createAdapterWithListComments(mockListComments);
+      const history = await callFetchCommentHistory(testAdapter);
+
+      expect(history).toEqual([]);
+    });
+
+    test('should handle empty comment list', async () => {
+      const mockListComments = mock(() => Promise.resolve({ data: [] }));
+
+      const testAdapter = createAdapterWithListComments(mockListComments);
+      const history = await callFetchCommentHistory(testAdapter);
+
+      expect(history).toEqual([]);
+    });
+  });
 });
