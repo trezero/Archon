@@ -85,6 +85,12 @@ describe('Workflow Executor', () => {
     mockGetAssistantClient.mockClear();
     (mockPlatform.sendMessage as ReturnType<typeof mock>).mockClear();
 
+    // Reset mock implementation to default behavior (prevents test pollution)
+    mockSendQuery.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'AI response' };
+      yield { type: 'result', sessionId: 'new-session-id' };
+    });
+
     // Create unique temp directory for each test with command files
     testDir = join(tmpdir(), `executor-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const commandsDir = join(testDir, '.archon', 'commands');
@@ -103,6 +109,26 @@ describe('Workflow Executor', () => {
       // Ignore cleanup errors
     }
   });
+
+  // Helper: Get count of workflow status updates in database
+  function getWorkflowStatusUpdates(status: 'failed' | 'completed'): unknown[][] {
+    return mockQuery.mock.calls.filter(
+      (call: unknown[]) =>
+        (call[0] as string).includes('remote_agent_workflow_runs') &&
+        (call[0] as string).includes(`status = '${status}'`)
+    );
+  }
+
+  // Helper: Parse JSONL log file into array of events
+  async function parseLogEvents(dir: string): Promise<Record<string, unknown>[]> {
+    const logPath = join(dir, '.archon', 'logs', 'test-workflow-run-id.jsonl');
+    const logContent = await readFile(logPath, 'utf-8');
+    expect(logContent.trim()).not.toBe('');
+    return logContent
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line) as Record<string, unknown>);
+  }
 
   describe('executeWorkflow', () => {
     const testWorkflow: WorkflowDefinition = {
@@ -870,12 +896,6 @@ describe('Workflow Executor', () => {
           (call[1] as string).includes('wait')
       );
       expect(hintMessages.length).toBeGreaterThan(0);
-
-      // Reset mock for other tests
-      mockSendQuery.mockImplementation(function* () {
-        yield { type: 'assistant', content: 'AI response' };
-        yield { type: 'result', sessionId: 'new-session-id' };
-      });
     });
 
     it('should include auth hint for 401 errors', async () => {
@@ -903,12 +923,6 @@ describe('Workflow Executor', () => {
         (call: unknown[]) => typeof call[1] === 'string' && (call[1] as string).includes('API key')
       );
       expect(hintMessages.length).toBeGreaterThan(0);
-
-      // Reset mock for other tests
-      mockSendQuery.mockImplementation(function* () {
-        yield { type: 'assistant', content: 'AI response' };
-        yield { type: 'result', sessionId: 'new-session-id' };
-      });
     });
 
     it('should include permission hint for 403 errors', async () => {
@@ -937,12 +951,6 @@ describe('Workflow Executor', () => {
           typeof call[1] === 'string' && (call[1] as string).includes('Permission denied')
       );
       expect(hintMessages.length).toBeGreaterThan(0);
-
-      // Reset mock for other tests
-      mockSendQuery.mockImplementation(function* () {
-        yield { type: 'assistant', content: 'AI response' };
-        yield { type: 'result', sessionId: 'new-session-id' };
-      });
     });
 
     it('should include network hint for timeout errors', async () => {
@@ -971,12 +979,145 @@ describe('Workflow Executor', () => {
           typeof call[1] === 'string' && (call[1] as string).includes('Network issue')
       );
       expect(hintMessages.length).toBeGreaterThan(0);
+    });
 
-      // Reset mock for other tests
+    it('should fail workflow when AI throws on first step', async () => {
+      // Mock AI client to throw immediately
       mockSendQuery.mockImplementation(function* () {
-        yield { type: 'assistant', content: 'AI response' };
-        yield { type: 'result', sessionId: 'new-session-id' };
+        throw new Error('API error: Service unavailable');
       });
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'ai-error-workflow',
+          description: 'Test AI failure handling',
+          steps: [{ command: 'command-one' }, { command: 'command-two' }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      expect(mockSendQuery).toHaveBeenCalled();
+      expect(getWorkflowStatusUpdates('failed')).toHaveLength(1);
+
+      // Verify error notification sent to user
+      const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+      const errorMessages = sendMessage.mock.calls.filter((call: unknown[]) =>
+        (call[1] as string).includes('❌ **Workflow failed**')
+      );
+      expect(errorMessages).toHaveLength(1);
+      expect(errorMessages[0][1]).toContain('Service unavailable');
+    });
+
+    it('should mark first step complete and fail workflow when AI throws on second step', async () => {
+      // Mock AI to succeed on first call, fail on second
+      let callCount = 0;
+      mockSendQuery.mockImplementation(function* () {
+        callCount++;
+        if (callCount === 1) {
+          yield { type: 'assistant', content: 'First step completed' };
+          yield { type: 'result', sessionId: 'session-1' };
+        } else {
+          throw new Error('API error: Second step failed');
+        }
+      });
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'partial-failure-workflow',
+          description: 'Test mid-workflow failure',
+          steps: [{ command: 'command-one' }, { command: 'command-two' }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      expect(mockSendQuery.mock.calls).toHaveLength(2);
+
+      // Verify first step completed and second step failed in logs
+      const events = await parseLogEvents(testDir);
+      const stepCompleteEvents = events.filter(e => e.type === 'step_complete');
+      const workflowErrorEvents = events.filter(e => e.type === 'workflow_error');
+
+      expect(stepCompleteEvents).toHaveLength(1);
+      expect(workflowErrorEvents).toHaveLength(1);
+      expect((workflowErrorEvents[0] as { error: string }).error).toContain('Second step failed');
+      expect(getWorkflowStatusUpdates('failed')).toHaveLength(1);
+    });
+
+    it('should log AI errors to workflow JSONL log file', async () => {
+      // Mock AI to throw with specific error message
+      const errorMessage = 'Claude API: Request timeout after 60s';
+      mockSendQuery.mockImplementation(function* () {
+        throw new Error(errorMessage);
+      });
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'error-logging-workflow',
+          description: 'Test error logging',
+          steps: [{ command: 'command-one' }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      expect(mockSendQuery).toHaveBeenCalled();
+
+      // Verify error was logged to JSONL file
+      const events = await parseLogEvents(testDir);
+      const errorEvents = events.filter(e => e.type === 'workflow_error');
+      expect(errorEvents).toHaveLength(1);
+      expect((errorEvents[0] as { error: string }).error).toContain('Request timeout after 60s');
+    });
+
+    it('should handle AI errors that occur after partial response', async () => {
+      // Mock AI to yield partial response then throw
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'Starting to process...' };
+        yield { type: 'tool', toolName: 'read_file', toolInput: { path: '/tmp/test.ts' } };
+        throw new Error('API error: Connection lost mid-stream');
+      });
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'partial-response-workflow',
+          description: 'Test partial response handling',
+          steps: [{ command: 'command-one' }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      expect(mockSendQuery).toHaveBeenCalled();
+      expect(getWorkflowStatusUpdates('failed')).toHaveLength(1);
+
+      // Verify partial messages and error were logged
+      const events = await parseLogEvents(testDir);
+
+      const assistantEvents = events.filter(e => e.type === 'assistant');
+      expect(assistantEvents).toHaveLength(1);
+      expect((assistantEvents[0] as { content: string }).content).toBe('Starting to process...');
+
+      const toolEvents = events.filter(e => e.type === 'tool');
+      expect(toolEvents).toHaveLength(1);
+      expect((toolEvents[0] as { tool_name: string }).tool_name).toBe('read_file');
+
+      const errorEvents = events.filter(e => e.type === 'workflow_error');
+      expect(errorEvents).toHaveLength(1);
+      expect((errorEvents[0] as { error: string }).error).toContain('Connection lost mid-stream');
     });
   });
 
