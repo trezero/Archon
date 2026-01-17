@@ -9,9 +9,9 @@
  * - Content blocks are typed via inline assertions for clarity
  *
  * Authentication:
- * - By default (CLAUDE_USE_GLOBAL_AUTH=true), uses global auth from `claude /login`
- * - Auth env vars are filtered to prevent Bun's auto-loaded .env from overriding
- * - Set CLAUDE_USE_GLOBAL_AUTH=false and provide explicit tokens to override
+ * - CLAUDE_USE_GLOBAL_AUTH=true: Use global auth from `claude /login`, filter env tokens
+ * - CLAUDE_USE_GLOBAL_AUTH=false: Use explicit tokens from env vars
+ * - Not set: Auto-detect - use tokens if present in env, otherwise global auth
  */
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { IAssistantClient, MessageChunk } from '../types';
@@ -29,11 +29,56 @@ interface ContentBlock {
 
 /**
  * Build environment for Claude subprocess
- * When CLAUDE_USE_GLOBAL_AUTH=true (default), filters out auth tokens
- * so Claude uses the globally logged-in credentials
+ *
+ * Auth behavior:
+ * - CLAUDE_USE_GLOBAL_AUTH=true: Filter tokens, use global auth from `claude /login`
+ * - CLAUDE_USE_GLOBAL_AUTH=false: Pass tokens through explicitly
+ * - Not set: Auto-detect - if tokens exist in env, use them (backwards compatibility)
  */
 function buildSubprocessEnv(): NodeJS.ProcessEnv {
-  const useGlobalAuth = process.env.CLAUDE_USE_GLOBAL_AUTH !== 'false';
+  const globalAuthSetting = process.env.CLAUDE_USE_GLOBAL_AUTH?.toLowerCase();
+
+  // Check for empty token values (common misconfiguration)
+  const tokenVars = [
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'CLAUDE_API_KEY',
+    'ANTHROPIC_API_KEY',
+  ] as const;
+  const emptyTokens = tokenVars.filter((v) => process.env[v] === '');
+  if (emptyTokens.length > 0) {
+    console.warn(`[Claude] Warning: Empty token values found for: ${emptyTokens.join(', ')}`);
+  }
+
+  const hasExplicitTokens = Boolean(
+    process.env.CLAUDE_CODE_OAUTH_TOKEN ??
+      process.env.CLAUDE_API_KEY ??
+      process.env.ANTHROPIC_API_KEY
+  );
+
+  // Determine whether to use global auth
+  let useGlobalAuth: boolean;
+  if (globalAuthSetting === 'true') {
+    useGlobalAuth = true;
+    console.log('[Claude] CLAUDE_USE_GLOBAL_AUTH=true, using global auth');
+  } else if (globalAuthSetting === 'false') {
+    useGlobalAuth = false;
+    console.log('[Claude] CLAUDE_USE_GLOBAL_AUTH=false, using explicit tokens');
+  } else if (globalAuthSetting !== undefined) {
+    // Unrecognized value - warn and fall back to auto-detect
+    console.warn(
+      `[Claude] Unrecognized CLAUDE_USE_GLOBAL_AUTH value: "${globalAuthSetting}". ` +
+        'Expected "true" or "false". Using auto-detect.'
+    );
+    useGlobalAuth = !hasExplicitTokens;
+  } else {
+    // Not set - auto-detect: use tokens if present, otherwise global auth
+    useGlobalAuth = !hasExplicitTokens;
+    if (hasExplicitTokens) {
+      console.log('[Claude] CLAUDE_USE_GLOBAL_AUTH not set, using explicit tokens from env');
+    } else {
+      console.log('[Claude] CLAUDE_USE_GLOBAL_AUTH not set, no tokens found - using global auth');
+    }
+  }
 
   if (useGlobalAuth) {
     // Filter out auth tokens - let Claude use global auth from `claude /login`

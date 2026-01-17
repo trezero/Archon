@@ -242,9 +242,11 @@ src/
 DATABASE_URL=postgresql://user:pass@host:5432/dbname
 
 # AI Assistants
-# Claude - Use global auth from `claude /login` (recommended)
+# Claude Auth Options:
+# - CLAUDE_USE_GLOBAL_AUTH=true: Use global auth from `claude /login` (recommended)
+# - CLAUDE_USE_GLOBAL_AUTH=false: Use explicit tokens below
+# - Not set: Auto-detect (use tokens if present, otherwise global auth)
 CLAUDE_USE_GLOBAL_AUTH=true
-# OR set explicit credentials (not recommended - Bun auto-loads .env which can cause conflicts)
 # CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
 # CLAUDE_API_KEY=sk-ant-...
 

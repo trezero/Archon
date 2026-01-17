@@ -222,15 +222,19 @@ You must configure **at least one** AI assistant. Both can be configured if desi
 
 **Recommended for Claude Pro/Max subscribers.**
 
-**Option 1: Global Auth (Recommended)**
+**Authentication Options:**
 
-If you've already logged in with Claude Code CLI, use global auth:
+Claude Code supports three authentication modes via `CLAUDE_USE_GLOBAL_AUTH`:
+
+1. **Global Auth** (set to `true`): Uses credentials from `claude /login`
+2. **Explicit Tokens** (set to `false`): Uses tokens from env vars below
+3. **Auto-Detect** (not set): Uses tokens if present in env, otherwise global auth
+
+**Option 1: Global Auth (Recommended)**
 
 ```env
 CLAUDE_USE_GLOBAL_AUTH=true
 ```
-
-This uses credentials from `claude /login` and avoids conflicts with Bun's automatic `.env` loading in worktrees.
 
 **Option 2: OAuth Token**
 
