@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { calculatePortOffset } from './index';
+import { calculatePortOffset, getPort } from './utils/port-allocation';
 
 // Test the exported hash calculation function directly
 describe('calculatePortOffset', () => {
@@ -58,8 +58,6 @@ describe('getPort', () => {
 
   it('should return PORT env var when explicitly set to valid number', async () => {
     process.env.PORT = '4000';
-    // Import fresh to pick up env change
-    const { getPort } = await import('./index');
     const port = await getPort();
     expect(port).toBe(4000);
   });
@@ -67,7 +65,6 @@ describe('getPort', () => {
   it('should return default 3000 for non-worktree paths without PORT env', async () => {
     delete process.env.PORT;
     // This test runs in the main repo, not a worktree
-    const { getPort } = await import('./index');
     const port = await getPort();
     expect(port).toBe(3000);
   });
