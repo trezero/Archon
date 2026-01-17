@@ -114,7 +114,18 @@ export async function isWorktreePath(path: string): Promise<boolean> {
     const content = await readFile(gitPath, 'utf-8');
     // Worktree .git file contains "gitdir: /path/to/main/.git/worktrees/..."
     return content.startsWith('gitdir:');
-  } catch {
+  } catch (error) {
+    // Expected errors: file doesn't exist (ENOENT) or .git is a directory (EISDIR)
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === 'ENOENT' || err.code === 'EISDIR') {
+      return false;
+    }
+    // Unexpected error - log warning but don't crash (graceful degradation)
+    console.error('[Git] Unexpected error checking worktree status:', {
+      path,
+      error: err.message,
+      code: err.code,
+    });
     return false;
   }
 }

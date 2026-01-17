@@ -313,23 +313,30 @@ Git (`git worktree list`) is the source of truth for what actually exists on dis
 
 ### Running the App in Worktrees
 
-Agents working in worktrees can run the app for self-testing (make changes → run app → test via curl → fix). To avoid port conflicts with other instances:
+Agents working in worktrees can run the app for self-testing (make changes → run app → test via curl → fix). Ports are automatically allocated to avoid conflicts:
 
 ```bash
-# Run with unique port in worktree
-PORT=3091 bun dev &
+# Run in worktree (port auto-allocated based on path)
+bun dev &
+# [Express] Worktree detected (/path/to/worktree)
+# [Express] Auto-allocated port: 3547 (base: 3000, offset: +547)
 
-# Test via test adapter
-curl -X POST http://localhost:3091/test/message \
+# Test via test adapter (use the auto-allocated port from logs)
+curl -X POST http://localhost:3547/test/message \
   -H "Content-Type: application/json" \
   -d '{"conversationId":"test","message":"/status"}'
 
 # Check response
-curl http://localhost:3091/test/messages/test
+curl http://localhost:3547/test/messages/test
 ```
 
+**Port Allocation:**
+- Worktrees: Automatic unique port (3100-3999 range, hash-based on path)
+- Main repo: Default 3000
+- Override: `PORT=4000 bun dev` (works in both contexts)
+- Same worktree always gets same port (deterministic)
+
 **Important:**
-- Use unique PORT per worktree (3091, 3092, etc.)
 - Only use test adapter - Telegram/Slack/Discord tokens conflict across instances
 - Database is shared (same conversations/codebases available)
 - Kill the server when done: `pkill -f "bun.*dev"` or use the specific port
