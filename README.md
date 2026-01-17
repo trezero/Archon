@@ -102,6 +102,7 @@ See [Configuration Guide](docs/configuration.md) for customization options.
 ```bash
 git clone https://github.com/dynamous-community/remote-coding-agent
 cd remote-coding-agent
+bun install
 ```
 
 ### 1. Core Configuration (Required)
@@ -614,6 +615,7 @@ docker compose logs -f app-with-db
 Run directly with Bun (requires local PostgreSQL or remote `DATABASE_URL` in `.env`):
 
 ```bash
+bun install  # First time only
 bun run dev
 ```
 
