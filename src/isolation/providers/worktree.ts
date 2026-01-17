@@ -56,11 +56,12 @@ export class WorktreeProvider implements IIsolationProvider {
   /**
    * Destroy an isolated environment
    * @param envId - The worktree path (used as environment ID)
-   * @param options - Options including force flag
+   * @param options - Options including force flag, branchName for cleanup, and canonicalRepoPath
    */
-  async destroy(envId: string, options?: { force?: boolean }): Promise<void> {
+  async destroy(envId: string, options?: { force?: boolean; branchName?: string; canonicalRepoPath?: string }): Promise<void> {
     // For worktrees, envId is the worktree path
     const worktreePath = envId;
+    let pathExists = true;
 
     // Check if worktree path exists before attempting removal (optimization to avoid spawning git)
     try {
@@ -68,43 +69,90 @@ export class WorktreeProvider implements IIsolationProvider {
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       if (err.code === 'ENOENT') {
-        // Path genuinely doesn't exist - nothing to remove
+        // Path doesn't exist - skip worktree removal but still attempt branch deletion
         console.log(`[WorktreeProvider] Path ${worktreePath} already removed`);
-        return;
+        pathExists = false;
+      } else {
+        // Re-throw other errors (permission issues, etc.) with context
+        console.error(`[WorktreeProvider] Access check failed for ${worktreePath}:`, err.message);
+        throw new Error(`Failed to destroy worktree at ${worktreePath}: ${err.message}`);
       }
-      // Re-throw other errors (permission issues, etc.) with context
-      console.error(`[WorktreeProvider] Access check failed for ${worktreePath}:`, err.message);
-      throw new Error(`Failed to destroy worktree at ${worktreePath}: ${err.message}`);
     }
 
-    // Get canonical repo path to run git commands
-    const repoPath = await getCanonicalRepoPath(worktreePath);
-
-    const gitArgs = ['-C', repoPath, 'worktree', 'remove'];
-    if (options?.force) {
-      gitArgs.push('--force');
+    // Get canonical repo path - use provided path or derive from worktree
+    let repoPath: string;
+    if (options?.canonicalRepoPath) {
+      repoPath = options.canonicalRepoPath;
+    } else if (pathExists) {
+      repoPath = await getCanonicalRepoPath(worktreePath);
+    } else {
+      // Path doesn't exist and no canonicalRepoPath provided - can't clean up branch
+      if (options?.branchName) {
+        console.warn(`[WorktreeProvider] Cannot delete branch ${options.branchName}: no canonical repo path available`);
+      }
+      return;
     }
-    gitArgs.push(worktreePath);
 
+    // Only attempt worktree removal if path exists
+    if (pathExists) {
+      const gitArgs = ['-C', repoPath, 'worktree', 'remove'];
+      if (options?.force) {
+        gitArgs.push('--force');
+      }
+      gitArgs.push(worktreePath);
+
+      try {
+        await execFileAsync('git', gitArgs, { timeout: 30000 });
+      } catch (error) {
+        if (!this.isWorktreeMissingError(error)) {
+          throw error;
+        }
+        console.log(`[WorktreeProvider] Worktree ${worktreePath} already removed`);
+        // Continue to branch deletion below - branch may still exist
+      }
+    }
+
+    // Delete associated branch if provided (best-effort cleanup)
+    if (options?.branchName) {
+      await this.deleteBranchBestEffort(repoPath, options.branchName);
+    }
+  }
+
+  /**
+   * Check if an error indicates the worktree path is missing.
+   * Checks both message and stderr for robustness across git versions/locales.
+   */
+  private isWorktreeMissingError(error: unknown): boolean {
+    const err = error as Error & { stderr?: string };
+    const errorText = `${err.message} ${err.stderr ?? ''}`;
+    return (
+      errorText.includes('No such file or directory') ||
+      errorText.includes('does not exist') ||
+      errorText.includes('is not a working tree')
+    );
+  }
+
+  /**
+   * Delete a branch, logging results. Never throws - branch deletion is best-effort cleanup.
+   */
+  private async deleteBranchBestEffort(repoPath: string, branchName: string): Promise<void> {
     try {
-      await execFileAsync('git', gitArgs, { timeout: 30000 });
+      await execFileAsync('git', ['-C', repoPath, 'branch', '-D', branchName], { timeout: 30000 });
+      console.log(`[WorktreeProvider] Deleted branch ${branchName}`);
     } catch (error) {
       const err = error as Error & { stderr?: string };
-
-      // Handle "directory not found" errors gracefully
-      // Check both message and stderr for robustness across git versions/locales
       const errorText = `${err.message} ${err.stderr ?? ''}`;
-      if (
-        errorText.includes('No such file or directory') ||
-        errorText.includes('does not exist') ||
-        errorText.includes('is not a working tree')
-      ) {
-        console.log(`[WorktreeProvider] Worktree ${worktreePath} already removed`);
-        return;
-      }
 
-      // Re-throw other errors
-      throw err;
+      if (errorText.includes('not found') || errorText.includes('did not match any')) {
+        console.log(`[WorktreeProvider] Branch ${branchName} already deleted or not found`);
+      } else if (errorText.includes('checked out at')) {
+        console.warn(`[WorktreeProvider] Cannot delete branch ${branchName}: branch is checked out elsewhere`);
+      } else {
+        console.error(`[WorktreeProvider] Unexpected error deleting branch ${branchName}:`, {
+          message: err.message,
+          stderr: err.stderr,
+        });
+      }
     }
   }
 
@@ -457,6 +505,9 @@ export class WorktreeProvider implements IIsolationProvider {
 
   /**
    * Create worktree for fork PR using synthetic review branch
+   *
+   * Handles stale branches: If a branch already exists from a previous worktree
+   * that was deleted, we delete the stale branch and retry.
    */
   private async createFromForkPR(
     repoPath: string,
@@ -477,20 +528,45 @@ export class WorktreeProvider implements IIsolationProvider {
       });
 
       // Create a local tracking branch so it's not detached HEAD
-      await execFileAsync('git', ['-C', worktreePath, 'checkout', '-b', reviewBranch, prSha], {
-        timeout: 30000,
-      });
+      await this.createBranchWithStaleRetry(
+        repoPath,
+        () => execFileAsync('git', ['-C', worktreePath, 'checkout', '-b', reviewBranch, prSha], { timeout: 30000 }),
+        reviewBranch
+      );
     } else {
       // No SHA: fetch and create review branch
-      await execFileAsync(
-        'git',
-        ['-C', repoPath, 'fetch', 'origin', `pull/${prNumber}/head:${reviewBranch}`],
-        { timeout: 30000 }
+      await this.createBranchWithStaleRetry(
+        repoPath,
+        () => execFileAsync('git', ['-C', repoPath, 'fetch', 'origin', `pull/${prNumber}/head:${reviewBranch}`], { timeout: 30000 }),
+        reviewBranch
       );
 
       await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, reviewBranch], {
         timeout: 30000,
       });
+    }
+  }
+
+  /**
+   * Execute a git command that creates a branch, with retry logic for stale branches.
+   * If the branch already exists, delete it and retry the command.
+   */
+  private async createBranchWithStaleRetry(
+    repoPath: string,
+    createCommand: () => Promise<{ stdout: string; stderr: string }>,
+    branchName: string
+  ): Promise<void> {
+    try {
+      await createCommand();
+    } catch (error) {
+      const err = error as Error & { stderr?: string };
+      if (err.stderr?.includes('already exists')) {
+        console.log(`[WorktreeProvider] Branch ${branchName} exists (stale), deleting and retrying...`);
+        await execFileAsync('git', ['-C', repoPath, 'branch', '-D', branchName], { timeout: 30000 });
+        await createCommand();
+      } else {
+        throw error;
+      }
     }
   }
 

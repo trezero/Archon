@@ -47,6 +47,12 @@ mock.module('../db/sessions', () => ({
   deactivateSession: mock(() => Promise.resolve()),
 }));
 
+// Mock codebases DB
+const mockGetCodebase = mock(() => Promise.resolve(null));
+mock.module('../db/codebases', () => ({
+  getCodebase: mockGetCodebase,
+}));
+
 import {
   hasUncommittedChanges,
   isBranchMerged,
@@ -68,6 +74,7 @@ describe('cleanup-service', () => {
     mockDestroy.mockClear();
     mockUpdateStatus.mockClear();
     mockGetById.mockClear();
+    mockGetCodebase.mockClear();
   });
 
   describe('hasUncommittedChanges', () => {
@@ -217,7 +224,7 @@ describe('cleanup-service', () => {
   });
 
   describe('removeEnvironment', () => {
-    test('marks missing directory as destroyed', async () => {
+    test('calls destroy with canonicalRepoPath even when directory is missing', async () => {
       const envId = 'env-missing-dir';
 
       mockGetById.mockResolvedValueOnce({
@@ -234,14 +241,26 @@ describe('cleanup-service', () => {
         metadata: {},
       });
 
+      // Mock codebase fetch to get canonical repo path
+      mockGetCodebase.mockResolvedValueOnce({
+        id: 'codebase-123',
+        name: 'test-repo',
+        default_cwd: '/workspace/repo',
+      });
+
       // Internal worktreeExists returns false (git rev-parse fails)
       mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
 
       await removeEnvironment(envId);
 
-      // Should mark as destroyed without calling provider.destroy()
+      // Should call destroy with branchName and canonicalRepoPath for cleanup
+      expect(mockDestroy).toHaveBeenCalledWith('/path/that/does/not/exist', {
+        force: undefined,
+        branchName: 'issue-187',
+        canonicalRepoPath: '/workspace/repo',
+      });
+      // Should mark as destroyed
       expect(mockUpdateStatus).toHaveBeenCalledWith(envId, 'destroyed');
-      expect(mockDestroy).not.toHaveBeenCalled();
     });
 
     test('handles git worktree remove failure for missing path', async () => {
@@ -259,6 +278,13 @@ describe('cleanup-service', () => {
         created_at: new Date(),
         created_by_platform: 'github',
         metadata: {},
+      });
+
+      // Mock codebase fetch
+      mockGetCodebase.mockResolvedValueOnce({
+        id: 'codebase-123',
+        name: 'test-repo',
+        default_cwd: '/workspace/repo',
       });
 
       // Internal worktreeExists succeeds (path exists)
@@ -293,6 +319,13 @@ describe('cleanup-service', () => {
         created_at: new Date(),
         created_by_platform: 'github',
         metadata: {},
+      });
+
+      // Mock codebase fetch
+      mockGetCodebase.mockResolvedValueOnce({
+        id: 'codebase-123',
+        name: 'test-repo',
+        default_cwd: '/workspace/repo',
       });
 
       // Internal worktreeExists succeeds (path exists)
@@ -334,7 +367,7 @@ describe('runScheduledCleanup', () => {
     expect(report.errors).toHaveLength(0);
   });
 
-  test('marks missing paths as destroyed', async () => {
+  test('marks missing paths as destroyed and cleans up branch', async () => {
     mockListAllActiveWithCodebase.mockResolvedValueOnce([
       {
         id: 'env-123',
@@ -351,12 +384,34 @@ describe('runScheduledCleanup', () => {
         metadata: {},
       },
     ]);
-    // Internal worktreeExists returns false (git rev-parse fails)
+    // runScheduledCleanup: Internal worktreeExists returns false (git rev-parse fails)
+    mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+    // removeEnvironment: getById returns the env
+    mockGetById.mockResolvedValueOnce({
+      id: 'env-123',
+      codebase_id: 'codebase-1',
+      working_path: '/nonexistent/path',
+      branch_name: 'issue-42',
+      status: 'active',
+    });
+    // removeEnvironment: getCodebase for canonical repo path
+    mockGetCodebase.mockResolvedValueOnce({
+      id: 'codebase-1',
+      name: 'test-repo',
+      default_cwd: '/workspace/repo',
+    });
+    // removeEnvironment: internal worktreeExists returns false
     mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
 
     const report = await runScheduledCleanup();
 
     expect(report.removed).toContain('env-123 (path missing)');
+    // Should call destroy to clean up the branch
+    expect(mockDestroy).toHaveBeenCalledWith('/nonexistent/path', {
+      force: false,
+      branchName: 'issue-42',
+      canonicalRepoPath: '/workspace/repo',
+    });
     expect(mockUpdateStatus).toHaveBeenCalledWith('env-123', 'destroyed');
   });
 
@@ -390,8 +445,15 @@ describe('runScheduledCleanup', () => {
     // For removeEnvironment: getById returns the env
     mockGetById.mockResolvedValueOnce({
       id: 'env-456',
+      codebase_id: 'codebase-1',
       working_path: '/workspace/repo/worktrees/pr-99',
       status: 'active',
+    });
+    // removeEnvironment: getCodebase for canonical repo path
+    mockGetCodebase.mockResolvedValueOnce({
+      id: 'codebase-1',
+      name: 'test-repo',
+      default_cwd: '/workspace/repo',
     });
     // removeEnvironment: internal worktreeExists check
     mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });

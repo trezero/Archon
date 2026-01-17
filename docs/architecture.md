@@ -463,7 +463,7 @@ Isolation providers create isolated working environments (worktrees, containers,
 export interface IIsolationProvider {
   readonly providerType: string;
   create(request: IsolationRequest): Promise<IsolatedEnvironment>;
-  destroy(envId: string, options?: { force?: boolean }): Promise<void>;
+  destroy(envId: string, options?: { force?: boolean; branchName?: string }): Promise<void>;
   get(envId: string): Promise<IsolatedEnvironment | null>;
   list(codebaseId: string): Promise<IsolatedEnvironment[]>;
   adopt?(path: string): Promise<IsolatedEnvironment | null>;
@@ -510,8 +510,9 @@ export class WorktreeProvider implements IIsolationProvider {
     // 4. Return IsolatedEnvironment
   }
 
-  async destroy(envId: string, options?: { force?: boolean }): Promise<void> {
+  async destroy(envId: string, options?: { force?: boolean; branchName?: string }): Promise<void> {
     // git worktree remove <path> [--force]
+    // git branch -D <branchName> (if provided, best-effort)
   }
 }
 ```

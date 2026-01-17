@@ -40,7 +40,7 @@ export interface IsolatedEnvironment {
 export interface IIsolationProvider {
   readonly providerType: string;
   create(request: IsolationRequest): Promise<IsolatedEnvironment>;
-  destroy(envId: string, options?: { force?: boolean }): Promise<void>;
+  destroy(envId: string, options?: { force?: boolean; branchName?: string; canonicalRepoPath?: string }): Promise<void>;
   get(envId: string): Promise<IsolatedEnvironment | null>;
   list(codebaseId: string): Promise<IsolatedEnvironment[]>;
   adopt?(path: string): Promise<IsolatedEnvironment | null>;

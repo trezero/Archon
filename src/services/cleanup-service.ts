@@ -5,6 +5,7 @@
 import * as isolationEnvDb from '../db/isolation-environments';
 import * as conversationDb from '../db/conversations';
 import * as sessionDb from '../db/sessions';
+import * as codebaseDb from '../db/codebases';
 import { getIsolationProvider } from '../isolation';
 import { execFileAsync } from '../utils/git';
 import { IsolationEnvironmentRow } from '../types';
@@ -100,20 +101,21 @@ export async function removeEnvironment(
     return;
   }
 
+  // Get canonical repo path from codebase for branch cleanup
+  let canonicalRepoPath: string | undefined;
+  if (env.codebase_id) {
+    const codebase = await codebaseDb.getCodebase(env.codebase_id);
+    canonicalRepoPath = codebase?.default_cwd;
+  }
+
   // Check if directory exists before attempting removal
   const pathExists = await worktreeExists(env.working_path);
-  if (!pathExists) {
-    // Path doesn't exist - mark as destroyed in DB
-    await isolationEnvDb.updateStatus(envId, 'destroyed');
-    console.log(`[Cleanup] Marked ${envId} as destroyed (path missing)`);
-    return;
-  }
 
   const provider = getIsolationProvider();
 
   try {
-    // Check for uncommitted changes (unless force)
-    if (!options?.force) {
+    // If path exists, check for uncommitted changes (unless force)
+    if (pathExists && !options?.force) {
       const hasChanges = await hasUncommittedChanges(env.working_path);
       if (hasChanges) {
         console.warn(`[Cleanup] Environment ${envId} has uncommitted changes, skipping`);
@@ -121,8 +123,13 @@ export async function removeEnvironment(
       }
     }
 
-    // Remove the worktree
-    await provider.destroy(env.working_path, { force: options?.force });
+    // Remove the worktree (and branch if provided)
+    // Call destroy even if path doesn't exist - branch cleanup may still be needed
+    await provider.destroy(env.working_path, {
+      force: options?.force,
+      branchName: env.branch_name,
+      canonicalRepoPath,
+    });
 
     // Mark as destroyed in database
     await isolationEnvDb.updateStatus(envId, 'destroyed');
@@ -235,10 +242,9 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
         // Check if path still exists
         const pathExists = await worktreeExists(env.working_path);
         if (!pathExists) {
-          // Path doesn't exist - mark as destroyed in DB
-          await isolationEnvDb.updateStatus(env.id, 'destroyed');
+          // Path doesn't exist - call removeEnvironment to clean up branch and mark as destroyed
+          await removeEnvironment(env.id, { force: false });
           report.removed.push(`${env.id} (path missing)`);
-          console.log(`[Cleanup] Marked ${env.id} as destroyed (path missing)`);
           continue;
         }
 

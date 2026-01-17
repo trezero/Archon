@@ -35,7 +35,7 @@ Detection order in `getWorktreeBase()`:
 │  getIsolationProvider() → WorktreeProvider (singleton)          │
 ├─────────────────────────────────────────────────────────────────┤
 │  create(request)  → IsolatedEnvironment                         │
-│  destroy(envId)   → void                                        │
+│  destroy(envId, branchName?)   → void                           │
 │  get(envId)       → IsolatedEnvironment | null                  │
 │  list(codebaseId) → IsolatedEnvironment[]                       │
 │  adopt(path)      → IsolatedEnvironment | null                  │
@@ -181,6 +181,8 @@ IsolationRequest
 │          Check uncommitted    Mark as destroyed      │
 │          changes, then        (DB only)              │
 │          git worktree remove                          │
+│          git branch -D <name>                         │
+│          (best-effort cleanup)                        │
 │                                                       │
 └───────────────────────────────────────────────────────┘
 ```

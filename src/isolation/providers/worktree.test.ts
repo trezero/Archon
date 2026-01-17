@@ -528,6 +528,105 @@ describe('WorktreeProvider', () => {
         expect.any(Object)
       );
     });
+
+    test('handles stale branch when creating fork PR with SHA', async () => {
+      const request: IsolationRequest = {
+        ...baseRequest,
+        workflowType: 'pr',
+        identifier: '42',
+        prBranch: 'feature/auth',
+        prSha: 'abc123',
+        isForkPR: true,
+      };
+
+      let checkoutAttempts = 0;
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        // First checkout -b attempt fails with "already exists"
+        if (args.includes('checkout') && args.includes('-b')) {
+          checkoutAttempts++;
+          if (checkoutAttempts === 1) {
+            const error = new Error(
+              'fatal: A branch named pr-42-review already exists.'
+            ) as Error & { stderr?: string };
+            error.stderr = 'fatal: A branch named pr-42-review already exists.';
+            throw error;
+          }
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await provider.create(request);
+
+      // Verify branch deletion was called to clean up stale branch
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'branch', '-D', 'pr-42-review'],
+        expect.any(Object)
+      );
+
+      // Verify checkout was retried
+      expect(checkoutAttempts).toBe(2);
+    });
+
+    test('handles stale branch when creating fork PR without SHA', async () => {
+      const request: IsolationRequest = {
+        ...baseRequest,
+        workflowType: 'pr',
+        identifier: '42',
+        prBranch: 'feature/auth',
+        isForkPR: true,
+      };
+
+      let fetchAttempts = 0;
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        // First fetch with branch creation fails
+        if (args.includes('fetch') && args.some(a => a.includes('pull/42/head:pr-42-review'))) {
+          fetchAttempts++;
+          if (fetchAttempts === 1) {
+            const error = new Error('fatal: already exists') as Error & { stderr?: string };
+            error.stderr = "fatal: cannot lock ref 'refs/heads/pr-42-review': reference already exists";
+            throw error;
+          }
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await provider.create(request);
+
+      // Verify branch deletion was called to clean up stale branch
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'branch', '-D', 'pr-42-review'],
+        expect.any(Object)
+      );
+
+      // Verify fetch was retried
+      expect(fetchAttempts).toBe(2);
+    });
+
+    test('throws error when stale branch deletion fails during fork PR creation', async () => {
+      const request: IsolationRequest = {
+        ...baseRequest,
+        workflowType: 'pr',
+        identifier: '42',
+        prBranch: 'feature/auth',
+        isForkPR: true,
+      };
+
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('fetch') && args.some(a => a.includes('pull/42/head:pr-42-review'))) {
+          const error = new Error('already exists') as Error & { stderr?: string };
+          error.stderr = 'reference already exists';
+          throw error;
+        }
+        if (args.includes('branch') && args.includes('-D')) {
+          throw new Error('error: permission denied');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await expect(provider.create(request)).rejects.toThrow('Failed to create worktree for PR #42');
+    });
   });
 
   describe('destroy', () => {
@@ -568,7 +667,7 @@ describe('WorktreeProvider', () => {
       );
     });
 
-    test('returns gracefully when path does not exist (ENOENT)', async () => {
+    test('returns gracefully when path does not exist (ENOENT) without canonicalRepoPath', async () => {
       const worktreePath = '/workspace/worktrees/repo/nonexistent';
 
       // access() throws ENOENT
@@ -576,11 +675,41 @@ describe('WorktreeProvider', () => {
       enoentError.code = 'ENOENT';
       mockAccess.mockRejectedValueOnce(enoentError);
 
-      // Should not throw
-      await provider.destroy(worktreePath);
+      // Should not throw - but can't clean up branch without canonicalRepoPath
+      await provider.destroy(worktreePath, { branchName: 'test-branch' });
 
-      // Should NOT call git worktree remove
+      // Should NOT call git commands (no canonicalRepoPath to run them in)
       expect(execSpy).not.toHaveBeenCalled();
+    });
+
+    test('cleans up branch when path does not exist but canonicalRepoPath provided', async () => {
+      const worktreePath = '/workspace/worktrees/repo/nonexistent';
+      const branchName = 'pr-42-review';
+
+      // access() throws ENOENT
+      const enoentError = new Error('ENOENT: no such file or directory') as NodeJS.ErrnoException;
+      enoentError.code = 'ENOENT';
+      mockAccess.mockRejectedValueOnce(enoentError);
+
+      // Should not throw - and should still clean up branch
+      await provider.destroy(worktreePath, {
+        branchName,
+        canonicalRepoPath: '/workspace/repo',
+      });
+
+      // Should NOT call git worktree remove (path doesn't exist)
+      expect(execSpy).not.toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['worktree', 'remove']),
+        expect.any(Object)
+      );
+
+      // SHOULD call git branch -D to clean up the branch
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'branch', '-D', branchName],
+        expect.any(Object)
+      );
     });
 
     test('re-throws non-ENOENT errors from access check', async () => {
@@ -637,6 +766,102 @@ describe('WorktreeProvider', () => {
 
       // Should throw the error
       await expect(provider.destroy(worktreePath)).rejects.toThrow('local modifications');
+    });
+
+    test('deletes branch when branchName provided', async () => {
+      const worktreePath = '/workspace/worktrees/repo/pr-42-review';
+      const branchName = 'pr-42-review';
+
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+
+      await provider.destroy(worktreePath, { branchName });
+
+      // Verify worktree removal
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['-C', '/workspace/repo', 'worktree', 'remove', worktreePath]),
+        expect.any(Object)
+      );
+
+      // Verify branch deletion
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'branch', '-D', branchName],
+        expect.any(Object)
+      );
+    });
+
+    test('continues if branch deletion fails', async () => {
+      const worktreePath = '/workspace/worktrees/repo/pr-42-review';
+      const branchName = 'pr-42-review';
+
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        // Branch deletion fails
+        if (args.includes('branch')) {
+          throw new Error('error: branch not found');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      // Should not throw - branch deletion is best-effort
+      await provider.destroy(worktreePath, { branchName });
+
+      // Worktree removal should still be called
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['worktree', 'remove']),
+        expect.any(Object)
+      );
+    });
+
+    test('does not attempt branch deletion when branchName not provided', async () => {
+      const worktreePath = '/workspace/worktrees/repo/pr-42-review';
+
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+
+      await provider.destroy(worktreePath);
+
+      // Verify worktree removal called
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['worktree', 'remove']),
+        expect.any(Object)
+      );
+
+      // Verify branch deletion NOT called
+      expect(execSpy).not.toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['branch', '-D']),
+        expect.any(Object)
+      );
+    });
+
+    test('still deletes branch even when worktree path does not exist', async () => {
+      const worktreePath = '/workspace/worktrees/repo/pr-42-review';
+      const branchName = 'pr-42-review';
+
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+      // git worktree remove fails because path doesn't exist
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('worktree')) {
+          throw new Error(
+            "fatal: cannot change to '/workspace/worktrees/repo/pr-42-review': No such file or directory"
+          );
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      // Should not throw
+      await provider.destroy(worktreePath, { branchName });
+
+      // Verify branch deletion was still called after graceful worktree removal failure
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'branch', '-D', branchName],
+        expect.any(Object)
+      );
     });
   });
 
