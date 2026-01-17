@@ -197,53 +197,31 @@ steps:
       expect(workflows).toHaveLength(2);
     });
 
-    it('should search fallback directories (.claude/workflows, .agents/workflows)', async () => {
-      // No .archon/workflows, but .claude/workflows exists
-      const claudeWorkflowDir = join(testDir, '.claude', 'workflows');
-      await mkdir(claudeWorkflowDir, { recursive: true });
+    it('should recursively load workflows from subdirectories (like defaults/)', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      const defaultsDir = join(workflowDir, 'defaults');
+      await mkdir(defaultsDir, { recursive: true });
 
-      const workflow = `name: claude-workflow
-description: Found in .claude
+      // Workflow in root
+      const rootWorkflow = `name: root-workflow
+description: Root level workflow
 steps:
-  - command: test
+  - command: root
 `;
-      await writeFile(join(claudeWorkflowDir, 'test.yaml'), workflow);
+      // Workflow in subdirectory
+      const subWorkflow = `name: sub-workflow
+description: Subdirectory workflow
+steps:
+  - command: sub
+`;
+      await writeFile(join(workflowDir, 'root.yaml'), rootWorkflow);
+      await writeFile(join(defaultsDir, 'sub.yaml'), subWorkflow);
 
       const workflows = await discoverWorkflows(testDir);
 
-      expect(workflows).toHaveLength(1);
-      expect(workflows[0].name).toBe('claude-workflow');
-    });
-
-    it('should prefer .archon/workflows over .claude/workflows', async () => {
-      // Both directories exist
-      const archonDir = join(testDir, '.archon', 'workflows');
-      const claudeDir = join(testDir, '.claude', 'workflows');
-      await mkdir(archonDir, { recursive: true });
-      await mkdir(claudeDir, { recursive: true });
-
-      await writeFile(
-        join(archonDir, 'archon.yaml'),
-        `name: archon-workflow
-description: From .archon
-steps:
-  - command: test
-`
-      );
-      await writeFile(
-        join(claudeDir, 'claude.yaml'),
-        `name: claude-workflow
-description: From .claude
-steps:
-  - command: test
-`
-      );
-
-      const workflows = await discoverWorkflows(testDir);
-
-      // Should only find the .archon workflow (stops at first directory with workflows)
-      expect(workflows).toHaveLength(1);
-      expect(workflows[0].name).toBe('archon-workflow');
+      expect(workflows).toHaveLength(2);
+      const names = workflows.map(w => w.name).sort();
+      expect(names).toEqual(['root-workflow', 'sub-workflow']);
     });
   });
 

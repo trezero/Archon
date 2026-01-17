@@ -100,7 +100,7 @@ export function getCommandFolderSearchPaths(configuredFolder?: string): string[]
  * Returns folders in priority order (first match wins)
  */
 export function getWorkflowFolderSearchPaths(): string[] {
-  return ['.archon/workflows', '.claude/workflows', '.agents/workflows'];
+  return ['.archon/workflows'];
 }
 
 /**

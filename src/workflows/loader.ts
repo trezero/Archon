@@ -1,7 +1,7 @@
 /**
  * Workflow loader - discovers and parses workflow YAML files
  */
-import { readFile, readdir, access } from 'fs/promises';
+import { readFile, readdir, access, stat } from 'fs/promises';
 import { join } from 'path';
 import type { WorkflowDefinition, LoopConfig, SingleStep, WorkflowStep } from './types';
 import { getWorkflowFolderSearchPaths } from '../utils/archon-paths';
@@ -192,23 +192,30 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
 }
 
 /**
- * Load workflows from a directory
+ * Load workflows from a directory (recursively includes subdirectories)
  */
 async function loadWorkflowsFromDir(dirPath: string): Promise<WorkflowDefinition[]> {
   const workflows: WorkflowDefinition[] = [];
 
   try {
-    const files = await readdir(dirPath);
-    const yamlFiles = files.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
+    const entries = await readdir(dirPath);
 
-    for (const file of yamlFiles) {
-      const filePath = join(dirPath, file);
-      const content = await readFile(filePath, 'utf-8');
-      const workflow = parseWorkflow(content, file);
+    for (const entry of entries) {
+      const entryPath = join(dirPath, entry);
+      const entryStat = await stat(entryPath);
 
-      if (workflow) {
-        workflows.push(workflow);
-        console.log(`[WorkflowLoader] Loaded workflow: ${workflow.name}`);
+      if (entryStat.isDirectory()) {
+        // Recursively load from subdirectories
+        const subWorkflows = await loadWorkflowsFromDir(entryPath);
+        workflows.push(...subWorkflows);
+      } else if (entry.endsWith('.yaml') || entry.endsWith('.yml')) {
+        const content = await readFile(entryPath, 'utf-8');
+        const workflow = parseWorkflow(content, entry);
+
+        if (workflow) {
+          workflows.push(workflow);
+          console.log(`[WorkflowLoader] Loaded workflow: ${workflow.name}`);
+        }
       }
     }
   } catch (error) {
@@ -225,42 +232,29 @@ async function loadWorkflowsFromDir(dirPath: string): Promise<WorkflowDefinition
 
 /**
  * Discover and load workflows from codebase
- * Searches .archon/workflows/, .claude/workflows/, .agents/workflows/
- * Stops at the first folder that contains workflows (priority order).
+ * Searches .archon/workflows/ recursively (includes subdirectories like defaults/).
  */
 export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition[]> {
-  const allWorkflows: WorkflowDefinition[] = [];
-  const searchPaths = getWorkflowFolderSearchPaths();
+  const [workflowFolder] = getWorkflowFolderSearchPaths();
+  const workflowPath = join(cwd, workflowFolder);
 
-  console.log(`[WorkflowLoader] Searching for workflows in: ${cwd}`);
-  console.log(`[WorkflowLoader] Search paths: ${searchPaths.join(', ')}`);
+  console.log(`[WorkflowLoader] Searching for workflows in: ${workflowPath}`);
 
-  for (const folder of searchPaths) {
-    const fullPath = join(cwd, folder);
-    try {
-      await access(fullPath);
-      console.log(`[WorkflowLoader] Found workflow folder: ${fullPath}`);
-      const workflows = await loadWorkflowsFromDir(fullPath);
-      allWorkflows.push(...workflows);
-
-      if (workflows.length > 0) {
-        console.log(`[WorkflowLoader] Loaded ${String(workflows.length)} workflows from ${folder}`);
-        break; // Stop at first folder with workflows
-      } else {
-        console.log(`[WorkflowLoader] Folder exists but no valid workflows: ${fullPath}`);
-      }
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') {
-        console.log(`[WorkflowLoader] Folder not found (expected): ${fullPath}`);
-      } else {
-        console.warn(`[WorkflowLoader] Error accessing ${fullPath}: ${err.message}`);
-      }
+  try {
+    await access(workflowPath);
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === 'ENOENT') {
+      console.log(`[WorkflowLoader] No workflow folder found at: ${workflowPath}`);
+    } else {
+      console.warn(`[WorkflowLoader] Error accessing ${workflowPath}: ${err.message}`);
     }
+    return [];
   }
 
+  const workflows = await loadWorkflowsFromDir(workflowPath);
   console.log(
-    `[WorkflowLoader] Discovery complete: ${String(allWorkflows.length)} total workflows`
+    `[WorkflowLoader] Loaded ${String(workflows.length)} workflows from ${workflowFolder}`
   );
-  return allWorkflows;
+  return workflows;
 }

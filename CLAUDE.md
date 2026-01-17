@@ -366,10 +366,8 @@ All Archon-managed files are organized under a dedicated namespace:
 - `.archon/commands/` - Primary location for repo commands
 - Additional folder can be configured in `.archon/config.yaml`
 
-**Workflow folder search paths (in priority order):**
-1. `.archon/workflows/`
-2. `.claude/workflows/`
-3. `.agents/workflows/`
+**Workflow folder location:**
+- `.archon/workflows/` - Workflow definitions (YAML files)
 
 ## Development Guidelines
 
@@ -616,7 +614,7 @@ if (streamingMode === 'batch') {
 - Shared across all codebases
 
 **3. Workflows** (YAML-based):
-- Stored in `.archon/workflows/` (or `.claude/workflows/`, `.agents/workflows/`)
+- Stored in `.archon/workflows/` (searched recursively, includes subdirectories like `defaults/`)
 - Multi-step AI execution chains
 - Discovered at runtime, routed by AI
 - Concurrent execution prevented - only one workflow can run per conversation at a time
