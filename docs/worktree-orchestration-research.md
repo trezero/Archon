@@ -247,8 +247,9 @@ interface IsolationHints {
   workflowId?: string;
 
   // PR-specific (for reproducible reviews)
-  prBranch?: string;
+  prBranch?: string; // PR branch name (for adoption and same-repo PRs)
   prSha?: string;
+  isForkPR?: boolean; // True if PR is from a fork
 
   // Cross-reference hints (for linking)
   linkedIssues?: number[]; // From "Fixes #X" parsing

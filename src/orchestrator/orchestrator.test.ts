@@ -781,6 +781,151 @@ describe('orchestrator', () => {
     });
   });
 
+  describe('isolation hints pass-through', () => {
+    test('passes isForkPR to isolation provider when creating new environment', async () => {
+      // Setup: conversation without isolation (needs auto-creation)
+      mockGetOrCreateConversation.mockResolvedValue({
+        ...mockConversation,
+        isolation_env_id: null,
+        cwd: null,
+      });
+
+      // No existing isolation env - will trigger creation
+      mockIsolationEnvGetById.mockResolvedValue(null);
+      mockIsolationEnvFindByWorkflow.mockResolvedValue(null);
+      spyWorktreeExists.mockResolvedValue(false);
+      mockIsolationEnvCountByCodebase.mockResolvedValue(0);
+
+      // Setup isolation provider mock to capture the request
+      mockIsolationProviderCreate.mockResolvedValue({
+        id: 'env-new',
+        provider: 'worktree',
+        workingPath: '/workspace/worktrees/test/pr-42',
+        branchName: 'feature/auth',
+        status: 'active',
+        createdAt: new Date(),
+        metadata: {},
+      });
+
+      mockIsolationEnvCreate.mockResolvedValue({
+        id: 'env-new',
+        codebase_id: 'codebase-789',
+        workflow_type: 'pr',
+        workflow_id: '42',
+        provider: 'worktree',
+        working_path: '/workspace/worktrees/test/pr-42',
+        branch_name: 'feature/auth',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'github',
+        metadata: {},
+      });
+
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      // Call handleMessage with isolation hints including isForkPR
+      const isolationHints = {
+        workflowType: 'pr' as const,
+        workflowId: '42',
+        prBranch: 'feature/auth',
+        prSha: 'abc123',
+        isForkPR: false, // Same-repo PR
+      };
+
+      await handleMessage(
+        platform,
+        'chat-456',
+        'review this PR',
+        undefined,
+        undefined,
+        undefined,
+        isolationHints
+      );
+
+      // Verify isolation provider was called with isForkPR
+      expect(mockIsolationProviderCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          isForkPR: false,
+          prBranch: 'feature/auth',
+          prSha: 'abc123',
+        })
+      );
+    });
+
+    test('passes isForkPR=true for fork PRs', async () => {
+      // Setup: conversation without isolation (needs auto-creation)
+      mockGetOrCreateConversation.mockResolvedValue({
+        ...mockConversation,
+        isolation_env_id: null,
+        cwd: null,
+      });
+
+      // No existing isolation env - will trigger creation
+      mockIsolationEnvGetById.mockResolvedValue(null);
+      mockIsolationEnvFindByWorkflow.mockResolvedValue(null);
+      spyWorktreeExists.mockResolvedValue(false);
+      mockIsolationEnvCountByCodebase.mockResolvedValue(0);
+
+      mockIsolationProviderCreate.mockResolvedValue({
+        id: 'env-fork',
+        provider: 'worktree',
+        workingPath: '/workspace/worktrees/test/pr-42-review',
+        branchName: 'pr-42-review',
+        status: 'active',
+        createdAt: new Date(),
+        metadata: {},
+      });
+
+      mockIsolationEnvCreate.mockResolvedValue({
+        id: 'env-fork',
+        codebase_id: 'codebase-789',
+        workflow_type: 'pr',
+        workflow_id: '42',
+        provider: 'worktree',
+        working_path: '/workspace/worktrees/test/pr-42-review',
+        branch_name: 'pr-42-review',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'github',
+        metadata: {},
+      });
+
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      // Call handleMessage with fork PR hints
+      const isolationHints = {
+        workflowType: 'pr' as const,
+        workflowId: '42',
+        prBranch: 'contributor-feature',
+        prSha: 'def456',
+        isForkPR: true, // Fork PR
+      };
+
+      await handleMessage(
+        platform,
+        'chat-456',
+        'review this fork PR',
+        undefined,
+        undefined,
+        undefined,
+        isolationHints
+      );
+
+      // Verify isolation provider was called with isForkPR=true
+      expect(mockIsolationProviderCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          isForkPR: true,
+          prBranch: 'contributor-feature',
+          prSha: 'def456',
+        })
+      );
+    });
+  });
+
   describe('stale worktree handling', () => {
     test('should clear isolation fields when isolation_env_id points to non-existent path', async () => {
       // Setup: conversation with isolation_env_id pointing to stale env

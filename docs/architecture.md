@@ -479,8 +479,9 @@ interface IsolationRequest {
   canonicalRepoPath: string; // Main repo path, never a worktree
   workflowType: 'issue' | 'pr' | 'review' | 'thread' | 'task';
   identifier: string; // "42", "feature-auth", etc.
-  prBranch?: string; // For PR adoption
+  prBranch?: string; // PR branch name (for adoption and same-repo PRs)
   prSha?: string; // For reproducible PR reviews
+  isForkPR?: boolean; // True if PR is from a fork
 }
 
 interface IsolatedEnvironment {
@@ -517,13 +518,13 @@ export class WorktreeProvider implements IIsolationProvider {
 
 ### Branch Naming Convention
 
-| Workflow | Identifier      | Generated Branch                |
-| -------- | --------------- | ------------------------------- |
-| issue    | `"42"`          | `issue-42`                      |
-| pr       | `"123"`         | `pr-123`                        |
-| pr + SHA | `"123"`         | `pr-123-review`                 |
-| task     | `"my-feature"`  | `task-my-feature`               |
-| thread   | `"C123:ts.123"` | `thread-a1b2c3d4` (8-char hash) |
+| Workflow           | Identifier      | Generated Branch                |
+| ------------------ | --------------- | ------------------------------- |
+| issue              | `"42"`          | `issue-42`                      |
+| pr (same-repo)     | `"123"`         | `feature/auth` (actual branch)  |
+| pr (fork)          | `"123"`         | `pr-123-review`                 |
+| task               | `"my-feature"`  | `task-my-feature`               |
+| thread             | `"C123:ts.123"` | `thread-a1b2c3d4` (8-char hash) |
 
 ### Storage Location
 

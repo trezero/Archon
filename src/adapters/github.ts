@@ -786,7 +786,7 @@ ${userComment}`;
         console.log(`[GitHub] PR #${String(number)} linked to issues: ${linkedIssues.join(', ')}`);
       }
 
-      // Fetch PR head branch and SHA for isolation
+      // Fetch PR head branch, SHA, and fork status for isolation
       try {
         const { data: prData } = await this.octokit.rest.pulls.get({
           owner,
@@ -795,18 +795,39 @@ ${userComment}`;
         });
         isolationHints.prBranch = prData.head.ref;
         isolationHints.prSha = prData.head.sha;
+
+        // Detect if PR is from a fork (different repo than base)
+        // For fork PRs: head.repo is different from base.repo
+        // For same-repo PRs: head.repo.full_name === base.repo.full_name
+        // Note: head.repo can be null if the fork was deleted after PR creation
+        // In that case, we treat it as a fork (can't push to deleted repo anyway)
+        const headRepoFullName = prData.head.repo?.full_name;
+        const baseRepoFullName = prData.base.repo.full_name;
+        isolationHints.isForkPR = headRepoFullName !== baseRepoFullName;
+
+        const forkInfo = isolationHints.isForkPR ? ' (fork)' : '';
         console.log(
-          `[GitHub] PR #${String(number)} head: ${prData.head.ref}@${prData.head.sha.substring(0, 7)}`
+          `[GitHub] PR #${String(number)} head: ${prData.head.ref}@${prData.head.sha.substring(0, 7)}${forkInfo}`
         );
       } catch (error) {
         const err = error as Error;
-        console.warn('[GitHub] Failed to fetch PR head info:', {
+        // Log at appropriate level based on error type
+        const isNonTransient =
+          err.message.includes('rate limit') ||
+          err.message.includes('403') ||
+          err.message.includes('401') ||
+          err.message.includes('Bad credentials');
+
+        const logFn = isNonTransient ? console.error : console.warn;
+        logFn('[GitHub] Failed to fetch PR head info:', {
           owner,
           repo,
           prNumber: number,
           error: err.message,
         });
-        // Note: Continuing without PR branch info - worktree isolation will use fallback naming
+
+        // Mark degraded mode - worktree isolation will use fallback naming
+        isolationHints.prFetchFailed = true;
       }
     }
 

@@ -235,6 +235,7 @@ async function resolveIsolation(
       identifier: workflowId,
       prBranch: hints?.prBranch,
       prSha: hints?.prSha,
+      isForkPR: hints?.isForkPR,
     });
 
     // Create database record

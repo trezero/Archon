@@ -58,18 +58,19 @@ interface IsolationRequest {
   canonicalRepoPath: string; // Main repo, never a worktree
   workflowType: 'issue' | 'pr' | 'review' | 'thread' | 'task';
   identifier: string;
-  prBranch?: string; // For PR adoption
+  prBranch?: string; // PR branch name (for adoption and same-repo PRs)
   prSha?: string; // For reproducible reviews
+  isForkPR?: boolean; // True if PR is from a fork
 }
 ```
 
-| Workflow | Identifier      | Branch Name              |
-| -------- | --------------- | ------------------------ |
-| issue    | `"42"`          | `issue-42`               |
-| pr       | `"123"`         | `pr-123`                 |
-| pr + SHA | `"123"`         | `pr-123-review`          |
-| task     | `"my-feature"`  | `task-my-feature`        |
-| thread   | `"C123:ts.123"` | `thread-a1b2c3d4` (hash) |
+| Workflow            | Identifier      | Branch Name              |
+| ------------------- | --------------- | ------------------------ |
+| issue               | `"42"`          | `issue-42`               |
+| pr (same-repo)      | `"123"`         | `feature/auth` (actual)  |
+| pr (fork)           | `"123"`         | `pr-123-review`          |
+| task                | `"my-feature"`  | `task-my-feature`        |
+| thread              | `"C123:ts.123"` | `thread-a1b2c3d4` (hash) |
 
 ## Creation Flow
 
@@ -97,12 +98,17 @@ IsolationRequest
 │   git worktree add <path> -b <branch>            │
 │   (falls back to existing branch if exists)      │
 │                                                  │
-│ PR with SHA:                                     │
+│ PR (same-repo):                                  │
+│   git fetch origin <branch>                      │
+│   git worktree add <path> -b <branch> origin/<b> │
+│   (uses actual PR branch for direct push)        │
+│                                                  │
+│ PR (fork) with SHA:                              │
 │   git fetch origin pull/<N>/head                 │
 │   git worktree add <path> <sha>                  │
 │   git checkout -b pr-<N>-review <sha>            │
 │                                                  │
-│ PR without SHA:                                  │
+│ PR (fork) without SHA:                           │
 │   git fetch origin pull/<N>/head:pr-<N>-review   │
 │   git worktree add <path> pr-<N>-review          │
 └──────────────────────────────────────────────────┘

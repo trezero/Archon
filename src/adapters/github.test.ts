@@ -870,4 +870,52 @@ describe('GitHubAdapter', () => {
       expect(mockCreateComment).toHaveBeenCalledTimes(3);
     });
   });
+
+  describe('fork detection logic', () => {
+    /**
+     * Tests for the fork detection comparison logic used in handleWebhook.
+     * The actual logic: isForkPR = headRepoFullName !== baseRepoFullName
+     * This logic determines whether a PR uses the actual branch (same-repo)
+     * or a synthetic pr-N-review branch (fork).
+     */
+
+    test('should detect same-repo PR when head and base repos match', () => {
+      // Simulates same-repo PR where contributor has push access
+      const headRepoFullName = 'owner/repo';
+      const baseRepoFullName = 'owner/repo';
+      const isForkPR = headRepoFullName !== baseRepoFullName;
+
+      expect(isForkPR).toBe(false);
+    });
+
+    test('should detect fork PR when head and base repos differ', () => {
+      // Simulates fork PR where head is from a different repo
+      const headRepoFullName = 'contributor/repo';
+      const baseRepoFullName = 'owner/repo';
+      const isForkPR = headRepoFullName !== baseRepoFullName;
+
+      expect(isForkPR).toBe(true);
+    });
+
+    test('should detect fork PR when head.repo is null (deleted fork)', () => {
+      // When a fork is deleted after a PR was opened, head.repo becomes null
+      // The optional chaining (?.) returns undefined, and undefined !== 'owner/repo' is true
+      const headRepoFullName: string | undefined = undefined; // Simulates prData.head.repo?.full_name
+      const baseRepoFullName = 'owner/repo';
+      const isForkPR = headRepoFullName !== baseRepoFullName;
+
+      // Correctly treated as fork - can't push to deleted repo anyway
+      expect(isForkPR).toBe(true);
+    });
+
+    test('should handle case sensitivity correctly', () => {
+      // GitHub full_names are case-sensitive in the API response
+      const headRepoFullName = 'Owner/Repo';
+      const baseRepoFullName = 'owner/repo';
+      const isForkPR = headRepoFullName !== baseRepoFullName;
+
+      // Different casing = different repos (fork detection)
+      expect(isForkPR).toBe(true);
+    });
+  });
 });

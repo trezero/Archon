@@ -15,8 +15,9 @@ export interface IsolationRequest {
   canonicalRepoPath: string; // Main repo path, never a worktree
   workflowType: 'issue' | 'pr' | 'review' | 'thread' | 'task';
   identifier: string; // "42", "feature-auth", thread hash, etc.
-  prBranch?: string; // PR-specific (for reproducible reviews)
-  prSha?: string;
+  prBranch?: string; // PR-specific: the actual branch name of the PR
+  prSha?: string; // PR-specific: head commit SHA for reproducible reviews
+  isForkPR?: boolean; // PR-specific: true if PR is from a fork
   description?: string;
 }
 

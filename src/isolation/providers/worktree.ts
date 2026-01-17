@@ -193,13 +193,20 @@ export class WorktreeProvider implements IIsolationProvider {
 
   /**
    * Generate semantic branch name based on workflow type
+   *
+   * For same-repo PRs: Use the actual PR branch name
+   * For fork PRs: Use synthetic pr-N-review branch
    */
   generateBranchName(request: IsolationRequest): string {
     switch (request.workflowType) {
       case 'issue':
         return `issue-${request.identifier}`;
       case 'pr':
-        return `pr-${request.identifier}`;
+        // Same-repo PRs use actual branch, fork PRs use synthetic branch
+        if (!request.isForkPR && request.prBranch) {
+          return request.prBranch;
+        }
+        return `pr-${request.identifier}-review`;
       case 'review':
         return `review-${request.identifier}`;
       case 'thread':
@@ -300,8 +307,8 @@ export class WorktreeProvider implements IIsolationProvider {
     // Ensure worktree base directory exists
     await mkdirAsync(projectWorktreeDir, { recursive: true });
 
-    if (request.workflowType === 'pr' && request.prBranch) {
-      // For PRs: fetch and checkout the PR's head branch
+    if (request.workflowType === 'pr') {
+      // For PRs: fetch and checkout the PR branch (actual or synthetic)
       await this.createFromPR(request, worktreePath);
     } else {
       // For issues, tasks, threads: create new branch
@@ -372,59 +379,118 @@ export class WorktreeProvider implements IIsolationProvider {
   }
 
   /**
-   * Create worktree from PR (handles both SHA and branch-based)
+   * Create worktree from PR
+   *
+   * For same-repo PRs: Use the actual branch name so changes push directly to PR
+   * For fork PRs: Use synthetic branch (pr-N-review) since we can't push to forks
    */
   private async createFromPR(request: IsolationRequest, worktreePath: string): Promise<void> {
     const repoPath = request.canonicalRepoPath;
     const prNumber = request.identifier;
+    const isForkPR = request.isForkPR ?? false;
+    const prBranch = request.prBranch;
 
     try {
-      if (request.prSha) {
-        // If SHA provided, use it for reproducible reviews (hybrid approach)
-        // Fetch the specific commit SHA using PR refs (works for both fork and non-fork PRs)
-        await execFileAsync('git', ['-C', repoPath, 'fetch', 'origin', `pull/${prNumber}/head`], {
-          timeout: 30000,
-        });
-
-        // Create worktree at the specific SHA
-        await execFileAsync(
-          'git',
-          ['-C', repoPath, 'worktree', 'add', worktreePath, request.prSha],
-          {
-            timeout: 30000,
-          }
-        );
-
-        // Create a local tracking branch so it's not detached HEAD
-        await execFileAsync(
-          'git',
-          ['-C', worktreePath, 'checkout', '-b', `pr-${prNumber}-review`, request.prSha],
-          {
-            timeout: 30000,
-          }
-        );
+      if (!isForkPR && prBranch) {
+        // Same-repo PR: Use the actual branch so changes push directly to PR
+        await this.createFromSameRepoPR(repoPath, worktreePath, prBranch);
       } else {
-        // Use GitHub's PR refs which work for both fork and non-fork PRs
-        await execFileAsync(
-          'git',
-          ['-C', repoPath, 'fetch', 'origin', `pull/${prNumber}/head:pr-${prNumber}-review`],
-          {
-            timeout: 30000,
-          }
-        );
-
-        // Create worktree using the fetched PR ref
-        await execFileAsync(
-          'git',
-          ['-C', repoPath, 'worktree', 'add', worktreePath, `pr-${prNumber}-review`],
-          {
-            timeout: 30000,
-          }
-        );
+        // Fork PR or no branch info: Use synthetic review branch
+        await this.createFromForkPR(repoPath, worktreePath, prNumber, request.prSha);
       }
     } catch (error) {
       const err = error as Error;
       throw new Error(`Failed to create worktree for PR #${prNumber}: ${err.message}`);
+    }
+  }
+
+  /**
+   * Create worktree for same-repo PR using the actual branch
+   */
+  private async createFromSameRepoPR(
+    repoPath: string,
+    worktreePath: string,
+    prBranch: string
+  ): Promise<void> {
+    // Fetch the PR's actual branch
+    await execFileAsync('git', ['-C', repoPath, 'fetch', 'origin', prBranch], {
+      timeout: 30000,
+    });
+
+    // Try to create worktree with the branch
+    try {
+      // If branch doesn't exist locally, create it tracking remote
+      await execFileAsync(
+        'git',
+        ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', prBranch, `origin/${prBranch}`],
+        { timeout: 30000 }
+      );
+    } catch (error) {
+      const err = error as Error & { stderr?: string };
+      // Branch already exists locally - use it directly
+      if (err.stderr?.includes('already exists')) {
+        await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, prBranch], {
+          timeout: 30000,
+        });
+      } else {
+        throw error;
+      }
+    }
+
+    // Set up tracking for push/pull (non-fatal - worktree is usable without it)
+    try {
+      await execFileAsync(
+        'git',
+        ['-C', worktreePath, 'branch', '--set-upstream-to', `origin/${prBranch}`],
+        { timeout: 30000 }
+      );
+    } catch (trackingError) {
+      const err = trackingError as Error;
+      console.warn('[WorktreeProvider] Failed to set upstream tracking (worktree usable):', {
+        worktreePath,
+        prBranch,
+        error: err.message,
+      });
+      // Continue - the worktree was created successfully, tracking is just convenience
+    }
+  }
+
+  /**
+   * Create worktree for fork PR using synthetic review branch
+   */
+  private async createFromForkPR(
+    repoPath: string,
+    worktreePath: string,
+    prNumber: string,
+    prSha?: string
+  ): Promise<void> {
+    const reviewBranch = `pr-${prNumber}-review`;
+
+    if (prSha) {
+      // SHA provided: create at specific commit for reproducible reviews
+      await execFileAsync('git', ['-C', repoPath, 'fetch', 'origin', `pull/${prNumber}/head`], {
+        timeout: 30000,
+      });
+
+      await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, prSha], {
+        timeout: 30000,
+      });
+
+      // Create a local tracking branch so it's not detached HEAD
+      await execFileAsync('git', ['-C', worktreePath, 'checkout', '-b', reviewBranch, prSha], {
+        timeout: 30000,
+      });
+    } else {
+      // No SHA: fetch and create review branch
+      await execFileAsync(
+        'git',
+        ['-C', repoPath, 'fetch', 'origin', `pull/${prNumber}/head:${reviewBranch}`],
+        { timeout: 30000 }
+      );
+
+      await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, reviewBranch], {
+        timeout: 30000,
+      });
     }
   }
 

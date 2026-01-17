@@ -62,14 +62,38 @@ describe('WorktreeProvider', () => {
       expect(provider.generateBranchName(request)).toBe('issue-42');
     });
 
-    test('generates pr-N for PR workflows', () => {
+    test('generates pr-N-review for PR workflows without branch info (fork fallback)', () => {
       const request: IsolationRequest = {
         codebaseId: 'cb-123',
         canonicalRepoPath: '/workspace/repo',
         workflowType: 'pr',
         identifier: '123',
       };
-      expect(provider.generateBranchName(request)).toBe('pr-123');
+      expect(provider.generateBranchName(request)).toBe('pr-123-review');
+    });
+
+    test('generates actual branch name for same-repo PR workflows', () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
+        workflowType: 'pr',
+        identifier: '123',
+        prBranch: 'feature/auth',
+        isForkPR: false,
+      };
+      expect(provider.generateBranchName(request)).toBe('feature/auth');
+    });
+
+    test('generates pr-N-review for fork PR workflows', () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
+        workflowType: 'pr',
+        identifier: '123',
+        prBranch: 'feature/auth',
+        isForkPR: true,
+      };
+      expect(provider.generateBranchName(request)).toBe('pr-123-review');
     });
 
     test('generates review-N for review workflows', () => {
@@ -174,18 +198,67 @@ describe('WorktreeProvider', () => {
       );
     });
 
-    test('creates worktree for PR with SHA (reproducible reviews)', async () => {
+    test('creates worktree for same-repo PR (uses actual branch)', async () => {
+      const request: IsolationRequest = {
+        ...baseRequest,
+        workflowType: 'pr',
+        identifier: '42',
+        prBranch: 'feature/auth',
+        isForkPR: false,
+      };
+
+      await provider.create(request);
+
+      // Verify fetch with actual branch name
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['-C', '/workspace/repo', 'fetch', 'origin', 'feature/auth']),
+        expect.any(Object)
+      );
+
+      // Verify worktree add with actual branch
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining([
+          '-C',
+          '/workspace/repo',
+          'worktree',
+          'add',
+          expect.any(String),
+          '-b',
+          'feature/auth',
+          'origin/feature/auth',
+        ]),
+        expect.any(Object)
+      );
+
+      // Verify upstream tracking is set
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining([
+          '-C',
+          expect.any(String),
+          'branch',
+          '--set-upstream-to',
+          'origin/feature/auth',
+        ]),
+        expect.any(Object)
+      );
+    });
+
+    test('creates worktree for fork PR with SHA (reproducible reviews)', async () => {
       const request: IsolationRequest = {
         ...baseRequest,
         workflowType: 'pr',
         identifier: '42',
         prBranch: 'feature/auth',
         prSha: 'abc123def456',
+        isForkPR: true,
       };
 
       await provider.create(request);
 
-      // Verify fetch with PR ref
+      // Verify fetch with PR ref (fork PRs use pull/N/head)
       expect(execSpy).toHaveBeenCalledWith(
         'git',
         expect.arrayContaining(['-C', '/workspace/repo', 'fetch', 'origin', 'pull/42/head']),
@@ -221,12 +294,13 @@ describe('WorktreeProvider', () => {
       );
     });
 
-    test('creates worktree for PR without SHA (uses PR ref)', async () => {
+    test('creates worktree for fork PR without SHA (uses PR ref)', async () => {
       const request: IsolationRequest = {
         ...baseRequest,
         workflowType: 'pr',
         identifier: '42',
         prBranch: 'feature/auth',
+        isForkPR: true,
       };
 
       await provider.create(request);
@@ -254,6 +328,30 @@ describe('WorktreeProvider', () => {
           'add',
           expect.any(String),
           'pr-42-review',
+        ]),
+        expect.any(Object)
+      );
+    });
+
+    test('creates worktree for PR without branch info (fallback to fork behavior)', async () => {
+      const request: IsolationRequest = {
+        ...baseRequest,
+        workflowType: 'pr',
+        identifier: '42',
+        // No prBranch or isForkPR - should use fork fallback
+      };
+
+      await provider.create(request);
+
+      // Verify fetch with PR ref (fallback behavior)
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining([
+          '-C',
+          '/workspace/repo',
+          'fetch',
+          'origin',
+          'pull/42/head:pr-42-review',
         ]),
         expect.any(Object)
       );
@@ -349,12 +447,13 @@ describe('WorktreeProvider', () => {
       );
     });
 
-    test('throws error if PR fetch fails', async () => {
+    test('throws error if PR fetch fails (same-repo PR)', async () => {
       const request: IsolationRequest = {
         ...baseRequest,
         workflowType: 'pr',
         identifier: '42',
         prBranch: 'feature/auth',
+        isForkPR: false,
       };
 
       execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
@@ -366,6 +465,67 @@ describe('WorktreeProvider', () => {
 
       await expect(provider.create(request)).rejects.toThrow(
         'Failed to create worktree for PR #42'
+      );
+    });
+
+    test('throws error if PR fetch fails (fork PR)', async () => {
+      const request: IsolationRequest = {
+        ...baseRequest,
+        workflowType: 'pr',
+        identifier: '42',
+        prBranch: 'feature/auth',
+        isForkPR: true,
+      };
+
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('fetch')) {
+          throw new Error('fatal: unable to access repository');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await expect(provider.create(request)).rejects.toThrow(
+        'Failed to create worktree for PR #42'
+      );
+    });
+
+    test('handles existing branch for same-repo PR', async () => {
+      const request: IsolationRequest = {
+        ...baseRequest,
+        workflowType: 'pr',
+        identifier: '42',
+        prBranch: 'feature/auth',
+        isForkPR: false,
+      };
+
+      let callCount = 0;
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        callCount++;
+        // First worktree add fails (branch already exists)
+        if (callCount === 2 && args.includes('-b') && args.includes('feature/auth')) {
+          const error = new Error(
+            'fatal: A branch named feature/auth already exists.'
+          ) as Error & { stderr?: string };
+          error.stderr = 'fatal: A branch named feature/auth already exists.';
+          throw error;
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await provider.create(request);
+
+      // Should have called worktree add without -b flag after failure
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining([
+          '-C',
+          '/workspace/repo',
+          'worktree',
+          'add',
+          expect.any(String),
+          'feature/auth',
+        ]),
+        expect.any(Object)
       );
     });
   });

@@ -27,6 +27,8 @@ export interface IsolationHints {
   // PR-specific (for reproducible reviews)
   prBranch?: string;
   prSha?: string;
+  isForkPR?: boolean; // True if PR is from a fork (different repo)
+  prFetchFailed?: boolean; // True if GitHub API fetch failed (degraded mode)
 
   // Cross-reference hints (for linking)
   linkedIssues?: number[];
