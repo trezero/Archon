@@ -414,8 +414,9 @@ export class GitHubAdapter implements IPlatformAdapter {
 
   /**
    * Ensure repository is cloned and ready
-   * For new conversations: clone or sync
-   * For existing conversations: skip
+   * For new codebases: clone (directory won't exist)
+   * For existing codebases: sync if shouldSync=true, skip if shouldSync=false
+   * @param shouldSync - Whether to sync if directory exists (pass true to ensure latest code)
    */
   private async ensureRepoReady(
     owner: string,
@@ -424,27 +425,85 @@ export class GitHubAdapter implements IPlatformAdapter {
     repoPath: string,
     shouldSync: boolean
   ): Promise<void> {
+    // Check if directory exists
+    let directoryExists = false;
     try {
       await access(repoPath);
-      if (shouldSync) {
-        console.log('[GitHub] Syncing repository');
-        await execAsync(
-          `cd ${repoPath} && git fetch origin && git reset --hard origin/${defaultBranch}`
+      directoryExists = true;
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') {
+        // Real error - permission denied, I/O failure, etc.
+        console.error('[GitHub] Failed to access repository path:', {
+          repoPath,
+          errorCode: err.code,
+          errorMessage: err.message,
+        });
+        throw new Error(
+          `Cannot access repository at ${repoPath}: ${err.code ?? err.message}. ` +
+            'Check permissions and disk health.'
         );
       }
-    } catch {
-      console.log(`[GitHub] Cloning repository to ${repoPath}`);
-      const ghToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-      const repoUrl = `https://github.com/${owner}/${repo}.git`;
-      let cloneCommand = `git clone ${repoUrl} ${repoPath}`;
+      // ENOENT means directory doesn't exist - we'll clone below
+    }
 
-      if (ghToken) {
-        const authenticatedUrl = `https://${ghToken}@github.com/${owner}/${repo}.git`;
-        cloneCommand = `git clone ${authenticatedUrl} ${repoPath}`;
+    if (directoryExists) {
+      if (shouldSync) {
+        console.log('[GitHub] Syncing repository');
+        try {
+          await execAsync(
+            `cd ${repoPath} && git fetch origin && git reset --hard origin/${defaultBranch}`
+          );
+        } catch (syncError) {
+          const err = syncError as Error;
+          console.error('[GitHub] Repository sync failed:', {
+            repoPath,
+            defaultBranch,
+            error: err.message,
+          });
+          throw new Error(
+            `Failed to sync repository to ${defaultBranch}. ` +
+              `Try /reset or check if the branch exists. Details: ${err.message}`
+          );
+        }
       }
+      return;
+    }
 
+    // Directory doesn't exist - clone the repository
+    console.log(`[GitHub] Cloning repository to ${repoPath}`);
+    const ghToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+    const repoUrl = `https://github.com/${owner}/${repo}.git`;
+    let cloneCommand = `git clone ${repoUrl} ${repoPath}`;
+
+    if (ghToken) {
+      const authenticatedUrl = `https://${ghToken}@github.com/${owner}/${repo}.git`;
+      cloneCommand = `git clone ${authenticatedUrl} ${repoPath}`;
+    }
+
+    try {
       await execAsync(cloneCommand);
       await execAsync(`git config --global --add safe.directory '${repoPath}'`);
+    } catch (cloneError) {
+      const err = cloneError as Error;
+      console.error('[GitHub] Repository clone failed:', {
+        owner,
+        repo,
+        repoPath,
+        error: err.message,
+      });
+
+      // Throw user-friendly error
+      if (err.message.includes('not found') || err.message.includes('404')) {
+        throw new Error(
+          `Repository ${owner}/${repo} not found or is private. Check repository access.`
+        );
+      } else if (err.message.includes('Authentication failed')) {
+        throw new Error(
+          `Authentication failed for ${owner}/${repo}. Check GITHUB_TOKEN permissions.`
+        );
+      }
+      throw new Error(`Failed to clone ${owner}/${repo}: ${err.message}`);
     }
   }
 
@@ -473,7 +532,18 @@ export class GitHubAdapter implements IPlatformAdapter {
         await codebaseDb.updateCodebaseCommands(codebaseId, commands);
         console.log(`[GitHub] Loaded ${String(files.length)} commands from ${folder}`);
         return;
-      } catch {
+      } catch (error) {
+        const err = error as NodeJS.ErrnoException;
+        // Folder not existing is expected - silently continue to next folder
+        if (err.code === 'ENOENT') {
+          continue;
+        }
+        // Log unexpected errors (database failures, permission issues) but don't fail setup
+        console.error('[GitHub] Error loading commands from folder:', {
+          folder,
+          errorCode: err.code,
+          errorMessage: err.message,
+        });
         continue;
       }
     }
@@ -542,7 +612,12 @@ export class GitHubAdapter implements IPlatformAdapter {
       console.log(`[GitHub] Cleanup complete for ${conversationId}`);
     } catch (error) {
       const err = error as Error;
-      console.error(`[GitHub] Cleanup failed for ${conversationId}:`, err.message);
+      // Log full context for debugging - cleanup failures shouldn't break user flow
+      console.error(`[GitHub] Cleanup failed for ${conversationId}:`, {
+        error: err.message,
+        stack: err.stack,
+        conversationId,
+      });
     }
   }
 
@@ -665,7 +740,7 @@ ${userComment}`;
     const defaultBranch = repoData.default_branch;
 
     // 8. Ensure repo ready (clone if needed, sync if new conversation)
-    await this.ensureRepoReady(owner, repo, defaultBranch, repoPath, isNewConversation);
+    await this.ensureRepoReady(owner, repo, defaultBranch, repoPath, isNewCodebase);
 
     // 9. Copy defaults and auto-load commands if new codebase
     if (isNewCodebase) {
@@ -724,7 +799,14 @@ ${userComment}`;
           `[GitHub] PR #${String(number)} head: ${prData.head.ref}@${prData.head.sha.substring(0, 7)}`
         );
       } catch (error) {
-        console.warn('[GitHub] Failed to fetch PR head info:', error);
+        const err = error as Error;
+        console.warn('[GitHub] Failed to fetch PR head info:', {
+          owner,
+          repo,
+          prNumber: number,
+          error: err.message,
+        });
+        // Note: Continuing without PR branch info - worktree isolation will use fallback naming
       }
     }
 
