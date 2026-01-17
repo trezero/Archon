@@ -29,7 +29,7 @@ Control AI coding assistants (Claude Code, Codex) remotely from Telegram, GitHub
 
 ## Quick Start
 
-### Option 1: Docker (Recommended for trying it out)
+### Option 1: Docker (*Not working yet => works when repo goes public*)
 
 ```bash
 # 1. Get the files
@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-ag
 nano .env
 
 # 3. Run
-docker compose up -d
+docker compose up -d --profile <yourprofile>
 
 # 4. Check it's working
 curl http://localhost:3000/health
