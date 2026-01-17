@@ -142,6 +142,30 @@ docker-compose --profile with-db down
 
 **Note:** For development, use the hybrid approach above instead (postgres in Docker, app locally).
 
+### Cloud Deployment
+
+For production cloud deployment with automatic HTTPS via Caddy, use the `docker-compose.cloud.yml` overlay:
+
+```bash
+# With external database (Supabase, Neon, etc.)
+docker compose --profile external-db -f docker-compose.yml -f docker-compose.cloud.yml up -d --build
+
+# With local PostgreSQL
+docker compose --profile with-db -f docker-compose.yml -f docker-compose.cloud.yml up -d --build
+```
+
+The overlay file adds:
+- Caddy reverse proxy with automatic HTTPS (Let's Encrypt)
+- Profile-specific Caddy services (`caddy` for `external-db`, `caddy-with-db` for `with-db`)
+- Internal-only networking (app not exposed on host ports)
+
+**Caddyfile configuration:**
+- Copy `Caddyfile.example` to `Caddyfile`
+- Update domain name
+- Set service name based on profile: `app:3000` for `external-db`, `app-with-db:3000` for `with-db`
+
+See [Cloud Deployment Guide](docs/cloud-deployment.md) for complete setup instructions.
+
 ## Architecture
 
 ### Directory Structure

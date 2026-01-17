@@ -509,6 +509,8 @@ remote-agent.yourdomain.com {
 
 Replace `remote-agent.yourdomain.com` with your actual domain.
 
+> **Note:** If using `with-db` profile (local PostgreSQL), change `app:3000` to `app-with-db:3000`
+
 **Save and exit:** `Ctrl+X`, then `Y`, then `Enter`
 
 ### How Caddy Works
@@ -536,10 +538,10 @@ If using managed database:
 
 ```bash
 # Start app with Caddy reverse proxy
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml up -d --build
+docker compose --profile external-db -f docker-compose.yml -f docker-compose.cloud.yml up -d --build
 
 # View logs
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml logs -f app
+docker compose --profile external-db -f docker-compose.yml -f docker-compose.cloud.yml logs -f app
 ```
 
 ### Option B: With Local PostgreSQL
@@ -558,8 +560,8 @@ docker compose --profile with-db -f docker-compose.yml -f docker-compose.cloud.y
 ### Monitor Startup
 
 ```bash
-# Watch logs for successful startup
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml logs -f app
+# Watch logs for successful startup (use --profile with-db for local PostgreSQL)
+docker compose --profile external-db -f docker-compose.yml -f docker-compose.cloud.yml logs -f app
 
 # Look for:
 # [App] Starting Remote Coding Agent

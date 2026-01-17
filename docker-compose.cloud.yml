@@ -1,9 +1,12 @@
 # Cloud deployment configuration with Caddy reverse proxy
-# Usage: docker compose -f docker-compose.yml -f docker-compose.cloud.yml up -d
+# Usage with external-db: docker compose --profile external-db -f docker-compose.yml -f docker-compose.cloud.yml up -d
+# Usage with with-db:     docker compose --profile with-db -f docker-compose.yml -f docker-compose.cloud.yml up -d
 
 services:
+  # Caddy for external-db profile
   caddy:
     image: caddy:2-alpine
+    profiles: ["external-db"]
     container_name: remote-agent-caddy
     restart: unless-stopped
     ports:
@@ -19,12 +22,43 @@ services:
     depends_on:
       - app
 
+  # Caddy for with-db profile
+  caddy-with-db:
+    image: caddy:2-alpine
+    profiles: ["with-db"]
+    container_name: remote-agent-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - remote-agent-network
+    depends_on:
+      - app-with-db
+
+  # Override for external-db profile
   app:
-    # Override ports - Caddy proxies internally, no need to expose 3000
     ports: []
     expose:
       - "3000"
-    restart: unless-stopped
+    networks:
+      - remote-agent-network
+
+  # Override for with-db profile
+  app-with-db:
+    ports: []
+    expose:
+      - "3000"
+    networks:
+      - remote-agent-network
+
+  # Add postgres to network for with-db profile
+  postgres:
     networks:
       - remote-agent-network
 

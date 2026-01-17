@@ -18,12 +18,16 @@ remote-agent.yourdomain.com {
     # No additional configuration needed - Caddy handles it automatically
 }
 
+# IMPORTANT: Service name depends on your Docker Compose profile:
+# - external-db profile: use "app:3000"
+# - with-db profile: use "app-with-db:3000"
+
 # Alternative configuration with multiple domains:
 # remote-agent.yourdomain.com, alternative.domain.com {
-#     reverse_proxy app:3000
+#     reverse_proxy app:3000  # Use app-with-db:3000 for with-db profile
 # }
 
 # Alternative: HTTP only (for testing, not recommended for production)
 # http://remote-agent.yourdomain.com {
-#     reverse_proxy app:3000
+#     reverse_proxy app:3000  # Use app-with-db:3000 for with-db profile
 # }
