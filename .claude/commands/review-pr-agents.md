@@ -11,6 +11,7 @@ Run a comprehensive pull request review using multiple specialized agents, each 
 - Study the target
 - Check if a rebase is needed
 - Check and intelligently resolve conflicts as needed
+- Push to the pr if on a pr, never push to main without approval from the user
 - Validate
 
 Then run the review workflow on the Target
