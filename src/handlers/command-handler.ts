@@ -52,6 +52,73 @@ function shortenPath(absolutePath: string, repoRoot?: string): string {
 }
 
 /**
+ * Get the current git branch name for a repository.
+ * Returns 'unknown' if git command fails, with error logged for debugging.
+ *
+ * @returns Branch name, 'detached HEAD', or 'unknown'. Never throws.
+ */
+async function getCurrentBranch(repoPath: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', repoPath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+      { timeout: 3000 }
+    );
+    const branch = stdout.trim();
+    // Handle detached HEAD state - git returns literal "HEAD"
+    return branch === 'HEAD' ? 'detached HEAD' : branch;
+  } catch (error) {
+    console.error('[getCurrentBranch] Failed to get branch name', {
+      repoPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 'unknown';
+  }
+}
+
+/**
+ * Format repository context for user-facing display.
+ * Shows "owner/repo @ branch" instead of filesystem paths.
+ *
+ * @returns Formatted context string. Never throws - falls back gracefully on errors.
+ */
+async function formatRepoContext(
+  codebase: { name: string; default_cwd: string } | null,
+  isolationEnvId: string | null
+): Promise<string> {
+  if (!codebase) {
+    return 'No codebase configured';
+  }
+
+  // If in a worktree, use the worktree's branch name from database
+  if (isolationEnvId) {
+    try {
+      const env = await isolationEnvDb.getById(isolationEnvId);
+      if (env?.branch_name) {
+        return `${codebase.name} @ ${env.branch_name} (worktree)`;
+      }
+      // Log data integrity issue - isolation_env_id exists but record missing or incomplete
+      console.warn('[formatRepoContext] Isolation environment record missing or incomplete', {
+        isolationEnvId,
+        found: !!env,
+        hasBranchName: !!env?.branch_name,
+      });
+      // Fallthrough to git branch detection
+    } catch (error) {
+      console.error('[formatRepoContext] Failed to get isolation environment', {
+        isolationEnvId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Fallthrough to git branch detection on DB error
+    }
+  }
+
+  // Not in worktree or worktree lookup failed - get branch from git
+  const branchName = await getCurrentBranch(codebase.default_cwd);
+  return `${codebase.name} @ ${branchName}`;
+}
+
+/**
  * Recursively find all .md files in a directory and its subdirectories
  */
 async function findMarkdownFilesRecursive(
@@ -247,21 +314,13 @@ Setup:
       }
 
       if (codebase?.name) {
-        msg += `\n\nCodebase: ${codebase.name}`;
+        const repoContext = await formatRepoContext(codebase, conversation.isolation_env_id);
+        msg += `\n\nRepository: ${repoContext}`;
         if (codebase.repository_url) {
-          msg += `\nRepository: ${codebase.repository_url}`;
+          msg += `\nURL: ${codebase.repository_url}`;
         }
       } else {
         msg += '\n\nNo codebase configured. Use /clone <repo-url> to get started.';
-      }
-
-      msg += `\n\nCurrent Working Directory: ${conversation.cwd ?? 'Not set'}`;
-
-      const activeIsolation = conversation.isolation_env_id;
-      if (activeIsolation) {
-        const repoRoot = codebase?.default_cwd;
-        const shortPath = shortenPath(activeIsolation, repoRoot);
-        msg += `\nWorktree: ${shortPath}`;
       }
 
       const session = await sessionDb.getActiveSession(conversation.id);
@@ -292,11 +351,16 @@ Setup:
       return { success: true, message: msg };
     }
 
-    case 'getcwd':
+    case 'getcwd': {
+      const codebase = conversation.codebase_id
+        ? await codebaseDb.getCodebase(conversation.codebase_id)
+        : null;
+      const repoContext = await formatRepoContext(codebase, conversation.isolation_env_id);
       return {
         success: true,
-        message: `Current working directory: ${conversation.cwd ?? 'Not set'}`,
+        message: `Repository: ${repoContext}`,
       };
+    }
 
     case 'setcwd': {
       if (args.length === 0) {
@@ -343,9 +407,15 @@ Setup:
         console.log('[Command] Deactivated session after cwd change');
       }
 
+      // Format response with repo context instead of filesystem path
+      const codebase = await codebaseDb.findCodebaseByDefaultCwd(resolvedCwd);
+      const repoContext = codebase
+        ? await formatRepoContext(codebase, conversation.isolation_env_id)
+        : basename(resolvedCwd); // Show folder name only, not full path
+
       return {
         success: true,
-        message: `Working directory set to: ${resolvedCwd}\n\nSession reset - starting fresh on next message.`,
+        message: `Working directory set to: ${repoContext}\n\nSession reset - starting fresh on next message.`,
         modified: true,
       };
     }
@@ -575,7 +645,7 @@ Setup:
           }
         }
 
-        let responseMessage = `Repository cloned successfully!\n\nCodebase: ${repoName}\nPath: ${targetPath}`;
+        let responseMessage = `Repository cloned successfully!\n\nRepository: ${repoName}`;
         if (copyResult.commandsCopied > 0) {
           responseMessage += `\n✓ Copied ${String(copyResult.commandsCopied)} default commands`;
         }

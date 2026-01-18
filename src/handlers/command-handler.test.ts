@@ -401,13 +401,13 @@ describe('CommandHandler', () => {
         const conversation = { ...baseConversation, cwd: '/workspace/my-repo' };
         const result = await handleCommand(conversation, '/getcwd');
         expect(result.success).toBe(true);
-        expect(result.message).toContain('/workspace/my-repo');
+        expect(result.message).toContain('Repository:');
       });
 
-      test('should return "Not set" when cwd is null', async () => {
+      test('should return "No codebase configured" when codebase is not linked', async () => {
         const result = await handleCommand(baseConversation, '/getcwd');
         expect(result.success).toBe(true);
-        expect(result.message).toContain('Not set');
+        expect(result.message).toContain('No codebase configured');
       });
     });
 
@@ -433,7 +433,8 @@ describe('CommandHandler', () => {
 
         const result = await handleCommand(baseConversation, '/setcwd /workspace/repo');
         expect(result.success).toBe(true);
-        expect(result.message).toMatch(/workspace[\\\/]repo/);
+        // Shows folder name only (not full path) for security
+        expect(result.message).toContain('repo');
         expect(mockUpdateConversation).toHaveBeenCalled();
       });
     });
@@ -513,16 +514,71 @@ describe('CommandHandler', () => {
       test('should display worktree from isolation_env_id when set', async () => {
         const conversation = {
           ...baseConversation,
-          isolation_env_id: '/workspace/issue-123',
+          codebase_id: 'cb-worktree',
+          isolation_env_id: 'env-123',
         };
 
+        mockGetCodebase.mockResolvedValue({
+          id: 'cb-worktree',
+          name: 'owner/repo',
+          repository_url: 'https://github.com/owner/repo',
+          default_cwd: '/workspace/repo',
+          ai_assistant_type: 'claude',
+          commands: {},
+          created_at: new Date(),
+          updated_at: new Date(),
+        });
         mockGetActiveSession.mockResolvedValue(null);
+        // Mock isolation environment lookup to return worktree branch
+        mockIsolationEnvDbGet.mockResolvedValue({
+          id: 'env-123',
+          codebase_id: 'cb-worktree',
+          workflow_type: 'issue',
+          workflow_id: 'issue-42',
+          provider: 'worktree',
+          working_path: '/workspace/repo/worktrees/issue-42',
+          branch_name: 'issue-42',
+          status: 'active',
+          created_at: new Date(),
+          created_by_platform: 'test',
+        });
 
         const result = await handleCommand(conversation, '/status');
 
         expect(result.success).toBe(true);
-        expect(result.message).toContain('Worktree:');
-        expect(result.message).toContain('issue-123');
+        expect(result.message).toContain('Repository:');
+        expect(result.message).toContain('owner/repo @ issue-42 (worktree)');
+      });
+
+      test('should warn and fallback when isolation_env_id record not found', async () => {
+        const conversation = {
+          ...baseConversation,
+          codebase_id: 'cb-orphaned',
+          isolation_env_id: 'env-orphaned', // Points to deleted record
+        };
+
+        mockGetCodebase.mockResolvedValue({
+          id: 'cb-orphaned',
+          name: 'owner/orphaned-repo',
+          repository_url: 'https://github.com/owner/orphaned-repo',
+          default_cwd: '/workspace/orphaned-repo',
+          ai_assistant_type: 'claude',
+          commands: {},
+          created_at: new Date(),
+          updated_at: new Date(),
+        });
+        mockGetActiveSession.mockResolvedValue(null);
+        // Mock isolation environment lookup returning null (orphaned reference)
+        mockIsolationEnvDbGet.mockResolvedValue(null);
+        // Mock git branch detection fallback
+        spyExecFileAsync.mockResolvedValue({ stdout: 'main\n', stderr: '' });
+
+        const result = await handleCommand(conversation, '/status');
+
+        expect(result.success).toBe(true);
+        // Should fallback to git branch detection (no worktree marker)
+        expect(result.message).toContain('owner/orphaned-repo @ main');
+        expect(result.message).not.toContain('(worktree)');
       });
     });
 

@@ -714,8 +714,7 @@ You: /clone https://github.com/user/my-project
 
 Bot: Repository cloned successfully!
 
-     Codebase: my-project
-     Path: ~/.archon/workspaces/user/my-project
+     Repository: my-project
      ✓ Copied 16 default commands
      ✓ Copied 8 default workflows
 
@@ -758,7 +757,7 @@ Bot: Platform: telegram
      Codebase: my-project
      Repository: https://github.com/user/my-project
 
-     Current Working Directory: ~/.archon/workspaces/user/my-project
+     Repository: my-project @ main
 
      Worktrees: 0/10
 ```
