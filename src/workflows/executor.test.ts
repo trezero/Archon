@@ -3099,6 +3099,132 @@ describe('Workflow Executor', () => {
       });
     });
   });
+
+  describe('concurrent workflow detection', () => {
+    // Note: Basic blocking behavior is tested in 'staleness detection' describe block
+    // These tests focus on conversation ID handling and error scenarios
+
+    const simpleWorkflow: WorkflowDefinition = {
+      name: 'test-workflow',
+      description: 'Test',
+      steps: [{ command: 'command-one' }],
+    };
+
+    // Helper: Create mock query handler that allows workflow creation
+    function createSuccessfulWorkflowMock(
+      conversationId: string,
+      codebaseId: string | null = null
+    ): (query: string, params?: unknown[]) => Promise<{ rows: unknown[]; rowCount: number }> {
+      return (query: string) => {
+        if (query.includes("status = 'running'")) {
+          return Promise.resolve(createQueryResult([]));
+        }
+        if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
+          return Promise.resolve(
+            createQueryResult([
+              {
+                id: 'workflow-id',
+                workflow_name: 'test-workflow',
+                conversation_id: conversationId,
+                codebase_id: codebaseId,
+                current_step_index: 0,
+                status: 'running' as const,
+                user_message: 'test',
+                metadata: {},
+                started_at: new Date(),
+                last_activity_at: new Date(),
+                completed_at: null,
+              },
+            ])
+          );
+        }
+        if (
+          query.includes('UPDATE remote_agent_workflow_runs') ||
+          query.includes('last_activity_at')
+        ) {
+          return Promise.resolve(createQueryResult([]));
+        }
+        throw new Error(`Unexpected query: ${query.slice(0, 100)}`);
+      };
+    }
+
+    // Helper: Check if query calls include a specific pattern
+    function hasQueryMatching(pattern: string): boolean {
+      return mockQuery.mock.calls.some((call: unknown[]) => (call[0] as string).includes(pattern));
+    }
+
+    // Helper: Find message containing text
+    function findMessage(platform: IPlatformAdapter, text: string): unknown[] | undefined {
+      const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
+      return sendMessage.mock.calls.find((call: unknown[]) => (call[1] as string).includes(text));
+    }
+
+    it('should allow workflow when no active workflow for conversation', async () => {
+      mockQuery.mockImplementation(createSuccessfulWorkflowMock('db-conv-123'));
+      const platform = createMockPlatform();
+
+      await executeWorkflow(
+        platform,
+        'conv-123',
+        testDir,
+        simpleWorkflow,
+        'new workflow',
+        'db-conv-123'
+      );
+
+      expect(hasQueryMatching("status = 'running'")).toBe(true);
+      expect(hasQueryMatching('INSERT INTO remote_agent_workflow_runs')).toBe(true);
+      expect(findMessage(platform, '🚀 **Starting workflow**')).toBeDefined();
+      expect(findMessage(platform, '✅ **Workflow complete**')).toBeDefined();
+    });
+
+    it('should use database conversation ID for active workflow check', async () => {
+      const queryCalls: Array<{ query: string; params: unknown[] }> = [];
+      mockQuery.mockImplementation((query: string, params?: unknown[]) => {
+        queryCalls.push({ query, params: params || [] });
+        return createSuccessfulWorkflowMock('db-conv-456', 'codebase-789')(query);
+      });
+
+      await executeWorkflow(
+        createMockPlatform(),
+        'platform-conv-456',
+        testDir,
+        simpleWorkflow,
+        'test message',
+        'db-conv-456',
+        'codebase-789'
+      );
+
+      const activeCheckCall = queryCalls.find(c => c.query.includes("status = 'running'"));
+      expect(activeCheckCall?.params).toContain('db-conv-456');
+      expect(activeCheckCall?.params).not.toContain('platform-conv-456');
+    });
+
+    it('should block workflow when active workflow check fails', async () => {
+      mockQuery.mockImplementation((query: string) => {
+        if (query.includes("status = 'running'")) {
+          return Promise.reject(new Error('Database connection lost'));
+        }
+        throw new Error(`Unexpected query: ${query.slice(0, 100)}`);
+      });
+
+      const platform = createMockPlatform();
+
+      await executeWorkflow(
+        platform,
+        'conv-123',
+        testDir,
+        simpleWorkflow,
+        'test message',
+        'db-conv-123'
+      );
+
+      expect(hasQueryMatching('INSERT INTO remote_agent_workflow_runs')).toBe(false);
+      const errorMsg =
+        findMessage(platform, 'Unable to verify') || findMessage(platform, 'Workflow blocked');
+      expect(errorMsg).toBeDefined();
+    });
+  });
 });
 
 describe('isValidCommandName', () => {
