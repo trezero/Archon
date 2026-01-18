@@ -47,13 +47,55 @@ import {
 } from '../services/cleanup-service';
 
 /**
- * Error thrown when isolation is required but cannot be provided (e.g., limit reached)
- * This error signals that workflow execution should be blocked.
+ * Error thrown when isolation is required but cannot be provided.
+ * This error signals that ALL message handling should stop - not just workflows.
+ * The user has already been notified of the specific reason (worktree limit reached,
+ * isolation creation failure, etc.) before this error is thrown.
  */
 class IsolationBlockedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'IsolationBlockedError';
+  }
+}
+
+/**
+ * Attempt to persist session ID to database. Non-critical operation - if it fails,
+ * the conversation continues but the session may not be resumable on next message.
+ */
+async function tryPersistSessionId(sessionId: string, assistantSessionId: string): Promise<void> {
+  try {
+    await sessionDb.updateSession(sessionId, assistantSessionId);
+  } catch (error) {
+    const err = error as Error;
+    console.error('[Orchestrator] Failed to persist session ID - session may not be resumable', {
+      sessionId,
+      newSessionId: assistantSessionId,
+      error: err.message,
+    });
+  }
+}
+
+/**
+ * Attempt to update session metadata. Non-critical operation - if it fails,
+ * plan→execute detection may not work in subsequent messages.
+ */
+async function tryUpdateSessionMetadata(
+  sessionId: string,
+  metadata: Record<string, unknown>
+): Promise<void> {
+  try {
+    await sessionDb.updateSessionMetadata(sessionId, metadata);
+  } catch (error) {
+    const err = error as Error;
+    console.error(
+      '[Orchestrator] Failed to update session metadata - plan→execute detection may not work',
+      {
+        sessionId,
+        metadata,
+        error: err.message,
+      }
+    );
   }
 }
 
@@ -82,8 +124,11 @@ function formatWorktreeLimitMessage(
 }
 
 /**
- * Validate existing isolation and create new if needed
- * This is the single source of truth for isolation decisions
+ * Validate existing isolation reference and coordinate creation of new isolation if needed.
+ * Orchestrates the isolation lifecycle but delegates creation decisions (reuse, sharing,
+ * adoption, limit checks) to resolveIsolation.
+ *
+ * @throws {IsolationBlockedError} When isolation is required but blocked (user already notified)
  */
 async function validateAndResolveIsolation(
   conversation: Conversation,
@@ -147,8 +192,14 @@ async function validateAndResolveIsolation(
 }
 
 /**
- * Resolve which isolation environment to use
- * Handles reuse, sharing, adoption, and creation
+ * Resolve which isolation environment to use.
+ * Handles: (1) reuse of existing environment, (2) sharing via linked issues,
+ * (3) adoption of skill-created worktrees, (4) limit enforcement with auto-cleanup,
+ * and (5) creation of new worktrees.
+ *
+ * @returns The isolation environment to use, or null if blocked:
+ *   - Worktree limit reached and auto-cleanup failed (user shown limit message)
+ *   - Worktree creation failed (user shown specific error message)
  */
 async function resolveIsolation(
   codebase: Codebase,
@@ -202,7 +253,7 @@ async function resolveIsolation(
     }
   }
 
-  // 4. Check limit before creating new worktree (Phase 3D)
+  // 4. Check worktree limit and attempt auto-cleanup before creating new
   const canonicalPath = await getCanonicalRepoPath(codebase.default_cwd);
   const count = await isolationEnvDb.countByCodebase(codebase.id);
   if (count >= MAX_WORKTREES_PER_CODEBASE) {
@@ -268,17 +319,77 @@ async function resolveIsolation(
     return env;
   } catch (error) {
     const err = error as Error;
-    console.error('[Orchestrator] Failed to create isolation:', error);
+    const userMessage = classifyIsolationError(err);
 
-    // Notify user that execution is blocked due to isolation failure
+    console.error('[Orchestrator] Failed to create isolation:', {
+      error: err.message,
+      stack: err.stack,
+      codebaseId: codebase.id,
+    });
+
     await platform.sendMessage(
       conversationId,
-      `**Error:** Could not create isolated workspace (${err.message}). ` +
-        'Execution blocked to prevent changes to shared codebase. ' +
-        'Please resolve the issue and try again.'
+      userMessage +
+        ' Execution blocked to prevent changes to shared codebase. Please resolve the issue and try again.'
     );
     return null;
   }
+}
+
+/**
+ * Classify isolation creation errors into user-friendly messages.
+ */
+function classifyIsolationError(err: Error): string {
+  const errorLower = err.message.toLowerCase();
+
+  // Map error patterns to user-friendly messages
+  const errorPatterns: { pattern: string; message: string }[] = [
+    {
+      pattern: 'permission denied',
+      message:
+        '**Error:** Permission denied while creating workspace. Check file system permissions.',
+    },
+    {
+      pattern: 'eacces',
+      message:
+        '**Error:** Permission denied while creating workspace. Check file system permissions.',
+    },
+    {
+      pattern: 'timeout',
+      message:
+        '**Error:** Timed out creating workspace. Git repository may be slow or unavailable.',
+    },
+    {
+      pattern: 'no space left',
+      message: '**Error:** No disk space available for new workspace.',
+    },
+    {
+      pattern: 'enospc',
+      message: '**Error:** No disk space available for new workspace.',
+    },
+    {
+      pattern: 'not a git repository',
+      message: '**Error:** Target path is not a valid git repository.',
+    },
+  ];
+
+  for (const { pattern, message } of errorPatterns) {
+    if (errorLower.includes(pattern)) {
+      return message;
+    }
+  }
+
+  return `**Error:** Could not create isolated workspace (${err.message}).`;
+}
+
+/**
+ * Check if a workflow discovery error is expected (missing directory) vs unexpected (config error).
+ * Expected errors result in silent fallback; unexpected errors warn the user.
+ */
+function isExpectedWorkflowDiscoveryError(err: Error): boolean {
+  const errorLower = err.message.toLowerCase();
+  const expectedPatterns = ['enoent', 'no such file', 'not found', 'does not exist'];
+  return expectedPatterns.some(pattern => errorLower.includes(pattern));
 }
 
 /**
@@ -311,8 +422,10 @@ interface WorkflowRoutingContext {
 }
 
 /**
- * Try to route AI response to a workflow
- * Returns true if a workflow was executed, false otherwise
+ * Attempt to route an AI response to a workflow.
+ * Returns true if a workflow was successfully matched and execution was initiated,
+ * false if routing was not applicable (no workflows available, no workflow invocation
+ * detected, or workflow not found).
  */
 async function tryWorkflowRouting(
   ctx: WorkflowRoutingContext,
@@ -351,6 +464,7 @@ async function tryWorkflowRouting(
     ? { branchName: ctx.isolationEnv.branch_name, isPrReview, prSha, prBranch }
     : undefined;
 
+  // executeWorkflow handles its own errors and user messaging
   await executeWorkflow(
     ctx.platform,
     ctx.conversationId,
@@ -367,12 +481,13 @@ async function tryWorkflowRouting(
 }
 
 /**
- * Wraps command content with execution context to signal the AI should execute immediately
+ * Wraps command content with execution context to signal the AI should execute immediately.
  * @param commandName - The name of the command being invoked (e.g., 'create-pr')
  * @param content - The command template content after variable substitution
- * @returns Content wrapped with execution context
+ * @returns The content wrapped with instructions that tell the AI to execute immediately
+ *          without asking for confirmation (used for explicit user command invocations)
  */
-function wrapCommandForExecution(commandName: string, content: string): string {
+export function wrapCommandForExecution(commandName: string, content: string): string {
   return `The user invoked the \`/${commandName}\` command. Execute the following instructions immediately without asking for confirmation:
 
 ---
@@ -438,6 +553,7 @@ export async function handleMessage(
       const { command, args } = commandHandler.parseCommand(message);
 
       // List of deterministic commands (handled by command-handler, no AI)
+      // IMPORTANT: Keep synchronized with switch cases in command-handler.ts handleCommand()
       const deterministicCommands = [
         'help',
         'status',
@@ -516,7 +632,9 @@ export async function handleMessage(
         try {
           const commandText = await readCommandFile(commandFilePath);
 
-          // Substitute variables (no metadata needed - file-based workflow)
+          // Substitute variables from command arguments
+          // Note: Metadata (for $PLAN, $IMPLEMENTATION_SUMMARY) not passed here -
+          // command-invoke uses fresh context per invocation
           const substituted = substituteVariables(commandText, commandArgs);
           promptToSend = wrapCommandForExecution(commandName, substituted);
 
@@ -591,13 +709,19 @@ export async function handleMessage(
           }
         } catch (error) {
           const err = error as Error;
-          console.warn(`[Orchestrator] Failed to discover workflows: ${err.message}`);
-          // Inform user that workflows are unavailable
-          await platform.sendMessage(
-            conversationId,
-            `Note: Could not load workflows (${err.message}). Falling back to direct conversation mode.`
-          );
-          // Continue without workflows - graceful degradation
+          if (isExpectedWorkflowDiscoveryError(err)) {
+            console.log('[Orchestrator] No workflows directory found, using direct conversation');
+          } else {
+            console.error(`[Orchestrator] Workflow discovery failed: ${err.message}`, {
+              error: err.message,
+              stack: err.stack,
+            });
+            await platform.sendMessage(
+              conversationId,
+              `Note: Could not load workflows (${err.message}). This may be a configuration error. ` +
+                'Check .archon/workflows/ for YAML syntax issues. Continuing without workflows.'
+            );
+          }
         }
       } else {
         console.warn(
@@ -736,7 +860,7 @@ export async function handleMessage(
       throw error;
     }
 
-    // Get or create session (handle plan→execute transition)
+    // Get existing active session (may be null if first message or after isolation change)
     let session = await sessionDb.getActiveSession(conversation.id);
 
     // If cwd changed (new isolation), deactivate stale sessions
@@ -749,7 +873,7 @@ export async function handleMessage(
     // Update last_activity_at for staleness tracking
     await db.touchConversation(conversation.id);
 
-    // Check for plan→execute transition (requires NEW session per PRD)
+    // Check for plan→execute transition (new session ensures fresh context without prior planning biases)
     // Supports both regular and GitHub workflows:
     // - plan-feature → execute (regular workflow)
     // - plan-feature-github → execute-github (GitHub workflow with staging)
@@ -820,7 +944,7 @@ export async function handleMessage(
       }
 
       if (newSessionId) {
-        await sessionDb.updateSession(session.id, newSessionId);
+        await tryPersistSessionId(session.id, newSessionId);
       }
 
       // Try workflow routing first
@@ -829,7 +953,7 @@ export async function handleMessage(
         const routed = await tryWorkflowRouting(routingCtx, fullResponse);
         if (routed) {
           if (commandName) {
-            await sessionDb.updateSessionMetadata(session.id, { lastCommand: commandName });
+            await tryUpdateSessionMetadata(session.id, { lastCommand: commandName });
           }
           return;
         }
@@ -858,7 +982,7 @@ export async function handleMessage(
           allChunks.push({ type: 'tool', content: toolMessage });
           console.log(`[Orchestrator] Tool call: ${msg.toolName}`);
         } else if (msg.type === 'result' && msg.sessionId) {
-          await sessionDb.updateSession(session.id, msg.sessionId);
+          await tryPersistSessionId(session.id, msg.sessionId);
         }
       }
 
@@ -867,8 +991,10 @@ export async function handleMessage(
       console.log(`[Orchestrator] Assistant messages: ${String(assistantMessages.length)}`);
 
       // Join all assistant messages and filter tool indicators
-      // Tool indicators from Claude Code: 🔧, 💭, etc.
-      // These appear at the start of lines showing tool usage
+      // Tool indicators from Claude Code SDK responses:
+      // 🔧 (U+1F527) - tool usage, 💭 (U+1F4AD) - thinking, 📝 (U+1F4DD) - writing,
+      // ✏️ (U+270F+FE0F) - editing, 🗑️ (U+1F5D1+FE0F) - deleting,
+      // 📂 (U+1F4C2) - folder, 🔍 (U+1F50D) - search
       let finalMessage = '';
 
       if (assistantMessages.length > 0) {
@@ -879,7 +1005,6 @@ export async function handleMessage(
         const sections = allMessages.split('\n\n');
 
         // Filter out sections that start with tool indicators
-        // Using alternation for emojis with variation selectors
         const toolIndicatorRegex =
           /^(?:\u{1F527}|\u{1F4AD}|\u{1F4DD}|\u{270F}\u{FE0F}|\u{1F5D1}\u{FE0F}|\u{1F4C2}|\u{1F50D})/u;
         const cleanSections = sections.filter(section => {
@@ -910,8 +1035,9 @@ export async function handleMessage(
     }
 
     // Track last command in metadata (for plan→execute detection)
+    // Non-critical: if this fails, response was already sent successfully
     if (commandName) {
-      await sessionDb.updateSessionMetadata(session.id, { lastCommand: commandName });
+      await tryUpdateSessionMetadata(session.id, { lastCommand: commandName });
     }
 
     console.log('[Orchestrator] Message handling complete');

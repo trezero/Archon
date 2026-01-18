@@ -153,22 +153,7 @@ mock.module('./orchestrator', () => ({
   readCommandFile: mockReadCommandFile,
 }));
 
-import { handleMessage } from './orchestrator';
-
-/**
- * Helper to wrap command content with execution context (matches wrapCommandForExecution in orchestrator.ts)
- */
-function wrapCommandForExecution(commandName: string, content: string): string {
-  return `The user invoked the \`/${commandName}\` command. Execute the following instructions immediately without asking for confirmation:
-
----
-
-${content}
-
----
-
-Remember: The user already decided to run this command. Take action now.`;
-}
+import { handleMessage, wrapCommandForExecution } from './orchestrator';
 
 // Helper to restore all git utility spies
 function restoreGitSpies(): void {
@@ -1550,7 +1535,7 @@ Labels: correct`;
       );
     });
 
-    test.each(['batch', 'stream'] as const)('routes correctly in %s mode', async (mode) => {
+    test.each(['batch', 'stream'] as const)('routes correctly in %s mode', async mode => {
       platform.getStreamingMode.mockReturnValue(mode);
       mockAIResponse('/invoke-workflow add-feature\nI will create a plan.');
 
@@ -1567,7 +1552,7 @@ Labels: correct`;
       await handleMessage(platform, 'chat-456', 'fix the login bug');
 
       expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
-      const sentMessages = platform.sendMessage.mock.calls.map((call) => call[1]).join('');
+      const sentMessages = platform.sendMessage.mock.calls.map(call => call[1]).join('');
       expect(sentMessages).not.toContain('fix-bug');
     });
 
