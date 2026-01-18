@@ -38,6 +38,9 @@ const mockDiscoverWorkflows = mock(() => Promise.resolve([]));
 // Mock for workflow execution
 const mockExecuteWorkflow = mock(() => Promise.resolve());
 
+// Mock for worktree sync
+const mockSyncArchonToWorktree = mock(() => Promise.resolve(false));
+
 // Isolation environment mocks
 const mockIsolationEnvGetById = mock(() => Promise.resolve(null));
 const mockIsolationEnvFindByWorkflow = mock(() => Promise.resolve(null));
@@ -137,6 +140,10 @@ mock.module('../services/cleanup-service', () => ({
   getWorktreeStatusBreakdown: mockGetWorktreeStatusBreakdown,
   MAX_WORKTREES_PER_CODEBASE: 25,
   STALE_THRESHOLD_DAYS: 7,
+}));
+
+mock.module('../utils/worktree-sync', () => ({
+  syncArchonToWorktree: mockSyncArchonToWorktree,
 }));
 
 // Import real orchestrator to spread its exports, then override readCommandFile
@@ -1071,6 +1078,38 @@ describe('orchestrator', () => {
 
       // Should not attempt workflow discovery
       expect(mockDiscoverWorkflows).not.toHaveBeenCalled();
+    });
+
+    test('calls syncArchonToWorktree before discoverWorkflows', async () => {
+      // Setup: conversation has cwd set
+      mockGetOrCreateConversation.mockResolvedValue({
+        ...mockConversation,
+        cwd: '/worktree/custom-path',
+      });
+      mockDiscoverWorkflows.mockResolvedValue([]);
+      mockSyncArchonToWorktree.mockResolvedValue(false);
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      // Track call order
+      const callOrder: string[] = [];
+      mockSyncArchonToWorktree.mockImplementation(async () => {
+        callOrder.push('syncArchonToWorktree');
+        return false;
+      });
+      mockDiscoverWorkflows.mockImplementation(async () => {
+        callOrder.push('discoverWorkflows');
+        return [];
+      });
+
+      await handleMessage(platform, 'chat-456', 'help me with this feature');
+
+      // Verify syncArchonToWorktree was called with the correct path
+      expect(mockSyncArchonToWorktree).toHaveBeenCalledWith('/worktree/custom-path');
+
+      // Verify sync happens before workflow discovery
+      expect(callOrder).toEqual(['syncArchonToWorktree', 'discoverWorkflows']);
     });
   });
 

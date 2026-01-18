@@ -29,6 +29,7 @@ import { classifyAndFormatError } from '../utils/error-formatter';
 import { getAssistantClient } from '../clients/factory';
 import { getIsolationProvider } from '../isolation';
 import { worktreeExists, findWorktreeByBranch, getCanonicalRepoPath } from '../utils/git';
+import { syncArchonToWorktree } from '../utils/worktree-sync';
 import {
   discoverWorkflows,
   buildRouterPrompt,
@@ -570,6 +571,9 @@ export async function handleMessage(
         const workflowCwd = conversation.cwd ?? codebaseForWorkflows.default_cwd;
         console.log(`[Orchestrator] Discovering workflows from: ${workflowCwd}`);
         try {
+          // Sync .archon from canonical repo to worktree if needed
+          await syncArchonToWorktree(workflowCwd);
+
           availableWorkflows = await discoverWorkflows(workflowCwd);
           console.log(
             `[Orchestrator] Workflow discovery result: ${String(availableWorkflows.length)} workflows found`
