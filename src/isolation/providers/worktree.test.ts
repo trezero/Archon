@@ -1155,4 +1155,234 @@ describe('WorktreeProvider', () => {
       );
     });
   });
+
+  describe('orphan directory handling', () => {
+    let accessSpy: Mock<typeof import('fs/promises').access>;
+    let rmSpy: Mock<typeof import('fs/promises').rm>;
+
+    beforeEach(async () => {
+      // Dynamic import to mock fs/promises
+      const fs = await import('fs/promises');
+      accessSpy = spyOn(fs, 'access');
+      rmSpy = spyOn(fs, 'rm');
+
+      // Default: directory doesn't exist (use proper NodeJS.ErrnoException)
+      const enoentError = Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+      accessSpy.mockRejectedValue(enoentError);
+      rmSpy.mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+      accessSpy.mockRestore();
+      rmSpy.mockRestore();
+    });
+
+    test('cleans orphan directory before creating worktree', async () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
+        workflowType: 'issue',
+        identifier: '999',
+      };
+
+      // Simulate orphan directory: directory exists but not a valid worktree
+      accessSpy.mockResolvedValue(undefined); // Directory exists
+      worktreeExistsSpy.mockResolvedValue(false); // But not a valid worktree
+
+      const env = await provider.create(request);
+
+      // Verify orphan directory was removed
+      expect(rmSpy).toHaveBeenCalledWith(
+        expect.stringContaining('issue-999'),
+        { recursive: true, force: true }
+      );
+
+      // Verify worktree was created
+      expect(env.workingPath).toContain('issue-999');
+    });
+
+    test('does not remove directory if it is a valid worktree', async () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
+        workflowType: 'issue',
+        identifier: '999',
+      };
+
+      // Simulate valid worktree: directory exists and IS a valid worktree
+      accessSpy.mockResolvedValue(undefined); // Directory exists
+      worktreeExistsSpy.mockResolvedValue(true); // And IS a valid worktree (will be adopted)
+
+      await provider.create(request);
+
+      // Verify directory was NOT removed (should be adopted instead)
+      expect(rmSpy).not.toHaveBeenCalled();
+    });
+
+    test('cleans orphan directory before creating PR worktree', async () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
+        workflowType: 'pr',
+        identifier: '42',
+        prBranch: 'feature/auth',
+        isForkPR: true, // Fork PR uses pr-N-review naming
+      };
+
+      // Simulate orphan directory: directory exists but not a valid worktree
+      accessSpy.mockResolvedValue(undefined); // Directory exists
+      worktreeExistsSpy.mockResolvedValue(false); // But not a valid worktree
+
+      const env = await provider.create(request);
+
+      // Verify orphan directory was removed
+      expect(rmSpy).toHaveBeenCalledWith(
+        expect.stringContaining('pr-42'),
+        { recursive: true, force: true }
+      );
+
+      // Verify worktree was created
+      expect(env.workingPath).toContain('pr-42');
+    });
+
+    test('removes remaining directory after git worktree remove', async () => {
+      const worktreePath = '/workspace/worktrees/repo/issue-999';
+
+      // Mock getCanonicalRepoPath
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+
+      // Simulate directory still exists after git worktree remove
+      accessSpy.mockResolvedValue(undefined);
+
+      await provider.destroy(worktreePath);
+
+      // Verify git worktree remove was called
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['-C', '/workspace/repo', 'worktree', 'remove', worktreePath]),
+        expect.any(Object)
+      );
+
+      // Verify remaining directory was cleaned up
+      expect(rmSpy).toHaveBeenCalledWith(worktreePath, { recursive: true, force: true });
+    });
+
+    test('does not try to remove directory if already gone after git worktree remove', async () => {
+      const worktreePath = '/workspace/worktrees/repo/issue-999';
+
+      // Mock getCanonicalRepoPath
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+
+      // Simulate directory does not exist after git worktree remove
+      // Need to create NodeJS.ErrnoException with proper code property
+      const enoentError = Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+      accessSpy.mockRejectedValue(enoentError);
+
+      await provider.destroy(worktreePath);
+
+      // Verify git worktree remove was NOT called (path doesn't exist)
+      // The access check happens first and sets pathExists = false
+      expect(execSpy).not.toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['worktree', 'remove']),
+        expect.any(Object)
+      );
+
+      // Verify rm was NOT called (directory already gone)
+      expect(rmSpy).not.toHaveBeenCalled();
+    });
+
+    test('propagates rm errors during orphan cleanup in create()', async () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
+        workflowType: 'issue',
+        identifier: '999',
+      };
+
+      // Simulate orphan directory exists
+      accessSpy.mockResolvedValue(undefined);
+      worktreeExistsSpy.mockResolvedValue(false);
+      // rm fails with permission denied
+      rmSpy.mockRejectedValue(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }));
+
+      await expect(provider.create(request)).rejects.toThrow('Failed to clean orphan directory');
+    });
+
+    test('logs but does not throw when rm fails during post-removal cleanup in destroy()', async () => {
+      const worktreePath = '/workspace/worktrees/repo/issue-999';
+
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+      // First access check: path exists
+      accessSpy.mockResolvedValueOnce(undefined);
+      // git worktree remove succeeds
+      execSpy.mockResolvedValueOnce({ stdout: '', stderr: '' });
+      // Directory still exists after git remove (directoryExists check)
+      accessSpy.mockResolvedValueOnce(undefined);
+      // rm fails with permission denied
+      rmSpy.mockRejectedValue(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }));
+
+      // Should NOT throw - post-removal cleanup is best-effort
+      await expect(provider.destroy(worktreePath)).resolves.toBeUndefined();
+    });
+
+    test('cleans orphan directory before creating same-repo PR worktree', async () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
+        workflowType: 'pr',
+        identifier: '42',
+        prBranch: 'feature/auth',
+        isForkPR: false, // Same-repo PR uses actual branch name
+      };
+
+      // Simulate orphan directory: directory exists but not a valid worktree
+      accessSpy.mockResolvedValue(undefined);
+      worktreeExistsSpy.mockResolvedValue(false);
+
+      const env = await provider.create(request);
+
+      // Verify orphan directory was removed (path uses actual branch name for same-repo PRs)
+      expect(rmSpy).toHaveBeenCalledWith(
+        expect.stringContaining('feature/auth'),
+        { recursive: true, force: true }
+      );
+
+      // Verify worktree was created with actual branch name
+      expect(env.workingPath).toContain('feature/auth');
+    });
+
+    test('cleans directory when git worktree remove fails with "not a working tree"', async () => {
+      const worktreePath = '/workspace/worktrees/repo/issue-999';
+
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+      // First access check: path exists
+      accessSpy.mockResolvedValueOnce(undefined);
+      // git worktree remove fails with "is not a working tree" (matches isWorktreeMissingError)
+      execSpy.mockRejectedValueOnce(
+        Object.assign(new Error('fatal: /path is not a working tree'), { stderr: 'is not a working tree' })
+      );
+      // Directory still exists (directoryExists check after git failure)
+      accessSpy.mockResolvedValueOnce(undefined);
+
+      await provider.destroy(worktreePath);
+
+      // Should still clean up the orphan directory
+      expect(rmSpy).toHaveBeenCalledWith(worktreePath, { recursive: true, force: true });
+    });
+
+    test('throws when directoryExists encounters non-ENOENT error', async () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
+        workflowType: 'issue',
+        identifier: '999',
+      };
+
+      // Simulate permission error when checking directory
+      accessSpy.mockRejectedValue(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }));
+
+      await expect(provider.create(request)).rejects.toThrow('Failed to check directory');
+    });
+  });
 });

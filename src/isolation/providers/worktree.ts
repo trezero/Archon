@@ -5,8 +5,8 @@
  * Migrated from src/utils/git.ts with consistent semantics.
  */
 
-import { access } from 'node:fs/promises';
 import { createHash } from 'crypto';
+import { access, rm } from 'fs/promises';
 import { join } from 'path';
 
 import { loadRepoConfig } from '../../config/config-loader';
@@ -61,22 +61,11 @@ export class WorktreeProvider implements IIsolationProvider {
   async destroy(envId: string, options?: { force?: boolean; branchName?: string; canonicalRepoPath?: string }): Promise<void> {
     // For worktrees, envId is the worktree path
     const worktreePath = envId;
-    let pathExists = true;
 
     // Check if worktree path exists before attempting removal (optimization to avoid spawning git)
-    try {
-      await access(worktreePath);
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') {
-        // Path doesn't exist - skip worktree removal but still attempt branch deletion
-        console.log(`[WorktreeProvider] Path ${worktreePath} already removed`);
-        pathExists = false;
-      } else {
-        // Re-throw other errors (permission issues, etc.) with context
-        console.error(`[WorktreeProvider] Access check failed for ${worktreePath}:`, err.message);
-        throw new Error(`Failed to destroy worktree at ${worktreePath}: ${err.message}`);
-      }
+    const pathExists = await this.directoryExists(worktreePath);
+    if (!pathExists) {
+      console.log(`[WorktreeProvider] Path ${worktreePath} already removed`);
     }
 
     // Get canonical repo path - use provided path or derive from worktree
@@ -109,6 +98,21 @@ export class WorktreeProvider implements IIsolationProvider {
         }
         console.log(`[WorktreeProvider] Worktree ${worktreePath} already removed`);
         // Continue to branch deletion below - branch may still exist
+      }
+
+      // Ensure directory is fully removed (git may leave untracked files like .archon/)
+      const dirExists = await this.directoryExists(worktreePath);
+      if (dirExists) {
+        console.log(`[WorktreeProvider] Cleaning remaining directory at ${worktreePath}`);
+        try {
+          await rm(worktreePath, { recursive: true, force: true });
+          console.log(`[WorktreeProvider] Successfully cleaned remaining directory at ${worktreePath}`);
+        } catch (error) {
+          const err = error as NodeJS.ErrnoException;
+          // Log but don't fail - git worktree removal succeeded, directory cleanup is best-effort
+          console.error(`[WorktreeProvider] Failed to clean remaining directory at ${worktreePath}:`, err.message);
+          // Don't throw - the worktree itself was removed, this is supplementary cleanup
+        }
       }
     }
 
@@ -433,6 +437,9 @@ export class WorktreeProvider implements IIsolationProvider {
    * For fork PRs: Use synthetic branch (pr-N-review) since we can't push to forks
    */
   private async createFromPR(request: IsolationRequest, worktreePath: string): Promise<void> {
+    // Clean up any orphan directory before creating worktree
+    await this.cleanOrphanDirectoryIfExists(worktreePath);
+
     const repoPath = request.canonicalRepoPath;
     const prNumber = request.identifier;
     const isForkPR = request.isForkPR ?? false;
@@ -578,6 +585,9 @@ export class WorktreeProvider implements IIsolationProvider {
     worktreePath: string,
     branchName: string
   ): Promise<void> {
+    // Clean up any orphan directory before creating worktree
+    await this.cleanOrphanDirectoryIfExists(worktreePath);
+
     try {
       // Try to create with new branch
       await execFileAsync(
@@ -597,6 +607,52 @@ export class WorktreeProvider implements IIsolationProvider {
       } else {
         throw error;
       }
+    }
+  }
+
+  /**
+   * Check if a directory exists.
+   * Returns true if directory exists, false if it doesn't exist (ENOENT).
+   * Throws for other errors (permission denied, I/O errors, etc.)
+   */
+  private async directoryExists(path: string): Promise<boolean> {
+    try {
+      await access(path);
+      return true;
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === 'ENOENT') {
+        return false;
+      }
+      throw new Error(`Failed to check directory at ${path}: ${err.message}`);
+    }
+  }
+
+  /**
+   * Clean up an orphan directory if it exists but is not a valid worktree.
+   * An orphan directory can occur when git worktree remove succeeds but leaves
+   * untracked files (like .archon/) behind.
+   */
+  private async cleanOrphanDirectoryIfExists(worktreePath: string): Promise<void> {
+    const dirExists = await this.directoryExists(worktreePath);
+    if (!dirExists) {
+      return;
+    }
+
+    const isValidWorktree = await worktreeExists(worktreePath);
+    if (isValidWorktree) {
+      return; // Not an orphan - it's a valid worktree
+    }
+
+    // Orphan directory - remove it before creating worktree
+    console.log(`[WorktreeProvider] Cleaning orphan directory at ${worktreePath}`);
+    try {
+      await rm(worktreePath, { recursive: true, force: true });
+      console.log(`[WorktreeProvider] Successfully removed orphan directory at ${worktreePath}`);
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      // Provide context for the error - orphan cleanup is critical for worktree creation
+      throw new Error(`Failed to clean orphan directory at ${worktreePath}: ${err.message}`);
     }
   }
 
