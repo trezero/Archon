@@ -1,6 +1,7 @@
 import { mock, describe, test, expect, beforeEach, afterEach, afterAll, spyOn } from 'bun:test';
 import { MockPlatformAdapter } from '../test/mocks/platform';
 import { Conversation, Codebase, Session } from '../types';
+import type { WorkflowDefinition } from '../workflows/types';
 import { join } from 'path';
 import * as gitUtils from '../utils/git';
 
@@ -33,6 +34,9 @@ const mockReadCommandFile = mock(() => Promise.resolve(''));
 
 // Mock for workflow discovery
 const mockDiscoverWorkflows = mock(() => Promise.resolve([]));
+
+// Mock for workflow execution
+const mockExecuteWorkflow = mock(() => Promise.resolve());
 
 // Isolation environment mocks
 const mockIsolationEnvGetById = mock(() => Promise.resolve(null));
@@ -110,6 +114,10 @@ mock.module('../clients/factory', () => ({
 
 mock.module('../workflows/loader', () => ({
   discoverWorkflows: mockDiscoverWorkflows,
+}));
+
+mock.module('../workflows/executor', () => ({
+  executeWorkflow: mockExecuteWorkflow,
 }));
 
 // Cleanup service mocks for worktree limit tests
@@ -234,6 +242,7 @@ describe('orchestrator', () => {
     mockGetAssistantClient.mockClear();
     mockReadCommandFile.mockClear();
     mockDiscoverWorkflows.mockClear();
+    mockExecuteWorkflow.mockClear();
     mockClient.sendQuery.mockClear();
     mockClient.getType.mockClear();
 
@@ -1430,6 +1439,188 @@ Labels: correct`;
 
       expect(mockClient.sendQuery).not.toHaveBeenCalled();
       expect(mockIsolationEnvCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('workflow routing integration', () => {
+    const testWorkflows: WorkflowDefinition[] = [
+      {
+        name: 'fix-bug',
+        description: 'Fix a bug',
+        steps: [{ command: 'investigate' }, { command: 'implement' }],
+      },
+      {
+        name: 'add-feature',
+        description: 'Add a feature',
+        steps: [{ command: 'plan' }, { command: 'implement' }],
+      },
+    ];
+
+    // Helper to mock AI response with workflow invocation or conversational reply
+    function mockAIResponse(content: string): void {
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'assistant', content };
+        yield { type: 'result', sessionId: 'session-123' };
+      });
+    }
+
+    beforeEach(() => {
+      mockExecuteWorkflow.mockClear();
+      mockDiscoverWorkflows.mockClear();
+      platform.sendMessage.mockClear();
+
+      // Default: workflows available
+      mockDiscoverWorkflows.mockResolvedValue(testWorkflows);
+    });
+
+    test('routes message to workflow when AI responds with /invoke-workflow', async () => {
+      mockAIResponse('/invoke-workflow fix-bug\nI will investigate and fix the bug.');
+
+      await handleMessage(platform, 'chat-456', 'fix the login bug');
+
+      expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+      const [plat, convId, , workflow, originalMsg] = mockExecuteWorkflow.mock.calls[0];
+      expect(plat).toBe(platform);
+      expect(convId).toBe('chat-456');
+      expect(workflow.name).toBe('fix-bug');
+      expect(originalMsg).toBe('fix the login bug');
+
+      expect(platform.sendMessage).toHaveBeenCalledWith(
+        'chat-456',
+        'I will investigate and fix the bug.'
+      );
+    });
+
+    test('does not route when AI responds conversationally', async () => {
+      mockAIResponse('Let me help you with that bug.');
+
+      await handleMessage(platform, 'chat-456', 'fix the login bug');
+
+      expect(mockExecuteWorkflow).not.toHaveBeenCalled();
+      expect(platform.sendMessage).toHaveBeenCalledWith(
+        'chat-456',
+        'Let me help you with that bug.'
+      );
+    });
+
+    test('does not route when no workflows available', async () => {
+      mockDiscoverWorkflows.mockResolvedValue([]);
+      mockAIResponse('/invoke-workflow fix-bug\nAttempting to route...');
+
+      await handleMessage(platform, 'chat-456', 'fix the login bug');
+
+      expect(mockExecuteWorkflow).not.toHaveBeenCalled();
+      expect(platform.sendMessage).toHaveBeenCalledWith(
+        'chat-456',
+        '/invoke-workflow fix-bug\nAttempting to route...'
+      );
+    });
+
+    test.each(['batch', 'stream'] as const)('routes correctly in %s mode', async (mode) => {
+      platform.getStreamingMode.mockReturnValue(mode);
+      mockAIResponse('/invoke-workflow add-feature\nI will create a plan.');
+
+      await handleMessage(platform, 'chat-456', 'add dark mode');
+
+      expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+      expect(mockExecuteWorkflow.mock.calls[0][3].name).toBe('add-feature');
+      expect(platform.sendMessage).toHaveBeenCalledWith('chat-456', 'I will create a plan.');
+    });
+
+    test('does not send AI response when workflow is routed', async () => {
+      mockAIResponse('/invoke-workflow fix-bug');
+
+      await handleMessage(platform, 'chat-456', 'fix the login bug');
+
+      expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+      const sentMessages = platform.sendMessage.mock.calls.map((call) => call[1]).join('');
+      expect(sentMessages).not.toContain('fix-bug');
+    });
+
+    test('handles unknown workflow name gracefully', async () => {
+      mockAIResponse('/invoke-workflow unknown-workflow\nTrying to route...');
+
+      await handleMessage(platform, 'chat-456', 'help me');
+
+      expect(mockExecuteWorkflow).not.toHaveBeenCalled();
+      expect(platform.sendMessage).toHaveBeenCalledWith(
+        'chat-456',
+        '/invoke-workflow unknown-workflow\nTrying to route...'
+      );
+    });
+
+    test('passes correct WorkflowRoutingContext', async () => {
+      mockAIResponse('/invoke-workflow fix-bug');
+
+      await handleMessage(platform, 'chat-456', 'fix the login bug');
+
+      const [plat, convId, cwd, workflow, originalMsg, convDbId, codebaseId] =
+        mockExecuteWorkflow.mock.calls[0];
+
+      expect(plat).toBe(platform);
+      expect(convId).toBe('chat-456');
+      expect(cwd).toBe('/workspace/project');
+      expect(workflow.name).toBe('fix-bug');
+      expect(originalMsg).toBe('fix the login bug');
+      expect(convDbId).toBe('conv-123');
+      expect(codebaseId).toBe('codebase-789');
+    });
+
+    test('does not route for slash commands', async () => {
+      mockHandleCommand.mockResolvedValue({
+        message: 'Command executed',
+        modified: false,
+      });
+
+      await handleMessage(platform, 'chat-456', '/status');
+
+      expect(mockDiscoverWorkflows).not.toHaveBeenCalled();
+      expect(mockExecuteWorkflow).not.toHaveBeenCalled();
+      expect(mockHandleCommand).toHaveBeenCalled();
+    });
+
+    test('passes issueContext to executeWorkflow when provided', async () => {
+      mockAIResponse('/invoke-workflow fix-bug');
+
+      const issueContext = '[GitHub Issue Context]\nIssue #42: "Login fails"\nLabels: bug';
+      await handleMessage(platform, 'chat-456', 'fix the login bug', issueContext);
+
+      expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+      const passedIssueContext = mockExecuteWorkflow.mock.calls[0][7];
+      expect(passedIssueContext).toBe(issueContext);
+    });
+
+    test('routes when /invoke-workflow appears in middle of response', async () => {
+      mockAIResponse(
+        'Let me analyze this request...\n/invoke-workflow fix-bug\nI will investigate the bug.'
+      );
+
+      await handleMessage(platform, 'chat-456', 'fix the bug');
+
+      expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+      expect(mockExecuteWorkflow.mock.calls[0][3].name).toBe('fix-bug');
+    });
+
+    test('routes to first workflow when multiple /invoke-workflow in response', async () => {
+      mockAIResponse('/invoke-workflow fix-bug\n/invoke-workflow add-feature\nAnalysis...');
+
+      await handleMessage(platform, 'chat-456', 'help me');
+
+      expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+      expect(mockExecuteWorkflow.mock.calls[0][3].name).toBe('fix-bug');
+    });
+
+    test('handles workflow discovery failure gracefully', async () => {
+      mockDiscoverWorkflows.mockRejectedValue(new Error('No .archon/workflows directory'));
+      mockAIResponse('I will help you directly.');
+
+      await handleMessage(platform, 'chat-456', 'help me');
+
+      expect(platform.sendMessage).toHaveBeenCalledWith(
+        'chat-456',
+        expect.stringContaining('Could not load workflows')
+      );
+      expect(mockExecuteWorkflow).not.toHaveBeenCalled();
     });
   });
 });
