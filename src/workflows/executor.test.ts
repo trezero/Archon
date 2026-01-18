@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn, type Mock } from 'bun:test';
 import { mkdir, writeFile, rm, readFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -73,10 +73,12 @@ function createMockPlatform(): IPlatformAdapter {
 
 // Import after mocks are set up
 import { executeWorkflow, isValidCommandName } from './executor';
+import * as gitUtils from '../utils/git';
 
 describe('Workflow Executor', () => {
   let mockPlatform: IPlatformAdapter;
   let testDir: string;
+  let commitAllChangesSpy: Mock<typeof gitUtils.commitAllChanges>;
 
   beforeEach(async () => {
     mockPlatform = createMockPlatform();
@@ -84,6 +86,10 @@ describe('Workflow Executor', () => {
     mockSendQuery.mockClear();
     mockGetAssistantClient.mockClear();
     (mockPlatform.sendMessage as ReturnType<typeof mock>).mockClear();
+
+    // Mock commitAllChanges to return false (no changes to commit) by default
+    // This prevents sendCriticalMessage retries from causing test timeouts
+    commitAllChangesSpy = spyOn(gitUtils, 'commitAllChanges').mockResolvedValue(false);
 
     // Reset mock implementation to default behavior (prevents test pollution)
     mockSendQuery.mockImplementation(function* () {
@@ -103,6 +109,7 @@ describe('Workflow Executor', () => {
   });
 
   afterEach(async () => {
+    commitAllChangesSpy.mockRestore();
     try {
       await rm(testDir, { recursive: true, force: true });
     } catch {
@@ -272,9 +279,12 @@ describe('Workflow Executor', () => {
 
       const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
       const calls = sendMessage.mock.calls;
-      const lastMessage = calls[calls.length - 1][1];
+      const messages = calls.map((call: unknown[]) => call[1] as string);
 
-      expect(lastMessage).toContain('✅ **Workflow complete**: `test-workflow`');
+      // Completion message should be sent (may not be last due to artifact commit)
+      expect(messages.some(m => m.includes('✅ **Workflow complete**: `test-workflow`'))).toBe(
+        true
+      );
     });
 
     // Platform-specific completion message behavior
@@ -2903,6 +2913,184 @@ describe('Workflow Executor', () => {
       // step-after: should get fresh session after parallel block (undefined, not step-before's session)
       // This verifies that currentSessionId is reset to undefined after parallel block
       expect(receivedSessionIds[3]).toBeUndefined();
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+  });
+
+  describe('commitWorkflowArtifacts behavior', () => {
+    const testWorkflow: WorkflowDefinition = {
+      name: 'artifact-test-workflow',
+      description: 'Test workflow for artifact commit behavior',
+      steps: [{ command: 'command-one' }],
+    };
+
+    it('should call commitAllChanges after workflow completion', async () => {
+      // Reset the spy to track calls
+      commitAllChangesSpy.mockResolvedValue(false);
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        testWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Verify commitAllChanges was called with the working directory
+      expect(commitAllChangesSpy).toHaveBeenCalledWith(
+        testDir,
+        expect.stringContaining('Auto-commit workflow artifacts')
+      );
+    });
+
+    it('should notify user when artifacts are committed (non-GitHub platform)', async () => {
+      // Mock commitAllChanges to return true (changes were committed)
+      commitAllChangesSpy.mockResolvedValue(true);
+
+      // Ensure platform is not GitHub
+      (mockPlatform.getPlatformType as ReturnType<typeof mock>).mockReturnValue('telegram');
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        testWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should send notification about committed artifacts
+      const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+      const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1]);
+      expect(
+        messages.some((m: string) => m.includes('Committed remaining workflow artifacts'))
+      ).toBe(true);
+    });
+
+    it('should suppress artifact commit notification on GitHub platform', async () => {
+      // Mock commitAllChanges to return true (changes were committed)
+      commitAllChangesSpy.mockResolvedValue(true);
+
+      // Set platform to GitHub
+      (mockPlatform.getPlatformType as ReturnType<typeof mock>).mockReturnValue('github');
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        testWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should NOT send artifact commit notification on GitHub
+      const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+      const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1]);
+      expect(
+        messages.some((m: string) => m.includes('Committed remaining workflow artifacts'))
+      ).toBe(false);
+    });
+
+    it('should warn user when artifact commit fails', async () => {
+      // Mock commitAllChanges to throw an error
+      commitAllChangesSpy.mockRejectedValue(new Error('pre-commit hook failed'));
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        testWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should send warning about failed commit
+      const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+      const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1]);
+      const warningMessage = messages.find(
+        (m: string) => m.includes('Warning') && m.includes('Could not auto-commit')
+      );
+      expect(warningMessage).toBeDefined();
+      expect(warningMessage).toContain('pre-commit hook failed');
+      expect(warningMessage).toContain('manually commit');
+    });
+
+    it('should call commitAllChanges after loop workflow completion', async () => {
+      // Reset the spy to track calls
+      commitAllChangesSpy.mockResolvedValue(false);
+
+      // Mock AI to complete on first iteration
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: '<promise>COMPLETE</promise>' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'loop-artifact-test',
+        description: 'Test loop workflow artifact commit',
+        loop: { until: 'COMPLETE', max_iterations: 5, fresh_context: false },
+        prompt: 'Complete immediately.',
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Verify commitAllChanges was called
+      expect(commitAllChangesSpy).toHaveBeenCalledWith(
+        testDir,
+        expect.stringContaining('Auto-commit workflow artifacts')
+      );
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
+
+    it('should call commitAllChanges even when loop workflow fails', async () => {
+      // Reset the spy to track calls
+      commitAllChangesSpy.mockResolvedValue(false);
+
+      // Mock AI to always fail to complete (hit max iterations)
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'Still working...' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'fail-loop-artifact-test',
+        description: 'Test failed loop workflow artifact commit',
+        loop: { until: 'COMPLETE', max_iterations: 2, fresh_context: false },
+        prompt: 'Never complete.',
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Verify commitAllChanges was still called even after failure
+      expect(commitAllChangesSpy).toHaveBeenCalledWith(
+        testDir,
+        expect.stringContaining('Auto-commit workflow artifacts')
+      );
 
       // Reset mock
       mockSendQuery.mockImplementation(function* () {

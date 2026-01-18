@@ -290,3 +290,54 @@ export async function getCanonicalRepoPath(path: string): Promise<string> {
   }
   return path;
 }
+
+/**
+ * Commit all uncommitted changes (typically workflow-generated artifacts)
+ * Only commits if there are actually changes to commit
+ * Returns true if commit was made, false if nothing to commit
+ */
+export async function commitAllChanges(workingPath: string, message: string): Promise<boolean> {
+  const hasChanges = await hasUncommittedChanges(workingPath);
+  if (!hasChanges) {
+    return false;
+  }
+
+  await execFileAsync('git', ['-C', workingPath, 'add', '-A'], { timeout: 10000 });
+  await execFileAsync('git', ['-C', workingPath, 'commit', '-m', message], { timeout: 10000 });
+
+  return true;
+}
+
+/**
+ * Check if a worktree has uncommitted changes
+ * Exported for use by cleanup service and workflow executor
+ *
+ * FAIL-SAFE: Returns true (assume changes exist) on unexpected errors
+ * to prevent data loss during worktree cleanup. Only returns false for
+ * expected "path doesn't exist" scenarios.
+ */
+export async function hasUncommittedChanges(workingPath: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', workingPath, 'status', '--porcelain']);
+    return stdout.trim().length > 0;
+  } catch (error) {
+    const err = error as Error & { code?: string };
+
+    // Only return false for expected "path doesn't exist" scenarios
+    if (err.code === 'ENOENT' || err.message.includes('No such file or directory')) {
+      console.log('[Git] Path does not exist, treating as no uncommitted changes', {
+        workingPath,
+      });
+      return false;
+    }
+
+    // FAIL-SAFE: For any other error, assume changes exist to prevent data loss
+    // This is intentionally conservative - better to block cleanup than lose work
+    console.error('[Git] Failed to check uncommitted changes - assuming changes exist for safety', {
+      workingPath,
+      error: err.message,
+      code: err.code,
+    });
+    return true;
+  }
+}

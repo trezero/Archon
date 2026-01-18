@@ -9,6 +9,7 @@ import * as workflowDb from '../db/workflows';
 import { formatToolCall } from '../utils/tool-formatter';
 import { getCommandFolderSearchPaths } from '../utils/archon-paths';
 import { loadRepoConfig } from '../config/config-loader';
+import { commitAllChanges } from '../utils/git';
 import type {
   WorkflowDefinition,
   WorkflowRun,
@@ -792,6 +793,16 @@ async function executeLoopWorkflow(
           `✅ **Loop complete**: \`${workflow.name}\` (${String(i)} iterations)`,
           workflowContext
         );
+
+        // Safety net: Commit any uncommitted artifacts before returning
+        await commitWorkflowArtifacts(
+          platform,
+          conversationId,
+          cwd,
+          workflow.name,
+          workflowRun.id,
+          workflowContext
+        );
         return;
       }
 
@@ -805,6 +816,16 @@ async function executeLoopWorkflow(
         platform,
         conversationId,
         `❌ **Loop failed** at iteration ${String(i)}: ${err.message}`,
+        workflowContext
+      );
+
+      // Safety net: Try to commit any artifacts created before failure
+      await commitWorkflowArtifacts(
+        platform,
+        conversationId,
+        cwd,
+        workflow.name,
+        workflowRun.id,
         workflowContext
       );
       return;
@@ -827,6 +848,16 @@ ${errorMsg}
 - Review logs at \`.archon/logs/${workflowRun.id}.jsonl\``;
 
   await sendCriticalMessage(platform, conversationId, userMsg, workflowContext);
+
+  // Safety net: Try to commit any artifacts created before max iterations exceeded
+  await commitWorkflowArtifacts(
+    platform,
+    conversationId,
+    cwd,
+    workflow.name,
+    workflowRun.id,
+    workflowContext
+  );
 }
 
 /**
@@ -1160,6 +1191,16 @@ export async function executeWorkflow(
     }
 
     console.log(`[WorkflowExecutor] Workflow completed: ${workflow.name}`);
+
+    // Safety net: Commit any artifacts created during workflow but not yet committed
+    await commitWorkflowArtifacts(
+      platform,
+      conversationId,
+      cwd,
+      workflow.name,
+      workflowRun.id,
+      workflowContext
+    );
   } catch (error) {
     // Top-level error handler: ensure workflow is marked as failed
     const err = error as Error;
@@ -1206,5 +1247,57 @@ export async function executeWorkflow(
       });
     }
     // Don't re-throw - orchestrator already has error handling
+  }
+}
+
+/**
+ * Safety net: Commit any uncommitted workflow artifacts
+ * Shared between step-based and loop-based workflows
+ */
+async function commitWorkflowArtifacts(
+  platform: IPlatformAdapter,
+  conversationId: string,
+  cwd: string,
+  workflowName: string,
+  workflowId: string,
+  context: SendMessageContext
+): Promise<void> {
+  const platformType = platform.getPlatformType();
+
+  try {
+    const committed = await commitAllChanges(
+      cwd,
+      `chore: Auto-commit workflow artifacts (${workflowName})`
+    );
+    if (committed) {
+      console.log(`[WorkflowExecutor] Committed remaining artifacts for workflow: ${workflowName}`);
+
+      // Notify user about the commit (non-GitHub platforms only)
+      if (platformType !== 'github') {
+        await sendCriticalMessage(
+          platform,
+          conversationId,
+          '📦 Committed remaining workflow artifacts',
+          context
+        );
+      }
+    }
+  } catch (commitError) {
+    const err = commitError as Error;
+    console.error('[WorkflowExecutor] Failed to commit workflow artifacts', {
+      error: err.message,
+      stack: err.stack,
+      workflowName,
+      workflowId,
+      conversationId,
+      cwd,
+    });
+
+    await sendCriticalMessage(
+      platform,
+      conversationId,
+      `⚠️ **Warning**: Could not auto-commit workflow artifacts. Your changes may not be saved.\n\nError: ${err.message}\n\nPlease manually commit any important changes in \`${cwd}\`.`,
+      context
+    );
   }
 }

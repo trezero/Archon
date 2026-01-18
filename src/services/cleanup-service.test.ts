@@ -54,7 +54,6 @@ mock.module('../db/codebases', () => ({
 }));
 
 import {
-  hasUncommittedChanges,
   isBranchMerged,
   getLastCommitDate,
   runScheduledCleanup,
@@ -67,6 +66,7 @@ import {
   removeEnvironment,
   MAX_WORKTREES_PER_CODEBASE,
 } from './cleanup-service';
+import { hasUncommittedChanges } from '../utils/git';
 
 describe('cleanup-service', () => {
   beforeEach(() => {
@@ -103,12 +103,23 @@ describe('cleanup-service', () => {
       expect(result).toBe(false);
     });
 
-    test('returns false when git fails (path not found)', async () => {
-      mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repository'));
+    test('returns false when path does not exist (ENOENT)', async () => {
+      const error = new Error('No such file or directory') as Error & { code: string };
+      error.code = 'ENOENT';
+      mockExecFileAsync.mockRejectedValueOnce(error);
 
       const result = await hasUncommittedChanges('/nonexistent');
 
       expect(result).toBe(false);
+    });
+
+    test('returns true (fail-safe) when git fails with unexpected error', async () => {
+      // Unexpected errors like git corruption should return true to prevent data loss
+      mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repository'));
+
+      const result = await hasUncommittedChanges('/workspace/corrupted');
+
+      expect(result).toBe(true);
     });
 
     test('returns false when git status is only whitespace', async () => {

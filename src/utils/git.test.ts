@@ -527,4 +527,155 @@ branch refs/heads/feature/auth
       expect(createCalls).toHaveLength(0);
     });
   });
+
+  describe('hasUncommittedChanges', () => {
+    let execSpy: Mock<typeof git.execFileAsync>;
+
+    beforeEach(() => {
+      execSpy = spyOn(git, 'execFileAsync');
+    });
+
+    afterEach(() => {
+      execSpy.mockRestore();
+    });
+
+    test('returns true when there are uncommitted changes', async () => {
+      execSpy.mockResolvedValue({ stdout: ' M file.ts\n?? newfile.ts\n', stderr: '' });
+
+      const result = await git.hasUncommittedChanges('/workspace/repo');
+
+      expect(result).toBe(true);
+      expect(execSpy).toHaveBeenCalledWith('git', [
+        '-C',
+        '/workspace/repo',
+        'status',
+        '--porcelain',
+      ]);
+    });
+
+    test('returns false when working tree is clean', async () => {
+      execSpy.mockResolvedValue({ stdout: '', stderr: '' });
+
+      const result = await git.hasUncommittedChanges('/workspace/repo');
+
+      expect(result).toBe(false);
+    });
+
+    test('returns false when output is only whitespace', async () => {
+      execSpy.mockResolvedValue({ stdout: '   \n\n', stderr: '' });
+
+      const result = await git.hasUncommittedChanges('/workspace/repo');
+
+      expect(result).toBe(false);
+    });
+
+    test('returns false when path does not exist (ENOENT)', async () => {
+      const error = new Error('No such file or directory') as Error & { code: string };
+      error.code = 'ENOENT';
+      execSpy.mockRejectedValue(error);
+
+      const result = await git.hasUncommittedChanges('/nonexistent');
+
+      expect(result).toBe(false);
+    });
+
+    test('returns true (fail-safe) when git fails with unexpected error', async () => {
+      // Unexpected errors like git corruption should return true to prevent data loss
+      execSpy.mockRejectedValue(new Error('fatal: not a git repository'));
+
+      const result = await git.hasUncommittedChanges('/workspace/corrupted');
+
+      expect(result).toBe(true);
+    });
+
+    test('returns true (fail-safe) when git lock file exists', async () => {
+      execSpy.mockRejectedValue(new Error('Another git process seems to be running'));
+
+      const result = await git.hasUncommittedChanges('/workspace/locked');
+
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('commitAllChanges', () => {
+    let execSpy: Mock<typeof git.execFileAsync>;
+
+    beforeEach(() => {
+      execSpy = spyOn(git, 'execFileAsync');
+    });
+
+    afterEach(() => {
+      execSpy.mockRestore();
+    });
+
+    test('commits when there are uncommitted changes', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        // hasUncommittedChanges check - return changes
+        if (args.includes('status')) {
+          return { stdout: ' M file.ts\n', stderr: '' };
+        }
+        // git add and commit - succeed
+        return { stdout: '', stderr: '' };
+      });
+
+      const result = await git.commitAllChanges('/workspace/repo', 'test commit');
+
+      expect(result).toBe(true);
+      expect(execSpy).toHaveBeenCalledWith('git', ['-C', '/workspace/repo', 'add', '-A'], {
+        timeout: 10000,
+      });
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'commit', '-m', 'test commit'],
+        { timeout: 10000 }
+      );
+    });
+
+    test('returns false when no changes to commit', async () => {
+      execSpy.mockResolvedValue({ stdout: '', stderr: '' });
+
+      const result = await git.commitAllChanges('/workspace/repo', 'test commit');
+
+      expect(result).toBe(false);
+      // git add and commit should not be called
+      expect(execSpy).toHaveBeenCalledTimes(1); // only hasUncommittedChanges
+    });
+
+    test('throws error when git add fails', async () => {
+      let callCount = 0;
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        callCount++;
+        if (args.includes('status')) {
+          return { stdout: ' M file.ts\n', stderr: '' };
+        }
+        if (args.includes('add')) {
+          throw new Error('git add failed');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await expect(git.commitAllChanges('/workspace/repo', 'test commit')).rejects.toThrow(
+        'git add failed'
+      );
+    });
+
+    test('throws error when git commit fails', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('status')) {
+          return { stdout: ' M file.ts\n', stderr: '' };
+        }
+        if (args.includes('add')) {
+          return { stdout: '', stderr: '' };
+        }
+        if (args.includes('commit')) {
+          throw new Error('pre-commit hook failed');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await expect(git.commitAllChanges('/workspace/repo', 'test commit')).rejects.toThrow(
+        'pre-commit hook failed'
+      );
+    });
+  });
 });

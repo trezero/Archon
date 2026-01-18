@@ -191,7 +191,9 @@ src/
 ├── types/          # TypeScript types and interfaces
 │   └── index.ts
 ├── utils/          # Shared utilities
-│   └── variable-substitution.ts
+│   ├── variable-substitution.ts
+│   ├── git.ts      # Git operations (commits, status checks)
+│   └── archon-paths.ts
 └── index.ts        # Entry point (Express server)
 ```
 
@@ -649,6 +651,7 @@ if (streamingMode === 'batch') {
 - Multi-step AI execution chains
 - Discovered at runtime, routed by AI
 - Concurrent execution prevented - only one workflow can run per conversation at a time
+- Auto-commits artifacts on completion (safety net for uncommitted changes)
 - Commands: `/workflow list`, `/workflow reload`, `/workflow cancel`
 
 ### Default Commands and Workflows

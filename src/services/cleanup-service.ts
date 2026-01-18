@@ -7,7 +7,7 @@ import * as conversationDb from '../db/conversations';
 import * as sessionDb from '../db/sessions';
 import * as codebaseDb from '../db/codebases';
 import { getIsolationProvider } from '../isolation';
-import { execFileAsync } from '../utils/git';
+import { execFileAsync, hasUncommittedChanges } from '../utils/git';
 import { IsolationEnvironmentRow } from '../types';
 
 // Configuration constants (configurable via env vars)
@@ -156,19 +156,6 @@ export async function removeEnvironment(
 
     console.error(`[Cleanup] Failed to remove environment ${envId}:`, err.message);
     throw err;
-  }
-}
-
-/**
- * Check if a worktree has uncommitted changes
- */
-export async function hasUncommittedChanges(workingPath: string): Promise<boolean> {
-  try {
-    const { stdout } = await execFileAsync('git', ['-C', workingPath, 'status', '--porcelain']);
-    return stdout.trim().length > 0;
-  } catch {
-    // If git fails, assume it's safe to remove (path might not exist)
-    return false;
   }
 }
 
