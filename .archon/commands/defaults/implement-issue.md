@@ -308,6 +308,8 @@ EOF
 
 ## Phase 7: PR - Create Pull Request
 
+**Before creating a PR**, check if one already exists for this issue or branch using `gh pr list`. If a PR already exists, skip creation and use the existing one.
+
 ### 7.1 Push to Remote
 
 ```bash
