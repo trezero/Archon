@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { calculatePortOffset, getPort } from './utils/port-allocation';
+import { calculatePortOffset, getPort } from './port-allocation';
 
 // Test the exported hash calculation function directly
 describe('calculatePortOffset', () => {

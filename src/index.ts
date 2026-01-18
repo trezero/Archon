@@ -1,6 +1,6 @@
 /**
  * Remote Coding Agent - Main Entry Point
- * Telegram + Claude MVP
+ * Multi-platform AI coding assistant (Telegram, Discord, Slack, GitHub)
  */
 
 // Load environment variables FIRST - using 'dotenv/config' ensures
@@ -21,6 +21,27 @@ import { startCleanupScheduler, stopCleanupScheduler } from './services/cleanup-
 import { logArchonPaths } from './utils/archon-paths';
 import { loadConfig, logConfig } from './config';
 import { getPort } from './utils/port-allocation';
+import type { IPlatformAdapter } from './types';
+
+/**
+ * Creates an error handler for message processing failures.
+ * Logs the error and attempts to send a user-friendly message to the platform.
+ */
+function createMessageErrorHandler(
+  platform: string,
+  adapter: IPlatformAdapter,
+  conversationId: string
+): (error: unknown) => Promise<void> {
+  return async (error: unknown): Promise<void> => {
+    console.error(`[${platform}] Failed to process message:`, error);
+    try {
+      const userMessage = classifyAndFormatError(error as Error);
+      await adapter.sendMessage(conversationId, userMessage);
+    } catch (sendError) {
+      console.error(`[${platform}] Failed to send error message to user:`, sendError);
+    }
+  };
+}
 
 async function main(): Promise<void> {
   console.log('[App] Starting Remote Coding Agent');
@@ -121,11 +142,12 @@ async function main(): Promise<void> {
       | 'stream'
       | 'batch';
     discord = new DiscordAdapter(process.env.DISCORD_BOT_TOKEN, discordStreamingMode);
+    const discordAdapter = discord; // Capture for use in callback
 
     // Register message handler
-    discord.onMessage(async message => {
+    discordAdapter.onMessage(async message => {
       // Get initial conversation ID
-      let conversationId = discord!.getConversationId(message);
+      let conversationId = discordAdapter.getConversationId(message);
 
       // Skip if no content
       if (!message.content) return;
@@ -133,42 +155,37 @@ async function main(): Promise<void> {
       // Check if bot was mentioned (required for activation)
       // Exception: DMs don't require mention
       const isDM = !message.guild;
-      if (!isDM && !discord!.isBotMentioned(message)) {
+      if (!isDM && !discordAdapter.isBotMentioned(message)) {
         return; // Ignore messages that don't mention the bot
       }
 
       // Strip the bot mention from the message
-      const content = discord!.stripBotMention(message);
+      const content = discordAdapter.stripBotMention(message);
       if (!content) return; // Message was only a mention with no content
 
-      // PHASE 3A: Ensure we're responding in a thread
-      // This creates a thread if we're not already in one
-      conversationId = await discord!.ensureThread(conversationId, message);
+      // Ensure we're responding in a thread - creates one if needed
+      conversationId = await discordAdapter.ensureThread(conversationId, message);
 
       // Check for thread context (now we're guaranteed to be in a thread if applicable)
       let threadContext: string | undefined;
       let parentConversationId: string | undefined;
 
-      if (discord!.isThread(message)) {
-        // Fetch thread history for context
-        const history = await discord!.fetchThreadHistory(message);
-        if (history.length > 0) {
-          // Exclude the current message from history (it's included in fetch)
-          const historyWithoutCurrent = history.slice(0, -1);
-          if (historyWithoutCurrent.length > 0) {
-            threadContext = historyWithoutCurrent.join('\n');
-          }
+      if (discordAdapter.isThread(message)) {
+        // Fetch thread history for context (exclude current message)
+        const history = await discordAdapter.fetchThreadHistory(message);
+        if (history.length > 1) {
+          threadContext = history.slice(0, -1).join('\n');
         }
 
         // Get parent channel ID for context inheritance
-        parentConversationId = discord!.getParentChannelId(message) ?? undefined;
+        parentConversationId = discordAdapter.getParentChannelId(message) ?? undefined;
       }
 
       // Fire-and-forget: handler returns immediately, processing happens async
       lockManager
         .acquireLock(conversationId, async () => {
           await handleMessage(
-            discord!,
+            discordAdapter,
             conversationId,
             content,
             undefined,
@@ -176,15 +193,7 @@ async function main(): Promise<void> {
             parentConversationId
           );
         })
-        .catch(async error => {
-          console.error('[Discord] Failed to process message:', error);
-          try {
-            const userMessage = classifyAndFormatError(error as Error);
-            await discord!.sendMessage(conversationId, userMessage);
-          } catch (sendError) {
-            console.error('[Discord] Failed to send error message to user:', sendError);
-          }
-        });
+        .catch(createMessageErrorHandler('Discord', discordAdapter, conversationId));
     });
 
     await discord.start();
@@ -201,42 +210,39 @@ async function main(): Promise<void> {
       process.env.SLACK_APP_TOKEN,
       slackStreamingMode
     );
+    const slackAdapter = slack; // Capture for use in callback
 
     // Register message handler
-    slack.onMessage(async event => {
-      const conversationId = slack!.getConversationId(event);
+    slackAdapter.onMessage(async event => {
+      const conversationId = slackAdapter.getConversationId(event);
 
       // Skip if no text
       if (!event.text) return;
 
       // Strip the bot mention from the message
-      const content = slack!.stripBotMention(event.text);
+      const content = slackAdapter.stripBotMention(event.text);
       if (!content) return; // Message was only a mention with no content
 
       // Check for thread context
       let threadContext: string | undefined;
       let parentConversationId: string | undefined;
 
-      if (slack!.isThread(event)) {
-        // Fetch thread history for context
-        const history = await slack!.fetchThreadHistory(event);
-        if (history.length > 0) {
-          // Exclude the current message from history
-          const historyWithoutCurrent = history.slice(0, -1);
-          if (historyWithoutCurrent.length > 0) {
-            threadContext = historyWithoutCurrent.join('\n');
-          }
+      if (slackAdapter.isThread(event)) {
+        // Fetch thread history for context (exclude current message)
+        const history = await slackAdapter.fetchThreadHistory(event);
+        if (history.length > 1) {
+          threadContext = history.slice(0, -1).join('\n');
         }
 
         // Get parent conversation ID for context inheritance
-        parentConversationId = slack!.getParentConversationId(event) ?? undefined;
+        parentConversationId = slackAdapter.getParentConversationId(event) ?? undefined;
       }
 
       // Fire-and-forget: handler returns immediately, processing happens async
       lockManager
         .acquireLock(conversationId, async () => {
           await handleMessage(
-            slack!,
+            slackAdapter,
             conversationId,
             content,
             undefined,
@@ -244,15 +250,7 @@ async function main(): Promise<void> {
             parentConversationId
           );
         })
-        .catch(async error => {
-          console.error('[Slack] Failed to process message:', error);
-          try {
-            const userMessage = classifyAndFormatError(error as Error);
-            await slack!.sendMessage(conversationId, userMessage);
-          } catch (sendError) {
-            console.error('[Slack] Failed to send error message to user:', sendError);
-          }
-        });
+        .catch(createMessageErrorHandler('Slack', slackAdapter, conversationId));
     });
 
     await slack.start();
@@ -268,6 +266,9 @@ async function main(): Promise<void> {
   // IMPORTANT: Register BEFORE express.json() to prevent body parsing
   if (github) {
     app.post('/webhooks/github', express.raw({ type: 'application/json' }), async (req, res) => {
+      const eventType = req.headers['x-github-event'] as string | undefined;
+      const deliveryId = req.headers['x-github-delivery'] as string | undefined;
+
       try {
         const signature = req.headers['x-hub-signature-256'] as string;
         if (!signature) {
@@ -279,13 +280,21 @@ async function main(): Promise<void> {
         // Process async (fire-and-forget for fast webhook response)
         // Note: github.handleWebhook() has internal error handling that notifies users
         // This catch is a fallback for truly unexpected errors (e.g., signature verification bugs)
-        github.handleWebhook(payload, signature).catch(error => {
-          console.error('[GitHub] Webhook processing error:', error);
+        github.handleWebhook(payload, signature).catch((error: unknown) => {
+          console.error('[GitHub] Webhook processing error:', {
+            error,
+            eventType,
+            deliveryId,
+          });
         });
 
         return res.status(200).send('OK');
       } catch (error) {
-        console.error('[GitHub] Webhook endpoint error:', error);
+        console.error('[GitHub] Webhook endpoint error:', {
+          error,
+          eventType,
+          deliveryId,
+        });
         return res.status(500).json({ error: 'Internal server error' });
       }
     });
@@ -304,7 +313,8 @@ async function main(): Promise<void> {
     try {
       await pool.query('SELECT 1');
       res.json({ status: 'ok', database: 'connected' });
-    } catch (_error) {
+    } catch (error) {
+      console.error('[Health] Database health check failed:', error);
       res.status(500).json({ status: 'error', database: 'disconnected' });
     }
   });
@@ -316,7 +326,8 @@ async function main(): Promise<void> {
         status: 'ok',
         ...stats,
       });
-    } catch (_error) {
+    } catch (error) {
+      console.error('[Health] Failed to get concurrency stats:', error);
       res.status(500).json({ status: 'error', reason: 'Failed to get stats' });
     }
   });
@@ -342,15 +353,7 @@ async function main(): Promise<void> {
         .acquireLock(conversationId, async () => {
           await handleMessage(testAdapter, conversationId, message);
         })
-        .catch(async error => {
-          console.error('[Test] Message handling error:', error);
-          try {
-            const userMessage = classifyAndFormatError(error as Error);
-            await testAdapter.sendMessage(conversationId, userMessage);
-          } catch (sendError) {
-            console.error('[Test] Failed to send error message to user:', sendError);
-          }
-        });
+        .catch(createMessageErrorHandler('Test', testAdapter, conversationId));
 
       return res.json({ success: true, conversationId, message });
     } catch (error) {
@@ -381,7 +384,7 @@ async function main(): Promise<void> {
   });
 
   app.listen(port, () => {
-    console.log(`[Express] Health check server listening on port ${String(port)}`);
+    console.log(`[Express] Server listening on port ${String(port)}`);
   });
 
   // Initialize Telegram adapter (conditional)
@@ -389,27 +392,19 @@ async function main(): Promise<void> {
   if (process.env.TELEGRAM_BOT_TOKEN) {
     const streamingMode = (process.env.TELEGRAM_STREAMING_MODE ?? 'stream') as 'stream' | 'batch';
     telegram = new TelegramAdapter(process.env.TELEGRAM_BOT_TOKEN, streamingMode);
+    const telegramAdapter = telegram; // Capture for use in callback
 
     // Register message handler (auth is handled internally by adapter)
-    telegram.onMessage(async ({ conversationId, message }) => {
+    telegramAdapter.onMessage(async ({ conversationId, message }) => {
       // Fire-and-forget: handler returns immediately, processing happens async
       lockManager
         .acquireLock(conversationId, async () => {
-          await handleMessage(telegram!, conversationId, message);
+          await handleMessage(telegramAdapter, conversationId, message);
         })
-        .catch(async error => {
-          console.error('[Telegram] Failed to process message:', error);
-          try {
-            const userMessage = classifyAndFormatError(error as Error);
-            await telegram!.sendMessage(conversationId, userMessage);
-          } catch (sendError) {
-            console.error('[Telegram] Failed to send error message to user:', sendError);
-          }
-        });
+        .catch(createMessageErrorHandler('Telegram', telegramAdapter, conversationId));
     });
 
-    // Start bot
-    await telegram.start();
+    await telegramAdapter.start();
   } else {
     console.log('[Telegram] Adapter not initialized (missing TELEGRAM_BOT_TOKEN)');
   }
@@ -418,13 +413,26 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     console.log('[App] Shutting down gracefully...');
     stopCleanupScheduler();
-    telegram?.stop();
-    discord?.stop();
-    slack?.stop();
-    void pool.end().then(() => {
-      console.log('[Database] Connection pool closed');
-      process.exit(0);
-    });
+
+    // Stop adapters (these should not throw, but be defensive)
+    try {
+      telegram?.stop();
+      discord?.stop();
+      slack?.stop();
+    } catch (error) {
+      console.error('[App] Error stopping adapters:', error);
+    }
+
+    pool
+      .end()
+      .then(() => {
+        console.log('[Database] Connection pool closed');
+        process.exit(0);
+      })
+      .catch((error: unknown) => {
+        console.error('[Database] Error closing connection pool:', error);
+        process.exit(1);
+      });
   };
 
   process.once('SIGINT', shutdown);
