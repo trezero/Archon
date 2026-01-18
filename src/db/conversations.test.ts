@@ -11,7 +11,7 @@ mock.module('./connection', () => ({
 }));
 
 import { getOrCreateConversation, updateConversation } from './conversations';
-import { Conversation } from '../types';
+import { Conversation, ConversationNotFoundError } from '../types';
 
 describe('conversations', () => {
   beforeEach(() => {
@@ -296,6 +296,25 @@ describe('conversations', () => {
         'UPDATE remote_agent_conversations SET codebase_id = $1, updated_at = NOW() WHERE id = $2',
         [null, 'conv-123']
       );
+    });
+
+    test('throws ConversationNotFoundError when conversation not found (rowCount === 0)', async () => {
+      // Simulate UPDATE returning 0 rows affected
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 0));
+
+      await expect(
+        updateConversation('non-existent-id', { codebase_id: 'codebase-456' })
+      ).rejects.toThrow(ConversationNotFoundError);
+
+      // Verify the error contains the conversation ID
+      try {
+        mockQuery.mockResolvedValueOnce(createQueryResult([], 0));
+        await updateConversation('test-conv-id', { cwd: '/workspace' });
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConversationNotFoundError);
+        expect((error as ConversationNotFoundError).conversationId).toBe('test-conv-id');
+        expect((error as ConversationNotFoundError).message).toBe('Conversation not found: test-conv-id');
+      }
     });
   });
 });

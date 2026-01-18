@@ -681,11 +681,21 @@ These are **automatically copied** to new repos on `/clone` (unless opted out).
 
 **Database Errors:**
 ```typescript
+// INSERT operations
 try {
   await db.query('INSERT INTO conversations ...', params);
 } catch (error) {
   console.error('[DB] Insert failed', { error, params });
   throw new Error('Failed to create conversation');
+}
+
+// UPDATE operations - verify rowCount to catch missing records
+try {
+  await db.updateConversation(conversationId, { codebase_id: codebaseId });
+} catch (error) {
+  // updateConversation throws if no rows matched (conversation not found)
+  console.error('[DB] Update failed', { error, conversationId });
+  throw error; // Re-throw to surface the issue
 }
 ```
 

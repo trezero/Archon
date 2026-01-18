@@ -2,6 +2,17 @@
  * Core type definitions for the Remote Coding Agent platform
  */
 
+/**
+ * Custom error for when a conversation is not found during update operations
+ * Allows callers to programmatically handle this specific error case
+ */
+export class ConversationNotFoundError extends Error {
+  constructor(public conversationId: string) {
+    super(`Conversation not found: ${conversationId}`);
+    this.name = 'ConversationNotFoundError';
+  }
+}
+
 export interface Conversation {
   id: string;
   platform_type: string;

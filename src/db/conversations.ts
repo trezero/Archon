@@ -2,7 +2,7 @@
  * Database operations for conversations
  */
 import { pool } from './connection';
-import { Conversation } from '../types';
+import { Conversation, ConversationNotFoundError } from '../types';
 
 /**
  * Get a conversation by platform type and platform ID
@@ -104,10 +104,18 @@ export async function updateConversation(
   fields.push('updated_at = NOW()');
   values.push(id);
 
-  await pool.query(
+  const result = await pool.query(
     `UPDATE remote_agent_conversations SET ${fields.join(', ')} WHERE id = $${String(i)}`,
     values
   );
+
+  if (result.rowCount === 0) {
+    console.error(`[DB] updateConversation: No rows updated for id=${id}`, {
+      fields,
+      updates,
+    });
+    throw new ConversationNotFoundError(id);
+  }
 }
 
 /**

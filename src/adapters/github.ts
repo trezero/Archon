@@ -4,7 +4,7 @@
  */
 import { Octokit } from '@octokit/rest';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { IPlatformAdapter, IsolationHints } from '../types';
+import { IPlatformAdapter, IsolationHints, ConversationNotFoundError } from '../types';
 import { handleMessage } from '../orchestrator/orchestrator';
 import { classifyAndFormatError } from '../utils/error-formatter';
 import * as db from '../db/conversations';
@@ -756,10 +756,22 @@ ${userComment}`;
 
     // 6b. Link conversation to codebase (fixes #97)
     if (isNewConversation) {
-      await db.updateConversation(existingConv.id, {
-        codebase_id: codebase.id,
-        cwd: repoPath,
-      });
+      try {
+        await db.updateConversation(existingConv.id, {
+          codebase_id: codebase.id,
+          cwd: repoPath,
+        });
+      } catch (updateError) {
+        if (updateError instanceof ConversationNotFoundError) {
+          console.error('[GitHub] Failed to link conversation to codebase - conversation not found', {
+            conversationId: existingConv.id,
+            codebaseId: codebase.id,
+          });
+          // Re-throw as this is a critical setup step
+          throw new Error('Failed to set up GitHub conversation - please try again');
+        }
+        throw updateError;
+      }
     }
 
     // 7. Get default branch

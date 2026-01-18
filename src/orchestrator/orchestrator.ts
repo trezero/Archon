@@ -15,6 +15,7 @@ import {
   IsolationEnvironmentRow,
   Conversation,
   Codebase,
+  ConversationNotFoundError,
 } from '../types';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
@@ -99,10 +100,10 @@ async function validateAndResolveIsolation(
       return { cwd: env.working_path, env, isNew: false };
     }
 
-    // Stale reference - clean up
+    // Stale reference - clean up (best-effort, don't fail on missing conversation)
     console.warn(`[Orchestrator] Stale isolation: ${conversation.isolation_env_id}`);
-    await db.updateConversation(conversation.id, {
-      isolation_env_id: null,
+    await db.updateConversation(conversation.id, { isolation_env_id: null }).catch(err => {
+      if (!(err instanceof ConversationNotFoundError)) throw err;
     });
 
     if (env) {
@@ -118,10 +119,21 @@ async function validateAndResolveIsolation(
   // 3. Create new isolation (auto-isolation for all platforms!)
   const env = await resolveIsolation(codebase, platform, conversationId, hints);
   if (env) {
-    await db.updateConversation(conversation.id, {
-      isolation_env_id: env.id,
-      cwd: env.working_path,
-    });
+    try {
+      await db.updateConversation(conversation.id, {
+        isolation_env_id: env.id,
+        cwd: env.working_path,
+      });
+    } catch (updateError) {
+      // If we can't link the isolation to the conversation, clean up and rethrow
+      console.error('[Orchestrator] Failed to link new isolation - cleaning up', {
+        conversationId: conversation.id,
+        isolationEnvId: env.id,
+      });
+      // Mark isolation as destroyed since we can't use it
+      await isolationEnvDb.updateStatus(env.id, 'destroyed');
+      throw updateError;
+    }
     return { cwd: env.working_path, env, isNew: true };
   }
 
@@ -385,20 +397,28 @@ export async function handleMessage(
       parentConversationId
     );
 
-    // If new thread conversation, inherit context from parent
+    // If new thread conversation, inherit context from parent (best-effort)
     if (parentConversationId && !conversation.codebase_id) {
       const parentConversation = await db.getConversationByPlatformId(
         platform.getPlatformType(),
         parentConversationId
       );
       if (parentConversation?.codebase_id) {
-        await db.updateConversation(conversation.id, {
-          codebase_id: parentConversation.codebase_id,
-          cwd: parentConversation.cwd,
-        });
-        // Reload conversation with inherited values
-        conversation = await db.getOrCreateConversation(platform.getPlatformType(), conversationId);
-        console.log('[Orchestrator] Thread inherited context from parent channel');
+        await db
+          .updateConversation(conversation.id, {
+            codebase_id: parentConversation.codebase_id,
+            cwd: parentConversation.cwd,
+          })
+          .then(async () => {
+            conversation = await db.getOrCreateConversation(
+              platform.getPlatformType(),
+              conversationId
+            );
+            console.log('[Orchestrator] Thread inherited context from parent channel');
+          })
+          .catch(err => {
+            if (!(err instanceof ConversationNotFoundError)) throw err;
+          });
       }
     }
 

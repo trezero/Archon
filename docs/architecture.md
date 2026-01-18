@@ -999,7 +999,7 @@ remote_agent_sessions
 **Conversations** (`src/db/conversations.ts`):
 
 - `getOrCreateConversation(platform, id)` - Idempotent get/create
-- `updateConversation(id, data)` - Update fields
+- `updateConversation(id, data)` - Update fields (throws if conversation not found)
 
 **Sessions** (`src/db/sessions.ts`):
 
@@ -1008,6 +1008,16 @@ remote_agent_sessions
 - `updateSession(id, sessionId)` - Update `assistant_session_id`
 - `updateSessionMetadata(id, metadata)` - Update metadata JSONB
 - `deactivateSession(id)` - Mark session inactive
+
+**Error Handling:**
+
+All UPDATE operations verify `rowCount` and throw errors if no rows were affected. This prevents silent failures when attempting to update non-existent records.
+
+```typescript
+// Example: updateConversation throws if conversation not found
+await updateConversation(id, { codebase_id: '...' });
+// Throws: "updateConversation: Conversation not found for id=..."
+```
 
 ### Session Lifecycle
 

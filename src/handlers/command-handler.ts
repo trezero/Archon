@@ -4,7 +4,7 @@
  */
 import { readFile, writeFile, readdir, access, rm } from 'fs/promises';
 import { join, basename, resolve, relative } from 'path';
-import { Conversation, CommandResult } from '../types';
+import { Conversation, CommandResult, ConversationNotFoundError } from '../types';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
@@ -233,9 +233,16 @@ Setup:
       if (!codebase && conversation.cwd) {
         codebase = await codebaseDb.findCodebaseByDefaultCwd(conversation.cwd);
         if (codebase) {
-          // Auto-link the detected codebase to this conversation
-          await db.updateConversation(conversation.id, { codebase_id: codebase.id });
-          console.log(`[Status] Auto-linked codebase ${codebase.name} to conversation`);
+          // Auto-link the detected codebase (best-effort - don't fail status on link error)
+          const detectedCodebase = codebase;
+          await db
+            .updateConversation(conversation.id, { codebase_id: detectedCodebase.id })
+            .then(() => {
+              console.log(`[Status] Auto-linked codebase ${detectedCodebase.name} to conversation`);
+            })
+            .catch(err => {
+              if (!(err instanceof ConversationNotFoundError)) throw err;
+            });
         }
       }
 
@@ -304,7 +311,17 @@ Setup:
         return { success: false, message: `Path must be within ${workspacePath} directory` };
       }
 
-      await db.updateConversation(conversation.id, { cwd: resolvedCwd });
+      try {
+        await db.updateConversation(conversation.id, { cwd: resolvedCwd });
+      } catch (updateError) {
+        if (updateError instanceof ConversationNotFoundError) {
+          return {
+            success: false,
+            message: 'Failed to update working directory: conversation state changed. Please try again.',
+          };
+        }
+        throw updateError;
+      }
 
       // Add this directory to git safe.directory if it's a git repository
       // This prevents "dubious ownership" errors when working with existing repos
@@ -375,10 +392,21 @@ Setup:
 
           if (existingCodebase) {
             // Link conversation to existing codebase
-            await db.updateConversation(conversation.id, {
-              codebase_id: existingCodebase.id,
-              cwd: targetPath,
-            });
+            try {
+              await db.updateConversation(conversation.id, {
+                codebase_id: existingCodebase.id,
+                cwd: targetPath,
+              });
+            } catch (updateError) {
+              if (updateError instanceof ConversationNotFoundError) {
+                return {
+                  success: false,
+                  message:
+                    'Failed to link existing codebase: conversation state changed. Please try again.',
+                };
+              }
+              throw updateError;
+            }
 
             // Reset session when switching codebases
             const session = await sessionDb.getActiveSession(conversation.id);
@@ -474,10 +502,28 @@ Setup:
           ai_assistant_type: suggestedAssistant,
         });
 
-        await db.updateConversation(conversation.id, {
-          codebase_id: codebase.id,
-          cwd: targetPath,
-        });
+        console.log(
+          `[Clone] Updating conversation ${conversation.id} with codebase ${codebase.id}`
+        );
+        try {
+          await db.updateConversation(conversation.id, {
+            codebase_id: codebase.id,
+            cwd: targetPath,
+          });
+        } catch (updateError) {
+          if (updateError instanceof ConversationNotFoundError) {
+            console.error('[Clone] Failed to link conversation - state changed unexpectedly', {
+              conversationId: conversation.id,
+              codebaseId: codebase.id,
+            });
+            return {
+              success: false,
+              message:
+                'Failed to complete clone: conversation state changed unexpectedly. Please try again.',
+            };
+          }
+          throw updateError;
+        }
 
         // Reset session when cloning a new repository
         const session = await sessionDb.getActiveSession(conversation.id);
@@ -840,10 +886,20 @@ Setup:
         }
 
         // Link conversation to codebase
-        await db.updateConversation(conversation.id, {
-          codebase_id: codebase.id,
-          cwd: targetPath,
-        });
+        try {
+          await db.updateConversation(conversation.id, {
+            codebase_id: codebase.id,
+            cwd: targetPath,
+          });
+        } catch (updateError) {
+          if (updateError instanceof ConversationNotFoundError) {
+            return {
+              success: false,
+              message: 'Failed to switch repository: conversation state changed. Please try again.',
+            };
+          }
+          throw updateError;
+        }
 
         // Reset session when switching
         const session = await sessionDb.getActiveSession(conversation.id);
@@ -945,7 +1001,17 @@ Setup:
 
         // If current conversation uses this codebase, unlink it
         if (codebase && conversation.codebase_id === codebase.id) {
-          await db.updateConversation(conversation.id, { codebase_id: null, cwd: null });
+          try {
+            await db.updateConversation(conversation.id, { codebase_id: null, cwd: null });
+          } catch (updateError) {
+            if (updateError instanceof ConversationNotFoundError) {
+              return {
+                success: false,
+                message: 'Failed to unlink repository: conversation state changed. Please try again.',
+              };
+            }
+            throw updateError;
+          }
           // Also deactivate any active session
           const session = await sessionDb.getActiveSession(conversation.id);
           if (session) {
@@ -1146,6 +1212,12 @@ Setup:
             console.error('[Worktree] Create failed:', err);
 
             // Check for common errors
+            if (error instanceof ConversationNotFoundError) {
+              return {
+                success: false,
+                message: 'Failed to create worktree: conversation state changed. Please try again.',
+              };
+            }
             if (err.message.includes('already exists')) {
               return {
                 success: false,
@@ -1232,6 +1304,13 @@ Setup:
             const err = error as Error;
             console.error('[Worktree] Remove failed:', err);
 
+            // Check for common errors
+            if (error instanceof ConversationNotFoundError) {
+              return {
+                success: false,
+                message: 'Failed to remove worktree: conversation state changed. Please try again.',
+              };
+            }
             // Provide friendly error for uncommitted changes
             if (err.message.includes('untracked files') || err.message.includes('modified')) {
               return {

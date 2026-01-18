@@ -8,7 +8,7 @@ import * as sessionDb from '../db/sessions';
 import * as codebaseDb from '../db/codebases';
 import { getIsolationProvider } from '../isolation';
 import { execFileAsync, hasUncommittedChanges } from '../utils/git';
-import { IsolationEnvironmentRow } from '../types';
+import { IsolationEnvironmentRow, ConversationNotFoundError } from '../types';
 
 // Configuration constants (configurable via env vars)
 const STALE_THRESHOLD_DAYS = parseInt(process.env.STALE_THRESHOLD_DAYS ?? '14', 10);
@@ -64,10 +64,9 @@ export async function onConversationClosed(
     return;
   }
 
-  // Clear this conversation's reference (regardless of whether we remove the worktree)
-  await conversationDb.updateConversation(conversation.id, {
-    isolation_env_id: null,
-    // Keep cwd pointing to main repo (will be set by caller or orchestrator)
+  // Clear this conversation's reference (best-effort - conversation may be deleted)
+  await conversationDb.updateConversation(conversation.id, { isolation_env_id: null }).catch(err => {
+    if (!(err instanceof ConversationNotFoundError)) throw err;
   });
 
   // Check if other conversations still use this environment
