@@ -265,20 +265,6 @@ async function resolveIsolation(
       },
     });
 
-    // UX message
-    if (hints?.prSha) {
-      const shortSha = hints.prSha.substring(0, 7);
-      await platform.sendMessage(
-        conversationId,
-        `Reviewing PR at commit \`${shortSha}\` (branch: \`${hints.prBranch}\`)`
-      );
-    } else {
-      await platform.sendMessage(
-        conversationId,
-        `Working in isolated branch \`${env.branch_name}\``
-      );
-    }
-
     return env;
   } catch (error) {
     const err = error as Error;
@@ -312,6 +298,16 @@ interface WorkflowRoutingContext {
    * Passed to workflow executor for substitution into $CONTEXT variables.
    */
   issueContext?: string;
+  /**
+   * Isolation environment context for consolidated startup message.
+   */
+  isolationEnv?: {
+    branch_name: string;
+  };
+  /**
+   * Hints for isolation environment (PR review context, etc.)
+   */
+  isolationHints?: IsolationHints;
 }
 
 /**
@@ -346,6 +342,15 @@ async function tryWorkflowRouting(
     await ctx.platform.sendMessage(ctx.conversationId, remainingMessage);
   }
 
+  // Build isolation context for workflow executor
+  const { workflowType, prSha, prBranch } = ctx.isolationHints ?? {};
+  const isPrReview =
+    workflowType === 'review' || workflowType === 'pr' || Boolean(prSha && prBranch);
+
+  const isolationContext = ctx.isolationEnv
+    ? { branchName: ctx.isolationEnv.branch_name, isPrReview, prSha, prBranch }
+    : undefined;
+
   await executeWorkflow(
     ctx.platform,
     ctx.conversationId,
@@ -354,7 +359,8 @@ async function tryWorkflowRouting(
     ctx.originalMessage,
     ctx.conversationDbId,
     ctx.codebaseId,
-    ctx.issueContext
+    ctx.issueContext,
+    isolationContext
   );
 
   return true;
@@ -705,6 +711,7 @@ export async function handleMessage(
 
     // Validate and resolve isolation - this is the single source of truth
     let cwd: string;
+    let env: IsolationEnvironmentRow | null;
     let isNewIsolation: boolean;
     try {
       const result = await validateAndResolveIsolation(
@@ -715,6 +722,7 @@ export async function handleMessage(
         isolationHints
       );
       cwd = result.cwd;
+      env = result.env;
       isNewIsolation = result.isNew;
     } catch (error) {
       if (error instanceof IsolationBlockedError) {
@@ -777,12 +785,6 @@ export async function handleMessage(
     const mode = platform.getStreamingMode();
     console.log(`[Orchestrator] Streaming mode: ${mode}`);
 
-    // Send "starting" message in batch mode to provide feedback
-    if (mode === 'batch') {
-      const botName = process.env.BOT_DISPLAY_NAME || 'Archon';
-      await platform.sendMessage(conversationId, `${botName} is on the case...`);
-    }
-
     // Build workflow routing context once
     const routingCtx: WorkflowRoutingContext = {
       platform,
@@ -793,6 +795,8 @@ export async function handleMessage(
       codebaseId: conversation.codebase_id ?? undefined,
       availableWorkflows,
       issueContext,
+      isolationEnv: env ? { branch_name: env.branch_name } : undefined,
+      isolationHints,
     };
 
     if (mode === 'stream') {

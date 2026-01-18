@@ -884,7 +884,13 @@ export async function executeWorkflow(
   userMessage: string,
   conversationDbId: string,
   codebaseId?: string,
-  issueContext?: string
+  issueContext?: string,
+  isolationContext?: {
+    branchName?: string;
+    isPrReview?: boolean;
+    prSha?: string;
+    prBranch?: string;
+  }
 ): Promise<void> {
   // Load repo config to get configured command folder
   const repoConfig = await loadRepoConfig(cwd);
@@ -986,16 +992,54 @@ export async function executeWorkflow(
       workflowId: workflowRun.id,
     };
 
-    // Notify user - use type narrowing from discriminated union
+    // Build consolidated startup message
+    let startupMessage = '';
+
+    // Add isolation context to startup message
+    if (isolationContext) {
+      const { isPrReview, prSha, prBranch, branchName } = isolationContext;
+
+      if (isPrReview && prSha && prBranch) {
+        startupMessage += `Reviewing PR at commit \`${prSha.substring(0, 7)}\` (branch: \`${prBranch}\`)\n\n`;
+      } else if (branchName) {
+        const repoName = cwd.split('/').pop() || 'repository';
+        startupMessage += `📍 ${repoName} @ \`${branchName}\`\n\n`;
+      } else {
+        console.warn('[WorkflowExecutor] Incomplete isolation context - omitting from startup message', {
+          workflowId: workflowRun.id,
+          hasFields: { isPrReview: !!isPrReview, prSha: !!prSha, prBranch: !!prBranch, branchName: !!branchName },
+        });
+      }
+    }
+
+    // Add workflow start message
+    startupMessage += `🚀 **Starting workflow**: \`${workflow.name}\`\n\n> ${workflow.description}`;
+
+    // Add steps info - use type narrowing from discriminated union
     const stepsInfo = workflow.steps
-      ? `Steps: ${workflow.steps.map(s => (isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`)).join(' -> ')}`
-      : `Loop: until \`${workflow.loop.until}\` (max ${String(workflow.loop.max_iterations)} iterations)`;
-    await safeSendMessage(
+      ? `\n\n**Steps**: ${workflow.steps.map(s => (isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`)).join(' → ')}`
+      : `\n\n**Loop**: until \`${workflow.loop.until}\` (max ${String(workflow.loop.max_iterations)} iterations)`;
+    startupMessage += stepsInfo;
+
+    // Send consolidated message - use critical send with limited retries (1 retry max)
+    // to avoid blocking workflow execution while still catching transient failures
+    const startupSent = await sendCriticalMessage(
       platform,
       conversationId,
-      `🚀 **Starting workflow**: \`${workflow.name}\`\n\n${workflow.description}\n\n${stepsInfo}`,
-      workflowContext
+      startupMessage,
+      workflowContext,
+      2 // maxRetries=2 means 2 total attempts (1 initial + 1 retry), 1s max delay
     );
+    if (!startupSent) {
+      console.error(
+        '[WorkflowExecutor] Failed to send startup message after retries - user may not be aware workflow is running',
+        {
+          workflowId: workflowRun.id,
+          conversationId,
+        }
+      );
+      // Continue anyway - workflow is already recorded in database
+    }
 
     // Dispatch to appropriate execution mode
     if (workflow.loop) {

@@ -8,7 +8,14 @@ allowed-tools: ["Bash", "Glob", "Grep", "Read", "Task"]
 
 Run a comprehensive pull request review using multiple specialized agents, each focusing on a different aspect of code quality.
 
-**Arguments:** "$ARGUMENTS"
+- Study the target
+- Check if a rebase is needed
+- Check and intelligently resolve conflicts as needed
+- Validate
+
+Then run the review workflow on the Target
+
+**Target:** "$ARGUMENTS"
 
 ## Review Workflow:
 

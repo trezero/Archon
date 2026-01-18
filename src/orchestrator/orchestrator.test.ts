@@ -630,15 +630,10 @@ describe('orchestrator', () => {
 
       await handleMessage(platform, 'chat-456', '/command-invoke plan');
 
-      // Batch mode sends: 1) "starting" message, 2) all messages joined
-      expect(platform.sendMessage).toHaveBeenCalledTimes(2);
-      expect(platform.sendMessage).toHaveBeenNthCalledWith(
-        1,
-        'chat-456',
-        expect.stringContaining('is on the case')
-      );
+      // Batch mode sends all messages joined (no separate "starting" message since we removed "on the case")
+      expect(platform.sendMessage).toHaveBeenCalledTimes(1);
       // Verify both Part 1 and Final summary are included (joined with ---)
-      const finalMessage = (platform.sendMessage as ReturnType<typeof mock>).mock.calls[1][1];
+      const finalMessage = (platform.sendMessage as ReturnType<typeof mock>).mock.calls[0][1];
       expect(finalMessage).toContain('Part 1');
       expect(finalMessage).toContain('---');
       expect(finalMessage).toContain('Final summary');
@@ -653,8 +648,8 @@ describe('orchestrator', () => {
 
       await handleMessage(platform, 'chat-456', '/command-invoke plan');
 
-      // Second message is the final one (first is "starting" message)
-      const sentMessage = (platform.sendMessage as ReturnType<typeof mock>).mock.calls[1][1];
+      // Batch mode sends only the final message (no "starting" message)
+      const sentMessage = (platform.sendMessage as ReturnType<typeof mock>).mock.calls[0][1];
       expect(sentMessage).not.toContain('🔧');
       expect(sentMessage).toContain('Clean summary');
     });
