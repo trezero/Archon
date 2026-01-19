@@ -476,7 +476,7 @@ async function executeStepInternal(
     const err = error as Error;
     throw new Error(
       `Invalid provider '${resolvedProvider}' configured for workflow. ` +
-        `Check your workflow YAML or .archon/config.yaml assistant setting. ` +
+        'Check your workflow YAML or .archon/config.yaml assistant setting. ' +
         `Original error: ${err.message}`
     );
   }
@@ -747,7 +747,7 @@ async function executeLoopWorkflow(
       const err = error as Error;
       throw new Error(
         `Invalid provider '${resolvedProvider}' configured for workflow. ` +
-          `Check your workflow YAML or .archon/config.yaml assistant setting. ` +
+          'Check your workflow YAML or .archon/config.yaml assistant setting. ' +
           `Original error: ${err.message}`
       );
     }
