@@ -80,15 +80,20 @@ export function getArchonConfigPath(): string {
  *
  * Order:
  * 1. .archon/commands (always - user's custom commands)
- * 2. configuredFolder (if specified in config)
+ * 2. .archon/commands/defaults (bundled default commands)
+ * 3. configuredFolder (if specified in config)
  *
  * @param configuredFolder - Optional additional folder from config
  */
 export function getCommandFolderSearchPaths(configuredFolder?: string): string[] {
-  const paths = ['.archon/commands'];
+  const paths = ['.archon/commands', '.archon/commands/defaults'];
 
-  // Add configured folder if specified (and not already .archon/commands)
-  if (configuredFolder && configuredFolder !== '.archon/commands') {
+  // Add configured folder if specified (and not already in paths)
+  if (
+    configuredFolder &&
+    configuredFolder !== '.archon/commands' &&
+    configuredFolder !== '.archon/commands/defaults'
+  ) {
     paths.push(configuredFolder);
   }
 
