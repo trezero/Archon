@@ -5,7 +5,6 @@ description: |
   NOT for: Questions about issues, CI failures, PR reviews, general exploration.
   Does: Investigates root cause -> creates implementation plan -> makes code changes -> creates PR.
 
-provider: claude
 model: sonnet
 
 steps:

@@ -10,7 +10,6 @@ description: |
   This workflow produces artifacts in .archon/artifacts/reviews/pr-{number}/ and posts
   a comprehensive review comment to the GitHub PR.
 
-provider: claude
 model: sonnet
 
 steps:

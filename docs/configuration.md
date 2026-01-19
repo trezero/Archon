@@ -65,7 +65,7 @@ concurrency:
 Create `.archon/config.yaml` in any repository for project-specific settings:
 
 ```yaml
-# AI assistant for this project
+# AI assistant for this project (used as default provider for workflows)
 assistant: claude
 
 # Commands configuration
@@ -150,7 +150,7 @@ defaultAssistant: codex
 
 ```yaml
 # .archon/config.yaml in your repo
-assistant: claude
+assistant: claude  # Workflows inherit this provider unless they specify their own
 commands:
   autoLoad: true
 ```

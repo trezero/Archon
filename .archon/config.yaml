@@ -1,6 +1,10 @@
 # Archon Repository Configuration
 # This configures Archon for this specific repository
 
+# AI assistant preference for this repository (overrides global default)
+# Options: 'claude' | 'codex'
+assistant: codex
+
 # Commands configuration
 commands:
   # Additional command folder to search (after .archon/commands/)

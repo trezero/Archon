@@ -10,7 +10,6 @@ description: |
   This workflow helps resolve merge conflicts by analyzing the conflicting changes,
   automatically resolving where intent is clear, and presenting options for complex conflicts.
 
-provider: claude
 model: sonnet
 
 steps:

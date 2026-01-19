@@ -8,7 +8,7 @@ import { getAssistantClient } from '../clients/factory';
 import * as workflowDb from '../db/workflows';
 import { formatToolCall } from '../utils/tool-formatter';
 import { getCommandFolderSearchPaths } from '../utils/archon-paths';
-import { loadRepoConfig } from '../config/config-loader';
+import { loadConfig } from '../config/config-loader';
 import { commitAllChanges } from '../utils/git';
 import type {
   WorkflowDefinition,
@@ -422,10 +422,11 @@ async function executeStepInternal(
   platform: IPlatformAdapter,
   conversationId: string,
   cwd: string,
-  workflow: WorkflowDefinition,
   workflowRun: WorkflowRun,
   stepDef: SingleStep,
   stepId: string, // For logging: "0", "1", "2.0", "2.1", etc.
+  resolvedProvider: string, // Provider resolved from workflow or config
+  resolvedModel: string | undefined, // Model from workflow (if any)
   currentSessionId?: string,
   configuredCommandFolder?: string,
   issueContext?: string
@@ -464,8 +465,21 @@ async function executeStepInternal(
     console.log(`[WorkflowExecutor] Resuming session: ${resumeSessionId}`);
   }
 
-  // Get AI client
-  const aiClient = getAssistantClient(workflow.provider ?? 'claude');
+  // Log provider/model selection
+  console.log(`[WorkflowExecutor] Step "${commandName}" using provider: ${resolvedProvider}${resolvedModel ? `, model: ${resolvedModel}` : ' (default model)'}`);
+
+  // Get AI client with enhanced error context
+  let aiClient;
+  try {
+    aiClient = getAssistantClient(resolvedProvider);
+  } catch (error) {
+    const err = error as Error;
+    throw new Error(
+      `Invalid provider '${resolvedProvider}' configured for workflow. ` +
+        `Check your workflow YAML or .archon/config.yaml assistant setting. ` +
+        `Original error: ${err.message}`
+    );
+  }
   const streamingMode = platform.getStreamingMode();
 
   // Context for error logging
@@ -600,10 +614,11 @@ async function executeParallelBlock(
   platform: IPlatformAdapter,
   conversationId: string,
   cwd: string, // All agents share this worktree
-  workflow: WorkflowDefinition,
   workflowRun: WorkflowRun,
   parallelSteps: readonly SingleStep[],
   blockIndex: number,
+  resolvedProvider: string, // Provider resolved from workflow or config
+  resolvedModel: string | undefined, // Model from workflow (if any)
   configuredCommandFolder?: string,
   issueContext?: string
 ): Promise<ParallelStepResult[]> {
@@ -624,10 +639,11 @@ async function executeParallelBlock(
         platform,
         conversationId,
         cwd, // Same worktree for all agents
-        workflow,
         workflowRun,
         step,
         `${String(blockIndex)}.${String(i)}`, // Step identifier for logging
+        resolvedProvider,
+        resolvedModel,
         undefined, // Always fresh session for parallel (no resume)
         configuredCommandFolder,
         issueContext
@@ -652,6 +668,8 @@ async function executeLoopWorkflow(
   cwd: string,
   workflow: WorkflowDefinition,
   workflowRun: WorkflowRun,
+  resolvedProvider: string, // Provider resolved from workflow or config
+  resolvedModel: string | undefined, // Model from workflow (if any)
   issueContext?: string
 ): Promise<void> {
   const loop = workflow.loop!;
@@ -718,8 +736,21 @@ async function executeLoopWorkflow(
       'workflow loop prompt'
     );
 
-    // Execute iteration
-    const aiClient = getAssistantClient(workflow.provider ?? 'claude');
+    // Log provider/model selection for this iteration
+    console.log(`[WorkflowExecutor] Loop iteration ${String(i)} using provider: ${resolvedProvider}${resolvedModel ? `, model: ${resolvedModel}` : ' (default model)'}`);
+
+    // Get AI client with enhanced error context
+    let aiClient;
+    try {
+      aiClient = getAssistantClient(resolvedProvider);
+    } catch (error) {
+      const err = error as Error;
+      throw new Error(
+        `Invalid provider '${resolvedProvider}' configured for workflow. ` +
+          `Check your workflow YAML or .archon/config.yaml assistant setting. ` +
+          `Original error: ${err.message}`
+      );
+    }
     const streamingMode = platform.getStreamingMode();
 
     try {
@@ -892,9 +923,15 @@ export async function executeWorkflow(
     prBranch?: string;
   }
 ): Promise<void> {
-  // Load repo config to get configured command folder
-  const repoConfig = await loadRepoConfig(cwd);
-  const configuredCommandFolder = repoConfig.commands?.folder;
+  // Load config once for the entire workflow execution
+  const config = await loadConfig(cwd);
+  const configuredCommandFolder = config.commands.folder;
+
+  // Resolve provider and model once (used by all steps/iterations)
+  const resolvedProvider = workflow.provider ?? config.assistant;
+  const providerSource = workflow.provider ? 'workflow definition' : 'config';
+  const resolvedModel = workflow.model; // TODO: Pass to client when model validation is implemented
+  console.log(`[WorkflowExecutor] Workflow "${workflow.name}" using provider: ${resolvedProvider} (from ${providerSource})${resolvedModel ? `, model: ${resolvedModel}` : ' (default model)'}`);
 
   if (configuredCommandFolder) {
     console.log(`[WorkflowExecutor] Using configured command folder: ${configuredCommandFolder}`);
@@ -1043,7 +1080,16 @@ export async function executeWorkflow(
 
     // Dispatch to appropriate execution mode
     if (workflow.loop) {
-      await executeLoopWorkflow(platform, conversationId, cwd, workflow, workflowRun, issueContext);
+      await executeLoopWorkflow(
+        platform,
+        conversationId,
+        cwd,
+        workflow,
+        workflowRun,
+        resolvedProvider,
+        resolvedModel,
+        issueContext
+      );
       return;
     }
 
@@ -1080,10 +1126,11 @@ export async function executeWorkflow(
           platform,
           conversationId,
           cwd,
-          workflow,
           workflowRun,
           parallelSteps,
           i,
+          resolvedProvider,
+          resolvedModel,
           configuredCommandFolder,
           issueContext
         );
@@ -1151,10 +1198,11 @@ export async function executeWorkflow(
           platform,
           conversationId,
           cwd,
-          workflow,
           workflowRun,
           step,
           String(i),
+          resolvedProvider,
+          resolvedModel,
           resumeSessionId,
           configuredCommandFolder,
           issueContext

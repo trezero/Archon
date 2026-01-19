@@ -977,8 +977,7 @@ description: |
   Use when: User wants to FIX or RESOLVE a GitHub issue.
   Does: Investigates root cause -> creates plan -> makes code changes -> creates PR.
 
-provider: claude
-model: sonnet
+model: sonnet  # Optional: provider inherited from .archon/config.yaml
 
 steps:
   - command: investigate-issue
@@ -992,8 +991,7 @@ steps:
 name: ralph-loop
 description: Execute plan until all validations pass
 
-provider: claude
-model: sonnet
+model: sonnet  # Optional: provider inherited from .archon/config.yaml
 
 loop:
   until: "All validations pass"

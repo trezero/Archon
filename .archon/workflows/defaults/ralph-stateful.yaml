@@ -22,8 +22,6 @@ description: |
 
   REQUIRES: .archon/ralph/{feature}/prd.md and prd.json
 
-provider: claude
-
 loop:
   until: COMPLETE
   max_iterations: 10

@@ -650,6 +650,7 @@ if (streamingMode === 'batch') {
 - Stored in `.archon/workflows/` (searched recursively, includes subdirectories like `defaults/`)
 - Multi-step AI execution chains
 - Discovered at runtime, routed by AI
+- Provider selection: Workflows inherit provider from `.archon/config.yaml` `assistant` field unless `provider` is explicitly set in workflow YAML
 - Concurrent execution prevented - only one workflow can run per conversation at a time
 - Auto-commits artifacts on completion (safety net for uncommitted changes)
 - Commands: `/workflow list`, `/workflow reload`, `/workflow cancel`
