@@ -26,7 +26,7 @@ function getCodex(): Codex {
 interface CodexThreadOptions {
   workingDirectory: string;
   skipGitRepoCheck: boolean;
-  sandboxMode: 'workspace-write';
+  sandboxMode: 'danger-full-access';
   networkAccessEnabled: boolean;
   approvalPolicy: 'never';
 }
@@ -39,7 +39,7 @@ function buildThreadOptions(cwd: string): CodexThreadOptions {
   return {
     workingDirectory: cwd,
     skipGitRepoCheck: true,
-    sandboxMode: 'workspace-write', // Allow writing to workspace files
+    sandboxMode: 'danger-full-access', // Full filesystem access (needed for git worktree operations)
     networkAccessEnabled: true, // Allow network calls (GitHub CLI, HTTP requests)
     approvalPolicy: 'never', // Auto-approve all operations without user confirmation
   };

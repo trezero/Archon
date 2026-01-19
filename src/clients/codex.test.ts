@@ -127,7 +127,7 @@ describe('CodexClient', () => {
       expect(mockStartThread).toHaveBeenCalledWith({
         workingDirectory: '/my/workspace',
         skipGitRepoCheck: true,
-        sandboxMode: 'workspace-write',
+        sandboxMode: 'danger-full-access',
         networkAccessEnabled: true,
         approvalPolicy: 'never',
       });
@@ -148,7 +148,7 @@ describe('CodexClient', () => {
       expect(mockResumeThread).toHaveBeenCalledWith('existing-thread', {
         workingDirectory: '/workspace',
         skipGitRepoCheck: true,
-        sandboxMode: 'workspace-write',
+        sandboxMode: 'danger-full-access',
         networkAccessEnabled: true,
         approvalPolicy: 'never',
       });
@@ -179,7 +179,7 @@ describe('CodexClient', () => {
       expect(mockStartThread).toHaveBeenCalledWith({
         workingDirectory: '/workspace',
         skipGitRepoCheck: true,
-        sandboxMode: 'workspace-write',
+        sandboxMode: 'danger-full-access',
         networkAccessEnabled: true,
         approvalPolicy: 'never',
       });
