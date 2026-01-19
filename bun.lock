@@ -7,7 +7,7 @@
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.2.7",
         "@octokit/rest": "^22.0.0",
-        "@openai/codex-sdk": "^0.64.0",
+        "@openai/codex-sdk": "^0.87.0",
         "@slack/bolt": "^4.6.0",
         "discord.js": "^14.16.0",
         "dotenv": "^17.2.3",
@@ -131,7 +131,7 @@
 
     "@octokit/types": ["@octokit/types@16.0.0", "", { "dependencies": { "@octokit/openapi-types": "^27.0.0" } }, "sha512-sKq+9r1Mm4efXW1FCk7hFSeJo4QKreL/tTbR0rz/qx/r1Oa2VV83LTA/H/MuCOX7uCIJmQVRKBcbmWoySjAnSg=="],
 
-    "@openai/codex-sdk": ["@openai/codex-sdk@0.64.0", "", {}, "sha512-C675h9+5iL7v3w3XKlMTCmejGyEY4qOygro8pRAoBAQbbCS504SKxosJu5Mb/drhV0GkjbKbKfcjxHtjZJfNDQ=="],
+    "@openai/codex-sdk": ["@openai/codex-sdk@0.87.0", "", {}, "sha512-HV9DKSCq1PTc1Ti1XvfXFgwc+WR1sPT2JSyPkFkDV5Ip1lkK4C0WeQ++WE4y0fSIS3x3XtBGmdT4oDfaeqj63g=="],
 
     "@sapphire/async-queue": ["@sapphire/async-queue@1.5.5", "", {}, "sha512-cvGzxbba6sav2zZkH8GPf2oGk9yYoD5qrNWdu9fRehifgnFZJMV+nuy2nON2roRO4yQQ+v7MK/Pktl/HgfsUXg=="],
 
