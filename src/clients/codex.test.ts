@@ -112,7 +112,7 @@ describe('CodexClient', () => {
       expect(chunks[0]).toEqual({ type: 'thinking', content: 'Let me think about this...' });
     });
 
-    test('creates new thread and passes working directory', async () => {
+    test('creates new thread with sandbox/network settings', async () => {
       mockRunStreamed.mockResolvedValue({
         events: (async function* () {
           yield { type: 'turn.completed' };
@@ -127,10 +127,13 @@ describe('CodexClient', () => {
       expect(mockStartThread).toHaveBeenCalledWith({
         workingDirectory: '/my/workspace',
         skipGitRepoCheck: true,
+        sandboxMode: 'workspace-write',
+        networkAccessEnabled: true,
+        approvalPolicy: 'never',
       });
     });
 
-    test('resumes existing thread when sessionId provided', async () => {
+    test('resumes existing thread with sandbox/network settings', async () => {
       mockRunStreamed.mockResolvedValue({
         events: (async function* () {
           yield { type: 'turn.completed' };
@@ -145,11 +148,14 @@ describe('CodexClient', () => {
       expect(mockResumeThread).toHaveBeenCalledWith('existing-thread', {
         workingDirectory: '/workspace',
         skipGitRepoCheck: true,
+        sandboxMode: 'workspace-write',
+        networkAccessEnabled: true,
+        approvalPolicy: 'never',
       });
       expect(mockStartThread).not.toHaveBeenCalled();
     });
 
-    test('falls back to new thread when resume fails', async () => {
+    test('falls back to new thread when resume fails and notifies user', async () => {
       mockResumeThread.mockImplementation(() => {
         throw new Error('Thread not found');
       });
@@ -169,8 +175,20 @@ describe('CodexClient', () => {
       }
 
       expect(mockResumeThread).toHaveBeenCalled();
-      expect(mockStartThread).toHaveBeenCalled();
-      expect(chunks[0]).toEqual({ type: 'result', sessionId: 'fallback-thread' });
+      // Verify fallback startThread is called with correct config options
+      expect(mockStartThread).toHaveBeenCalledWith({
+        workingDirectory: '/workspace',
+        skipGitRepoCheck: true,
+        sandboxMode: 'workspace-write',
+        networkAccessEnabled: true,
+        approvalPolicy: 'never',
+      });
+      // Verify user is notified about session loss
+      expect(chunks[0]).toEqual({
+        type: 'system',
+        content: expect.stringContaining('Could not resume previous session'),
+      });
+      expect(chunks[1]).toEqual({ type: 'result', sessionId: 'fallback-thread' });
 
       consoleSpy.mockRestore();
     });
@@ -194,6 +212,40 @@ describe('CodexClient', () => {
       expect(chunks).toHaveLength(2);
       expect(chunks[0]).toEqual({ type: 'assistant', content: 'Before turn' });
       expect(chunks[1]).toEqual({ type: 'result', sessionId: 'new-thread-id' });
+    });
+
+    test('logs progress for item.started and item.completed events', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield { type: 'item.started', item: { id: 'item-1', type: 'command_execution' } };
+          yield {
+            type: 'item.completed',
+            item: { id: 'item-1', type: 'command_execution', command: 'npm test' },
+          };
+          yield { type: 'turn.completed' };
+        })(),
+      });
+
+      const consoleSpy = spyOn(console, 'log').mockImplementation(() => {});
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      // Verify item.started logging with correct format
+      expect(consoleSpy).toHaveBeenCalledWith(
+        '[Codex] item.started: command_execution',
+        { id: 'item-1' }
+      );
+
+      // Verify item.completed logging includes command context
+      expect(consoleSpy).toHaveBeenCalledWith(
+        '[Codex] item.completed: command_execution',
+        { id: 'item-1', command: 'npm test' }
+      );
+
+      consoleSpy.mockRestore();
     });
 
     test('handles error events', async () => {

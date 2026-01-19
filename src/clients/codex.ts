@@ -22,6 +22,29 @@ function getCodex(): Codex {
   return codexInstance;
 }
 
+/** Thread options type for Codex SDK */
+interface CodexThreadOptions {
+  workingDirectory: string;
+  skipGitRepoCheck: boolean;
+  sandboxMode: 'workspace-write';
+  networkAccessEnabled: boolean;
+  approvalPolicy: 'never';
+}
+
+/**
+ * Build thread options for Codex SDK
+ * Extracted to avoid duplication across thread creation paths
+ */
+function buildThreadOptions(cwd: string): CodexThreadOptions {
+  return {
+    workingDirectory: cwd,
+    skipGitRepoCheck: true,
+    sandboxMode: 'workspace-write', // Allow writing to workspace files
+    networkAccessEnabled: true, // Allow network calls (GitHub CLI, HTTP requests)
+    approvalPolicy: 'never', // Auto-approve all operations without user confirmation
+  };
+}
+
 /**
  * Codex AI assistant client
  * Implements generic IAssistantClient interface
@@ -39,6 +62,10 @@ export class CodexClient implements IAssistantClient {
     resumeSessionId?: string
   ): AsyncGenerator<MessageChunk> {
     const codex = getCodex();
+    const threadOptions = buildThreadOptions(cwd);
+
+    // Track if we fell back from a failed resume (to notify user)
+    let sessionResumeFailed = false;
 
     // Get or create thread (synchronous operations!)
     let thread;
@@ -47,28 +74,28 @@ export class CodexClient implements IAssistantClient {
       try {
         // NOTE: resumeThread is synchronous, not async
         // IMPORTANT: Must pass options when resuming!
-        thread = codex.resumeThread(resumeSessionId, {
-          workingDirectory: cwd,
-          skipGitRepoCheck: true,
-        });
+        thread = codex.resumeThread(resumeSessionId, threadOptions);
       } catch (error) {
         console.error(
           `[Codex] Failed to resume thread ${resumeSessionId}, creating new one:`,
           error
         );
         // Fall back to creating new thread
-        thread = codex.startThread({
-          workingDirectory: cwd,
-          skipGitRepoCheck: true,
-        });
+        thread = codex.startThread(threadOptions);
+        sessionResumeFailed = true;
       }
     } else {
       console.log(`[Codex] Starting new thread in ${cwd}`);
       // NOTE: startThread is synchronous, not async
-      thread = codex.startThread({
-        workingDirectory: cwd,
-        skipGitRepoCheck: true,
-      });
+      thread = codex.startThread(threadOptions);
+    }
+
+    // Notify user if session resume failed (don't silently lose context)
+    if (sessionResumeFailed) {
+      yield {
+        type: 'system',
+        content: '⚠️ Could not resume previous session. Starting fresh conversation.',
+      };
     }
 
     try {
@@ -77,6 +104,12 @@ export class CodexClient implements IAssistantClient {
 
       // Process streaming events
       for await (const event of result.events) {
+        // Log progress for item.started (visibility fix for Codex appearing to hang)
+        if (event.type === 'item.started') {
+          const item = event.item;
+          console.log(`[Codex] ${event.type}: ${item.type}`, { id: item.id });
+        }
+
         // Handle error events
         if (event.type === 'error') {
           console.error('[Codex] Stream error:', event.message);
@@ -102,6 +135,13 @@ export class CodexClient implements IAssistantClient {
         // Handle item.completed events - map to MessageChunk types
         if (event.type === 'item.completed') {
           const item = event.item;
+
+          // Log progress with context for debugging
+          const logContext: Record<string, unknown> = { id: item.id };
+          if (item.type === 'command_execution' && item.command) {
+            logContext.command = item.command;
+          }
+          console.log(`[Codex] ${event.type}: ${item.type}`, logContext);
 
           switch (item.type) {
             case 'agent_message':
