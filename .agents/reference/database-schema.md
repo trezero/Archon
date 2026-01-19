@@ -79,6 +79,8 @@ CREATE TABLE remote_agent_sessions (
   ai_assistant_type VARCHAR(20) NOT NULL,
   assistant_session_id VARCHAR(255),
   active BOOLEAN DEFAULT true,
+  parent_session_id UUID REFERENCES remote_agent_sessions(id),
+  transition_reason TEXT,
   metadata JSONB DEFAULT '{}',
   started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   ended_at TIMESTAMP
@@ -89,6 +91,12 @@ CREATE INDEX idx_remote_agent_sessions_conversation
 
 CREATE INDEX idx_remote_agent_sessions_codebase
   ON remote_agent_sessions(codebase_id);
+
+CREATE INDEX idx_sessions_parent
+  ON remote_agent_sessions(parent_session_id);
+
+CREATE INDEX idx_sessions_conversation_started
+  ON remote_agent_sessions(conversation_id, started_at DESC);
 ```
 
 **CASCADE delete:** Sessions are automatically deleted when their parent conversation is deleted.
@@ -96,9 +104,13 @@ CREATE INDEX idx_remote_agent_sessions_codebase
 **Key fields:**
 - `assistant_session_id` - SDK session ID for resume (Claude session ID, Codex thread ID)
 - `active` - Only one active session per conversation
+- `parent_session_id` - Links to previous session in this conversation (audit trail)
+- `transition_reason` - Why this session was created (e.g., 'plan-to-execute', 'reset-requested')
 - `metadata` - JSONB for session state (e.g., `{lastCommand: "plan-feature"}`)
 
 **Session persistence:** Sessions survive app restarts. Load `assistant_session_id` to resume.
+
+**Immutable sessions:** Sessions are never modified after creation. Transitions create new sessions linked via `parent_session_id`.
 
 ## Database Operations
 
@@ -143,9 +155,24 @@ createSession(data: {
   conversation_id: string;
   codebase_id?: string;
   ai_assistant_type: string;
+  parent_session_id?: string;        // NEW: Link to previous session
+  transition_reason?: string;        // NEW: Why this session was created
 }): Promise<Session>
 
+transitionSession(                   // NEW: Immutable session pattern
+  conversationId: string,
+  reason: TransitionTrigger,         // e.g., 'plan-to-execute', 'reset-requested'
+  data: {
+    codebase_id?: string;
+    ai_assistant_type: string;
+  }
+): Promise<Session>
+
 getActiveSession(conversationId: string): Promise<Session | null>
+
+getSessionHistory(conversationId: string): Promise<Session[]>  // NEW: Audit trail
+
+getSessionChain(sessionId: string): Promise<Session[]>          // NEW: Walk chain
 
 updateSession(id: string, assistantSessionId: string): Promise<void>
 
@@ -164,7 +191,8 @@ deactivateSession(id: string): Promise<void>
    → getActiveSession(conversationId) // null
 
 2. No session exists
-   → createSession({ conversation_id, codebase_id, ai_assistant_type })
+   → transitionSession(conversationId, 'first-message', {...})
+   → Creates session with transition_reason='first-message'
 
 3. Send to AI, receive session ID
    → updateSession(session.id, aiSessionId)
@@ -174,27 +202,29 @@ deactivateSession(id: string): Promise<void>
    → Resume with assistant_session_id
 
 5. User sends /reset
-   → deactivateSession(session.id)
-   → Next message creates new session
+   → deactivateSession(session.id) // Sets ended_at timestamp
+   → Next message creates new session via transitionSession()
 ```
 
 ### Plan→Execute Transition
 
-**Special case:** Only transition requiring new session.
+**Special case:** Only transition creating new session immediately (immutable pattern).
 
 ```
 1. /command-invoke plan-feature "Add dark mode"
-   → getActiveSession() or createSession()
+   → transitionSession() or resumeSession()
    → updateSessionMetadata({ lastCommand: 'plan-feature' })
 
 2. /command-invoke execute
-   → getActiveSession() // check metadata.lastCommand
-   → lastCommand === 'plan-feature' → needsNewSession = true
-   → deactivateSession(oldSession.id)
-   → createSession({ active: true }) // Fresh context
+   → detectPlanToExecuteTransition() // Returns 'plan-to-execute'
+   → transitionSession(conversationId, 'plan-to-execute', {...})
+   → New session created with:
+      - parent_session_id = planning session ID
+      - transition_reason = 'plan-to-execute'
+   → Fresh context with full audit trail
 ```
 
-**Implementation:** `src/orchestrator/orchestrator.ts:122-145`
+**Implementation:** `src/orchestrator/orchestrator.ts`, `src/state/session-transitions.ts`
 
 ## Common Patterns
 
@@ -210,18 +240,20 @@ const conversation = await db.getOrCreateConversation(
 ### Safe Session Handling
 
 ```typescript
-const session = await sessionDb.getActiveSession(conversationId);
+// Use transitionSession() for immutable session pattern
+// Automatically deactivates old session and creates new one with audit trail
+const newSession = await sessionDb.transitionSession(
+  conversationId,
+  'reset-requested', // TransitionTrigger: why we're transitioning
+  {
+    codebase_id: codebaseId,
+    ai_assistant_type: aiType,
+  }
+);
 
-// Deactivate before creating new
-if (session) {
-  await sessionDb.deactivateSession(session.id);
-}
-
-const newSession = await sessionDb.createSession({
-  conversation_id: conversationId,
-  codebase_id: codebaseId,
-  ai_assistant_type: aiType,
-});
+// For audit trail analysis
+const history = await sessionDb.getSessionHistory(conversationId);
+const chain = await sessionDb.getSessionChain(currentSession.id);
 ```
 
 ### Command Registry Updates

@@ -45,6 +45,7 @@ import {
   STALE_THRESHOLD_DAYS,
   WorktreeStatusBreakdown,
 } from '../services/cleanup-service';
+import { detectPlanToExecuteTransition } from '../state/session-transitions';
 
 /**
  * Error thrown when isolation is required but cannot be provided.
@@ -875,41 +876,34 @@ export async function handleMessage(
     // Get existing active session (may be null if first message or after isolation change)
     let session = await sessionDb.getActiveSession(conversation.id);
 
-    // If cwd changed (new isolation), deactivate stale sessions
+    // If cwd changed (new isolation), transition to new session with audit trail
     if (isNewIsolation && session) {
-      console.log('[Orchestrator] New isolation, deactivating existing session');
-      await sessionDb.deactivateSession(session.id);
-      session = null;
+      console.log('[Orchestrator] isolation-changed: transitioning session');
+      session = await sessionDb.transitionSession(conversation.id, 'isolation-changed', {
+        codebase_id: conversation.codebase_id ?? undefined,
+        ai_assistant_type: conversation.ai_assistant_type,
+      });
     }
 
     // Update last_activity_at for staleness tracking
     await db.touchConversation(conversation.id);
 
     // Check for plan→execute transition (new session ensures fresh context without prior planning biases)
-    // Supports both regular and GitHub workflows:
-    // - plan-feature → execute (regular workflow)
-    // - plan-feature-github → execute-github (GitHub workflow with staging)
-    const needsNewSession =
-      (commandName === 'execute' && session?.metadata?.lastCommand === 'plan-feature') ||
-      (commandName === 'execute-github' &&
-        session?.metadata?.lastCommand === 'plan-feature-github');
+    // Uses session-transitions module as single source of truth for transition detection
+    const planToExecuteTrigger = detectPlanToExecuteTransition(
+      commandName,
+      (session?.metadata?.lastCommand as string | null | undefined) ?? null
+    );
 
-    if (needsNewSession) {
-      console.log('[Orchestrator] Plan→Execute transition: creating new session');
-
-      if (session) {
-        await sessionDb.deactivateSession(session.id);
-      }
-
-      session = await sessionDb.createSession({
-        conversation_id: conversation.id,
+    if (planToExecuteTrigger) {
+      console.log(`[Orchestrator] ${planToExecuteTrigger}: transitioning session`);
+      session = await sessionDb.transitionSession(conversation.id, planToExecuteTrigger, {
         codebase_id: conversation.codebase_id ?? undefined,
         ai_assistant_type: conversation.ai_assistant_type,
       });
     } else if (!session) {
-      console.log('[Orchestrator] Creating new session');
-      session = await sessionDb.createSession({
-        conversation_id: conversation.id,
+      console.log('[Orchestrator] first-message: creating new session');
+      session = await sessionDb.transitionSession(conversation.id, 'first-message', {
         codebase_id: conversation.codebase_id ?? undefined,
         ai_assistant_type: conversation.ai_assistant_type,
       });

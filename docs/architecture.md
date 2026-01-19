@@ -346,25 +346,28 @@ YOUR_ASSISTANT_MODEL=<model-name>
 
 **Key concepts:**
 
+- **Immutable sessions**: Sessions are never modified; transitions create new linked sessions
+- **Audit trail**: Each session stores `parent_session_id` (previous session) and `transition_reason` (why created)
+- **State machine**: Explicit `TransitionTrigger` types define all transition reasons
 - **Session ID persistence**: Store `assistant_session_id` in database to resume context
-- **New session trigger**: Only on plan→execute transition (per PRD requirement)
-- **Session resume**: All other commands resume existing active session
 
-**Orchestrator logic** (`src/orchestrator/orchestrator.ts:122-145`):
+**Transition triggers** (`src/state/session-transitions.ts`):
+- `first-message` - No existing session
+- `plan-to-execute` - Plan phase completed, starting execution (creates new session immediately)
+- `isolation-changed`, `codebase-changed`, `reset-requested`, etc. - Deactivate current session
+
+**Orchestrator logic** (`src/orchestrator/orchestrator.ts`):
 
 ```typescript
-// Check for plan→execute transition (requires NEW session)
-const needsNewSession =
-  commandName === 'execute' &&
-  session?.metadata?.lastCommand === 'plan-feature';
+// Detect plan→execute transition
+const trigger = detectPlanToExecuteTransition(commandName, session?.metadata?.lastCommand);
 
-if (needsNewSession) {
-  // Deactivate old session, create new one
-  await sessionDb.deactivateSession(session.id);
-  session = await sessionDb.createSession({...});
+if (trigger && shouldCreateNewSession(trigger)) {
+  // Transition to new session (links to previous via parent_session_id)
+  session = await sessionDb.transitionSession(conversationId, trigger, {...});
 } else if (!session) {
   // No session exists - create one
-  session = await sessionDb.createSession({...});
+  session = await sessionDb.transitionSession(conversationId, 'first-message', {...});
 } else {
   // Resume existing session
   console.log(`Resuming session ${session.id}`);
@@ -980,6 +983,8 @@ remote_agent_sessions
 ├── ai_assistant_type (VARCHAR) -- Must match conversation
 ├── assistant_session_id (VARCHAR) -- SDK session ID for resume
 ├── active (BOOLEAN) -- Only one active per conversation
+├── parent_session_id (UUID → remote_agent_sessions.id) -- Previous session for audit trail
+├── transition_reason (TEXT) -- Why this session was created (TransitionTrigger)
 └── metadata (JSONB) -- {lastCommand: "plan-feature", ...}
 ```
 
@@ -1003,8 +1008,11 @@ remote_agent_sessions
 
 **Sessions** (`src/db/sessions.ts`):
 
-- `createSession(data)` - Create new session
+- `createSession(data)` - Create new session (supports `parent_session_id` and `transition_reason`)
+- `transitionSession(conversationId, reason, data)` - Create new session linked to previous (immutable sessions)
 - `getActiveSession(conversationId)` - Get active session for conversation
+- `getSessionHistory(conversationId)` - Get all sessions for conversation (audit trail)
+- `getSessionChain(sessionId)` - Walk session chain back to root
 - `updateSession(id, sessionId)` - Update `assistant_session_id`
 - `updateSessionMetadata(id, metadata)` - Update metadata JSONB
 - `deactivateSession(id)` - Mark session inactive
@@ -1029,7 +1037,8 @@ await updateConversation(id, { codebase_id: '...' });
    → getActiveSession() // null if first message
 
 2. No session exists
-   → createSession({ active: true })
+   → transitionSession(conversationId, 'first-message', {...})
+   → New session created with transition_reason='first-message'
 
 3. Send to AI, get session ID
    → updateSession(session.id, aiSessionId)
@@ -1039,26 +1048,25 @@ await updateConversation(id, { codebase_id: '...' });
    → Resume with assistant_session_id
 
 5. User sends /reset
-   → deactivateSession(session.id)
-   → Next message creates new session
+   → deactivateSession(session.id) // Sets ended_at timestamp
+   → Next message creates new session via transitionSession()
 ```
 
-**Plan→Execute transition:**
+**Plan→Execute transition (immutable sessions):**
 
 ```
 1. /command-invoke plan-feature "Add dark mode"
-   → createSession() or resumeSession()
+   → transitionSession() or resumeSession()
    → updateSessionMetadata({ lastCommand: 'plan-feature' })
 
 2. /command-invoke execute
-   → getActiveSession() // check metadata.lastCommand
-   → lastCommand === 'plan-feature' → needsNewSession = true
-   → deactivateSession(oldSession.id)
-   → createSession({ active: true })
-   → Fresh context for implementation
+   → detectPlanToExecuteTransition() // Returns 'plan-to-execute' trigger
+   → transitionSession(conversationId, 'plan-to-execute', {...})
+   → New session created, parent_session_id points to planning session
+   → Fresh context for implementation with full audit trail
 ```
 
-**Reference:** `src/orchestrator/orchestrator.ts:122-145`
+**Reference:** `src/orchestrator/orchestrator.ts`, `src/state/session-transitions.ts`
 
 ---
 
@@ -1214,13 +1222,13 @@ return await codebaseDb.createCodebase({...});
 // Always check for active session
 const session = await sessionDb.getActiveSession(conversationId);
 
-// Deactivate before creating new
-if (session) {
-  await sessionDb.deactivateSession(session.id);
-}
-
-// Create new session
-const newSession = await sessionDb.createSession({...});
+// Use transitionSession() for immutable session pattern
+// Automatically deactivates old session and creates new one with audit trail
+const newSession = await sessionDb.transitionSession(
+  conversationId,
+  'reset-requested', // TransitionTrigger
+  { codebase_id, ai_assistant_type }
+);
 ```
 
 ### Streaming Error Handling

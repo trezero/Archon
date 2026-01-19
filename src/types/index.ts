@@ -87,6 +87,9 @@ export interface Session {
   metadata: Record<string, unknown>;
   started_at: Date;
   ended_at: Date | null;
+  // Audit trail fields (added in migration 010)
+  parent_session_id: string | null;
+  transition_reason: string | null;
 }
 
 export interface CommandTemplate {

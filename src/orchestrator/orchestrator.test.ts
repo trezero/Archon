@@ -21,6 +21,26 @@ const mockCreateSession = mock(() => Promise.resolve(null));
 const mockUpdateSession = mock(() => Promise.resolve());
 const mockDeactivateSession = mock(() => Promise.resolve());
 const mockUpdateSessionMetadata = mock(() => Promise.resolve());
+// Mock transitionSession to simulate the real function's behavior
+const mockTransitionSession = mock(
+  async (
+    conversationId: string,
+    reason: string,
+    data: { codebase_id?: string; ai_assistant_type: string }
+  ) => {
+    const current = await mockGetActiveSession(conversationId);
+    if (current) {
+      await mockDeactivateSession((current as { id: string }).id);
+    }
+    return mockCreateSession({
+      conversation_id: conversationId,
+      codebase_id: data.codebase_id,
+      ai_assistant_type: data.ai_assistant_type,
+      parent_session_id: current ? (current as { id: string }).id : undefined,
+      transition_reason: reason,
+    });
+  }
+);
 const mockGetTemplate = mock(() => Promise.resolve(null));
 const mockHandleCommand = mock(() => Promise.resolve({ message: '', modified: false }));
 const mockParseCommand = mock((message: string) => {
@@ -100,6 +120,7 @@ mock.module('../db/sessions', () => ({
   updateSession: mockUpdateSession,
   deactivateSession: mockDeactivateSession,
   updateSessionMetadata: mockUpdateSessionMetadata,
+  transitionSession: mockTransitionSession,
 }));
 
 mock.module('../db/command-templates', () => ({
@@ -504,10 +525,13 @@ describe('orchestrator', () => {
 
       await handleMessage(platform, 'chat-456', '/command-invoke plan');
 
+      // transitionSession calls createSession with audit trail fields
       expect(mockCreateSession).toHaveBeenCalledWith({
         conversation_id: 'conv-123',
         codebase_id: 'codebase-789',
         ai_assistant_type: 'claude',
+        parent_session_id: undefined, // No previous session
+        transition_reason: 'first-message',
       });
     });
 

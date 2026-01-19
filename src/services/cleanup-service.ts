@@ -54,7 +54,7 @@ export async function onConversationClosed(
   const session = await sessionDb.getActiveSession(conversation.id);
   if (session) {
     await sessionDb.deactivateSession(session.id);
-    console.log(`[Cleanup] Deactivated session ${session.id}`);
+    console.log(`[Cleanup] Deactivated session ${session.id}: conversation-closed`);
   }
 
   // Get the environment
@@ -65,9 +65,11 @@ export async function onConversationClosed(
   }
 
   // Clear this conversation's reference (best-effort - conversation may be deleted)
-  await conversationDb.updateConversation(conversation.id, { isolation_env_id: null }).catch(err => {
-    if (!(err instanceof ConversationNotFoundError)) throw err;
-  });
+  await conversationDb
+    .updateConversation(conversation.id, { isolation_env_id: null })
+    .catch(err => {
+      if (!(err instanceof ConversationNotFoundError)) throw err;
+    });
 
   // Check if other conversations still use this environment
   const otherConversations = await isolationEnvDb.getConversationsUsingEnv(envId);
@@ -159,7 +161,8 @@ export async function removeEnvironment(
 }
 
 /**
- * Check if a branch has been merged into main
+ * Check if a branch has been merged into main.
+ * Returns false for any error (logs unexpected errors for debugging).
  */
 export async function isBranchMerged(
   repoPath: string,
@@ -176,19 +179,55 @@ export async function isBranchMerged(
     ]);
     const mergedBranches = stdout.split('\n').map(b => b.trim().replace(/^\* /, ''));
     return mergedBranches.includes(branchName);
-  } catch {
+  } catch (error) {
+    const err = error as Error & { code?: string; stderr?: string };
+    const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
+
+    // Expected errors: branch doesn't exist, not a git repo, etc.
+    const isExpectedError =
+      errorText.includes('not a git repository') ||
+      errorText.includes('unknown revision') ||
+      errorText.includes('no such file') ||
+      err.code === 'ENOENT';
+
+    if (!isExpectedError) {
+      // Log unexpected errors for debugging (permission issues, corruption, etc.)
+      console.warn('[Cleanup] Unexpected error checking branch merge status', {
+        repoPath,
+        branchName,
+        mainBranch,
+        error: err.message,
+      });
+    }
     return false;
   }
 }
 
 /**
- * Get the last commit date for a worktree
+ * Get the last commit date for a worktree.
+ * Returns null for any error (logs unexpected errors for debugging).
  */
 export async function getLastCommitDate(workingPath: string): Promise<Date | null> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', workingPath, 'log', '-1', '--format=%ci']);
     return new Date(stdout.trim());
-  } catch {
+  } catch (error) {
+    const err = error as Error & { code?: string; stderr?: string };
+    const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
+
+    // Expected errors: not a git repo, no commits, path doesn't exist
+    const isExpectedError =
+      errorText.includes('not a git repository') ||
+      errorText.includes('does not have any commits') ||
+      errorText.includes('no such file') ||
+      err.code === 'ENOENT';
+
+    if (!isExpectedError) {
+      console.warn('[Cleanup] Unexpected error getting last commit date', {
+        workingPath,
+        error: err.message,
+      });
+    }
     return null;
   }
 }

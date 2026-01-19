@@ -215,8 +215,10 @@ src/
 - Session persistence: Sessions survive restarts, loaded from database
 
 **Session Transitions:**
-- **NEW session needed:** Plan → Execute transition only
-- **Resume session:** All other transitions (prime→plan, execute→commit)
+- Sessions are immutable - transitions create new linked sessions
+- Each transition has explicit `TransitionTrigger` reason (first-message, plan-to-execute, reset-requested, etc.)
+- Audit trail: `parent_session_id` links to previous session, `transition_reason` records why
+- Only plan→execute creates new session immediately; other triggers deactivate current session
 
 ### Architecture Layers
 

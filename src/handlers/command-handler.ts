@@ -25,6 +25,7 @@ import { copyDefaultsToRepo } from '../utils/defaults-copy';
 import { discoverWorkflows } from '../workflows';
 import { isSingleStep } from '../workflows/types';
 import * as workflowDb from '../db/workflows';
+import { getTriggerForCommand } from '../state/session-transitions';
 
 // Workflow staleness thresholds (in milliseconds)
 const WORKFLOW_SLOW_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
@@ -459,7 +460,8 @@ Setup:
         if (updateError instanceof ConversationNotFoundError) {
           return {
             success: false,
-            message: 'Failed to update working directory: conversation state changed. Please try again.',
+            message:
+              'Failed to update working directory: conversation state changed. Please try again.',
           };
         }
         throw updateError;
@@ -482,7 +484,7 @@ Setup:
       const session = await sessionDb.getActiveSession(conversation.id);
       if (session) {
         await sessionDb.deactivateSession(session.id);
-        console.log('[Command] Deactivated session after cwd change');
+        console.log(`[Command] Deactivated session: ${getTriggerForCommand('setcwd')!}`);
       }
 
       // Format response with repo context instead of filesystem path
@@ -560,6 +562,7 @@ Setup:
             const session = await sessionDb.getActiveSession(conversation.id);
             if (session) {
               await sessionDb.deactivateSession(session.id);
+              console.log(`[Command] Deactivated session: ${getTriggerForCommand('clone')!}`);
             }
 
             // Check for command folders (same logic as successful clone)
@@ -677,7 +680,7 @@ Setup:
         const session = await sessionDb.getActiveSession(conversation.id);
         if (session) {
           await sessionDb.deactivateSession(session.id);
-          console.log('[Command] Deactivated session after clone');
+          console.log(`[Command] Deactivated session: ${getTriggerForCommand('clone')!}`);
         }
 
         // Copy default commands/workflows if target doesn't have them (non-fatal)
@@ -919,6 +922,7 @@ Setup:
       const session = await sessionDb.getActiveSession(conversation.id);
       if (session) {
         await sessionDb.deactivateSession(session.id);
+        console.log(`[Command] Deactivated session: ${getTriggerForCommand('reset')!}`);
         return {
           success: true,
           message:
@@ -936,6 +940,7 @@ Setup:
       const activeSession = await sessionDb.getActiveSession(conversation.id);
       if (activeSession) {
         await sessionDb.deactivateSession(activeSession.id);
+        console.log(`[Command] Deactivated session: ${getTriggerForCommand('reset-context')!}`);
         return {
           success: true,
           message:
@@ -1053,6 +1058,7 @@ Setup:
         const session = await sessionDb.getActiveSession(conversation.id);
         if (session) {
           await sessionDb.deactivateSession(session.id);
+          console.log(`[Command] Deactivated session: ${getTriggerForCommand('repo')!}`);
         }
 
         // Auto-load commands if found
@@ -1155,7 +1161,8 @@ Setup:
             if (updateError instanceof ConversationNotFoundError) {
               return {
                 success: false,
-                message: 'Failed to unlink repository: conversation state changed. Please try again.',
+                message:
+                  'Failed to unlink repository: conversation state changed. Please try again.',
               };
             }
             throw updateError;
@@ -1164,6 +1171,7 @@ Setup:
           const session = await sessionDb.getActiveSession(conversation.id);
           if (session) {
             await sessionDb.deactivateSession(session.id);
+            console.log(`[Command] Deactivated session: ${getTriggerForCommand('repo-remove')!}`);
           }
         }
 
@@ -1440,6 +1448,9 @@ Setup:
             const session = await sessionDb.getActiveSession(conversation.id);
             if (session) {
               await sessionDb.deactivateSession(session.id);
+              console.log(
+                `[Command] Deactivated session: ${getTriggerForCommand('worktree-remove')!}`
+              );
             }
 
             const shortPath = shortenPath(isolationEnv.working_path, mainPath);
