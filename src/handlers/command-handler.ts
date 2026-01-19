@@ -26,6 +26,56 @@ import { discoverWorkflows } from '../workflows';
 import { isSingleStep } from '../workflows/types';
 import * as workflowDb from '../db/workflows';
 
+// Workflow staleness thresholds (in milliseconds)
+const WORKFLOW_SLOW_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+const WORKFLOW_STALE_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes (matches executor.ts)
+
+/**
+ * Workflow timing information calculated from database values
+ */
+interface WorkflowTimingInfo {
+  startedAt: Date;
+  lastActivity: Date;
+  durationMs: number;
+  durationMin: number;
+  durationSec: number;
+  lastActivityMs: number;
+  lastActivityMin: number;
+  lastActivitySec: number;
+  isValid: boolean;
+}
+
+/**
+ * Calculate timing information for a workflow run
+ * Handles invalid dates gracefully and prevents negative durations
+ */
+function calculateWorkflowTiming(workflow: {
+  started_at: Date | string;
+  last_activity_at: Date | string | null;
+}): WorkflowTimingInfo {
+  const startedAt = new Date(workflow.started_at);
+  const lastActivity = workflow.last_activity_at ? new Date(workflow.last_activity_at) : startedAt;
+
+  // Validate dates - check for Invalid Date
+  const isValid = !isNaN(startedAt.getTime()) && !isNaN(lastActivity.getTime());
+
+  // Use Math.max(0, ...) to prevent negative durations from clock skew or data corruption
+  const durationMs = Math.max(0, Date.now() - startedAt.getTime());
+  const lastActivityMs = Math.max(0, Date.now() - lastActivity.getTime());
+
+  return {
+    startedAt,
+    lastActivity,
+    durationMs,
+    durationMin: Math.floor(durationMs / 60000),
+    durationSec: Math.floor((durationMs % 60000) / 1000),
+    lastActivityMs,
+    lastActivityMin: Math.floor(lastActivityMs / 60000),
+    lastActivitySec: Math.floor((lastActivityMs % 60000) / 1000),
+    isValid,
+  };
+}
+
 /**
  * Convert an absolute path to a relative path from the repository root
  * Falls back to showing relative to workspace if not in a git repo
@@ -276,6 +326,7 @@ Worktrees:
 Workflows:
   /workflow list - Show available workflows
   /workflow reload - Reload workflow definitions
+  /workflow status - Show running workflow details
   /workflow cancel - Cancel running workflow
   Note: Workflows are YAML files in .archon/workflows/
 
@@ -326,6 +377,33 @@ Setup:
       const session = await sessionDb.getActiveSession(conversation.id);
       if (session?.id) {
         msg += `\nActive Session: ${session.id.slice(0, 8)}...`;
+      }
+
+      // Add workflow status
+      try {
+        const activeWorkflow = await workflowDb.getActiveWorkflowRun(conversation.id);
+        if (activeWorkflow) {
+          const timing = calculateWorkflowTiming(activeWorkflow);
+
+          if (timing.isValid) {
+            msg += `\n\nActive Workflow: \`${activeWorkflow.workflow_name}\``;
+            msg += `\n  ID: ${activeWorkflow.id.slice(0, 8)}`;
+            msg += `\n  Step: ${activeWorkflow.current_step_index + 1}`;
+            msg += `\n  Duration: ${timing.durationMin}m ${timing.durationSec}s`;
+            msg += `\n  Last activity: ${timing.lastActivitySec}s ago`;
+            if (timing.lastActivityMs > WORKFLOW_SLOW_THRESHOLD_MS) {
+              msg += ' (possibly stale)';
+            }
+            msg += '\n  Cancel: `/workflow cancel`';
+          } else {
+            // Graceful fallback for corrupted timing data
+            msg += `\n\nActive Workflow: \`${activeWorkflow.workflow_name}\` (timing unavailable)`;
+            msg += '\n  Cancel: `/workflow cancel`';
+          }
+        }
+      } catch (error) {
+        // Don't fail status if workflow query fails
+        console.error('[Status] Failed to get workflow status:', error);
       }
 
       // Add worktree breakdown if codebase is configured (Phase 3D)
@@ -1545,11 +1623,58 @@ Setup:
           };
         }
 
+        case 'status': {
+          // Show detailed status of running workflow
+          try {
+            const activeWorkflow = await workflowDb.getActiveWorkflowRun(conversation.id);
+            if (!activeWorkflow) {
+              return {
+                success: true,
+                message: 'No workflow currently running.',
+              };
+            }
+
+            const timing = calculateWorkflowTiming(activeWorkflow);
+
+            if (!timing.isValid) {
+              // Graceful fallback for corrupted timing data
+              return {
+                success: true,
+                message: `Workflow: \`${activeWorkflow.workflow_name}\`\nID: ${activeWorkflow.id}\nStatus: ${activeWorkflow.status}\n\nTiming data unavailable.`,
+              };
+            }
+
+            let msg = `Workflow: \`${activeWorkflow.workflow_name}\`\n`;
+            msg += `ID: ${activeWorkflow.id}\n`;
+            msg += `Status: ${activeWorkflow.status}\n`;
+            msg += `Step: ${activeWorkflow.current_step_index + 1}\n`;
+            msg += `Started: ${timing.startedAt.toISOString()}\n`;
+            msg += `Duration: ${timing.durationMin}m ${timing.durationSec}s\n`;
+            msg += `Last activity: ${timing.lastActivityMin}m ${timing.lastActivitySec}s ago\n`;
+
+            // Staleness check
+            if (timing.lastActivityMs > WORKFLOW_STALE_THRESHOLD_MS) {
+              msg += `\nThis workflow appears stale (no activity for ${timing.lastActivityMin} minutes).\n`;
+              msg += 'Consider cancelling with `/workflow cancel`.';
+            } else if (timing.lastActivityMs > WORKFLOW_SLOW_THRESHOLD_MS) {
+              msg += '\nActivity is slow - may be waiting on AI response or stuck.';
+            }
+
+            return { success: true, message: msg };
+          } catch (error) {
+            console.error('[Workflow Status] Failed to get workflow status:', error);
+            return {
+              success: false,
+              message: 'Failed to retrieve workflow status. Please try again.',
+            };
+          }
+        }
+
         default:
           return {
             success: false,
             message:
-              'Usage:\n  /workflow list - Show available workflows\n  /workflow reload - Reload workflow definitions\n  /workflow cancel - Cancel running workflow',
+              'Usage:\n  /workflow list - Show available workflows\n  /workflow reload - Reload workflow definitions\n  /workflow status - Show running workflow details\n  /workflow cancel - Cancel running workflow',
           };
       }
     }

@@ -687,6 +687,7 @@ Once your platform adapter is running, you can use these commands. Type `/help` 
 |---------|-------------|
 | `/workflow list` | Show available workflows |
 | `/workflow reload` | Reload workflow definitions |
+| `/workflow status` | Show running workflow details |
 | `/workflow cancel` | Cancel running workflow |
 
 > **Note:** Workflows are YAML files in `.archon/workflows/`

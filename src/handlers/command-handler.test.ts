@@ -1736,5 +1736,303 @@ describe('CommandHandler', () => {
         expect(result.message).toContain('No codebase configured');
       });
     });
+
+    describe('/workflow status', () => {
+      const conversationWithCodebase: Conversation = {
+        ...baseConversation,
+        codebase_id: 'codebase-123',
+      };
+
+      beforeEach(() => {
+        // Mock getCodebase to return a valid codebase
+        mockGetCodebase.mockResolvedValue({
+          id: 'codebase-123',
+          repository_url: 'https://github.com/test/repo',
+          default_cwd: '/workspace/test-repo',
+          commands: {},
+          created_at: new Date(),
+          updated_at: new Date(),
+        });
+      });
+
+      test('should show detailed workflow status when running', async () => {
+        const startedAt = new Date(Date.now() - 2 * 60 * 1000); // 2 minutes ago
+        const lastActivity = new Date(Date.now() - 30 * 1000); // 30 seconds ago
+        mockGetActiveWorkflowRun.mockResolvedValueOnce({
+          id: 'wf-123',
+          workflow_name: 'test-workflow',
+          conversation_id: 'conv-123',
+          status: 'running',
+          started_at: startedAt,
+          completed_at: null,
+          current_step_index: 1,
+          user_message: 'test',
+          metadata: {},
+          last_activity_at: lastActivity,
+        });
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow status');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Workflow: `test-workflow`');
+        expect(result.message).toContain('Status: running');
+        expect(result.message).toContain('Step: 2'); // index + 1
+        expect(result.message).toContain('Duration:');
+        expect(result.message).toContain('Last activity:');
+      });
+
+      test('should indicate when no workflow is running', async () => {
+        mockGetActiveWorkflowRun.mockResolvedValueOnce(null);
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow status');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toBe('No workflow currently running.');
+      });
+
+      test('should warn about stale workflows (>15 minutes)', async () => {
+        const startedAt = new Date(Date.now() - 20 * 60 * 1000); // 20 minutes ago
+        const lastActivity = new Date(Date.now() - 20 * 60 * 1000); // 20 minutes ago
+        mockGetActiveWorkflowRun.mockResolvedValueOnce({
+          id: 'wf-stale',
+          workflow_name: 'stale-workflow',
+          conversation_id: 'conv-123',
+          status: 'running',
+          started_at: startedAt,
+          completed_at: null,
+          current_step_index: 0,
+          user_message: 'test',
+          metadata: {},
+          last_activity_at: lastActivity,
+        });
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow status');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('appears stale');
+        expect(result.message).toContain('/workflow cancel');
+      });
+
+      test('should warn about slow activity (5-15 minutes)', async () => {
+        const startedAt = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes ago
+        const lastActivity = new Date(Date.now() - 7 * 60 * 1000); // 7 minutes ago
+        mockGetActiveWorkflowRun.mockResolvedValueOnce({
+          id: 'wf-slow',
+          workflow_name: 'slow-workflow',
+          conversation_id: 'conv-123',
+          status: 'running',
+          started_at: startedAt,
+          completed_at: null,
+          current_step_index: 0,
+          user_message: 'test',
+          metadata: {},
+          last_activity_at: lastActivity,
+        });
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow status');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Activity is slow');
+      });
+
+      test('should use started_at as fallback when last_activity_at is null', async () => {
+        const startedAt = new Date(Date.now() - 1 * 60 * 1000); // 1 minute ago
+        mockGetActiveWorkflowRun.mockResolvedValueOnce({
+          id: 'wf-new',
+          workflow_name: 'new-workflow',
+          conversation_id: 'conv-123',
+          status: 'running',
+          started_at: startedAt,
+          completed_at: null,
+          current_step_index: 0,
+          user_message: 'test',
+          metadata: {},
+          last_activity_at: null,
+        });
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow status');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Workflow: `new-workflow`');
+        // Should not throw, and should show activity based on started_at
+        expect(result.message).toContain('Last activity:');
+      });
+
+      test('should handle database errors gracefully', async () => {
+        mockGetActiveWorkflowRun.mockRejectedValueOnce(new Error('Database connection error'));
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow status');
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('Failed to retrieve workflow status');
+      });
+
+      test('should handle invalid date data gracefully', async () => {
+        mockGetActiveWorkflowRun.mockResolvedValueOnce({
+          id: 'wf-invalid',
+          workflow_name: 'invalid-dates-workflow',
+          conversation_id: 'conv-123',
+          status: 'running',
+          started_at: 'invalid-date', // Invalid date string
+          completed_at: null,
+          current_step_index: 0,
+          user_message: 'test',
+          metadata: {},
+          last_activity_at: null,
+        });
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow status');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Workflow: `invalid-dates-workflow`');
+        expect(result.message).toContain('Timing data unavailable');
+      });
+    });
+
+    describe('/workflow help text', () => {
+      const conversationWithCodebase: Conversation = {
+        ...baseConversation,
+        codebase_id: 'codebase-123',
+      };
+
+      beforeEach(() => {
+        mockGetCodebase.mockResolvedValue({
+          id: 'codebase-123',
+          repository_url: 'https://github.com/test/repo',
+          default_cwd: '/workspace/test-repo',
+          commands: {},
+          created_at: new Date(),
+          updated_at: new Date(),
+        });
+      });
+
+      test('should show status in workflow usage help', async () => {
+        const result = await handleCommand(conversationWithCodebase, '/workflow invalid');
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('/workflow status');
+      });
+    });
+
+    describe('/status with active workflow', () => {
+      test('should show active workflow info in status', async () => {
+        const conversation: Conversation = {
+          ...baseConversation,
+          codebase_id: null,
+          cwd: null,
+        };
+
+        const startedAt = new Date(Date.now() - 3 * 60 * 1000); // 3 minutes ago
+        const lastActivity = new Date(Date.now() - 10 * 1000); // 10 seconds ago
+        mockGetActiveWorkflowRun.mockResolvedValueOnce({
+          id: 'wf-active-123',
+          workflow_name: 'investigate-issue',
+          conversation_id: 'conv-123',
+          status: 'running',
+          started_at: startedAt,
+          completed_at: null,
+          current_step_index: 2,
+          user_message: 'test',
+          metadata: {},
+          last_activity_at: lastActivity,
+        });
+
+        const result = await handleCommand(conversation, '/status');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Active Workflow: `investigate-issue`');
+        expect(result.message).toContain('Step: 3'); // index + 1
+        expect(result.message).toContain('Cancel: `/workflow cancel`');
+      });
+
+      test('should not show workflow section when no workflow running', async () => {
+        const conversation: Conversation = {
+          ...baseConversation,
+          codebase_id: null,
+          cwd: null,
+        };
+
+        mockGetActiveWorkflowRun.mockResolvedValueOnce(null);
+
+        const result = await handleCommand(conversation, '/status');
+
+        expect(result.success).toBe(true);
+        expect(result.message).not.toContain('Active Workflow');
+      });
+
+      test('should show possibly stale warning in status when activity > 5 minutes', async () => {
+        const conversation: Conversation = {
+          ...baseConversation,
+          codebase_id: null,
+          cwd: null,
+        };
+
+        const startedAt = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes ago
+        const lastActivity = new Date(Date.now() - 7 * 60 * 1000); // 7 minutes ago
+        mockGetActiveWorkflowRun.mockResolvedValueOnce({
+          id: 'wf-stale-status',
+          workflow_name: 'long-workflow',
+          conversation_id: 'conv-123',
+          status: 'running',
+          started_at: startedAt,
+          completed_at: null,
+          current_step_index: 0,
+          user_message: 'test',
+          metadata: {},
+          last_activity_at: lastActivity,
+        });
+
+        const result = await handleCommand(conversation, '/status');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Active Workflow');
+        expect(result.message).toContain('(possibly stale)');
+      });
+
+      test('should gracefully handle workflow database errors in status', async () => {
+        const conversation: Conversation = {
+          ...baseConversation,
+          codebase_id: null,
+          cwd: null,
+        };
+
+        mockGetActiveWorkflowRun.mockRejectedValueOnce(new Error('Database connection error'));
+
+        const result = await handleCommand(conversation, '/status');
+
+        // Status should still succeed, just without workflow info
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('telegram'); // Basic info still present
+        expect(result.message).not.toContain('Active Workflow');
+      });
+
+      test('should handle invalid workflow date data gracefully in status', async () => {
+        const conversation: Conversation = {
+          ...baseConversation,
+          codebase_id: null,
+          cwd: null,
+        };
+
+        mockGetActiveWorkflowRun.mockResolvedValueOnce({
+          id: 'wf-invalid-dates',
+          workflow_name: 'corrupted-workflow',
+          conversation_id: 'conv-123',
+          status: 'running',
+          started_at: 'not-a-valid-date', // Invalid date
+          completed_at: null,
+          current_step_index: 0,
+          user_message: 'test',
+          metadata: {},
+          last_activity_at: null,
+        });
+
+        const result = await handleCommand(conversation, '/status');
+
+        expect(result.success).toBe(true);
+        // Should still show workflow name but indicate timing unavailable
+        expect(result.message).toContain('Active Workflow: `corrupted-workflow`');
+        expect(result.message).toContain('timing unavailable');
+      });
+    });
   });
 });
