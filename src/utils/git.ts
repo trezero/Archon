@@ -341,3 +341,118 @@ export async function hasUncommittedChanges(workingPath: string): Promise<boolea
     return true;
   }
 }
+
+/**
+ * Sync workspace with remote origin
+ * Fetches latest changes and resets default branch to match origin
+ *
+ * Important: Only syncs the default branch, not arbitrary branches.
+ * Worktrees are created from this synced state.
+ *
+ * Warning: This uses `git reset --hard` which discards any local commits
+ * on the default branch that haven't been pushed to origin.
+ *
+ * Safety: Refuses to sync if there are uncommitted changes to prevent data loss.
+ *
+ * @param workspacePath - Path to the workspace (canonical repo, not worktree)
+ * @param defaultBranch - The default branch name (e.g., 'main', 'master')
+ * @returns true if sync was performed, false if skipped due to uncommitted changes
+ */
+export async function syncWorkspace(
+  workspacePath: string,
+  defaultBranch: string
+): Promise<boolean> {
+  // Safety check: refuse to sync if there are uncommitted changes
+  const hasChanges = await hasUncommittedChanges(workspacePath);
+  if (hasChanges) {
+    console.warn('[Git] Workspace has uncommitted changes, skipping sync to prevent data loss', {
+      workspacePath,
+      defaultBranch,
+    });
+    return false;
+  }
+
+  // Check if we're on the default branch
+  const { stdout: currentBranch } = await execFileAsync(
+    'git',
+    ['-C', workspacePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+    { timeout: 10000 }
+  );
+
+  if (currentBranch.trim() !== defaultBranch) {
+    // Checkout default branch first
+    try {
+      await execFileAsync('git', ['-C', workspacePath, 'checkout', defaultBranch], {
+        timeout: 30000,
+      });
+    } catch (error) {
+      const err = error as Error;
+      throw new Error(`Sync checkout to ${defaultBranch} failed: ${err.message}`);
+    }
+  }
+
+  // Fetch from origin
+  try {
+    await execFileAsync('git', ['-C', workspacePath, 'fetch', 'origin', defaultBranch], {
+      timeout: 60000,
+    });
+  } catch (error) {
+    const err = error as Error;
+    throw new Error(`Sync fetch from origin/${defaultBranch} failed: ${err.message}`);
+  }
+
+  // Reset to match origin
+  try {
+    await execFileAsync('git', ['-C', workspacePath, 'reset', '--hard', `origin/${defaultBranch}`], {
+      timeout: 30000,
+    });
+  } catch (error) {
+    const err = error as Error;
+    throw new Error(`Sync reset to origin/${defaultBranch} failed: ${err.message}`);
+  }
+
+  return true;
+}
+
+/**
+ * Get the default branch name for a repository
+ * Uses git symbolic-ref to get the remote HEAD reference
+ *
+ * Fallback chain: symbolic-ref -> origin/main -> origin/master
+ * Note: Fallback is common for freshly cloned repos where origin/HEAD isn't set.
+ */
+export async function getDefaultBranch(repoPath: string): Promise<string> {
+  // Try to get from remote HEAD
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', repoPath, 'symbolic-ref', 'refs/remotes/origin/HEAD', '--short'],
+      { timeout: 10000 }
+    );
+    // stdout is like "origin/main" - extract just the branch name
+    return stdout.trim().replace('origin/', '');
+  } catch (error) {
+    const err = error as Error;
+    // Log for debugging - symbolic-ref failure is common but worth tracking
+    console.log('[Git] symbolic-ref failed, trying fallback', {
+      repoPath,
+      error: err.message,
+    });
+  }
+
+  // Fallback: check if origin/main exists, otherwise assume master
+  try {
+    await execFileAsync('git', ['-C', repoPath, 'rev-parse', '--verify', 'origin/main'], {
+      timeout: 10000,
+    });
+    return 'main';
+  } catch (error) {
+    const err = error as Error;
+    // Log fallback to master - helps debug branch detection issues
+    console.log('[Git] origin/main not found or inaccessible, defaulting to master', {
+      repoPath,
+      error: err.message,
+    });
+    return 'master';
+  }
+}

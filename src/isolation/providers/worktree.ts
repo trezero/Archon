@@ -14,9 +14,11 @@ import {
   execFileAsync,
   findWorktreeByBranch,
   getCanonicalRepoPath,
+  getDefaultBranch,
   getWorktreeBase,
   listWorktrees,
   mkdirAsync,
+  syncWorkspace,
   worktreeExists,
 } from '../../utils/git';
 import { copyWorktreeFiles } from '../../utils/worktree-copy';
@@ -58,7 +60,10 @@ export class WorktreeProvider implements IIsolationProvider {
    * @param envId - The worktree path (used as environment ID)
    * @param options - Options including force flag, branchName for cleanup, and canonicalRepoPath
    */
-  async destroy(envId: string, options?: { force?: boolean; branchName?: string; canonicalRepoPath?: string }): Promise<void> {
+  async destroy(
+    envId: string,
+    options?: { force?: boolean; branchName?: string; canonicalRepoPath?: string }
+  ): Promise<void> {
     // For worktrees, envId is the worktree path
     const worktreePath = envId;
 
@@ -77,7 +82,9 @@ export class WorktreeProvider implements IIsolationProvider {
     } else {
       // Path doesn't exist and no canonicalRepoPath provided - can't clean up branch
       if (options?.branchName) {
-        console.warn(`[WorktreeProvider] Cannot delete branch ${options.branchName}: no canonical repo path available`);
+        console.warn(
+          `[WorktreeProvider] Cannot delete branch ${options.branchName}: no canonical repo path available`
+        );
       }
       return;
     }
@@ -106,11 +113,16 @@ export class WorktreeProvider implements IIsolationProvider {
         console.log(`[WorktreeProvider] Cleaning remaining directory at ${worktreePath}`);
         try {
           await rm(worktreePath, { recursive: true, force: true });
-          console.log(`[WorktreeProvider] Successfully cleaned remaining directory at ${worktreePath}`);
+          console.log(
+            `[WorktreeProvider] Successfully cleaned remaining directory at ${worktreePath}`
+          );
         } catch (error) {
           const err = error as NodeJS.ErrnoException;
           // Log but don't fail - git worktree removal succeeded, directory cleanup is best-effort
-          console.error(`[WorktreeProvider] Failed to clean remaining directory at ${worktreePath}:`, err.message);
+          console.error(
+            `[WorktreeProvider] Failed to clean remaining directory at ${worktreePath}:`,
+            err.message
+          );
           // Don't throw - the worktree itself was removed, this is supplementary cleanup
         }
       }
@@ -150,7 +162,9 @@ export class WorktreeProvider implements IIsolationProvider {
       if (errorText.includes('not found') || errorText.includes('did not match any')) {
         console.log(`[WorktreeProvider] Branch ${branchName} already deleted or not found`);
       } else if (errorText.includes('checked out at')) {
-        console.warn(`[WorktreeProvider] Cannot delete branch ${branchName}: branch is checked out elsewhere`);
+        console.warn(
+          `[WorktreeProvider] Cannot delete branch ${branchName}: branch is checked out elsewhere`
+        );
       } else {
         console.error(`[WorktreeProvider] Unexpected error deleting branch ${branchName}:`, {
           message: err.message,
@@ -348,6 +362,8 @@ export class WorktreeProvider implements IIsolationProvider {
   ): Promise<void> {
     const repoPath = request.canonicalRepoPath;
 
+    await this.syncWorkspaceBeforeCreate(repoPath);
+
     // Extract owner and repo name from canonicalRepoPath to avoid collisions
     const pathParts = repoPath.split('/').filter(p => p.length > 0);
     const repoName = pathParts[pathParts.length - 1];
@@ -369,6 +385,54 @@ export class WorktreeProvider implements IIsolationProvider {
 
     // Copy git-ignored files based on repo config
     await this.copyConfiguredFiles(repoPath, worktreePath);
+  }
+
+  /**
+   * Sync workspace with remote before creating a new worktree
+   * Ensures new work starts from the latest code on the default branch
+   *
+   * Non-fatal: If sync fails (e.g., offline mode, network issues) or is skipped
+   * (uncommitted changes in workspace), log and continue. Worktree will be created
+   * from whatever state the workspace is currently in.
+   */
+  private async syncWorkspaceBeforeCreate(repoPath: string): Promise<void> {
+    try {
+      const defaultBranch = await getDefaultBranch(repoPath);
+      console.log('[WorktreeProvider] Syncing workspace before worktree creation', {
+        repoPath,
+        defaultBranch,
+      });
+      const synced = await syncWorkspace(repoPath, defaultBranch);
+      if (synced) {
+        console.log(`[WorktreeProvider] Workspace synced to latest ${defaultBranch}`);
+      } else {
+        console.log(
+          '[WorktreeProvider] Workspace sync skipped (uncommitted changes), proceeding with existing code'
+        );
+      }
+    } catch (error) {
+      const err = error as Error & { code?: string };
+      const errorMessage = err.message.toLowerCase();
+
+      // Check for serious errors that warrant stronger warnings
+      if (err.code === 'EACCES' || errorMessage.includes('permission denied')) {
+        console.error(
+          '[WorktreeProvider] Permission denied during workspace sync - this may affect worktree creation:',
+          { repoPath, error: err.message }
+        );
+      } else if (errorMessage.includes('not a git repository')) {
+        console.error(
+          '[WorktreeProvider] Repository appears corrupted - worktree creation may fail:',
+          { repoPath, error: err.message }
+        );
+      } else {
+        // Network errors, timeouts, etc. - truly non-fatal
+        console.warn(
+          '[WorktreeProvider] Failed to sync workspace (proceeding with worktree creation):',
+          { repoPath, error: err.message }
+        );
+      }
+    }
   }
 
   /**
@@ -537,14 +601,22 @@ export class WorktreeProvider implements IIsolationProvider {
       // Create a local tracking branch so it's not detached HEAD
       await this.createBranchWithStaleRetry(
         repoPath,
-        () => execFileAsync('git', ['-C', worktreePath, 'checkout', '-b', reviewBranch, prSha], { timeout: 30000 }),
+        () =>
+          execFileAsync('git', ['-C', worktreePath, 'checkout', '-b', reviewBranch, prSha], {
+            timeout: 30000,
+          }),
         reviewBranch
       );
     } else {
       // No SHA: fetch and create review branch
       await this.createBranchWithStaleRetry(
         repoPath,
-        () => execFileAsync('git', ['-C', repoPath, 'fetch', 'origin', `pull/${prNumber}/head:${reviewBranch}`], { timeout: 30000 }),
+        () =>
+          execFileAsync(
+            'git',
+            ['-C', repoPath, 'fetch', 'origin', `pull/${prNumber}/head:${reviewBranch}`],
+            { timeout: 30000 }
+          ),
         reviewBranch
       );
 
@@ -568,8 +640,12 @@ export class WorktreeProvider implements IIsolationProvider {
     } catch (error) {
       const err = error as Error & { stderr?: string };
       if (err.stderr?.includes('already exists')) {
-        console.log(`[WorktreeProvider] Branch ${branchName} exists (stale), deleting and retrying...`);
-        await execFileAsync('git', ['-C', repoPath, 'branch', '-D', branchName], { timeout: 30000 });
+        console.log(
+          `[WorktreeProvider] Branch ${branchName} exists (stale), deleting and retrying...`
+        );
+        await execFileAsync('git', ['-C', repoPath, 'branch', '-D', branchName], {
+          timeout: 30000,
+        });
         await createCommand();
       } else {
         throw error;

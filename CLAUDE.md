@@ -34,6 +34,7 @@
 - Trust git's natural guardrails (e.g., refuse to remove worktree with uncommitted changes)
 - Use `execFileAsync` for git commands (not `exec`) to prevent command injection
 - Worktrees enable parallel development per conversation without branch conflicts
+- Workspaces automatically sync with origin before worktree creation (ensures latest code)
 - **NEVER run `git clean -fd`** - it permanently deletes untracked files (use `git checkout .` instead)
 
 ## Essential Commands
@@ -374,7 +375,7 @@ All Archon-managed files are organized under a dedicated namespace:
 **User-level (`~/.archon/`):**
 ```
 ~/.archon/
-├── workspaces/     # Cloned repositories (via /clone)
+├── workspaces/     # Cloned repositories (via /clone, auto-synced before worktree creation)
 │   └── owner/repo/
 ├── worktrees/      # Git worktrees for isolation
 │   └── repo-name/

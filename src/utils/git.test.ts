@@ -597,6 +597,307 @@ branch refs/heads/feature/auth
     });
   });
 
+  describe('syncWorkspace', () => {
+    let execSpy: Mock<typeof git.execFileAsync>;
+    let hasUncommittedChangesSpy: Mock<typeof git.hasUncommittedChanges>;
+
+    beforeEach(() => {
+      execSpy = spyOn(git, 'execFileAsync');
+      hasUncommittedChangesSpy = spyOn(git, 'hasUncommittedChanges');
+      // Default: workspace is clean
+      hasUncommittedChangesSpy.mockResolvedValue(false);
+    });
+
+    afterEach(() => {
+      execSpy.mockRestore();
+      hasUncommittedChangesSpy.mockRestore();
+    });
+
+    test('fetches and resets to origin default branch when already on default branch', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        // rev-parse returns current branch name
+        if (args.includes('rev-parse')) {
+          return { stdout: 'main\n', stderr: '' };
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      const result = await git.syncWorkspace('/workspace/repo', 'main');
+
+      expect(result).toBe(true);
+
+      // Should NOT call checkout (already on main)
+      const checkoutCalls = execSpy.mock.calls.filter((call: unknown[]) => {
+        const args = call[1] as string[];
+        return args.includes('checkout');
+      });
+      expect(checkoutCalls).toHaveLength(0);
+
+      // Should call fetch
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'fetch', 'origin', 'main'],
+        expect.any(Object)
+      );
+
+      // Should call reset
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'reset', '--hard', 'origin/main'],
+        expect.any(Object)
+      );
+    });
+
+    test('checks out default branch before syncing if on different branch', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        // rev-parse returns current branch name (not main)
+        if (args.includes('rev-parse')) {
+          return { stdout: 'feature-branch\n', stderr: '' };
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      const result = await git.syncWorkspace('/workspace/repo', 'main');
+
+      expect(result).toBe(true);
+
+      // Should call checkout main
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'checkout', 'main'],
+        expect.any(Object)
+      );
+
+      // Should call fetch
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'fetch', 'origin', 'main'],
+        expect.any(Object)
+      );
+
+      // Should call reset
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'reset', '--hard', 'origin/main'],
+        expect.any(Object)
+      );
+    });
+
+    test('skips sync and returns false if workspace has uncommitted changes (staged or unstaged)', async () => {
+      // hasUncommittedChanges uses `git status --porcelain` which shows both staged and unstaged
+      hasUncommittedChangesSpy.mockResolvedValue(true);
+
+      const result = await git.syncWorkspace('/workspace/repo', 'main');
+
+      expect(result).toBe(false);
+
+      // Should NOT call any git operations - sync was skipped entirely
+      expect(execSpy).not.toHaveBeenCalled();
+    });
+
+    test('throws error if fetch fails', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('rev-parse')) {
+          return { stdout: 'main\n', stderr: '' };
+        }
+        if (args.includes('fetch')) {
+          throw new Error('fatal: unable to access repository');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await expect(git.syncWorkspace('/workspace/repo', 'main')).rejects.toThrow(
+        'unable to access repository'
+      );
+    });
+
+    test('throws error if reset fails', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('rev-parse')) {
+          return { stdout: 'main\n', stderr: '' };
+        }
+        if (args.includes('reset')) {
+          throw new Error('fatal: Not a valid object name');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await expect(git.syncWorkspace('/workspace/repo', 'main')).rejects.toThrow(
+        'Not a valid object name'
+      );
+    });
+
+    test('throws error if checkout fails', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('rev-parse')) {
+          return { stdout: 'feature-branch\n', stderr: '' };
+        }
+        if (args.includes('checkout')) {
+          throw new Error("error: pathspec 'main' did not match any file(s)");
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await expect(git.syncWorkspace('/workspace/repo', 'main')).rejects.toThrow('pathspec');
+    });
+
+    test('passes correct timeout values to git commands', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('rev-parse')) {
+          return { stdout: 'main\n', stderr: '' };
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await git.syncWorkspace('/workspace/repo', 'main');
+
+      // Verify fetch was called with 60s timeout (longest operation)
+      const fetchCall = execSpy.mock.calls.find((call: unknown[]) => {
+        const args = call[1] as string[];
+        return args.includes('fetch');
+      });
+      expect(fetchCall?.[2]).toEqual({ timeout: 60000 });
+
+      // Verify reset was called with 30s timeout
+      const resetCall = execSpy.mock.calls.find((call: unknown[]) => {
+        const args = call[1] as string[];
+        return args.includes('reset');
+      });
+      expect(resetCall?.[2]).toEqual({ timeout: 30000 });
+    });
+
+    test('includes operation context in checkout error message', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('rev-parse')) {
+          return { stdout: 'feature-branch\n', stderr: '' };
+        }
+        if (args.includes('checkout')) {
+          throw new Error('fatal: unable to checkout');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await expect(git.syncWorkspace('/workspace/repo', 'main')).rejects.toThrow(
+        'Sync checkout to main failed'
+      );
+    });
+
+    test('includes operation context in fetch error message', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('rev-parse')) {
+          return { stdout: 'main\n', stderr: '' };
+        }
+        if (args.includes('fetch')) {
+          throw new Error('fatal: network unreachable');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await expect(git.syncWorkspace('/workspace/repo', 'main')).rejects.toThrow(
+        'Sync fetch from origin/main failed'
+      );
+    });
+
+    test('includes operation context in reset error message', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('rev-parse')) {
+          return { stdout: 'main\n', stderr: '' };
+        }
+        if (args.includes('reset')) {
+          throw new Error('fatal: ambiguous argument');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await expect(git.syncWorkspace('/workspace/repo', 'main')).rejects.toThrow(
+        'Sync reset to origin/main failed'
+      );
+    });
+  });
+
+  describe('getDefaultBranch', () => {
+    let execSpy: Mock<typeof git.execFileAsync>;
+
+    beforeEach(() => {
+      execSpy = spyOn(git, 'execFileAsync');
+    });
+
+    afterEach(() => {
+      execSpy.mockRestore();
+    });
+
+    test('returns branch from symbolic-ref (origin/main)', async () => {
+      execSpy.mockResolvedValue({ stdout: 'origin/main\n', stderr: '' });
+
+      const result = await git.getDefaultBranch('/workspace/repo');
+
+      expect(result).toBe('main');
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'symbolic-ref', 'refs/remotes/origin/HEAD', '--short'],
+        expect.any(Object)
+      );
+    });
+
+    test('returns branch from symbolic-ref (origin/master)', async () => {
+      execSpy.mockResolvedValue({ stdout: 'origin/master\n', stderr: '' });
+
+      const result = await git.getDefaultBranch('/workspace/repo');
+
+      expect(result).toBe('master');
+    });
+
+    test('returns non-standard branch from symbolic-ref (origin/develop)', async () => {
+      execSpy.mockResolvedValue({ stdout: 'origin/develop\n', stderr: '' });
+
+      const result = await git.getDefaultBranch('/workspace/repo');
+
+      expect(result).toBe('develop');
+    });
+
+    test('returns non-standard branch from symbolic-ref (origin/trunk)', async () => {
+      execSpy.mockResolvedValue({ stdout: 'origin/trunk\n', stderr: '' });
+
+      const result = await git.getDefaultBranch('/workspace/repo');
+
+      expect(result).toBe('trunk');
+    });
+
+    test('falls back to main if symbolic-ref fails and origin/main exists', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('symbolic-ref')) {
+          throw new Error('fatal: ref refs/remotes/origin/HEAD is not a symbolic ref');
+        }
+        // rev-parse for origin/main succeeds
+        if (args.includes('rev-parse') && args.includes('origin/main')) {
+          return { stdout: 'abc123\n', stderr: '' };
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      const result = await git.getDefaultBranch('/workspace/repo');
+
+      expect(result).toBe('main');
+    });
+
+    test('falls back to master if symbolic-ref fails and origin/main does not exist', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('symbolic-ref')) {
+          throw new Error('fatal: ref refs/remotes/origin/HEAD is not a symbolic ref');
+        }
+        // rev-parse for origin/main fails
+        if (args.includes('rev-parse') && args.includes('origin/main')) {
+          throw new Error('fatal: Not a valid object name');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      const result = await git.getDefaultBranch('/workspace/repo');
+
+      expect(result).toBe('master');
+    });
+  });
+
   describe('commitAllChanges', () => {
     let execSpy: Mock<typeof git.execFileAsync>;
 

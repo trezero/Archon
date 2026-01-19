@@ -5,6 +5,10 @@ import * as git from '../../utils/git';
 import * as worktreeCopy from '../../utils/worktree-copy';
 import type { IsolationRequest } from '../types';
 
+// Track sync function calls for testing
+let getDefaultBranchSpy: Mock<typeof git.getDefaultBranch>;
+let syncWorkspaceSpy: Mock<typeof git.syncWorkspace>;
+
 // Mock fs.promises.access for destroy() existence check
 const mockAccess = mock(() => Promise.resolve());
 mock.module('node:fs/promises', () => ({
@@ -30,6 +34,8 @@ describe('WorktreeProvider', () => {
     listWorktreesSpy = spyOn(git, 'listWorktrees');
     findWorktreeByBranchSpy = spyOn(git, 'findWorktreeByBranch');
     getCanonicalRepoPathSpy = spyOn(git, 'getCanonicalRepoPath');
+    getDefaultBranchSpy = spyOn(git, 'getDefaultBranch');
+    syncWorkspaceSpy = spyOn(git, 'syncWorkspace');
 
     // Default mocks
     execSpy.mockResolvedValue({ stdout: '', stderr: '' });
@@ -39,6 +45,10 @@ describe('WorktreeProvider', () => {
     findWorktreeByBranchSpy.mockResolvedValue(null);
     getCanonicalRepoPathSpy.mockImplementation(async path => path);
     mockAccess.mockResolvedValue(undefined); // Path exists by default
+
+    // Default mocks for workspace sync
+    getDefaultBranchSpy.mockResolvedValue('main');
+    syncWorkspaceSpy.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -48,6 +58,8 @@ describe('WorktreeProvider', () => {
     listWorktreesSpy.mockRestore();
     findWorktreeByBranchSpy.mockRestore();
     getCanonicalRepoPathSpy.mockRestore();
+    getDefaultBranchSpy.mockRestore();
+    syncWorkspaceSpy.mockRestore();
     mockAccess.mockClear();
   });
 
@@ -503,9 +515,9 @@ describe('WorktreeProvider', () => {
         callCount++;
         // First worktree add fails (branch already exists)
         if (callCount === 2 && args.includes('-b') && args.includes('feature/auth')) {
-          const error = new Error(
-            'fatal: A branch named feature/auth already exists.'
-          ) as Error & { stderr?: string };
+          const error = new Error('fatal: A branch named feature/auth already exists.') as Error & {
+            stderr?: string;
+          };
           error.stderr = 'fatal: A branch named feature/auth already exists.';
           throw error;
         }
@@ -584,7 +596,8 @@ describe('WorktreeProvider', () => {
           fetchAttempts++;
           if (fetchAttempts === 1) {
             const error = new Error('fatal: already exists') as Error & { stderr?: string };
-            error.stderr = "fatal: cannot lock ref 'refs/heads/pr-42-review': reference already exists";
+            error.stderr =
+              "fatal: cannot lock ref 'refs/heads/pr-42-review': reference already exists";
             throw error;
           }
         }
@@ -625,7 +638,9 @@ describe('WorktreeProvider', () => {
         return { stdout: '', stderr: '' };
       });
 
-      await expect(provider.create(request)).rejects.toThrow('Failed to create worktree for PR #42');
+      await expect(provider.create(request)).rejects.toThrow(
+        'Failed to create worktree for PR #42'
+      );
     });
   });
 
@@ -1167,7 +1182,9 @@ describe('WorktreeProvider', () => {
       rmSpy = spyOn(fs, 'rm');
 
       // Default: directory doesn't exist (use proper NodeJS.ErrnoException)
-      const enoentError = Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+      const enoentError = Object.assign(new Error('ENOENT: no such file or directory'), {
+        code: 'ENOENT',
+      });
       accessSpy.mockRejectedValue(enoentError);
       rmSpy.mockResolvedValue(undefined);
     });
@@ -1192,10 +1209,10 @@ describe('WorktreeProvider', () => {
       const env = await provider.create(request);
 
       // Verify orphan directory was removed
-      expect(rmSpy).toHaveBeenCalledWith(
-        expect.stringContaining('issue-999'),
-        { recursive: true, force: true }
-      );
+      expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('issue-999'), {
+        recursive: true,
+        force: true,
+      });
 
       // Verify worktree was created
       expect(env.workingPath).toContain('issue-999');
@@ -1236,10 +1253,10 @@ describe('WorktreeProvider', () => {
       const env = await provider.create(request);
 
       // Verify orphan directory was removed
-      expect(rmSpy).toHaveBeenCalledWith(
-        expect.stringContaining('pr-42'),
-        { recursive: true, force: true }
-      );
+      expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('pr-42'), {
+        recursive: true,
+        force: true,
+      });
 
       // Verify worktree was created
       expect(env.workingPath).toContain('pr-42');
@@ -1275,7 +1292,9 @@ describe('WorktreeProvider', () => {
 
       // Simulate directory does not exist after git worktree remove
       // Need to create NodeJS.ErrnoException with proper code property
-      const enoentError = Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+      const enoentError = Object.assign(new Error('ENOENT: no such file or directory'), {
+        code: 'ENOENT',
+      });
       accessSpy.mockRejectedValue(enoentError);
 
       await provider.destroy(worktreePath);
@@ -1304,7 +1323,9 @@ describe('WorktreeProvider', () => {
       accessSpy.mockResolvedValue(undefined);
       worktreeExistsSpy.mockResolvedValue(false);
       // rm fails with permission denied
-      rmSpy.mockRejectedValue(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }));
+      rmSpy.mockRejectedValue(
+        Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+      );
 
       await expect(provider.create(request)).rejects.toThrow('Failed to clean orphan directory');
     });
@@ -1320,7 +1341,9 @@ describe('WorktreeProvider', () => {
       // Directory still exists after git remove (directoryExists check)
       accessSpy.mockResolvedValueOnce(undefined);
       // rm fails with permission denied
-      rmSpy.mockRejectedValue(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }));
+      rmSpy.mockRejectedValue(
+        Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+      );
 
       // Should NOT throw - post-removal cleanup is best-effort
       await expect(provider.destroy(worktreePath)).resolves.toBeUndefined();
@@ -1343,10 +1366,10 @@ describe('WorktreeProvider', () => {
       const env = await provider.create(request);
 
       // Verify orphan directory was removed (path uses actual branch name for same-repo PRs)
-      expect(rmSpy).toHaveBeenCalledWith(
-        expect.stringContaining('feature/auth'),
-        { recursive: true, force: true }
-      );
+      expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('feature/auth'), {
+        recursive: true,
+        force: true,
+      });
 
       // Verify worktree was created with actual branch name
       expect(env.workingPath).toContain('feature/auth');
@@ -1360,7 +1383,9 @@ describe('WorktreeProvider', () => {
       accessSpy.mockResolvedValueOnce(undefined);
       // git worktree remove fails with "is not a working tree" (matches isWorktreeMissingError)
       execSpy.mockRejectedValueOnce(
-        Object.assign(new Error('fatal: /path is not a working tree'), { stderr: 'is not a working tree' })
+        Object.assign(new Error('fatal: /path is not a working tree'), {
+          stderr: 'is not a working tree',
+        })
       );
       // Directory still exists (directoryExists check after git failure)
       accessSpy.mockResolvedValueOnce(undefined);
@@ -1380,9 +1405,85 @@ describe('WorktreeProvider', () => {
       };
 
       // Simulate permission error when checking directory
-      accessSpy.mockRejectedValue(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }));
+      accessSpy.mockRejectedValue(
+        Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+      );
 
       await expect(provider.create(request)).rejects.toThrow('Failed to check directory');
+    });
+  });
+
+  describe('workspace sync before worktree creation', () => {
+    const baseRequest: IsolationRequest = {
+      codebaseId: 'cb-123',
+      // Uses full owner/repo path format to test path parsing in createWorktree
+      canonicalRepoPath: '/workspace/owner/repo',
+      workflowType: 'issue',
+      identifier: '42',
+    };
+
+    test('does not sync workspace when adopting existing worktree', async () => {
+      // Worktree exists - triggers adoption path (skips createWorktree)
+      worktreeExistsSpy.mockResolvedValue(true);
+
+      await provider.create(baseRequest);
+
+      // Verify sync was NOT called (adoption skips createWorktree entirely)
+      expect(syncWorkspaceSpy).not.toHaveBeenCalled();
+      expect(getDefaultBranchSpy).not.toHaveBeenCalled();
+    });
+
+    test('syncs workspace before creating worktree', async () => {
+      // Ensure worktree doesn't exist
+      worktreeExistsSpy.mockResolvedValue(false);
+
+      await provider.create(baseRequest);
+
+      // Verify sync functions were called with correct args
+      expect(getDefaultBranchSpy).toHaveBeenCalledWith('/workspace/owner/repo');
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', 'main');
+    });
+
+    test('continues worktree creation when sync fails (non-fatal)', async () => {
+      // Mock sync to fail
+      syncWorkspaceSpy.mockRejectedValue(new Error('Network error'));
+
+      // Ensure worktree doesn't exist
+      worktreeExistsSpy.mockResolvedValue(false);
+
+      // Should NOT throw - sync is non-fatal
+      const env = await provider.create(baseRequest);
+
+      expect(env.workingPath).toContain('issue-42');
+      expect(env.status).toBe('active');
+    });
+
+    test('continues worktree creation when sync is skipped due to uncommitted changes', async () => {
+      // Mock sync to return false (skipped due to uncommitted changes)
+      syncWorkspaceSpy.mockResolvedValue(false);
+
+      // Ensure worktree doesn't exist
+      worktreeExistsSpy.mockResolvedValue(false);
+
+      // Should NOT throw - sync skip is non-fatal
+      const env = await provider.create(baseRequest);
+
+      expect(env.workingPath).toContain('issue-42');
+      expect(env.status).toBe('active');
+    });
+
+    test('continues worktree creation when getDefaultBranch fails', async () => {
+      // Mock getDefaultBranch to fail
+      getDefaultBranchSpy.mockRejectedValue(new Error('Git error'));
+
+      // Ensure worktree doesn't exist
+      worktreeExistsSpy.mockResolvedValue(false);
+
+      // Should NOT throw - sync failure is non-fatal
+      const env = await provider.create(baseRequest);
+
+      expect(env.workingPath).toContain('issue-42');
+      expect(env.status).toBe('active');
     });
   });
 });

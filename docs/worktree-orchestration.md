@@ -92,6 +92,15 @@ IsolationRequest
        │ NO
        ▼
 ┌──────────────────────────────────────────────────┐
+│ SYNC WORKSPACE (before creating worktree)        │
+│   git fetch origin <default-branch>              │
+│   git reset --hard origin/<default-branch>       │
+│   (skipped if uncommitted changes)               │
+│   (non-fatal - continues on failure)             │
+└──────────────┬───────────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────────────────────────┐
 │ CREATE NEW WORKTREE                              │
 │                                                  │
 │ Issue/Task:                                      │
@@ -272,7 +281,7 @@ App checks: findWorktreeByBranch("feature/auth")
 | `src/isolation/types.ts`              | `IIsolationProvider`, `IsolationRequest`, `IsolatedEnvironment` |
 | `src/isolation/providers/worktree.ts` | `WorktreeProvider` implementation                               |
 | `src/isolation/index.ts`              | `getIsolationProvider()` factory                                |
-| `src/utils/git.ts`                    | `getWorktreeBase()`, `listWorktrees()`, low-level git ops       |
+| `src/utils/git.ts`                    | `getWorktreeBase()`, `listWorktrees()`, `syncWorkspace()`, `getDefaultBranch()`, low-level git ops |
 | `src/adapters/github.ts`              | Webhook handling, `cleanupPRWorktree()`                         |
 | `src/handlers/command-handler.ts`     | `/worktree` command handling                                    |
 

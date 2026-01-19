@@ -84,7 +84,7 @@ The app uses `~/.archon/` for all managed files:
 
 ```
 ~/.archon/
-├── workspaces/     # Cloned repositories
+├── workspaces/     # Cloned repositories (auto-synced before worktree creation)
 ├── worktrees/      # Git worktrees for isolation
 └── config.yaml     # Optional: global configuration
 ```
@@ -1060,7 +1060,7 @@ prompt: |
 - **Session Persistence**: AI context survives restarts via database storage
 - **Generic Commands**: User-defined markdown commands versioned with Git
 - **Workflow Engine**: YAML-based multi-step automation with step and loop modes
-- **Worktree Isolation**: Git worktrees enable parallel work per conversation
+- **Worktree Isolation**: Git worktrees enable parallel work per conversation, auto-synced with origin before creation
 - **Concurrency Control**: Lock manager prevents race conditions
 
 ### Database Schema
