@@ -3,7 +3,7 @@
 
 # AI assistant preference for this repository (overrides global default)
 # Options: 'claude' | 'codex'
-assistant: codex
+assistant: claude
 
 # Commands configuration
 commands:
