@@ -271,6 +271,8 @@ DEFAULT_AI_ASSISTANT=claude
 <details>
 <summary><b>🤖 Codex</b></summary>
 
+> ⚠️ **Current Limitation**: Codex currently runs in **read-only sandbox mode** and cannot write files or make network calls. This means it can analyze code and answer questions, but cannot create artifacts, make code changes, or run commands like `gh`. See [issue #288](https://github.com/dynamous-community/remote-coding-agent/issues/288) for status. For full coding capabilities, use Claude Code instead.
+
 **Authenticate with Codex CLI:**
 
 ```bash
