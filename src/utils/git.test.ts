@@ -39,6 +39,25 @@ describe('git utilities', () => {
       const result = await git.isWorktreePath(testDir);
       expect(result).toBe(false);
     });
+
+    test('throws for permission errors (EACCES)', async () => {
+      // Create test directory
+      const testPath = join(testDir, 'permission-test');
+      await realMkdir(testPath, { recursive: true });
+
+      // Mock readFile to throw EACCES
+      const fsPromises = await import('fs/promises');
+      const readFileSpy = spyOn(fsPromises, 'readFile');
+      const eaccesError = new Error('Permission denied') as NodeJS.ErrnoException;
+      eaccesError.code = 'EACCES';
+      readFileSpy.mockRejectedValue(eaccesError);
+
+      await expect(git.isWorktreePath(testPath)).rejects.toThrow(
+        `Cannot determine if ${testPath} is a worktree: Permission denied`
+      );
+
+      readFileSpy.mockRestore();
+    });
   });
 
   describe('getCanonicalRepoPath', () => {
@@ -169,6 +188,28 @@ describe('git utilities', () => {
       const result = await git.worktreeExists(join(testDir, 'no-git'));
       expect(result).toBe(false);
     });
+
+    test('throws for permission errors (EACCES)', async () => {
+      // Create a directory to check
+      const testPath = join(testDir, 'permission-denied');
+      await realMkdir(testPath, { recursive: true });
+
+      // Mock the access function by using a temp import and spying on fs/promises
+      const fsPromises = await import('fs/promises');
+      const accessSpy = spyOn(fsPromises, 'access');
+      const eaccesError = new Error('Permission denied') as NodeJS.ErrnoException;
+      eaccesError.code = 'EACCES';
+      accessSpy.mockRejectedValue(eaccesError);
+
+      // Re-import git module to use the mocked access
+      // Since git.ts imports access at module level, we need to call the function
+      // which internally uses the mocked version
+      await expect(git.worktreeExists(testPath)).rejects.toThrow(
+        `Failed to check worktree at ${testPath}: Permission denied`
+      );
+
+      accessSpy.mockRestore();
+    });
   });
 
   describe('listWorktrees', () => {
@@ -201,8 +242,42 @@ branch refs/heads/feature/auth
       expect(result[1]).toEqual({ path: '/path/to/feature', branch: 'feature/auth' });
     });
 
-    test('returns empty array on error', async () => {
+    test('returns empty array for "not a git repository" error', async () => {
+      execSpy.mockRejectedValue(new Error('fatal: not a git repository'));
+
+      const result = await git.listWorktrees('/path/to/repo');
+      expect(result).toEqual([]);
+    });
+
+    test('returns empty array for "No such file or directory" error', async () => {
+      execSpy.mockRejectedValue(new Error('No such file or directory'));
+
+      const result = await git.listWorktrees('/path/to/repo');
+      expect(result).toEqual([]);
+    });
+
+    test('throws for unexpected errors', async () => {
       execSpy.mockRejectedValue(new Error('git not found'));
+
+      await expect(git.listWorktrees('/path/to/repo')).rejects.toThrow(
+        'Failed to list worktrees for /path/to/repo: git not found'
+      );
+    });
+
+    test('returns empty array when expected error pattern is in stderr', async () => {
+      // Error pattern in stderr rather than message (line 96 checks both)
+      const error = new Error('Command failed') as Error & { stderr?: string };
+      error.stderr = 'fatal: not a git repository (or any parent up to mount point /)';
+      execSpy.mockRejectedValue(error);
+
+      const result = await git.listWorktrees('/path/to/repo');
+      expect(result).toEqual([]);
+    });
+
+    test('returns empty array when "No such file or directory" is in stderr', async () => {
+      const error = new Error('Command failed') as Error & { stderr?: string };
+      error.stderr = 'No such file or directory';
+      execSpy.mockRejectedValue(error);
 
       const result = await git.listWorktrees('/path/to/repo');
       expect(result).toEqual([]);

@@ -292,15 +292,27 @@ async function resolveIsolation(
   const provider = getIsolationProvider();
 
   try {
-    const isolatedEnv = await provider.create({
+    // Construct request based on workflow type (discriminated union)
+    const baseRequest = {
       codebaseId: codebase.id,
       canonicalRepoPath: canonicalPath,
-      workflowType,
       identifier: workflowId,
-      prBranch: hints?.prBranch,
-      prSha: hints?.prSha,
-      isForkPR: hints?.isForkPR,
-    });
+    };
+
+    const isolatedEnv = await provider.create(
+      workflowType === 'pr'
+        ? {
+            ...baseRequest,
+            workflowType: 'pr' as const,
+            prBranch: hints?.prBranch ?? `pr-${workflowId}`,
+            prSha: hints?.prSha,
+            isForkPR: hints?.isForkPR ?? false,
+          }
+        : {
+            ...baseRequest,
+            workflowType,
+          }
+    );
 
     // Create database record
     const env = await isolationEnvDb.create({

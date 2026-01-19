@@ -3,7 +3,7 @@ import { describe, test, expect, beforeEach, afterEach, spyOn, mock, type Mock }
 import * as configLoader from '../../config/config-loader';
 import * as git from '../../utils/git';
 import * as worktreeCopy from '../../utils/worktree-copy';
-import type { IsolationRequest } from '../types';
+import type { IsolationRequest, PRIsolationRequest } from '../types';
 
 // Track sync function calls for testing
 let getDefaultBranchSpy: Mock<typeof git.getDefaultBranch>;
@@ -74,18 +74,8 @@ describe('WorktreeProvider', () => {
       expect(provider.generateBranchName(request)).toBe('issue-42');
     });
 
-    test('generates pr-N-review for PR workflows without branch info (fork fallback)', () => {
-      const request: IsolationRequest = {
-        codebaseId: 'cb-123',
-        canonicalRepoPath: '/workspace/repo',
-        workflowType: 'pr',
-        identifier: '123',
-      };
-      expect(provider.generateBranchName(request)).toBe('pr-123-review');
-    });
-
     test('generates actual branch name for same-repo PR workflows', () => {
-      const request: IsolationRequest = {
+      const request: PRIsolationRequest = {
         codebaseId: 'cb-123',
         canonicalRepoPath: '/workspace/repo',
         workflowType: 'pr',
@@ -97,7 +87,7 @@ describe('WorktreeProvider', () => {
     });
 
     test('generates pr-N-review for fork PR workflows', () => {
-      const request: IsolationRequest = {
+      const request: PRIsolationRequest = {
         codebaseId: 'cb-123',
         canonicalRepoPath: '/workspace/repo',
         workflowType: 'pr',
@@ -345,17 +335,19 @@ describe('WorktreeProvider', () => {
       );
     });
 
-    test('creates worktree for PR without branch info (fallback to fork behavior)', async () => {
-      const request: IsolationRequest = {
-        ...baseRequest,
+    test('creates worktree for fork PR (uses synthetic review branch)', async () => {
+      const request: PRIsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
         workflowType: 'pr',
         identifier: '42',
-        // No prBranch or isForkPR - should use fork fallback
+        prBranch: 'feature/external',
+        isForkPR: true,
       };
 
       await provider.create(request);
 
-      // Verify fetch with PR ref (fallback behavior)
+      // Verify fetch with PR ref (fork behavior uses synthetic branch)
       expect(execSpy).toHaveBeenCalledWith(
         'git',
         expect.arrayContaining([
@@ -386,11 +378,13 @@ describe('WorktreeProvider', () => {
     });
 
     test('adopts worktree by PR branch name (skill symbiosis)', async () => {
-      const request: IsolationRequest = {
-        ...baseRequest,
+      const request: PRIsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
         workflowType: 'pr',
         identifier: '42',
         prBranch: 'feature/auth',
+        isForkPR: false,
       };
 
       // First check (expected path) returns false

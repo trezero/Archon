@@ -22,7 +22,14 @@ import {
   worktreeExists,
 } from '../../utils/git';
 import { copyWorktreeFiles } from '../../utils/worktree-copy';
-import type { IIsolationProvider, IsolatedEnvironment, IsolationRequest } from '../types';
+import type {
+  IIsolationProvider,
+  IsolatedEnvironment,
+  IsolationRequest,
+  PRIsolationRequest,
+  WorktreeDestroyOptions,
+  WorktreeEnvironment,
+} from '../types';
 
 export class WorktreeProvider implements IIsolationProvider {
   readonly providerType = 'worktree';
@@ -51,20 +58,33 @@ export class WorktreeProvider implements IIsolationProvider {
       branchName,
       status: 'active',
       createdAt: new Date(),
-      metadata: { request },
+      metadata: { adopted: false, request },
     };
   }
 
   /**
    * Destroy an isolated environment
-   * @param envId - The worktree path (used as environment ID)
-   * @param options - Options including force flag, branchName for cleanup, and canonicalRepoPath
+   *
+   * @param envId - The worktree path (for WorktreeProvider, envId IS the filesystem path)
+   * @param options - Cleanup options:
+   *   - force: Force removal even with uncommitted changes
+   *   - branchName: Delete the associated branch after worktree removal
+   *   - canonicalRepoPath: Required for branch cleanup if worktree path doesn't exist
+   *
+   * Cleanup behavior:
+   * - Worktree removal: Best-effort, continues if already removed
+   * - Directory cleanup: Best-effort, logs but doesn't fail if directory persists
+   * - Branch deletion: Best-effort, logs but doesn't fail
+   *
+   * **IMPORTANT: Branch cleanup limitation**
+   * If `branchName` is provided but the worktree path no longer exists AND
+   * `canonicalRepoPath` is not provided, branch deletion will be SILENTLY SKIPPED.
+   * A warning is logged but the method returns successfully. To ensure branch
+   * cleanup when the worktree may already be removed, always provide `canonicalRepoPath`.
+   *
+   * Throws only for unexpected errors (permissions, git failures).
    */
-  async destroy(
-    envId: string,
-    options?: { force?: boolean; branchName?: string; canonicalRepoPath?: string }
-  ): Promise<void> {
-    // For worktrees, envId is the worktree path
+  async destroy(envId: string, options?: WorktreeDestroyOptions): Promise<void> {
     const worktreePath = envId;
 
     // Check if worktree path exists before attempting removal (optimization to avoid spawning git)
@@ -81,9 +101,14 @@ export class WorktreeProvider implements IIsolationProvider {
       repoPath = await getCanonicalRepoPath(worktreePath);
     } else {
       // Path doesn't exist and no canonicalRepoPath provided - can't clean up branch
+      // This is expected when worktree was already fully cleaned up externally
       if (options?.branchName) {
         console.warn(
-          `[WorktreeProvider] Cannot delete branch ${options.branchName}: no canonical repo path available`
+          '[WorktreeProvider] Cannot delete branch: worktree path gone and no canonicalRepoPath provided',
+          {
+            branchName: options.branchName,
+            worktreePath,
+          }
         );
       }
       return;
@@ -176,6 +201,13 @@ export class WorktreeProvider implements IIsolationProvider {
 
   /**
    * Get environment by ID (worktree path)
+   *
+   * Note: createdAt is set to current time since git worktrees don't store
+   * creation timestamps. For accurate timestamps, store metadata in the
+   * database when creating environments.
+   *
+   * Returns null if worktree doesn't exist. May throw if underlying git
+   * operations fail with unexpected errors.
    */
   async get(envId: string): Promise<IsolatedEnvironment | null> {
     const worktreePath = envId;
@@ -189,14 +221,23 @@ export class WorktreeProvider implements IIsolationProvider {
     const worktrees = await listWorktrees(repoPath);
     const wt = worktrees.find(w => w.path === worktreePath);
 
+    // If worktree exists on disk but not in git's list, it's a corrupted state
+    if (!wt) {
+      console.warn('[WorktreeProvider] Worktree exists but not registered with git', {
+        worktreePath,
+        repoPath,
+      });
+      return null;
+    }
+
     return {
       id: envId,
       provider: 'worktree',
       workingPath: worktreePath,
-      branchName: wt?.branch,
+      branchName: wt.branch,
       status: 'active',
       createdAt: new Date(), // Cannot determine actual creation time
-      metadata: {},
+      metadata: { adopted: false },
     };
   }
 
@@ -218,12 +259,16 @@ export class WorktreeProvider implements IIsolationProvider {
         branchName: wt.branch,
         status: 'active' as const,
         createdAt: new Date(),
-        metadata: {},
+        metadata: { adopted: false },
       }));
   }
 
   /**
    * Adopt an existing worktree (for skill-app symbiosis)
+   *
+   * Returns null if:
+   * - Path doesn't exist or isn't a valid worktree
+   * - Worktree exists on disk but isn't registered with git (corrupted state)
    */
   async adopt(path: string): Promise<IsolatedEnvironment | null> {
     if (!(await worktreeExists(path))) {
@@ -235,6 +280,15 @@ export class WorktreeProvider implements IIsolationProvider {
     const wt = worktrees.find(w => w.path === path);
 
     if (!wt) {
+      // Worktree directory exists but isn't registered with git - possible corruption
+      console.warn(
+        '[WorktreeProvider] Adoption failed: worktree exists at path but not registered with git',
+        {
+          path,
+          repoPath,
+          registeredWorktreeCount: worktrees.length,
+        }
+      );
       return null;
     }
 
@@ -252,6 +306,11 @@ export class WorktreeProvider implements IIsolationProvider {
 
   /**
    * Check if environment exists and is healthy
+   *
+   * Delegates to `worktreeExists()` which checks both path and .git file access.
+   *
+   * @throws Error - May throw for permission denied or other I/O errors.
+   *                 Only returns false for missing paths (ENOENT).
    */
   async healthCheck(envId: string): Promise<boolean> {
     return worktreeExists(envId);
@@ -262,14 +321,18 @@ export class WorktreeProvider implements IIsolationProvider {
    *
    * For same-repo PRs: Use the actual PR branch name
    * For fork PRs: Use synthetic pr-N-review branch
+   *
+   * Branch names are sanitized via slugify() for thread/task types.
+   * Maximum length: 50 characters (task type only).
    */
   generateBranchName(request: IsolationRequest): string {
     switch (request.workflowType) {
       case 'issue':
         return `issue-${request.identifier}`;
       case 'pr':
+        // Type narrowing: request is PRIsolationRequest here
         // Same-repo PRs use actual branch, fork PRs use synthetic branch
-        if (!request.isForkPR && request.prBranch) {
+        if (!request.isForkPR) {
           return request.prBranch;
         }
         return `pr-${request.identifier}-review`;
@@ -312,7 +375,7 @@ export class WorktreeProvider implements IIsolationProvider {
     request: IsolationRequest,
     branchName: string,
     worktreePath: string
-  ): Promise<IsolatedEnvironment | null> {
+  ): Promise<WorktreeEnvironment | null> {
     // Check if worktree already exists at expected path
     if (await worktreeExists(worktreePath)) {
       console.log(`[WorktreeProvider] Adopting existing worktree: ${worktreePath}`);
@@ -328,7 +391,8 @@ export class WorktreeProvider implements IIsolationProvider {
     }
 
     // For PRs: also check if skill created a worktree with the PR's branch name
-    if (request.workflowType === 'pr' && request.prBranch) {
+    // Type narrowing: when workflowType === 'pr', request is PRIsolationRequest with prBranch required
+    if (request.workflowType === 'pr') {
       const existingByBranch = await findWorktreeByBranch(
         request.canonicalRepoPath,
         request.prBranch
@@ -472,7 +536,7 @@ export class WorktreeProvider implements IIsolationProvider {
     try {
       const copied = await copyWorktreeFiles(canonicalRepoPath, worktreePath, copyFiles);
       if (copied.length > 0) {
-        console.log(`[WorktreeProvider] Copied ${copied.length} file(s) to worktree`);
+        console.log(`[WorktreeProvider] Copied ${String(copied.length)} file(s) to worktree`);
       }
 
       // Log summary if some files were configured but not all were copied
@@ -480,7 +544,7 @@ export class WorktreeProvider implements IIsolationProvider {
       const copiedCount = copied.length;
       if (copiedCount < attemptedCount) {
         console.log(
-          `[WorktreeProvider] File copy summary: ${copiedCount}/${attemptedCount} succeeded (check logs above for details)`
+          `[WorktreeProvider] File copy summary: ${String(copiedCount)}/${String(attemptedCount)} succeeded (check logs above for details)`
         );
       }
     } catch (error) {
@@ -499,22 +563,23 @@ export class WorktreeProvider implements IIsolationProvider {
    *
    * For same-repo PRs: Use the actual branch name so changes push directly to PR
    * For fork PRs: Use synthetic branch (pr-N-review) since we can't push to forks
+   *
+   * When prSha is provided, the worktree is initially created at the specific
+   * commit (detached HEAD), then a local tracking branch is created.
    */
-  private async createFromPR(request: IsolationRequest, worktreePath: string): Promise<void> {
+  private async createFromPR(request: PRIsolationRequest, worktreePath: string): Promise<void> {
     // Clean up any orphan directory before creating worktree
     await this.cleanOrphanDirectoryIfExists(worktreePath);
 
     const repoPath = request.canonicalRepoPath;
     const prNumber = request.identifier;
-    const isForkPR = request.isForkPR ?? false;
-    const prBranch = request.prBranch;
 
     try {
-      if (!isForkPR && prBranch) {
+      if (!request.isForkPR) {
         // Same-repo PR: Use the actual branch so changes push directly to PR
-        await this.createFromSameRepoPR(repoPath, worktreePath, prBranch);
+        await this.createFromSameRepoPR(repoPath, worktreePath, request.prBranch);
       } else {
-        // Fork PR or no branch info: Use synthetic review branch
+        // Fork PR: Use synthetic review branch
         await this.createFromForkPR(repoPath, worktreePath, prNumber, request.prSha);
       }
     } catch (error) {
@@ -700,7 +765,9 @@ export class WorktreeProvider implements IIsolationProvider {
       if (err.code === 'ENOENT') {
         return false;
       }
-      throw new Error(`Failed to check directory at ${path}: ${err.message}`);
+      throw new Error(
+        `Failed to check directory at ${path}: ${err.message} (code: ${err.code ?? 'unknown'})`
+      );
     }
   }
 

@@ -36,6 +36,9 @@ export function getWorktreeBase(_repoPath: string): string {
 /**
  * Check if a worktree already exists at the given path
  * A valid worktree has both the directory and a .git file/directory
+ *
+ * Only returns false for ENOENT (path doesn't exist).
+ * Throws for unexpected errors (permission denied, I/O errors, etc.)
  */
 export async function worktreeExists(worktreePath: string): Promise<boolean> {
   try {
@@ -43,14 +46,27 @@ export async function worktreeExists(worktreePath: string): Promise<boolean> {
     const gitPath = join(worktreePath, '.git');
     await access(gitPath);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === 'ENOENT') {
+      return false;
+    }
+    // Unexpected error - permission denied, I/O error, etc.
+    console.error('[Git] Failed to check worktree existence', {
+      worktreePath,
+      error: err.message,
+      code: err.code,
+    });
+    throw new Error(`Failed to check worktree at ${worktreePath}: ${err.message}`);
   }
 }
 
 /**
  * List all worktrees for a repository
  * Returns array of {path, branch} objects parsed from git worktree list --porcelain
+ *
+ * Only returns [] for expected "not a git repository" errors.
+ * Throws for unexpected errors (permission denied, git not found, etc.)
  */
 export async function listWorktrees(repoPath: string): Promise<{ path: string; branch: string }[]> {
   try {
@@ -75,8 +91,25 @@ export async function listWorktrees(repoPath: string): Promise<{ path: string; b
     }
 
     return worktrees;
-  } catch {
-    return [];
+  } catch (error) {
+    const err = error as Error & { code?: string; stderr?: string };
+    const errorText = `${err.message} ${err.stderr ?? ''}`;
+
+    // Expected: not a git repository - return empty list
+    if (
+      errorText.includes('not a git repository') ||
+      errorText.includes('No such file or directory')
+    ) {
+      return [];
+    }
+
+    // Unexpected error - log and throw
+    console.error('[Git] Failed to list worktrees', {
+      repoPath,
+      error: err.message,
+      code: err.code,
+    });
+    throw new Error(`Failed to list worktrees for ${repoPath}: ${err.message}`);
   }
 }
 
@@ -107,6 +140,9 @@ export async function findWorktreeByBranch(
 /**
  * Check if a path is inside a git worktree (vs main repo)
  * Worktrees have a .git FILE, main repos have a .git DIRECTORY
+ *
+ * Returns false for expected cases (ENOENT, EISDIR - main repo).
+ * Throws for unexpected errors since this function is used for critical path decisions.
  */
 export async function isWorktreePath(path: string): Promise<boolean> {
   try {
@@ -120,13 +156,13 @@ export async function isWorktreePath(path: string): Promise<boolean> {
     if (err.code === 'ENOENT' || err.code === 'EISDIR') {
       return false;
     }
-    // Unexpected error - log warning but don't crash (graceful degradation)
-    console.error('[Git] Unexpected error checking worktree status:', {
+    // Unexpected error - throw since this affects critical path decisions
+    console.error('[Git] Failed to check worktree status', {
       path,
       error: err.message,
       code: err.code,
     });
-    return false;
+    throw new Error(`Cannot determine if ${path} is a worktree: ${err.message}`);
   }
 }
 
