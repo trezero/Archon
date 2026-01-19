@@ -115,7 +115,7 @@ steps: []
       expect(workflows).toHaveLength(0);
     });
 
-    it('should default provider to claude when not specified', async () => {
+    it('should leave provider undefined when not specified (executor handles fallback)', async () => {
       const workflowDir = join(testDir, '.archon', 'workflows');
       await mkdir(workflowDir, { recursive: true });
 
@@ -129,10 +129,10 @@ steps:
       const workflows = await discoverWorkflows(testDir);
 
       expect(workflows).toHaveLength(1);
-      expect(workflows[0].provider).toBe('claude');
+      expect(workflows[0].provider).toBeUndefined();
     });
 
-    it('should validate provider to union type', async () => {
+    it('should treat invalid provider as undefined (executor handles fallback)', async () => {
       const workflowDir = join(testDir, '.archon', 'workflows');
       await mkdir(workflowDir, { recursive: true });
 
@@ -146,9 +146,9 @@ steps:
 
       const workflows = await discoverWorkflows(testDir);
 
-      // Invalid provider should default to claude
+      // Invalid provider treated as undefined - executor will fall back to config
       expect(workflows).toHaveLength(1);
-      expect(workflows[0].provider).toBe('claude');
+      expect(workflows[0].provider).toBeUndefined();
     });
   });
 

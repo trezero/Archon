@@ -152,9 +152,9 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
       }
     }
 
-    // Validate provider (default to 'claude')
+    // Validate provider (leave undefined if not specified - executor handles fallback to config)
     const provider =
-      raw.provider === 'claude' || raw.provider === 'codex' ? raw.provider : 'claude';
+      raw.provider === 'claude' || raw.provider === 'codex' ? raw.provider : undefined;
     const model = typeof raw.model === 'string' ? raw.model : undefined;
 
     // Return appropriate workflow type based on discriminated union
