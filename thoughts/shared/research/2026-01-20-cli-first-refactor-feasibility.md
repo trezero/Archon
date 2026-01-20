@@ -5,11 +5,11 @@ git_commit: 7fb5fc0c0389e5696eaf6ea90f8faa30af72530c
 branch: main
 repository: remote-coding-agent
 topic: 'CLI-First Architecture Refactor Feasibility Analysis'
-tags: [research, architecture, cli, refactor, elysia, hono, express]
+tags: [research, architecture, cli, refactor, elysia, hono, express, sqlite, database]
 status: complete
 last_updated: 2026-01-20
 last_updated_by: Claude
-last_updated_note: 'Added implementation phases with success criteria and dependencies'
+last_updated_note: 'Added SQLite strategy decision - database abstraction moved to Phase 3'
 ---
 
 # Research: CLI-First Architecture Refactor Feasibility
@@ -838,17 +838,144 @@ This adds moderate complexity to the CLI refactor:
 - **Dashboard framework**: Svelte 5 / SvelteKit (decided)
 - **CLI isolation**: Worktrees by default with `--branch` flag, `--no-worktree` escape hatch (decided)
 - **HTTP framework**: Hono (decided)
+- **Package structure**: Monorepo with `@archon/core`, `@archon/cli`, `@archon/server` (implemented in Phase 1)
+- **Conversation IDs for CLI**: Timestamp-based format `cli-{timestamp}-{random}` (implemented in Phase 2)
+- **Database for CLI-only**: SQLite with auto-detection (decided - see detailed analysis below)
 
 ### Still Open
 
-1. **Conversation IDs for CLI**: Use timestamp-based IDs? Branch-based? User-specified?
-2. **Session persistence**: Should CLI sessions resume across invocations?
-3. **Concurrent CLI + Server**: How to handle both accessing same database?
-4. **Authentication**: Should CLI require any auth for multi-user scenarios?
-5. **Package structure**: Monorepo with shared core, or single package with optional server?
-6. **Database for CLI-only**: SQLite for standalone CLI, PostgreSQL for server?
-7. **Workflow builder storage**: Where do dashboard-created workflows get saved? User's repo? Central location?
-8. **Default branch behavior**: If no `--branch` specified, should CLI run in cwd or require explicit flag?
+1. **Session persistence**: Should CLI sessions resume across invocations?
+2. **Concurrent CLI + Server**: How to handle both accessing same database?
+3. **Authentication**: Should CLI require any auth for multi-user scenarios?
+4. **Workflow builder storage**: Where do dashboard-created workflows get saved? User's repo? Central location?
+5. **Default branch behavior**: If no `--branch` specified, should CLI run in cwd or require explicit flag?
+
+---
+
+## Database Strategy Decision: SQLite for Standalone CLI
+
+### The Problem
+
+The CLI currently requires `DATABASE_URL` to be set, pointing to a PostgreSQL database. This creates friction for standalone CLI usage:
+
+1. Users must have PostgreSQL running (or a cloud database)
+2. `brew install archon` won't "just work" - requires additional setup
+3. Defeats the purpose of a lightweight, portable CLI tool
+
+### Decision: Embedded SQLite with Auto-Detection
+
+**The CLI will use SQLite by default**, with automatic PostgreSQL detection:
+
+```
+CLI Startup
+    │
+    ▼
+┌─────────────────┐
+│  DATABASE_URL   │
+│     set?        │
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    │ Yes     │ No
+    ▼         ▼
+┌─────────┐  ┌──────────────────┐
+│PostgreSQL│  │ SQLite           │
+│(shared   │  │ ~/.archon/       │
+│ w/server)│  │ archon.db        │
+└─────────┘  └──────────────────┘
+```
+
+**Why this approach:**
+
+- **Zero config for CLI users** - `archon workflow run` works immediately
+- **Power users can share state** - Set `DATABASE_URL` to use server's PostgreSQL
+- **No sync complexity** - User chooses one database, not both
+- **Bun has SQLite built-in** - `bun:sqlite` requires no external dependencies
+
+### Why Phase 3, Not Phase 5
+
+**Original thinking**: SQLite was listed as "optional" for Phase 5 (binary distribution).
+
+**Problem with that approach**:
+
+1. Phase 3 adds isolation (`--branch`, `--no-worktree`) which requires database tracking
+2. Phase 5 is about **compiling and distributing** the binary, not adding features
+3. If we wait until Phase 5, we'd have built Phase 3 and 4 all assuming PostgreSQL-only
+4. Retrofitting database abstraction after building more features = more rework
+
+**Phase 3 is the natural place** because:
+
+1. It's where CLI becomes "serious" (isolation, worktree management)
+2. It's where database becomes mandatory for CLI (tracking isolation environments)
+3. It's before Phase 5, so the binary distribution gets SQLite "for free"
+4. It keeps Phase 5 focused on distribution mechanics, not feature development
+
+### Current Database Layer Analysis
+
+**6 database modules** in `packages/core/src/db/`:
+
+- `connection.ts` - PostgreSQL pool (22 lines)
+- `conversations.ts` - Conversation CRUD (~150 lines)
+- `sessions.ts` - Session management (~100 lines)
+- `codebases.ts` - Codebase/repo tracking (~95 lines)
+- `workflows.ts` - Workflow run tracking (~180 lines)
+- `isolation-environments.ts` - Worktree tracking (~200 lines)
+- `command-templates.ts` - Global templates (~60 lines)
+
+**PostgreSQL-specific features used:**
+| Feature | Usage | SQLite Equivalent |
+|---------|-------|-------------------|
+| `::jsonb` cast | Metadata merging | `json()` function |
+| `NOW()` | Timestamps | `datetime('now')` |
+| `gen_random_uuid()` | Schema UUIDs | `crypto.randomUUID()` in app |
+| `metadata \|\| $1::jsonb` | JSON merge | `json_patch()` |
+| `INTERVAL` | Date arithmetic | Manual calculation |
+| `EXTRACT(EPOCH FROM ...)` | Time calculations | `strftime('%s', ...)` |
+
+**Estimated migration effort**: 2-3 days (included in Phase 3)
+
+### Implementation Approach
+
+1. **Create `IDatabase` interface:**
+
+```typescript
+interface IDatabase {
+  query<T>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
+  close(): Promise<void>;
+}
+```
+
+2. **Adapter implementations:**
+
+- `packages/core/src/db/adapters/postgres.ts` - Wraps existing `pg` Pool
+- `packages/core/src/db/adapters/sqlite.ts` - Uses `bun:sqlite`
+
+3. **Auto-detection in connection.ts:**
+
+```typescript
+export function getDatabase(): IDatabase {
+  if (process.env.DATABASE_URL) {
+    return new PostgresAdapter(process.env.DATABASE_URL);
+  }
+  const dbPath = join(getArchonHome(), 'archon.db');
+  return new SqliteAdapter(dbPath);
+}
+```
+
+4. **Schema parity:**
+
+- Same table names and structures
+- SQLite schema in `migrations/sqlite/`
+- Auto-create tables on first run
+
+### What This Means for Each Consumer
+
+| Consumer          | Database         | Notes                            |
+| ----------------- | ---------------- | -------------------------------- |
+| CLI (standalone)  | SQLite           | Zero config, works immediately   |
+| CLI (with server) | PostgreSQL       | Set `DATABASE_URL`, shares state |
+| Server            | PostgreSQL       | Always (production workload)     |
+| Tests             | SQLite in-memory | Fast, isolated                   |
 
 ---
 
@@ -864,20 +991,26 @@ The refactor is broken into focused phases. Each phase:
 ### Phase Overview
 
 ```
-Phase 1: Monorepo Structure + Core Package
+Phase 1: Monorepo Structure + Core Package        [COMPLETE]
          ↓
-Phase 2: CLI Entry Point + Basic Commands
+Phase 2: CLI Entry Point + Basic Commands         [COMPLETE]
          ↓
-Phase 3: CLI Isolation Orchestration
+Phase 3: Database Abstraction + CLI Isolation     ← SQLite support here!
+         ├── Part A: Database adapter layer (SQLite + PostgreSQL)
+         └── Part B: CLI isolation (--branch, --no-worktree)
          ↓
 Phase 4: Express → Hono Migration
          ↓
-Phase 5: CLI Binary Distribution
+Phase 5: CLI Binary Distribution                  ← Distribution only, no features
          ↓
 Phase 6: Svelte 5 Dashboard (future)
          ↓
 Phase 7: Visual Workflow Builder (future)
 ```
+
+**Key insight**: Database abstraction (SQLite) is in Phase 3, NOT Phase 5.
+Phase 5 is purely about compiling and distributing the binary - all features
+including SQLite support are complete before we get there.
 
 ---
 
@@ -998,13 +1131,73 @@ Phase 7: Visual Workflow Builder (future)
 
 ---
 
-### Phase 3: CLI Isolation Orchestration
+### Phase 3: Database Abstraction + CLI Isolation
 
-**Goal**: Add `--branch` and `--no-worktree` flags to CLI for isolation management.
+**Goal**: Add SQLite support for standalone CLI usage AND add `--branch`/`--no-worktree` flags for isolation management.
 
-**Why this third**: Isolation is core to the workflow. Running without isolation works, but running with isolation is the primary use case.
+**Why this third**:
+
+1. Isolation requires database tracking (`isolation_environments` table)
+2. For standalone CLI distribution (Phase 5), we can't require PostgreSQL
+3. This is the right time to abstract the database layer - before building more features on top
+4. Combining these keeps Phase 3 focused on "making CLI production-ready"
+
+**Why database abstraction belongs here, not Phase 5**:
+
+- Phase 5 is about **compiling and distributing** binaries, not adding features
+- If we wait until Phase 5, we'd retrofit database abstraction after building Phase 3 and 4
+- The binary won't "just work" without SQLite - it would still require PostgreSQL
+- Phase 3 isolation features need database tracking anyway - perfect time to make it flexible
 
 **Scope**:
+
+#### Part A: Database Abstraction Layer (2-3 days)
+
+1. Create database adapter interface:
+
+   ```typescript
+   // packages/core/src/db/types.ts
+   interface IDatabase {
+     query<T>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
+     close(): Promise<void>;
+   }
+   ```
+
+2. Extract PostgreSQL adapter:
+   - `packages/core/src/db/adapters/postgres.ts`
+   - Wraps existing `pg` Pool
+   - Same behavior as current `connection.ts`
+
+3. Create SQLite adapter:
+   - `packages/core/src/db/adapters/sqlite.ts`
+   - Uses `bun:sqlite` (built into Bun, zero dependencies)
+   - Auto-creates `~/.archon/archon.db` on first use
+   - Auto-runs migrations to create tables
+
+4. Update `connection.ts` with auto-detection:
+
+   ```typescript
+   export function getDatabase(): IDatabase {
+     if (process.env.DATABASE_URL) {
+       return new PostgresAdapter(process.env.DATABASE_URL);
+     }
+     return new SqliteAdapter(join(getArchonHome(), 'archon.db'));
+   }
+   ```
+
+5. Create SQLite-compatible schema:
+   - `migrations/sqlite/001_initial_schema.sql`
+   - Same tables, SQLite syntax
+   - Replace `gen_random_uuid()` with app-generated UUIDs
+   - Replace `NOW()` with `datetime('now')`
+   - Replace `::jsonb` with `json()` function
+
+6. Update all database modules to use adapter:
+   - `conversations.ts`, `sessions.ts`, `codebases.ts`, etc.
+   - Replace direct `pool.query()` with `db.query()`
+   - Handle SQL dialect differences (NOW() vs datetime('now'))
+
+#### Part B: CLI Isolation Orchestration (2-3 days)
 
 1. Extract isolation orchestration to `@archon/core`:
    - Create `packages/core/src/isolation/orchestrator.ts`
@@ -1031,12 +1224,27 @@ Phase 7: Visual Workflow Builder (future)
 
 **Success criteria**:
 
+Database Abstraction:
+
+- `bun run cli workflow list` works **without** `DATABASE_URL` set (uses SQLite)
+- `bun run cli workflow list` works **with** `DATABASE_URL` set (uses PostgreSQL)
+- All existing tests pass with both adapters
+- Server continues to work with PostgreSQL (no behavior change)
+
+CLI Isolation:
+
 - `archon workflow run plan --branch test-branch "Test"` creates worktree
 - Worktree appears in `archon isolation list`
 - Same worktree is reused for subsequent runs on same branch
 - Adapters (GitHub, Slack) still work with shared isolation code
 
-**Estimated effort**: 2-3 days
+**Estimated effort**: 4-6 days total (can be split into two sub-PRs)
+
+**Risk mitigation**:
+
+- Implement database abstraction first, then isolation features
+- Run full test suite after each major change
+- Keep PostgreSQL as the "known good" path, add SQLite incrementally
 
 ---
 
@@ -1084,7 +1292,13 @@ Phase 7: Visual Workflow Builder (future)
 
 **Goal**: Create standalone binary and distribution channels.
 
-**Why this fifth**: CLI is feature-complete, now make it distributable.
+**Why this fifth**: CLI is feature-complete (including SQLite support from Phase 3), now make it distributable.
+
+**Prerequisites from Phase 3**:
+
+- SQLite adapter implemented (zero external database dependencies)
+- Auto-detection working (DATABASE_URL → PostgreSQL, else → SQLite)
+- CLI works standalone without any setup
 
 **Scope**:
 
@@ -1117,9 +1331,13 @@ Phase 7: Visual Workflow Builder (future)
 - `brew install archon` works on macOS
 - curl script works on Linux/macOS
 - Binary runs without Bun installed
+- Binary runs without PostgreSQL (uses embedded SQLite)
+- `archon workflow list` works immediately after install (zero config)
 - Version command shows correct version
 
 **Estimated effort**: 1-2 days
+
+**Note**: This phase is purely about distribution mechanics. All database and feature work is done in Phase 3.
 
 ---
 
@@ -1166,7 +1384,7 @@ Phase 7: Visual Workflow Builder (future)
 ```
                     ┌──────────────────┐
                     │     Phase 1      │
-                    │ Monorepo + Core  │
+                    │ Monorepo + Core  │ [COMPLETE]
                     └────────┬─────────┘
                              │
               ┌──────────────┼──────────────┐
@@ -1174,24 +1392,30 @@ Phase 7: Visual Workflow Builder (future)
      ┌────────────────┐ ┌────────────┐ ┌────────────┐
      │    Phase 2     │ │  Phase 4   │ │  (future)  │
      │  CLI Entry     │ │  Hono      │ │  Phase 6   │
-     └───────┬────────┘ └────────────┘ │  Dashboard │
-             │                         └─────┬──────┘
-             ▼                               │
-     ┌────────────────┐                      ▼
-     │    Phase 3     │              ┌────────────┐
-     │  CLI Isolation │              │  Phase 7   │
-     └───────┬────────┘              │  Workflow  │
-             │                       │  Builder   │
-             ▼                       └────────────┘
+     │  [COMPLETE]    │ └────────────┘ │  Dashboard │
+     └───────┬────────┘                └─────┬──────┘
+             │                               │
+             ▼                               ▼
+     ┌────────────────┐              ┌────────────┐
+     │    Phase 3     │              │  Phase 7   │
+     │  DB Abstraction│              │  Workflow  │
+     │  + Isolation   │              │  Builder   │
+     │  (SQLite here!)│              └────────────┘
+     └───────┬────────┘
+             │
+             ▼
      ┌────────────────┐
      │    Phase 5     │
      │  Distribution  │
+     │  (binary only) │
      └────────────────┘
 ```
 
 **Notes**:
 
-- Phase 4 (Hono) can happen in parallel with Phase 2/3
+- **Phase 3 includes SQLite** - This is critical. Database abstraction happens here, not Phase 5.
+- Phase 4 (Hono) can happen in parallel with Phase 3
+- Phase 5 depends on Phase 3 completing (SQLite required for standalone binary)
 - Phase 6/7 are independent of Phase 5, can start earlier if desired
 - Each phase can be a separate PR for easier review
 
@@ -1213,11 +1437,13 @@ Phase 7: Visual Workflow Builder (future)
 
 ## Risk Mitigation
 
-| Phase | Key Risk                           | Mitigation                                            |
-| ----- | ---------------------------------- | ----------------------------------------------------- |
-| 1     | Breaking imports during extraction | Incremental moves, run tests after each               |
-| 2     | Database connection from CLI       | Same connection code as server, test early            |
-| 3     | Isolation state conflicts          | Use same `isolation_environments` table, transactions |
-| 4     | Webhook signature verification     | Test with real GitHub webhooks before merging         |
-| 5     | Binary size too large              | Accept ~50-100MB, Bun runtime is included             |
-| 6-7   | Scope creep                        | Keep MVP focused, iterate later                       |
+| Phase | Key Risk                           | Mitigation                                                       |
+| ----- | ---------------------------------- | ---------------------------------------------------------------- |
+| 1     | Breaking imports during extraction | Incremental moves, run tests after each                          |
+| 2     | Database connection from CLI       | Same connection code as server, test early                       |
+| 3a    | SQL dialect differences            | Abstract queries, test both adapters, keep PostgreSQL as primary |
+| 3a    | SQLite missing features            | Use json() instead of JSONB, app-generated UUIDs                 |
+| 3b    | Isolation state conflicts          | Use same `isolation_environments` table, transactions            |
+| 4     | Webhook signature verification     | Test with real GitHub webhooks before merging                    |
+| 5     | Binary size too large              | Accept ~50-100MB, Bun runtime is included                        |
+| 6-7   | Scope creep                        | Keep MVP focused, iterate later                                  |
