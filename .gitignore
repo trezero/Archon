@@ -69,3 +69,4 @@ worktrees
 .agents/context
 .agents/posts
 .agents/PRODUCT.md
+packages/server/.env

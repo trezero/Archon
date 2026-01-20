@@ -3,8 +3,6 @@
     "target": "ES2022",
     "module": "ESNext",
     "lib": ["ES2022"],
-    "outDir": "./dist",
-    "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -19,7 +17,5 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "types": ["bun-types"]
-  },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+  }
 }

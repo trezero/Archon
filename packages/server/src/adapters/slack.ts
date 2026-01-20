@@ -3,8 +3,9 @@
  * Handles message sending with markdown block formatting for AI responses
  */
 import { App, LogLevel } from '@slack/bolt';
-import { IPlatformAdapter } from '../types';
-import { parseAllowedUserIds, isSlackUserAuthorized } from '../utils/slack-auth';
+import type { IPlatformAdapter } from '@archon/core';
+import { isSlackUserAuthorized } from '@archon/core';
+import { parseAllowedUserIds } from '@archon/core/utils/slack-auth';
 
 const MAX_MARKDOWN_BLOCK_LENGTH = 12000; // Slack markdown block limit
 

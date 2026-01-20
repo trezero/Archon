@@ -4,22 +4,27 @@
  */
 import { Octokit } from '@octokit/rest';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { IPlatformAdapter, IsolationHints, ConversationNotFoundError } from '../types';
-import { handleMessage } from '../orchestrator/orchestrator';
-import { classifyAndFormatError } from '../utils/error-formatter';
-import * as db from '../db/conversations';
-import * as codebaseDb from '../db/codebases';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { readdir, access } from 'fs/promises';
 import { join } from 'path';
-import { parseAllowedUsers, isGitHubUserAuthorized } from '../utils/github-auth';
-import { getLinkedIssueNumbers } from '../utils/github-graphql';
-import { onConversationClosed } from '../services/cleanup-service';
-import { isWorktreePath } from '../utils/git';
-import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
-import { copyDefaultsToRepo } from '../utils/defaults-copy';
-import { ConversationLockManager } from '../utils/conversation-lock';
+import type { IPlatformAdapter, IsolationHints } from '@archon/core';
+import {
+  ConversationNotFoundError,
+  handleMessage,
+  classifyAndFormatError,
+  parseGitHubAllowedUsers,
+  isGitHubUserAuthorized,
+  getLinkedIssueNumbers,
+  onConversationClosed,
+  isWorktreePath,
+  getArchonWorkspacesPath,
+  getCommandFolderSearchPaths,
+  copyDefaultsToRepo,
+  ConversationLockManager,
+} from '@archon/core';
+import * as db from '@archon/core/db/conversations';
+import * as codebaseDb from '@archon/core/db/codebases';
 
 const execAsync = promisify(exec);
 
@@ -79,7 +84,7 @@ export class GitHubAdapter implements IPlatformAdapter {
     this.botMention = botMention ?? 'Archon';
 
     // Parse GitHub user whitelist (optional - empty = open access)
-    this.allowedUsers = parseAllowedUsers(process.env.GITHUB_ALLOWED_USERS);
+    this.allowedUsers = parseGitHubAllowedUsers(process.env.GITHUB_ALLOWED_USERS);
     if (this.allowedUsers.length > 0) {
       console.log(`[GitHub] User whitelist enabled (${this.allowedUsers.length} users)`);
     } else {
@@ -397,7 +402,11 @@ export class GitHubAdapter implements IPlatformAdapter {
    * Fetch comment history from issue or PR
    * Returns comments in chronological order (oldest first)
    */
-  private async fetchCommentHistory(owner: string, repo: string, number: number): Promise<string[]> {
+  private async fetchCommentHistory(
+    owner: string,
+    repo: string,
+    number: number
+  ): Promise<string[]> {
     try {
       const { data: comments } = await this.octokit.rest.issues.listComments({
         owner,
@@ -763,10 +772,13 @@ ${userComment}`;
         });
       } catch (updateError) {
         if (updateError instanceof ConversationNotFoundError) {
-          console.error('[GitHub] Failed to link conversation to codebase - conversation not found', {
-            conversationId: existingConv.id,
-            codebaseId: codebase.id,
-          });
+          console.error(
+            '[GitHub] Failed to link conversation to codebase - conversation not found',
+            {
+              conversationId: existingConv.id,
+              codebaseId: codebase.id,
+            }
+          );
           // Re-throw as this is a critical setup step
           throw new Error('Failed to set up GitHub conversation - please try again');
         }

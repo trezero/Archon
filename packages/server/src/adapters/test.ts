@@ -2,7 +2,7 @@
  * Test adapter for validation
  * Exposes HTTP endpoints to send/receive messages for testing
  */
-import { IPlatformAdapter } from '../types';
+import type { IPlatformAdapter } from '@archon/core';
 
 interface TestMessage {
   conversationId: string;

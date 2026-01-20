@@ -234,16 +234,15 @@ describe('CodexClient', () => {
       }
 
       // Verify item.started logging with correct format
-      expect(consoleSpy).toHaveBeenCalledWith(
-        '[Codex] item.started: command_execution',
-        { id: 'item-1' }
-      );
+      expect(consoleSpy).toHaveBeenCalledWith('[Codex] item.started: command_execution', {
+        id: 'item-1',
+      });
 
       // Verify item.completed logging includes command context
-      expect(consoleSpy).toHaveBeenCalledWith(
-        '[Codex] item.completed: command_execution',
-        { id: 'item-1', command: 'npm test' }
-      );
+      expect(consoleSpy).toHaveBeenCalledWith('[Codex] item.completed: command_execution', {
+        id: 'item-1',
+        command: 'npm test',
+      });
 
       consoleSpy.mockRestore();
     });

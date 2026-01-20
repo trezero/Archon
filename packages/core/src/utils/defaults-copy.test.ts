@@ -60,7 +60,7 @@ describe('defaults-copy', () => {
   describe('copyDefaultsToRepo', () => {
     test('copies commands when target has none', async () => {
       // Target has no .archon/commands/ (access throws)
-      accessSpy.mockImplementation(async (path) => {
+      accessSpy.mockImplementation(async path => {
         if (String(path).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
@@ -88,7 +88,7 @@ describe('defaults-copy', () => {
 
     test('skips if target already has commands directory', async () => {
       // Target already has .archon/commands/ (access succeeds)
-      accessSpy.mockImplementation(async (path) => {
+      accessSpy.mockImplementation(async path => {
         if (String(path).includes('target/.archon/commands')) {
           return; // Exists
         }
@@ -145,7 +145,7 @@ describe('defaults-copy', () => {
     });
 
     test('only copies .md files for commands', async () => {
-      accessSpy.mockImplementation(async (path) => {
+      accessSpy.mockImplementation(async path => {
         if (String(path).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
@@ -155,7 +155,7 @@ describe('defaults-copy', () => {
         return;
       });
 
-      readdirSpy.mockImplementation(async (path) => {
+      readdirSpy.mockImplementation(async path => {
         if (String(path).includes('commands')) {
           return [
             createMockDirent('assist.md', true),
@@ -172,7 +172,7 @@ describe('defaults-copy', () => {
     });
 
     test('only copies .yaml/.yml files for workflows', async () => {
-      accessSpy.mockImplementation(async (path) => {
+      accessSpy.mockImplementation(async path => {
         if (String(path).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
@@ -182,7 +182,7 @@ describe('defaults-copy', () => {
         return;
       });
 
-      readdirSpy.mockImplementation(async (path) => {
+      readdirSpy.mockImplementation(async path => {
         if (String(path).includes('workflows')) {
           return [
             createMockDirent('fix-issue.yaml', true),
@@ -199,7 +199,7 @@ describe('defaults-copy', () => {
     });
 
     test('creates target directories before copying', async () => {
-      accessSpy.mockImplementation(async (path) => {
+      accessSpy.mockImplementation(async path => {
         if (String(path).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
@@ -209,7 +209,7 @@ describe('defaults-copy', () => {
         return;
       });
 
-      readdirSpy.mockImplementation(async (path) => {
+      readdirSpy.mockImplementation(async path => {
         if (String(path).includes('commands')) {
           return [createMockDirent('assist.md', true)] as Dirent[];
         }
@@ -222,7 +222,7 @@ describe('defaults-copy', () => {
     });
 
     test('handles file copy errors gracefully and tracks failures', async () => {
-      accessSpy.mockImplementation(async (path) => {
+      accessSpy.mockImplementation(async path => {
         if (String(path).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
@@ -232,7 +232,7 @@ describe('defaults-copy', () => {
         return;
       });
 
-      readdirSpy.mockImplementation(async (path) => {
+      readdirSpy.mockImplementation(async path => {
         if (String(path).includes('commands')) {
           return [
             createMockDirent('assist.md', true),
@@ -253,7 +253,7 @@ describe('defaults-copy', () => {
     });
 
     test('handles mkdir failure gracefully', async () => {
-      accessSpy.mockImplementation(async (path) => {
+      accessSpy.mockImplementation(async path => {
         if (String(path).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
@@ -263,7 +263,7 @@ describe('defaults-copy', () => {
         return;
       });
 
-      readdirSpy.mockImplementation(async (path) => {
+      readdirSpy.mockImplementation(async path => {
         if (String(path).includes('commands')) {
           return [createMockDirent('assist.md', true)] as Dirent[];
         }
@@ -282,7 +282,7 @@ describe('defaults-copy', () => {
     });
 
     test('copies both commands and workflows in same call', async () => {
-      accessSpy.mockImplementation(async (path) => {
+      accessSpy.mockImplementation(async path => {
         if (String(path).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
@@ -292,7 +292,7 @@ describe('defaults-copy', () => {
         return;
       });
 
-      readdirSpy.mockImplementation(async (path) => {
+      readdirSpy.mockImplementation(async path => {
         if (String(path).includes('commands')) {
           return [
             createMockDirent('assist.md', true),
@@ -319,7 +319,7 @@ describe('defaults-copy', () => {
     });
 
     test('does not create directory when no files to copy', async () => {
-      accessSpy.mockImplementation(async (path) => {
+      accessSpy.mockImplementation(async path => {
         if (String(path).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }

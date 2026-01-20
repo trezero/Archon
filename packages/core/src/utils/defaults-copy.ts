@@ -84,7 +84,7 @@ async function copyFiles(options: CopyFilesOptions): Promise<CopyFilesResult> {
   }
 
   const matchingFiles = entries.filter(
-    (entry) => entry.isFile() && extensions.some((ext) => entry.name.endsWith(ext))
+    entry => entry.isFile() && extensions.some(ext => entry.name.endsWith(ext))
   );
 
   if (matchingFiles.length === 0) {

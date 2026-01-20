@@ -78,7 +78,7 @@ bun test
 bun test --watch
 
 # Run specific test file
-bun test src/handlers/command-handler.test.ts
+bun test packages/core/src/handlers/command-handler.test.ts
 ```
 
 ### Type Checking
@@ -171,32 +171,67 @@ See [Cloud Deployment Guide](docs/cloud-deployment.md) for complete setup instru
 
 ### Directory Structure
 
+**Monorepo Layout (Bun Workspaces):**
+
 ```
-src/
-├── adapters/       # Platform adapters (Slack, Telegram, GitHub)
-│   ├── slack.ts
-│   ├── telegram.ts
-│   └── github.ts
-├── clients/        # AI assistant clients (Claude, Codex)
-│   ├── claude.ts
-│   └── codex.ts
-├── handlers/       # Command handler (slash commands)
-│   └── command-handler.ts
-├── orchestrator/   # AI conversation management
-│   └── orchestrator.ts
-├── db/             # Database connection, queries
-│   ├── connection.ts
-│   ├── conversations.ts
-│   ├── codebases.ts
-│   └── sessions.ts
-├── types/          # TypeScript types and interfaces
-│   └── index.ts
-├── utils/          # Shared utilities
-│   ├── variable-substitution.ts
-│   ├── git.ts      # Git operations (commits, status checks)
-│   └── archon-paths.ts
-└── index.ts        # Entry point (Express server)
+packages/
+├── core/                     # @archon/core - Shared business logic
+│   └── src/
+│       ├── clients/          # AI SDK clients (Claude, Codex)
+│       ├── config/           # YAML config loading
+│       ├── db/               # Database connection, queries
+│       │   ├── connection.ts
+│       │   ├── conversations.ts
+│       │   ├── codebases.ts
+│       │   └── sessions.ts
+│       ├── handlers/         # Command handler (slash commands)
+│       ├── isolation/        # Git worktree management
+│       ├── orchestrator/     # AI conversation management
+│       ├── services/         # Background services (cleanup)
+│       ├── state/            # Session state machine
+│       ├── types/            # TypeScript types and interfaces
+│       ├── utils/            # Shared utilities
+│       │   ├── variable-substitution.ts
+│       │   ├── git.ts
+│       │   └── archon-paths.ts
+│       ├── workflows/        # YAML workflow engine
+│       └── index.ts          # Package exports
+└── server/                   # @archon/server - HTTP server + adapters
+    └── src/
+        ├── adapters/         # Platform adapters (Slack, Telegram, GitHub, Discord, Test)
+        │   ├── slack.ts
+        │   ├── telegram.ts
+        │   ├── github.ts
+        │   ├── discord.ts
+        │   └── test.ts
+        ├── scripts/          # Setup utilities
+        └── index.ts          # Express server entry point
 ```
+
+**Import Patterns:**
+
+**IMPORTANT**: Always use typed imports - never use generic `import *` for the main package.
+
+```typescript
+// ✅ CORRECT: Use `import type` for type-only imports
+import type { IPlatformAdapter, Conversation, MergedConfig } from '@archon/core';
+
+// ✅ CORRECT: Use specific named imports for values
+import { handleMessage, ConversationLockManager, pool } from '@archon/core';
+
+// ✅ CORRECT: Namespace imports for submodules with many exports
+import * as conversationDb from '@archon/core/db/conversations';
+import * as git from '@archon/core/utils/git';
+
+// ❌ WRONG: Never use generic import for main package
+import * as core from '@archon/core';  // Don't do this
+```
+
+**Rules:**
+1. Always use `import type { ... }` for types (interfaces, type aliases)
+2. Use specific named imports `{ foo, bar }` for values from the main package
+3. Namespace imports (`import * as`) are acceptable for submodules (`/db/*`, `/utils/*`)
+4. Combine type and value imports when needed: `import { handleMessage, type IPlatformAdapter } from '@archon/core'`
 
 ### Database Schema
 
@@ -222,7 +257,11 @@ src/
 
 ### Architecture Layers
 
-**1. Platform Adapters** (`src/adapters/`)
+**Package Split:**
+- **@archon/core**: Business logic, database, orchestration, workflows
+- **@archon/server**: Platform adapters, Express server, HTTP endpoints
+
+**1. Platform Adapters** (`packages/server/src/adapters/`)
 - Implement `IPlatformAdapter` interface
 - Handle platform-specific message formats
 - **Slack**: SDK with polling (not webhooks), conversation ID = `thread_ts`
@@ -232,7 +271,7 @@ src/
 
 **Adapter Authorization Pattern:**
 - Auth checks happen INSIDE adapters (encapsulation, consistency)
-- Auth utilities in `src/utils/{platform}-auth.ts`
+- Auth utilities in `packages/core/src/utils/{platform}-auth.ts`
 - Parse whitelist from env var in constructor (e.g., `TELEGRAM_ALLOWED_USER_IDS`)
 - Check authorization in message handler (before calling `onMessage` callback)
 - Silent rejection for unauthorized users (no error response)
@@ -241,22 +280,22 @@ src/
 **Adapter Message Handler Pattern:**
 - Adapters expose `onMessage(handler)` callback registration
 - Auth check happens internally before invoking callback
-- `index.ts` only registers the callback and handles orchestrator routing
+- Server entry point (`packages/server/src/index.ts`) registers callback and routes to orchestrator
 - Errors handled by caller (callback returns Promise)
 
-**2. Command Handler** (`src/handlers/`)
+**2. Command Handler** (`packages/core/src/handlers/`)
 - Process slash commands (deterministic, no AI)
 - Commands: `/command-set`, `/command-invoke`, `/load-commands`, `/clone`, `/getcwd`, `/setcwd`, `/codebase-switch`, `/status`, `/commands`, `/help`, `/reset`
 - Update database, perform operations, return responses
 
-**3. Orchestrator** (`src/orchestrator/`)
+**3. Orchestrator** (`packages/core/src/orchestrator/`)
 - Manage AI conversations
 - Load conversation + codebase context from database
 - Variable substitution: `$1`, `$2`, `$3`, `$ARGUMENTS`, `$PLAN`
 - Session management: Create new or resume existing
 - Stream AI responses to platform
 
-**4. AI Assistant Clients** (`src/clients/`)
+**4. AI Assistant Clients** (`packages/core/src/clients/`)
 - Implement `IAssistantClient` interface
 - **ClaudeClient**: `@anthropic-ai/claude-agent-sdk`
 - **CodexClient**: `@openai/codex-sdk`
@@ -308,7 +347,7 @@ PORT=3000
 MAX_CONCURRENT_CONVERSATIONS=10
 ```
 
-**Loading:** Use `dotenv` package, load in `src/index.ts`
+**Loading:** Use `dotenv` package, load in `packages/server/src/index.ts`
 
 ### Worktree Symbiosis (Skill + App)
 
@@ -495,7 +534,7 @@ describe('CommandHandler', () => {
 
 **Manual Validation with Test Adapter:**
 
-The application includes a built-in test adapter (`src/adapters/test.ts`) with HTTP endpoints for programmatic testing without requiring Telegram/Slack setup.
+The application includes a built-in test adapter (`packages/server/src/adapters/test.ts`) with HTTP endpoints for programmatic testing without requiring Telegram/Slack setup.
 
 **Test Adapter Endpoints:**
 ```bash

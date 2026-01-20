@@ -156,10 +156,7 @@ describe('GitHubAdapter', () => {
     /**
      * Creates a webhook payload for issue comment events.
      */
-    function createCommentPayload(
-      commentBody: string,
-      commentAuthor: string | undefined
-    ): string {
+    function createCommentPayload(commentBody: string, commentAuthor: string | undefined): string {
       const comment: { body: string; user?: { login: string } } = { body: commentBody };
       if (commentAuthor !== undefined) {
         comment.user = { login: commentAuthor };

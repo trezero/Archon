@@ -39,20 +39,16 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
   const globalAuthSetting = process.env.CLAUDE_USE_GLOBAL_AUTH?.toLowerCase();
 
   // Check for empty token values (common misconfiguration)
-  const tokenVars = [
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'CLAUDE_API_KEY',
-    'ANTHROPIC_API_KEY',
-  ] as const;
-  const emptyTokens = tokenVars.filter((v) => process.env[v] === '');
+  const tokenVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_API_KEY', 'ANTHROPIC_API_KEY'] as const;
+  const emptyTokens = tokenVars.filter(v => process.env[v] === '');
   if (emptyTokens.length > 0) {
     console.warn(`[Claude] Warning: Empty token values found for: ${emptyTokens.join(', ')}`);
   }
 
   const hasExplicitTokens = Boolean(
     process.env.CLAUDE_CODE_OAUTH_TOKEN ??
-      process.env.CLAUDE_API_KEY ??
-      process.env.ANTHROPIC_API_KEY
+    process.env.CLAUDE_API_KEY ??
+    process.env.ANTHROPIC_API_KEY
   );
 
   // Determine whether to use global auth

@@ -313,7 +313,9 @@ describe('conversations', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(ConversationNotFoundError);
         expect((error as ConversationNotFoundError).conversationId).toBe('test-conv-id');
-        expect((error as ConversationNotFoundError).message).toBe('Conversation not found: test-conv-id');
+        expect((error as ConversationNotFoundError).message).toBe(
+          'Conversation not found: test-conv-id'
+        );
       }
     });
   });

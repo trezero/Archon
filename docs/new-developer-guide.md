@@ -78,7 +78,7 @@ Just talk to the AI like you would in Claude Code terminal:
 │                                                                 │
 │ You: What does the handleMessage function do?                   │
 │                                                                 │
-│ Archon: Looking at src/orchestrator/orchestrator.ts...          │
+│ Archon: Looking at packages/core/src/orchestrator/orchestrator.ts...          │
 │                                                                 │
 │         The handleMessage function is the main entry point      │
 │         that routes incoming messages. It:                      │
@@ -87,7 +87,7 @@ Just talk to the AI like you would in Claude Code terminal:
 │         3. Routes to AI client for processing                   │
 │         4. Streams responses back to platform                   │
 │                                                                 │
-│         See: src/orchestrator/orchestrator.ts:45-120            │
+│         See: packages/core/src/orchestrator/orchestrator.ts            │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -133,7 +133,7 @@ This is where Archon shines - automated multi-step AI workflows:
 │   🔍 Investigation Complete                                     │
 │                                                                 │
 │   Root Cause: Touch event handler missing on mobile             │
-│   File: src/components/LoginButton.tsx:45                       │
+│   File: packages/server/src/components/LoginButton.tsx:45                       │
 │   Fix: Add onTouchEnd handler alongside onClick                 │
 │                                                                 │
 │   Creating PR...                                                │
@@ -524,7 +524,7 @@ Each conversation gets its own isolated copy of the repo:
 │   │   └── artifacts/                                                   │
 │   │       └── issues/                                                  │
 │   │           └── issue-42.md                                          │
-│   ├── src/                                                             │
+│   ├── packages/                                                             │
 │   └── ...                                                              │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘

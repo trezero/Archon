@@ -10,8 +10,9 @@ import {
   Events,
   ThreadAutoArchiveDuration,
 } from 'discord.js';
-import { IPlatformAdapter } from '../types';
-import { parseAllowedUserIds, isDiscordUserAuthorized } from '../utils/discord-auth';
+import type { IPlatformAdapter } from '@archon/core';
+import { isDiscordUserAuthorized } from '@archon/core';
+import { parseAllowedUserIds } from '@archon/core/utils/discord-auth';
 
 const MAX_LENGTH = 2000;
 

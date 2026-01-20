@@ -7,14 +7,16 @@ export default tseslint.config(
   {
     ignores: [
       'node_modules/**',
+      'packages/*/node_modules/**',
+      'packages/*/dist/**',
       'dist/**',
       'coverage/**',
       '.agents/examples/**',
       'workspace/**',
       'worktrees/**',
-      '**/*.js', // Ignore JS files (like jest.config.js)
-      '*.mjs', // Ignore ESLint config itself
-      '**/*.test.ts', // Ignore test files (excluded from tsconfig)
+      '**/*.js',
+      '*.mjs',
+      '**/*.test.ts',
     ],
   },
 
@@ -24,12 +26,12 @@ export default tseslint.config(
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
 
-  // Prettier integration (disables conflicting rules)
+  // Prettier integration
   prettierConfig,
 
   // Project-specific settings
   {
-    files: ['src/**/*.ts'],
+    files: ['packages/*/src/**/*.ts'],
     languageOptions: {
       parserOptions: {
         projectService: true,
@@ -37,7 +39,6 @@ export default tseslint.config(
       },
     },
     rules: {
-      // Enforce patterns from codebase analysis
       '@typescript-eslint/explicit-function-return-type': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': [
@@ -55,15 +56,12 @@ export default tseslint.config(
         {
           selector: 'interface',
           format: ['PascalCase'],
-          // Allow both IInterface and Interface patterns
           custom: { regex: '^I?[A-Z]', match: true },
         },
         { selector: 'typeAlias', format: ['PascalCase'] },
         { selector: 'function', format: ['camelCase'] },
         { selector: 'variable', format: ['camelCase', 'UPPER_CASE'] },
       ],
-
-      // Relax some overly strict rules for pragmatic TypeScript
       '@typescript-eslint/no-unsafe-assignment': 'warn',
       '@typescript-eslint/no-unsafe-member-access': 'warn',
       '@typescript-eslint/no-unsafe-argument': 'warn',

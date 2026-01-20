@@ -63,7 +63,7 @@ Platform adapters connect messaging platforms to the orchestrator. Implement the
 
 ### IPlatformAdapter Interface
 
-**Location:** `src/types/index.ts:49-74`
+**Location:** `packages/core/src/types/index.ts`
 
 ```typescript
 export interface IPlatformAdapter {
@@ -86,12 +86,12 @@ export interface IPlatformAdapter {
 
 ### Implementation Guide
 
-**1. Create adapter file:** `src/adapters/your-platform.ts`
+**1. Create adapter file:** `packages/server/src/adapters/your-platform.ts`
 
 **2. Implement the interface:**
 
 ```typescript
-import { IPlatformAdapter } from '../types';
+import type { IPlatformAdapter } from '@archon/core';
 
 export class YourPlatformAdapter implements IPlatformAdapter {
   private streamingMode: 'stream' | 'batch';
@@ -125,7 +125,7 @@ export class YourPlatformAdapter implements IPlatformAdapter {
 }
 ```
 
-**3. Register in main app:** `src/index.ts`
+**3. Register in main app:** `packages/server/src/index.ts`
 
 ```typescript
 import { YourPlatformAdapter } from './adapters/your-platform';
@@ -187,7 +187,7 @@ async sendMessage(conversationId: string, message: string): Promise<void> {
 }
 ```
 
-**Reference:** `src/adapters/telegram.ts:28-55`
+**Reference:** `packages/server/src/adapters/telegram.ts`
 
 #### Polling vs Webhooks
 
@@ -208,7 +208,7 @@ async start(): Promise<void> {
 **Webhooks** (GitHub pattern):
 
 ```typescript
-// In src/index.ts, add Express route
+// In packages/server/src/index.ts, add Express route
 app.post('/webhooks/your-platform', async (req, res) => {
   const signature = req.headers['x-signature'];
   const payload = req.body;
@@ -230,7 +230,7 @@ async handleWebhook(payload: any, signature: string): Promise<void> {
 }
 ```
 
-**Reference:** `src/adapters/github.ts:378-491`
+**Reference:** `packages/server/src/adapters/github.ts`
 
 ---
 
@@ -240,7 +240,7 @@ AI assistant clients wrap AI SDKs and provide a unified streaming interface. Imp
 
 ### IAssistantClient Interface
 
-**Location:** `src/types/index.ts:93-106`
+**Location:** `packages/core/src/types/index.ts`
 
 ```typescript
 export interface IAssistantClient {
@@ -266,7 +266,7 @@ interface MessageChunk {
 
 ### Implementation Guide
 
-**1. Create client file:** `src/clients/your-assistant.ts`
+**1. Create client file:** `packages/core/src/clients/your-assistant.ts`
 
 **2. Implement the interface:**
 
@@ -315,7 +315,7 @@ export class YourAssistantClient implements IAssistantClient {
 }
 ```
 
-**3. Register in factory:** `src/clients/factory.ts`
+**3. Register in factory:** `packages/core/src/clients/factory.ts`
 
 ```typescript
 import { YourAssistantClient } from './your-assistant';
@@ -351,12 +351,12 @@ YOUR_ASSISTANT_MODEL=<model-name>
 - **State machine**: Explicit `TransitionTrigger` types define all transition reasons
 - **Session ID persistence**: Store `assistant_session_id` in database to resume context
 
-**Transition triggers** (`src/state/session-transitions.ts`):
+**Transition triggers** (`packages/core/src/state/session-transitions.ts`):
 - `first-message` - No existing session
 - `plan-to-execute` - Plan phase completed, starting execution (creates new session immediately)
 - `isolation-changed`, `codebase-changed`, `reset-requested`, etc. - Deactivate current session
 
-**Orchestrator logic** (`src/orchestrator/orchestrator.ts`):
+**Orchestrator logic** (`packages/core/src/orchestrator/orchestrator.ts`):
 
 ```typescript
 // Detect plan→execute transition
@@ -378,7 +378,7 @@ if (trigger && shouldCreateNewSession(trigger)) {
 
 Different SDKs use different event types. Map them to MessageChunk types:
 
-**Claude Code SDK** (`src/clients/claude.ts:74-99`):
+**Claude Code SDK** (`packages/core/src/clients/claude.ts`):
 
 ```typescript
 for await (const msg of query({ prompt, options })) {
@@ -400,7 +400,7 @@ for await (const msg of query({ prompt, options })) {
 }
 ```
 
-**Codex SDK** (`src/clients/codex.ts:88-148`):
+**Codex SDK** (`packages/core/src/clients/codex.ts`):
 
 ```typescript
 for await (const event of result.events) {
@@ -460,7 +460,7 @@ Isolation providers create isolated working environments (worktrees, containers,
 
 ### IIsolationProvider Interface
 
-**Location:** `src/isolation/types.ts`
+**Location:** `packages/core/src/isolation/types.ts`
 
 ```typescript
 export interface IIsolationProvider {
@@ -500,7 +500,7 @@ interface IsolatedEnvironment {
 
 ### WorktreeProvider Implementation
 
-**Location:** `src/isolation/providers/worktree.ts`
+**Location:** `packages/core/src/isolation/providers/worktree.ts`
 
 ```typescript
 export class WorktreeProvider implements IIsolationProvider {
@@ -545,7 +545,7 @@ DOCKER:  /.archon/worktrees/<project>/<branch>/    ← FIXED, no override
 
 ### Usage Pattern
 
-**GitHub adapter** (`src/adapters/github.ts`):
+**GitHub adapter** (`packages/server/src/adapters/github.ts`):
 
 ```typescript
 const provider = getIsolationProvider();
@@ -615,7 +615,7 @@ const envId = conversation.isolation_env_id ?? conversation.worktree_path;
 
 ### Adding a New Isolation Provider
 
-**1. Create provider:** `src/isolation/providers/your-provider.ts`
+**1. Create provider:** `packages/core/src/isolation/providers/your-provider.ts`
 
 ```typescript
 export class ContainerProvider implements IIsolationProvider {
@@ -640,7 +640,7 @@ export class ContainerProvider implements IIsolationProvider {
 }
 ```
 
-**2. Register in factory:** `src/isolation/index.ts`
+**2. Register in factory:** `packages/core/src/isolation/index.ts`
 
 ```typescript
 export function getIsolationProvider(type?: string): IIsolationProvider {
@@ -725,7 +725,7 @@ for (const folder of searchPaths) {
 }
 ```
 
-**Reference:** `src/utils/archon-paths.ts:87-96`
+**Reference:** `packages/core/src/utils/archon-paths.ts`
 
 ### Variable Substitution
 
@@ -735,7 +735,7 @@ for (const folder of searchPaths) {
 - `$ARGUMENTS` - All arguments as single string
 - `\$` - Escaped dollar sign (literal `$`)
 
-**Implementation** (`src/utils/variable-substitution.ts`):
+**Implementation** (`packages/core/src/utils/variable-substitution.ts`):
 
 ```typescript
 export function substituteVariables(

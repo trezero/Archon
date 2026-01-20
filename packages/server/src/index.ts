@@ -3,8 +3,8 @@
  * Multi-platform AI coding assistant (Telegram, Discord, Slack, GitHub)
  */
 
-// Load environment variables FIRST - using 'dotenv/config' ensures
-// it runs during import phase, before other modules are evaluated
+// Load environment variables FIRST
+// Note: packages/server/.env is a symlink to the root .env file
 import 'dotenv/config';
 
 import express from 'express';
@@ -13,15 +13,19 @@ import { TestAdapter } from './adapters/test';
 import { GitHubAdapter } from './adapters/github';
 import { DiscordAdapter } from './adapters/discord';
 import { SlackAdapter } from './adapters/slack';
-import { handleMessage } from './orchestrator/orchestrator';
-import { pool } from './db/connection';
-import { ConversationLockManager } from './utils/conversation-lock';
-import { classifyAndFormatError } from './utils/error-formatter';
-import { startCleanupScheduler, stopCleanupScheduler } from './services/cleanup-service';
-import { logArchonPaths } from './utils/archon-paths';
-import { loadConfig, logConfig } from './config';
-import { getPort } from './utils/port-allocation';
-import type { IPlatformAdapter } from './types';
+import {
+  handleMessage,
+  pool,
+  ConversationLockManager,
+  classifyAndFormatError,
+  startCleanupScheduler,
+  stopCleanupScheduler,
+  logArchonPaths,
+  loadConfig,
+  logConfig,
+  getPort,
+} from '@archon/core';
+import type { IPlatformAdapter } from '@archon/core';
 
 /**
  * Creates an error handler for message processing failures.

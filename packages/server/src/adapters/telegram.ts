@@ -3,9 +3,13 @@
  * Handles message sending with 4096 character limit splitting
  */
 import { Telegraf, Context } from 'telegraf';
-import { IPlatformAdapter } from '../types';
-import { parseAllowedUserIds, isUserAuthorized } from '../utils/telegram-auth';
-import { convertToTelegramMarkdown, stripMarkdown } from '../utils/telegram-markdown';
+import type { IPlatformAdapter } from '@archon/core';
+import {
+  parseTelegramAllowedUserIds,
+  isTelegramUserAuthorized,
+  convertToTelegramMarkdown,
+  stripMarkdown,
+} from '@archon/core';
 
 const MAX_LENGTH = 4096;
 
@@ -34,7 +38,7 @@ export class TelegramAdapter implements IPlatformAdapter {
 
     // Parse Telegram user whitelist (optional - empty = open access)
     // Support both TELEGRAM_ALLOWED_USER_IDS and TELEGRAM_ALLOWED_USERS
-    this.allowedUserIds = parseAllowedUserIds(
+    this.allowedUserIds = parseTelegramAllowedUserIds(
       process.env.TELEGRAM_ALLOWED_USER_IDS ?? process.env.TELEGRAM_ALLOWED_USERS
     );
     if (this.allowedUserIds.length > 0) {
@@ -211,7 +215,7 @@ export class TelegramAdapter implements IPlatformAdapter {
 
       // Authorization check - verify sender is in whitelist
       const userId = ctx.from.id;
-      if (!isUserAuthorized(userId, this.allowedUserIds)) {
+      if (!isTelegramUserAuthorized(userId, this.allowedUserIds)) {
         // Log unauthorized attempt (mask user ID for privacy)
         const maskedId = `${String(userId).slice(0, 4)}***`;
         console.log(`[Telegram] Unauthorized message from user ${maskedId}`);

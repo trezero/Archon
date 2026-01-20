@@ -466,7 +466,9 @@ async function executeStepInternal(
   }
 
   // Log provider/model selection
-  console.log(`[WorkflowExecutor] Step "${commandName}" using provider: ${resolvedProvider}${resolvedModel ? `, model: ${resolvedModel}` : ' (default model)'}`);
+  console.log(
+    `[WorkflowExecutor] Step "${commandName}" using provider: ${resolvedProvider}${resolvedModel ? `, model: ${resolvedModel}` : ' (default model)'}`
+  );
 
   // Get AI client with enhanced error context
   let aiClient;
@@ -737,7 +739,9 @@ async function executeLoopWorkflow(
     );
 
     // Log provider/model selection for this iteration
-    console.log(`[WorkflowExecutor] Loop iteration ${String(i)} using provider: ${resolvedProvider}${resolvedModel ? `, model: ${resolvedModel}` : ' (default model)'}`);
+    console.log(
+      `[WorkflowExecutor] Loop iteration ${String(i)} using provider: ${resolvedProvider}${resolvedModel ? `, model: ${resolvedModel}` : ' (default model)'}`
+    );
 
     // Get AI client with enhanced error context
     let aiClient;
@@ -931,7 +935,9 @@ export async function executeWorkflow(
   const resolvedProvider = workflow.provider ?? config.assistant;
   const providerSource = workflow.provider ? 'workflow definition' : 'config';
   const resolvedModel = workflow.model; // TODO: Pass to client when model validation is implemented
-  console.log(`[WorkflowExecutor] Workflow "${workflow.name}" using provider: ${resolvedProvider} (from ${providerSource})${resolvedModel ? `, model: ${resolvedModel}` : ' (default model)'}`);
+  console.log(
+    `[WorkflowExecutor] Workflow "${workflow.name}" using provider: ${resolvedProvider} (from ${providerSource})${resolvedModel ? `, model: ${resolvedModel}` : ' (default model)'}`
+  );
 
   if (configuredCommandFolder) {
     console.log(`[WorkflowExecutor] Using configured command folder: ${configuredCommandFolder}`);
@@ -1042,10 +1048,18 @@ export async function executeWorkflow(
         const repoName = cwd.split('/').pop() || 'repository';
         startupMessage += `📍 ${repoName} @ \`${branchName}\`\n\n`;
       } else {
-        console.warn('[WorkflowExecutor] Incomplete isolation context - omitting from startup message', {
-          workflowId: workflowRun.id,
-          hasFields: { isPrReview: !!isPrReview, prSha: !!prSha, prBranch: !!prBranch, branchName: !!branchName },
-        });
+        console.warn(
+          '[WorkflowExecutor] Incomplete isolation context - omitting from startup message',
+          {
+            workflowId: workflowRun.id,
+            hasFields: {
+              isPrReview: !!isPrReview,
+              prSha: !!prSha,
+              prBranch: !!prBranch,
+              branchName: !!branchName,
+            },
+          }
+        );
       }
     }
 
