@@ -16,6 +16,7 @@ import type {
   StepResult,
   LoadCommandResult,
   SingleStep,
+  WorkflowExecutionResult,
 } from './types';
 import { isParallelBlock, isSingleStep } from './types';
 import {
@@ -926,7 +927,7 @@ export async function executeWorkflow(
     prSha?: string;
     prBranch?: string;
   }
-): Promise<void> {
+): Promise<WorkflowExecutionResult> {
   // Load config once for the entire workflow execution
   const config = await loadConfig(cwd);
   const configuredCommandFolder = config.commands.folder;
@@ -959,7 +960,7 @@ export async function executeWorkflow(
       conversationId,
       '❌ **Workflow blocked**: Unable to verify if another workflow is running (database error). Please try again in a moment.'
     );
-    return;
+    return { success: false, error: 'Database error checking for active workflow' };
   }
   if (activeWorkflow) {
     // Check staleness based on last activity, not start time
@@ -986,7 +987,7 @@ export async function executeWorkflow(
           conversationId,
           '❌ **Workflow blocked**: A stale workflow exists but cleanup failed. Try `/workflow cancel` first.'
         );
-        return;
+        return { success: false, error: 'Stale workflow cleanup failed' };
       }
       // Continue to create new workflow
     } else {
@@ -996,7 +997,7 @@ export async function executeWorkflow(
         conversationId,
         `❌ **Workflow already running**: A \`${activeWorkflow.workflow_name}\` workflow (ID: ${activeWorkflow.id.slice(0, 8)}) has been running since ${startedAt}. Please wait for it to complete or use \`/workflow cancel\` to stop it.`
       );
-      return;
+      return { success: false, error: `Workflow already running: ${activeWorkflow.workflow_name}` };
     }
   }
 
@@ -1022,7 +1023,7 @@ export async function executeWorkflow(
       conversationId,
       '❌ **Workflow failed**: Unable to start workflow (database error). Please try again later.'
     );
-    return;
+    return { success: false, error: 'Database error creating workflow run' };
   }
 
   // Wrap execution in try-catch to ensure workflow is marked as failed on any error
@@ -1104,7 +1105,18 @@ export async function executeWorkflow(
         resolvedModel,
         issueContext
       );
-      return;
+      // Loop workflow handles its own success/failure internally
+      // Check the database status to determine result
+      const finalStatus = await workflowDb.getWorkflowRun(workflowRun.id);
+      if (finalStatus?.status === 'completed') {
+        return { success: true, workflowRunId: workflowRun.id };
+      } else {
+        return {
+          success: false,
+          workflowRunId: workflowRun.id,
+          error: 'Loop workflow did not complete successfully',
+        };
+      }
     }
 
     let currentSessionId: string | undefined;
@@ -1180,7 +1192,11 @@ export async function executeWorkflow(
             conversationId,
             `❌ **Workflow failed** in parallel block:\n\n${failureDetails.join('\n')}`
           );
-          return;
+          return {
+            success: false,
+            workflowRunId: workflowRun.id,
+            error: `Parallel block failed: ${failureDetails.join('; ')}`,
+          };
         }
 
         // Log parallel block complete
@@ -1243,7 +1259,11 @@ export async function executeWorkflow(
             `❌ **Workflow failed** at step: \`${result.commandName}\`\n\nError: ${result.error}`,
             { ...workflowContext, stepName: result.commandName }
           );
-          return;
+          return {
+            success: false,
+            workflowRunId: workflowRun.id,
+            error: `Step '${result.commandName}' failed: ${result.error}`,
+          };
         }
 
         if (result.sessionId) {
@@ -1307,6 +1327,8 @@ export async function executeWorkflow(
       workflowRun.id,
       workflowContext
     );
+
+    return { success: true, workflowRunId: workflowRun.id };
   } catch (error) {
     // Top-level error handler: ensure workflow is marked as failed
     const err = error as Error;
@@ -1352,7 +1374,8 @@ export async function executeWorkflow(
         originalError: err.message,
       });
     }
-    // Don't re-throw - orchestrator already has error handling
+    // Return failure result instead of re-throwing
+    return { success: false, workflowRunId: workflowRun.id, error: err.message };
   }
 }
 

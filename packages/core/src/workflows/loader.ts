@@ -245,11 +245,14 @@ export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     if (err.code === 'ENOENT') {
+      // No workflow folder exists - this is expected, return empty array
       console.log(`[WorkflowLoader] No workflow folder found at: ${workflowPath}`);
-    } else {
-      console.warn(`[WorkflowLoader] Error accessing ${workflowPath}: ${err.message}`);
+      return [];
     }
-    return [];
+    // For other errors (permission denied, I/O errors), throw so callers can handle
+    throw new Error(
+      `Cannot access workflow folder at ${workflowPath}: ${err.message} (${err.code ?? 'unknown'})`
+    );
   }
 
   const workflows = await loadWorkflowsFromDir(workflowPath);

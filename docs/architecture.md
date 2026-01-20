@@ -14,7 +14,7 @@ The Remote Coding Agent is a **platform-agnostic AI coding assistant orchestrato
 
 ```
 ┌─────────────────────────────────────────────┐
-│   Platform Adapters (Telegram, GitHub)      │
+│   Platform Adapters (Telegram, GitHub, CLI) │
 │   • IPlatformAdapter interface              │
 │   • Handle platform-specific messaging      │
 └──────────────────┬──────────────────────────┘
@@ -166,6 +166,7 @@ Each platform must provide a unique, stable conversation ID:
 - **Telegram**: `chat_id` (e.g., `"123456789"`)
 - **GitHub**: `owner/repo#issue_number` (e.g., `"user/repo#42"`)
 - **Slack**: `thread_ts` or `channel_id+thread_ts`
+- **CLI**: `cli-{timestamp}-{random}` (e.g., `"cli-1737400000-abc123"`)
 
 #### Message Length Limits
 

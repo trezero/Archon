@@ -143,6 +143,34 @@ docker-compose --profile with-db down
 
 **Note:** For development, use the hybrid approach above instead (postgres in Docker, app locally).
 
+### CLI (Command Line)
+
+Run workflows directly from the command line without needing the server:
+
+```bash
+# List available workflows
+bun run cli workflow list
+
+# Run a workflow
+bun run cli workflow run assist "What does the orchestrator do?"
+
+# Run in a specific directory
+bun run cli workflow run plan --cwd /path/to/repo "Add dark mode"
+
+# Show version
+bun run cli version
+```
+
+**How it works:**
+- Discovers workflows from `.archon/workflows/` in working directory
+- Creates a new conversation for each invocation (ID: `cli-{timestamp}-{random}`)
+- Connects to same PostgreSQL database as server
+- Streams AI responses to stdout in real-time
+
+**Requirements:**
+- `DATABASE_URL` environment variable must be set
+- Same AI credentials as server (Claude/Codex tokens)
+
 ### Cloud Deployment
 
 For production cloud deployment with automatic HTTPS via Caddy, use the `docker-compose.cloud.yml` overlay:
@@ -175,6 +203,13 @@ See [Cloud Deployment Guide](docs/cloud-deployment.md) for complete setup instru
 
 ```
 packages/
+├── cli/                      # @archon/cli - Command-line interface
+│   └── src/
+│       ├── adapters/         # CLI adapter (stdout output)
+│       ├── commands/         # CLI command implementations
+│       │   ├── version.ts
+│       │   └── workflow.ts
+│       └── cli.ts            # CLI entry point
 ├── core/                     # @archon/core - Shared business logic
 │   └── src/
 │       ├── clients/          # AI SDK clients (Claude, Codex)
@@ -258,6 +293,7 @@ import * as core from '@archon/core';  // Don't do this
 ### Architecture Layers
 
 **Package Split:**
+- **@archon/cli**: Command-line interface for running workflows
 - **@archon/core**: Business logic, database, orchestration, workflows
 - **@archon/server**: Platform adapters, Express server, HTTP endpoints
 

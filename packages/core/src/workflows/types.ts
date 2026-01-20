@@ -126,3 +126,17 @@ export type LoadCommandResult =
       reason: 'invalid_name' | 'empty_file' | 'not_found' | 'permission_denied' | 'read_error';
       message: string;
     };
+
+/**
+ * Result of workflow execution - allows callers to detect success/failure
+ */
+export type WorkflowExecutionResult =
+  | { success: true; workflowRunId: string }
+  | { success: false; workflowRunId?: string; error: string };
+
+/**
+ * Result of workflow discovery - distinguishes "no workflows" from "error loading"
+ */
+export type DiscoverWorkflowsResult =
+  | { success: true; workflows: WorkflowDefinition[] }
+  | { success: false; error: string };

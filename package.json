@@ -6,6 +6,7 @@
   ],
   "type": "module",
   "scripts": {
+    "cli": "bun --env-file=.env --cwd packages/cli src/cli.ts",
     "dev": "bun --cwd packages/server --watch src/index.ts",
     "start": "bun --cwd packages/server src/index.ts",
     "build": "bun --filter '*' build",

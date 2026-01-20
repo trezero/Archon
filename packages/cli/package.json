@@ -1,0 +1,21 @@
+{
+  "name": "@archon/cli",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./src/cli.ts",
+  "bin": {
+    "archon": "./src/cli.ts"
+  },
+  "scripts": {
+    "cli": "bun src/cli.ts",
+    "test": "bun test",
+    "type-check": "bun x tsc --noEmit"
+  },
+  "dependencies": {
+    "@archon/core": "workspace:*",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  }
+}

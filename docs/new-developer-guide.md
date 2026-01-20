@@ -65,9 +65,40 @@
 
 ---
 
-## The Three Ways to Use Archon
+## The Four Ways to Use Archon
 
-### 1. Direct Chat (Simple Questions)
+### 1. Command Line (Local Execution)
+
+Run workflows directly from your terminal without needing the server:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ TERMINAL                                                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ $ bun run cli workflow list                                     │
+│                                                                 │
+│ Available workflows in .archon/workflows/:                     │
+│   - assist                    General help and questions        │
+│   - fix-github-issue          Investigate and fix issues        │
+│   - comprehensive-pr-review   Full PR review with agents        │
+│                                                                 │
+│ $ bun run cli workflow run assist "What does orchestrator do?"  │
+│                                                                 │
+│ 🔧 READ                                                         │
+│ Reading: packages/core/src/orchestrator/orchestrator.ts                │
+│                                                                 │
+│ The orchestrator is the main entry point that routes incoming  │
+│ messages. It checks if it's a slash command, loads conversation│
+│ context from the database, and routes to the appropriate AI     │
+│ client for processing...                                        │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Good for:** Running workflows locally, testing, automation scripts, CI/CD
+
+### 2. Direct Chat (Simple Questions)
 
 Just talk to the AI like you would in Claude Code terminal:
 
@@ -92,7 +123,7 @@ Just talk to the AI like you would in Claude Code terminal:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 2. Slash Commands (Specific Operations)
+### 3. Slash Commands (Specific Operations)
 
 Deterministic commands that don't involve AI:
 
@@ -111,7 +142,7 @@ Deterministic commands that don't involve AI:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 3. Workflows (Multi-Step Automation)
+### 4. Workflows (Multi-Step Automation)
 
 This is where Archon shines - automated multi-step AI workflows:
 
@@ -382,6 +413,17 @@ For larger features, Ralph executes user stories one-by-one until complete:
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                                                                         │
+│   CLI                               HOW IT WORKS                        │
+│   ─────────────────────────────────────────────────────────────────    │
+│   ┌──────────────────┐              - Direct command execution         │
+│   │  Terminal        │              - Real-time streaming to stdout    │
+│   │                  │              - No server needed                 │
+│   │  bun run cli     │              - Good for local workflows         │
+│   │  workflow run    │              - Perfect for CI/CD                │
+│   └──────────────────┘                                                  │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
 │   TELEGRAM                          HOW IT WORKS                        │
 │   ─────────────────────────────────────────────────────────────────    │
 │   ┌──────────────────┐              - Bot polls for messages           │
@@ -537,8 +579,10 @@ Each conversation gets its own isolated copy of the repo:
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                                                                         │
-│   WHAT YOU WANT                     WHAT TO SAY                         │
+│   WHAT YOU WANT                     WHAT TO SAY (Platform/CLI)          │
 │                                                                         │
+│   Run workflow locally              bun run cli workflow run <name>     │
+│   List CLI workflows                bun run cli workflow list           │
 │   Fix a GitHub issue                "@archon fix this issue"            │
 │   Review a PR                       "@archon review this PR"            │
 │   Ask a question                    "What does handleMessage do?"       │
