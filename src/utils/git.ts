@@ -108,6 +108,7 @@ export async function listWorktrees(repoPath: string): Promise<{ path: string; b
       repoPath,
       error: err.message,
       code: err.code,
+      stderr: err.stderr,
     });
     throw new Error(`Failed to list worktrees for ${repoPath}: ${err.message}`);
   }
@@ -439,9 +440,13 @@ export async function syncWorkspace(
 
   // Reset to match origin
   try {
-    await execFileAsync('git', ['-C', workspacePath, 'reset', '--hard', `origin/${defaultBranch}`], {
-      timeout: 30000,
-    });
+    await execFileAsync(
+      'git',
+      ['-C', workspacePath, 'reset', '--hard', `origin/${defaultBranch}`],
+      {
+        timeout: 30000,
+      }
+    );
   } catch (error) {
     const err = error as Error;
     throw new Error(`Sync reset to origin/${defaultBranch} failed: ${err.message}`);
@@ -456,6 +461,9 @@ export async function syncWorkspace(
  *
  * Fallback chain: symbolic-ref -> origin/main -> origin/master
  * Note: Fallback is common for freshly cloned repos where origin/HEAD isn't set.
+ *
+ * Only falls back for expected git errors (ref not found, branch not found).
+ * Throws for unexpected errors (permission denied, git corruption, etc.)
  */
 export async function getDefaultBranch(repoPath: string): Promise<string> {
   // Try to get from remote HEAD
@@ -468,12 +476,27 @@ export async function getDefaultBranch(repoPath: string): Promise<string> {
     // stdout is like "origin/main" - extract just the branch name
     return stdout.trim().replace('origin/', '');
   } catch (error) {
-    const err = error as Error;
-    // Log for debugging - symbolic-ref failure is common but worth tracking
-    console.log('[Git] symbolic-ref failed, trying fallback', {
-      repoPath,
-      error: err.message,
-    });
+    const err = error as Error & { stderr?: string };
+    const errorText = `${err.message} ${err.stderr ?? ''}`;
+
+    // Expected: symbolic-ref not set (common for fresh clones)
+    if (
+      errorText.includes('not a symbolic ref') ||
+      errorText.includes('No such file or directory')
+    ) {
+      console.log('[Git] symbolic-ref failed, trying fallback', {
+        repoPath,
+        error: err.message,
+      });
+    } else {
+      // Unexpected error (permission denied, git corruption, etc.) - surface it
+      console.error('[Git] Failed to get default branch via symbolic-ref', {
+        repoPath,
+        error: err.message,
+        stderr: err.stderr,
+      });
+      throw new Error(`Failed to get default branch for ${repoPath}: ${err.message}`);
+    }
   }
 
   // Fallback: check if origin/main exists, otherwise assume master
@@ -483,12 +506,28 @@ export async function getDefaultBranch(repoPath: string): Promise<string> {
     });
     return 'main';
   } catch (error) {
-    const err = error as Error;
-    // Log fallback to master - helps debug branch detection issues
-    console.log('[Git] origin/main not found or inaccessible, defaulting to master', {
+    const err = error as Error & { stderr?: string };
+    const errorText = `${err.message} ${err.stderr ?? ''}`;
+
+    // Expected: origin/main doesn't exist
+    if (
+      errorText.includes('Not a valid object name') ||
+      errorText.includes('Needed a single revision') ||
+      errorText.includes('unknown revision')
+    ) {
+      console.log('[Git] origin/main not found, defaulting to master', {
+        repoPath,
+        error: err.message,
+      });
+      return 'master';
+    }
+
+    // Unexpected error - surface it
+    console.error('[Git] Failed to verify origin/main branch', {
       repoPath,
       error: err.message,
+      stderr: err.stderr,
     });
-    return 'master';
+    throw new Error(`Failed to get default branch for ${repoPath}: ${err.message}`);
   }
 }
