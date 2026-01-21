@@ -37,8 +37,12 @@ RUN useradd -m -u 1001 -s /bin/bash appuser \
 RUN mkdir -p /.archon/workspaces /.archon/worktrees \
     && chown -R appuser:appuser /.archon
 
-# Copy package files and lockfile
+# Copy package files and lockfile for all workspaces
+# This is a monorepo - the lockfile depends on all workspace package.json files
 COPY package.json bun.lock ./
+COPY packages/cli/package.json ./packages/cli/
+COPY packages/core/package.json ./packages/core/
+COPY packages/server/package.json ./packages/server/
 
 # Install ALL dependencies (including devDependencies for build)
 RUN bun install --frozen-lockfile
@@ -47,7 +51,8 @@ RUN bun install --frozen-lockfile
 COPY . .
 
 # Build TypeScript with Bun
-RUN bun build src/index.ts --outdir=dist --target=bun
+# Note: This is a monorepo - server entry point is in packages/server
+RUN bun build packages/server/src/index.ts --outdir=dist --target=bun
 
 # Remove devDependencies to reduce image size
 RUN bun install --production --frozen-lockfile
