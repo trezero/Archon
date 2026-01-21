@@ -259,7 +259,7 @@ GH_TOKEN=ghp_your_token_here
 GITHUB_TOKEN=ghp_your_token_here
 
 # Server settings
-PORT=3000
+PORT=3090
 ARCHON_HOME=/tmp/archon  # Override base directory (optional)
 ```
 
@@ -503,13 +503,13 @@ nano Caddyfile
 
 ```
 remote-agent.yourdomain.com {
-    reverse_proxy app:3000
+    reverse_proxy app:3090
 }
 ```
 
 Replace `remote-agent.yourdomain.com` with your actual domain.
 
-> **Note:** If using `with-db` profile (local PostgreSQL), change `app:3000` to `app-with-db:3000`
+> **Note:** If using `with-db` profile (local PostgreSQL), change `app:3090` to `app-with-db:3090`
 
 **Save and exit:** `Ctrl+X`, then `Y`, then `Enter`
 
@@ -517,7 +517,7 @@ Replace `remote-agent.yourdomain.com` with your actual domain.
 
 - Automatically obtains SSL certificates from Let's Encrypt
 - Handles HTTPS (443) and HTTP (80) → HTTPS redirect
-- Proxies requests to app container on port 3000
+- Proxies requests to app container on port 3090
 - Renews certificates automatically
 
 ---
@@ -755,7 +755,7 @@ docker compose -f docker-compose.yml -f docker-compose.cloud.yml ps
 **Check health endpoint:**
 
 ```bash
-curl http://localhost:3000/health
+curl http://localhost:3090/health
 # Tests app directly (bypasses Caddy)
 ```
 

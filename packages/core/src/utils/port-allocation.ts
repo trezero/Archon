@@ -1,5 +1,5 @@
 /**
- * Port allocation utilities for Express server
+ * Port allocation utilities for Hono server
  * Separated from index.ts to allow testing without triggering app startup
  */
 import { createHash } from 'crypto';
@@ -19,7 +19,7 @@ export function calculatePortOffset(path: string): number {
 }
 
 /**
- * Get the port for the Express server
+ * Get the port for the Hono server
  * - If PORT env var is set: use it (explicit override, validated)
  * - If running in worktree: auto-allocate deterministic port based on path hash
  * - Otherwise: use default 3000
@@ -33,24 +33,24 @@ export async function getPort(): Promise<number> {
     const parsedPort = Number(envPort);
     if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
       console.error(
-        `[Express] Invalid PORT environment variable: "${envPort}". Must be an integer between 1-65535.`
+        `[Hono] Invalid PORT environment variable: "${envPort}". Must be an integer between 1-65535.`
       );
       process.exit(1);
     }
     return parsedPort;
   }
 
-  const basePort = 3000;
+  const basePort = 3090;
   const cwd = process.cwd();
 
   if (await isWorktreePath(cwd)) {
     const offset = calculatePortOffset(cwd);
     const port = basePort + offset;
-    console.log(`[Express] Worktree detected (${cwd})`);
-    console.log(`[Express] Auto-allocated port: ${port} (base: ${basePort}, offset: +${offset})`);
+    console.log(`[Hono] Worktree detected (${cwd})`);
+    console.log(`[Hono] Auto-allocated port: ${port} (base: ${basePort}, offset: +${offset})`);
     return port;
   }
 
-  console.log(`[Express] Using default port: ${basePort} (not in worktree)`);
+  console.log(`[Hono] Using default port: ${basePort} (not in worktree)`);
   return basePort;
 }

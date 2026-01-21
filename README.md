@@ -120,7 +120,7 @@ cp .env.example .env
 | `DATABASE_URL` | PostgreSQL connection (optional) | See database options below. Omit to use SQLite |
 | `GH_TOKEN` | Repository cloning | [Generate token](https://github.com/settings/tokens) with `repo` scope |
 | `GITHUB_TOKEN` | Same as `GH_TOKEN` | Use same token value |
-| `PORT` | HTTP server port | Default: `3000` (optional) |
+| `PORT` | HTTP server port | Default: `3090` (optional) |
 | `ARCHON_HOME` | (Optional) Override base directory | Default: `~/.archon` |
 
 **GitHub Personal Access Token Setup:**
@@ -918,19 +918,19 @@ The application exposes health check endpoints for monitoring:
 
 **Basic Health Check:**
 ```bash
-curl http://localhost:3000/health
+curl http://localhost:3090/health
 ```
 Returns: `{"status":"ok"}`
 
 **Database Connectivity:**
 ```bash
-curl http://localhost:3000/health/db
+curl http://localhost:3090/health/db
 ```
 Returns: `{"status":"ok","database":"connected"}`
 
 **Concurrency Status:**
 ```bash
-curl http://localhost:3000/health/concurrency
+curl http://localhost:3090/health/concurrency
 ```
 Returns: `{"status":"ok","active":0,"queued":0,"maxConcurrent":10}`
 
@@ -1145,7 +1145,7 @@ cat .env | grep TELEGRAM_BOT_TOKEN
 
 **Test with health check:**
 ```bash
-curl http://localhost:3000/health
+curl http://localhost:3090/health
 # Expected: {"status":"ok"}
 ```
 
@@ -1153,7 +1153,7 @@ curl http://localhost:3000/health
 
 **Check database health:**
 ```bash
-curl http://localhost:3000/health/db
+curl http://localhost:3090/health/db
 # Expected: {"status":"ok","database":"connected"}
 ```
 
@@ -1284,10 +1284,10 @@ docker compose --profile external-db up -d             # or --profile with-db
 
 **Check port conflicts:**
 ```bash
-# See if port 3000 is already in use
+# See if port 3090 is already in use
 # Linux/Mac:
-lsof -i :3000
+lsof -i :3090
 
 # Windows:
-netstat -ano | findstr :3000
+netstat -ano | findstr :3090
 ```

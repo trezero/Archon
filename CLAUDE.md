@@ -293,7 +293,7 @@ packages/
         │   ├── discord.ts
         │   └── test.ts
         ├── scripts/          # Setup utilities
-        └── index.ts          # Express server entry point
+        └── index.ts          # Hono server entry point
 ```
 
 **Import Patterns:**
@@ -347,7 +347,7 @@ import * as core from '@archon/core';  // Don't do this
 **Package Split:**
 - **@archon/cli**: Command-line interface for running workflows
 - **@archon/core**: Business logic, database, orchestration, workflows
-- **@archon/server**: Platform adapters, Express server, HTTP endpoints
+- **@archon/server**: Platform adapters, Hono server, HTTP endpoints
 
 **1. Platform Adapters** (`packages/server/src/adapters/`)
 - Implement `IPlatformAdapter` interface
@@ -435,21 +435,21 @@ Agents working in worktrees can run the app for self-testing (make changes → r
 ```bash
 # Run in worktree (port auto-allocated based on path)
 bun dev &
-# [Express] Worktree detected (/path/to/worktree)
-# [Express] Auto-allocated port: 3547 (base: 3000, offset: +547)
+# [Hono] Worktree detected (/path/to/worktree)
+# [Hono] Auto-allocated port: 3637 (base: 3090, offset: +547)
 
 # Test via test adapter (use the auto-allocated port from logs)
-curl -X POST http://localhost:3547/test/message \
+curl -X POST http://localhost:3637/test/message \
   -H "Content-Type: application/json" \
   -d '{"conversationId":"test","message":"/status"}'
 
 # Check response
-curl http://localhost:3547/test/messages/test
+curl http://localhost:3637/test/messages/test
 ```
 
 **Port Allocation:**
-- Worktrees: Automatic unique port (3100-3999 range, hash-based on path)
-- Main repo: Default 3000
+- Worktrees: Automatic unique port (3190-4089 range, hash-based on path)
+- Main repo: Default 3090
 - Override: `PORT=4000 bun dev` (works in both contexts)
 - Same worktree always gets same port (deterministic)
 
@@ -686,7 +686,7 @@ try {
 
 **Security:**
 - Verify webhook signatures (GitHub: `X-Hub-Signature-256`)
-- Use `express.raw()` middleware for webhook body (signature verification)
+- Use `c.req.text()` for raw webhook body (signature verification)
 - Never log or expose tokens in responses
 
 **@Mention Detection:**

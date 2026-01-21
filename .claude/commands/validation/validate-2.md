@@ -19,7 +19,7 @@ Run comprehensive end-to-end validation of the Remote Agentic Coding Platform in
 ```
 
 **Prerequisites:**
-- ngrok running and exposing port 3000 (for GitHub webhooks)
+- ngrok running and exposing port 3090 (for GitHub webhooks)
 - `.env` file configured with all required credentials
 - GitHub CLI (`gh`) authenticated
 - Docker installed and running
@@ -307,14 +307,14 @@ docker compose logs app-with-db 2>&1 | tail -30
 **Check for:**
 - `[Archon] Paths configured:`
 - `[App] Adapters initialized`
-- `[App] Server listening on port 3000`
+- `[App] Server listening on port 3090`
 - `[ConversationLock] Initialized`
 
 ### 3.4 Health Checks
 ```bash
-curl -s http://localhost:3000/health | jq
-curl -s http://localhost:3000/health/db | jq
-curl -s http://localhost:3000/health/concurrency | jq
+curl -s http://localhost:3090/health | jq
+curl -s http://localhost:3090/health/db | jq
+curl -s http://localhost:3090/health/concurrency | jq
 ```
 
 **Expected:** All return `{"status":"ok",...}`

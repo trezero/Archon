@@ -7,7 +7,7 @@
 // Note: packages/server/.env is a symlink to the root .env file
 import 'dotenv/config';
 
-import express from 'express';
+import { Hono } from 'hono';
 import { TelegramAdapter } from './adapters/telegram';
 import { TestAdapter } from './adapters/test';
 import { GitHubAdapter } from './adapters/github';
@@ -262,24 +262,34 @@ async function main(): Promise<void> {
     console.log('[Slack] Adapter not initialized (missing SLACK_BOT_TOKEN or SLACK_APP_TOKEN)');
   }
 
-  // Setup Express server
-  const app = express();
+  // Setup Hono server
+  const app = new Hono();
   const port = await getPort();
 
-  // GitHub webhook endpoint (must use raw body for signature verification)
-  // IMPORTANT: Register BEFORE express.json() to prevent body parsing
+  // Global error handler for unhandled exceptions
+  app.onError((err, c) => {
+    console.error('[Hono] Unhandled error:', {
+      error: err,
+      path: c.req.path,
+      method: c.req.method,
+    });
+    return c.json({ error: 'Internal server error' }, 500);
+  });
+
+  // GitHub webhook endpoint
   if (github) {
-    app.post('/webhooks/github', express.raw({ type: 'application/json' }), async (req, res) => {
-      const eventType = req.headers['x-github-event'] as string | undefined;
-      const deliveryId = req.headers['x-github-delivery'] as string | undefined;
+    app.post('/webhooks/github', async c => {
+      const eventType = c.req.header('x-github-event');
+      const deliveryId = c.req.header('x-github-delivery');
 
       try {
-        const signature = req.headers['x-hub-signature-256'] as string;
+        const signature = c.req.header('x-hub-signature-256');
         if (!signature) {
-          return res.status(400).json({ error: 'Missing signature header' });
+          return c.json({ error: 'Missing signature header' }, 400);
         }
 
-        const payload = (req.body as Buffer).toString('utf-8');
+        // CRITICAL: Use c.req.text() for raw body (signature verification)
+        const payload = await c.req.text();
 
         // Process async (fire-and-forget for fast webhook response)
         // Note: github.handleWebhook() has internal error handling that notifies users
@@ -292,104 +302,107 @@ async function main(): Promise<void> {
           });
         });
 
-        return res.status(200).send('OK');
+        return c.text('OK', 200);
       } catch (error) {
         console.error('[GitHub] Webhook endpoint error:', {
           error,
           eventType,
           deliveryId,
         });
-        return res.status(500).json({ error: 'Internal server error' });
+        return c.json({ error: 'Internal server error' }, 500);
       }
     });
-    console.log('[Express] GitHub webhook endpoint registered');
+    console.log('[Hono] GitHub webhook endpoint registered');
   }
 
-  // JSON parsing for all other endpoints
-  app.use(express.json());
-
   // Health check endpoints
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok' });
+  app.get('/health', c => {
+    return c.json({ status: 'ok' });
   });
 
-  app.get('/health/db', async (_req, res) => {
+  app.get('/health/db', async c => {
     try {
       await pool.query('SELECT 1');
-      res.json({ status: 'ok', database: 'connected' });
+      return c.json({ status: 'ok', database: 'connected' });
     } catch (error) {
       console.error('[Health] Database health check failed:', error);
-      res.status(500).json({ status: 'error', database: 'disconnected' });
+      return c.json({ status: 'error', database: 'disconnected' }, 500);
     }
   });
 
-  app.get('/health/concurrency', (_req, res) => {
-    try {
-      const stats = lockManager.getStats();
-      res.json({
-        status: 'ok',
-        ...stats,
-      });
-    } catch (error) {
-      console.error('[Health] Failed to get concurrency stats:', error);
-      res.status(500).json({ status: 'error', reason: 'Failed to get stats' });
-    }
+  app.get('/health/concurrency', c => {
+    const stats = lockManager.getStats();
+    return c.json({ status: 'ok', ...stats });
   });
 
   // Test adapter endpoints
-  app.post('/test/message', async (req, res) => {
+  app.post('/test/message', async c => {
+    // Parse JSON with explicit error handling
+    let body: { conversationId?: unknown; message?: unknown };
     try {
-      const { conversationId, message } = req.body as {
-        conversationId?: unknown;
-        message?: unknown;
-      };
-      if (typeof conversationId !== 'string' || typeof message !== 'string') {
-        return res.status(400).json({ error: 'conversationId and message must be strings' });
-      }
-      if (!conversationId || !message) {
-        return res.status(400).json({ error: 'conversationId and message required' });
-      }
-
-      await testAdapter.receiveMessage(conversationId, message);
-
-      // Process the message through orchestrator (non-blocking)
-      lockManager
-        .acquireLock(conversationId, async () => {
-          await handleMessage(testAdapter, conversationId, message);
-        })
-        .catch(createMessageErrorHandler('Test', testAdapter, conversationId));
-
-      return res.json({ success: true, conversationId, message });
-    } catch (error) {
-      console.error('[Test] Endpoint error:', error);
-      return res.status(500).json({ error: 'Internal server error' });
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON in request body' }, 400);
     }
+
+    const { conversationId, message } = body;
+
+    // Validate: must be non-empty strings
+    if (typeof conversationId !== 'string' || !conversationId) {
+      return c.json({ error: 'conversationId must be a non-empty string' }, 400);
+    }
+    if (typeof message !== 'string' || !message) {
+      return c.json({ error: 'message must be a non-empty string' }, 400);
+    }
+
+    await testAdapter.receiveMessage(conversationId, message);
+
+    // Process the message through orchestrator (non-blocking)
+    lockManager
+      .acquireLock(conversationId, async () => {
+        await handleMessage(testAdapter, conversationId, message);
+      })
+      .catch(createMessageErrorHandler('Test', testAdapter, conversationId));
+
+    return c.json({ success: true, conversationId, message });
   });
 
-  app.get('/test/messages/:conversationId', (req, res) => {
-    const messages = testAdapter.getSentMessages(req.params.conversationId);
-    res.json({ conversationId: req.params.conversationId, messages });
+  app.get('/test/messages/:conversationId', c => {
+    const conversationId = c.req.param('conversationId');
+    const messages = testAdapter.getSentMessages(conversationId);
+    return c.json({ conversationId, messages });
   });
 
-  // Express 5 optional parameter syntax - handles both /test/messages and /test/messages/:id
-  app.delete('/test/messages{/:conversationId}', (req, res) => {
-    testAdapter.clearMessages(req.params.conversationId);
-    res.json({ success: true });
+  // Hono optional parameter syntax
+  app.delete('/test/messages/:conversationId?', c => {
+    const conversationId = c.req.param('conversationId');
+    testAdapter.clearMessages(conversationId);
+    return c.json({ success: true });
   });
 
   // Set test adapter streaming mode
-  app.put('/test/mode', (req, res) => {
-    const { mode } = req.body as { mode?: unknown };
+  app.put('/test/mode', async c => {
+    // Parse JSON with explicit error handling
+    let body: { mode?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON in request body' }, 400);
+    }
+
+    const { mode } = body;
     if (mode !== 'stream' && mode !== 'batch') {
-      return res.status(400).json({ error: 'mode must be "stream" or "batch"' });
+      return c.json({ error: 'mode must be "stream" or "batch"' }, 400);
     }
     testAdapter.setStreamingMode(mode);
-    return res.json({ success: true, mode });
+    return c.json({ success: true, mode });
   });
 
-  app.listen(port, () => {
-    console.log(`[Express] Server listening on port ${String(port)}`);
+  const server = Bun.serve({
+    fetch: app.fetch,
+    port,
   });
+  console.log(`[Hono] Server listening on port ${String(server.port)}`);
 
   // Initialize Telegram adapter (conditional)
   let telegram: TelegramAdapter | null = null;

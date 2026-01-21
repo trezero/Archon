@@ -18,7 +18,7 @@ Run complete end-to-end validation of the Remote Agentic Coding Platform includi
 ```
 
 **Prerequisites:**
-- ✅ ngrok running and exposing port 3000 (for GitHub webhooks)
+- ✅ ngrok running and exposing port 3090 (for GitHub webhooks)
 - ✅ `.env` file configured with all required credentials
 - ✅ GitHub CLI (`gh`) authenticated
 - ✅ PostgreSQL accessible via `DATABASE_URL`
@@ -1429,7 +1429,7 @@ rm -rf "${WORK_DIR}/${TEST_REPO_NAME}"
 
 ### Prerequisites
 - **Ngrok URL**: Pass as argument when running command (e.g., `/validation:validate https://your-url.ngrok-free.dev`)
-- **Ngrok Running**: Must be running and forwarding to port 3000 before starting validation
+- **Ngrok Running**: Must be running and forwarding to port 3090 before starting validation
 - **Environment**: Ensure `.env` has all required credentials (DATABASE_URL, WEBHOOK_SECRET, GitHub tokens, Claude token)
 - **GitHub CLI**: Must be authenticated (`gh auth status`)
 
