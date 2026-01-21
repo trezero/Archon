@@ -29,78 +29,161 @@ Monorepo restructure introducing the CLI package for local workflow execution.
 
 - Surface git utility errors instead of swallowing silently (#292)
 
-## [0.1.1] - 2026-01-19
+## [0.1.6] - 2026-01-19
 
-Major workflow engine release with autonomous execution, parallel steps, and comprehensive fixes.
+Provider selection and session audit trail.
 
 ### Added
 
-- **Workflow engine** for multi-step AI orchestration with YAML definitions (#108)
-- **Ralph-style autonomous iteration loops** for plan-until-done execution (#168)
-- **Parallel block execution** for workflows - run multiple steps concurrently (#217)
-- **Workflow router** with platform context for intelligent intent detection (#170, #135)
-- **Workflow status visibility** - track running workflows per conversation (#256)
-- **Emoji status indicators** for workflow messages (#160)
+- **Config-based provider selection** for workflows - choose Claude or Codex per workflow (#283)
 - **Session state machine** with immutable sessions for full audit trail (#302)
-- **Config-based provider selection** for workflows (Claude/Codex per workflow) (#283)
-- **Auto-copy default commands/workflows** on `/clone` (#243)
-- **Worktree-aware automatic port allocation** for parallel development (#178)
-- **GitHub thread history** - fetch previous PR/issue comments as context (#185)
-- **Claude global auth detection** - auto-detect when `CLAUDE_USE_GLOBAL_AUTH` not set (#228, #236)
-- **Cloud deployment support** for `with-db` profile (#134)
-- **Pre-commit hook** to prevent formatting drift (#229)
-- Integration tests for orchestrator workflow routing (#181)
-- Concurrent workflow detection tests (#179)
-- Comprehensive AI error handling tests (#176)
-- Tests for logger filesystem error handling (#133)
+- **Workflow status visibility** - track running workflows per conversation (#256)
+- Codex sandbox/network settings and progress logging (#290)
 
 ### Changed
 
-- Improve error handling in workflow engine (#150)
-- Improve error handling and code clarity in server entry point (#257)
-- Deep orchestrator code review refactor (#265)
 - Comprehensive isolation module code review (#274)
-- Make `WorkflowDefinition.steps` readonly for immutability (#136)
+
+### Fixed
+
+- Stale workspace: sync before worktree creation (#287)
+- Add defaults subdirectory to command search paths (#289)
+
+## [0.1.5] - 2026-01-18
+
+Major stability release with comprehensive bug fixes and test coverage.
+
+### Added
+
+- **Worktree-aware automatic port allocation** for parallel development (#178)
+- **GitHub thread history** - fetch previous PR/issue comments as context (#185)
+- **Cloud deployment support** for `with-db` profile (#134)
+- Integration tests for orchestrator workflow routing (#181)
+- Concurrent workflow detection tests (#179)
+- Comprehensive AI error handling tests for workflow executor (#176)
+
+### Changed
+
+- Deep orchestrator code review refactor (#265)
+- Improve error handling and code clarity in server entry point (#257)
+
+### Fixed
+
+- Workflows should only load from `.archon/workflows/` (#200)
+- PR worktrees use actual branch for same-repo PRs (#238)
+- GitHub adapter parameter bug causes clone failures (#209)
+- Auto-detect Claude auth when `CLAUDE_USE_GLOBAL_AUTH` not set (#236)
+- Worktree provider cleans up branches when worktrees are deleted (#222)
+- Extract port utilities to prevent test conflicts with running server (#251)
+- Workflows ensure artifacts committed before completing (#203)
+- Worktree creation fails when orphan directory exists (#208)
+- Add logging to detect silent updateConversation failures (#235)
+- Auto-sync `.archon` folder to worktrees before workflow discovery (#219)
+- Consolidate startup messages into single workflow start comment (#177)
+- Show repo identifier instead of server filesystem path (#175)
+- Check for existing PR before creating new one (#195)
+- Use empty Slack token placeholders in .env.example (#249)
+
+## [0.1.4] - 2026-01-15
+
+Developer experience improvements and worktree stability.
+
+### Added
+
+- **Auto-copy default commands/workflows** on `/clone` (#243)
+- **Pre-commit hook** to prevent formatting drift (#229)
+- **Claude global auth** - `CLAUDE_USE_GLOBAL_AUTH` for SDK built-in authentication (#228)
+
+### Changed
+
 - Update README with accurate command reference and new features (#242)
 
 ### Fixed
 
-- Detect and block concurrent workflow execution (#196)
-- Bot no longer responds to @mentions in issue/PR descriptions (#143)
+- Copy `.archon` directory to worktrees by default (#210)
+- Stale workflow cleanup and defense-in-depth error handling (#237)
+- Cleanup service handles missing worktree directories gracefully (#207)
+- Worktree limit blocks workflow execution instead of falling back to main (#197)
 - Bot self-triggering on own comments (#202)
+- Remove unnecessary String() calls in workflow db operations (#182)
+
+## [0.1.3] - 2026-01-13
+
+Workflow engine improvements with autonomous execution and parallel steps.
+
+### Added
+
+- **Ralph-style autonomous iteration loops** for plan-until-done execution (#168)
+- **Parallel block execution** for workflows - run multiple steps concurrently (#217)
+- **Workflow router** with platform context for intelligent intent detection (#170)
+- **Emoji status indicators** for workflow messages (#160)
+- Tests for logger filesystem error handling (#133)
+
+### Changed
+
+- Make `WorkflowDefinition.steps` readonly for immutability (#136)
+
+### Fixed
+
+- Detect and block concurrent workflow execution (#196)
 - RouterContext not populated for non-slash commands on GitHub (#173)
 - Workflow executor missing GitHub issue context (#212)
-- Load workflows from conversation.cwd instead of server cwd (#149)
-- Workflows should only load from `.archon/workflows/` (#200)
-- `/repo <name>` fails due to owner/repo folder structure mismatch (#148)
-- Add ConversationLock to GitHub webhook handler (#142)
 - Skip step notification for single-step workflows (#159)
 - Remove redundant workflow completion message on GitHub (#162)
 - Add message length handling for GitHub adapter (#163)
 - Use code formatting for workflow/command names (#161)
-- Consolidate startup messages into single workflow start comment (#177)
-- Show repo identifier instead of server filesystem path (#175)
-- Copy `.archon` directory to worktrees by default (#210)
-- Auto-sync `.archon` folder to worktrees before workflow discovery (#219)
+
+## [0.1.2] - 2026-01-07
+
+Introduction of the YAML-based workflow engine.
+
+### Added
+
+- **Workflow engine** for multi-step AI orchestration with YAML definitions (#108)
+- Improve workflow router to always invoke a workflow (#135)
+
+### Changed
+
+- Improve error handling in workflow engine (#150)
+
+### Fixed
+
+- Add ConversationLock to GitHub webhook handler (#142)
+- Bot no longer responds to @mentions in issue/PR descriptions (#143)
 - Copy git-ignored files to worktrees (#145)
-- Stale workflow cleanup and defense-in-depth error handling (#237)
-- Cleanup service handles missing worktree directories gracefully (#207)
-- Worktree limit blocks workflow execution instead of falling back to main (#197)
-- Worktree provider cleans up branches when worktrees are deleted (#222)
-- Worktree creation fails when orphan directory exists (#208)
-- PR worktrees use actual branch for same-repo PRs (#238)
-- Stale workspace: sync before worktree creation (#287)
-- GitHub adapter parameter bug causes clone failures (#209)
-- Check for existing PR before creating new one (#195)
-- Workflows ensure artifacts committed before completing (#203)
-- Add logging to detect silent updateConversation failures (#235)
-- Extract port utilities to prevent test conflicts with running server (#251)
-- Add defaults subdirectory to command search paths (#289)
-- Codex sandbox/network settings and progress logging (#290)
-- Remove unnecessary String() calls in workflow db operations (#182)
-- Use empty Slack token placeholders in .env.example (#249)
-- Wrap platform.sendMessage calls in try-catch in executor (#132)
+- `/repo <name>` fails due to owner/repo folder structure mismatch (#148)
+- Load workflows from conversation.cwd instead of server cwd (#149)
 - Revert to Bun native YAML parser and add Windows CI (#141)
+- Wrap platform.sendMessage calls in try-catch in executor (#132)
+- Cloud database pooler idle disconnects gracefully (#118)
+
+## [0.1.1] - 2025-12-17
+
+Isolation architecture overhaul and Bun runtime migration.
+
+### Added
+
+- **Bun runtime migration** - replaced Node.js/npm/Jest with Bun (#85)
+- **Unified isolation environment architecture** with provider abstraction (#87, #92)
+- **Scheduled cleanup service** for stale worktree environments (#94)
+- **Worktree limits** with user feedback (#98)
+- **Force-thread response model** for Discord (#93)
+- **Archon distribution config** and `~/.archon/` directory structure (#101)
+- User feedback messages for GitHub worktree operations (#90)
+- Required SDK options for permissions and system prompt (#91)
+- Test coverage for PR worktree creation (#77)
+
+### Changed
+
+- Drop legacy isolation columns in favor of new architecture (#99)
+- Use `isolation_env_id` with fallback to `worktree_path` (#88)
+
+### Fixed
+
+- Fork PR support in worktree creation (#76)
+- Multi-repository path collision bug (#78)
+- Status command displays `isolation_env_id` (#89)
+- Worktree path collision for repos with same name (#106)
 
 ## [0.1.0] - 2025-12-08
 
