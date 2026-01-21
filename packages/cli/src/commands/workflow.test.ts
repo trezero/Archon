@@ -165,7 +165,7 @@ describe('workflowRunCommand', () => {
       expect.stringContaining('Could not look up codebase')
     );
     expect(consoleWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Check DATABASE_URL and that PostgreSQL is running')
+      expect.stringContaining('Check DATABASE_URL and that the database is running')
     );
   });
 

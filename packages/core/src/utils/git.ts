@@ -531,3 +531,102 @@ export async function getDefaultBranch(repoPath: string): Promise<string> {
     throw new Error(`Failed to get default branch for ${repoPath}: ${err.message}`);
   }
 }
+
+/**
+ * Find the root of the git repository containing the given path
+ * Returns null if not in a git repository
+ */
+export async function findRepoRoot(startPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', startPath, 'rev-parse', '--show-toplevel'],
+      { timeout: 10000 }
+    );
+    return stdout.trim();
+  } catch (error) {
+    const err = error as Error & { stderr?: string };
+    const errorText = `${err.message} ${err.stderr ?? ''}`;
+
+    // Expected: not a git repository
+    if (errorText.includes('not a git repository') || errorText.includes('Not a git repository')) {
+      return null;
+    }
+
+    // Unexpected error - surface it
+    console.error('[Git] Failed to find repo root', {
+      startPath,
+      error: err.message,
+      stderr: err.stderr,
+    });
+    throw new Error(`Failed to find repo root for ${startPath}: ${err.message}`);
+  }
+}
+
+/**
+ * Get the remote URL for origin (if it exists)
+ * Returns null if no remote is configured
+ */
+export async function getRemoteUrl(repoPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', repoPath, 'remote', 'get-url', 'origin'], {
+      timeout: 10000,
+    });
+    return stdout.trim() || null;
+  } catch (error) {
+    const err = error as Error & { stderr?: string };
+    const errorText = `${err.message} ${err.stderr ?? ''}`;
+
+    // Expected: no remote named origin
+    if (
+      errorText.includes('No such remote') ||
+      errorText.includes('does not have a url configured')
+    ) {
+      return null;
+    }
+
+    // Unexpected error - surface it
+    console.error('[Git] Failed to get remote URL', {
+      repoPath,
+      error: err.message,
+      stderr: err.stderr,
+    });
+    throw new Error(`Failed to get remote URL for ${repoPath}: ${err.message}`);
+  }
+}
+
+/**
+ * Checkout a branch (creating it if it doesn't exist)
+ */
+export async function checkout(repoPath: string, branchName: string): Promise<void> {
+  try {
+    // Try to checkout existing branch first
+    await execFileAsync('git', ['-C', repoPath, 'checkout', branchName], {
+      timeout: 30000,
+    });
+  } catch (error) {
+    const err = error as Error & { stderr?: string };
+    const errorText = `${err.message} ${err.stderr ?? ''}`;
+
+    // If branch doesn't exist, create it
+    if (
+      errorText.includes('did not match any file') ||
+      errorText.includes('pathspec') ||
+      errorText.includes("doesn't exist")
+    ) {
+      await execFileAsync('git', ['-C', repoPath, 'checkout', '-b', branchName], {
+        timeout: 30000,
+      });
+      return;
+    }
+
+    // Unexpected error - surface it
+    console.error('[Git] Failed to checkout branch', {
+      repoPath,
+      branchName,
+      error: err.message,
+      stderr: err.stderr,
+    });
+    throw new Error(`Failed to checkout branch ${branchName}: ${err.message}`);
+  }
+}

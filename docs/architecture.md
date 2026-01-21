@@ -42,7 +42,7 @@ The Remote Coding Agent is a **platform-agnostic AI coding assistant orchestrato
       └───────────────┼───────────────────┘
                       ▼
 ┌─────────────────────────────────────────────┐
-│        PostgreSQL (3 Tables)                │
+│    PostgreSQL/SQLite (3 Tables)             │
 │  • Codebases  • Conversations  • Sessions   │
 └─────────────────────────────────────────────┘
 ```

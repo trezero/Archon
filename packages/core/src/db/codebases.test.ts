@@ -1,5 +1,5 @@
 import { mock, describe, test, expect, beforeEach } from 'bun:test';
-import { createQueryResult } from '../test/mocks/database';
+import { createQueryResult, mockPostgresDialect } from '../test/mocks/database';
 import { Codebase } from '../types';
 
 const mockQuery = mock(() => Promise.resolve(createQueryResult([])));
@@ -9,6 +9,7 @@ mock.module('./connection', () => ({
   pool: {
     query: mockQuery,
   },
+  getDialect: () => mockPostgresDialect,
 }));
 
 import {

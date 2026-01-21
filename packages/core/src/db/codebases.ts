@@ -1,8 +1,8 @@
 /**
  * Database operations for codebases
  */
-import { pool } from './connection';
-import { Codebase } from '../types';
+import { pool, getDialect } from './connection';
+import type { Codebase } from '../types';
 
 export async function createCodebase(data: {
   name: string;
@@ -15,6 +15,9 @@ export async function createCodebase(data: {
     'INSERT INTO remote_agent_codebases (name, repository_url, default_cwd, ai_assistant_type) VALUES ($1, $2, $3, $4) RETURNING *',
     [data.name, data.repository_url ?? null, data.default_cwd, assistantType]
   );
+  if (!result.rows[0]) {
+    throw new Error('Failed to create codebase: INSERT succeeded but no row returned');
+  }
   return result.rows[0];
 }
 
@@ -29,8 +32,9 @@ export async function updateCodebaseCommands(
   id: string,
   commands: Record<string, { path: string; description: string }>
 ): Promise<void> {
+  const dialect = getDialect();
   await pool.query(
-    'UPDATE remote_agent_codebases SET commands = $1, updated_at = NOW() WHERE id = $2',
+    `UPDATE remote_agent_codebases SET commands = $1, updated_at = ${dialect.now()} WHERE id = $2`,
     [JSON.stringify(commands), id]
   );
 }
@@ -71,6 +75,7 @@ export async function findCodebaseByDefaultCwd(defaultCwd: string): Promise<Code
 }
 
 export async function updateCodebase(id: string, data: { default_cwd?: string }): Promise<void> {
+  const dialect = getDialect();
   const updates: string[] = [];
   const values: (string | null)[] = [];
   let paramIndex = 1;
@@ -82,7 +87,7 @@ export async function updateCodebase(id: string, data: { default_cwd?: string })
 
   if (updates.length === 0) return;
 
-  updates.push('updated_at = NOW()');
+  updates.push(`updated_at = ${dialect.now()}`);
   values.push(id);
 
   await pool.query(

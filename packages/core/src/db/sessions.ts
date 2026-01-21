@@ -1,8 +1,8 @@
 /**
  * Database operations for sessions
  */
-import { pool } from './connection';
-import { Session } from '../types';
+import { pool, getDialect } from './connection';
+import type { Session } from '../types';
 import type { TransitionTrigger } from '../state/session-transitions';
 
 /**
@@ -60,8 +60,9 @@ export async function updateSession(id: string, sessionId: string): Promise<void
 }
 
 export async function deactivateSession(id: string): Promise<void> {
+  const dialect = getDialect();
   const result = await pool.query(
-    'UPDATE remote_agent_sessions SET active = false, ended_at = NOW() WHERE id = $1',
+    `UPDATE remote_agent_sessions SET active = false, ended_at = ${dialect.now()} WHERE id = $1`,
     [id]
   );
   if (result.rowCount === 0) {
@@ -73,8 +74,9 @@ export async function updateSessionMetadata(
   id: string,
   metadata: Record<string, unknown>
 ): Promise<void> {
+  const dialect = getDialect();
   const result = await pool.query(
-    'UPDATE remote_agent_sessions SET metadata = metadata || $1::jsonb WHERE id = $2',
+    `UPDATE remote_agent_sessions SET metadata = ${dialect.jsonMerge('metadata', 1)} WHERE id = $2`,
     [JSON.stringify(metadata), id]
   );
   if (result.rowCount === 0) {
@@ -118,7 +120,7 @@ export async function transitionSession(
  * Get session history for a conversation (most recent first).
  * Useful for debugging agent decision history.
  */
-export async function getSessionHistory(conversationId: string): Promise<Session[]> {
+export async function getSessionHistory(conversationId: string): Promise<readonly Session[]> {
   const result = await pool.query<Session>(
     `SELECT * FROM remote_agent_sessions
      WHERE conversation_id = $1
@@ -132,7 +134,7 @@ export async function getSessionHistory(conversationId: string): Promise<Session
  * Walk the session chain from a given session back to the root.
  * Returns sessions in chronological order (oldest first).
  */
-export async function getSessionChain(sessionId: string): Promise<Session[]> {
+export async function getSessionChain(sessionId: string): Promise<readonly Session[]> {
   const result = await pool.query<Session>(
     `WITH RECURSIVE chain AS (
        SELECT * FROM remote_agent_sessions WHERE id = $1

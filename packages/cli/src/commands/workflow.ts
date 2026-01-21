@@ -1,10 +1,21 @@
 /**
  * Workflow command - list and run workflows
  */
-import { discoverWorkflows, executeWorkflow } from '@archon/core';
+import { discoverWorkflows, executeWorkflow, getIsolationProvider } from '@archon/core';
 import * as conversationDb from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
+import * as isolationDb from '@archon/core/db/isolation-environments';
+import * as git from '@archon/core/utils/git';
 import { CLIAdapter } from '../adapters/cli-adapter';
+
+/**
+ * Options for workflow run command
+ *
+ * Discriminated union ensures `noWorktree` can only be set when `branchName` is provided.
+ */
+export type WorkflowRunOptions =
+  | { branchName?: undefined; noWorktree?: undefined } // No isolation
+  | { branchName: string; noWorktree?: boolean }; // With branch - worktree or direct checkout
 
 /**
  * Generate a unique conversation ID for CLI usage
@@ -16,20 +27,26 @@ function generateConversationId(): string {
 }
 
 /**
- * List available workflows in the current directory
+ * Load workflows from cwd with standardized error handling
  */
-export async function workflowListCommand(cwd: string): Promise<void> {
-  console.log(`Discovering workflows in: ${cwd}`);
-
-  let workflows;
+async function loadWorkflows(cwd: string): Promise<Awaited<ReturnType<typeof discoverWorkflows>>> {
   try {
-    workflows = await discoverWorkflows(cwd);
+    return await discoverWorkflows(cwd);
   } catch (error) {
     const err = error as Error;
     throw new Error(
       `Error loading workflows: ${err.message}\nHint: Check permissions on .archon/workflows/ directory.`
     );
   }
+}
+
+/**
+ * List available workflows in the current directory
+ */
+export async function workflowListCommand(cwd: string): Promise<void> {
+  console.log(`Discovering workflows in: ${cwd}`);
+
+  const workflows = await loadWorkflows(cwd);
 
   if (workflows.length === 0) {
     console.log('\nNo workflows found.');
@@ -55,18 +72,10 @@ export async function workflowListCommand(cwd: string): Promise<void> {
 export async function workflowRunCommand(
   cwd: string,
   workflowName: string,
-  userMessage: string
+  userMessage: string,
+  options: WorkflowRunOptions = {}
 ): Promise<void> {
-  // Discover workflows
-  let workflows;
-  try {
-    workflows = await discoverWorkflows(cwd);
-  } catch (error) {
-    const err = error as Error;
-    throw new Error(
-      `Error loading workflows: ${err.message}\nHint: Check permissions on .archon/workflows/ directory.`
-    );
-  }
+  const workflows = await loadWorkflows(cwd);
 
   if (workflows.length === 0) {
     throw new Error('No workflows found in .archon/workflows/');
@@ -103,36 +112,130 @@ export async function workflowRunCommand(
     );
   }
 
-  // Try to find a codebase for this directory (non-critical)
+  // Try to find a codebase for this directory (non-critical for non-isolation workflows)
   let codebase = null;
+  let codebaseLookupError: Error | null = null;
   try {
     codebase = await codebaseDb.findCodebaseByDefaultCwd(cwd);
   } catch (error) {
     const err = error as Error;
-    // Non-critical - log with details but continue
+    codebaseLookupError = err;
+    // Non-critical for non-isolation workflows - log with details but continue
     console.warn(`Warning: Could not look up codebase for ${cwd}: ${err.message}`);
     // If this is a connection error, it might indicate broader database issues
-    if (err.message.includes('connect') || err.message.includes('ECONNREFUSED')) {
-      console.warn('Hint: Check DATABASE_URL and that PostgreSQL is running.');
+    if (
+      err.message.includes('connect') ||
+      err.message.includes('ECONNREFUSED') ||
+      err.message.includes('ETIMEDOUT')
+    ) {
+      console.warn('Hint: Check DATABASE_URL and that the database is running.');
     }
   }
 
-  // Update conversation with cwd (and optionally codebase)
+  // Handle isolation (worktree creation)
+  let workingCwd = cwd;
+  let isolationEnvId: string | undefined;
+
+  if (options.branchName) {
+    // Need a codebase for isolation
+    if (!codebase) {
+      // Check if it's a database issue rather than "not in git repo"
+      if (codebaseLookupError) {
+        throw new Error(
+          'Cannot create worktree: Database lookup failed.\n' +
+            `Error: ${codebaseLookupError.message}\n` +
+            'Hint: Check your database connection before using --branch.'
+        );
+      }
+
+      // Try to auto-detect from cwd
+      const repoRoot = await git.findRepoRoot(cwd);
+      if (!repoRoot) {
+        throw new Error(
+          'Cannot create worktree: Not in a git repository.\n' +
+            'Either run from a git repo or use /clone first.'
+        );
+      }
+
+      // Auto-register as codebase
+      const remoteUrl = await git.getRemoteUrl(repoRoot);
+      const repoName = remoteUrl?.split('/').pop()?.replace('.git', '') ?? 'local-repo';
+      codebase = await codebaseDb.createCodebase({
+        name: repoName,
+        repository_url: remoteUrl ?? undefined,
+        default_cwd: repoRoot,
+      });
+      console.log(`[CLI] Auto-registered codebase: ${codebase.repository_url ?? repoRoot}`);
+    }
+
+    if (options.noWorktree) {
+      // Checkout branch in cwd, no worktree
+      console.log(`[CLI] Checking out branch: ${options.branchName}`);
+      await git.checkout(cwd, options.branchName);
+      workingCwd = cwd;
+    } else {
+      // Create or reuse worktree
+      const provider = getIsolationProvider();
+
+      // Check for existing worktree
+      const existingEnv = await isolationDb.findByWorkflow(codebase.id, 'task', options.branchName);
+
+      if (existingEnv && (await provider.healthCheck(existingEnv.working_path))) {
+        console.log(`[CLI] Reusing existing worktree: ${existingEnv.working_path}`);
+        workingCwd = existingEnv.working_path;
+        isolationEnvId = existingEnv.id;
+      } else {
+        // Create new worktree
+        console.log(`[CLI] Creating worktree for branch: ${options.branchName}`);
+
+        const isolatedEnv = await provider.create({
+          workflowType: 'task',
+          identifier: options.branchName,
+          codebaseId: codebase.id,
+          canonicalRepoPath: codebase.default_cwd,
+          description: `CLI workflow: ${workflowName}`,
+        });
+
+        // Track in database
+        // Use actual branch name from worktree provider (may differ from requested name)
+        const actualBranchName =
+          isolatedEnv.provider === 'worktree' ? isolatedEnv.branchName : options.branchName;
+
+        const envRecord = await isolationDb.create({
+          codebase_id: codebase.id,
+          workflow_type: 'task',
+          workflow_id: options.branchName,
+          provider: 'worktree',
+          working_path: isolatedEnv.workingPath,
+          branch_name: actualBranchName,
+          created_by_platform: 'cli',
+          metadata: {},
+        });
+
+        workingCwd = isolatedEnv.workingPath;
+        isolationEnvId = envRecord.id;
+        console.log(`[CLI] Worktree created: ${workingCwd}`);
+      }
+    }
+  }
+
+  // Update conversation with cwd and isolation info
   try {
     await conversationDb.updateConversation(conversation.id, {
-      cwd,
+      cwd: workingCwd,
       codebase_id: codebase?.id ?? null,
+      isolation_env_id: isolationEnvId ?? null,
     });
   } catch (error) {
     const err = error as Error;
     throw new Error(`Failed to update conversation: ${err.message}`);
   }
 
-  // Execute workflow
+  // Execute workflow with workingCwd (may be worktree path)
   const result = await executeWorkflow(
     adapter,
     conversationId,
-    cwd,
+    workingCwd,
     workflow,
     userMessage,
     conversation.id,

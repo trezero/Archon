@@ -1,6 +1,6 @@
 ## Project Overview
 
-**Remote Agentic Coding Platform**: Control AI coding assistants (Claude Code SDK, Codex SDK) remotely from Slack, Telegram, and GitHub. Built with **Bun + TypeScript + PostgreSQL**, single-developer tool for practitioners of the Dynamous Agentic Coding Course. Architecture prioritizes simplicity, flexibility, and user control.
+**Remote Agentic Coding Platform**: Control AI coding assistants (Claude Code SDK, Codex SDK) remotely from Slack, Telegram, and GitHub. Built with **Bun + TypeScript + PostgreSQL/SQLite**, single-developer tool for practitioners of the Dynamous Agentic Coding Course. Architecture prioritizes simplicity, flexibility, and user control.
 
 ## Core Principles
 
@@ -51,7 +51,7 @@ docker-compose --profile with-db up -d postgres
 bun run dev
 ```
 
-Requires `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/remote_coding_agent` in `.env`.
+Requires `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/remote_coding_agent` in `.env` (or omit for SQLite auto-detection).
 
 Code changes auto-reload instantly. Telegram/Slack work from any device (polling-based, no port forwarding needed).
 
@@ -115,11 +115,15 @@ bun run format:check
 
 ### Database
 
+**Auto-Detection:**
+- **With `DATABASE_URL` set**: Uses PostgreSQL
+- **Without `DATABASE_URL`**: Uses SQLite at `~/.archon/archon.db` (auto-initialized)
+
 ```bash
-# Run SQL migrations (manual)
+# PostgreSQL: Run SQL migrations (manual)
 psql $DATABASE_URL < migrations/001_initial_schema.sql
 
-# Start PostgreSQL (Docker)
+# PostgreSQL: Start PostgreSQL (Docker)
 docker-compose --profile with-db up -d postgres
 ```
 
@@ -157,6 +161,19 @@ bun run cli workflow run assist "What does the orchestrator do?"
 # Run in a specific directory
 bun run cli workflow run plan --cwd /path/to/repo "Add dark mode"
 
+# Isolation: Create/reuse worktree for a branch
+bun run cli workflow run implement --branch feature-auth "Add auth"
+
+# Isolation: Run on branch directly without worktree
+bun run cli workflow run quick-fix --no-worktree "Fix typo"
+
+# List active worktrees/environments
+bun run cli isolation list
+
+# Clean up stale environments (default: 7 days)
+bun run cli isolation cleanup
+bun run cli isolation cleanup 14  # Custom days
+
 # Show version
 bun run cli version
 ```
@@ -164,11 +181,15 @@ bun run cli version
 **How it works:**
 - Discovers workflows from `.archon/workflows/` in working directory
 - Creates a new conversation for each invocation (ID: `cli-{timestamp}-{random}`)
-- Connects to same PostgreSQL database as server
+- Connects to database (PostgreSQL if `DATABASE_URL` set, otherwise SQLite at `~/.archon/archon.db`)
 - Streams AI responses to stdout in real-time
 
+**Isolation flags:**
+- `--branch/-b <name>`: Creates or reuses a worktree for the specified branch (auto-registers codebase if in a git repo)
+- `--no-worktree`: Checks out branch directly in current directory without creating a worktree
+
 **Requirements:**
-- `DATABASE_URL` environment variable must be set
+- `DATABASE_URL` optional (defaults to SQLite if not set)
 - Same AI credentials as server (Claude/Codex tokens)
 
 ### Cloud Deployment
@@ -342,7 +363,7 @@ import * as core from '@archon/core';  // Don't do this
 **Environment Variables:**
 
 ```env
-# Database
+# Database (optional - uses SQLite at ~/.archon/archon.db if not set)
 DATABASE_URL=postgresql://user:pass@host:5432/dbname
 
 # AI Assistants
@@ -457,6 +478,7 @@ All Archon-managed files are organized under a dedicated namespace:
 ├── worktrees/      # Git worktrees for isolation
 │   └── repo-name/
 │       └── branch-name/
+├── archon.db       # SQLite database (when DATABASE_URL not set)
 └── config.yaml     # Global configuration (non-secrets)
 ```
 
@@ -490,7 +512,7 @@ All Archon-managed files are organized under a dedicated namespace:
 - **Platform Adapters**: Implement `IPlatformAdapter`, handle auth, polling/webhooks
 - **AI Clients**: Implement `IAssistantClient`, session management, streaming
 - **Slash Commands**: Add to command-handler.ts, update database, no AI
-- **Database Operations**: Use `pg` with parameterized queries, connection pooling
+- **Database Operations**: Use `IDatabase` interface (supports PostgreSQL and SQLite via adapters)
 
 ### Type Checking
 

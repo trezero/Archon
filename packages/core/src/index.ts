@@ -30,7 +30,8 @@ export {
 // =============================================================================
 // Database
 // =============================================================================
-export { pool } from './db/connection';
+export { pool, getDatabase, getDialect, closeDatabase, resetDatabase } from './db/connection';
+export type { IDatabase, SqlDialect } from './db/adapters/types';
 
 // Namespaced db modules for explicit access
 export * as conversationDb from './db/conversations';
@@ -206,6 +207,9 @@ export {
   hasUncommittedChanges,
   syncWorkspace,
   getDefaultBranch,
+  findRepoRoot,
+  getRemoteUrl,
+  checkout,
 } from './utils/git';
 
 // GitHub GraphQL

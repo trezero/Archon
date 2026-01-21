@@ -13,6 +13,7 @@ Archon supports a layered configuration system with sensible defaults, optional 
 ├── worktrees/      # Git worktrees for isolation
 │   └── repo-name/
 │       └── branch-name/
+├── archon.db       # SQLite database (when DATABASE_URL not set)
 └── config.yaml     # Global configuration (optional)
 ```
 
@@ -95,6 +96,7 @@ Environment variables override all other configuration:
 
 | Variable                       | Description                | Default       |
 | ------------------------------ | -------------------------- | ------------- |
+| `DATABASE_URL`                 | PostgreSQL connection (optional) | SQLite at `~/.archon/archon.db` if not set |
 | `ARCHON_HOME`                  | Base directory for Archon  | `~/.archon`   |
 | `DEFAULT_AI_ASSISTANT`         | Default AI assistant       | `claude`      |
 | `TELEGRAM_STREAMING_MODE`      | Telegram streaming         | `stream`      |

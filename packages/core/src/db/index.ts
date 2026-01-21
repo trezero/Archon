@@ -9,7 +9,9 @@
  * in the same file.
  */
 
-export { pool } from './connection';
+// Connection management
+export { pool, getDatabase, getDialect, closeDatabase, resetDatabase } from './connection';
+export type { IDatabase, SqlDialect, QueryResult } from './adapters/types';
 
 // Re-export namespaced for convenience
 export * as conversationDb from './conversations';

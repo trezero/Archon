@@ -478,16 +478,16 @@ export class WorktreeProvider implements IIsolationProvider {
       const err = error as Error & { code?: string };
       const errorMessage = err.message.toLowerCase();
 
-      // Check for serious errors that warrant stronger warnings
+      // Fatal errors - throw to prevent confusing downstream failures
       if (err.code === 'EACCES' || errorMessage.includes('permission denied')) {
-        console.error(
-          '[WorktreeProvider] Permission denied during workspace sync - this may affect worktree creation:',
-          { repoPath, error: err.message }
+        throw new Error(
+          `Permission denied accessing repository at ${repoPath}. ` +
+            'Check file permissions and try again.'
         );
       } else if (errorMessage.includes('not a git repository')) {
-        console.error(
-          '[WorktreeProvider] Repository appears corrupted - worktree creation may fail:',
-          { repoPath, error: err.message }
+        throw new Error(
+          `${repoPath} is not a valid git repository. ` +
+            'Ensure the workspace was cloned correctly.'
         );
       } else {
         // Network errors, timeouts, etc. - truly non-fatal

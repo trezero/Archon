@@ -1,8 +1,9 @@
 /**
  * Database operations for conversations
  */
-import { pool } from './connection';
-import { Conversation, ConversationNotFoundError } from '../types';
+import { pool, getDialect } from './connection';
+import type { Conversation } from '../types';
+import { ConversationNotFoundError } from '../types';
 
 /**
  * Get a conversation by platform type and platform ID
@@ -101,7 +102,8 @@ export async function updateConversation(
     return; // No updates
   }
 
-  fields.push('updated_at = NOW()');
+  const dialect = getDialect();
+  fields.push(`updated_at = ${dialect.now()}`);
   values.push(id);
 
   const result = await pool.query(
@@ -133,7 +135,9 @@ export async function getConversationByIsolationEnvId(envId: string): Promise<Co
 /**
  * Find all conversations using a specific isolation environment (new UUID model)
  */
-export async function getConversationsByIsolationEnvId(envId: string): Promise<Conversation[]> {
+export async function getConversationsByIsolationEnvId(
+  envId: string
+): Promise<readonly Conversation[]> {
   const result = await pool.query<Conversation>(
     'SELECT * FROM remote_agent_conversations WHERE isolation_env_id = $1',
     [envId]
@@ -145,7 +149,9 @@ export async function getConversationsByIsolationEnvId(envId: string): Promise<C
  * Update last_activity_at for staleness tracking
  */
 export async function touchConversation(id: string): Promise<void> {
-  await pool.query('UPDATE remote_agent_conversations SET last_activity_at = NOW() WHERE id = $1', [
-    id,
-  ]);
+  const dialect = getDialect();
+  await pool.query(
+    `UPDATE remote_agent_conversations SET last_activity_at = ${dialect.now()} WHERE id = $1`,
+    [id]
+  );
 }

@@ -1,7 +1,7 @@
 /**
  * Database operations for workflow runs
  */
-import { pool } from './connection';
+import { pool, getDialect } from './connection';
 import type { WorkflowRun } from '../workflows/types';
 
 export async function createWorkflowRun(data: {
@@ -88,6 +88,7 @@ export async function updateWorkflowRun(
   id: string,
   updates: Partial<Pick<WorkflowRun, 'current_step_index' | 'status' | 'metadata'>>
 ): Promise<void> {
+  const dialect = getDialect();
   const setClauses: string[] = [];
   const values: unknown[] = [];
 
@@ -103,11 +104,14 @@ export async function updateWorkflowRun(
   if (updates.status !== undefined) {
     addParam('status = ?', updates.status);
     if (updates.status === 'completed' || updates.status === 'failed') {
-      setClauses.push('completed_at = NOW()');
+      setClauses.push(`completed_at = ${dialect.now()}`);
     }
   }
   if (updates.metadata !== undefined) {
-    addParam('metadata = metadata || ?::jsonb', JSON.stringify(updates.metadata));
+    // Use dialect helper for JSON merge - need to calculate the param index
+    const paramIndex = values.length + 1;
+    values.push(JSON.stringify(updates.metadata));
+    setClauses.push(`metadata = ${dialect.jsonMerge('metadata', paramIndex)}`);
   }
 
   if (setClauses.length === 0) return;
@@ -128,10 +132,11 @@ export async function updateWorkflowRun(
 }
 
 export async function completeWorkflowRun(id: string): Promise<void> {
+  const dialect = getDialect();
   try {
     await pool.query(
       `UPDATE remote_agent_workflow_runs
-       SET status = 'completed', completed_at = NOW()
+       SET status = 'completed', completed_at = ${dialect.now()}
        WHERE id = $1`,
       [id]
     );
@@ -143,10 +148,11 @@ export async function completeWorkflowRun(id: string): Promise<void> {
 }
 
 export async function failWorkflowRun(id: string, error: string): Promise<void> {
+  const dialect = getDialect();
   try {
     await pool.query(
       `UPDATE remote_agent_workflow_runs
-       SET status = 'failed', completed_at = NOW(), metadata = metadata || $2::jsonb
+       SET status = 'failed', completed_at = ${dialect.now()}, metadata = ${dialect.jsonMerge('metadata', 2)}
        WHERE id = $1`,
       [id, JSON.stringify({ error })]
     );
@@ -163,9 +169,10 @@ export async function failWorkflowRun(id: string, error: string): Promise<void> 
  * Non-throwing: logs errors but doesn't fail the workflow.
  */
 export async function updateWorkflowActivity(id: string): Promise<void> {
+  const dialect = getDialect();
   try {
     await pool.query(
-      'UPDATE remote_agent_workflow_runs SET last_activity_at = NOW() WHERE id = $1',
+      `UPDATE remote_agent_workflow_runs SET last_activity_at = ${dialect.now()} WHERE id = $1`,
       [id]
     );
   } catch (error) {

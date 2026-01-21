@@ -86,6 +86,7 @@ The app uses `~/.archon/` for all managed files:
 ~/.archon/
 ├── workspaces/     # Cloned repositories (auto-synced before worktree creation)
 ├── worktrees/      # Git worktrees for isolation
+├── archon.db       # SQLite database (when DATABASE_URL not set)
 └── config.yaml     # Optional: global configuration
 ```
 
@@ -116,7 +117,7 @@ cp .env.example .env
 
 | Variable | Purpose | How to Get |
 |----------|---------|------------|
-| `DATABASE_URL` | PostgreSQL connection | See database options below |
+| `DATABASE_URL` | PostgreSQL connection (optional) | See database options below. Omit to use SQLite |
 | `GH_TOKEN` | Repository cloning | [Generate token](https://github.com/settings/tokens) with `repo` scope |
 | `GITHUB_TOKEN` | Same as `GH_TOKEN` | Use same token value |
 | `PORT` | HTTP server port | Default: `3000` (optional) |
@@ -139,7 +140,26 @@ GITHUB_TOKEN=ghp_your_token_here  # Same value
 **Database Setup - Choose One:**
 
 <details>
-<summary><b>Option A: Remote PostgreSQL (Supabase, Neon)</b></summary>
+<summary><b>Option A: SQLite (Default - No Setup Required)</b></summary>
+
+Simply **omit the `DATABASE_URL` variable** from your `.env` file. The app will automatically:
+- Create a SQLite database at `~/.archon/archon.db`
+- Initialize the schema on first run
+- Use this database for all operations
+
+**Pros:**
+- Zero configuration required
+- No external database needed
+- Perfect for single-user CLI usage
+
+**Cons:**
+- Not suitable for multi-container deployments
+- No network access (CLI and server can't share database across different hosts)
+
+</details>
+
+<details>
+<summary><b>Option B: Remote PostgreSQL (Supabase, Neon)</b></summary>
 
 Set your remote connection string:
 
@@ -174,7 +194,7 @@ psql $DATABASE_URL < migrations/007_drop_legacy_columns.sql
 </details>
 
 <details>
-<summary><b>Option B: Local PostgreSQL (via Docker)</b></summary>
+<summary><b>Option C: Local PostgreSQL (via Docker)</b></summary>
 
 Use the `with-db` profile for automatic PostgreSQL setup:
 

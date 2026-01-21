@@ -18,7 +18,6 @@ const envPaths = [
   resolve(process.env.HOME ?? '~', '.archon', '.env'),
 ];
 
-let envLoaded = false;
 for (const envPath of envPaths) {
   if (existsSync(envPath)) {
     const result = config({ path: envPath });
@@ -27,16 +26,19 @@ for (const envPath of envPaths) {
       console.error('Hint: Check for syntax errors in your .env file.');
       process.exit(1);
     }
-    envLoaded = true;
     break;
   }
 }
 
-// Warn if no .env found and DATABASE_URL is missing (required for most operations)
-if (!envLoaded && !process.env.DATABASE_URL) {
-  console.warn('Warning: No .env file found and DATABASE_URL not set.');
-  console.warn('Hint: Create a .env file or set DATABASE_URL environment variable.');
+// Smart defaults for Claude auth
+// If no explicit tokens, default to global auth from `claude /login`
+if (!process.env.CLAUDE_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+  if (process.env.CLAUDE_USE_GLOBAL_AUTH === undefined) {
+    process.env.CLAUDE_USE_GLOBAL_AUTH = 'true';
+  }
 }
+
+// DATABASE_URL is no longer required - SQLite will be used as default
 
 // Import commands after dotenv is loaded
 import { versionCommand } from './commands/version';
@@ -45,7 +47,8 @@ import {
   workflowRunCommand,
   workflowStatusCommand,
 } from './commands/workflow';
-import { pool } from '@archon/core';
+import { isolationListCommand, isolationCleanupCommand } from './commands/isolation';
+import { closeDatabase } from '@archon/core';
 
 /**
  * Print usage information
@@ -61,29 +64,35 @@ Commands:
   workflow list              List available workflows in current directory
   workflow run <name> [msg]  Run a workflow with optional message
   workflow status            Show status of running workflows
+  isolation list             List all active worktrees/environments
+  isolation cleanup [days]   Remove stale environments (default: 7 days)
   version                    Show version info
   help                       Show this help message
 
 Options:
   --cwd <path>               Override working directory (default: current directory)
+  --branch, -b <name>        Create worktree for branch (or reuse existing)
+  --no-worktree              Run on branch directly without worktree isolation
 
 Examples:
   archon workflow list
   archon workflow run investigate-issue "Fix the login bug"
   archon workflow run plan --cwd /path/to/repo "Add dark mode"
+  archon workflow run implement --branch feature-auth "Implement auth"
+  archon workflow run quick-fix --no-worktree "Fix typo"
 `);
 }
 
 /**
- * Safely close the database pool
+ * Safely close the database connection
  */
-async function closePool(): Promise<void> {
+async function closeDb(): Promise<void> {
   try {
-    await pool.end();
+    await closeDatabase();
   } catch (error) {
     const err = error as Error;
     // Log with details but don't throw - we want the original error to be visible
-    console.error(`Warning: Error closing database connection pool: ${err.message}`);
+    console.error(`Warning: Error closing database connection: ${err.message}`);
     if (process.env.DEBUG) {
       console.error(err.stack);
     }
@@ -112,6 +121,8 @@ async function main(): Promise<number> {
       options: {
         cwd: { type: 'string', default: process.cwd() },
         help: { type: 'boolean', short: 'h' },
+        branch: { type: 'string', short: 'b' },
+        'no-worktree': { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false, // Allow unknown flags to pass through
@@ -126,6 +137,8 @@ async function main(): Promise<number> {
   const { values, positionals } = parsedArgs;
   const cwdValue = values.cwd;
   const cwd = resolve(typeof cwdValue === 'string' ? cwdValue : process.cwd());
+  const branchName = values.branch as string | undefined;
+  const noWorktree = values['no-worktree'] as boolean | undefined;
 
   // Handle help flag
   if (values.help) {
@@ -160,7 +173,9 @@ async function main(): Promise<number> {
               return 1;
             }
             const userMessage = positionals.slice(3).join(' ') || '';
-            await workflowRunCommand(cwd, workflowName, userMessage);
+            // Conditionally construct options to satisfy discriminated union
+            const options = branchName !== undefined ? { branchName, noWorktree } : {};
+            await workflowRunCommand(cwd, workflowName, userMessage, options);
             break;
           }
 
@@ -175,6 +190,29 @@ async function main(): Promise<number> {
               console.error(`Unknown workflow subcommand: ${subcommand}`);
             }
             console.error('Available: list, run, status');
+            return 1;
+        }
+        break;
+
+      case 'isolation':
+        switch (subcommand) {
+          case 'list':
+            await isolationListCommand();
+            break;
+
+          case 'cleanup': {
+            const days = parseInt(positionals[2] ?? '7', 10);
+            await isolationCleanupCommand(days);
+            break;
+          }
+
+          default:
+            if (subcommand === undefined) {
+              console.error('Missing isolation subcommand');
+            } else {
+              console.error(`Unknown isolation subcommand: ${subcommand}`);
+            }
+            console.error('Available: list, cleanup');
             return 1;
         }
         break;
@@ -197,8 +235,8 @@ async function main(): Promise<number> {
     }
     return 1;
   } finally {
-    // Always close database connection pool
-    await closePool();
+    // Always close database connection
+    await closeDb();
   }
 }
 

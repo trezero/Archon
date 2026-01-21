@@ -24,7 +24,7 @@ export async function getTemplate(name: string): Promise<CommandTemplate | null>
   return result.rows[0] || null;
 }
 
-export async function getAllTemplates(): Promise<CommandTemplate[]> {
+export async function getAllTemplates(): Promise<readonly CommandTemplate[]> {
   const result = await pool.query<CommandTemplate>(
     'SELECT * FROM remote_agent_command_templates ORDER BY name'
   );

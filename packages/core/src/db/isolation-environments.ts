@@ -1,8 +1,8 @@
 /**
  * Database operations for isolation environments
  */
-import { pool } from './connection';
-import { IsolationEnvironmentRow } from '../types';
+import { pool, getDialect } from './connection';
+import type { IsolationEnvironmentRow } from '../types';
 
 /**
  * Get an isolation environment by UUID
@@ -34,7 +34,9 @@ export async function findByWorkflow(
 /**
  * Find all active environments for a codebase
  */
-export async function listByCodebase(codebaseId: string): Promise<IsolationEnvironmentRow[]> {
+export async function listByCodebase(
+  codebaseId: string
+): Promise<readonly IsolationEnvironmentRow[]> {
   const result = await pool.query<IsolationEnvironmentRow>(
     `SELECT * FROM remote_agent_isolation_environments
      WHERE codebase_id = $1 AND status = 'active'
@@ -73,6 +75,11 @@ export async function create(env: {
       JSON.stringify(env.metadata ?? {}),
     ]
   );
+
+  if (!result.rows[0]) {
+    throw new Error('Failed to create isolation environment: INSERT succeeded but no row returned');
+  }
+
   return result.rows[0];
 }
 
@@ -80,22 +87,35 @@ export async function create(env: {
  * Update environment status
  */
 export async function updateStatus(id: string, status: 'active' | 'destroyed'): Promise<void> {
-  await pool.query('UPDATE remote_agent_isolation_environments SET status = $1 WHERE id = $2', [
-    status,
-    id,
-  ]);
+  const result = await pool.query(
+    'UPDATE remote_agent_isolation_environments SET status = $1 WHERE id = $2',
+    [status, id]
+  );
+
+  if (result.rowCount === 0) {
+    throw new Error(
+      `Failed to update isolation environment status: no environment found with id '${id}'`
+    );
+  }
 }
 
 /**
  * Update environment metadata (merge with existing)
  */
 export async function updateMetadata(id: string, metadata: Record<string, unknown>): Promise<void> {
-  await pool.query(
+  const dialect = getDialect();
+  const result = await pool.query(
     `UPDATE remote_agent_isolation_environments
-     SET metadata = metadata || $1::jsonb
+     SET metadata = ${dialect.jsonMerge('metadata', 1)}
      WHERE id = $2`,
     [JSON.stringify(metadata), id]
   );
+
+  if (result.rowCount === 0) {
+    throw new Error(
+      `Failed to update isolation environment metadata: no environment found with id '${id}'`
+    );
+  }
 }
 
 /**
@@ -105,11 +125,12 @@ export async function findByRelatedIssue(
   codebaseId: string,
   issueNumber: number
 ): Promise<IsolationEnvironmentRow | null> {
+  const dialect = getDialect();
   const result = await pool.query<IsolationEnvironmentRow>(
     `SELECT * FROM remote_agent_isolation_environments
      WHERE codebase_id = $1
        AND status = 'active'
-       AND metadata->'related_issues' ? $2
+       AND ${dialect.jsonArrayContains('metadata', 'related_issues', 2)}
      LIMIT 1`,
     [codebaseId, String(issueNumber)]
   );
@@ -145,7 +166,12 @@ export async function getConversationsUsingEnv(envId: string): Promise<string[]>
  */
 export async function findStaleEnvironments(
   staleDays = 14
-): Promise<(IsolationEnvironmentRow & { codebase_default_cwd: string })[]> {
+): Promise<readonly (IsolationEnvironmentRow & { codebase_default_cwd: string })[]> {
+  const dialect = getDialect();
+  // Both conditions use the same staleDays value but need separate placeholders
+  const staleActivityThreshold = dialect.nowMinusDays(1);
+  const staleCreationThreshold = dialect.nowMinusDays(2);
+
   const result = await pool.query<IsolationEnvironmentRow & { codebase_default_cwd: string }>(
     `SELECT e.*, c.default_cwd as codebase_default_cwd
      FROM remote_agent_isolation_environments e
@@ -155,10 +181,10 @@ export async function findStaleEnvironments(
        AND NOT EXISTS (
          SELECT 1 FROM remote_agent_conversations conv
          WHERE conv.isolation_env_id = e.id
-           AND conv.last_activity_at > NOW() - ($1 || ' days')::INTERVAL
+           AND conv.last_activity_at > ${staleActivityThreshold}
        )
-       AND e.created_at < NOW() - ($1 || ' days')::INTERVAL`,
-    [staleDays]
+       AND e.created_at < ${staleCreationThreshold}`,
+    [staleDays, staleDays]
   );
   return result.rows;
 }
@@ -167,10 +193,18 @@ export async function findStaleEnvironments(
  * List all active environments with their codebase info (for cleanup)
  */
 export async function listAllActiveWithCodebase(): Promise<
-  (IsolationEnvironmentRow & { codebase_default_cwd: string })[]
+  readonly (IsolationEnvironmentRow & {
+    codebase_default_cwd: string;
+    codebase_repository_url: string | null;
+  })[]
 > {
-  const result = await pool.query<IsolationEnvironmentRow & { codebase_default_cwd: string }>(
-    `SELECT e.*, c.default_cwd as codebase_default_cwd
+  const result = await pool.query<
+    IsolationEnvironmentRow & {
+      codebase_default_cwd: string;
+      codebase_repository_url: string | null;
+    }
+  >(
+    `SELECT e.*, c.default_cwd as codebase_default_cwd, c.repository_url as codebase_repository_url
      FROM remote_agent_isolation_environments e
      JOIN remote_agent_codebases c ON e.codebase_id = c.id
      WHERE e.status = 'active'
@@ -185,18 +219,19 @@ export async function listAllActiveWithCodebase(): Promise<
  */
 export async function listByCodebaseWithAge(
   codebaseId: string
-): Promise<(IsolationEnvironmentRow & { days_since_activity: number })[]> {
+): Promise<readonly (IsolationEnvironmentRow & { days_since_activity: number })[]> {
+  const dialect = getDialect();
+  const daysSinceCreated = dialect.daysSince('e.created_at');
+  const daysSinceActivity = dialect.daysSince('MAX(conv.last_activity_at)');
+
   const result = await pool.query<IsolationEnvironmentRow & { days_since_activity: number }>(
     `SELECT e.*,
-            GREATEST(
-              EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 86400,
-              COALESCE(
-                (SELECT EXTRACT(EPOCH FROM (NOW() - MAX(conv.last_activity_at))) / 86400
-                 FROM remote_agent_conversations conv
-                 WHERE conv.isolation_env_id = e.id),
-                EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 86400
-              )
-            )::INTEGER as days_since_activity
+            COALESCE(
+              (SELECT ${daysSinceActivity}
+               FROM remote_agent_conversations conv
+               WHERE conv.isolation_env_id = e.id),
+              ${daysSinceCreated}
+            ) as days_since_activity
      FROM remote_agent_isolation_environments e
      WHERE e.codebase_id = $1 AND e.status = 'active'
      ORDER BY e.created_at DESC`,

@@ -7,7 +7,7 @@ This guide walks you through setting up the Remote Coding Agent from scratch.
 Before you begin, you'll need:
 
 1. **Docker** (recommended) or **Bun** runtime
-2. **PostgreSQL** database (local or managed like Supabase/Neon)
+2. **Database** - SQLite (default, zero-config) or PostgreSQL (optional, for multi-container deployments)
 3. **AI Assistant credentials** (Claude or Codex)
 4. **Platform credentials** (Telegram, Discord, Slack, or GitHub)
 
@@ -87,7 +87,7 @@ nano .env
 ```
 
 At minimum, set:
-- `DATABASE_URL`
+- `DATABASE_URL` (optional - omit to use SQLite at `~/.archon/archon.db`)
 - One AI assistant (`CLAUDE_CODE_OAUTH_TOKEN` or Codex credentials)
 - One platform (`TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, etc.)
 
@@ -169,9 +169,10 @@ The server starts with hot reload. Changes to code automatically restart.
 
 ### "Database connection failed"
 
-1. Check `DATABASE_URL` is correct
-2. For managed DB: Ensure IP is whitelisted
-3. For local: Ensure postgres container is running: `docker compose ps`
+1. **Using SQLite (default)**: No configuration needed - database auto-created at `~/.archon/archon.db`
+2. **Using PostgreSQL**: Check `DATABASE_URL` is correct
+3. For managed DB: Ensure IP is whitelisted
+4. For local: Ensure postgres container is running: `docker compose ps`
 
 ### "No AI assistant credentials found"
 
