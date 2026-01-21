@@ -90,19 +90,39 @@ archon version
 > archon version
 > ```
 
+## Manual Release (When GitHub Actions Unavailable)
+
+If GitHub Actions can't run (billing issues, private repo limits), create the release manually:
+
+```bash
+# 1. Build binaries locally (only builds for your current platform)
+./scripts/build-binaries.sh
+
+# 2. Create the release with binaries
+gh release create vX.Y.Z dist/binaries/* \
+  --title "Archon CLI vX.Y.Z" \
+  --generate-notes
+
+# 3. Verify the release
+gh release view vX.Y.Z
+```
+
+> **Note:** Local builds only create binaries for your current platform.
+> For cross-platform binaries, you need GitHub Actions or access to each platform.
+
 ## Manual Build (for Testing)
 
 To build binaries locally without creating a release:
 
 ```bash
 # Build all platform binaries
-bun run build:binaries
+./scripts/build-binaries.sh
 
 # Binaries are in dist/binaries/
 ls -la dist/binaries/
 
 # Generate checksums
-bun run build:checksums
+./scripts/checksums.sh
 ```
 
 ## Release Workflow Details
