@@ -102,32 +102,32 @@ jobs:
 
             ### Quick Install (Recommended)
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/raswonders/remote-coding-agent/main/scripts/install.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/scripts/install.sh | bash
             ```
 
             ### Manual Installation
 
             **macOS (Apple Silicon)**
             ```bash
-            curl -fsSL https://github.com/raswonders/remote-coding-agent/releases/latest/download/archon-darwin-arm64 -o /usr/local/bin/archon
+            curl -fsSL https://github.com/dynamous-community/remote-coding-agent/releases/latest/download/archon-darwin-arm64 -o /usr/local/bin/archon
             chmod +x /usr/local/bin/archon
             ```
 
             **macOS (Intel)**
             ```bash
-            curl -fsSL https://github.com/raswonders/remote-coding-agent/releases/latest/download/archon-darwin-x64 -o /usr/local/bin/archon
+            curl -fsSL https://github.com/dynamous-community/remote-coding-agent/releases/latest/download/archon-darwin-x64 -o /usr/local/bin/archon
             chmod +x /usr/local/bin/archon
             ```
 
             **Linux (x64)**
             ```bash
-            curl -fsSL https://github.com/raswonders/remote-coding-agent/releases/latest/download/archon-linux-x64 -o /usr/local/bin/archon
+            curl -fsSL https://github.com/dynamous-community/remote-coding-agent/releases/latest/download/archon-linux-x64 -o /usr/local/bin/archon
             chmod +x /usr/local/bin/archon
             ```
 
             **Linux (ARM64)**
             ```bash
-            curl -fsSL https://github.com/raswonders/remote-coding-agent/releases/latest/download/archon-linux-arm64 -o /usr/local/bin/archon
+            curl -fsSL https://github.com/dynamous-community/remote-coding-agent/releases/latest/download/archon-linux-arm64 -o /usr/local/bin/archon
             chmod +x /usr/local/bin/archon
             ```
 

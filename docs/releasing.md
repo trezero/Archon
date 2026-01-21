@@ -65,7 +65,7 @@ If you maintain a Homebrew tap (`homebrew-archon`), copy the updated formula the
 
 ```bash
 # Test the install script
-curl -fsSL https://raw.githubusercontent.com/raswonders/remote-coding-agent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/scripts/install.sh | bash
 
 # Verify version
 archon version

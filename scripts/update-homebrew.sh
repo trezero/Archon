@@ -17,7 +17,7 @@ fi
 # Remove 'v' prefix if present for formula version
 FORMULA_VERSION="${VERSION#v}"
 
-REPO="raswonders/remote-coding-agent"
+REPO="dynamous-community/remote-coding-agent"
 FORMULA_FILE="homebrew/archon.rb"
 
 echo "Updating Homebrew formula for version $VERSION"

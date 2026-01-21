@@ -22,18 +22,18 @@ Archon CLI lets you run AI workflows directly from your terminal, without needin
 
 ```bash
 # Install with one command
-curl -fsSL https://raw.githubusercontent.com/raswonders/remote-coding-agent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/scripts/install.sh | bash
 
 # Verify installation
 archon version
 ```
 
-Or download directly from [GitHub Releases](https://github.com/raswonders/remote-coding-agent/releases/latest).
+Or download directly from [GitHub Releases](https://github.com/dynamous-community/remote-coding-agent/releases/latest).
 
 ### macOS with Homebrew
 
 ```bash
-brew install raswonders/remote-coding-agent/archon
+brew install dynamous-community/remote-coding-agent/archon
 ```
 
 ### Windows (WSL2 Required)
@@ -42,7 +42,7 @@ Windows requires WSL2 for full compatibility. See [Windows Setup](#windows-wsl2-
 
 ```bash
 # Inside WSL2 (Ubuntu)
-curl -fsSL https://raw.githubusercontent.com/raswonders/remote-coding-agent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/scripts/install.sh | bash
 ```
 
 ### CLI Quick Start
@@ -1405,7 +1405,7 @@ WSL2 provides a full Linux environment that runs seamlessly on Windows.
 
 4. **Install Archon CLI**:
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/raswonders/remote-coding-agent/main/scripts/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/scripts/install.sh | bash
    ```
 
 5. **Verify installation**:
