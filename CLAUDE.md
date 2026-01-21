@@ -8,7 +8,7 @@
 - No multi-tenant complexity
 - Commands versioned with Git (not stored in database)
 - All credentials in environment variables only
-- 3-table database schema (conversations, codebases, sessions)
+- 5-table database schema (see Database Schema section)
 
 **User-Controlled Workflows**
 - Manual phase transitions via slash commands
@@ -182,9 +182,6 @@ if (!steps) {
 ```bash
 # PostgreSQL: Run SQL migrations (manual)
 psql $DATABASE_URL < migrations/001_initial_schema.sql
-
-# PostgreSQL: Start PostgreSQL (Docker)
-docker-compose --profile with-db up -d postgres
 ```
 
 ### Docker (Production)
@@ -241,40 +238,15 @@ bun run cli version
 **How it works:**
 - Discovers workflows from `.archon/workflows/` in working directory
 - Creates a new conversation for each invocation (ID: `cli-{timestamp}-{random}`)
-- Connects to database (PostgreSQL if `DATABASE_URL` set, otherwise SQLite at `~/.archon/archon.db`)
 - Streams AI responses to stdout in real-time
 
 **Isolation flags:**
 - `--branch/-b <name>`: Creates or reuses a worktree for the specified branch (auto-registers codebase if in a git repo)
 - `--no-worktree`: Checks out branch directly in current directory without creating a worktree
 
-**Requirements:**
-- `DATABASE_URL` optional (defaults to SQLite if not set)
-- Same AI credentials as server (Claude/Codex tokens)
-
 ### Cloud Deployment
 
-For production cloud deployment with automatic HTTPS via Caddy, use the `docker-compose.cloud.yml` overlay:
-
-```bash
-# With external database (Supabase, Neon, etc.)
-docker compose --profile external-db -f docker-compose.yml -f docker-compose.cloud.yml up -d --build
-
-# With local PostgreSQL
-docker compose --profile with-db -f docker-compose.yml -f docker-compose.cloud.yml up -d --build
-```
-
-The overlay file adds:
-- Caddy reverse proxy with automatic HTTPS (Let's Encrypt)
-- Profile-specific Caddy services (`caddy` for `external-db`, `caddy-with-db` for `with-db`)
-- Internal-only networking (app not exposed on host ports)
-
-**Caddyfile configuration:**
-- Copy `Caddyfile.example` to `Caddyfile`
-- Update domain name
-- Set service name based on profile: `app:3000` for `external-db`, `app-with-db:3000` for `with-db`
-
-See [Cloud Deployment Guide](docs/cloud-deployment.md) for complete setup instructions.
+See [Cloud Deployment Guide](docs/cloud-deployment.md) for complete setup instructions. (only if the user asks about this)
 
 ## Architecture
 
@@ -363,7 +335,6 @@ import * as core from '@archon/core';  // Don't do this
 - One active session per conversation
 - Codebase commands stored in filesystem, paths in `codebases.commands` JSONB
 - Global templates stored in database, added via `/template-add`
-- Session persistence: Sessions survive restarts, loaded from database
 
 **Session Transitions:**
 - Sessions are immutable - transitions create new linked sessions
@@ -422,51 +393,12 @@ import * as core from '@archon/core';  // Don't do this
 
 **Environment Variables:**
 
-```env
-# Database (optional - uses SQLite at ~/.archon/archon.db if not set)
-DATABASE_URL=postgresql://user:pass@host:5432/dbname
-
-# AI Assistants
-# Claude Auth Options:
-# - CLAUDE_USE_GLOBAL_AUTH=true: Use global auth from `claude /login` (recommended)
-# - CLAUDE_USE_GLOBAL_AUTH=false: Use explicit tokens below
-# - Not set: Auto-detect (use tokens if present, otherwise global auth)
-CLAUDE_USE_GLOBAL_AUTH=true
-# CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
-# CLAUDE_API_KEY=sk-ant-...
-
-CODEX_ID_TOKEN=eyJ...
-CODEX_ACCESS_TOKEN=eyJ...
-CODEX_REFRESH_TOKEN=rt_...
-CODEX_ACCOUNT_ID=...
-
-# Platforms
-TELEGRAM_BOT_TOKEN=<from @BotFather>
-TELEGRAM_ALLOWED_USER_IDS=123456789,987654321  # Optional: Restrict bot to specific user IDs
-DISCORD_BOT_TOKEN=<from Discord Developer Portal>
-DISCORD_ALLOWED_USER_IDS=123456789012345678  # Optional: Restrict bot to specific user IDs
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_APP_TOKEN=xapp-...  # Required for Socket Mode
-GH_TOKEN=ghp_...          # For git operations and GitHub CLI
-GITHUB_TOKEN=ghp_...      # Same as GH_TOKEN
-WEBHOOK_SECRET=<random string>
-GITHUB_ALLOWED_USERS=octocat,monalisa  # Optional: Restrict webhook processing to specific users
-
-# Platform Streaming Mode (stream | batch)
-TELEGRAM_STREAMING_MODE=stream  # Default: stream
-SLACK_STREAMING_MODE=batch      # Default: batch
-DISCORD_STREAMING_MODE=batch    # Default: batch
-GITHUB_STREAMING_MODE=batch     # Default: batch
-
-# Optional
-ARCHON_HOME=~/.archon  # Override the base directory
-PORT=3000
-MAX_CONCURRENT_CONVERSATIONS=10
-```
-
-**Loading:** Use `dotenv` package, load in `packages/server/src/index.ts`
+see .env.example
+see .archon/config.yaml setup as needed
 
 ### Worktree Symbiosis (Skill + App)
+
+//TODO, This should be converted to a skill to not bload claude.md
 
 The app can work alongside the worktree-manager Claude Code skill. Both use git worktrees for isolated development, and can share the same base directory.
 
@@ -566,37 +498,13 @@ All Archon-managed files are organized under a dedicated namespace:
 
 ### When Creating New Features
 
-**See detailed implementation guide:** `.agents/reference/new-features.md`
-
 **Quick reference:**
 - **Platform Adapters**: Implement `IPlatformAdapter`, handle auth, polling/webhooks
 - **AI Clients**: Implement `IAssistantClient`, session management, streaming
 - **Slash Commands**: Add to command-handler.ts, update database, no AI
 - **Database Operations**: Use `IDatabase` interface (supports PostgreSQL and SQLite via adapters)
 
-### Type Checking
-
-**Critical Rules:**
-- All functions must have return type annotations
-- All parameters must have type annotations
-- Use interfaces for contracts (`IPlatformAdapter`, `IAssistantClient`)
-- Avoid `any` - use `unknown` and type guards instead
-- Enable `strict: true` in `tsconfig.json`
-
-**Example:**
-```typescript
-// ✅ CORRECT
-async function sendMessage(conversationId: string, message: string): Promise<void> {
-  await adapter.sendMessage(conversationId, message);
-}
-
-// ❌ WRONG - missing return type
-async function sendMessage(conversationId: string, message: string) {
-  await adapter.sendMessage(conversationId, message);
-}
-```
-
-**SDK Type Patterns:**
+### SDK Type Patterns
 
 When working with external SDKs (Claude Agent SDK, Codex SDK), prefer importing and using SDK types directly:
 
@@ -632,67 +540,22 @@ This ensures type compatibility with SDK updates and eliminates `as any` casts.
 - Test pure functions (variable substitution, command parsing)
 - Mock external dependencies (database, AI SDKs, platform APIs)
 - Fast execution (<1s total)
-- Use Jest or similar framework
+- Bun Test is the Framework
 
 **Integration Tests:**
 - Test database operations with test database
 - Test end-to-end flows (mock platforms/AI but use real orchestrator)
 - Clean up test data after each test
 
-**Pattern:**
-```typescript
-describe('CommandHandler', () => {
-  it('should parse /command-invoke with arguments', () => {
-    const result = parseCommand('/command-invoke plan "Add dark mode"');
-    expect(result.command).toBe('plan');
-    expect(result.args).toEqual(['Add dark mode']);
-  });
-});
-```
-
 **Manual Validation with Test Adapter:**
 
 The application includes a built-in test adapter (`packages/server/src/adapters/test.ts`) with HTTP endpoints for programmatic testing without requiring Telegram/Slack setup.
 
-**Test Adapter Endpoints:**
-```bash
-# Send message to bot (triggers full orchestrator flow)
-POST http://localhost:3000/test/message
-Body: {"conversationId": "test-123", "message": "/help"}
+Please look into how to use the test adapter for manual validation.
 
-# Get bot responses (all messages sent by bot)
-GET http://localhost:3000/test/messages/test-123
+You can also run all CLI commands directly for regression testing and testing new capabilities.
 
-# Clear conversation history
-DELETE http://localhost:3000/test/messages/test-123
-```
-
-**Complete Test Workflow:**
-```bash
-# 1. Start application (hybrid mode - recommended)
-docker-compose --profile with-db up -d postgres
-bun run dev
-
-# 2. Send test message (use your configured PORT, default 3000)
-curl -X POST http://localhost:3000/test/message \
-  -H "Content-Type: application/json" \
-  -d '{"conversationId":"test-123","message":"/status"}'
-
-# 3. Verify bot response
-curl http://localhost:3000/test/messages/test-123 | jq
-
-# 4. Clean up
-curl -X DELETE http://localhost:3000/test/messages/test-123
-```
-
-**Test Adapter Features:**
-- Implements `IPlatformAdapter` (same interface as Telegram/Slack)
-- In-memory message storage (no external dependencies)
-- Tracks message direction (sent by bot vs received from user)
-- Full orchestrator integration (real AI, real database)
-- Useful for feature validation, debugging, and CI/CD integration
-
-**When to Use Test Adapter:**
+**When to Use Test Adapter and CLI Commands:**
 - ✅ Manual validation after implementing new features
 - ✅ End-to-end testing of command flows
 - ✅ Debugging orchestrator logic without Telegram setup
@@ -735,40 +598,7 @@ console.log('Processing...');
 - User message content in production (privacy)
 - Personal identifiable information
 
-### Streaming Patterns
-
-**AI Response Streaming:**
-Platform streaming mode configured per platform via environment variables (`{PLATFORM}_STREAMING_MODE`).
-
-```typescript
-// Stream mode: Send each chunk immediately (real-time)
-for await (const event of client.streamResponse()) {
-  if (streamingMode === 'stream') {
-    if (event.type === 'text') {
-      await platform.sendMessage(conversationId, event.content);
-    } else if (event.type === 'tool') {
-      await platform.sendMessage(conversationId, `🔧 ${event.toolName}`);
-    }
-  } else {
-    // Batch mode: Accumulate chunks
-    buffer.push(event);
-  }
-}
-
-// Batch mode: Send accumulated response
-if (streamingMode === 'batch') {
-  const fullResponse = buffer.map(e => e.content).join('');
-  await platform.sendMessage(conversationId, fullResponse);
-}
-```
-
-**Platform-Specific Defaults:**
-- **Telegram/Slack**: `stream` mode (real-time chat experience)
-- **GitHub**: `batch` mode (single comment, avoid spam)
-- **Future platforms** (Asana, Notion): `batch` mode (single update)
-- **Typing indicators**: Send periodically during long operations in `stream` mode
-
-### Command System Patterns
+### Command System
 
 **Variable Substitution:**
 - `$1`, `$2`, `$3` - Positional arguments
@@ -776,67 +606,28 @@ if (streamingMode === 'batch') {
 - `$PLAN` - Previous plan from session metadata
 - `$IMPLEMENTATION_SUMMARY` - Previous execution summary
 
-**Command Files:**
-- Stored in codebase (e.g., `.archon/commands/plan.md`)
-- Plain text/markdown format
-- Users edit with Git version control
-- Paths stored in `codebases.commands` JSONB
+**Command Types:**
 
-**Auto-detection:**
-- On `/clone`, auto-load commands from `.archon/commands/` if present
-- Commands are registered per-codebase (not global)
+1. **Codebase Commands** (per-repo):
+   - Stored in `.archon/commands/` (plain text/markdown)
+   - Loaded via `/clone` (auto) or `/load-commands <folder>` (manual)
+   - Invoked via `/command-invoke <name> [args]`
 
-**Default Commands/Workflows:**
-- Bundled defaults are stored in `.archon/commands/defaults/` and `.archon/workflows/defaults/`
-- On `/clone`, if target repo has no `.archon/commands/`, defaults are copied automatically
-- Defaults are copied flat (not into a `defaults/` subfolder in target)
+2. **Global Templates** (database):
+   - Stored in `remote_agent_command_templates` table
+   - Added via `/template-add <name> <file-path>`
+   - Invoked directly via `/<name> [args]`
+
+3. **Workflows** (YAML-based):
+   - Stored in `.archon/workflows/` (searched recursively)
+   - Multi-step AI execution chains, discovered at runtime
+   - Provider inherited from `.archon/config.yaml` unless explicitly set
+   - Commands: `/workflow list`, `/workflow reload`, `/workflow status`, `/workflow cancel`
+
+**Defaults:**
+- Bundled in `.archon/commands/defaults/` and `.archon/workflows/defaults/`
+- Copied to target repos on `/clone` (if no existing `.archon/commands/`)
 - Opt-out: Set `defaults.copyDefaults: false` in target's `.archon/config.yaml`
-
-### Command Types
-
-**1. Codebase Commands** (per-repo):
-- Stored in filesystem (e.g., `.archon/commands/plan.md`)
-- Loaded via `/clone` (auto) or `/load-commands <folder>` (manual)
-- Invoked via `/command-invoke <name> [args]`
-- Paths stored in `codebases.commands` JSONB
-
-**2. Global Templates** (database):
-- Stored in `remote_agent_command_templates` table
-- Added manually via `/template-add <name> <file-path>`
-- Invoked directly via `/<name> [args]`
-- Shared across all codebases
-
-**3. Workflows** (YAML-based):
-- Stored in `.archon/workflows/` (searched recursively, includes subdirectories like `defaults/`)
-- Multi-step AI execution chains
-- Discovered at runtime, routed by AI
-- Provider selection: Workflows inherit provider from `.archon/config.yaml` `assistant` field unless `provider` is explicitly set in workflow YAML
-- Concurrent execution prevented - only one workflow can run per conversation at a time
-- Auto-commits artifacts on completion (safety net for uncommitted changes)
-- Commands: `/workflow list`, `/workflow reload`, `/workflow status`, `/workflow cancel`
-
-### Default Commands and Workflows
-
-This repo includes bundled default commands in `.archon/commands/defaults/` and workflows in `.archon/workflows/defaults/`. These serve two purposes:
-
-1. **For this repo**: Loaded via recursive search (developers working on Archon can use these)
-2. **For target repos**: Copied automatically on `/clone` to give users a starting point
-
-To opt out of automatic copying, add to target repo's `.archon/config.yaml`:
-```yaml
-defaults:
-  copyDefaults: false
-```
-
-### Example Commands in This Repo
-
-This repo includes 16 default commands in `.archon/commands/defaults/` and 8 default workflows in `.archon/workflows/defaults/`. Key examples:
-- Feature development: `implement.md`, `create-pr.md`
-- GitHub issue workflow: `investigate-issue.md`, `implement-issue.md`
-- Code review: `code-review-agent.md`, `synthesize-review.md`
-- General assistance: `assist.md`
-
-These are **automatically copied** to new repos on `/clone` (unless opted out).
 
 ### Error Handling
 
@@ -880,22 +671,7 @@ try {
 }
 ```
 
-**Git Operation Errors (Graceful Handling):**
-```typescript
-// Handle expected failure cases gracefully (don't throw to users)
-try {
-  await execFileAsync('git', ['worktree', 'remove', path]);
-} catch (error) {
-  // Missing directories are expected during cleanup (manual deletion, OS cleanup)
-  if (error.message.includes('No such file or directory')) {
-    console.log('[Cleanup] Directory already removed, marking as destroyed');
-    await db.markEnvironmentDestroyed(envId);
-    return; // Success - goal achieved
-  }
-  // Surface unexpected git errors (permission issues, git repo corruption)
-  throw error;
-}
-```
+**Git Operation Errors (Graceful Handling but dont fail silently):**
 
 ### API Endpoints
 
@@ -913,69 +689,7 @@ try {
 - Use `express.raw()` middleware for webhook body (signature verification)
 - Never log or expose tokens in responses
 
-### Docker Patterns
-
-**Profiles:**
-- `external-db`: App only (for remote databases like Supabase/Neon)
-- `with-db`: App + PostgreSQL 18 (for production with local DB)
-
-**Development Setup (Recommended):**
-- Run only postgres: `docker-compose --profile with-db up -d postgres`
-- Run app locally: `bun run dev` (hot reload enabled)
-
-**Volumes:**
-- `/.archon/` - All Archon-managed data (workspaces, worktrees)
-
-**Networking:**
-- App: Port 3000 (configurable via `PORT` env var)
-- PostgreSQL: Port 5432 (exposed on localhost for local development)
-
-### GitHub-Specific Patterns
-
-**Authentication:**
-- GitHub CLI operations: Use `GITHUB_TOKEN` (personal access token)
-- Webhook events: Use GitHub App credentials (`GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`)
-
-**Operations:**
-```bash
-# Clone repo
-git clone https://github.com/user/repo.git /workspace/repo
-
-# Create PR
-gh pr create --title "Fix #42" --body "Fixes #42"
-
-# Comment on issue
-gh issue comment 42 --body "Working on this..."
-
-# Review PR
-gh pr review 15 --comment -b "Looks good!"
-```
-
 **@Mention Detection:**
-- Parse `@coding-assistant` in issue/PR **comments only** (not descriptions)
+- Parse `@archon` in issue/PR **comments only** (not descriptions)
 - Events: `issue_comment` only
 - Note: Descriptions often contain example commands or documentation - these are NOT command invocations (see #96)
-
-## Common Workflows
-
-**Fix Issue (GitHub):**
-1. User: Comments `@coding-assistant fix this` on issue #42
-2. Webhook: `issue_comment` event triggers, conversationId = `user/repo#42`
-3. Clone repo if needed
-4. AI: Analyze issue, make changes, commit
-5. `gh pr create` with "Fixes #42"
-6. Comment on issue with PR link
-
-**Review PR (GitHub):**
-1. User: `@coding-assistant review` on PR #15
-2. Fetch PR diff: `gh pr diff 15`
-3. AI: Review code, generate feedback
-4. `gh pr review 15 --comment -b "feedback"`
-
-**Remote Development (Telegram/Slack):**
-1. `/clone https://github.com/user/repo`
-2. `/load-commands .claude/commands`
-3. `/command-invoke prime`
-4. `/command-invoke plan "Add dark mode"`
-5. `/command-invoke execute`
-6. `/command-invoke commit`
