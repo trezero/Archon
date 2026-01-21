@@ -58,6 +58,14 @@ export function getDialect(): SqlDialect {
 }
 
 /**
+ * Get the current database type without initializing the database
+ * Useful for version/info commands that don't need a connection
+ */
+export function getDatabaseType(): 'postgresql' | 'sqlite' {
+  return process.env.DATABASE_URL ? 'postgresql' : 'sqlite';
+}
+
+/**
  * Close the database connection
  */
 export async function closeDatabase(): Promise<void> {

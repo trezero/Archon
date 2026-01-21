@@ -17,6 +17,7 @@ export default tseslint.config(
       '**/*.js',
       '*.mjs',
       '**/*.test.ts',
+      '*.d.ts', // Root-level declaration files (not in tsconfig project scope)
     ],
   },
 

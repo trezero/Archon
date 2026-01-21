@@ -1,5 +1,6 @@
 {
   "name": "archon",
+  "version": "0.2.0",
   "private": true,
   "workspaces": [
     "packages/*"
@@ -10,6 +11,8 @@
     "dev": "bun --cwd packages/server --watch src/index.ts",
     "start": "bun --cwd packages/server src/index.ts",
     "build": "bun --filter '*' build",
+    "build:binaries": "bash scripts/build-binaries.sh",
+    "build:checksums": "bash scripts/checksums.sh",
     "test": "bun --filter '*' test",
     "test:watch": "bun --filter @archon/server test:watch",
     "type-check": "bun --filter '*' type-check",

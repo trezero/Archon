@@ -75,6 +75,7 @@ function createMockPlatform(): IPlatformAdapter {
 import { executeWorkflow, isValidCommandName } from './executor';
 import * as gitUtils from '../utils/git';
 import * as configLoader from '../config/config-loader';
+import * as bundledDefaults from '../defaults/bundled-defaults';
 
 describe('Workflow Executor', () => {
   let mockPlatform: IPlatformAdapter;
@@ -3480,5 +3481,140 @@ describe('app defaults command loading', () => {
         typeof call[1] === 'string' && (call[1] as string).includes('Command prompt not found')
     );
     expect(failureMessages.length).toBeGreaterThan(0);
+  });
+
+  describe('binary build bundled commands', () => {
+    let isBinaryBuildSpy: Mock<typeof bundledDefaults.isBinaryBuild>;
+    let loadConfigSpy: Mock<typeof configLoader.loadConfig>;
+
+    beforeEach(() => {
+      isBinaryBuildSpy = spyOn(bundledDefaults, 'isBinaryBuild');
+      loadConfigSpy = spyOn(configLoader, 'loadConfig');
+    });
+
+    afterEach(() => {
+      isBinaryBuildSpy.mockRestore();
+      loadConfigSpy.mockRestore();
+    });
+
+    it('should load command from bundled defaults when running as binary', async () => {
+      // Simulate binary build
+      isBinaryBuildSpy.mockReturnValue(true);
+
+      // Enable default command loading
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'claude',
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+      });
+
+      // Use a known bundled command name
+      const workflow: WorkflowDefinition = {
+        name: 'bundled-cmd-test',
+        description: 'Test bundled command loading',
+        steps: [{ command: 'archon-assist' }],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should have called AI with the bundled command content (not fail with not found)
+      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const notFoundMessages = sendMessageCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' && (call[1] as string).includes('Command prompt not found')
+      );
+      // Should NOT have not found error when using bundled command
+      expect(notFoundMessages.length).toBe(0);
+    });
+
+    it('should fallback to not found when bundled command does not exist', async () => {
+      // Simulate binary build
+      isBinaryBuildSpy.mockReturnValue(true);
+
+      // Enable default command loading
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'claude',
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+      });
+
+      const workflow: WorkflowDefinition = {
+        name: 'nonexistent-bundled-test',
+        description: 'Test nonexistent bundled command',
+        steps: [{ command: 'nonexistent-command-xyz' }],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should fail with not found error
+      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const notFoundMessages = sendMessageCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' && (call[1] as string).includes('Command prompt not found')
+      );
+      expect(notFoundMessages.length).toBeGreaterThan(0);
+    });
+
+    it('should skip bundled commands when loadDefaultCommands is false', async () => {
+      // Simulate binary build
+      isBinaryBuildSpy.mockReturnValue(true);
+
+      // Disable default command loading
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'claude',
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: false, loadDefaultWorkflows: true },
+      });
+
+      // Use a known bundled command name, but defaults are disabled
+      const workflow: WorkflowDefinition = {
+        name: 'disabled-defaults-test',
+        description: 'Test with disabled defaults',
+        steps: [{ command: 'archon-assist' }],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should fail with not found because defaults are disabled
+      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const notFoundMessages = sendMessageCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' && (call[1] as string).includes('Command prompt not found')
+      );
+      expect(notFoundMessages.length).toBeGreaterThan(0);
+    });
   });
 });

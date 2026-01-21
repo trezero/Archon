@@ -2,7 +2,7 @@
 
 Control AI coding assistants (Claude Code, Codex) remotely from Telegram, GitHub, and more. Built for developers who want to code from anywhere with persistent sessions and flexible workflows/systems.
 
-**Quick Start:** [Core Configuration](#1-core-configuration-required) • [AI Assistant Setup](#2-ai-assistant-setup-choose-at-least-one) • [Platform Setup](#3-platform-adapter-setup-choose-at-least-one) • [Start the App](#4-start-the-application) • [Usage Guide](#usage)
+**Quick Start:** [CLI Installation](#cli-installation) • [Server Setup](#server-quick-start) • [AI Assistant Setup](#2-ai-assistant-setup-choose-at-least-one) • [Platform Setup](#3-platform-adapter-setup-choose-at-least-one) • [Usage Guide](#usage)
 
 ## Features
 
@@ -14,20 +14,71 @@ Control AI coding assistants (Claude Code, Codex) remotely from Telegram, GitHub
 - **Generic Command System**: User-defined commands versioned with Git
 - **Docker Ready**: Simple deployment with Docker Compose
 
+## CLI Installation
+
+Archon CLI lets you run AI workflows directly from your terminal, without needing a server or messaging platform.
+
+### macOS / Linux (Recommended)
+
+```bash
+# Install with one command
+curl -fsSL https://raw.githubusercontent.com/raswonders/remote-coding-agent/main/scripts/install.sh | bash
+
+# Verify installation
+archon version
+```
+
+Or download directly from [GitHub Releases](https://github.com/raswonders/remote-coding-agent/releases/latest).
+
+### macOS with Homebrew
+
+```bash
+brew install raswonders/remote-coding-agent/archon
+```
+
+### Windows (WSL2 Required)
+
+Windows requires WSL2 for full compatibility. See [Windows Setup](#windows-wsl2-setup) for details.
+
+```bash
+# Inside WSL2 (Ubuntu)
+curl -fsSL https://raw.githubusercontent.com/raswonders/remote-coding-agent/main/scripts/install.sh | bash
+```
+
+### CLI Quick Start
+
+```bash
+# List available workflows
+archon workflow list
+
+# Run a workflow
+archon workflow run assist "What does this codebase do?"
+
+# Run in a specific directory
+archon workflow run assist --cwd /path/to/repo "Explain the architecture"
+```
+
+---
+
 ## Prerequisites
 
 **System Requirements:**
-- Docker & Docker Compose (for deployment)
+- Docker & Docker Compose (for server deployment)
 - [Bun](https://bun.sh) 1.0+ (for local development)
+
+**Platform Support:**
+- **macOS**: Apple Silicon (M1/M2/M3) and Intel - fully supported
+- **Linux**: x64 and ARM64 - fully supported
+- **Windows**: Requires WSL2 (Windows Subsystem for Linux 2) - see [Windows Setup](#windows-wsl2-setup) below
 
 **Accounts Required:**
 - GitHub account (for repository cloning via `/clone` command)
 - At least one of: Claude Pro/Max subscription OR Codex account
-- At least one of: Telegram, Slack, Discord, or GitHub account (for interaction)
+- At least one of: Telegram, Slack, Discord, or GitHub account (for server interaction)
 
 ---
 
-## Quick Start
+## Server Quick Start
 
 ### Option 1: Docker (*Not working yet => works when repo goes public*)
 
@@ -1319,3 +1370,61 @@ lsof -i :3090
 # Windows:
 netstat -ano | findstr :3090
 ```
+
+---
+
+## Windows (WSL2 Setup)
+
+Archon CLI requires WSL2 (Windows Subsystem for Linux 2) on Windows. Native Windows binaries are not currently supported.
+
+### Why WSL2?
+
+The Archon CLI relies on Unix-specific features and tools:
+- Git worktree operations with symlinks
+- Shell scripting for AI agent execution
+- File system operations that differ between Windows and Unix
+
+WSL2 provides a full Linux environment that runs seamlessly on Windows.
+
+### Quick WSL2 Setup
+
+1. **Install WSL2** (requires Windows 10 version 2004+ or Windows 11):
+   ```powershell
+   wsl --install
+   ```
+   This installs Ubuntu by default. Restart your computer when prompted.
+
+2. **Set up Ubuntu**:
+   Open "Ubuntu" from the Start menu and create a username/password.
+
+3. **Install Bun in WSL2**:
+   ```bash
+   curl -fsSL https://bun.sh/install | bash
+   source ~/.bashrc
+   ```
+
+4. **Install Archon CLI**:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/raswonders/remote-coding-agent/main/scripts/install.sh | bash
+   ```
+
+5. **Verify installation**:
+   ```bash
+   archon version
+   ```
+
+### Working with Windows Files
+
+WSL2 can access your Windows files at `/mnt/c/` (for C: drive):
+```bash
+cd /mnt/c/Users/YourName/Projects/my-repo
+archon workflow run assist "What does this code do?"
+```
+
+For best performance, keep projects inside the WSL2 file system (`~/projects/`) rather than `/mnt/c/`.
+
+### Tips
+
+- **VS Code Integration**: Install "Remote - WSL" extension to edit WSL2 files from VS Code
+- **Terminal**: Windows Terminal provides excellent WSL2 support
+- **Git**: Use Git inside WSL2 for consistent behavior with Archon

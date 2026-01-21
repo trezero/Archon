@@ -5,6 +5,7 @@ import { tmpdir } from 'os';
 import { discoverWorkflows } from './loader';
 import { isParallelBlock } from './types';
 import * as configLoader from '../config/config-loader';
+import * as bundledDefaults from '../defaults/bundled-defaults';
 
 describe('Workflow Loader', () => {
   let testDir: string;
@@ -981,6 +982,133 @@ steps:
       const customWorkflow = workflows.find(w => w.name === 'my-custom-workflow');
       expect(archonAssist).toBeDefined();
       expect(customWorkflow).toBeDefined();
+    });
+  });
+
+  describe('binary build bundled workflows', () => {
+    let isBinaryBuildSpy: Mock<typeof bundledDefaults.isBinaryBuild>;
+
+    beforeEach(() => {
+      isBinaryBuildSpy = spyOn(bundledDefaults, 'isBinaryBuild');
+    });
+
+    afterEach(() => {
+      isBinaryBuildSpy.mockRestore();
+    });
+
+    it('should load bundled workflows when running as binary', async () => {
+      // Simulate binary build
+      isBinaryBuildSpy.mockReturnValue(true);
+
+      // Enable default workflow loading
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'claude',
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+      });
+
+      const workflows = await discoverWorkflows(testDir);
+
+      // Should load bundled workflows
+      expect(workflows.length).toBeGreaterThanOrEqual(1);
+      // Check that known bundled workflows are loaded
+      const archonAssist = workflows.find(w => w.name === 'archon-assist');
+      expect(archonAssist).toBeDefined();
+    });
+
+    it('should skip bundled workflows when loadDefaultWorkflows is false', async () => {
+      // Simulate binary build
+      isBinaryBuildSpy.mockReturnValue(true);
+
+      // Disable default workflow loading
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'claude',
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: false },
+      });
+
+      const workflows = await discoverWorkflows(testDir);
+
+      // Should not have any bundled defaults
+      const archonWorkflow = workflows.find(w => w.name.startsWith('archon-'));
+      expect(archonWorkflow).toBeUndefined();
+    });
+
+    it('should allow repo workflows to override bundled defaults', async () => {
+      // Simulate binary build
+      isBinaryBuildSpy.mockReturnValue(true);
+
+      // Enable default workflow loading
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'claude',
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+      });
+
+      // Create repo workflow with same filename as bundled default
+      const repoWorkflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(repoWorkflowDir, { recursive: true });
+      const repoWorkflowYaml = `name: custom-assist-override
+description: Custom override of archon-assist
+steps:
+  - command: custom
+`;
+      await writeFile(join(repoWorkflowDir, 'archon-assist.yaml'), repoWorkflowYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      // Repo workflow should override bundled default
+      const assistWorkflow = workflows.find(
+        w => w.name === 'custom-assist-override' || w.name === 'archon-assist'
+      );
+      expect(assistWorkflow).toBeDefined();
+      expect(assistWorkflow?.name).toBe('custom-assist-override');
+    });
+
+    it('should combine bundled workflows with repo workflows', async () => {
+      // Simulate binary build
+      isBinaryBuildSpy.mockReturnValue(true);
+
+      // Enable default workflow loading
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'claude',
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+      });
+
+      // Create repo workflow with unique name
+      const repoWorkflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(repoWorkflowDir, { recursive: true });
+      const repoWorkflowYaml = `name: my-repo-workflow
+description: A repo-specific workflow
+steps:
+  - command: custom
+`;
+      await writeFile(join(repoWorkflowDir, 'my-repo.yaml'), repoWorkflowYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      // Should have both bundled and repo workflows
+      const archonAssist = workflows.find(w => w.name === 'archon-assist');
+      const repoWorkflow = workflows.find(w => w.name === 'my-repo-workflow');
+      expect(archonAssist).toBeDefined();
+      expect(repoWorkflow).toBeDefined();
     });
   });
 });

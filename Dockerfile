@@ -1,4 +1,4 @@
-FROM oven/bun:1-slim
+FROM oven/bun:1.3.4-slim
 
 # OCI Labels for GHCR
 LABEL org.opencontainers.image.source="https://github.com/dynamous-community/remote-coding-agent"

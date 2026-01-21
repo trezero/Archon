@@ -17,5 +17,6 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "types": ["bun-types"]
-  }
+  },
+  "include": ["global.d.ts"]
 }

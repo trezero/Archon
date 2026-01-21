@@ -626,8 +626,9 @@ console.log('Processing...');
 
 **Defaults:**
 - Bundled in `.archon/commands/defaults/` and `.archon/workflows/defaults/`
-- Loaded at runtime (merged with repo-specific commands/workflows)
-- Repo commands/workflows override app defaults by name
+- Binary builds: Embedded at compile time (no filesystem access needed)
+- Source builds: Loaded from filesystem at runtime
+- Merged with repo-specific commands/workflows (repo overrides defaults by name)
 - Opt-out: Set `defaults.loadDefaultCommands: false` or `defaults.loadDefaultWorkflows: false` in `.archon/config.yaml`
 
 ### Error Handling

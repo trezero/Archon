@@ -9,6 +9,7 @@ import * as workflowDb from '../db/workflows';
 import { formatToolCall } from '../utils/tool-formatter';
 import * as archonPaths from '../utils/archon-paths';
 import * as configLoader from '../config/config-loader';
+import { BUNDLED_COMMANDS, isBinaryBuild } from '../defaults/bundled-defaults';
 import { commitAllChanges } from '../utils/git';
 import type {
   WorkflowDefinition,
@@ -336,29 +337,40 @@ async function loadCommandPrompt(
   // If not found in repo and app defaults enabled, search app defaults
   const loadDefaultCommands = config.defaults?.loadDefaultCommands ?? true;
   if (loadDefaultCommands) {
-    const appDefaultsPath = archonPaths.getDefaultCommandsPath();
-    const filePath = join(appDefaultsPath, `${commandName}.md`);
-    try {
-      await access(filePath);
-      const content = await readFile(filePath, 'utf-8');
-      if (!content.trim()) {
-        console.error(`[WorkflowExecutor] Empty app default command file: ${commandName}.md`);
-        return {
-          success: false,
-          reason: 'empty_file',
-          message: `App default command file is empty: ${commandName}.md`,
-        };
+    if (isBinaryBuild()) {
+      // Binary: check bundled commands
+      const bundledContent = BUNDLED_COMMANDS[commandName];
+      if (bundledContent) {
+        console.log(`[WorkflowExecutor] Loaded command from bundled defaults: ${commandName}.md`);
+        return { success: true, content: bundledContent };
       }
-      console.log(`[WorkflowExecutor] Loaded command from app defaults: ${commandName}.md`);
-      return { success: true, content };
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code !== 'ENOENT') {
-        console.warn(`[WorkflowExecutor] Error reading app default: ${err.message}`);
-      } else {
-        console.log(`[WorkflowExecutor] App default command not found: ${commandName}.md`);
+      console.log(`[WorkflowExecutor] Bundled default command not found: ${commandName}.md`);
+    } else {
+      // Bun: load from filesystem
+      const appDefaultsPath = archonPaths.getDefaultCommandsPath();
+      const filePath = join(appDefaultsPath, `${commandName}.md`);
+      try {
+        await access(filePath);
+        const content = await readFile(filePath, 'utf-8');
+        if (!content.trim()) {
+          console.error(`[WorkflowExecutor] Empty app default command file: ${commandName}.md`);
+          return {
+            success: false,
+            reason: 'empty_file',
+            message: `App default command file is empty: ${commandName}.md`,
+          };
+        }
+        console.log(`[WorkflowExecutor] Loaded command from app defaults: ${commandName}.md`);
+        return { success: true, content };
+      } catch (error) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code !== 'ENOENT') {
+          console.warn(`[WorkflowExecutor] Error reading app default: ${err.message}`);
+        } else {
+          console.log(`[WorkflowExecutor] App default command not found: ${commandName}.md`);
+        }
+        // Fall through to not found
       }
-      // Fall through to not found
     }
   }
 

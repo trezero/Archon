@@ -7,6 +7,7 @@ import type { WorkflowDefinition, LoopConfig, SingleStep, WorkflowStep } from '.
 import * as archonPaths from '../utils/archon-paths';
 import * as configLoader from '../config/config-loader';
 import { isValidCommandName } from './executor';
+import { BUNDLED_WORKFLOWS, isBinaryBuild } from '../defaults/bundled-defaults';
 
 /**
  * Parse YAML using Bun's native YAML parser
@@ -243,9 +244,40 @@ async function loadWorkflowsFromDir(dirPath: string): Promise<Map<string, Workfl
 }
 
 /**
+ * Load bundled default workflows (for binary distribution)
+ * Returns a Map of filename -> workflow for consistency with loadWorkflowsFromDir
+ *
+ * Note: Bundled workflows are embedded at compile time and should ALWAYS be valid.
+ * Parse failures indicate a build-time corruption and are logged as errors.
+ */
+function loadBundledWorkflows(): Map<string, WorkflowDefinition> {
+  const workflows = new Map<string, WorkflowDefinition>();
+
+  for (const [name, content] of Object.entries(BUNDLED_WORKFLOWS)) {
+    const filename = `${name}.yaml`;
+    const workflow = parseWorkflow(content, filename);
+    if (workflow) {
+      workflows.set(filename, workflow);
+      console.log(`[WorkflowLoader] Loaded bundled workflow: ${workflow.name}`);
+    } else {
+      // Bundled workflows should ALWAYS be valid - this indicates a build-time error
+      console.error(`[WorkflowLoader] CRITICAL: Bundled workflow failed to parse: ${filename}`);
+      console.error('[WorkflowLoader] This indicates build-time corruption or invalid YAML.');
+      console.error(`[WorkflowLoader] Content preview: ${content.slice(0, 200)}...`);
+    }
+  }
+
+  return workflows;
+}
+
+/**
  * Discover and load workflows from codebase
  * Loads from both app's bundled defaults and repo's workflow folder.
  * Repo workflows override app defaults by exact filename match.
+ *
+ * When running as a compiled binary, defaults are loaded from the bundled
+ * content embedded at compile time. When running with Bun, defaults are
+ * loaded from the filesystem.
  */
 export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition[]> {
   // Map of filename -> workflow for deduplication
@@ -269,21 +301,34 @@ export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition
   // 1. Load from app's bundled defaults (unless opted out)
   const loadDefaultWorkflows = config.defaults?.loadDefaultWorkflows ?? true;
   if (loadDefaultWorkflows) {
-    const appDefaultsPath = archonPaths.getDefaultWorkflowsPath();
-    console.log(`[WorkflowLoader] Loading app defaults from: ${appDefaultsPath}`);
-    try {
-      await access(appDefaultsPath);
-      const appWorkflows = await loadWorkflowsFromDir(appDefaultsPath);
-      for (const [filename, workflow] of appWorkflows) {
+    if (isBinaryBuild()) {
+      // Binary: load from embedded bundled content
+      console.log('[WorkflowLoader] Loading bundled default workflows (binary mode)');
+      const bundledWorkflows = loadBundledWorkflows();
+      for (const [filename, workflow] of bundledWorkflows) {
         workflowsByFile.set(filename, workflow);
       }
-      console.log(`[WorkflowLoader] Loaded ${String(appWorkflows.size)} app default workflows`);
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code !== 'ENOENT') {
-        console.warn(`[WorkflowLoader] Could not access app defaults: ${err.message}`);
-      } else {
-        console.log(`[WorkflowLoader] No app defaults directory found at: ${appDefaultsPath}`);
+      console.log(
+        `[WorkflowLoader] Loaded ${String(bundledWorkflows.size)} bundled default workflows`
+      );
+    } else {
+      // Bun: load from filesystem (development mode)
+      const appDefaultsPath = archonPaths.getDefaultWorkflowsPath();
+      console.log(`[WorkflowLoader] Loading app defaults from: ${appDefaultsPath}`);
+      try {
+        await access(appDefaultsPath);
+        const appWorkflows = await loadWorkflowsFromDir(appDefaultsPath);
+        for (const [filename, workflow] of appWorkflows) {
+          workflowsByFile.set(filename, workflow);
+        }
+        console.log(`[WorkflowLoader] Loaded ${String(appWorkflows.size)} app default workflows`);
+      } catch (error) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code !== 'ENOENT') {
+          console.warn(`[WorkflowLoader] Could not access app defaults: ${err.message}`);
+        } else {
+          console.log(`[WorkflowLoader] No app defaults directory found at: ${appDefaultsPath}`);
+        }
       }
     }
   }

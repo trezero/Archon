@@ -995,17 +995,19 @@ Phase 1: Monorepo Structure + Core Package        [COMPLETE]
          ↓
 Phase 2: CLI Entry Point + Basic Commands         [COMPLETE]
          ↓
-Phase 3: Database Abstraction + CLI Isolation     ← SQLite support here!
+Phase 3: Database Abstraction + CLI Isolation     [COMPLETE]
          ├── Part A: Database adapter layer (SQLite + PostgreSQL)
          └── Part B: CLI isolation (--branch, --no-worktree)
          ↓
-Phase 4: Express → Hono Migration
+Phase 4: Express → Hono Migration                 [COMPLETE]
          ↓
 Phase 5: CLI Binary Distribution                  ← Distribution only, no features
          ↓
-Phase 6: Svelte 5 Dashboard (future)
+Phase 6: CLI Auto-Update Command                  ← Self-update capability
          ↓
-Phase 7: Visual Workflow Builder (future)
+Phase 7: Svelte 5 Dashboard (future)
+         ↓
+Phase 8: Visual Workflow Builder (future)
 ```
 
 **Key insight**: Database abstraction (SQLite) is in Phase 3, NOT Phase 5.
@@ -1341,7 +1343,85 @@ CLI Isolation:
 
 ---
 
-### Phase 6: Svelte 5 Dashboard (Future)
+### Phase 6: CLI Auto-Update Command
+
+**Goal**: Add `archon update` command that allows the CLI to update itself to the latest version.
+
+**Why this after Phase 5**: Once binary distribution is working, users need an easy way to update without re-running the install script manually.
+
+**How updates work without this**:
+
+- Users must manually re-run: `curl -fsSL https://.../install.sh | bash`
+- No notification when new versions are available
+- No way to check current vs latest version
+
+**Scope**:
+
+1. Add `archon update` command:
+
+   ```bash
+   archon update           # Update to latest version
+   archon update --check   # Check for updates without installing
+   ```
+
+2. Implementation:
+
+   ```typescript
+   // packages/cli/src/commands/update.ts
+   export async function updateCommand(options: { check?: boolean }): Promise<void> {
+     const currentVersion = getVersion();
+     const latestVersion = await fetchLatestVersion(); // GitHub API
+
+     if (currentVersion === latestVersion) {
+       console.log(`Already up to date (v${currentVersion})`);
+       return;
+     }
+
+     console.log(`Update available: v${currentVersion} → v${latestVersion}`);
+
+     if (options.check) {
+       return; // Just checking, don't install
+     }
+
+     // Download and replace binary
+     const platform = detectPlatform(); // darwin-arm64, linux-x64, etc.
+     const binaryUrl = `https://github.com/.../releases/download/v${latestVersion}/archon-${platform}`;
+
+     await downloadAndReplace(binaryUrl);
+     console.log(`Updated to v${latestVersion}`);
+   }
+   ```
+
+3. Self-replacement strategy:
+   - Download new binary to temp location
+   - Verify checksum
+   - Replace current binary (may need sudo on some systems)
+   - Verify new binary works before completing
+
+4. Optional: Version check on startup (non-blocking)
+   - Check for updates in background on `archon` invocation
+   - Show subtle message if update available: `(update available: v0.4.0)`
+   - Don't block or slow down CLI startup
+
+**Success criteria**:
+
+- `archon update --check` shows if update is available
+- `archon update` downloads and installs latest version
+- Update works on macOS and Linux
+- Handles permission errors gracefully (prompts for sudo if needed)
+- Verifies download integrity before replacing
+
+**Estimated effort**: 1-2 days
+
+**Reference implementations**:
+
+- `gh` (GitHub CLI): `gh upgrade`
+- `rustup`: `rustup update`
+- `brew`: `brew upgrade`
+
+---
+
+### Phase 7: Svelte 5 Dashboard (Future)
 
 **Goal**: Create a web dashboard for stats, settings, and monitoring.
 
@@ -1361,7 +1441,7 @@ CLI Isolation:
 
 ---
 
-### Phase 7: Visual Workflow Builder (Future)
+### Phase 8: Visual Workflow Builder (Future)
 
 **Goal**: Drag-and-drop workflow editor that outputs YAML.
 
@@ -1391,16 +1471,16 @@ CLI Isolation:
               ▼              ▼              ▼
      ┌────────────────┐ ┌────────────┐ ┌────────────┐
      │    Phase 2     │ │  Phase 4   │ │  (future)  │
-     │  CLI Entry     │ │  Hono      │ │  Phase 6   │
-     │  [COMPLETE]    │ └────────────┘ │  Dashboard │
-     └───────┬────────┘                └─────┬──────┘
+     │  CLI Entry     │ │  Hono      │ │  Phase 7   │
+     │  [COMPLETE]    │ │ [COMPLETE] │ │  Dashboard │
+     └───────┬────────┘ └────────────┘ └─────┬──────┘
              │                               │
              ▼                               ▼
      ┌────────────────┐              ┌────────────┐
-     │    Phase 3     │              │  Phase 7   │
+     │    Phase 3     │              │  Phase 8   │
      │  DB Abstraction│              │  Workflow  │
      │  + Isolation   │              │  Builder   │
-     │  (SQLite here!)│              └────────────┘
+     │  [COMPLETE]    │              └────────────┘
      └───────┬────────┘
              │
              ▼
@@ -1408,30 +1488,35 @@ CLI Isolation:
      │    Phase 5     │
      │  Distribution  │
      │  (binary only) │
+     └───────┬────────┘
+             │
+             ▼
+     ┌────────────────┐
+     │    Phase 6     │
+     │  Auto-Update   │
+     │ (archon update)│
      └────────────────┘
 ```
 
 **Notes**:
 
-- **Phase 3 includes SQLite** - This is critical. Database abstraction happens here, not Phase 5.
-- Phase 4 (Hono) can happen in parallel with Phase 3
-- Phase 5 depends on Phase 3 completing (SQLite required for standalone binary)
-- Phase 6/7 are independent of Phase 5, can start earlier if desired
+- **Phases 1-4 are complete** - Core CLI functionality is working
+- Phase 5 is about distribution (binaries, install scripts, Homebrew)
+- Phase 6 adds self-update capability (`archon update`)
+- Phase 7/8 (Dashboard, Workflow Builder) are independent and can start earlier if desired
 - Each phase can be a separate PR for easier review
 
 ---
 
 ## Implementation Recommendations
 
-1. **Start with Phase 1** - This is the foundation. Don't skip it or do it half-way.
+1. **Phases 1-4 are complete** - The foundation is solid.
 
-2. **Phase 2 + 3 can be combined** if the implementer prefers, but isolation adds complexity so separating them is cleaner.
+2. **Phase 5 is next** - Binary distribution makes the CLI accessible to users without Bun installed.
 
-3. **Phase 4 is low-risk** - Express layer is already thin. Could even be done first as a warm-up.
+3. **Phase 6 follows Phase 5** - Auto-update requires distribution to be working first.
 
-4. **Phase 5 can wait** - Local `bun run` works fine for development. Distribution is for wider adoption.
-
-5. **Phases 6-7 are optional** - CLI-first means CLI is the primary interface. Dashboard is secondary.
+4. **Phases 7-8 are optional** - CLI-first means CLI is the primary interface. Dashboard is secondary.
 
 ---
 
@@ -1446,4 +1531,5 @@ CLI Isolation:
 | 3b    | Isolation state conflicts          | Use same `isolation_environments` table, transactions            |
 | 4     | Webhook signature verification     | Test with real GitHub webhooks before merging                    |
 | 5     | Binary size too large              | Accept ~50-100MB, Bun runtime is included                        |
-| 6-7   | Scope creep                        | Keep MVP focused, iterate later                                  |
+| 6     | Self-replacement permissions       | Detect and prompt for sudo; verify binary before replacing       |
+| 7-8   | Scope creep                        | Keep MVP focused, iterate later                                  |
