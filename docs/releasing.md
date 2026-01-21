@@ -64,12 +64,31 @@ If you maintain a Homebrew tap (`homebrew-archon`), copy the updated formula the
 ### 4. Verify the Release
 
 ```bash
-# Test the install script
+# Test the install script (only works if repo is public)
 curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/scripts/install.sh | bash
 
 # Verify version
 archon version
 ```
+
+> **Note: Private Repository Installation**
+>
+> If the repository is private, the curl install script won't work for anonymous users.
+> Use the GitHub CLI instead:
+>
+> ```bash
+> # Download and install using gh (requires GitHub authentication)
+> gh release download v0.2.0 --repo dynamous-community/remote-coding-agent \
+>   --pattern "archon-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" \
+>   --dir /tmp/archon-install
+>
+> # Install the binary
+> chmod +x /tmp/archon-install/archon-*
+> sudo mv /tmp/archon-install/archon-* /usr/local/bin/archon
+>
+> # Verify
+> archon version
+> ```
 
 ## Manual Build (for Testing)
 
