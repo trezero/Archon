@@ -528,6 +528,35 @@ Interact by @mentioning `@Archon` in issues or PRs:
 - Resumes existing conversation
 - Maintains full context across comments
 
+---
+
+**Adding Additional Repositories**
+
+Once your server is running, add more repos by creating a webhook with the same secret:
+
+```bash
+# Get your existing webhook secret
+WEBHOOK_SECRET=$(grep WEBHOOK_SECRET .env | cut -d= -f2)
+
+# Add webhook to new repo (replace OWNER/REPO)
+gh api repos/OWNER/REPO/hooks --method POST \
+  -f "config[url]=https://YOUR_DOMAIN/webhooks/github" \
+  -f "config[content_type]=json" \
+  -f "config[secret]=$WEBHOOK_SECRET" \
+  -f "events[]=issues" \
+  -f "events[]=issue_comment" \
+  -f "events[]=pull_request" \
+  -f "events[]=pull_request_review_comment"
+```
+
+Or via GitHub UI: **Repo Settings → Webhooks → Add webhook**
+- **Payload URL**: Your server URL + `/webhooks/github`
+- **Content type**: `application/json`
+- **Secret**: Same `WEBHOOK_SECRET` from your `.env`
+- **Events**: Issues, Issue comments, Pull requests, Pull request review comments
+
+**Important**: The webhook secret must be identical across all repos.
+
 </details>
 
 <details>
