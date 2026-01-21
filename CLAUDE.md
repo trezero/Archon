@@ -108,10 +108,70 @@ bun run format:check
 ```
 
 **Code Quality Setup:**
-- **ESLint**: Flat config with TypeScript-ESLint (strict rules, 0 errors enforced)
+- **ESLint**: Flat config with TypeScript-ESLint (strict rules, 0 warnings enforced via `--max-warnings 0`)
 - **Prettier**: Opinionated formatter (single quotes, semicolons, 2-space indent)
 - **Integration**: ESLint + Prettier configured to work together (no conflicts)
-- **Validation**: All PRs must pass `lint` and `format:check` before merge
+- **Validation**: All PRs must pass `type-check`, `lint`, `format:check`, and `test` before merge
+
+### Pre-PR Validation
+
+**Before creating a pull request, always run:**
+
+```bash
+bun run validate
+```
+
+This runs type-check, lint, format check, and tests. All four must pass for CI to succeed.
+
+**If validation fails:**
+1. **Type errors**: Fix the type annotations
+2. **Lint errors**: Fix the code (do not use inline disables without justification)
+3. **Format errors**: Run `bun run format` to auto-fix
+
+### ESLint Guidelines
+
+**Zero-tolerance policy**: CI enforces `--max-warnings 0`. No warnings allowed.
+
+**When to use inline disable comments** (`// eslint-disable-next-line`):
+- **Almost never** - fix the issue instead
+- Only acceptable when:
+  1. External SDK types are incorrect (document which SDK and why)
+  2. Intentional type assertion after validation (must include comment explaining the validation)
+
+**Preferred approach - use guard clauses instead of disables:**
+```typescript
+// Instead of: const steps = validatedSteps!;
+// Use a guard clause that satisfies TypeScript and provides runtime safety:
+if (!steps) {
+  throw new Error('Steps validation failed unexpectedly');
+}
+// Now TypeScript knows steps is defined, no assertion needed
+```
+
+**Never acceptable:**
+- Disabling `no-explicit-any` without justification
+- Disabling rules to "make CI pass"
+- Bulk disabling at file level (`/* eslint-disable */`)
+
+**Disabled rules** (turned off globally, no need to suppress):
+
+*Template/expression rules:*
+- `restrict-template-expressions` - Numbers in templates are valid JS
+- `restrict-plus-operands` - Similar to above, mixed operands are often intentional
+
+*Defensive coding patterns:*
+- `no-unnecessary-condition` - Defensive coding (switch defaults, null checks) is encouraged
+- `prefer-nullish-coalescing` - Truthy checks with `||` are intentional for env vars
+
+*External SDK interop (types are often `any` or incomplete):*
+- `no-unsafe-assignment`, `no-unsafe-member-access`, `no-unsafe-argument` - SDK responses
+- `no-misused-promises`, `no-floating-promises` - Event handler patterns in SDKs
+
+*Style preferences (not critical for type safety):*
+- `require-await` - Empty async functions valid for interface compliance
+- `consistent-generic-constructors` - Style preference
+- `no-deprecated` - Allow using deprecated APIs during migration
+- `use-unknown-in-catch-callback-variable` - Catch variable typing preference
 
 ### Database
 

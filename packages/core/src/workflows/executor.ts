@@ -675,8 +675,13 @@ async function executeLoopWorkflow(
   resolvedModel: string | undefined, // Model from workflow (if any)
   issueContext?: string
 ): Promise<void> {
-  const loop = workflow.loop!;
-  const prompt = workflow.prompt!;
+  // Guard for TypeScript type narrowing and runtime safety - caller checks workflow.loop
+  // exists but doesn't verify workflow.prompt, so this guard is meaningful for both
+  if (!workflow.loop || !workflow.prompt) {
+    throw new Error('[WorkflowExecutor] Loop workflow missing required fields');
+  }
+  const loop = workflow.loop;
+  const prompt = workflow.prompt;
 
   console.log(
     `[WorkflowExecutor] Starting loop workflow: ${workflow.name} (max ${String(loop.max_iterations)} iterations)`

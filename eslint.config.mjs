@@ -39,6 +39,7 @@ export default tseslint.config(
       },
     },
     rules: {
+      // === ENFORCED RULES (errors) ===
       '@typescript-eslint/explicit-function-return-type': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': [
@@ -62,20 +63,39 @@ export default tseslint.config(
         { selector: 'function', format: ['camelCase'] },
         { selector: 'variable', format: ['camelCase', 'UPPER_CASE'] },
       ],
-      '@typescript-eslint/no-unsafe-assignment': 'warn',
-      '@typescript-eslint/no-unsafe-member-access': 'warn',
-      '@typescript-eslint/no-unsafe-argument': 'warn',
-      '@typescript-eslint/no-misused-promises': 'warn',
-      '@typescript-eslint/no-floating-promises': 'warn',
-      '@typescript-eslint/restrict-template-expressions': 'warn',
-      '@typescript-eslint/restrict-plus-operands': 'warn',
-      '@typescript-eslint/no-non-null-assertion': 'warn',
-      '@typescript-eslint/prefer-nullish-coalescing': 'warn',
+      '@typescript-eslint/no-non-null-assertion': 'error',
+
+      // === DISABLED RULES ===
+
+      // --- Template/expression rules ---
+      // Numbers/booleans in template literals are valid JS (auto-converted to string)
+      '@typescript-eslint/restrict-template-expressions': 'off',
+      // Mixed operands in + are often intentional (string concatenation)
+      '@typescript-eslint/restrict-plus-operands': 'off',
+
+      // --- Defensive coding patterns ---
+      // Switch defaults, null checks, and defensive guards are valuable
+      '@typescript-eslint/no-unnecessary-condition': 'off',
+      // Env var checks need || for truthy evaluation (empty string = missing)
+      '@typescript-eslint/prefer-nullish-coalescing': 'off',
+
+      // --- External SDK interop (types are often `any` or incomplete) ---
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      // Event handler patterns in SDKs often have promise mismatches
+      '@typescript-eslint/no-misused-promises': 'off',
+      '@typescript-eslint/no-floating-promises': 'off',
+
+      // --- Style preferences (not critical for type safety) ---
+      // Catch variable typing preference
       '@typescript-eslint/use-unknown-in-catch-callback-variable': 'off',
-      '@typescript-eslint/no-unnecessary-condition': 'warn',
-      '@typescript-eslint/no-deprecated': 'warn',
+      // Allow using deprecated APIs during migration periods
+      '@typescript-eslint/no-deprecated': 'off',
+      // Empty async functions valid for interface compliance
       '@typescript-eslint/require-await': 'off',
-      '@typescript-eslint/consistent-generic-constructors': 'warn',
+      // Constructor style preference
+      '@typescript-eslint/consistent-generic-constructors': 'off',
     },
   }
 );

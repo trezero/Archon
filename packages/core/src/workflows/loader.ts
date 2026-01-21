@@ -169,13 +169,21 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
       };
     }
 
-    // Step-based workflow
+    // Guard for TypeScript type narrowing - if we reach here without steps,
+    // it means step validation failed (see errors logged above at line 150)
+    if (!steps) {
+      console.error(
+        `[WorkflowLoader] Workflow ${filename} failed step validation (see errors above)`
+      );
+      return null;
+    }
+
     return {
       name: raw.name,
       description: raw.description,
       provider,
       model,
-      steps: steps!,
+      steps,
     };
   } catch (error) {
     const err = error as Error;

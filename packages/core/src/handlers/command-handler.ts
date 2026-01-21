@@ -484,7 +484,9 @@ Setup:
       const session = await sessionDb.getActiveSession(conversation.id);
       if (session) {
         await sessionDb.deactivateSession(session.id);
-        console.log(`[Command] Deactivated session: ${getTriggerForCommand('setcwd')!}`);
+        console.log(
+          `[Command] Deactivated session: ${getTriggerForCommand('setcwd') ?? 'cwd-changed'}`
+        );
       }
 
       // Format response with repo context instead of filesystem path
@@ -562,7 +564,9 @@ Setup:
             const session = await sessionDb.getActiveSession(conversation.id);
             if (session) {
               await sessionDb.deactivateSession(session.id);
-              console.log(`[Command] Deactivated session: ${getTriggerForCommand('clone')!}`);
+              console.log(
+                `[Command] Deactivated session: ${getTriggerForCommand('clone') ?? 'codebase-cloned'}`
+              );
             }
 
             // Check for command folders (same logic as successful clone)
@@ -680,7 +684,9 @@ Setup:
         const session = await sessionDb.getActiveSession(conversation.id);
         if (session) {
           await sessionDb.deactivateSession(session.id);
-          console.log(`[Command] Deactivated session: ${getTriggerForCommand('clone')!}`);
+          console.log(
+            `[Command] Deactivated session: ${getTriggerForCommand('clone') ?? 'codebase-cloned'}`
+          );
         }
 
         // Copy default commands/workflows if target doesn't have them (non-fatal)
@@ -922,7 +928,9 @@ Setup:
       const session = await sessionDb.getActiveSession(conversation.id);
       if (session) {
         await sessionDb.deactivateSession(session.id);
-        console.log(`[Command] Deactivated session: ${getTriggerForCommand('reset')!}`);
+        console.log(
+          `[Command] Deactivated session: ${getTriggerForCommand('reset') ?? 'reset-requested'}`
+        );
         return {
           success: true,
           message:
@@ -940,7 +948,9 @@ Setup:
       const activeSession = await sessionDb.getActiveSession(conversation.id);
       if (activeSession) {
         await sessionDb.deactivateSession(activeSession.id);
-        console.log(`[Command] Deactivated session: ${getTriggerForCommand('reset-context')!}`);
+        console.log(
+          `[Command] Deactivated session: ${getTriggerForCommand('reset-context') ?? 'context-reset'}`
+        );
         return {
           success: true,
           message:
@@ -1058,7 +1068,9 @@ Setup:
         const session = await sessionDb.getActiveSession(conversation.id);
         if (session) {
           await sessionDb.deactivateSession(session.id);
-          console.log(`[Command] Deactivated session: ${getTriggerForCommand('repo')!}`);
+          console.log(
+            `[Command] Deactivated session: ${getTriggerForCommand('repo') ?? 'codebase-changed'}`
+          );
         }
 
         // Auto-load commands if found
@@ -1171,7 +1183,9 @@ Setup:
           const session = await sessionDb.getActiveSession(conversation.id);
           if (session) {
             await sessionDb.deactivateSession(session.id);
-            console.log(`[Command] Deactivated session: ${getTriggerForCommand('repo-remove')!}`);
+            console.log(
+              `[Command] Deactivated session: ${getTriggerForCommand('repo-remove') ?? 'repo-removed'}`
+            );
           }
         }
 
@@ -1449,7 +1463,7 @@ Setup:
             if (session) {
               await sessionDb.deactivateSession(session.id);
               console.log(
-                `[Command] Deactivated session: ${getTriggerForCommand('worktree-remove')!}`
+                `[Command] Deactivated session: ${getTriggerForCommand('worktree-remove') ?? 'worktree-removed'}`
               );
             }
 
