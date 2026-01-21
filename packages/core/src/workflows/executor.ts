@@ -7,8 +7,8 @@ import type { IPlatformAdapter } from '../types';
 import { getAssistantClient } from '../clients/factory';
 import * as workflowDb from '../db/workflows';
 import { formatToolCall } from '../utils/tool-formatter';
-import { getCommandFolderSearchPaths } from '../utils/archon-paths';
-import { loadConfig } from '../config/config-loader';
+import * as archonPaths from '../utils/archon-paths';
+import * as configLoader from '../config/config-loader';
 import { commitAllChanges } from '../utils/git';
 import type {
   WorkflowDefinition,
@@ -275,9 +275,25 @@ async function loadCommandPrompt(
     };
   }
 
-  // Use command folder paths with optional configured folder
-  const searchPaths = getCommandFolderSearchPaths(configuredFolder);
+  // Load config to check opt-out
+  let config;
+  try {
+    config = await configLoader.loadConfig(cwd);
+  } catch (error) {
+    const err = error as Error;
+    console.warn('[WorkflowExecutor] Failed to load config, using defaults:', {
+      cwd,
+      error: err.message,
+      errorType: err.name,
+      note: 'Default commands will be loaded. Check your .archon/config.yaml if this is unexpected.',
+    });
+    config = { defaults: { loadDefaultCommands: true } };
+  }
 
+  // Use command folder paths with optional configured folder
+  const searchPaths = archonPaths.getCommandFolderSearchPaths(configuredFolder);
+
+  // Search repo paths first
   for (const folder of searchPaths) {
     const filePath = join(cwd, folder, `${commandName}.md`);
     try {
@@ -317,13 +333,44 @@ async function loadCommandPrompt(
     }
   }
 
+  // If not found in repo and app defaults enabled, search app defaults
+  const loadDefaultCommands = config.defaults?.loadDefaultCommands ?? true;
+  if (loadDefaultCommands) {
+    const appDefaultsPath = archonPaths.getDefaultCommandsPath();
+    const filePath = join(appDefaultsPath, `${commandName}.md`);
+    try {
+      await access(filePath);
+      const content = await readFile(filePath, 'utf-8');
+      if (!content.trim()) {
+        console.error(`[WorkflowExecutor] Empty app default command file: ${commandName}.md`);
+        return {
+          success: false,
+          reason: 'empty_file',
+          message: `App default command file is empty: ${commandName}.md`,
+        };
+      }
+      console.log(`[WorkflowExecutor] Loaded command from app defaults: ${commandName}.md`);
+      return { success: true, content };
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') {
+        console.warn(`[WorkflowExecutor] Error reading app default: ${err.message}`);
+      } else {
+        console.log(`[WorkflowExecutor] App default command not found: ${commandName}.md`);
+      }
+      // Fall through to not found
+    }
+  }
+
+  // Not found anywhere
+  const allSearchPaths = loadDefaultCommands ? [...searchPaths, 'app defaults'] : searchPaths;
   console.error(
-    `[WorkflowExecutor] Command prompt not found: ${commandName}.md (searched: ${searchPaths.join(', ')})`
+    `[WorkflowExecutor] Command prompt not found: ${commandName}.md (searched: ${allSearchPaths.join(', ')})`
   );
   return {
     success: false,
     reason: 'not_found',
-    message: `Command prompt not found: ${commandName}.md (searched: ${searchPaths.join(', ')})`,
+    message: `Command prompt not found: ${commandName}.md (searched: ${allSearchPaths.join(', ')})`,
   };
 }
 
@@ -934,7 +981,7 @@ export async function executeWorkflow(
   }
 ): Promise<WorkflowExecutionResult> {
   // Load config once for the entire workflow execution
-  const config = await loadConfig(cwd);
+  const config = await configLoader.loadConfig(cwd);
   const configuredCommandFolder = config.commands.folder;
 
   // Resolve provider and model once (used by all steps/iterations)

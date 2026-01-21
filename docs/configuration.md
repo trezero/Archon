@@ -83,12 +83,14 @@ worktree:
 
 # Defaults configuration
 defaults:
-  copyDefaults: false  # Set to false to skip copying bundled commands/workflows on clone
+  loadDefaultCommands: true   # Load app's bundled default commands at runtime
+  loadDefaultWorkflows: true  # Load app's bundled default workflows at runtime
+  copyDefaults: false         # Deprecated: use loadDefaultCommands/loadDefaultWorkflows instead
 ```
 
 **Default behavior:** The `.archon/` directory is always copied to worktrees automatically (contains artifacts, plans, workflows). Use `copyFiles` only for additional files like `.env` or `.vscode`.
 
-**Defaults behavior:** When you `/clone` a repository, bundled default commands and workflows are automatically copied to `.archon/commands/` and `.archon/workflows/` if those directories don't exist. Set `defaults.copyDefaults: false` to skip this.
+**Defaults behavior:** The app's bundled default commands and workflows are loaded at runtime and merged with repo-specific ones. Repo commands/workflows override app defaults by name. Set `defaults.loadDefaultCommands: false` or `defaults.loadDefaultWorkflows: false` to disable runtime loading.
 
 ## Environment Variables
 

@@ -1,4 +1,4 @@
-name: ralph-fresh
+name: archon-ralph-fresh
 description: |
   PRD implementation loop with FRESH CONTEXT each iteration (stateless).
 

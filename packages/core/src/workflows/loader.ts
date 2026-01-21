@@ -4,7 +4,8 @@
 import { readFile, readdir, access, stat } from 'fs/promises';
 import { join } from 'path';
 import type { WorkflowDefinition, LoopConfig, SingleStep, WorkflowStep } from './types';
-import { getWorkflowFolderSearchPaths } from '../utils/archon-paths';
+import * as archonPaths from '../utils/archon-paths';
+import * as configLoader from '../config/config-loader';
 import { isValidCommandName } from './executor';
 
 /**
@@ -201,9 +202,10 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
 
 /**
  * Load workflows from a directory (recursively includes subdirectories)
+ * Returns a Map of filename -> workflow for easy deduplication
  */
-async function loadWorkflowsFromDir(dirPath: string): Promise<WorkflowDefinition[]> {
-  const workflows: WorkflowDefinition[] = [];
+async function loadWorkflowsFromDir(dirPath: string): Promise<Map<string, WorkflowDefinition>> {
+  const workflows = new Map<string, WorkflowDefinition>();
 
   try {
     const entries = await readdir(dirPath);
@@ -215,13 +217,15 @@ async function loadWorkflowsFromDir(dirPath: string): Promise<WorkflowDefinition
       if (entryStat.isDirectory()) {
         // Recursively load from subdirectories
         const subWorkflows = await loadWorkflowsFromDir(entryPath);
-        workflows.push(...subWorkflows);
+        for (const [filename, workflow] of subWorkflows) {
+          workflows.set(filename, workflow);
+        }
       } else if (entry.endsWith('.yaml') || entry.endsWith('.yml')) {
         const content = await readFile(entryPath, 'utf-8');
         const workflow = parseWorkflow(content, entry);
 
         if (workflow) {
-          workflows.push(workflow);
+          workflows.set(entry, workflow);
           console.log(`[WorkflowLoader] Loaded workflow: ${workflow.name}`);
         }
       }
@@ -240,32 +244,107 @@ async function loadWorkflowsFromDir(dirPath: string): Promise<WorkflowDefinition
 
 /**
  * Discover and load workflows from codebase
- * Searches .archon/workflows/ recursively (includes subdirectories like defaults/).
+ * Loads from both app's bundled defaults and repo's workflow folder.
+ * Repo workflows override app defaults by exact filename match.
  */
 export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition[]> {
-  const [workflowFolder] = getWorkflowFolderSearchPaths();
+  // Map of filename -> workflow for deduplication
+  const workflowsByFile = new Map<string, WorkflowDefinition>();
+
+  // Load config to check opt-out settings
+  let config;
+  try {
+    config = await configLoader.loadConfig(cwd);
+  } catch (error) {
+    const err = error as Error;
+    console.warn('[WorkflowLoader] Failed to load config, using defaults:', {
+      cwd,
+      error: err.message,
+      errorType: err.name,
+      note: 'Default workflows will be loaded. Check your .archon/config.yaml if this is unexpected.',
+    });
+    config = { defaults: { loadDefaultWorkflows: true } };
+  }
+
+  // 1. Load from app's bundled defaults (unless opted out)
+  const loadDefaultWorkflows = config.defaults?.loadDefaultWorkflows ?? true;
+  if (loadDefaultWorkflows) {
+    const appDefaultsPath = archonPaths.getDefaultWorkflowsPath();
+    console.log(`[WorkflowLoader] Loading app defaults from: ${appDefaultsPath}`);
+    try {
+      await access(appDefaultsPath);
+      const appWorkflows = await loadWorkflowsFromDir(appDefaultsPath);
+      for (const [filename, workflow] of appWorkflows) {
+        workflowsByFile.set(filename, workflow);
+      }
+      console.log(`[WorkflowLoader] Loaded ${String(appWorkflows.size)} app default workflows`);
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') {
+        console.warn(`[WorkflowLoader] Could not access app defaults: ${err.message}`);
+      } else {
+        console.log(`[WorkflowLoader] No app defaults directory found at: ${appDefaultsPath}`);
+      }
+    }
+  }
+
+  // 2. Load from repo's workflow folder (overrides app defaults by exact filename)
+  const [workflowFolder] = archonPaths.getWorkflowFolderSearchPaths();
   const workflowPath = join(cwd, workflowFolder);
 
   console.log(`[WorkflowLoader] Searching for workflows in: ${workflowPath}`);
 
   try {
     await access(workflowPath);
+    const repoWorkflows = await loadWorkflowsFromDir(workflowPath);
+
+    // Repo workflows override app defaults by exact filename match
+    for (const [filename, workflow] of repoWorkflows) {
+      if (workflowsByFile.has(filename)) {
+        console.log(`[WorkflowLoader] Repo workflow '${filename}' overrides app default`);
+      }
+      workflowsByFile.set(filename, workflow);
+    }
+
+    // Warn about deprecated non-prefixed defaults in repo's defaults folder
+    const repoDefaultsPath = join(cwd, workflowFolder, 'defaults');
+    try {
+      await access(repoDefaultsPath);
+      const defaultEntries = await readdir(repoDefaultsPath);
+      const oldDefaults = defaultEntries.filter(
+        f => (f.endsWith('.yaml') || f.endsWith('.yml')) && !f.startsWith('archon-')
+      );
+      if (oldDefaults.length > 0) {
+        console.warn(
+          `[WorkflowLoader] DEPRECATED: Found ${String(oldDefaults.length)} old-style workflow defaults in ${repoDefaultsPath}`
+        );
+        console.warn(
+          '[WorkflowLoader] These are from an older version. Delete the folder to use updated app defaults:'
+        );
+        console.warn(`[WorkflowLoader]   rm -rf "${repoDefaultsPath}"`);
+      }
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') {
+        console.warn('[WorkflowLoader] Could not check for deprecated defaults folder:', {
+          path: repoDefaultsPath,
+          error: err.message,
+          code: err.code,
+        });
+      }
+      // ENOENT (not found) is expected - no defaults folder exists
+    }
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
-    if (err.code === 'ENOENT') {
-      // No workflow folder exists - this is expected, return empty array
-      console.log(`[WorkflowLoader] No workflow folder found at: ${workflowPath}`);
-      return [];
+    if (err.code !== 'ENOENT') {
+      throw new Error(
+        `Cannot access workflow folder at ${workflowPath}: ${err.message} (${err.code ?? 'unknown'})`
+      );
     }
-    // For other errors (permission denied, I/O errors), throw so callers can handle
-    throw new Error(
-      `Cannot access workflow folder at ${workflowPath}: ${err.message} (${err.code ?? 'unknown'})`
-    );
+    console.log(`[WorkflowLoader] No workflow folder found at: ${workflowPath}`);
   }
 
-  const workflows = await loadWorkflowsFromDir(workflowPath);
-  console.log(
-    `[WorkflowLoader] Loaded ${String(workflows.length)} workflows from ${workflowFolder}`
-  );
+  const workflows = Array.from(workflowsByFile.values());
+  console.log(`[WorkflowLoader] Total workflows loaded: ${String(workflows.length)}`);
   return workflows;
 }

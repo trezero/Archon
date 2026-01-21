@@ -726,6 +726,8 @@ for (const folder of searchPaths) {
 }
 ```
 
+This registers repo-specific commands. Default commands are loaded at runtime from the app's bundled defaults, not copied to repos.
+
 **Reference:** `packages/core/src/utils/archon-paths.ts`
 
 ### Variable Substitution
@@ -1129,7 +1131,7 @@ GitHubAdapter.handleWebhook(payload, signature)
   - Check for @Archon mention
          ↓
 First mention on this issue?
-  - Yes → Clone repo, create codebase, load commands
+  - Yes → Clone repo, create codebase, detect and register commands
   - No → Use existing codebase
          ↓
 Strip @Archon from comment

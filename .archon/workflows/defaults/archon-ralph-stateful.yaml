@@ -1,4 +1,4 @@
-name: ralph-stateful
+name: archon-ralph-stateful
 description: |
   PRD implementation loop with PERSISTENT MEMORY across iterations.
 

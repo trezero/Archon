@@ -964,7 +964,7 @@ describe('CommandHandler', () => {
 
         expect(result.success).toBe(true);
         expect(result.message).toContain('Repository cloned successfully');
-        expect(result.message).toContain('✓ Loaded 2 commands');
+        expect(result.message).toContain('✓ Loaded 2 repo commands');
         const updateCall = mockUpdateCodebaseCommands.mock.calls[0] as [
           string,
           Record<string, { path: string; description: string }>,
@@ -1056,7 +1056,7 @@ describe('CommandHandler', () => {
 
         expect(result.success).toBe(true);
         // Should successfully load commands
-        expect(result.message).toMatch(/✓ Loaded \d+ command/);
+        expect(result.message).toMatch(/✓ Loaded \d+ repo command/);
         // Verify readdir was called multiple times (once for root, once for subdirectory)
         expect(spyFsReaddir).toHaveBeenCalledTimes(2);
       });

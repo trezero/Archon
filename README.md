@@ -765,15 +765,14 @@ You: /clone https://github.com/user/my-project
 Bot: Repository cloned successfully!
 
      Repository: my-project
-     ✓ Copied 16 default commands
-     ✓ Copied 8 default workflows
+     ✓ App defaults available at runtime
 
      Session reset - starting fresh on next message.
 
      You can now start asking questions about the code.
 ```
 
-> **Note:** Default commands and workflows are automatically copied to new repos. If the repo already has `.archon/commands/` or `.archon/workflows/`, existing files are preserved. To opt out, set `defaults.copyDefaults: false` in the repo's `.archon/config.yaml`.
+> **Note:** Default commands and workflows are loaded at runtime and merged with repo-specific ones. Repo commands/workflows override app defaults by name. To disable defaults, set `defaults.loadDefaultCommands: false` or `defaults.loadDefaultWorkflows: false` in the repo's `.archon/config.yaml`.
 
 **Ask Questions Directly**
 ```

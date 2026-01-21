@@ -74,6 +74,7 @@ function createMockPlatform(): IPlatformAdapter {
 // Import after mocks are set up
 import { executeWorkflow, isValidCommandName } from './executor';
 import * as gitUtils from '../utils/git';
+import * as configLoader from '../config/config-loader';
 
 describe('Workflow Executor', () => {
   let mockPlatform: IPlatformAdapter;
@@ -3270,5 +3271,214 @@ describe('isValidCommandName', () => {
   it('should accept names with numbers', () => {
     expect(isValidCommandName('step1')).toBe(true);
     expect(isValidCommandName('v2release')).toBe(true);
+  });
+});
+
+describe('app defaults command loading', () => {
+  let mockPlatform: IPlatformAdapter;
+  let testDir: string;
+  let loadConfigSpy: Mock<typeof configLoader.loadConfig>;
+  let commitAllChangesSpy: Mock<typeof gitUtils.commitAllChanges>;
+
+  // Create mock platform adapter
+  function createMockPlatform(): IPlatformAdapter {
+    return {
+      sendMessage: mock(() => Promise.resolve()),
+      ensureThread: mock((id: string) => Promise.resolve(id)),
+      getStreamingMode: mock(() => 'batch' as const),
+      getPlatformType: mock(() => 'test'),
+      start: mock(() => Promise.resolve()),
+      stop: mock(() => {}),
+    };
+  }
+
+  beforeEach(async () => {
+    mockPlatform = createMockPlatform();
+    mockQuery.mockClear();
+    mockSendQuery.mockClear();
+    mockGetAssistantClient.mockClear();
+    (mockPlatform.sendMessage as ReturnType<typeof mock>).mockClear();
+
+    // Reset mockQuery implementation to ensure database mocking works
+    mockQuery.mockImplementation((query: string) => {
+      // For getActiveWorkflowRun query, return no active workflow by default
+      if (query.includes("status = 'running'")) {
+        return Promise.resolve(createQueryResult([]));
+      }
+      // For createWorkflowRun INSERT, return the new workflow run
+      if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
+        return Promise.resolve(
+          createQueryResult([
+            {
+              id: 'test-workflow-run-id',
+              workflow_name: 'test-workflow',
+              conversation_id: 'conv-123',
+              codebase_id: 'codebase-456',
+              current_step_index: 0,
+              status: 'running' as const,
+              user_message: 'test user message',
+              metadata: {},
+              started_at: new Date(),
+              completed_at: null,
+            },
+          ])
+        );
+      }
+      // Default: empty result for UPDATE queries and other operations
+      return Promise.resolve(createQueryResult([]));
+    });
+
+    // Reset mock implementation to default behavior
+    mockSendQuery.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'AI response' };
+      yield { type: 'result', sessionId: 'new-session-id' };
+    });
+
+    // Mock commitAllChanges to prevent sendCriticalMessage retries
+    commitAllChangesSpy = spyOn(gitUtils, 'commitAllChanges').mockResolvedValue(false);
+
+    // Create temp directory for repo commands
+    testDir = join(
+      tmpdir(),
+      `executor-defaults-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    await mkdir(join(testDir, '.archon', 'commands'), { recursive: true });
+
+    // Mock loadConfig with default values (app defaults enabled)
+    loadConfigSpy = spyOn(configLoader, 'loadConfig');
+    loadConfigSpy.mockResolvedValue({
+      botName: 'Archon',
+      assistant: 'claude',
+      streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+      paths: { workspaces: '/tmp', worktrees: '/tmp' },
+      concurrency: { maxConversations: 10 },
+      commands: { autoLoad: true },
+      defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+    });
+  });
+
+  afterEach(async () => {
+    loadConfigSpy.mockRestore();
+    commitAllChangesSpy.mockRestore();
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  it('should load command from real app defaults when not found in repo', async () => {
+    // Use a real app default command (archon-assist exists in app defaults)
+    const workflow: WorkflowDefinition = {
+      name: 'test-real-app-defaults',
+      description: 'Tests real app defaults loading',
+      steps: [{ command: 'archon-assist' }],
+    };
+
+    const result = await executeWorkflow(
+      mockPlatform,
+      'conv-123',
+      testDir,
+      workflow,
+      'User message',
+      'db-conv-id'
+    );
+
+    // Workflow should succeed (command loaded from real app defaults)
+    expect(result.success).toBe(true);
+    // AI client should have been called
+    expect(mockSendQuery.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it('should use repo command over app default with same filename', async () => {
+    // Create repo command that overrides app default (same filename)
+    await writeFile(
+      join(testDir, '.archon', 'commands', 'archon-assist.md'),
+      'My custom assist prompt (repo version)'
+    );
+
+    const workflow: WorkflowDefinition = {
+      name: 'test-repo-override',
+      description: 'Tests repo overrides app defaults',
+      steps: [{ command: 'archon-assist' }],
+    };
+
+    await executeWorkflow(
+      mockPlatform,
+      'conv-123',
+      testDir,
+      workflow,
+      'User message',
+      'db-conv-id'
+    );
+
+    // AI client should have been called with repo version
+    const sendQueryCalls = mockSendQuery.mock.calls;
+    expect(sendQueryCalls.length).toBeGreaterThan(0);
+    // The prompt should contain repo version content
+    const promptArg = sendQueryCalls[0][0] as string;
+    expect(promptArg).toContain('My custom assist prompt (repo version)');
+  });
+
+  it('should skip app defaults when loadDefaultCommands is false', async () => {
+    // Configure to disable app default commands
+    loadConfigSpy.mockResolvedValue({
+      botName: 'Archon',
+      assistant: 'claude',
+      streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+      paths: { workspaces: '/tmp', worktrees: '/tmp' },
+      concurrency: { maxConversations: 10 },
+      commands: { autoLoad: true },
+      defaults: { copyDefaults: true, loadDefaultCommands: false, loadDefaultWorkflows: true },
+    });
+
+    // Try to load a real app default command - should fail since app defaults disabled
+    const workflow: WorkflowDefinition = {
+      name: 'test-disabled-defaults',
+      description: 'Tests disabled app defaults',
+      steps: [{ command: 'archon-assist' }],
+    };
+
+    await executeWorkflow(
+      mockPlatform,
+      'conv-123',
+      testDir,
+      workflow,
+      'User message',
+      'db-conv-id'
+    );
+
+    // Should fail with "not found" error (not search app defaults)
+    const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+    const failureMessages = sendMessageCalls.filter(
+      (call: unknown[]) =>
+        typeof call[1] === 'string' && (call[1] as string).includes('Command prompt not found')
+    );
+    expect(failureMessages.length).toBeGreaterThan(0);
+  });
+
+  it('should handle non-existent command gracefully', async () => {
+    const workflow: WorkflowDefinition = {
+      name: 'test-missing-command',
+      description: 'Tests missing command handling',
+      steps: [{ command: 'definitely-does-not-exist-anywhere' }],
+    };
+
+    await executeWorkflow(
+      mockPlatform,
+      'conv-123',
+      testDir,
+      workflow,
+      'User message',
+      'db-conv-id'
+    );
+
+    // Should fail with "not found" error but not crash
+    const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+    const failureMessages = sendMessageCalls.filter(
+      (call: unknown[]) =>
+        typeof call[1] === 'string' && (call[1] as string).includes('Command prompt not found')
+    );
+    expect(failureMessages.length).toBeGreaterThan(0);
   });
 });

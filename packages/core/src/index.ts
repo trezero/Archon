@@ -189,6 +189,7 @@ export {
   getDefaultCommandsPath,
   getDefaultWorkflowsPath,
   logArchonPaths,
+  validateAppDefaultsPaths,
 } from './utils/archon-paths';
 
 // Git utilities

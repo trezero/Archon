@@ -1,4 +1,4 @@
-name: fix-github-issue
+name: archon-fix-github-issue
 description: |
   Use when: User wants to FIX, RESOLVE, or IMPLEMENT a solution for a GitHub issue.
   Triggers: "fix this issue", "implement issue #123", "resolve this bug", "fix it".
@@ -8,7 +8,7 @@ description: |
 model: sonnet
 
 steps:
-  - command: investigate-issue
+  - command: archon-investigate-issue
 
-  - command: implement-issue
+  - command: archon-implement-issue
     clearContext: true

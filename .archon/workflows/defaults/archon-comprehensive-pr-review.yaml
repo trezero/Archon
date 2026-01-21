@@ -1,4 +1,4 @@
-name: comprehensive-pr-review
+name: archon-comprehensive-pr-review
 description: |
   Use when: User wants a comprehensive code review of a pull request with automatic fixes.
   Triggers: "review this PR", "review PR #123", "comprehensive review", "full PR review",
@@ -13,17 +13,17 @@ description: |
 model: sonnet
 
 steps:
-  - command: pr-review-scope
+  - command: archon-pr-review-scope
 
-  - command: sync-pr-with-main
+  - command: archon-sync-pr-with-main
 
   - parallel:
-      - command: code-review-agent
-      - command: error-handling-agent
-      - command: test-coverage-agent
-      - command: comment-quality-agent
-      - command: docs-impact-agent
+      - command: archon-code-review-agent
+      - command: archon-error-handling-agent
+      - command: archon-test-coverage-agent
+      - command: archon-comment-quality-agent
+      - command: archon-docs-impact-agent
 
-  - command: synthesize-review
+  - command: archon-synthesize-review
 
-  - command: implement-review-fixes
+  - command: archon-implement-review-fixes

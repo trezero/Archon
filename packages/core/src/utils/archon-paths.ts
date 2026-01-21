@@ -116,10 +116,11 @@ export function getWorkflowFolderSearchPaths(): string[] {
  * Locally: {repo_root}/.archon
  */
 export function getAppArchonBasePath(): string {
-  // This file is at src/utils/archon-paths.ts
-  // Go up from src/utils to repo root
-  const srcDir = dirname(dirname(import.meta.dir));
-  return join(srcDir, '.archon');
+  // This file is at packages/core/src/utils/archon-paths.ts
+  // Go up from utils → src → core → packages → repo root
+  // import.meta.dir = packages/core/src/utils
+  const repoRoot = dirname(dirname(dirname(dirname(import.meta.dir))));
+  return join(repoRoot, '.archon');
 }
 
 /**
@@ -150,4 +151,64 @@ export function logArchonPaths(): void {
   console.log(`  Workspaces: ${workspaces}`);
   console.log(`  Worktrees: ${worktrees}`);
   console.log(`  Config: ${config}`);
+}
+
+/**
+ * Validate that app defaults paths exist and are accessible (for startup)
+ * Logs verification status and warnings if paths don't exist
+ */
+export async function validateAppDefaultsPaths(): Promise<void> {
+  const { access: fsAccess } = await import('fs/promises');
+  const commandsPath = getDefaultCommandsPath();
+  const workflowsPath = getDefaultWorkflowsPath();
+
+  let commandsOk = false;
+  let workflowsOk = false;
+
+  try {
+    await fsAccess(commandsPath);
+    commandsOk = true;
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === 'ENOENT') {
+      console.warn('[Archon] App default commands not found:', commandsPath);
+    } else {
+      console.warn('[Archon] Cannot access app default commands:', {
+        path: commandsPath,
+        error: err.message,
+        code: err.code,
+      });
+    }
+  }
+
+  try {
+    await fsAccess(workflowsPath);
+    workflowsOk = true;
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === 'ENOENT') {
+      console.warn('[Archon] App default workflows not found:', workflowsPath);
+    } else {
+      console.warn('[Archon] Cannot access app default workflows:', {
+        path: workflowsPath,
+        error: err.message,
+        code: err.code,
+      });
+    }
+  }
+
+  // Report verification status
+  if (!commandsOk && !workflowsOk) {
+    console.warn(
+      '[Archon] App defaults not available - commands and workflows will only load from repos'
+    );
+    return;
+  }
+
+  if (commandsOk && workflowsOk) {
+    console.log('[Archon] App defaults verified:');
+    console.log(`  Commands: ${commandsPath}`);
+    console.log(`  Workflows: ${workflowsPath}`);
+  }
+  // Partial availability already logged warnings above for individual paths
 }

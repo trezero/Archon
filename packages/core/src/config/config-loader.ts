@@ -158,6 +158,8 @@ function getDefaults(): MergedConfig {
     },
     defaults: {
       copyDefaults: true,
+      loadDefaultCommands: true,
+      loadDefaultWorkflows: true,
     },
   };
 }
@@ -278,6 +280,9 @@ function mergeRepoConfig(merged: MergedConfig, repo: RepoConfig): MergedConfig {
     result.defaults = {
       ...result.defaults,
       copyDefaults: repo.defaults.copyDefaults ?? result.defaults.copyDefaults,
+      loadDefaultCommands: repo.defaults.loadDefaultCommands ?? result.defaults.loadDefaultCommands,
+      loadDefaultWorkflows:
+        repo.defaults.loadDefaultWorkflows ?? result.defaults.loadDefaultWorkflows,
     };
   }
 

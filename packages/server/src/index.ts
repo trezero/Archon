@@ -21,6 +21,7 @@ import {
   startCleanupScheduler,
   stopCleanupScheduler,
   logArchonPaths,
+  validateAppDefaultsPaths,
   loadConfig,
   logConfig,
   getPort,
@@ -95,6 +96,9 @@ async function main(): Promise<void> {
 
   // Log Archon paths configuration
   logArchonPaths();
+
+  // Validate app defaults paths (non-blocking, just logs warnings)
+  await validateAppDefaultsPaths();
 
   // Load and log configuration
   const config = await loadConfig();

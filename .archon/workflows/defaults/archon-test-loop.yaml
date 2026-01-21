@@ -1,4 +1,4 @@
-name: test-loop
+name: archon-test-loop
 description: |
   Use when: User explicitly says "test-loop", "run test-loop", or "execute test-loop workflow".
   IMPORTANT: This is an autonomous LOOP workflow that iterates until completion.

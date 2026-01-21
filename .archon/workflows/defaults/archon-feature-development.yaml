@@ -1,4 +1,4 @@
-name: feature-development
+name: archon-feature-development
 description: |
   Use when: Implementing a feature from an existing plan.
   Input: Path to a plan file (.archon/artifacts/*/plan.md) or GitHub issue containing a plan.
@@ -8,6 +8,6 @@ description: |
 model: sonnet
 
 steps:
-  - command: implement
+  - command: archon-implement
 
-  - command: create-pr
+  - command: archon-create-pr

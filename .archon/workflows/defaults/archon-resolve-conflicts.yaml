@@ -1,4 +1,4 @@
-name: resolve-conflicts
+name: archon-resolve-conflicts
 description: |
   Use when: PR has merge conflicts that need resolution.
   Triggers: "resolve conflicts", "fix merge conflicts", "rebase this PR", "resolve this",
@@ -13,4 +13,4 @@ description: |
 model: sonnet
 
 steps:
-  - command: resolve-merge-conflicts
+  - command: archon-resolve-merge-conflicts

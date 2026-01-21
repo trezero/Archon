@@ -10,6 +10,9 @@ import {
   getArchonConfigPath,
   getCommandFolderSearchPaths,
   expandTilde,
+  getAppArchonBasePath,
+  getDefaultCommandsPath,
+  getDefaultWorkflowsPath,
 } from './archon-paths';
 
 describe('archon-paths', () => {
@@ -182,6 +185,49 @@ describe('archon-paths', () => {
       delete process.env.ARCHON_HOME;
       delete process.env.ARCHON_DOCKER;
       expect(getArchonConfigPath()).toBe(join(homedir(), '.archon', 'config.yaml'));
+    });
+  });
+
+  describe('getAppArchonBasePath', () => {
+    test('returns repo root .archon path in local development', () => {
+      delete process.env.ARCHON_DOCKER;
+      delete process.env.WORKSPACE_PATH;
+      const path = getAppArchonBasePath();
+      // Should end with .archon and NOT contain packages/core
+      expect(path).toMatch(/\.archon$/);
+      expect(path).not.toContain('packages/core');
+    });
+
+    test('path exists and contains defaults directories', () => {
+      delete process.env.ARCHON_DOCKER;
+      delete process.env.WORKSPACE_PATH;
+      const path = getAppArchonBasePath();
+      // The path should contain 'remote-coding-agent' (the repo name)
+      expect(path).toContain('remote-coding-agent');
+    });
+  });
+
+  describe('getDefaultCommandsPath', () => {
+    test('returns commands/defaults under app archon base', () => {
+      delete process.env.ARCHON_DOCKER;
+      delete process.env.WORKSPACE_PATH;
+      const path = getDefaultCommandsPath();
+      expect(path).toContain('.archon');
+      expect(path).toContain('commands');
+      expect(path).toContain('defaults');
+      expect(path).not.toContain('packages/core');
+    });
+  });
+
+  describe('getDefaultWorkflowsPath', () => {
+    test('returns workflows/defaults under app archon base', () => {
+      delete process.env.ARCHON_DOCKER;
+      delete process.env.WORKSPACE_PATH;
+      const path = getDefaultWorkflowsPath();
+      expect(path).toContain('.archon');
+      expect(path).toContain('workflows');
+      expect(path).toContain('defaults');
+      expect(path).not.toContain('packages/core');
     });
   });
 });

@@ -1,20 +1,36 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test';
 import { mkdir, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { discoverWorkflows } from './loader';
 import { isParallelBlock } from './types';
+import * as configLoader from '../config/config-loader';
 
 describe('Workflow Loader', () => {
   let testDir: string;
+  let loadConfigSpy: Mock<typeof configLoader.loadConfig>;
 
   beforeEach(async () => {
     // Create unique temp directory for each test
     testDir = join(tmpdir(), `workflow-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(testDir, { recursive: true });
+
+    // Spy on loadConfig to disable app defaults loading by default
+    loadConfigSpy = spyOn(configLoader, 'loadConfig');
+    loadConfigSpy.mockResolvedValue({
+      botName: 'Archon',
+      assistant: 'claude',
+      streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+      paths: { workspaces: '/tmp', worktrees: '/tmp' },
+      concurrency: { maxConversations: 10 },
+      commands: { autoLoad: true },
+      // Key: disable app defaults loading by default
+      defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: false },
+    });
   });
 
   afterEach(async () => {
+    loadConfigSpy.mockRestore();
     // Clean up temp directory
     try {
       await rm(testDir, { recursive: true, force: true });
@@ -852,6 +868,119 @@ steps:
       if (isParallelBlock(parallelBlock)) {
         expect(parallelBlock.parallel).toHaveLength(1);
       }
+    });
+  });
+
+  describe('multi-source loading', () => {
+    it('should load real app defaults when enabled', async () => {
+      // Enable app defaults loading
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'claude',
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+      });
+
+      // Test dir has no .archon/workflows/
+      const workflows = await discoverWorkflows(testDir);
+
+      // Should load the real archon-* prefixed app defaults
+      expect(workflows.length).toBeGreaterThanOrEqual(1);
+      // Check for at least one of the known app defaults
+      const archonAssist = workflows.find(w => w.name === 'archon-assist');
+      expect(archonAssist).toBeDefined();
+    });
+
+    it('should override app defaults with repo workflows of same filename', async () => {
+      // Enable app defaults loading
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'claude',
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+      });
+
+      // Create repo workflow with same filename as an app default
+      const repoWorkflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(repoWorkflowDir, { recursive: true });
+      const repoWorkflowYaml = `name: my-custom-assist
+description: My custom assist (overrides archon-assist)
+steps:
+  - command: custom-command
+`;
+      // Use exact same filename as app default to override
+      await writeFile(join(repoWorkflowDir, 'archon-assist.yaml'), repoWorkflowYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      // Should have the repo version, not the app default
+      const assistWorkflow = workflows.find(
+        w => w.name === 'my-custom-assist' || w.name === 'archon-assist'
+      );
+      expect(assistWorkflow).toBeDefined();
+      // Repo version should win (has custom name)
+      expect(assistWorkflow?.name).toBe('my-custom-assist');
+      expect(assistWorkflow?.description).toBe('My custom assist (overrides archon-assist)');
+    });
+
+    it('should skip app defaults when loadDefaultWorkflows is false', async () => {
+      // Disable app defaults loading
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'claude',
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: {
+          copyDefaults: true,
+          loadDefaultCommands: true,
+          loadDefaultWorkflows: false,
+        },
+      });
+
+      const workflows = await discoverWorkflows(testDir);
+
+      // Should NOT find any archon-* workflows since app defaults are disabled
+      const archonWorkflow = workflows.find(w => w.name.startsWith('archon-'));
+      expect(archonWorkflow).toBeUndefined();
+    });
+
+    it('should combine app defaults with repo workflows', async () => {
+      // Enable app defaults loading
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'claude',
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+      });
+
+      // Create repo workflow with unique name (no collision)
+      const repoWorkflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(repoWorkflowDir, { recursive: true });
+      const repoWorkflowYaml = `name: my-custom-workflow
+description: My custom workflow
+steps:
+  - command: custom-command
+`;
+      await writeFile(join(repoWorkflowDir, 'my-custom.yaml'), repoWorkflowYaml);
+
+      const workflows = await discoverWorkflows(testDir);
+
+      // Should have both app defaults and repo workflows
+      const archonAssist = workflows.find(w => w.name === 'archon-assist');
+      const customWorkflow = workflows.find(w => w.name === 'my-custom-workflow');
+      expect(archonAssist).toBeDefined();
+      expect(customWorkflow).toBeDefined();
     });
   });
 });

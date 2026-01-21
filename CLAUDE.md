@@ -610,7 +610,7 @@ console.log('Processing...');
 
 1. **Codebase Commands** (per-repo):
    - Stored in `.archon/commands/` (plain text/markdown)
-   - Loaded via `/clone` (auto) or `/load-commands <folder>` (manual)
+   - Auto-detected via `/clone` or `/load-commands <folder>`
    - Invoked via `/command-invoke <name> [args]`
 
 2. **Global Templates** (database):
@@ -626,8 +626,9 @@ console.log('Processing...');
 
 **Defaults:**
 - Bundled in `.archon/commands/defaults/` and `.archon/workflows/defaults/`
-- Copied to target repos on `/clone` (if no existing `.archon/commands/`)
-- Opt-out: Set `defaults.copyDefaults: false` in target's `.archon/config.yaml`
+- Loaded at runtime (merged with repo-specific commands/workflows)
+- Repo commands/workflows override app defaults by name
+- Opt-out: Set `defaults.loadDefaultCommands: false` or `defaults.loadDefaultWorkflows: false` in `.archon/config.yaml`
 
 ### Error Handling
 

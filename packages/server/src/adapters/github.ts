@@ -20,7 +20,6 @@ import {
   isWorktreePath,
   getArchonWorkspacesPath,
   getCommandFolderSearchPaths,
-  copyDefaultsToRepo,
   ConversationLockManager,
 } from '@archon/core';
 import * as db from '@archon/core/db/conversations';
@@ -793,28 +792,8 @@ ${userComment}`;
     // 8. Ensure repo ready (clone if needed, sync if new conversation)
     await this.ensureRepoReady(owner, repo, defaultBranch, repoPath, isNewCodebase);
 
-    // 9. Copy defaults and auto-load commands if new codebase
+    // 9. Auto-load commands if new codebase (defaults loaded at runtime, not copied)
     if (isNewCodebase) {
-      // Copy default commands/workflows if target doesn't have them (non-fatal)
-      try {
-        const copyResult = await copyDefaultsToRepo(repoPath);
-        if (copyResult.commandsCopied > 0 || copyResult.workflowsCopied > 0) {
-          console.log('[GitHub] Copied defaults', copyResult);
-        }
-        if (copyResult.commandsFailed > 0 || copyResult.workflowsFailed > 0) {
-          console.warn('[GitHub] Some defaults failed to copy', {
-            commandsFailed: copyResult.commandsFailed,
-            workflowsFailed: copyResult.workflowsFailed,
-          });
-        }
-      } catch (copyError) {
-        const err = copyError as Error;
-        console.error('[GitHub] Failed to copy defaults (continuing with setup):', {
-          repoPath,
-          error: err.message,
-        });
-      }
-
       await this.autoDetectAndLoadCommands(repoPath, codebase.id);
     }
 

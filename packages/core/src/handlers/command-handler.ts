@@ -21,7 +21,6 @@ import {
   MAX_WORKTREES_PER_CODEBASE,
 } from '../services/cleanup-service';
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
-import { copyDefaultsToRepo } from '../utils/defaults-copy';
 import { discoverWorkflows } from '../workflows';
 import { isSingleStep } from '../workflows/types';
 import * as workflowDb from '../db/workflows';
@@ -689,25 +688,7 @@ Setup:
           );
         }
 
-        // Copy default commands/workflows if target doesn't have them (non-fatal)
-        let copyResult: Awaited<ReturnType<typeof copyDefaultsToRepo>> = {
-          commandsCopied: 0,
-          commandsFailed: 0,
-          workflowsCopied: 0,
-          workflowsFailed: 0,
-          skipped: true,
-        };
-        try {
-          copyResult = await copyDefaultsToRepo(targetPath);
-          if (copyResult.commandsCopied > 0 || copyResult.workflowsCopied > 0) {
-            console.log('[Clone] Copied defaults', copyResult);
-          }
-        } catch (copyError) {
-          const err = copyError as Error;
-          console.error('[Clone] Failed to copy defaults (continuing):', err.message);
-        }
-
-        // Auto-load commands if found
+        // Auto-load commands if found (defaults loaded at runtime, not copied)
         let commandsLoaded = 0;
         for (const folder of getCommandFolderSearchPaths()) {
           try {
@@ -733,21 +714,10 @@ Setup:
         }
 
         let responseMessage = `Repository cloned successfully!\n\nRepository: ${repoName}`;
-        if (copyResult.commandsCopied > 0) {
-          responseMessage += `\n✓ Copied ${String(copyResult.commandsCopied)} default commands`;
-        }
-        if (copyResult.commandsFailed > 0) {
-          responseMessage += `\n⚠️ ${String(copyResult.commandsFailed)} commands failed to copy`;
-        }
-        if (copyResult.workflowsCopied > 0) {
-          responseMessage += `\n✓ Copied ${String(copyResult.workflowsCopied)} default workflows`;
-        }
-        if (copyResult.workflowsFailed > 0) {
-          responseMessage += `\n⚠️ ${String(copyResult.workflowsFailed)} workflows failed to copy`;
-        }
         if (commandsLoaded > 0) {
-          responseMessage += `\n✓ Loaded ${String(commandsLoaded)} commands`;
+          responseMessage += `\n✓ Loaded ${String(commandsLoaded)} repo commands`;
         }
+        responseMessage += '\n✓ App defaults available at runtime';
         responseMessage +=
           '\n\nSession reset - starting fresh on next message.\n\nYou can now start asking questions about the code.';
 

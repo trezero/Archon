@@ -1,4 +1,4 @@
-name: assist
+name: archon-assist
 description: |
   Use when: No other workflow matches the request.
   Handles: Questions, debugging, exploration, one-off tasks, explanations, CI failures, general help.
@@ -8,4 +8,4 @@ description: |
 model: sonnet
 
 steps:
-  - command: assist
+  - command: archon-assist
