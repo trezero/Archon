@@ -19,7 +19,11 @@ Archon is a remote agentic coding platform that runs AI workflows in isolated gi
 bun run cli workflow run <workflow-name> --branch <branch-name> "<message>"
 ```
 
-**CRITICAL**: Always use the `--branch` flag for worktree isolation unless the user explicitly requests otherwise. This creates an isolated environment so Archon can work without affecting the main branch.
+**CRITICAL RULES**:
+
+1. **Always run in background** - Archon workflows are long-running. Always invoke the Bash tool with `run_in_background: true`. This allows you to continue working while Archon runs. Use `/tasks` or the TaskOutput tool to check on progress.
+
+2. **Always use worktree isolation** - Use the `--branch` flag unless the user explicitly requests otherwise. This creates an isolated environment so Archon can work without affecting the main branch.
 
 ## Isolation Modes
 
