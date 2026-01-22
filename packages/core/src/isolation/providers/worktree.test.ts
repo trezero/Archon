@@ -25,6 +25,7 @@ describe('WorktreeProvider', () => {
   let listWorktreesSpy: Mock<typeof git.listWorktrees>;
   let findWorktreeByBranchSpy: Mock<typeof git.findWorktreeByBranch>;
   let getCanonicalRepoPathSpy: Mock<typeof git.getCanonicalRepoPath>;
+  let loadRepoConfigSpy: Mock<typeof configLoader.loadRepoConfig>;
 
   beforeEach(() => {
     provider = new WorktreeProvider();
@@ -36,6 +37,7 @@ describe('WorktreeProvider', () => {
     getCanonicalRepoPathSpy = spyOn(git, 'getCanonicalRepoPath');
     getDefaultBranchSpy = spyOn(git, 'getDefaultBranch');
     syncWorkspaceSpy = spyOn(git, 'syncWorkspace');
+    loadRepoConfigSpy = spyOn(configLoader, 'loadRepoConfig');
 
     // Default mocks
     execSpy.mockResolvedValue({ stdout: '', stderr: '' });
@@ -48,7 +50,8 @@ describe('WorktreeProvider', () => {
 
     // Default mocks for workspace sync
     getDefaultBranchSpy.mockResolvedValue('main');
-    syncWorkspaceSpy.mockResolvedValue(true);
+    syncWorkspaceSpy.mockResolvedValue({ branch: 'main', synced: true });
+    loadRepoConfigSpy.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -60,6 +63,7 @@ describe('WorktreeProvider', () => {
     getCanonicalRepoPathSpy.mockRestore();
     getDefaultBranchSpy.mockRestore();
     syncWorkspaceSpy.mockRestore();
+    loadRepoConfigSpy.mockRestore();
     mockAccess.mockClear();
   });
 
@@ -960,7 +964,6 @@ describe('WorktreeProvider', () => {
   });
 
   describe('file copying', () => {
-    let loadRepoConfigSpy: Mock<typeof configLoader.loadRepoConfig>;
     let copyWorktreeFilesSpy: Mock<typeof worktreeCopy.copyWorktreeFiles>;
 
     const baseRequest: IsolationRequest = {
@@ -971,7 +974,6 @@ describe('WorktreeProvider', () => {
     };
 
     beforeEach(() => {
-      loadRepoConfigSpy = spyOn(configLoader, 'loadRepoConfig');
       copyWorktreeFilesSpy = spyOn(worktreeCopy, 'copyWorktreeFiles');
 
       // Default: no config, no copies
@@ -980,7 +982,6 @@ describe('WorktreeProvider', () => {
     });
 
     afterEach(() => {
-      loadRepoConfigSpy.mockRestore();
       copyWorktreeFilesSpy.mockRestore();
     });
 
@@ -1425,17 +1426,33 @@ describe('WorktreeProvider', () => {
       // Verify sync was NOT called (adoption skips createWorktree entirely)
       expect(syncWorkspaceSpy).not.toHaveBeenCalled();
       expect(getDefaultBranchSpy).not.toHaveBeenCalled();
+      expect(loadRepoConfigSpy).not.toHaveBeenCalled();
     });
 
-    test('syncs workspace before creating worktree', async () => {
+    test('syncs workspace before creating worktree using repo default', async () => {
       // Ensure worktree doesn't exist
       worktreeExistsSpy.mockResolvedValue(false);
+      syncWorkspaceSpy.mockImplementation(async (repoPath, branchOverride) => {
+        const resolvedBranch = branchOverride ?? (await git.getDefaultBranch(repoPath));
+        return { branch: resolvedBranch, synced: true };
+      });
 
       await provider.create(baseRequest);
 
-      // Verify sync functions were called with correct args
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', undefined);
       expect(getDefaultBranchSpy).toHaveBeenCalledWith('/workspace/owner/repo');
-      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', 'main');
+    });
+
+    test('passes configured base branch to workspace sync when provided', async () => {
+      worktreeExistsSpy.mockResolvedValue(false);
+      loadRepoConfigSpy.mockResolvedValue({
+        worktree: { baseBranch: 'develop' },
+      });
+
+      await provider.create(baseRequest);
+
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', 'develop');
+      expect(getDefaultBranchSpy).not.toHaveBeenCalled();
     });
 
     test('continues worktree creation when sync fails (non-fatal)', async () => {
@@ -1454,7 +1471,7 @@ describe('WorktreeProvider', () => {
 
     test('continues worktree creation when sync is skipped due to uncommitted changes', async () => {
       // Mock sync to return false (skipped due to uncommitted changes)
-      syncWorkspaceSpy.mockResolvedValue(false);
+      syncWorkspaceSpy.mockResolvedValue({ branch: 'main', synced: false });
 
       // Ensure worktree doesn't exist
       worktreeExistsSpy.mockResolvedValue(false);
@@ -1466,14 +1483,40 @@ describe('WorktreeProvider', () => {
       expect(env.status).toBe('active');
     });
 
-    test('continues worktree creation when getDefaultBranch fails', async () => {
-      // Mock getDefaultBranch to fail
-      getDefaultBranchSpy.mockRejectedValue(new Error('Git error'));
-
-      // Ensure worktree doesn't exist
+    test('continues worktree creation when repo config fails to load', async () => {
+      loadRepoConfigSpy.mockRejectedValue(new Error('Config error'));
       worktreeExistsSpy.mockResolvedValue(false);
 
-      // Should NOT throw - sync failure is non-fatal
+      const env = await provider.create(baseRequest);
+
+      expect(env.workingPath).toContain('issue-42');
+      expect(env.status).toBe('active');
+    });
+
+    test('throws error when configured base branch does not exist', async () => {
+      loadRepoConfigSpy.mockResolvedValue({
+        worktree: { baseBranch: 'does-not-exist' },
+      });
+      worktreeExistsSpy.mockResolvedValue(false);
+      syncWorkspaceSpy.mockRejectedValue(
+        new Error(
+          "Configured base branch 'does-not-exist' not found on remote. " +
+            'Either create the branch, update worktree.baseBranch in .archon/config.yaml, ' +
+            'or remove the setting to use the auto-detected default branch.'
+        )
+      );
+
+      // Configured branch errors should be fatal, not swallowed
+      await expect(provider.create(baseRequest)).rejects.toThrow(
+        "Configured base branch 'does-not-exist' not found"
+      );
+    });
+
+    test('continues worktree creation when network error occurs (non-fatal)', async () => {
+      worktreeExistsSpy.mockResolvedValue(false);
+      syncWorkspaceSpy.mockRejectedValue(new Error('Network timeout'));
+
+      // Network errors are non-fatal
       const env = await provider.create(baseRequest);
 
       expect(env.workingPath).toContain('issue-42');

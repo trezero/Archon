@@ -76,7 +76,7 @@ commands:
 
 # Worktree settings
 worktree:
-  baseBranch: main
+  baseBranch: main  # Optional: Base branch for workspace sync (default: auto-detect)
   copyFiles:  # Optional: Additional files to copy to worktrees
     - .env.example -> .env  # Rename during copy
     - .vscode               # Copy entire directory
@@ -91,6 +91,10 @@ defaults:
 **Default behavior:** The `.archon/` directory is always copied to worktrees automatically (contains artifacts, plans, workflows). Use `copyFiles` only for additional files like `.env` or `.vscode`.
 
 **Defaults behavior:** The app's bundled default commands and workflows are loaded at runtime and merged with repo-specific ones. Repo commands/workflows override app defaults by name. Set `defaults.loadDefaultCommands: false` or `defaults.loadDefaultWorkflows: false` to disable runtime loading.
+
+**Base branch behavior:** Before creating a worktree, the canonical workspace is synced to the latest code:
+- If `worktree.baseBranch` is set: Uses the configured branch. **Fails with an error** if the branch doesn't exist (no silent fallback).
+- If `worktree.baseBranch` is omitted: Auto-detects the default branch via `git symbolic-ref` (falls back to `main` or `master`).
 
 ## Environment Variables
 

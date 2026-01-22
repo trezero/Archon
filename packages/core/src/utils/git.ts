@@ -379,80 +379,118 @@ export async function hasUncommittedChanges(workingPath: string): Promise<boolea
   }
 }
 
+export interface WorkspaceSyncResult {
+  branch: string;
+  synced: boolean;
+}
+
 /**
  * Sync workspace with remote origin
- * Fetches latest changes and resets default branch to match origin
+ * Fetches latest changes and resets the base branch to match origin.
  *
- * Important: Only syncs the default branch, not arbitrary branches.
+ * Branch resolution:
+ * - If baseBranch is provided: Uses that branch (from config). Fails with actionable
+ *   error if the branch doesn't exist - no silent fallback.
+ * - If baseBranch is omitted: Auto-detects the default branch via git.
+ *
  * Worktrees are created from this synced state.
  *
  * Warning: This uses `git reset --hard` which discards any local commits
- * on the default branch that haven't been pushed to origin.
+ * on the base branch that haven't been pushed to origin.
  *
  * Safety: Refuses to sync if there are uncommitted changes to prevent data loss.
  *
  * @param workspacePath - Path to the workspace (canonical repo, not worktree)
- * @param defaultBranch - The default branch name (e.g., 'main', 'master')
- * @returns true if sync was performed, false if skipped due to uncommitted changes
+ * @param baseBranch - Optional base branch name (e.g., 'main', 'develop'). If omitted, auto-detects default branch
+ * @returns Branch used plus whether sync was performed
+ * @throws Error with actionable message if configured branch doesn't exist
  */
 export async function syncWorkspace(
   workspacePath: string,
-  defaultBranch: string
-): Promise<boolean> {
+  baseBranch?: string
+): Promise<WorkspaceSyncResult> {
+  const branchToSync = baseBranch ?? (await getDefaultBranch(workspacePath));
+
   // Safety check: refuse to sync if there are uncommitted changes
   const hasChanges = await hasUncommittedChanges(workspacePath);
   if (hasChanges) {
     console.warn('[Git] Workspace has uncommitted changes, skipping sync to prevent data loss', {
       workspacePath,
-      defaultBranch,
+      branch: branchToSync,
     });
-    return false;
+    return { branch: branchToSync, synced: false };
   }
 
-  // Check if we're on the default branch
+  // Fetch from origin first (handles remote-only branches)
+  try {
+    await execFileAsync('git', ['-C', workspacePath, 'fetch', 'origin', branchToSync], {
+      timeout: 60000,
+    });
+  } catch (error) {
+    const err = error as Error;
+    const errorMessage = err.message.toLowerCase();
+
+    // If configured branch doesn't exist on remote, provide actionable error
+    if (
+      baseBranch &&
+      (errorMessage.includes("couldn't find remote ref") || errorMessage.includes('not found'))
+    ) {
+      throw new Error(
+        `Configured base branch '${baseBranch}' not found on remote. ` +
+          'Either create the branch, update worktree.baseBranch in .archon/config.yaml, ' +
+          'or remove the setting to use the auto-detected default branch.'
+      );
+    }
+    throw new Error(`Sync fetch from origin/${branchToSync} failed: ${err.message}`);
+  }
+
+  // Check if we're on the target branch
   const { stdout: currentBranch } = await execFileAsync(
     'git',
     ['-C', workspacePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
     { timeout: 10000 }
   );
 
-  if (currentBranch.trim() !== defaultBranch) {
-    // Checkout default branch first
+  if (currentBranch.trim() !== branchToSync) {
+    // Checkout target branch (may be local or need to track remote)
     try {
-      await execFileAsync('git', ['-C', workspacePath, 'checkout', defaultBranch], {
+      await execFileAsync('git', ['-C', workspacePath, 'checkout', branchToSync], {
         timeout: 30000,
       });
-    } catch (error) {
-      const err = error as Error;
-      throw new Error(`Sync checkout to ${defaultBranch} failed: ${err.message}`);
+    } catch {
+      // Branch might only exist on remote - create local tracking branch
+      try {
+        await execFileAsync(
+          'git',
+          ['-C', workspacePath, 'checkout', '-B', branchToSync, `origin/${branchToSync}`],
+          { timeout: 30000 }
+        );
+      } catch (trackError) {
+        const err = trackError as Error;
+        // If configured branch, provide actionable error
+        if (baseBranch) {
+          throw new Error(
+            `Configured base branch '${baseBranch}' could not be checked out. ` +
+              'Ensure the branch exists locally or on remote, update worktree.baseBranch in .archon/config.yaml, ' +
+              'or remove the setting to use the auto-detected default branch.'
+          );
+        }
+        throw new Error(`Sync checkout to ${branchToSync} failed: ${err.message}`);
+      }
     }
-  }
-
-  // Fetch from origin
-  try {
-    await execFileAsync('git', ['-C', workspacePath, 'fetch', 'origin', defaultBranch], {
-      timeout: 60000,
-    });
-  } catch (error) {
-    const err = error as Error;
-    throw new Error(`Sync fetch from origin/${defaultBranch} failed: ${err.message}`);
   }
 
   // Reset to match origin
   try {
-    await execFileAsync(
-      'git',
-      ['-C', workspacePath, 'reset', '--hard', `origin/${defaultBranch}`],
-      {
-        timeout: 30000,
-      }
-    );
+    await execFileAsync('git', ['-C', workspacePath, 'reset', '--hard', `origin/${branchToSync}`], {
+      timeout: 30000,
+    });
   } catch (error) {
     const err = error as Error;
-    throw new Error(`Sync reset to origin/${defaultBranch} failed: ${err.message}`);
+    throw new Error(`Sync reset to origin/${branchToSync} failed: ${err.message}`);
   }
 
-  return true;
+  return { branch: branchToSync, synced: true };
 }
 
 /**

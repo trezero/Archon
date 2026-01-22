@@ -10,11 +10,11 @@ import { access, rm } from 'fs/promises';
 import { join } from 'path';
 
 import { loadRepoConfig } from '../../config/config-loader';
+import type { RepoConfig } from '../../config/config-types';
 import {
   execFileAsync,
   findWorktreeByBranch,
   getCanonicalRepoPath,
-  getDefaultBranch,
   getWorktreeBase,
   listWorktrees,
   mkdirAsync,
@@ -426,7 +426,18 @@ export class WorktreeProvider implements IIsolationProvider {
   ): Promise<void> {
     const repoPath = request.canonicalRepoPath;
 
-    await this.syncWorkspaceBeforeCreate(repoPath);
+    let repoConfig: RepoConfig | null = null;
+    try {
+      repoConfig = await loadRepoConfig(repoPath);
+    } catch (error) {
+      const err = error as Error;
+      console.error('[WorktreeProvider] Failed to load repo config', {
+        repoPath,
+        error: err.message,
+      });
+    }
+
+    await this.syncWorkspaceBeforeCreate(repoPath, repoConfig?.worktree?.baseBranch);
 
     // Extract owner and repo name from canonicalRepoPath to avoid collisions
     const pathParts = repoPath.split('/').filter(p => p.length > 0);
@@ -448,27 +459,39 @@ export class WorktreeProvider implements IIsolationProvider {
     }
 
     // Copy git-ignored files based on repo config
-    await this.copyConfiguredFiles(repoPath, worktreePath);
+    await this.copyConfiguredFiles(repoPath, worktreePath, repoConfig);
   }
 
   /**
    * Sync workspace with remote before creating a new worktree
-   * Ensures new work starts from the latest code on the default branch
+   * Ensures new work starts from the latest code on the base branch.
    *
-   * Non-fatal: If sync fails (e.g., offline mode, network issues) or is skipped
-   * (uncommitted changes in workspace), log and continue. Worktree will be created
-   * from whatever state the workspace is currently in.
+   * Branch resolution:
+   * - If configuredBaseBranch is provided: Uses that branch. Fails with actionable
+   *   error if the branch doesn't exist - no silent fallback to default.
+   * - If configuredBaseBranch is omitted: Auto-detects the default branch via git.
+   *
+   * Non-fatal cases (log and continue):
+   * - Network errors, timeouts (offline mode)
+   * - Uncommitted changes in workspace (skip sync to prevent data loss)
+   *
+   * Fatal cases (throw to user):
+   * - Configured base branch doesn't exist (user configuration error)
+   * - Permission denied
+   * - Not a git repository
    */
-  private async syncWorkspaceBeforeCreate(repoPath: string): Promise<void> {
+  private async syncWorkspaceBeforeCreate(
+    repoPath: string,
+    configuredBaseBranch?: string
+  ): Promise<void> {
     try {
-      const defaultBranch = await getDefaultBranch(repoPath);
       console.log('[WorktreeProvider] Syncing workspace before worktree creation', {
         repoPath,
-        defaultBranch,
+        branch: configuredBaseBranch ?? 'auto-detect',
       });
-      const synced = await syncWorkspace(repoPath, defaultBranch);
+      const { branch, synced } = await syncWorkspace(repoPath, configuredBaseBranch);
       if (synced) {
-        console.log(`[WorktreeProvider] Workspace synced to latest ${defaultBranch}`);
+        console.log(`[WorktreeProvider] Workspace synced to latest ${branch}`);
       } else {
         console.log(
           '[WorktreeProvider] Workspace sync skipped (uncommitted changes), proceeding with existing code'
@@ -489,6 +512,9 @@ export class WorktreeProvider implements IIsolationProvider {
           `${repoPath} is not a valid git repository. ` +
             'Ensure the workspace was cloned correctly.'
         );
+      } else if (errorMessage.includes('configured base branch')) {
+        // Configured branch errors are fatal - user needs to fix their config
+        throw err;
       } else {
         // Network errors, timeouts, etc. - truly non-fatal
         console.warn(
@@ -504,24 +530,29 @@ export class WorktreeProvider implements IIsolationProvider {
    */
   private async copyConfiguredFiles(
     canonicalRepoPath: string,
-    worktreePath: string
+    worktreePath: string,
+    repoConfig?: RepoConfig | null
   ): Promise<void> {
     // Default files to always copy
     const defaultCopyFiles = ['.archon'];
 
     // Load user config - log errors but don't fail worktree creation
     let userCopyFiles: string[] = [];
-    try {
-      const repoConfig = await loadRepoConfig(canonicalRepoPath);
+    if (repoConfig) {
       userCopyFiles = repoConfig.worktree?.copyFiles ?? [];
-    } catch (error) {
-      const err = error as Error;
-      // Config errors are more serious - log as error, not warning
-      console.error('[WorktreeProvider] Failed to load repo config', {
-        canonicalRepoPath,
-        error: err.message,
-      });
-      // Don't return - still copy default files even if config fails
+    } else {
+      try {
+        const loadedConfig = await loadRepoConfig(canonicalRepoPath);
+        userCopyFiles = loadedConfig.worktree?.copyFiles ?? [];
+      } catch (error) {
+        const err = error as Error;
+        // Config errors are more serious - log as error, not warning
+        console.error('[WorktreeProvider] Failed to load repo config', {
+          canonicalRepoPath,
+          error: err.message,
+        });
+        // Don't return - still copy default files even if config fails
+      }
     }
 
     // Merge defaults with user config (Set deduplicates)

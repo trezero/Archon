@@ -93,10 +93,12 @@ IsolationRequest
        ▼
 ┌──────────────────────────────────────────────────┐
 │ SYNC WORKSPACE (before creating worktree)        │
-│   git fetch origin <default-branch>              │
-│   git reset --hard origin/<default-branch>       │
+│   Branch: config worktree.baseBranch or auto     │
+│   git fetch origin <branch>                      │
+│   git reset --hard origin/<branch>               │
 │   (skipped if uncommitted changes)               │
-│   (non-fatal - continues on failure)             │
+│   (fatal if configured branch not found)         │
+│   (non-fatal for network errors)                 │
 └──────────────┬───────────────────────────────────┘
        │
        ▼
