@@ -14,49 +14,49 @@ Control AI coding assistants (Claude Code, Codex) remotely from Telegram, GitHub
 - **Generic Command System**: User-defined commands versioned with Git
 - **Docker Ready**: Simple deployment with Docker Compose
 
-## CLI Installation
+## CLI Usage
 
 Archon CLI lets you run AI workflows directly from your terminal, without needing a server or messaging platform.
 
-### macOS / Linux (Recommended)
+### Setup
+
+**Step 1: Clone and install**
 
 ```bash
-# Install with one command
-curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/scripts/install.sh | bash
-
-# Verify installation
-archon version
+git clone https://github.com/dynamous-community/remote-coding-agent
+cd remote-coding-agent
+bun install
 ```
 
-Or download directly from [GitHub Releases](https://github.com/dynamous-community/remote-coding-agent/releases/latest).
-
-### macOS with Homebrew
+**Step 2: Make CLI globally available (optional but recommended)**
 
 ```bash
-brew install dynamous-community/remote-coding-agent/archon
+cd packages/cli
+bun link
 ```
 
-### Windows (WSL2 Required)
+This creates an `archon` command available from anywhere on your system.
 
-Windows requires WSL2 for full compatibility. See [Windows Setup](#windows-wsl2-setup) for details.
+**Step 3: Authenticate with Claude**
 
 ```bash
-# Inside WSL2 (Ubuntu)
-curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/scripts/install.sh | bash
+claude /login
 ```
 
-### CLI Quick Start
+The CLI uses your existing Claude authentication.
+
+**Step 4: Run workflows**
 
 ```bash
-# List available workflows
-archon workflow list
+# If you ran bun link (recommended)
+archon workflow list --cwd /path/to/your/repo
+archon workflow run assist --cwd /path/to/your/repo "What does this codebase do?"
 
-# Run a workflow
-archon workflow run assist "What does this codebase do?"
-
-# Run in a specific directory
-archon workflow run assist --cwd /path/to/repo "Explain the architecture"
+# Without bun link (from the repo directory)
+bun run cli workflow list --cwd /path/to/your/repo
 ```
+
+**Detailed documentation:** [CLI User Guide](docs/cli-user-guide.md)
 
 ---
 
@@ -1403,12 +1403,20 @@ WSL2 provides a full Linux environment that runs seamlessly on Windows.
    source ~/.bashrc
    ```
 
-4. **Install Archon CLI**:
+4. **Clone and install Archon**:
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/scripts/install.sh | bash
+   git clone https://github.com/dynamous-community/remote-coding-agent
+   cd remote-coding-agent
+   bun install
    ```
 
-5. **Verify installation**:
+5. **Make CLI globally available**:
+   ```bash
+   cd packages/cli
+   bun link
+   ```
+
+6. **Verify installation**:
    ```bash
    archon version
    ```
@@ -1417,8 +1425,7 @@ WSL2 provides a full Linux environment that runs seamlessly on Windows.
 
 WSL2 can access your Windows files at `/mnt/c/` (for C: drive):
 ```bash
-cd /mnt/c/Users/YourName/Projects/my-repo
-archon workflow run assist "What does this code do?"
+archon workflow run assist --cwd /mnt/c/Users/YourName/Projects/my-repo "What does this code do?"
 ```
 
 For best performance, keep projects inside the WSL2 file system (`~/projects/`) rather than `/mnt/c/`.
