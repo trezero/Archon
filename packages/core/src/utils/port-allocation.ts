@@ -10,7 +10,7 @@ import { isWorktreePath } from './git';
  * Exported for testing.
  *
  * @param path - The worktree path to hash
- * @returns Offset in range 100-999 (ports 3100-3999 when added to base 3000)
+ * @returns Offset in range 100-999 (ports 3190-4089 when added to base 3090)
  */
 export function calculatePortOffset(path: string): number {
   const hash = createHash('md5').update(path).digest();

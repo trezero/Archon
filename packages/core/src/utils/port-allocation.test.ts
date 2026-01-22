@@ -64,12 +64,13 @@ describe('getPort', () => {
 
   it('should return a valid port when no PORT env is set', async () => {
     delete process.env.PORT;
-    // Note: If running in a worktree, port will be auto-allocated (3100-3999)
-    // If running in main repo, port will be 3000
+    // Note: If running in a worktree, port will be auto-allocated (base 3090 + offset 100-999)
+    // If running in main repo, port will be 3090
     const port = await getPort();
-    // Port should be either 3000 (main repo) or 3100-3999 (worktree)
-    expect(port).toBeGreaterThanOrEqual(3000);
-    expect(port).toBeLessThanOrEqual(3999);
+    const basePort = 3090;
+    const maxPort = basePort + 999;
+    expect(port).toBeGreaterThanOrEqual(basePort);
+    expect(port).toBeLessThanOrEqual(maxPort);
   });
 });
 
