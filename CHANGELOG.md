@@ -13,6 +13,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [0.2.2] - 2026-01-22
+
+Documentation improvements and bug fixes.
+
+### Added
+
+- **CLI documentation** - User guide and developer guide with architecture diagrams (#326)
+- **Private repo installation guide** using `gh` CLI for authenticated cloning
+- **Manual release process** documentation for when GitHub Actions unavailable
+
+### Changed
+
+- **Repository ownership** migrated from `raswonders` to `dynamous-community`
+
+### Fixed
+
+- Dockerfile monorepo workspace structure for proper package resolution
+
+## [0.2.1] - 2026-01-21
+
+Server migration to Hono and CLI binary distribution infrastructure.
+
+### Added
+
+- **CLI binary distribution** - Standalone binaries for macOS/Linux with curl install and Homebrew formula (#325)
+- **Bundled defaults** - Commands and workflows embedded at compile time for binary builds (#325)
+- **Runtime default loading** - Load default commands/workflows at runtime instead of copying on clone (#324)
+- **Default opt-out** - Config options `loadDefaultCommands` and `loadDefaultWorkflows` (#324)
+- **Version command enhancements** - Shows platform, build type (binary/source), and database type (#325)
+
+### Changed
+
+- **Express to Hono migration** - Replaced Express with Hono for improved performance and Bun integration (#318)
+- **Default port** changed from 3000 to 3090
+- **ESLint zero-warnings policy** enforced in CI (#316)
+- **CLAUDE.md consolidation** - Removed duplications and streamlined documentation (#317)
+
 ## [0.2.0] - 2026-01-21
 
 Monorepo restructure introducing the CLI package for local workflow execution.
