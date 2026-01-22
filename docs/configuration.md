@@ -164,3 +164,21 @@ commands:
 ```bash
 docker run -v /my/data:/.archon ghcr.io/dynamous-community/remote-coding-agent
 ```
+
+## Troubleshooting
+
+### Config Parse Errors
+
+If your config file has invalid YAML syntax, you'll see error messages like:
+
+```
+[Config] Failed to parse global config at ~/.archon/config.yaml: <error details>
+[Config] Using default configuration. Please fix the YAML syntax in your config file.
+```
+
+Common YAML syntax issues:
+- Incorrect indentation (use spaces, not tabs)
+- Missing colons after keys
+- Unquoted values with special characters
+
+The application will continue running with default settings until the config file is fixed.

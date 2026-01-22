@@ -96,44 +96,127 @@ concurrency:
 
       expect(mockReadConfigFile).toHaveBeenCalledTimes(2);
     });
+
+    test('logs error for invalid YAML syntax', async () => {
+      const errorSpy = mock(() => {});
+      const originalError = console.error;
+      console.error = errorSpy;
+
+      try {
+        // Simulate YAML parse error (SyntaxError has no .code property)
+        const syntaxError = new SyntaxError('YAML Parse error: Multiline implicit key');
+        mockReadConfigFile.mockRejectedValue(syntaxError);
+
+        const config = await loadGlobalConfig();
+
+        // Should fall back to empty config
+        expect(config).toEqual({});
+
+        // Should log both error lines
+        expect(errorSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+        const firstLine = errorSpy.mock.calls[0][0] as string;
+        const secondLine = errorSpy.mock.calls[1][0] as string;
+        expect(firstLine).toContain('[Config] Invalid YAML in');
+        expect(secondLine).toContain('Please fix the YAML syntax');
+      } finally {
+        console.error = originalError;
+      }
+    });
+
+    test('logs error for permission denied', async () => {
+      const errorSpy = mock(() => {});
+      const originalError = console.error;
+      console.error = errorSpy;
+
+      try {
+        const permError = new Error('Permission denied') as NodeJS.ErrnoException;
+        permError.code = 'EACCES';
+        mockReadConfigFile.mockRejectedValue(permError);
+
+        const config = await loadGlobalConfig();
+
+        // Should fall back to empty config
+        expect(config).toEqual({});
+
+        // Should log both error lines with permission message
+        expect(errorSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+        const firstLine = errorSpy.mock.calls[0][0] as string;
+        const secondLine = errorSpy.mock.calls[1][0] as string;
+        expect(firstLine).toContain('[Config] Permission denied');
+        expect(secondLine).toContain('Check file permissions');
+      } finally {
+        console.error = originalError;
+      }
+    });
   });
 
   describe('loadRepoConfig', () => {
-    // Helper to check path in cross-platform way (handles both / and \ separators)
-    const pathMatches = (path: string, pattern: string): boolean => {
-      const normalizedPath = path.replace(/\\/g, '/');
-      return normalizedPath.includes(pattern);
-    };
-
     test('loads from .archon/config.yaml', async () => {
-      mockReadConfigFile.mockImplementation(async (path: string) => {
-        if (pathMatches(path, '.archon/config.yaml')) {
-          return 'assistant: codex';
-        }
-        throw new Error('Not found');
-      });
+      mockReadConfigFile.mockResolvedValue('assistant: codex');
 
       const config = await loadRepoConfig('/test/repo');
       expect(config.assistant).toBe('codex');
     });
 
-    test('falls back to .claude/config.yaml', async () => {
-      mockReadConfigFile.mockImplementation(async (path: string) => {
-        if (pathMatches(path, '.claude/config.yaml')) {
-          return 'assistant: claude';
-        }
-        throw new Error('Not found');
-      });
-
-      const config = await loadRepoConfig('/test/repo');
-      expect(config.assistant).toBe('claude');
-    });
-
     test('returns empty object when no config found', async () => {
-      mockReadConfigFile.mockRejectedValue(new Error('Not found'));
+      const error = new Error('ENOENT') as NodeJS.ErrnoException;
+      error.code = 'ENOENT';
+      mockReadConfigFile.mockRejectedValue(error);
 
       const config = await loadRepoConfig('/test/repo');
       expect(config).toEqual({});
+    });
+
+    test('logs error for invalid YAML syntax', async () => {
+      const errorSpy = mock(() => {});
+      const originalError = console.error;
+      console.error = errorSpy;
+
+      try {
+        // Simulate YAML parse error (SyntaxError has no .code property)
+        const syntaxError = new SyntaxError('YAML Parse error: Multiline implicit key');
+        mockReadConfigFile.mockRejectedValue(syntaxError);
+
+        const config = await loadRepoConfig('/test/repo');
+
+        // Should fall back to empty config
+        expect(config).toEqual({});
+
+        // Should log both error lines
+        expect(errorSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+        const firstLine = errorSpy.mock.calls[0][0] as string;
+        const secondLine = errorSpy.mock.calls[1][0] as string;
+        expect(firstLine).toContain('[Config] Invalid YAML in');
+        expect(secondLine).toContain('Please fix the YAML syntax');
+      } finally {
+        console.error = originalError;
+      }
+    });
+
+    test('logs error for permission denied', async () => {
+      const errorSpy = mock(() => {});
+      const originalError = console.error;
+      console.error = errorSpy;
+
+      try {
+        const permError = new Error('Permission denied') as NodeJS.ErrnoException;
+        permError.code = 'EACCES';
+        mockReadConfigFile.mockRejectedValue(permError);
+
+        const config = await loadRepoConfig('/test/repo');
+
+        // Should fall back to empty config
+        expect(config).toEqual({});
+
+        // Should log both error lines with permission message
+        expect(errorSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+        const firstLine = errorSpy.mock.calls[0][0] as string;
+        const secondLine = errorSpy.mock.calls[1][0] as string;
+        expect(firstLine).toContain('[Config] Permission denied');
+        expect(secondLine).toContain('Check file permissions');
+      } finally {
+        console.error = originalError;
+      }
     });
   });
 
@@ -185,7 +268,9 @@ streaming:
           globalConfigRead = true;
           return 'defaultAssistant: claude';
         }
-        throw new Error('Not found');
+        const error = new Error('ENOENT') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
       });
 
       const config = await loadConfig('/test/repo');

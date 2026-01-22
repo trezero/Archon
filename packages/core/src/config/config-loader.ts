@@ -57,6 +57,25 @@ const DEFAULT_CONFIG_CONTENT = `# Archon Global Configuration
 `;
 
 /**
+ * Log config error with specific message based on error type
+ */
+function logConfigError(configPath: string, error: unknown): void {
+  const err = error as { code?: string; message?: string };
+  const message = err.message ?? String(error);
+
+  if (err.code === 'EACCES' || err.code === 'EPERM') {
+    console.error(`[Config] Permission denied reading ${configPath}: ${message}`);
+    console.error('[Config] Using default configuration. Check file permissions.');
+  } else if (error instanceof SyntaxError || message.includes('YAML')) {
+    console.error(`[Config] Invalid YAML in ${configPath}: ${message}`);
+    console.error('[Config] Using default configuration. Please fix the YAML syntax.');
+  } else {
+    console.error(`[Config] Unexpected error loading ${configPath}: ${message}`);
+    console.error('[Config] Using default configuration.');
+  }
+}
+
+/**
  * Create default config file if it doesn't exist
  */
 async function createDefaultConfig(configPath: string): Promise<void> {
@@ -89,12 +108,13 @@ export async function loadGlobalConfig(forceReload = false): Promise<GlobalConfi
     cachedGlobalConfig = parseYaml(content) as GlobalConfig;
     return cachedGlobalConfig ?? {};
   } catch (error) {
-    const err = error as NodeJS.ErrnoException;
+    const err = error as { code?: string };
     if (err.code === 'ENOENT') {
       // File doesn't exist - create default config
       await createDefaultConfig(configPath);
     } else {
-      console.warn(`[Config] Failed to load global config: ${err.message}`);
+      // Log specific error message based on error type
+      logConfigError(configPath, error);
     }
     cachedGlobalConfig = {};
     return cachedGlobalConfig;
@@ -103,33 +123,24 @@ export async function loadGlobalConfig(forceReload = false): Promise<GlobalConfi
 
 /**
  * Load repository config from .archon/config.yaml
- * Falls back to .claude/config.yaml for legacy support
  * Returns empty object if no config found
  */
 export async function loadRepoConfig(repoPath: string): Promise<RepoConfig> {
-  const configPaths = [
-    join(repoPath, '.archon', 'config.yaml'),
-    join(repoPath, '.claude', 'config.yaml'),
-  ];
+  const configPath = join(repoPath, '.archon', 'config.yaml');
 
-  for (const configPath of configPaths) {
-    try {
-      const content = await readConfigFile(configPath);
-      return (parseYaml(content) as RepoConfig) ?? {};
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') {
-        // File doesn't exist - expected, try next path
-        continue;
-      }
-      // Unexpected error (syntax error, permission denied, etc) - log so users know their config has issues
-      console.warn(`[Config] Failed to load repo config from ${configPath}: ${err.message}`);
-      continue;
+  try {
+    const content = await readConfigFile(configPath);
+    return (parseYaml(content) as RepoConfig) ?? {};
+  } catch (error) {
+    const err = error as { code?: string };
+    if (err.code === 'ENOENT') {
+      // File doesn't exist - expected, use defaults
+      return {};
     }
+    // Log specific error message based on error type
+    logConfigError(configPath, error);
+    return {};
   }
-
-  // No config found
-  return {};
 }
 
 /**
