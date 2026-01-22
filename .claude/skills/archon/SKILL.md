@@ -154,6 +154,37 @@ bun run cli version
 4. **Check isolation list** - Use `bun run cli isolation list` to see active environments
 5. **Clean up periodically** - Use `bun run cli isolation cleanup` to remove stale worktrees
 
+## Multi-Issue Invocation
+
+**CRITICAL**: When the user mentions multiple issues (e.g., "fix issues #1, #2, and #3"), you must run the workflow **separately for each issue**. Do NOT combine them into a single command.
+
+Each issue needs its own:
+- Separate workflow invocation
+- Separate branch name
+- Separate worktree
+
+**Correct approach** - Run sequentially, one at a time:
+```bash
+# Issue #1
+bun run cli workflow run archon-fix-github-issue --branch fix/issue-1 "Fix issue #1"
+# Wait for completion, then...
+
+# Issue #2
+bun run cli workflow run archon-fix-github-issue --branch fix/issue-2 "Fix issue #2"
+# Wait for completion, then...
+
+# Issue #3
+bun run cli workflow run archon-fix-github-issue --branch fix/issue-3 "Fix issue #3"
+```
+
+**WRONG** - Never combine multiple issues into one command:
+```bash
+# DON'T DO THIS - it won't work correctly
+bun run cli workflow run archon-fix-github-issue --branch fix/issues "Fix issues #1, #2, and #3"
+```
+
+This same pattern applies to multiple PRs, multiple plans, or any batch of similar tasks.
+
 ## Example Interactions
 
 **User**: "Use Archon to fix issue #42"
@@ -179,4 +210,14 @@ bun run cli workflow run archon-assist --branch assist/debug-auth "Debug the aut
 **User**: "Use Archon to fix issue #99 without isolation" (explicit no isolation)
 ```bash
 bun run cli workflow run archon-fix-github-issue "Fix issue #99"
+```
+
+**User**: "Use Archon to fix issues #10, #11, and #12" (multiple issues)
+```bash
+# Run each issue separately, waiting for completion between each
+bun run cli workflow run archon-fix-github-issue --branch fix/issue-10 "Fix issue #10"
+# After completion...
+bun run cli workflow run archon-fix-github-issue --branch fix/issue-11 "Fix issue #11"
+# After completion...
+bun run cli workflow run archon-fix-github-issue --branch fix/issue-12 "Fix issue #12"
 ```
