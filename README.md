@@ -56,6 +56,8 @@ archon workflow run assist --cwd /path/to/your/repo "What does this codebase do?
 bun run cli workflow list --cwd /path/to/your/repo
 ```
 
+**Note:** Workflow and isolation commands must be run from within a git repository. Running from subdirectories works (resolves to repo root). Version and help commands work anywhere.
+
 **Detailed documentation:** [CLI User Guide](docs/cli-user-guide.md)
 
 ---

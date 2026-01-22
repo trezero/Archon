@@ -49,6 +49,7 @@ import {
 } from './commands/workflow';
 import { isolationListCommand, isolationCleanupCommand } from './commands/isolation';
 import { closeDatabase } from '@archon/core';
+import * as git from '@archon/core/utils/git';
 
 /**
  * Print usage information
@@ -150,7 +151,31 @@ async function main(): Promise<number> {
   const command = positionals[0];
   const subcommand = positionals[1];
 
+  // Commands that don't require git repo validation
+  const noGitCommands = ['version', 'help'];
+  const requiresGitRepo = !noGitCommands.includes(command ?? '');
+
   try {
+    // Validate working directory exists
+    let effectiveCwd = cwd;
+    if (requiresGitRepo) {
+      if (!existsSync(cwd)) {
+        console.error(`Error: Directory does not exist: ${cwd}`);
+        return 1;
+      }
+
+      // Validate git repository and resolve to root
+      const repoRoot = await git.findRepoRoot(cwd);
+      if (!repoRoot) {
+        console.error('Error: Not in a git repository.');
+        console.error('The Archon CLI must be run from within a git repository.');
+        console.error('Either navigate to a git repo or use --cwd to specify one.');
+        return 1;
+      }
+      // Use repo root as working directory (handles subdirectory case)
+      effectiveCwd = repoRoot;
+    }
+
     switch (command) {
       case 'version':
         await versionCommand();
@@ -163,7 +188,7 @@ async function main(): Promise<number> {
       case 'workflow':
         switch (subcommand) {
           case 'list':
-            await workflowListCommand(cwd);
+            await workflowListCommand(effectiveCwd);
             break;
 
           case 'run': {
@@ -175,7 +200,7 @@ async function main(): Promise<number> {
             const userMessage = positionals.slice(3).join(' ') || '';
             // Conditionally construct options to satisfy discriminated union
             const options = branchName !== undefined ? { branchName, noWorktree } : {};
-            await workflowRunCommand(cwd, workflowName, userMessage, options);
+            await workflowRunCommand(effectiveCwd, workflowName, userMessage, options);
             break;
           }
 

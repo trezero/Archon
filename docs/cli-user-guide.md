@@ -30,7 +30,7 @@ Run AI-powered workflows from your terminal.
 ## Quick Start
 
 ```bash
-# List available workflows
+# List available workflows (requires git repository)
 archon workflow list --cwd /path/to/repo
 
 # Run a workflow
@@ -39,6 +39,8 @@ archon workflow run assist --cwd /path/to/repo "Explain the authentication flow"
 # Run in isolated worktree
 archon workflow run plan --cwd /path/to/repo --branch feature-auth "Add OAuth support"
 ```
+
+**Note:** Workflow and isolation commands require running from within a git repository. Running from subdirectories automatically resolves to the repo root. The `version` and `help` commands work anywhere.
 
 ## Commands
 
@@ -117,6 +119,8 @@ The CLI determines where to run based on:
 
 1. `--cwd` flag (if provided)
 2. Current directory (default)
+
+Running from a subdirectory (e.g., `/repo/packages/cli`) automatically resolves to the git repository root (e.g., `/repo`).
 
 When using `--branch`, workflows run inside the worktree directory.
 

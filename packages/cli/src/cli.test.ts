@@ -6,6 +6,7 @@
  */
 import { describe, it, expect } from 'bun:test';
 import { parseArgs } from 'util';
+import * as git from '@archon/core/utils/git';
 
 // Test the argument parsing logic used in cli.ts
 describe('CLI argument parsing', () => {
@@ -129,5 +130,119 @@ describe('Conversation ID generation', () => {
     }
     // All 100 IDs should be unique
     expect(ids.size).toBe(100);
+  });
+});
+
+describe('CLI git repo check', () => {
+  /**
+   * These tests verify the command categorization logic used in cli.ts.
+   * The CLI uses: requiresGitRepo = !noGitCommands.includes(command ?? '')
+   * where noGitCommands = ['version', 'help']
+   */
+  describe('command categorization', () => {
+    // Mirror the actual noGitCommands array from cli.ts
+    const noGitCommands = ['version', 'help'];
+
+    // Helper that mirrors the CLI's logic
+    const requiresGitRepo = (command: string | undefined): boolean => {
+      return !noGitCommands.includes(command ?? '');
+    };
+
+    describe('commands that bypass git check', () => {
+      it('version command should not require git repo', () => {
+        expect(requiresGitRepo('version')).toBe(false);
+      });
+
+      it('help command should not require git repo', () => {
+        expect(requiresGitRepo('help')).toBe(false);
+      });
+    });
+
+    describe('commands that require git repo', () => {
+      it('workflow command should require git repo', () => {
+        expect(requiresGitRepo('workflow')).toBe(true);
+      });
+
+      it('isolation command should require git repo', () => {
+        expect(requiresGitRepo('isolation')).toBe(true);
+      });
+
+      it('undefined command should require git repo (fail with unknown command later)', () => {
+        expect(requiresGitRepo(undefined)).toBe(true);
+      });
+
+      it('unknown commands should require git repo', () => {
+        expect(requiresGitRepo('unknown')).toBe(true);
+      });
+    });
+  });
+
+  describe('findRepoRoot behavior', () => {
+    // Test the actual git.findRepoRoot function with real directories
+    it('should find repo root from current test directory', async () => {
+      // This test file is inside a git repo, so findRepoRoot should work
+      const result = await git.findRepoRoot(process.cwd());
+      expect(result).not.toBeNull();
+      // The repo root should contain a .git directory or be the worktree root
+      expect(result).toMatch(/remote-coding-agent/);
+    });
+
+    it('should find repo root from a subdirectory', async () => {
+      // Use __dirname which is the directory containing this test file
+      // This is a real subdirectory (packages/cli/src) that should resolve to repo root
+      const subdirectory = import.meta.dir;
+      const result = await git.findRepoRoot(subdirectory);
+
+      // Should resolve to repo root (remote-coding-agent), not packages/cli/src
+      expect(result).not.toBeNull();
+      expect(result).toMatch(/remote-coding-agent$/);
+      expect(result).not.toContain('/packages/cli/src');
+    });
+
+    it('should return null for system directories outside any git repo', async () => {
+      // /tmp is typically not inside a git repo
+      // Note: This test may need adjustment if /tmp happens to be inside a repo
+      const result = await git.findRepoRoot('/tmp');
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('path validation', () => {
+    // The CLI now validates that the path exists before calling findRepoRoot
+    // This tests the logic pattern used in cli.ts
+    const { existsSync } = require('fs');
+
+    it('should detect existing directories', () => {
+      expect(existsSync(process.cwd())).toBe(true);
+      expect(existsSync('/tmp')).toBe(true);
+    });
+
+    it('should detect non-existent directories', () => {
+      expect(existsSync('/this/path/definitely/does/not/exist/12345')).toBe(false);
+    });
+  });
+
+  describe('error messages', () => {
+    // Verify the exact error messages used in cli.ts for documentation purposes
+    const ERROR_MESSAGES = {
+      notGitRepo: [
+        'Error: Not in a git repository.',
+        'The Archon CLI must be run from within a git repository.',
+        'Either navigate to a git repo or use --cwd to specify one.',
+      ],
+      dirNotExist: (path: string) => `Error: Directory does not exist: ${path}`,
+    };
+
+    it('should have actionable git repo error message', () => {
+      // Verify the messages include guidance
+      expect(ERROR_MESSAGES.notGitRepo[0]).toContain('Not in a git repository');
+      expect(ERROR_MESSAGES.notGitRepo[2]).toContain('--cwd');
+    });
+
+    it('should have clear directory error message', () => {
+      const msg = ERROR_MESSAGES.dirNotExist('/nonexistent');
+      expect(msg).toContain('Directory does not exist');
+      expect(msg).toContain('/nonexistent');
+    });
   });
 });

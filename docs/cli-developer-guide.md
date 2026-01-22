@@ -38,7 +38,14 @@ packages/cli/
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ cli.ts:154-228  Route to command handler                        │
+│ cli.ts:154-170  Git repository check                            │
+│                 Skip for version/help, validate and resolve to  │
+│                 repo root for workflow/isolation commands       │
+└─────────────────────────────────┬───────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ cli.ts:172-246  Route to command handler                        │
 │                 switch(command) → workflow | isolation | version│
 └─────────────────────────────────┬───────────────────────────────┘
                                   │
@@ -48,7 +55,13 @@ packages/cli/
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Code:** `packages/cli/src/cli.ts:106-241`
+**Code:** `packages/cli/src/cli.ts:106-259`
+
+**Git repository check:**
+- Commands `workflow` and `isolation` require running from a git repository
+- Commands `version` and `help` bypass this check
+- When in a subdirectory, automatically resolves to repository root
+- Exit code 1 if not in a git repository
 
 ---
 
@@ -278,7 +291,7 @@ Worktrees stored at: `~/.archon/worktrees/<repo>/<branch-slug>/`
 | Code | Meaning |
 |------|---------|
 | 0 | Success |
-| 1 | Error (logged to stderr) |
+| 1 | Error (logged to stderr, including not in git repo) |
 
 ---
 

@@ -206,10 +206,10 @@ docker-compose --profile with-db down
 
 ### CLI (Command Line)
 
-Run workflows directly from the command line without needing the server:
+Run workflows directly from the command line without needing the server. Workflow and isolation commands require running from within a git repository (subdirectories work - resolves to repo root).
 
 ```bash
-# List available workflows
+# List available workflows (requires git repo)
 bun run cli workflow list
 
 # Run a workflow
