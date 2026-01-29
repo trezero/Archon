@@ -24,17 +24,38 @@ Prepare everything needed for plan implementation:
 
 ## Phase 1: LOAD - Read the Plan
 
-### 1.1 Load Plan File
+### 1.1 Locate Plan File
+
+**Check in order:**
+
+1. **If `$ARGUMENTS` provided**: Use that path
+2. **If plan already in workflow artifacts**: Use `.archon/artifacts/runs/$WORKFLOW_ID/plan.md`
+
+```bash
+# Check if plan was created by archon-create-plan in this workflow
+if [ -f ".archon/artifacts/runs/$WORKFLOW_ID/plan.md" ]; then
+  PLAN_PATH=".archon/artifacts/runs/$WORKFLOW_ID/plan.md"
+  echo "Using plan from workflow: $PLAN_PATH"
+elif [ -n "$ARGUMENTS" ] && [ -f "$ARGUMENTS" ]; then
+  PLAN_PATH="$ARGUMENTS"
+  echo "Using plan from arguments: $PLAN_PATH"
+else
+  echo "ERROR: No plan found"
+  exit 1
+fi
+```
+
+### 1.2 Load Plan File
 
 Read the plan file:
 
 ```bash
-cat $ARGUMENTS
+cat $PLAN_PATH
 ```
 
 If `$ARGUMENTS` is a GitHub issue URL or number (e.g., `#123`), fetch the issue body instead.
 
-### 1.2 Extract Key Information
+### 1.3 Extract Key Information
 
 From the plan, identify and extract:
 
@@ -49,7 +70,7 @@ From the plan, identify and extract:
 
 **CRITICAL**: The "NOT Building" section defines what is **intentionally excluded** from scope. This MUST be captured and passed to review agents so they don't flag intentional exclusions as bugs.
 
-### 1.3 Derive Branch Name
+### 1.4 Derive Branch Name
 
 Create a branch name from the plan title:
 

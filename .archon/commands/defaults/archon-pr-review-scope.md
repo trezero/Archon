@@ -216,24 +216,36 @@ Note key rules that reviewers should check against.
 
 ---
 
-## Phase 3.5: PLAN CONTEXT - Check for Implementation Plan
+## Phase 3.5: PLAN/ISSUE CONTEXT - Check for Workflow Artifacts
 
-**CRITICAL**: If this PR was created by a workflow, there will be plan artifacts that contain important context for reviewers.
+**CRITICAL**: If this PR was created by a workflow, there will be artifacts that contain important context for reviewers.
 
 ### 3.5.1 Find Workflow Artifacts
 
+Check for artifacts from EITHER workflow type:
+
 ```bash
-# Look for most recent plan context
+# Option 1: Plan-based workflow (archon-plan-to-merge)
 ls -t .archon/artifacts/runs/*/plan-context.md 2>/dev/null | head -1
+
+# Option 2: Issue-based workflow (archon-fix-github-issue)
+ls -t .archon/artifacts/runs/*/investigation.md 2>/dev/null | head -1
 ```
 
 ### 3.5.2 Extract Scope Limits
 
-**If plan-context.md exists**, read the "NOT Building (Scope Limits)" section:
+**If plan-context.md exists** (from plan workflow):
 
 ```bash
 # Extract the NOT Building section
-sed -n '/## NOT Building/,/^## /p' .archon/artifacts/runs/*/plan-context.md | head -20
+sed -n '/## NOT Building/,/^## /p' .archon/artifacts/runs/*/plan-context.md | head -30
+```
+
+**If investigation.md exists** (from issue workflow):
+
+```bash
+# Extract the Scope Boundaries / OUT OF SCOPE section
+sed -n '/## Scope Boundaries/,/^## /p' .archon/artifacts/runs/*/investigation.md | head -30
 ```
 
 **These are INTENTIONAL exclusions** - do NOT flag them as bugs or missing features!
@@ -241,11 +253,11 @@ sed -n '/## NOT Building/,/^## /p' .archon/artifacts/runs/*/plan-context.md | he
 ### 3.5.3 Check Implementation Report
 
 ```bash
-# Look for implementation report
+# Look for implementation report (either workflow)
 ls -t .archon/artifacts/runs/*/implementation.md 2>/dev/null | head -1
 ```
 
-**If implementation.md exists**, note any deviations from the plan:
+**If implementation.md exists**, note any deviations:
 
 ```bash
 # Extract deviations section
@@ -253,8 +265,8 @@ sed -n '/## Deviations/,/^## /p' .archon/artifacts/runs/*/implementation.md | he
 ```
 
 **PHASE_3.5_CHECKPOINT:**
-- [ ] Plan context checked (may not exist for manual PRs)
-- [ ] Scope limits extracted (if available)
+- [ ] Workflow artifacts checked (plan-context.md OR investigation.md)
+- [ ] Scope limits extracted (NOT Building OR OUT OF SCOPE)
 - [ ] Implementation deviations noted (if available)
 
 ---
@@ -341,16 +353,20 @@ Based on changes, reviewers should focus on:
 
 ---
 
-## Plan Context (if from workflow)
+## Workflow Context (if from automated workflow)
 
-{If plan-context.md was found:}
+{If plan-context.md OR investigation.md was found:}
 
-### NOT Building (Scope Limits)
+### Scope Limits (NOT Building / OUT OF SCOPE)
 
 **CRITICAL FOR REVIEWERS**: These items are **intentionally excluded** from scope. Do NOT flag them as bugs or missing features.
 
-{Copy the "NOT Building" section from plan-context.md}
+{From plan-context.md "NOT Building" section OR investigation.md "Scope Boundaries/OUT OF SCOPE" section}
 
+**IN SCOPE:**
+- {what we're changing}
+
+**OUT OF SCOPE (do not touch):**
 - {Explicit exclusion 1 with rationale}
 - {Explicit exclusion 2 with rationale}
 
@@ -360,9 +376,9 @@ Based on changes, reviewers should focus on:
 
 {Copy the "Deviations" section from implementation.md}
 
-{If no plan artifacts found:}
+{If no workflow artifacts found:}
 
-_No plan artifacts found - this appears to be a manual PR._
+_No workflow artifacts found - this appears to be a manual PR._
 
 ---
 

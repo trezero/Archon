@@ -1,8 +1,8 @@
-name: archon-plan-to-merge
+name: archon-plan-to-pr
 description: |
-  Use when: Implementing a feature from an existing plan, end-to-end.
+  Use when: You have an existing implementation plan and want to execute it end-to-end.
   Input: Path to a plan file (.archon/artifacts/*/plan.md or .agents/plans/*.md)
-  Does: Setup → Confirm → Implement → Validate → PR → Review → Fix
+  Output: PR ready for merge with comprehensive review completed
 
   Full workflow:
   1. Read plan, setup branch, extract scope limits
@@ -14,7 +14,7 @@ description: |
   7. Synthesize and fix review findings
   8. Final summary with decision matrix → GitHub comment + follow-up recommendations
 
-  NOT for: Creating plans (use /archon-plan), quick fixes, standalone reviews.
+  NOT for: Creating plans from scratch (use archon-idea-to-pr), quick fixes, standalone reviews.
 
 model: sonnet
 

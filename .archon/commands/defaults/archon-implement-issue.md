@@ -27,16 +27,16 @@ Execute the implementation plan from `/investigate-issue`:
 
 ## Phase 1: LOAD - Get the Artifact
 
-### 1.1 Determine Input Type
+### 1.1 Find Investigation Artifact
 
-**If input looks like a number** (`123`, `#123`):
+Look for the investigation artifact from the previous step:
+
 ```bash
-# Look for artifact
-ls .archon/artifacts/issues/issue-{number}.md
+# Check for artifact in workflow runs directory
+ls .archon/artifacts/runs/$WORKFLOW_ID/investigation.md
 ```
 
-**If input is a path**:
-- Use the path directly
+**If input is a specific path**, use that path directly.
 
 ### 1.2 Load and Parse Artifact
 
@@ -56,7 +56,7 @@ cat {artifact-path}
 
 **If artifact not found:**
 ```
-❌ Artifact not found at .archon/artifacts/issues/issue-{number}.md
+❌ Investigation artifact not found at .archon/artifacts/runs/$WORKFLOW_ID/investigation.md
 
 Run `/investigate-issue {number}` first to create the implementation plan.
 ```
@@ -390,92 +390,79 @@ PR_NUMBER=$(gh pr view --json number -q '.number')
 
 ---
 
-## Phase 8: REVIEW - Self Code Review
+## Phase 8: WRITE - Implementation Report
 
-### 8.1 Run Code Review
+### 8.1 Write Implementation Artifact
 
-Use Task tool with subagent_type="code-reviewer":
+Write to `.archon/artifacts/runs/$WORKFLOW_ID/implementation.md`:
 
-```
-Review the changes in this PR for issue #{number}.
+```markdown
+# Implementation Report
 
-Focus on:
-1. Does the fix address the root cause from the investigation?
-2. Code quality - matches codebase patterns?
-3. Test coverage - are the new tests sufficient?
-4. Edge cases - are they handled?
-5. Security - any concerns?
-6. Potential bugs - anything that could break?
-
-Review only the diff, not the entire codebase.
-```
-
-### 8.2 Post Review to PR
-
-```bash
-gh pr comment --body "$(cat <<'EOF'
-## 🔍 Automated Code Review
-
-### Summary
-
-{1-2 sentence assessment}
-
-### Findings
-
-#### ✅ Strengths
-- {Good thing 1}
-- {Good thing 2}
-
-#### ⚠️ Suggestions (non-blocking)
-- `{file}:{line}` - {suggestion}
-- {other suggestions}
-
-#### 🔒 Security
-- {Any concerns or "No security concerns identified"}
-
-### Checklist
-
-- [x] Fix addresses root cause from investigation
-- [x] Code follows codebase patterns
-- [x] Tests cover the change
-- [x] No obvious bugs introduced
+**Issue**: #{number}
+**Generated**: {YYYY-MM-DD HH:MM}
+**Workflow ID**: $WORKFLOW_ID
 
 ---
-*Self-reviewed by Claude • Ready for human review*
-EOF
-)"
+
+## Tasks Completed
+
+| # | Task | File | Status |
+|---|------|------|--------|
+| 1 | {task} | `src/x.ts` | ✅ |
+| 2 | {task} | `src/x.test.ts` | ✅ |
+
+---
+
+## Files Changed
+
+| File | Action | Lines |
+|------|--------|-------|
+| `src/x.ts` | UPDATE | +{N}/-{M} |
+| `src/x.test.ts` | CREATE | +{N} |
+
+---
+
+## Deviations from Investigation
+
+{If none: "Implementation matched the investigation exactly."}
+
+{If any:}
+### Deviation 1: {title}
+
+**Expected**: {from investigation}
+**Actual**: {what was done}
+**Reason**: {why}
+
+---
+
+## Validation Results
+
+| Check | Result |
+|-------|--------|
+| Type check | ✅ |
+| Tests | ✅ ({N} passed) |
+| Lint | ✅ |
+
+---
+
+## PR Created
+
+- **Number**: #{pr-number}
+- **URL**: {pr-url}
+- **Branch**: {branch-name}
 ```
 
 **PHASE_8_CHECKPOINT:**
-- [ ] Code review completed
-- [ ] Review posted to PR
+- [ ] Implementation artifact written
 
 ---
 
-## Phase 9: ARCHIVE - Clean Up
+## Phase 9: OUTPUT - Report to User
 
-### 9.1 Move Artifact to Completed
-
-```bash
-mkdir -p .archon/artifacts/issues/completed
-mv .archon/artifacts/issues/issue-{number}.md .archon/artifacts/issues/completed/
-```
-
-### 9.2 Commit and Push Archive
-
-```bash
-git add .archon/artifacts/issues/
-git commit -m "Archive investigation for issue #{number}"
-git push
-```
-
-**PHASE_9_CHECKPOINT:**
-- [ ] Artifact moved to completed folder
-- [ ] Archive committed and pushed
+Skip archiving - artifacts remain in place for review workflow to access.
 
 ---
-
-## Phase 10: REPORT - Output to User
 
 ```markdown
 ## Implementation Complete
@@ -499,18 +486,14 @@ git push
 | Tests | ✅ Pass |
 | Lint | ✅ Pass |
 
-### Self-Review
+### Artifacts
 
-{Summary of review findings}
+- 📄 Investigation: `.archon/artifacts/runs/$WORKFLOW_ID/investigation.md`
+- 📄 Implementation: `.archon/artifacts/runs/$WORKFLOW_ID/implementation.md`
 
-### Artifact
+### Next Step
 
-📄 Archived to `.archon/artifacts/issues/completed/issue-{number}.md`
-
-### Next Steps
-
-- Human review of PR #{pr-number}
-- Merge when approved
+Proceeding to comprehensive code review...
 ```
 
 ---
@@ -552,9 +535,8 @@ git push
 
 ## Success Criteria
 
-- **PLAN_EXECUTED**: All artifact steps completed
+- **PLAN_EXECUTED**: All investigation steps completed
 - **VALIDATION_PASSED**: All checks green
 - **PR_CREATED**: PR exists and linked to issue
-- **REVIEW_POSTED**: Self-review comment on PR
-- **ARTIFACT_ARCHIVED**: Moved to completed folder
-- **AUDIT_TRAIL**: Full history in git and GitHub
+- **IMPLEMENTATION_ARTIFACT**: Written to runs/$WORKFLOW_ID/
+- **READY_FOR_REVIEW**: Workflow continues to comprehensive review

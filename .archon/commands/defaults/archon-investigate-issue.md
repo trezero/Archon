@@ -210,12 +210,12 @@ git blame -L {start},{end} {affected-file}
 ### 4.1 Artifact Path
 
 ```bash
-mkdir -p .archon/artifacts/issues
+mkdir -p .archon/artifacts/runs/$WORKFLOW_ID
 ```
 
-**Path:** `.archon/artifacts/issues/issue-{number}.md`
+**Path:** `.archon/artifacts/runs/$WORKFLOW_ID/investigation.md`
 
-If free-form (no issue number): `.archon/artifacts/issues/investigation-{timestamp}.md`
+This unified path allows review agents to find the artifact regardless of workflow type.
 
 ### 4.2 Artifact Template
 
@@ -397,7 +397,7 @@ bun run lint
 
 - **Investigated by**: Claude
 - **Timestamp**: {ISO timestamp}
-- **Artifact**: `.archon/artifacts/issues/issue-{number}.md`
+- **Artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/investigation.md`
 ```
 
 **PHASE_4_CHECKPOINT:**
@@ -408,24 +408,7 @@ bun run lint
 
 ---
 
-## Phase 5: COMMIT - Save Artifact
-
-```bash
-git add .archon/artifacts/issues/
-git status
-```
-
-**If changes to commit:**
-```bash
-git commit -m "Investigate issue #{number}: {brief title}"
-```
-
-**PHASE_5_CHECKPOINT:**
-- [ ] Artifact committed to git
-
----
-
-## Phase 6: POST - GitHub Comment
+## Phase 5: POST - GitHub Comment
 
 **Only if input was a GitHub issue (not free-form):**
 
@@ -493,13 +476,13 @@ EOF
 )"
 ```
 
-**PHASE_6_CHECKPOINT:**
+**PHASE_5_CHECKPOINT:**
 - [ ] Comment posted to GitHub (if GH issue)
 - [ ] Formatting renders correctly
 
 ---
 
-## Phase 7: REPORT - Output to User
+## Phase 6: REPORT - Output to User
 
 ```markdown
 ## Investigation Complete
@@ -530,7 +513,7 @@ EOF
 
 ### Artifact
 
-📄 `.archon/artifacts/issues/issue-{number}.md`
+📄 `.archon/artifacts/runs/$WORKFLOW_ID/investigation.md`
 
 ### GitHub
 
