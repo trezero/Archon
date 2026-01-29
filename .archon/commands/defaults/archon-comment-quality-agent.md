@@ -29,6 +29,8 @@ ls -d .archon/artifacts/reviews/pr-* 2>/dev/null | tail -1
 cat .archon/artifacts/reviews/pr-{number}/scope.md
 ```
 
+**CRITICAL**: Check for "NOT Building (Scope Limits)" section. Items listed there are **intentionally excluded** - do NOT flag them as missing documentation or comment issues!
+
 ### 1.3 Get PR Diff
 
 ```bash

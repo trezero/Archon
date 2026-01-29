@@ -22,3 +22,4 @@ worktree:
   copyFiles:
     - .env.example -> .env  # Copy example to .env for local dev
     - .env                   # Also copy .env if it exists
+    - .claude/PRPs

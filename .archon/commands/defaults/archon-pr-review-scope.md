@@ -216,6 +216,49 @@ Note key rules that reviewers should check against.
 
 ---
 
+## Phase 3.5: PLAN CONTEXT - Check for Implementation Plan
+
+**CRITICAL**: If this PR was created by a workflow, there will be plan artifacts that contain important context for reviewers.
+
+### 3.5.1 Find Workflow Artifacts
+
+```bash
+# Look for most recent plan context
+ls -t .archon/artifacts/runs/*/plan-context.md 2>/dev/null | head -1
+```
+
+### 3.5.2 Extract Scope Limits
+
+**If plan-context.md exists**, read the "NOT Building (Scope Limits)" section:
+
+```bash
+# Extract the NOT Building section
+sed -n '/## NOT Building/,/^## /p' .archon/artifacts/runs/*/plan-context.md | head -20
+```
+
+**These are INTENTIONAL exclusions** - do NOT flag them as bugs or missing features!
+
+### 3.5.3 Check Implementation Report
+
+```bash
+# Look for implementation report
+ls -t .archon/artifacts/runs/*/implementation.md 2>/dev/null | head -1
+```
+
+**If implementation.md exists**, note any deviations from the plan:
+
+```bash
+# Extract deviations section
+sed -n '/## Deviations/,/^## /p' .archon/artifacts/runs/*/implementation.md | head -20
+```
+
+**PHASE_3.5_CHECKPOINT:**
+- [ ] Plan context checked (may not exist for manual PRs)
+- [ ] Scope limits extracted (if available)
+- [ ] Implementation deviations noted (if available)
+
+---
+
 ## Phase 4: PREPARE - Create Artifacts Directory
 
 ### 4.1 Create Directory Structure
@@ -295,6 +338,31 @@ Based on changes, reviewers should focus on:
 ## CLAUDE.md Rules to Check
 
 {Extract key rules from CLAUDE.md that apply to this PR}
+
+---
+
+## Plan Context (if from workflow)
+
+{If plan-context.md was found:}
+
+### NOT Building (Scope Limits)
+
+**CRITICAL FOR REVIEWERS**: These items are **intentionally excluded** from scope. Do NOT flag them as bugs or missing features.
+
+{Copy the "NOT Building" section from plan-context.md}
+
+- {Explicit exclusion 1 with rationale}
+- {Explicit exclusion 2 with rationale}
+
+### Implementation Deviations
+
+{If implementation.md was found and has deviations:}
+
+{Copy the "Deviations" section from implementation.md}
+
+{If no plan artifacts found:}
+
+_No plan artifacts found - this appears to be a manual PR._
 
 ---
 

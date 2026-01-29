@@ -31,6 +31,8 @@ cat .archon/artifacts/reviews/pr-{number}/scope.md
 
 Note which files are source vs test files.
 
+**CRITICAL**: Check for "NOT Building (Scope Limits)" section. Items listed there are **intentionally excluded** - do NOT flag them as bugs or missing test coverage!
+
 ### 1.3 Get PR Diff
 
 ```bash

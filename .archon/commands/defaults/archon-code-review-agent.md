@@ -36,6 +36,8 @@ Note:
 - CLAUDE.md rules to check
 - Focus areas
 
+**CRITICAL**: Check for "NOT Building (Scope Limits)" section. Items listed there are **intentionally excluded** - do NOT flag them as bugs or missing features!
+
 ### 1.3 Get PR Diff
 
 ```bash
