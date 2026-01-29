@@ -22,7 +22,7 @@ import {
 } from '../services/cleanup-service';
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
 import { discoverWorkflows } from '../workflows';
-import { isSingleStep } from '../workflows/types';
+import { isSingleStep, type WorkflowDefinition } from '../workflows/types';
 import * as workflowDb from '../db/workflows';
 import { getTriggerForCommand } from '../state/session-transitions';
 
@@ -1678,16 +1678,51 @@ Setup:
             };
           }
 
-          // Discover workflows and find the requested one
-          const workflows = await discoverWorkflows(codebase.default_cwd);
+          console.log('[Command] /workflow run invoked', {
+            workflowName,
+            args: workflowArgs,
+            cwd: codebase.default_cwd,
+          });
+
+          // Discover workflows with error handling
+          let workflows: WorkflowDefinition[];
+          try {
+            workflows = await discoverWorkflows(codebase.default_cwd);
+          } catch (error) {
+            const err = error as Error;
+            console.error('[Workflow Run] Failed to discover workflows:', {
+              cwd: codebase.default_cwd,
+              error: err.message,
+            });
+            return {
+              success: false,
+              message: `Failed to load workflows: ${err.message}\n\nCheck .archon/workflows/ for YAML syntax issues.`,
+            };
+          }
+
+          console.log('[Command] Discovered workflows for /workflow run', {
+            count: workflows.length,
+            names: workflows.map(w => w.name),
+            searchingFor: workflowName,
+          });
+
           const workflow = workflows.find(w => w.name === workflowName);
 
           if (!workflow) {
+            console.warn('[Command] Workflow not found', {
+              requested: workflowName,
+              available: workflows.map(w => w.name),
+            });
             return {
               success: false,
               message: `Workflow \`${workflowName}\` not found.\n\nUse /workflow list to see available workflows.`,
             };
           }
+
+          console.log('[Command] Starting workflow execution', {
+            workflow: workflowName,
+            args: workflowArgs,
+          });
 
           // Return special result that triggers workflow execution in orchestrator
           return {

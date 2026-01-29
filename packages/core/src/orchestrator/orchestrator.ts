@@ -631,8 +631,25 @@ export async function handleMessage(
 
           const cwd = conversation.cwd ?? codebase.default_cwd;
 
-          // Discover and find the workflow
-          const workflows = await discoverWorkflows(cwd);
+          // Discover and find the workflow (with error handling)
+          let workflows: WorkflowDefinition[];
+          try {
+            workflows = await discoverWorkflows(cwd);
+          } catch (error) {
+            const err = error as Error;
+            console.error('[Orchestrator] Workflow discovery failed during /workflow run:', {
+              workflowName,
+              cwd,
+              error: err.message,
+            });
+            await platform.sendMessage(
+              conversationId,
+              `Workflow execution failed: Could not load workflows (${err.message}). ` +
+                'Check .archon/workflows/ for YAML syntax issues.'
+            );
+            return;
+          }
+
           const workflow = workflows.find(w => w.name === workflowName);
 
           if (!workflow) {
