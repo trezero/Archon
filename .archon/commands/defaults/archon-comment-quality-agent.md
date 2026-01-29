@@ -11,22 +11,22 @@ argument-hint: (none - reads from scope artifact)
 
 Analyze code comments for accuracy against actual code, identify comment rot, check documentation completeness, and ensure comments aid long-term maintainability. Produce a structured artifact with findings and recommendations.
 
-**Output artifact**: `.archon/artifacts/reviews/pr-{number}/comment-quality-findings.md`
+**Output artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/review/comment-quality-findings.md`
 
 ---
 
 ## Phase 1: LOAD - Get Context
 
-### 1.1 Find PR Number
+### 1.1 Get PR Number from Registry
 
 ```bash
-ls -d .archon/artifacts/reviews/pr-* 2>/dev/null | tail -1
+PR_NUMBER=$(cat .archon/artifacts/runs/$WORKFLOW_ID/.pr-number)
 ```
 
 ### 1.2 Read Scope
 
 ```bash
-cat .archon/artifacts/reviews/pr-{number}/scope.md
+cat .archon/artifacts/runs/$WORKFLOW_ID/review/scope.md
 ```
 
 **CRITICAL**: Check for "NOT Building (Scope Limits)" section. Items listed there are **intentionally excluded** - do NOT flag them as missing documentation or comment issues!
@@ -95,7 +95,7 @@ Consider:
 
 ## Phase 3: GENERATE - Create Artifact
 
-Write to `.archon/artifacts/reviews/pr-{number}/comment-quality-findings.md`:
+Write to `.archon/artifacts/runs/$WORKFLOW_ID/review/comment-quality-findings.md`:
 
 ```markdown
 # Comment Quality Findings: PR #{number}
@@ -230,7 +230,7 @@ Write to `.archon/artifacts/reviews/pr-{number}/comment-quality-findings.md`:
 
 - **Agent**: comment-quality-agent
 - **Timestamp**: {ISO timestamp}
-- **Artifact**: `.archon/artifacts/reviews/pr-{number}/comment-quality-findings.md`
+- **Artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/review/comment-quality-findings.md`
 ```
 
 **PHASE_3_CHECKPOINT:**

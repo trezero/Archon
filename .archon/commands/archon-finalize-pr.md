@@ -214,12 +214,25 @@ gh pr ready {pr-number} 2>/dev/null || true
 gh pr view --json number,url,headRefName,baseRefName
 ```
 
+### 3.5 Write PR Number Registry
+
+Write PR number for downstream review steps:
+
+```bash
+mkdir -p .archon/artifacts/runs/$WORKFLOW_ID
+PR_NUMBER=$(gh pr view --json number -q '.number')
+PR_URL=$(gh pr view --json url -q '.url')
+echo "$PR_NUMBER" > .archon/artifacts/runs/$WORKFLOW_ID/.pr-number
+echo "$PR_URL" > .archon/artifacts/runs/$WORKFLOW_ID/.pr-url
+```
+
 **PHASE_3_CHECKPOINT:**
 
 - [ ] PR created or updated
 - [ ] PR body uses template (if available)
 - [ ] PR ready for review
 - [ ] PR URL captured
+- [ ] PR number registry written
 
 ---
 

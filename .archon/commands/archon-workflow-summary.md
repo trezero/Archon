@@ -46,32 +46,32 @@ done
 - `implementation.md` - Tasks done, deviations, issues encountered
 - `validation.md` - Test/lint/build results
 - `pr-ready.md` - PR number, URL, final commit
+- `.pr-number` - PR number registry file
+- `.pr-url` - PR URL registry file
 
 ### 1.2 Scan Review Artifacts
 
 ```bash
-# Find the PR review directory
-PR_DIR=$(ls -d .archon/artifacts/reviews/pr-* 2>/dev/null | tail -1)
-
-# List all review artifacts
-ls -la $PR_DIR/
+# Read review artifacts from workflow-scoped directory
+ls -la .archon/artifacts/runs/$WORKFLOW_ID/review/
 
 # Read each review finding
-for file in $PR_DIR/*.md; do
+for file in .archon/artifacts/runs/$WORKFLOW_ID/review/*.md; do
   echo "=== $file ==="
   cat "$file"
 done
 ```
 
-**Expected review artifacts**:
+**Expected review artifacts** (in `runs/$WORKFLOW_ID/review/`):
 - `scope.md` - Files changed, scope limits, focus areas
 - `code-review-findings.md` - Code quality issues
 - `error-handling-findings.md` - Silent failures, catch blocks
 - `test-coverage-findings.md` - Test gaps
 - `comment-quality-findings.md` - Documentation issues
 - `docs-impact-findings.md` - Doc update needs
-- `synthesis.md` - Combined findings, priorities
+- `consolidated-review.md` - Combined findings, priorities
 - `fix-report.md` - What was fixed
+- `sync-report.md` - Rebase/sync status (if applicable)
 
 ### 1.3 Extract Key Data
 
@@ -424,6 +424,28 @@ Posted to: {PR URL}#comment-{id}
 
 - [ ] Summary artifact written
 - [ ] All sections complete
+
+---
+
+## Phase 5.5: ARCHIVE - Create Backward-Compatible Symlink
+
+### 5.5.1 Create Symlink for PR-Based Lookup
+
+Create symlink for backward compatibility with PR-based artifact lookup:
+
+```bash
+PR_NUMBER=$(cat .archon/artifacts/runs/$WORKFLOW_ID/.pr-number 2>/dev/null)
+if [ -n "$PR_NUMBER" ]; then
+  mkdir -p .archon/artifacts/reviews
+  ln -sfn ../runs/$WORKFLOW_ID/review .archon/artifacts/reviews/pr-$PR_NUMBER
+fi
+```
+
+This allows legacy tools to find review artifacts at `.archon/artifacts/reviews/pr-{number}/`.
+
+**PHASE_5.5_CHECKPOINT:**
+
+- [ ] Symlink created (if PR number available)
 
 ---
 

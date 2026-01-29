@@ -11,24 +11,22 @@ argument-hint: (none - uses PR from scope)
 
 Ensure the PR branch is up-to-date with the latest main branch before review. Rebase if needed, resolve conflicts if any arise. This step is silent when no action is needed.
 
-**Output artifact**: `.archon/artifacts/reviews/pr-{number}/sync-report.md` (only if rebase/conflicts occurred)
+**Output artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/review/sync-report.md` (only if rebase/conflicts occurred)
 
 ---
 
 ## Phase 1: CHECK - Determine if Sync Needed
 
-### 1.1 Find PR Number
+### 1.1 Get PR Number from Registry
 
 ```bash
-ls -d .archon/artifacts/reviews/pr-* 2>/dev/null | tail -1
+PR_NUMBER=$(cat .archon/artifacts/runs/$WORKFLOW_ID/.pr-number)
 ```
-
-Extract PR number from directory name.
 
 ### 1.2 Read Scope
 
 ```bash
-cat .archon/artifacts/reviews/pr-{number}/scope.md
+cat .archon/artifacts/runs/$WORKFLOW_ID/review/scope.md
 ```
 
 Get branch names: `HEAD_BRANCH` and `BASE_BRANCH`.
@@ -239,7 +237,7 @@ Confirm local and remote match.
 
 ### 6.1 Create Sync Artifact
 
-Write to `.archon/artifacts/reviews/pr-{number}/sync-report.md`:
+Write to `.archon/artifacts/runs/$WORKFLOW_ID/review/sync-report.md`:
 
 ```markdown
 # Sync Report: PR #{number}
@@ -304,7 +302,7 @@ No conflicts encountered during rebase.
 
 ### 6.2 Update Scope Artifact
 
-Append to `.archon/artifacts/reviews/pr-{number}/scope.md`:
+Append to `.archon/artifacts/runs/$WORKFLOW_ID/review/scope.md`:
 
 ```markdown
 ---

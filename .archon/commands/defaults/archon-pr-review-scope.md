@@ -17,16 +17,28 @@ Verify the PR is in a reviewable state, gather all context needed for the parall
 
 ## Phase 1: IDENTIFY - Determine PR
 
-### 1.1 Parse Input
-
-**Check input format:**
-- Number (`123`, `#123`) → GitHub PR number
-- URL (`https://github.com/...`) → Extract PR number
-- Empty → Check current branch for open PR
+### 1.1 Get PR Number
 
 ```bash
-# If no input, check current branch
-gh pr view --json number,title,url,headRefName,baseRefName,state 2>/dev/null || echo "NO_PR"
+# From workflow registry (if in workflow context)
+if [ -f ".archon/artifacts/runs/$WORKFLOW_ID/.pr-number" ]; then
+  PR_NUMBER=$(cat .archon/artifacts/runs/$WORKFLOW_ID/.pr-number)
+# From arguments (standalone review)
+elif [ -n "$ARGUMENTS" ]; then
+  PR_NUMBER=$(echo "$ARGUMENTS" | grep -oE '[0-9]+' | head -1)
+# From current branch
+else
+  PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null)
+fi
+
+if [ -z "$PR_NUMBER" ]; then
+  echo "ERROR: No PR number found"
+  exit 1
+fi
+
+# Write to registry for downstream steps (if not already there)
+mkdir -p .archon/artifacts/runs/$WORKFLOW_ID
+echo "$PR_NUMBER" > .archon/artifacts/runs/$WORKFLOW_ID/.pr-number
 ```
 
 ### 1.2 Fetch PR Details
@@ -276,12 +288,19 @@ sed -n '/## Deviations/,/^## /p' .archon/artifacts/runs/*/implementation.md | he
 ### 4.1 Create Directory Structure
 
 ```bash
-mkdir -p .archon/artifacts/reviews/pr-{number}
+mkdir -p .archon/artifacts/runs/$WORKFLOW_ID/review
 ```
 
-### 4.2 Create Scope Manifest
+### 4.2 Clean Stale Artifacts
 
-Write `.archon/artifacts/reviews/pr-{number}/scope.md`:
+```bash
+# Remove review directories older than 7 days
+find .archon/artifacts/reviews/pr-* -maxdepth 0 -mtime +7 -exec rm -rf {} \; 2>/dev/null || true
+```
+
+### 4.3 Create Scope Manifest
+
+Write `.archon/artifacts/runs/$WORKFLOW_ID/review/scope.md`:
 
 ```markdown
 # PR Review Scope: #{number}
@@ -391,11 +410,12 @@ _No workflow artifacts found - this appears to be a manual PR._
 ## Metadata
 
 - **Scope created**: {ISO timestamp}
-- **Artifact path**: `.archon/artifacts/reviews/pr-{number}/`
+- **Artifact path**: `.archon/artifacts/runs/$WORKFLOW_ID/review/`
 ```
 
 **PHASE_4_CHECKPOINT:**
 - [ ] Directory created
+- [ ] Stale artifacts cleaned
 - [ ] Scope manifest written with pre-review status
 
 ---
@@ -450,7 +470,7 @@ Then re-request the review: `@archon review this PR`
 - Config: {count} files
 
 ### Artifacts Directory
-`.archon/artifacts/reviews/pr-{number}/`
+`.archon/artifacts/runs/$WORKFLOW_ID/review/`
 
 ### Next Step
 Launching 5 parallel review agents...

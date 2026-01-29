@@ -11,22 +11,22 @@ argument-hint: (none - reads from scope artifact)
 
 Analyze test coverage for the PR changes. Identify critical gaps, evaluate test quality, and ensure tests verify behavior (not implementation). Produce a structured artifact with findings and recommendations.
 
-**Output artifact**: `.archon/artifacts/reviews/pr-{number}/test-coverage-findings.md`
+**Output artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/review/test-coverage-findings.md`
 
 ---
 
 ## Phase 1: LOAD - Get Context
 
-### 1.1 Find PR Number
+### 1.1 Get PR Number from Registry
 
 ```bash
-ls -d .archon/artifacts/reviews/pr-* 2>/dev/null | tail -1
+PR_NUMBER=$(cat .archon/artifacts/runs/$WORKFLOW_ID/.pr-number)
 ```
 
 ### 1.2 Read Scope
 
 ```bash
-cat .archon/artifacts/reviews/pr-{number}/scope.md
+cat .archon/artifacts/runs/$WORKFLOW_ID/review/scope.md
 ```
 
 Note which files are source vs test files.
@@ -100,7 +100,7 @@ grep -r "describe\|it\|test\(" src/ --include="*.test.ts" | head -20
 
 ## Phase 3: GENERATE - Create Artifact
 
-Write to `.archon/artifacts/reviews/pr-{number}/test-coverage-findings.md`:
+Write to `.archon/artifacts/runs/$WORKFLOW_ID/review/test-coverage-findings.md`:
 
 ```markdown
 # Test Coverage Findings: PR #{number}
@@ -254,7 +254,7 @@ describe('{feature}', () => {
 
 - **Agent**: test-coverage-agent
 - **Timestamp**: {ISO timestamp}
-- **Artifact**: `.archon/artifacts/reviews/pr-{number}/test-coverage-findings.md`
+- **Artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/review/test-coverage-findings.md`
 ```
 
 **PHASE_3_CHECKPOINT:**

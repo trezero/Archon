@@ -11,24 +11,22 @@ argument-hint: (none - reads from scope artifact)
 
 Review the PR for code quality, CLAUDE.md compliance, patterns, and bugs. Produce a structured artifact with findings, fix suggestions with multiple options, and reasoning.
 
-**Output artifact**: `.archon/artifacts/reviews/pr-{number}/code-review-findings.md`
+**Output artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/review/code-review-findings.md`
 
 ---
 
 ## Phase 1: LOAD - Get Context
 
-### 1.1 Find PR Number
+### 1.1 Get PR Number from Registry
 
 ```bash
-ls -d .archon/artifacts/reviews/pr-* 2>/dev/null | tail -1
+PR_NUMBER=$(cat .archon/artifacts/runs/$WORKFLOW_ID/.pr-number)
 ```
-
-Extract PR number from the directory name.
 
 ### 1.2 Read Scope
 
 ```bash
-cat .archon/artifacts/reviews/pr-{number}/scope.md
+cat .archon/artifacts/runs/$WORKFLOW_ID/review/scope.md
 ```
 
 Note:
@@ -110,7 +108,7 @@ grep -r "pattern" src/ --include="*.ts" | head -5
 
 ## Phase 3: GENERATE - Create Artifact
 
-Write to `.archon/artifacts/reviews/pr-{number}/code-review-findings.md`:
+Write to `.archon/artifacts/runs/$WORKFLOW_ID/review/code-review-findings.md`:
 
 ```markdown
 # Code Review Findings: PR #{number}
@@ -227,7 +225,7 @@ Write to `.archon/artifacts/reviews/pr-{number}/code-review-findings.md`:
 
 - **Agent**: code-review-agent
 - **Timestamp**: {ISO timestamp}
-- **Artifact**: `.archon/artifacts/reviews/pr-{number}/code-review-findings.md`
+- **Artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/review/code-review-findings.md`
 ```
 
 **PHASE_3_CHECKPOINT:**
@@ -243,7 +241,7 @@ Write to `.archon/artifacts/reviews/pr-{number}/code-review-findings.md`:
 ### 4.1 Verify File Exists
 
 ```bash
-cat .archon/artifacts/reviews/pr-{number}/code-review-findings.md | head -20
+cat .archon/artifacts/runs/$WORKFLOW_ID/review/code-review-findings.md | head -20
 ```
 
 ### 4.2 Check Structure
