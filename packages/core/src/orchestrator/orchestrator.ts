@@ -605,6 +605,59 @@ export async function handleMessage(
             conversationId
           );
         }
+
+        // Handle workflow execution trigger from /workflow run
+        if (result.workflow) {
+          const { name: workflowName, args: workflowArgs } = result.workflow;
+          console.log(`[Orchestrator] Workflow run triggered: ${workflowName}`);
+
+          // Get codebase to determine cwd
+          if (!conversation.codebase_id) {
+            await platform.sendMessage(
+              conversationId,
+              'Workflow execution failed: No codebase configured.'
+            );
+            return;
+          }
+
+          const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
+          if (!codebase) {
+            await platform.sendMessage(
+              conversationId,
+              'Workflow execution failed: Codebase not found.'
+            );
+            return;
+          }
+
+          const cwd = conversation.cwd ?? codebase.default_cwd;
+
+          // Discover and find the workflow
+          const workflows = await discoverWorkflows(cwd);
+          const workflow = workflows.find(w => w.name === workflowName);
+
+          if (!workflow) {
+            await platform.sendMessage(
+              conversationId,
+              `Workflow \`${workflowName}\` not found during execution. It may have been removed.`
+            );
+            return;
+          }
+
+          // Build the user message with workflow args
+          const userMessage = workflowArgs || message;
+
+          // Execute the workflow
+          await executeWorkflow(
+            platform,
+            conversationId,
+            cwd,
+            workflow,
+            userMessage,
+            conversation.id,
+            conversation.codebase_id,
+            issueContext
+          );
+        }
         return;
       }
 

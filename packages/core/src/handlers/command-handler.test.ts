@@ -14,6 +14,7 @@ import { resolve, join } from 'path';
 import * as fsPromises from 'fs/promises';
 import * as gitUtils from '../utils/git';
 import * as pathValidation from '../utils/path-validation';
+import * as workflows from '../workflows';
 
 // Create mock functions for database modules (safe to mock - no standalone tests)
 const mockUpdateConversation = mock(() => Promise.resolve());
@@ -47,6 +48,9 @@ let spyMkdirAsync: ReturnType<typeof spyOn>;
 let spyFsAccess: ReturnType<typeof spyOn>;
 let spyFsReaddir: ReturnType<typeof spyOn>;
 let spyFsRm: ReturnType<typeof spyOn>;
+
+// Spies for workflows module
+let spyDiscoverWorkflows: ReturnType<typeof spyOn>;
 
 // Mock database modules (safe - these don't have standalone tests that would be affected)
 mock.module('../db/conversations', () => ({
@@ -187,6 +191,9 @@ function setupSpies(): void {
   );
   spyFsReaddir = spyOn(fsPromises, 'readdir').mockImplementation(() => Promise.resolve([]));
   spyFsRm = spyOn(fsPromises, 'rm').mockImplementation(() => Promise.resolve());
+
+  // Workflow spies
+  spyDiscoverWorkflows = spyOn(workflows, 'discoverWorkflows').mockResolvedValue([]);
 }
 
 // Restore all spies
@@ -205,6 +212,7 @@ function restoreSpies(): void {
   spyFsAccess?.mockRestore();
   spyFsReaddir?.mockRestore();
   spyFsRm?.mockRestore();
+  spyDiscoverWorkflows?.mockRestore();
 }
 
 describe('CommandHandler', () => {
@@ -1889,6 +1897,93 @@ describe('CommandHandler', () => {
       });
     });
 
+    describe('/workflow run', () => {
+      const conversationWithCodebase: Conversation = {
+        ...baseConversation,
+        codebase_id: 'codebase-123',
+      };
+
+      beforeEach(() => {
+        mockGetCodebase.mockResolvedValue({
+          id: 'codebase-123',
+          repository_url: 'https://github.com/test/repo',
+          default_cwd: '/workspace/test-repo',
+          commands: {},
+          created_at: new Date(),
+          updated_at: new Date(),
+        });
+      });
+
+      test('should return error when no workflow name is provided', async () => {
+        const result = await handleCommand(conversationWithCodebase, '/workflow run');
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('Usage: /workflow run <name>');
+        expect(result.message).toContain('/workflow list');
+      });
+
+      test('should return error when workflow is not found', async () => {
+        spyDiscoverWorkflows.mockResolvedValueOnce([
+          {
+            name: 'existing-workflow',
+            description: 'An existing workflow',
+            steps: [{ command: 'assist', args: 'test' }],
+          },
+        ]);
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow run nonexistent');
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('Workflow `nonexistent` not found');
+        expect(result.message).toContain('/workflow list');
+      });
+
+      test('should return success with workflow info when workflow is found', async () => {
+        spyDiscoverWorkflows.mockResolvedValueOnce([
+          {
+            name: 'test-workflow',
+            description: 'A test workflow',
+            steps: [{ command: 'assist', args: 'do something' }],
+          },
+        ]);
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow run test-workflow');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Starting workflow: `test-workflow`');
+        expect(result.workflow).toBeDefined();
+        expect(result.workflow?.name).toBe('test-workflow');
+        expect(result.workflow?.args).toBe('');
+      });
+
+      test('should pass arguments to workflow', async () => {
+        spyDiscoverWorkflows.mockResolvedValueOnce([
+          {
+            name: 'fix-issue',
+            description: 'Fix a GitHub issue',
+            steps: [{ command: 'assist', args: 'fix $ARGUMENTS' }],
+          },
+        ]);
+
+        const result = await handleCommand(
+          conversationWithCodebase,
+          '/workflow run fix-issue #42 add dark mode'
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.workflow).toBeDefined();
+        expect(result.workflow?.name).toBe('fix-issue');
+        expect(result.workflow?.args).toBe('#42 add dark mode');
+      });
+
+      test('should fail when no codebase is configured', async () => {
+        const result = await handleCommand(baseConversation, '/workflow run test-workflow');
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('No codebase configured');
+      });
+    });
+
     describe('/workflow help text', () => {
       const conversationWithCodebase: Conversation = {
         ...baseConversation,
@@ -1904,6 +1999,13 @@ describe('CommandHandler', () => {
           created_at: new Date(),
           updated_at: new Date(),
         });
+      });
+
+      test('should show run command in workflow usage help', async () => {
+        const result = await handleCommand(conversationWithCodebase, '/workflow invalid');
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('/workflow run');
       });
 
       test('should show status in workflow usage help', async () => {

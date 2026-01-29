@@ -1665,11 +1665,46 @@ Setup:
           }
         }
 
+        case 'run': {
+          // Directly invoke a workflow by name (bypasses AI router)
+          const workflowName = args[1];
+          const workflowArgs = args.slice(2).join(' ');
+
+          if (!workflowName) {
+            return {
+              success: false,
+              message:
+                'Usage: /workflow run <name> [args]\n\nUse /workflow list to see available workflows.',
+            };
+          }
+
+          // Discover workflows and find the requested one
+          const workflows = await discoverWorkflows(codebase.default_cwd);
+          const workflow = workflows.find(w => w.name === workflowName);
+
+          if (!workflow) {
+            return {
+              success: false,
+              message: `Workflow \`${workflowName}\` not found.\n\nUse /workflow list to see available workflows.`,
+            };
+          }
+
+          // Return special result that triggers workflow execution in orchestrator
+          return {
+            success: true,
+            message: `Starting workflow: \`${workflowName}\``,
+            workflow: {
+              name: workflowName,
+              args: workflowArgs,
+            },
+          };
+        }
+
         default:
           return {
             success: false,
             message:
-              'Usage:\n  /workflow list - Show available workflows\n  /workflow reload - Reload workflow definitions\n  /workflow status - Show running workflow details\n  /workflow cancel - Cancel running workflow',
+              'Usage:\n  /workflow list - Show available workflows\n  /workflow reload - Reload workflow definitions\n  /workflow status - Show running workflow details\n  /workflow cancel - Cancel running workflow\n  /workflow run <name> [args] - Run a workflow directly',
           };
       }
     }

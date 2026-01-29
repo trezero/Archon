@@ -105,6 +105,11 @@ export interface CommandResult {
   success: boolean;
   message: string;
   modified?: boolean; // Indicates if conversation state was modified
+  workflow?: {
+    // If set, orchestrator should execute this workflow
+    name: string;
+    args: string;
+  };
 }
 
 /**

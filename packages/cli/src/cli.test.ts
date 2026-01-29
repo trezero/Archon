@@ -193,9 +193,10 @@ describe('CLI git repo check', () => {
       const subdirectory = import.meta.dir;
       const result = await git.findRepoRoot(subdirectory);
 
-      // Should resolve to repo root (remote-coding-agent), not packages/cli/src
+      // Should resolve to repo root (remote-coding-agent or a worktree), not packages/cli/src
       expect(result).not.toBeNull();
-      expect(result).toMatch(/remote-coding-agent$/);
+      // May be main repo (remote-coding-agent) or a worktree (remote-coding-agent/<worktree-name>)
+      expect(result).toMatch(/remote-coding-agent(\/[^/]+)?$/);
       expect(result).not.toContain('/packages/cli/src');
     });
 
