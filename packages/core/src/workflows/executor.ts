@@ -10,7 +10,7 @@ import { formatToolCall } from '../utils/tool-formatter';
 import * as archonPaths from '../utils/archon-paths';
 import * as configLoader from '../config/config-loader';
 import { BUNDLED_COMMANDS, isBinaryBuild } from '../defaults/bundled-defaults';
-import { commitAllChanges } from '../utils/git';
+import { commitAllChanges, execFileAsync } from '../utils/git';
 import type {
   WorkflowDefinition,
   WorkflowRun,
@@ -1464,6 +1464,22 @@ async function commitWorkflowArtifacts(
     );
     if (committed) {
       console.log(`[WorkflowExecutor] Committed remaining artifacts for workflow: ${workflowName}`);
+
+      // Push the committed artifacts
+      try {
+        await execFileAsync('git', ['-C', cwd, 'push', 'origin', 'HEAD'], { timeout: 30000 });
+        console.log(`[WorkflowExecutor] Pushed workflow artifacts for: ${workflowName}`);
+      } catch (pushError) {
+        const pushErr = pushError as Error;
+        console.warn(
+          '[WorkflowExecutor] Failed to push workflow artifacts (commit preserved locally)',
+          {
+            error: pushErr.message,
+            workflowName,
+            cwd,
+          }
+        );
+      }
 
       // Notify user about the commit (non-GitHub platforms only)
       if (platformType !== 'github') {
