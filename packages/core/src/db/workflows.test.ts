@@ -308,6 +308,60 @@ describe('workflows database', () => {
     });
   });
 
+  describe('metadata serialization', () => {
+    test('throws when critical github_context metadata fails to serialize', async () => {
+      // Create metadata with a circular reference
+      const circularObj: Record<string, unknown> = { github_context: 'Issue context' };
+      circularObj.self = circularObj;
+
+      await expect(
+        createWorkflowRun({
+          workflow_name: 'test',
+          conversation_id: 'conv',
+          user_message: 'test',
+          metadata: circularObj,
+        })
+      ).rejects.toThrow('Failed to serialize workflow metadata');
+    });
+
+    test('falls back to empty object for non-critical metadata serialization failure', async () => {
+      // Create metadata WITHOUT github_context but with circular reference
+      const circularObj: Record<string, unknown> = { someKey: 'value' };
+      circularObj.self = circularObj;
+
+      mockQuery.mockResolvedValueOnce(createQueryResult([{ ...mockWorkflowRun, metadata: {} }]));
+
+      const result = await createWorkflowRun({
+        workflow_name: 'test',
+        conversation_id: 'conv',
+        user_message: 'test',
+        metadata: circularObj,
+      });
+
+      // Should succeed with empty metadata fallback
+      expect(result.metadata).toEqual({});
+      const [, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(params[4]).toBe('{}');
+    });
+
+    test('serializes github_context metadata successfully under normal conditions', async () => {
+      const runWithContext = {
+        ...mockWorkflowRun,
+        metadata: { github_context: 'Issue #99: Fix bug' },
+      };
+      mockQuery.mockResolvedValueOnce(createQueryResult([runWithContext]));
+
+      const result = await createWorkflowRun({
+        workflow_name: 'test',
+        conversation_id: 'conv',
+        user_message: 'test',
+        metadata: { github_context: 'Issue #99: Fix bug' },
+      });
+
+      expect(result.metadata).toEqual({ github_context: 'Issue #99: Fix bug' });
+    });
+  });
+
   describe('updateWorkflowActivity', () => {
     test('updates last_activity_at timestamp', async () => {
       mockQuery.mockResolvedValueOnce(createQueryResult([]));

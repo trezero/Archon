@@ -17,11 +17,30 @@ export async function createWorkflowRun(data: {
     metadataJson = JSON.stringify(data.metadata ?? {});
   } catch (serializeError) {
     const err = serializeError as Error;
-    console.error('[DB:Workflows] Failed to serialize metadata:', {
-      error: err.message,
-      metadataKeys: data.metadata ? Object.keys(data.metadata) : [],
-    });
-    // Fall back to empty object rather than failing the workflow
+
+    // Check if metadata contains critical context that must not be silently lost
+    if (data.metadata && 'github_context' in data.metadata) {
+      // Critical context (e.g., GitHub issue/PR details) must not be silently discarded.
+      // Failing here surfaces the problem to the user instead of running the workflow
+      // with empty context variables ($CONTEXT, $EXTERNAL_CONTEXT, $ISSUE_CONTEXT).
+      console.error('[DB:Workflows] Failed to serialize metadata with critical context:', {
+        error: err.message,
+        metadataKeys: Object.keys(data.metadata),
+      });
+      throw new Error(
+        `Failed to serialize workflow metadata: ${err.message}. ` +
+          'Metadata contains github_context which is required for this workflow.'
+      );
+    }
+
+    // Non-critical metadata: fall back to empty object and log warning
+    console.error(
+      '[DB:Workflows] Failed to serialize metadata (non-critical, falling back to {}):',
+      {
+        error: err.message,
+        metadataKeys: data.metadata ? Object.keys(data.metadata) : [],
+      }
+    );
     metadataJson = '{}';
   }
 
