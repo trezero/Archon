@@ -35,7 +35,7 @@ Detection order in `getWorktreeBase()`:
 │  getIsolationProvider() → WorktreeProvider (singleton)          │
 ├─────────────────────────────────────────────────────────────────┤
 │  create(request)  → IsolatedEnvironment                         │
-│  destroy(envId, branchName?)   → void                           │
+│  destroy(envId, options?)      → DestroyResult                  │
 │  get(envId)       → IsolatedEnvironment | null                  │
 │  list(codebaseId) → IsolatedEnvironment[]                       │
 │  adopt(path)      → IsolatedEnvironment | null                  │
@@ -280,7 +280,7 @@ App checks: findWorktreeByBranch("feature/auth")
 
 | File                                  | Purpose                                                         |
 | ------------------------------------- | --------------------------------------------------------------- |
-| `src/isolation/types.ts`              | `IIsolationProvider`, `IsolationRequest`, `IsolatedEnvironment` |
+| `src/isolation/types.ts`              | `IIsolationProvider`, `IsolationRequest`, `IsolatedEnvironment`, `DestroyResult` |
 | `src/isolation/providers/worktree.ts` | `WorktreeProvider` implementation                               |
 | `src/isolation/index.ts`              | `getIsolationProvider()` factory                                |
 | `src/utils/git.ts`                    | `getWorktreeBase()`, `listWorktrees()`, `syncWorkspace()`, `getDefaultBranch()`, low-level git ops |

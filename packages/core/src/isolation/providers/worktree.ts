@@ -79,9 +79,10 @@ export class WorktreeProvider implements IIsolationProvider {
    *
    * **IMPORTANT: Branch cleanup limitation**
    * If `branchName` is provided but the worktree path no longer exists AND
-   * `canonicalRepoPath` is not provided, branch deletion will be SILENTLY SKIPPED.
-   * A warning is logged but the method returns successfully. To ensure branch
-   * cleanup when the worktree may already be removed, always provide `canonicalRepoPath`.
+   * `canonicalRepoPath` is not provided, branch deletion will be SKIPPED with a warning.
+   * The result will have `branchDeleted: false` and a warning in `warnings`.
+   * To ensure branch cleanup when the worktree may already be removed,
+   * always provide `canonicalRepoPath`.
    *
    * Throws only for unexpected errors (permissions, git failures).
    */
@@ -115,6 +116,8 @@ export class WorktreeProvider implements IIsolationProvider {
         const warning = `Cannot delete branch '${options.branchName}': worktree path gone and no canonicalRepoPath provided`;
         console.warn(`[WorktreeProvider] ${warning}`, { worktreePath });
         result.warnings.push(warning);
+      } else {
+        result.branchDeleted = true; // No branch to delete counts as success
       }
       return result;
     }

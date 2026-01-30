@@ -322,6 +322,46 @@ describe('cleanup-service', () => {
       expect(mockUpdateStatus).toHaveBeenCalledWith(envId, 'destroyed');
     });
 
+    test('logs warnings from partial destroy and still marks as destroyed', async () => {
+      const envId = 'env-partial-cleanup';
+
+      mockGetById.mockResolvedValueOnce({
+        id: envId,
+        codebase_id: 'codebase-123',
+        workflow_type: 'issue',
+        workflow_id: '42',
+        provider: 'worktree',
+        working_path: '/workspace/worktrees/repo/issue-42',
+        branch_name: 'issue-42',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'github',
+        metadata: {},
+      });
+
+      mockGetCodebase.mockResolvedValueOnce({
+        id: 'codebase-123',
+        name: 'test-repo',
+        default_cwd: '/workspace/repo',
+      });
+
+      // Internal worktreeExists returns false (path gone)
+      mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+
+      // destroy returns with warnings (branch couldn't be deleted)
+      mockDestroy.mockResolvedValueOnce({
+        worktreeRemoved: true,
+        branchDeleted: false,
+        directoryClean: true,
+        warnings: ["Cannot delete branch 'issue-42': branch is checked out elsewhere"],
+      });
+
+      await removeEnvironment(envId);
+
+      // Should still mark as destroyed despite partial cleanup
+      expect(mockUpdateStatus).toHaveBeenCalledWith(envId, 'destroyed');
+    });
+
     test('re-throws non-directory errors from provider.destroy', async () => {
       const envId = 'env-real-error';
 

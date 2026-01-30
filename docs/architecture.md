@@ -467,7 +467,7 @@ Isolation providers create isolated working environments (worktrees, containers,
 export interface IIsolationProvider {
   readonly providerType: string;
   create(request: IsolationRequest): Promise<IsolatedEnvironment>;
-  destroy(envId: string, options?: { force?: boolean; branchName?: string }): Promise<void>;
+  destroy(envId: string, options?: DestroyOptions | WorktreeDestroyOptions): Promise<DestroyResult>;
   get(envId: string): Promise<IsolatedEnvironment | null>;
   list(codebaseId: string): Promise<IsolatedEnvironment[]>;
   adopt?(path: string): Promise<IsolatedEnvironment | null>;
@@ -497,6 +497,13 @@ interface IsolatedEnvironment {
   createdAt: Date;
   metadata: Record<string, unknown>;
 }
+
+interface DestroyResult {
+  worktreeRemoved: boolean;  // Primary operation succeeded
+  branchDeleted: boolean;    // Branch cleanup succeeded (true if no branch requested)
+  directoryClean: boolean;   // No orphan files remain
+  warnings: string[];        // Non-fatal issues during cleanup
+}
 ```
 
 ### WorktreeProvider Implementation
@@ -514,9 +521,10 @@ export class WorktreeProvider implements IIsolationProvider {
     // 4. Return IsolatedEnvironment
   }
 
-  async destroy(envId: string, options?: { force?: boolean; branchName?: string }): Promise<void> {
+  async destroy(envId: string, options?: WorktreeDestroyOptions): Promise<DestroyResult> {
     // git worktree remove <path> [--force]
-    // git branch -D <branchName> (if provided, best-effort)
+    // git branch -D <branchName> (if provided, tracked via result)
+    // Returns DestroyResult with warnings for partial failures
   }
 }
 ```
