@@ -149,6 +149,9 @@ function logSendError(
 /** Threshold for consecutive UNKNOWN errors before aborting */
 const UNKNOWN_ERROR_THRESHOLD = 3;
 
+/** Threshold for consecutive activity update failures before warning user */
+const ACTIVITY_WARNING_THRESHOLD = 5;
+
 /** Mutable counter for tracking consecutive unknown errors across calls */
 interface UnknownErrorTracker {
   count: number;
@@ -592,8 +595,9 @@ async function executeStepInternal(
           workflowRunId: workflowRun.id,
           consecutiveFailures: activityUpdateFailures,
           error: (error as Error).message,
+          errorName: (error as Error).name,
         });
-        if (activityUpdateFailures >= 5 && !activityWarningShown) {
+        if (activityUpdateFailures >= ACTIVITY_WARNING_THRESHOLD && !activityWarningShown) {
           activityWarningShown = true;
           await safeSendMessage(
             platform,
@@ -908,7 +912,7 @@ async function executeLoopWorkflow(
             consecutiveFailures: activityUpdateFailures,
             error: (error as Error).message,
           });
-          if (activityUpdateFailures >= 5 && !activityWarningShown) {
+          if (activityUpdateFailures >= ACTIVITY_WARNING_THRESHOLD && !activityWarningShown) {
             activityWarningShown = true;
             await safeSendMessage(
               platform,
