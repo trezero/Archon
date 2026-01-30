@@ -890,12 +890,16 @@ ${userComment}`;
       // For non-command messages, add rich context
       if (eventType === 'issue' && issue) {
         finalMessage = this.buildIssueContext(issue, strippedComment);
+        contextToAppend = `GitHub Issue #${String(issue.number)}: "${issue.title}"\nUse 'gh issue view ${String(issue.number)}' for full details if needed.`;
       } else if (eventType === 'issue_comment' && issue) {
         finalMessage = this.buildIssueContext(issue, strippedComment);
+        contextToAppend = `GitHub Issue #${String(issue.number)}: "${issue.title}"\nUse 'gh issue view ${String(issue.number)}' for full details if needed.`;
       } else if (eventType === 'pull_request' && pullRequest) {
         finalMessage = this.buildPRContext(pullRequest, strippedComment);
+        contextToAppend = `GitHub Pull Request #${String(pullRequest.number)}: "${pullRequest.title}"\nUse 'gh pr view ${String(pullRequest.number)}' for full details if needed.`;
       } else if (eventType === 'issue_comment' && pullRequest) {
         finalMessage = this.buildPRContext(pullRequest, strippedComment);
+        contextToAppend = `GitHub Pull Request #${String(pullRequest.number)}: "${pullRequest.title}"\nUse 'gh pr view ${String(pullRequest.number)}' for full details if needed.`;
       }
     }
 
