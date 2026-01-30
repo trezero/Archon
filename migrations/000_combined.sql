@@ -107,8 +107,13 @@ CREATE TABLE IF NOT EXISTS remote_agent_isolation_environments (
   -- Cross-reference metadata (for linking)
   metadata              JSONB DEFAULT '{}',
 
-  CONSTRAINT unique_workflow UNIQUE (codebase_id, workflow_type, workflow_id)
+  -- Note: uniqueness enforced via partial index below (only active environments)
 );
+
+-- Partial unique index: only active environments need uniqueness
+CREATE UNIQUE INDEX IF NOT EXISTS unique_active_workflow
+  ON remote_agent_isolation_environments (codebase_id, workflow_type, workflow_id)
+  WHERE status = 'active';
 
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_isolation_env_codebase

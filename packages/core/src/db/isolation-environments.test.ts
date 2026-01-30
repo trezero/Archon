@@ -160,6 +160,41 @@ describe('isolation-environments', () => {
     });
   });
 
+  describe('create - ON CONFLICT behavior', () => {
+    test('insert query includes ON CONFLICT clause for active environments', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([sampleEnv]));
+
+      await create({
+        codebase_id: 'codebase-456',
+        workflow_type: 'issue',
+        workflow_id: '42',
+        working_path: '/workspace/worktrees/project/issue-42',
+        branch_name: 'issue-42',
+      });
+
+      const [query] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(query).toContain('ON CONFLICT');
+      expect(query).toContain("WHERE status = 'active'");
+      expect(query).toContain('DO UPDATE SET');
+    });
+
+    test('ON CONFLICT updates working_path and branch_name', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([sampleEnv]));
+
+      await create({
+        codebase_id: 'codebase-456',
+        workflow_type: 'issue',
+        workflow_id: '42',
+        working_path: '/workspace/worktrees/project/issue-42-v2',
+        branch_name: 'issue-42-v2',
+      });
+
+      const [query] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(query).toContain('working_path = EXCLUDED.working_path');
+      expect(query).toContain('branch_name = EXCLUDED.branch_name');
+    });
+  });
+
   describe('updateStatus', () => {
     test('updates status to destroyed', async () => {
       mockQuery.mockResolvedValueOnce(createQueryResult([], 1));

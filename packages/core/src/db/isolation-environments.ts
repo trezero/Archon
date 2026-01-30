@@ -59,10 +59,20 @@ export async function create(env: {
   created_by_platform?: string;
   metadata?: Record<string, unknown>;
 }): Promise<IsolationEnvironmentRow> {
+  const dialect = getDialect();
   const result = await pool.query<IsolationEnvironmentRow>(
     `INSERT INTO remote_agent_isolation_environments
      (codebase_id, workflow_type, workflow_id, provider, working_path, branch_name, created_by_platform, metadata)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (codebase_id, workflow_type, workflow_id) WHERE status = 'active'
+     DO UPDATE SET
+       working_path = EXCLUDED.working_path,
+       branch_name = EXCLUDED.branch_name,
+       provider = EXCLUDED.provider,
+       created_by_platform = EXCLUDED.created_by_platform,
+       metadata = EXCLUDED.metadata,
+       status = 'active',
+       created_at = ${dialect.now()}
      RETURNING *`,
     [
       env.codebase_id,

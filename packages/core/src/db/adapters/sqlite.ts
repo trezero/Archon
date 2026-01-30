@@ -200,8 +200,13 @@ export class SqliteAdapter implements IDatabase {
         status TEXT NOT NULL DEFAULT 'active',
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
-        UNIQUE(codebase_id, workflow_type, workflow_id)
+        -- Note: uniqueness enforced via partial index below (only active environments)
       );
+
+      -- Partial unique index: only active environments need uniqueness
+      CREATE UNIQUE INDEX IF NOT EXISTS unique_active_workflow
+        ON remote_agent_isolation_environments (codebase_id, workflow_type, workflow_id)
+        WHERE status = 'active';
 
       -- Workflow runs table
       CREATE TABLE IF NOT EXISTS remote_agent_workflow_runs (
