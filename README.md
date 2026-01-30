@@ -2,7 +2,7 @@
 
 Control AI coding assistants (Claude Code, Codex) remotely from Telegram, GitHub, and more. Built for developers who want to code from anywhere with persistent sessions and flexible workflows/systems.
 
-**Quick Start:** [CLI Installation](#cli-installation) • [Server Setup](#server-quick-start) • [AI Assistant Setup](#2-ai-assistant-setup-choose-at-least-one) • [Platform Setup](#3-platform-adapter-setup-choose-at-least-one) • [Usage Guide](#usage)
+**Quick Start:** [Getting Started](#getting-started) • [Server Setup](#server-quick-start) • [AI Assistant Setup](#2-ai-assistant-setup-choose-at-least-one) • [Platform Setup](#3-platform-adapter-setup-choose-at-least-one) • [Usage Guide](#usage)
 
 ## Features
 
@@ -14,13 +14,13 @@ Control AI coding assistants (Claude Code, Codex) remotely from Telegram, GitHub
 - **Generic Command System**: User-defined commands versioned with Git
 - **Docker Ready**: Simple deployment with Docker Compose
 
-## CLI Usage
+## Getting Started
 
-Archon CLI lets you run AI workflows directly from your terminal, without needing a server or messaging platform.
+The fastest way to set up Archon is through the built-in setup wizard in Claude Code.
 
-### Setup
+### Interactive Setup (Recommended)
 
-**Step 1: Clone and install**
+**Step 1: Clone the repo and install dependencies**
 
 ```bash
 git clone https://github.com/dynamous-community/remote-coding-agent
@@ -28,35 +28,64 @@ cd remote-coding-agent
 bun install
 ```
 
-**Step 2: Make CLI globally available (optional but recommended)**
+**Step 2: Open Claude Code in the repo**
 
 ```bash
-cd packages/cli
-bun link
+claude
+```
+
+**Step 3: Ask Claude to set up Archon**
+
+```
+Set up Archon
+```
+
+The skill walks you through everything interactively: installing the CLI, authenticating, choosing platforms (CLI, GitHub, Telegram, Slack, Discord), configuring credentials, and copying the skill to your target repository.
+
+When it's done, you'll have the `archon` command available globally and the skill installed in your target repo — open Claude Code there and start using it.
+
+### Manual Setup
+
+If you prefer to set things up yourself:
+
+<details>
+<summary>Manual CLI setup steps</summary>
+
+**1. Install and link the CLI**
+
+```bash
+cd remote-coding-agent
+bun install
+cd packages/cli && bun link
 ```
 
 This creates an `archon` command available from anywhere on your system.
 
-**Step 3: Authenticate with Claude**
+**2. Authenticate with Claude**
 
 ```bash
-claude /login
+which claude   # verify Claude Code is installed
+claude /login  # authenticate if needed
 ```
 
-The CLI uses your existing Claude authentication.
-
-**Step 4: Run workflows**
+**3. Copy the skill to your target repository**
 
 ```bash
-# If you ran bun link (recommended)
-archon workflow list --cwd /path/to/your/repo
-archon workflow run assist --cwd /path/to/your/repo "What does this codebase do?"
-
-# Without bun link (from the repo directory)
-bun run cli workflow list --cwd /path/to/your/repo
+mkdir -p /path/to/your/repository/.claude/skills
+cp -r .claude/skills/archon /path/to/your/repository/.claude/skills/archon
 ```
 
-**Note:** Workflow and isolation commands must be run from within a git repository. Running from subdirectories works (resolves to repo root). Version and help commands work anywhere.
+**4. Run workflows from your target repo**
+
+```bash
+cd /path/to/your/repository
+archon workflow list
+archon workflow run assist "What does this codebase do?"
+```
+
+</details>
+
+**Note:** Workflow and isolation commands must be run from within a git repository. Running from subdirectories works (resolves to repo root).
 
 **Detailed documentation:** [CLI User Guide](docs/cli-user-guide.md)
 
