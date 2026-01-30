@@ -1,9 +1,14 @@
 ---
 name: archon
 description: |
-  Use when: User wants to run Archon CLI workflows for coding tasks.
-  Triggers: "use archon to", "run archon", "archon workflow", "use archon for",
+  Use when: User wants to run Archon CLI workflows OR set up Archon for the first time.
+  Triggers (workflows): "use archon to", "run archon", "archon workflow", "use archon for",
             "have archon", "let archon", "ask archon to".
+  Triggers (setup): "set up archon", "install archon", "how to use archon",
+            "configure archon", "archon setup", "get started with archon".
+  Triggers (config): "change my archon config", "modify archon config", "archon config",
+            "change archon settings", "update my config", "help me change my config",
+            "edit archon config", "archon configuration".
   Capability: Runs AI workflows in isolated git worktrees for parallel development.
   NOT for: Direct Claude Code work - only for delegating to Archon CLI.
 argument-hint: "[workflow] [message or issue number]"
@@ -11,12 +16,26 @@ argument-hint: "[workflow] [message or issue number]"
 
 # Archon CLI Skill
 
-Archon is a remote agentic coding platform that runs AI workflows in isolated git worktrees. This skill teaches you how to invoke Archon workflows from the command line.
+Archon is a remote agentic coding platform that runs AI workflows in isolated git worktrees. This skill teaches you how to invoke Archon workflows from the command line, and guides first-time setup.
+
+## Available Workflows (live)
+
+!`archon workflow list 2>&1 || echo "Archon CLI not installed. Run /archon to set it up."`
+
+## Routing
+
+**Determine the user's intent:**
+
+- **Setup / install / "how to use" intent** → Read `guides/setup.md` and follow the interactive wizard using AskUserQuestion.
+- **Config / settings intent** → Read `guides/config.md` and follow the interactive config editor. This covers viewing, modifying, and understanding both global (`~/.archon/config.yaml`) and repo-level (`.archon/config.yaml`) configuration. Available at any time, not just during setup.
+- **Workflow intent (default)** → Continue with workflow invocation below.
+
+---
 
 ## Core Command
 
 ```bash
-bun run cli workflow run <workflow-name> --branch <branch-name> "<message>"
+archon workflow run <workflow-name> --branch <branch-name> "<message>"
 ```
 
 **CRITICAL RULES**:
@@ -41,7 +60,7 @@ bun run cli workflow run <workflow-name> --branch <branch-name> "<message>"
 **Does**: Investigates root cause → creates implementation plan → makes code changes → creates PR
 
 ```bash
-bun run cli workflow run archon-fix-github-issue --branch fix/issue-123 "Fix issue #123"
+archon workflow run archon-fix-github-issue --branch fix/issue-123 "Fix issue #123"
 ```
 
 ### `archon-feature-development`
@@ -51,7 +70,7 @@ bun run cli workflow run archon-fix-github-issue --branch fix/issue-123 "Fix iss
 **Requires**: Path to a plan file or GitHub issue containing a plan
 
 ```bash
-bun run cli workflow run archon-feature-development --branch feat/my-feature "Implement plan from .archon/artifacts/plans/my-feature.plan.md"
+archon workflow run archon-feature-development --branch feat/my-feature "Implement plan from .archon/artifacts/plans/my-feature.plan.md"
 ```
 
 ### `archon-comprehensive-pr-review`
@@ -60,7 +79,7 @@ bun run cli workflow run archon-feature-development --branch feat/my-feature "Im
 **Does**: Syncs with main → runs 5 specialized review agents → auto-fixes critical issues → reports findings
 
 ```bash
-bun run cli workflow run archon-comprehensive-pr-review --branch review/pr-123 "Review PR #123"
+archon workflow run archon-comprehensive-pr-review --branch review/pr-123 "Review PR #123"
 ```
 
 ### `archon-resolve-conflicts`
@@ -69,7 +88,7 @@ bun run cli workflow run archon-comprehensive-pr-review --branch review/pr-123 "
 **Does**: Fetches latest base → analyzes conflicts → auto-resolves where possible → presents options for complex ones
 
 ```bash
-bun run cli workflow run archon-resolve-conflicts --branch resolve/pr-123 "Resolve conflicts in PR #123"
+archon workflow run archon-resolve-conflicts --branch resolve/pr-123 "Resolve conflicts in PR #123"
 ```
 
 ### `archon-ralph-fresh`
@@ -79,7 +98,7 @@ bun run cli workflow run archon-resolve-conflicts --branch resolve/pr-123 "Resol
 **Requires**: `.archon/ralph/{feature}/prd.md` and `prd.json`
 
 ```bash
-bun run cli workflow run archon-ralph-fresh --branch feat/my-prd "Run ralph on .archon/ralph/my-feature"
+archon workflow run archon-ralph-fresh --branch feat/my-prd "Run ralph on .archon/ralph/my-feature"
 ```
 
 ### `archon-ralph-stateful`
@@ -89,7 +108,7 @@ bun run cli workflow run archon-ralph-fresh --branch feat/my-prd "Run ralph on .
 **Requires**: `.archon/ralph/{feature}/prd.md` and `prd.json`
 
 ```bash
-bun run cli workflow run archon-ralph-stateful --branch feat/my-prd "Run ralph on .archon/ralph/my-feature"
+archon workflow run archon-ralph-stateful --branch feat/my-prd "Run ralph on .archon/ralph/my-feature"
 ```
 
 ### `archon-assist`
@@ -98,7 +117,7 @@ bun run cli workflow run archon-ralph-stateful --branch feat/my-prd "Run ralph o
 **Does**: Full Claude Code agent with all tools available
 
 ```bash
-bun run cli workflow run archon-assist --branch assist/task-name "What does the orchestrator do?"
+archon workflow run archon-assist --branch assist/task-name "What does the orchestrator do?"
 ```
 
 ## Branch Naming Conventions
@@ -131,32 +150,32 @@ When the user says... → Use this workflow:
 
 ### List available workflows
 ```bash
-bun run cli workflow list
+archon workflow list
 ```
 
 ### List active worktrees
 ```bash
-bun run cli isolation list
+archon isolation list
 ```
 
 ### Clean up stale worktrees (default: 7 days)
 ```bash
-bun run cli isolation cleanup
-bun run cli isolation cleanup 14  # Custom: 14 days
+archon isolation cleanup
+archon isolation cleanup 14  # Custom: 14 days
 ```
 
 ### Show version
 ```bash
-bun run cli version
+archon version
 ```
 
 ## Important Notes
 
 1. **Always run from the repository root** - The CLI needs to be in a git repo
 2. **Worktree isolation is the default** - Archon works best in isolated environments
-3. **One workflow at a time** - Wait for completion before starting another
-4. **Check isolation list** - Use `bun run cli isolation list` to see active environments
-5. **Clean up periodically** - Use `bun run cli isolation cleanup` to remove stale worktrees
+3. **One workflow per shell** - Each workflow blocks its shell. Use `run_in_background: true` to run multiple workflows in parallel via separate background tasks.
+4. **Check isolation list** - Use `archon isolation list` to see active environments
+5. **Clean up periodically** - Use `archon isolation cleanup` to remove stale worktrees
 
 ## Multi-Issue Invocation
 
@@ -167,24 +186,24 @@ Each issue needs its own:
 - Separate branch name
 - Separate worktree
 
-**Correct approach** - Run sequentially, one at a time:
+**Correct approach** - Run each as a separate background task (they can run in parallel):
 ```bash
-# Issue #1
-bun run cli workflow run archon-fix-github-issue --branch fix/issue-1 "Fix issue #1"
-# Wait for completion, then...
+# Issue #1 (background)
+archon workflow run archon-fix-github-issue --branch fix/issue-1 "Fix issue #1"
 
-# Issue #2
-bun run cli workflow run archon-fix-github-issue --branch fix/issue-2 "Fix issue #2"
-# Wait for completion, then...
+# Issue #2 (background)
+archon workflow run archon-fix-github-issue --branch fix/issue-2 "Fix issue #2"
 
-# Issue #3
-bun run cli workflow run archon-fix-github-issue --branch fix/issue-3 "Fix issue #3"
+# Issue #3 (background)
+archon workflow run archon-fix-github-issue --branch fix/issue-3 "Fix issue #3"
 ```
+
+Each gets its own worktree, so they won't conflict. Use `run_in_background: true` on each Bash invocation.
 
 **WRONG** - Never combine multiple issues into one command:
 ```bash
 # DON'T DO THIS - it won't work correctly
-bun run cli workflow run archon-fix-github-issue --branch fix/issues "Fix issues #1, #2, and #3"
+archon workflow run archon-fix-github-issue --branch fix/issues "Fix issues #1, #2, and #3"
 ```
 
 This same pattern applies to multiple PRs, multiple plans, or any batch of similar tasks.
@@ -193,35 +212,32 @@ This same pattern applies to multiple PRs, multiple plans, or any batch of simil
 
 **User**: "Use Archon to fix issue #42"
 ```bash
-bun run cli workflow run archon-fix-github-issue --branch fix/issue-42 "Fix issue #42"
+archon workflow run archon-fix-github-issue --branch fix/issue-42 "Fix issue #42"
 ```
 
 **User**: "Have Archon review PR #15"
 ```bash
-bun run cli workflow run archon-comprehensive-pr-review --branch review/pr-15 "Review PR #15"
+archon workflow run archon-comprehensive-pr-review --branch review/pr-15 "Review PR #15"
 ```
 
 **User**: "Use Archon to implement the dark mode feature plan"
 ```bash
-bun run cli workflow run archon-feature-development --branch feat/dark-mode "Implement plan from .archon/artifacts/plans/dark-mode.plan.md"
+archon workflow run archon-feature-development --branch feat/dark-mode "Implement plan from .archon/artifacts/plans/dark-mode.plan.md"
 ```
 
 **User**: "Ask Archon to help debug the authentication flow"
 ```bash
-bun run cli workflow run archon-assist --branch assist/debug-auth "Debug the authentication flow"
+archon workflow run archon-assist --branch assist/debug-auth "Debug the authentication flow"
 ```
 
 **User**: "Use Archon to fix issue #99 without isolation" (explicit no isolation)
 ```bash
-bun run cli workflow run archon-fix-github-issue "Fix issue #99"
+archon workflow run archon-fix-github-issue "Fix issue #99"
 ```
 
-**User**: "Use Archon to fix issues #10, #11, and #12" (multiple issues)
+**User**: "Use Archon to fix issues #10, #11, and #12" (multiple issues — run in parallel as background tasks)
 ```bash
-# Run each issue separately, waiting for completion between each
-bun run cli workflow run archon-fix-github-issue --branch fix/issue-10 "Fix issue #10"
-# After completion...
-bun run cli workflow run archon-fix-github-issue --branch fix/issue-11 "Fix issue #11"
-# After completion...
-bun run cli workflow run archon-fix-github-issue --branch fix/issue-12 "Fix issue #12"
+archon workflow run archon-fix-github-issue --branch fix/issue-10 "Fix issue #10"
+archon workflow run archon-fix-github-issue --branch fix/issue-11 "Fix issue #11"
+archon workflow run archon-fix-github-issue --branch fix/issue-12 "Fix issue #12"
 ```
