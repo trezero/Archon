@@ -1,6 +1,6 @@
 import { mock, describe, test, expect, beforeEach, afterEach, afterAll, spyOn } from 'bun:test';
 import { MockPlatformAdapter } from '../test/mocks/platform';
-import { Conversation, Codebase, Session } from '../types';
+import { Conversation, Codebase, Session, ConversationNotFoundError } from '../types';
 import type { WorkflowDefinition } from '../workflows/types';
 import { join } from 'path';
 import * as gitUtils from '../utils/git';
@@ -13,6 +13,7 @@ import * as gitUtils from '../utils/git';
 
 // Setup mocks before importing the module under test
 const mockGetOrCreateConversation = mock(() => Promise.resolve(null));
+const mockGetConversationByPlatformId = mock(() => Promise.resolve(null));
 const mockUpdateConversation = mock(() => Promise.resolve());
 const mockTouchConversation = mock(() => Promise.resolve());
 const mockGetCodebase = mock(() => Promise.resolve(null));
@@ -92,6 +93,7 @@ const mockGetIsolationProvider = mock(() => ({
 
 mock.module('../db/conversations', () => ({
   getOrCreateConversation: mockGetOrCreateConversation,
+  getConversationByPlatformId: mockGetConversationByPlatformId,
   updateConversation: mockUpdateConversation,
   touchConversation: mockTouchConversation,
 }));
@@ -241,6 +243,7 @@ describe('orchestrator', () => {
   beforeEach(() => {
     platform = new MockPlatformAdapter();
     mockGetOrCreateConversation.mockClear();
+    mockGetConversationByPlatformId.mockClear();
     mockUpdateConversation.mockClear();
     mockTouchConversation.mockClear();
     mockGetCodebase.mockClear();
@@ -1664,6 +1667,127 @@ Labels: correct`;
         expect.stringContaining('Could not load workflows')
       );
       expect(mockExecuteWorkflow).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('thread context inheritance', () => {
+    const threadConversation: Conversation = {
+      id: 'conv-thread',
+      platform_type: 'discord',
+      platform_conversation_id: 'thread-123',
+      ai_assistant_type: 'claude',
+      codebase_id: null,
+      cwd: null,
+      isolation_env_id: null,
+      last_activity_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+
+    const parentConversation: Conversation = {
+      id: 'conv-parent',
+      platform_type: 'discord',
+      platform_conversation_id: 'channel-456',
+      ai_assistant_type: 'claude',
+      codebase_id: 'codebase-789',
+      cwd: '/workspace/project',
+      isolation_env_id: null,
+      last_activity_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+
+    const inheritedConversation: Conversation = {
+      ...threadConversation,
+      codebase_id: 'codebase-789',
+      cwd: '/workspace/project',
+    };
+
+    test('inherits codebase_id and cwd from parent when thread has no codebase', async () => {
+      mockGetOrCreateConversation
+        .mockResolvedValueOnce(threadConversation) // First call: initial load
+        .mockResolvedValueOnce(inheritedConversation); // Second call: reload after update
+      mockGetConversationByPlatformId.mockResolvedValueOnce(parentConversation);
+      mockUpdateConversation.mockResolvedValueOnce(undefined);
+      mockGetCodebase.mockResolvedValue(mockCodebase);
+      mockGetActiveSession.mockResolvedValue(null);
+      mockCreateSession.mockResolvedValue(mockSession);
+      mockGetAssistantClient.mockReturnValue(mockClient);
+      mockIsolationEnvGetById.mockResolvedValue(null);
+
+      await handleMessage(
+        platform,
+        'thread-123',
+        'hello',
+        undefined,
+        undefined,
+        'channel-456' // parentConversationId
+      );
+
+      expect(mockGetConversationByPlatformId).toHaveBeenCalledWith('mock', 'channel-456');
+      expect(mockUpdateConversation).toHaveBeenCalledWith('conv-thread', {
+        codebase_id: 'codebase-789',
+        cwd: '/workspace/project',
+      });
+      // Conversation reloaded after update
+      expect(mockGetOrCreateConversation).toHaveBeenCalledTimes(2);
+    });
+
+    test('does NOT inherit when thread already has codebase_id', async () => {
+      const threadWithCodebase: Conversation = {
+        ...threadConversation,
+        codebase_id: 'existing-codebase',
+        cwd: '/other/path',
+      };
+      mockGetOrCreateConversation.mockResolvedValue(threadWithCodebase);
+      mockGetCodebase.mockResolvedValue(mockCodebase);
+      mockGetActiveSession.mockResolvedValue(null);
+      mockCreateSession.mockResolvedValue(mockSession);
+      mockGetAssistantClient.mockReturnValue(mockClient);
+
+      await handleMessage(platform, 'thread-123', 'hello', undefined, undefined, 'channel-456');
+
+      // Should NOT look up parent or update
+      expect(mockGetConversationByPlatformId).not.toHaveBeenCalled();
+      expect(mockUpdateConversation).not.toHaveBeenCalled();
+    });
+
+    test('handles missing parent gracefully (parent not found)', async () => {
+      mockGetOrCreateConversation.mockResolvedValue(threadConversation);
+      mockGetConversationByPlatformId.mockResolvedValueOnce(null); // Parent not found
+      mockGetCodebase.mockResolvedValue(null);
+      mockGetActiveSession.mockResolvedValue(null);
+      mockCreateSession.mockResolvedValue(mockSession);
+      mockGetAssistantClient.mockReturnValue(mockClient);
+      mockIsolationEnvGetById.mockResolvedValue(null);
+
+      // Should not throw
+      await handleMessage(platform, 'thread-123', 'hello', undefined, undefined, 'channel-456');
+
+      expect(mockGetConversationByPlatformId).toHaveBeenCalledWith('mock', 'channel-456');
+      expect(mockUpdateConversation).not.toHaveBeenCalled();
+    });
+
+    test('handles ConversationNotFoundError during update gracefully', async () => {
+      mockGetOrCreateConversation.mockResolvedValue(threadConversation);
+      mockGetConversationByPlatformId.mockResolvedValueOnce(parentConversation);
+      mockUpdateConversation.mockRejectedValueOnce(new ConversationNotFoundError('conv-thread'));
+      mockGetCodebase.mockResolvedValue(null);
+      mockGetActiveSession.mockResolvedValue(null);
+      mockCreateSession.mockResolvedValue(mockSession);
+      mockGetAssistantClient.mockReturnValue(mockClient);
+      mockIsolationEnvGetById.mockResolvedValue(null);
+
+      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+
+      // Should not throw - ConversationNotFoundError is handled gracefully
+      await handleMessage(platform, 'thread-123', 'hello', undefined, undefined, 'channel-456');
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Thread inheritance failed'));
+      // Conversation NOT reloaded since update failed
+      expect(mockGetOrCreateConversation).toHaveBeenCalledTimes(1);
+
+      warnSpy.mockRestore();
     });
   });
 });

@@ -539,21 +539,25 @@ export async function handleMessage(
         parentConversationId
       );
       if (parentConversation?.codebase_id) {
-        await db
-          .updateConversation(conversation.id, {
+        try {
+          await db.updateConversation(conversation.id, {
             codebase_id: parentConversation.codebase_id,
             cwd: parentConversation.cwd,
-          })
-          .then(async () => {
-            conversation = await db.getOrCreateConversation(
-              platform.getPlatformType(),
-              conversationId
-            );
-            console.log('[Orchestrator] Thread inherited context from parent channel');
-          })
-          .catch(err => {
-            if (!(err instanceof ConversationNotFoundError)) throw err;
           });
+          conversation = await db.getOrCreateConversation(
+            platform.getPlatformType(),
+            conversationId
+          );
+          console.log('[Orchestrator] Thread inherited context from parent channel');
+        } catch (err) {
+          if (err instanceof ConversationNotFoundError) {
+            console.warn(
+              `[Orchestrator] Thread inheritance failed: conversation ${conversation.id} not found during update`
+            );
+          } else {
+            throw err;
+          }
+        }
       }
     }
 
