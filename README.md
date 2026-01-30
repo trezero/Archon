@@ -280,6 +280,7 @@ psql $DATABASE_URL < migrations/003_add_worktree.sql
 psql $DATABASE_URL < migrations/004_worktree_sharing.sql
 psql $DATABASE_URL < migrations/006_isolation_environments.sql
 psql $DATABASE_URL < migrations/007_drop_legacy_columns.sql
+psql $DATABASE_URL < migrations/011_partial_unique_constraint.sql
 ```
 
 </details>
@@ -307,6 +308,7 @@ docker compose exec postgres psql -U postgres -d remote_coding_agent
 \i /migrations/004_worktree_sharing.sql
 \i /migrations/006_isolation_environments.sql
 \i /migrations/007_drop_legacy_columns.sql
+\i /migrations/011_partial_unique_constraint.sql
 \q
 ```
 
@@ -318,6 +320,7 @@ psql postgresql://postgres:postgres@localhost:5432/remote_coding_agent < migrati
 psql postgresql://postgres:postgres@localhost:5432/remote_coding_agent < migrations/004_worktree_sharing.sql
 psql postgresql://postgres:postgres@localhost:5432/remote_coding_agent < migrations/006_isolation_environments.sql
 psql postgresql://postgres:postgres@localhost:5432/remote_coding_agent < migrations/007_drop_legacy_columns.sql
+psql postgresql://postgres:postgres@localhost:5432/remote_coding_agent < migrations/011_partial_unique_constraint.sql
 ```
 
 </details>

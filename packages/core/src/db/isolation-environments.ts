@@ -47,7 +47,9 @@ export async function listByCodebase(
 }
 
 /**
- * Create a new isolation environment
+ * Create or update an active isolation environment (upsert).
+ * If an active environment with the same (codebase_id, workflow_type, workflow_id) exists,
+ * it updates the existing row instead of inserting a duplicate.
  */
 export async function create(env: {
   codebase_id: string;

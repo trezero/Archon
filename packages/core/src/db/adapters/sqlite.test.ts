@@ -1,0 +1,100 @@
+import { describe, test, expect, afterEach } from 'bun:test';
+import { SqliteAdapter } from './sqlite';
+import { unlinkSync } from 'fs';
+import { join } from 'path';
+
+const TEST_DB_PATH = join(import.meta.dir, '.test-sqlite-adapter.db');
+
+function createTestDb(): SqliteAdapter {
+  return new SqliteAdapter(TEST_DB_PATH);
+}
+
+/** Insert a parent codebase row to satisfy FK constraints */
+async function insertCodebase(db: SqliteAdapter, id: string): Promise<void> {
+  await db.query(`INSERT INTO remote_agent_codebases (id, default_cwd) VALUES ($1, $2)`, [
+    id,
+    '/tmp/test-cwd',
+  ]);
+}
+
+describe('SqliteAdapter', () => {
+  let db: SqliteAdapter;
+
+  afterEach(async () => {
+    if (db) {
+      await db.close();
+    }
+    try {
+      unlinkSync(TEST_DB_PATH);
+      unlinkSync(TEST_DB_PATH + '-wal');
+      unlinkSync(TEST_DB_PATH + '-shm');
+    } catch {
+      // Files may not exist
+    }
+  });
+
+  describe('INSERT with RETURNING', () => {
+    test('returns inserted row via native RETURNING', async () => {
+      db = createTestDb();
+      await insertCodebase(db, 'cb-1');
+
+      const result = await db.query<{ id: string; status: string }>(
+        `INSERT INTO remote_agent_isolation_environments
+         (id, codebase_id, workflow_type, workflow_id, provider, working_path, branch_name, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *`,
+        ['test-id', 'cb-1', 'issue', '1', 'worktree', '/tmp/test', 'issue-1', 'active']
+      );
+
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].id).toBe('test-id');
+      expect(result.rows[0].status).toBe('active');
+    });
+
+    test('returns correct row on ON CONFLICT DO UPDATE', async () => {
+      db = createTestDb();
+      await insertCodebase(db, 'cb-1');
+
+      // Insert initial row
+      await db.query(
+        `INSERT INTO remote_agent_isolation_environments
+         (id, codebase_id, workflow_type, workflow_id, provider, working_path, branch_name, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        ['orig-id', 'cb-1', 'issue', '42', 'worktree', '/tmp/original', 'issue-42', 'active']
+      );
+
+      // Upsert with ON CONFLICT -- this is the scenario that was broken
+      const result = await db.query<{ id: string; working_path: string; branch_name: string }>(
+        `INSERT INTO remote_agent_isolation_environments
+         (codebase_id, workflow_type, workflow_id, provider, working_path, branch_name)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (codebase_id, workflow_type, workflow_id) WHERE status = 'active'
+         DO UPDATE SET
+           working_path = EXCLUDED.working_path,
+           branch_name = EXCLUDED.branch_name,
+           status = 'active'
+         RETURNING *`,
+        ['cb-1', 'issue', '42', 'worktree', '/tmp/updated', 'issue-42-v2']
+      );
+
+      expect(result.rows).toHaveLength(1);
+      // Must return the updated row, not a random/wrong row
+      expect(result.rows[0].id).toBe('orig-id');
+      expect(result.rows[0].working_path).toBe('/tmp/updated');
+      expect(result.rows[0].branch_name).toBe('issue-42-v2');
+    });
+  });
+
+  describe('UPDATE/DELETE with RETURNING', () => {
+    test('throws error for UPDATE RETURNING', async () => {
+      db = createTestDb();
+
+      await expect(
+        db.query(
+          `UPDATE remote_agent_isolation_environments SET status = $1 WHERE id = $2 RETURNING *`,
+          ['destroyed', 'test-id']
+        )
+      ).rejects.toThrow('does not support RETURNING clause on UPDATE/DELETE');
+    });
+  });
+});

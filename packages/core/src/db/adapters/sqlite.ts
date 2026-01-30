@@ -47,30 +47,30 @@ export class SqliteAdapter implements IDatabase {
         const rows = stmt.all(...sqliteParams) as T[];
         return { rows, rowCount: rows.length };
       } else {
-        // For INSERT/UPDATE/DELETE
-        const stmt = this.db.prepare(convertedSql);
-        const result = stmt.run(...sqliteParams);
-
-        // Handle RETURNING clause (SQLite doesn't support it natively)
         const upperSql = sql.toUpperCase();
-        if (upperSql.includes('RETURNING')) {
-          if (upperSql.includes('INSERT')) {
-            // Emulate INSERT RETURNING by fetching the inserted row
-            const lastId = result.lastInsertRowid;
-            const table = this.extractInsertTableName(sql);
-            const selectStmt = this.db.prepare(`SELECT * FROM ${table} WHERE rowid = ?`);
-            const rows = [selectStmt.get(lastId)] as T[];
-            return { rows, rowCount: result.changes };
-          } else {
-            // UPDATE/DELETE RETURNING not supported - fail fast rather than return empty rows
-            throw new Error(
-              'SQLite adapter does not support RETURNING clause on UPDATE/DELETE statements. ' +
-                `Query: ${convertedSql.substring(0, 100)}... ` +
-                'Hint: Use a SELECT before the mutation if you need the row data.'
-            );
-          }
+
+        // Handle INSERT with RETURNING using native SQLite RETURNING (3.35+)
+        // We must use .all() instead of .run() because .run() discards
+        // RETURNING results, and its lastInsertRowid is unreliable when
+        // ON CONFLICT DO UPDATE fires.
+        if (upperSql.includes('RETURNING') && upperSql.includes('INSERT')) {
+          const stmt = this.db.prepare(convertedSql);
+          const rows = stmt.all(...sqliteParams) as T[];
+          return { rows, rowCount: rows.length };
         }
 
+        // UPDATE/DELETE with RETURNING not supported
+        if (upperSql.includes('RETURNING')) {
+          throw new Error(
+            'SQLite adapter does not support RETURNING clause on UPDATE/DELETE statements. ' +
+              `Query: ${convertedSql.substring(0, 100)}... ` +
+              'Hint: Use a SELECT before the mutation if you need the row data.'
+          );
+        }
+
+        // Standard INSERT/UPDATE/DELETE without RETURNING
+        const stmt = this.db.prepare(convertedSql);
+        const result = stmt.run(...sqliteParams);
         return { rows: [], rowCount: result.changes };
       }
     } catch (error) {
@@ -96,20 +96,6 @@ export class SqliteAdapter implements IDatabase {
       .replace(/\$\d+/g, '?')
       .replace(/::jsonb/g, '')
       .replace(/::INTERVAL/g, '');
-  }
-
-  /**
-   * Extract table name from INSERT statement for RETURNING clause emulation
-   */
-  private extractInsertTableName(sql: string): string {
-    const match = /INSERT\s+INTO\s+(\w+)/i.exec(sql);
-    const tableName = match?.[1];
-
-    if (!tableName) {
-      throw new Error(`Failed to extract table name from INSERT: ${sql.substring(0, 100)}...`);
-    }
-
-    return tableName;
   }
 
   /**
@@ -199,7 +185,7 @@ export class SqliteAdapter implements IDatabase {
         metadata TEXT DEFAULT '{}',
         status TEXT NOT NULL DEFAULT 'active',
         created_at TEXT DEFAULT (datetime('now')),
-        updated_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
         -- Note: uniqueness enforced via partial index below (only active environments)
       );
 
