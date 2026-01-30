@@ -14,9 +14,7 @@ Transform "$ARGUMENTS" into a battle-tested implementation plan through systemat
 </objective>
 
 <context>
-Project structure: !`ls -la src/`
-Package info: !`cat package.json | head -30`
-Existing features: !`ls src/features/ 2>/dev/null || echo "No features directory"`
+Project structure: !`ls -la`
 CLAUDE.md rules: @CLAUDE.md
 </context>
 

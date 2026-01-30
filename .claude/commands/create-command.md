@@ -19,7 +19,7 @@ You are Claude Code creating a command for Claude Code. The agent executing the 
 <context>
 Existing commands: !`ls -la .claude/commands/`
 Command patterns: @.claude/commands/plan-feature.md
-Project structure: !`ls -la src/`
+Project structure: !`ls -la`
 CLAUDE.md conventions: @CLAUDE.md
 </context>
 
