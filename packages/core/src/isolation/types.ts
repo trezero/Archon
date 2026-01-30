@@ -206,6 +206,23 @@ export interface WorktreeDestroyOptions extends DestroyOptions {
 }
 
 /**
+ * Result of destroying an isolated environment
+ *
+ * Communicates partial failures from best-effort cleanup operations.
+ * All fields reflect what actually happened during destruction.
+ */
+export interface DestroyResult {
+  /** Whether the worktree itself was removed (the primary operation) */
+  worktreeRemoved: boolean;
+  /** Whether the branch was deleted (if requested) */
+  branchDeleted: boolean;
+  /** Whether the directory was fully cleaned (no orphan files remain) */
+  directoryClean: boolean;
+  /** Warnings for partial failures (non-fatal issues) */
+  warnings: string[];
+}
+
+/**
  * Provider interface for isolation strategies
  *
  * Git worktrees are the default implementation. The abstraction enables
@@ -233,7 +250,7 @@ export interface IIsolationProvider {
    *
    * Throws only for unexpected errors (permissions, git failures).
    */
-  destroy(envId: string, options?: DestroyOptions | WorktreeDestroyOptions): Promise<void>;
+  destroy(envId: string, options?: DestroyOptions | WorktreeDestroyOptions): Promise<DestroyResult>;
 
   /** Get environment by ID, returns null if not found */
   get(envId: string): Promise<IsolatedEnvironment | null>;

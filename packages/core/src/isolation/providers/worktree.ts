@@ -23,6 +23,7 @@ import {
 } from '../../utils/git';
 import { copyWorktreeFiles } from '../../utils/worktree-copy';
 import type {
+  DestroyResult,
   IIsolationProvider,
   IsolatedEnvironment,
   IsolationRequest,
@@ -84,13 +85,21 @@ export class WorktreeProvider implements IIsolationProvider {
    *
    * Throws only for unexpected errors (permissions, git failures).
    */
-  async destroy(envId: string, options?: WorktreeDestroyOptions): Promise<void> {
+  async destroy(envId: string, options?: WorktreeDestroyOptions): Promise<DestroyResult> {
     const worktreePath = envId;
+    const result: DestroyResult = {
+      worktreeRemoved: false,
+      branchDeleted: false,
+      directoryClean: false,
+      warnings: [],
+    };
 
     // Check if worktree path exists before attempting removal (optimization to avoid spawning git)
     const pathExists = await this.directoryExists(worktreePath);
     if (!pathExists) {
       console.log(`[WorktreeProvider] Path ${worktreePath} already removed`);
+      result.worktreeRemoved = true; // Already gone counts as removed
+      result.directoryClean = true;
     }
 
     // Get canonical repo path - use provided path or derive from worktree
@@ -103,15 +112,11 @@ export class WorktreeProvider implements IIsolationProvider {
       // Path doesn't exist and no canonicalRepoPath provided - can't clean up branch
       // This is expected when worktree was already fully cleaned up externally
       if (options?.branchName) {
-        console.warn(
-          '[WorktreeProvider] Cannot delete branch: worktree path gone and no canonicalRepoPath provided',
-          {
-            branchName: options.branchName,
-            worktreePath,
-          }
-        );
+        const warning = `Cannot delete branch '${options.branchName}': worktree path gone and no canonicalRepoPath provided`;
+        console.warn(`[WorktreeProvider] ${warning}`, { worktreePath });
+        result.warnings.push(warning);
       }
-      return;
+      return result;
     }
 
     // Only attempt worktree removal if path exists
@@ -124,11 +129,13 @@ export class WorktreeProvider implements IIsolationProvider {
 
       try {
         await execFileAsync('git', gitArgs, { timeout: 30000 });
+        result.worktreeRemoved = true;
       } catch (error) {
         if (!this.isWorktreeMissingError(error)) {
           throw error;
         }
         console.log(`[WorktreeProvider] Worktree ${worktreePath} already removed`);
+        result.worktreeRemoved = true;
         // Continue to branch deletion below - branch may still exist
       }
 
@@ -141,22 +148,27 @@ export class WorktreeProvider implements IIsolationProvider {
           console.log(
             `[WorktreeProvider] Successfully cleaned remaining directory at ${worktreePath}`
           );
+          result.directoryClean = true;
         } catch (error) {
           const err = error as NodeJS.ErrnoException;
-          // Log but don't fail - git worktree removal succeeded, directory cleanup is best-effort
-          console.error(
-            `[WorktreeProvider] Failed to clean remaining directory at ${worktreePath}:`,
-            err.message
-          );
-          // Don't throw - the worktree itself was removed, this is supplementary cleanup
+          const warning = `Failed to clean remaining directory at ${worktreePath}: ${err.message}`;
+          console.error(`[WorktreeProvider] ${warning}`);
+          result.warnings.push(warning);
+          // directoryClean stays false
         }
+      } else {
+        result.directoryClean = true;
       }
     }
 
     // Delete associated branch if provided (best-effort cleanup)
     if (options?.branchName) {
-      await this.deleteBranchBestEffort(repoPath, options.branchName);
+      result.branchDeleted = await this.deleteBranchTracked(repoPath, options.branchName, result);
+    } else {
+      result.branchDeleted = true; // No branch to delete counts as success
     }
+
+    return result;
   }
 
   /**
@@ -174,27 +186,35 @@ export class WorktreeProvider implements IIsolationProvider {
   }
 
   /**
-   * Delete a branch, logging results. Never throws - branch deletion is best-effort cleanup.
+   * Delete a branch and track the result. Never throws - branch deletion is best-effort.
+   * Returns true if branch was deleted or already gone, false if deletion failed.
    */
-  private async deleteBranchBestEffort(repoPath: string, branchName: string): Promise<void> {
+  private async deleteBranchTracked(
+    repoPath: string,
+    branchName: string,
+    result: DestroyResult
+  ): Promise<boolean> {
     try {
       await execFileAsync('git', ['-C', repoPath, 'branch', '-D', branchName], { timeout: 30000 });
       console.log(`[WorktreeProvider] Deleted branch ${branchName}`);
+      return true;
     } catch (error) {
       const err = error as Error & { stderr?: string };
       const errorText = `${err.message} ${err.stderr ?? ''}`;
 
       if (errorText.includes('not found') || errorText.includes('did not match any')) {
         console.log(`[WorktreeProvider] Branch ${branchName} already deleted or not found`);
+        return true; // Already gone counts as success
       } else if (errorText.includes('checked out at')) {
-        console.warn(
-          `[WorktreeProvider] Cannot delete branch ${branchName}: branch is checked out elsewhere`
-        );
+        const warning = `Cannot delete branch '${branchName}': branch is checked out elsewhere`;
+        console.warn(`[WorktreeProvider] ${warning}`);
+        result.warnings.push(warning);
+        return false;
       } else {
-        console.error(`[WorktreeProvider] Unexpected error deleting branch ${branchName}:`, {
-          message: err.message,
-          stderr: err.stderr,
-        });
+        const warning = `Unexpected error deleting branch '${branchName}': ${err.message}`;
+        console.error(`[WorktreeProvider] ${warning}`, { stderr: err.stderr });
+        result.warnings.push(warning);
+        return false;
       }
     }
   }
@@ -217,8 +237,20 @@ export class WorktreeProvider implements IIsolationProvider {
     }
 
     // Get branch name from worktree
-    const repoPath = await getCanonicalRepoPath(worktreePath);
-    const worktrees = await listWorktrees(repoPath);
+    let repoPath: string;
+    let worktrees: { path: string; branch: string }[];
+    try {
+      repoPath = await getCanonicalRepoPath(worktreePath);
+      worktrees = await listWorktrees(repoPath);
+    } catch (error) {
+      const err = error as Error;
+      console.error('[WorktreeProvider] Failed to query worktree info for get()', {
+        worktreePath,
+        error: err.message,
+      });
+      throw error;
+    }
+
     const wt = worktrees.find(w => w.path === worktreePath);
 
     // If worktree exists on disk but not in git's list, it's a corrupted state
@@ -275,8 +307,20 @@ export class WorktreeProvider implements IIsolationProvider {
       return null;
     }
 
-    const repoPath = await getCanonicalRepoPath(path);
-    const worktrees = await listWorktrees(repoPath);
+    let repoPath: string;
+    let worktrees: { path: string; branch: string }[];
+    try {
+      repoPath = await getCanonicalRepoPath(path);
+      worktrees = await listWorktrees(repoPath);
+    } catch (error) {
+      const err = error as Error;
+      console.error('[WorktreeProvider] Failed to query worktree info for adopt()', {
+        path,
+        error: err.message,
+      });
+      return null;
+    }
+
     const wt = worktrees.find(w => w.path === path);
 
     if (!wt) {

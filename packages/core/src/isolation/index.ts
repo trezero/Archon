@@ -6,9 +6,14 @@
  */
 
 import { WorktreeProvider } from './providers/worktree';
-import type { IIsolationProvider, IsolatedEnvironment, IsolationRequest } from './types';
+import type {
+  DestroyResult,
+  IIsolationProvider,
+  IsolatedEnvironment,
+  IsolationRequest,
+} from './types';
 
-export type { IIsolationProvider, IsolatedEnvironment, IsolationRequest };
+export type { DestroyResult, IIsolationProvider, IsolatedEnvironment, IsolationRequest };
 
 let provider: IIsolationProvider | null = null;
 

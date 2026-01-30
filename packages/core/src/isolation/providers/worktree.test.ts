@@ -876,6 +876,64 @@ describe('WorktreeProvider', () => {
         expect.any(Object)
       );
     });
+
+    test('returns DestroyResult with all fields true on full success', async () => {
+      const worktreePath = '/workspace/worktrees/repo/issue-42';
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+
+      const result = await provider.destroy(worktreePath, { branchName: 'issue-42' });
+
+      expect(result.worktreeRemoved).toBe(true);
+      expect(result.directoryClean).toBe(true);
+      expect(result.branchDeleted).toBe(true);
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    test('returns warning when branch cleanup skipped (no canonicalRepoPath)', async () => {
+      const worktreePath = '/workspace/worktrees/repo/nonexistent';
+      const enoentError = new Error('ENOENT') as NodeJS.ErrnoException;
+      enoentError.code = 'ENOENT';
+      mockAccess.mockRejectedValueOnce(enoentError);
+
+      const result = await provider.destroy(worktreePath, { branchName: 'test-branch' });
+
+      expect(result.worktreeRemoved).toBe(true);
+      expect(result.branchDeleted).toBe(false);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toContain('Cannot delete branch');
+    });
+
+    test('returns branchDeleted=true when no branch requested', async () => {
+      const worktreePath = '/workspace/worktrees/repo/issue-42';
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+
+      const result = await provider.destroy(worktreePath);
+
+      expect(result.worktreeRemoved).toBe(true);
+      expect(result.branchDeleted).toBe(true); // No branch to delete counts as success
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    test('returns branchDeleted=false with warning when branch is checked out elsewhere', async () => {
+      const worktreePath = '/workspace/worktrees/repo/issue-42';
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('branch') && args.includes('-D')) {
+          const error = new Error('error: checked out at') as Error & { stderr?: string };
+          error.stderr = "error: Cannot delete branch 'issue-42' checked out at '/workspace/repo'";
+          throw error;
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      const result = await provider.destroy(worktreePath, { branchName: 'issue-42' });
+
+      expect(result.worktreeRemoved).toBe(true);
+      expect(result.branchDeleted).toBe(false);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toContain('checked out elsewhere');
+    });
   });
 
   describe('get', () => {
@@ -899,6 +957,25 @@ describe('WorktreeProvider', () => {
       expect(result).not.toBeNull();
       expect(result?.provider).toBe('worktree');
       expect(result?.branchName).toBe('issue-42');
+    });
+
+    test('re-throws errors from getCanonicalRepoPath with logging', async () => {
+      worktreeExistsSpy.mockResolvedValue(true);
+      getCanonicalRepoPathSpy.mockRejectedValue(new Error('Permission denied'));
+
+      await expect(provider.get('/workspace/worktrees/repo/issue-42')).rejects.toThrow(
+        'Permission denied'
+      );
+    });
+
+    test('re-throws errors from listWorktrees with logging', async () => {
+      worktreeExistsSpy.mockResolvedValue(true);
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+      listWorktreesSpy.mockRejectedValue(new Error('git timeout'));
+
+      await expect(provider.get('/workspace/worktrees/repo/issue-42')).rejects.toThrow(
+        'git timeout'
+      );
     });
   });
 
@@ -959,6 +1036,23 @@ describe('WorktreeProvider', () => {
     test('returns null for non-existent path', async () => {
       worktreeExistsSpy.mockResolvedValue(false);
       const result = await provider.adopt('/workspace/worktrees/repo/nonexistent');
+      expect(result).toBeNull();
+    });
+
+    test('returns null and logs error when getCanonicalRepoPath fails', async () => {
+      worktreeExistsSpy.mockResolvedValue(true);
+      getCanonicalRepoPathSpy.mockRejectedValue(new Error('Permission denied'));
+
+      const result = await provider.adopt('/workspace/worktrees/repo/feature-auth');
+      expect(result).toBeNull();
+    });
+
+    test('returns null and logs error when listWorktrees fails', async () => {
+      worktreeExistsSpy.mockResolvedValue(true);
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+      listWorktreesSpy.mockRejectedValue(new Error('git timeout'));
+
+      const result = await provider.adopt('/workspace/worktrees/repo/feature-auth');
       expect(result).toBeNull();
     });
   });
@@ -1341,7 +1435,11 @@ describe('WorktreeProvider', () => {
       );
 
       // Should NOT throw - post-removal cleanup is best-effort
-      await expect(provider.destroy(worktreePath)).resolves.toBeUndefined();
+      const result = await provider.destroy(worktreePath);
+      expect(result.worktreeRemoved).toBe(true);
+      expect(result.directoryClean).toBe(false);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toContain('Failed to clean remaining directory');
     });
 
     test('cleans orphan directory before creating same-repo PR worktree', async () => {

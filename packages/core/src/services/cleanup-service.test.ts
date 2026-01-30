@@ -10,7 +10,14 @@ mock.module('../utils/git', () => ({
 }));
 
 // Mock isolation provider
-const mockDestroy = mock(() => Promise.resolve());
+const mockDestroy = mock(() =>
+  Promise.resolve({
+    worktreeRemoved: true,
+    branchDeleted: true,
+    directoryClean: true,
+    warnings: [],
+  })
+);
 mock.module('../isolation', () => ({
   getIsolationProvider: () => ({
     destroy: mockDestroy,

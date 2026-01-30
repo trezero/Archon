@@ -126,11 +126,16 @@ export async function removeEnvironment(
 
     // Remove the worktree (and branch if provided)
     // Call destroy even if path doesn't exist - branch cleanup may still be needed
-    await provider.destroy(env.working_path, {
+    const destroyResult = await provider.destroy(env.working_path, {
       force: options?.force,
       branchName: env.branch_name,
       canonicalRepoPath,
     });
+
+    // Log warnings from partial failures
+    if (destroyResult.warnings.length > 0) {
+      console.warn(`[Cleanup] Partial cleanup for ${envId}:`, destroyResult.warnings);
+    }
 
     // Mark as destroyed in database
     await isolationEnvDb.updateStatus(envId, 'destroyed');
