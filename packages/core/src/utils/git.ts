@@ -186,7 +186,7 @@ export async function createWorktreeForIssue(
   const branchName = isPR ? `pr-${String(issueNumber)}` : `issue-${String(issueNumber)}`;
 
   // Extract owner and repo name from repoPath to avoid collisions
-  // repoPath format: /.archon/workspaces/owner/repo
+  // repoPath format: /.archon/workspaces/owner/repo (or C:\...\ on Windows)
   const pathParts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
   const repoName = pathParts[pathParts.length - 1]; // Last part: "repo"
   const ownerName = pathParts[pathParts.length - 2]; // Second to last: "owner"
