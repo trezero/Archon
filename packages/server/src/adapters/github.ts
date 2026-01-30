@@ -887,7 +887,7 @@ ${userComment}`;
         }
       }
     } else {
-      // For non-command messages, add rich context
+      // For non-command messages, add rich context and issue/PR reference for workflows
       if (eventType === 'issue' && issue) {
         finalMessage = this.buildIssueContext(issue, strippedComment);
         contextToAppend = `GitHub Issue #${String(issue.number)}: "${issue.title}"\nUse 'gh issue view ${String(issue.number)}' for full details if needed.`;
