@@ -177,6 +177,15 @@ In Docker: `/.archon/`
 
 See [Configuration Guide](docs/configuration.md) for customization options.
 
+> **Important: How commands and workflows are loaded**
+>
+> Commands (`.archon/commands/`) and workflows (`.archon/workflows/`) are loaded **at runtime from the working directory** — not from a fixed location. This means:
+>
+> - **Server (Telegram/Slack/GitHub):** The working directory is the workspace clone (`~/.archon/workspaces/owner/repo/`). Changes to commands or workflows must be **committed and pushed** to the remote — the workspace syncs from origin before worktree creation, but does not see local uncommitted changes from other clones.
+> - **CLI (`archon workflow run`):** The working directory is wherever you run the command. If you run from your local repo, it reads files directly from disk, including uncommitted changes.
+>
+> If you edit a workflow locally but don't push, the server won't pick it up. The CLI will, as long as you run it from the same directory.
+
 ---
 
 ## Setup Guide

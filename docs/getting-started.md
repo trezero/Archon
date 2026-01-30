@@ -160,6 +160,15 @@ steps:
 
 Workflows chain multiple commands together, support parallel steps, and carry context between steps via variable substitution.
 
+> **Where are commands and workflows loaded from?**
+>
+> Commands and workflows are loaded at runtime from the current working directory — not from a fixed global location.
+>
+> - **CLI:** Reads from wherever you run the `archon` command. If you run from your local repo, it picks up uncommitted changes immediately.
+> - **Server (Telegram/Slack/GitHub):** Reads from the workspace clone at `~/.archon/workspaces/owner/repo/`. This clone only syncs from the remote before worktree creation, so you need to **commit and push** changes for the server to see them.
+>
+> In short: the CLI sees your local files, the server sees what's been pushed.
+
 ---
 
 ## Isolation (Worktrees)

@@ -23,7 +23,7 @@ steps:
 
 ## File Location
 
-Workflows live in `.archon/workflows/`:
+Workflows live in `.archon/workflows/` relative to the working directory:
 
 ```
 .archon/
@@ -36,6 +36,8 @@ Workflows live in `.archon/workflows/`:
 ```
 
 Archon discovers workflows recursively - subdirectories are fine.
+
+> **CLI vs Server:** The CLI reads workflow files from wherever you run it (sees uncommitted changes). The server reads from the workspace clone at `~/.archon/workspaces/owner/repo/`, which only syncs from the remote before worktree creation. If you edit a workflow locally but don't push, the server won't see it.
 
 ---
 

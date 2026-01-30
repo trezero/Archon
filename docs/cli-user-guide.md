@@ -124,6 +124,8 @@ Running from a subdirectory (e.g., `/repo/packages/cli`) automatically resolves 
 
 When using `--branch`, workflows run inside the worktree directory.
 
+> **Commands and workflows are loaded from the working directory at runtime.** The CLI reads directly from disk, so it picks up uncommitted changes immediately. This is different from the server (Telegram/Slack/GitHub), which reads from the workspace clone at `~/.archon/workspaces/` — that clone only syncs from the remote before worktree creation, so changes must be pushed to take effect there.
+
 ## Environment
 
 The CLI loads environment from:
