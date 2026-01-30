@@ -3227,6 +3227,256 @@ describe('Workflow Executor', () => {
       expect(errorMsg).toBeDefined();
     });
   });
+
+  describe('error tracking improvements (#259)', () => {
+    beforeEach(() => {
+      // Reset mockQuery to default implementation (previous tests may override it)
+      mockQuery.mockImplementation((query: string) => {
+        if (query.includes("status = 'running'")) {
+          return Promise.resolve(createQueryResult([]));
+        }
+        if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
+          return Promise.resolve(
+            createQueryResult([
+              {
+                id: 'test-workflow-run-id',
+                workflow_name: 'test-workflow',
+                conversation_id: 'conv-123',
+                codebase_id: 'codebase-456',
+                current_step_index: 0,
+                status: 'running' as const,
+                user_message: 'test user message',
+                metadata: {},
+                started_at: new Date(),
+                completed_at: null,
+              },
+            ])
+          );
+        }
+        return Promise.resolve(createQueryResult([]));
+      });
+    });
+
+    describe('consecutive UNKNOWN error tracking', () => {
+      it('should fail workflow step after 3 consecutive unknown errors in stream mode', async () => {
+        // Unknown errors: message doesn't match any FATAL or TRANSIENT patterns
+        const sendMessageMock = mock(() =>
+          Promise.reject(new Error('Some completely unexpected error'))
+        );
+        mockPlatform.sendMessage = sendMessageMock;
+        (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
+
+        // Provide enough AI messages to trigger 3 consecutive send failures
+        mockSendQuery.mockImplementation(function* () {
+          yield { type: 'assistant', content: 'Message 1' };
+          yield { type: 'assistant', content: 'Message 2' };
+          yield { type: 'assistant', content: 'Message 3' };
+          yield { type: 'result', sessionId: 'session-1' };
+        });
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          {
+            name: 'test-workflow',
+            description: 'Test',
+            steps: [{ command: 'command-one' }],
+          },
+          'User message',
+          'db-conv-id'
+        );
+
+        // safeSendMessage throws after 3 unknown errors, caught by executeStepInternal,
+        // which returns { success: false } → workflow marks as failed in DB
+        const failedCalls = getWorkflowStatusUpdates('failed');
+        expect(failedCalls.length).toBeGreaterThan(0);
+      });
+
+      it('should reset unknown error counter on successful send', async () => {
+        let callCount = 0;
+        const sendMessageMock = mock(() => {
+          callCount++;
+          // Fail first 2 calls (unknown errors), succeed on 3rd, fail next 2
+          if (callCount <= 2 || (callCount >= 4 && callCount <= 5)) {
+            return Promise.reject(new Error('Unexpected SDK error'));
+          }
+          return Promise.resolve();
+        });
+        mockPlatform.sendMessage = sendMessageMock;
+        (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
+
+        mockSendQuery.mockImplementation(function* () {
+          yield { type: 'assistant', content: 'Message 1' };
+          yield { type: 'assistant', content: 'Message 2' };
+          yield { type: 'assistant', content: 'Message 3' };
+          yield { type: 'assistant', content: 'Message 4' };
+          yield { type: 'assistant', content: 'Message 5' };
+          yield { type: 'result', sessionId: 'session-1' };
+        });
+
+        // Should NOT abort because counter resets on success (call 3)
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          {
+            name: 'test-workflow',
+            description: 'Test',
+            steps: [{ command: 'command-one' }],
+          },
+          'User message',
+          'db-conv-id'
+        );
+
+        // Workflow completed - counter reset prevented abort
+        const completeCalls = getWorkflowStatusUpdates('completed');
+        expect(completeCalls.length).toBeGreaterThan(0);
+      });
+
+      it('should not track unknown errors when sendMessage fails with transient error', async () => {
+        // Transient error - contains "rate limit" pattern
+        const sendMessageMock = mock(() => Promise.reject(new Error('rate limit exceeded')));
+        mockPlatform.sendMessage = sendMessageMock;
+        (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
+
+        mockSendQuery.mockImplementation(function* () {
+          yield { type: 'assistant', content: 'Message 1' };
+          yield { type: 'assistant', content: 'Message 2' };
+          yield { type: 'assistant', content: 'Message 3' };
+          yield { type: 'assistant', content: 'Message 4' };
+          yield { type: 'result', sessionId: 'session-1' };
+        });
+
+        // Should NOT abort - transient errors don't increment unknown counter
+        // Workflow completes because transient send failures are suppressed
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          {
+            name: 'test-workflow',
+            description: 'Test',
+            steps: [{ command: 'command-one' }],
+          },
+          'User message',
+          'db-conv-id'
+        );
+
+        const completeCalls = getWorkflowStatusUpdates('completed');
+        expect(completeCalls.length).toBeGreaterThan(0);
+      });
+    });
+
+    describe('activity update failure tracking', () => {
+      it('should warn user after 5 consecutive activity update failures', async () => {
+        // Make activity updates fail (the UPDATE query for last_activity_at)
+        mockQuery.mockImplementation((query: string) => {
+          if (typeof query === 'string' && query.includes('last_activity_at')) {
+            return Promise.reject(new Error('DB connection lost'));
+          }
+          if (query.includes("status = 'running'")) {
+            return Promise.resolve(createQueryResult([]));
+          }
+          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
+            return Promise.resolve(
+              createQueryResult([
+                {
+                  id: 'test-workflow-run-id',
+                  workflow_name: 'test-workflow',
+                  conversation_id: 'conv-123',
+                  codebase_id: 'codebase-456',
+                  current_step_index: 0,
+                  status: 'running' as const,
+                  user_message: 'test user message',
+                  metadata: {},
+                  started_at: new Date(),
+                  completed_at: null,
+                },
+              ])
+            );
+          }
+          return Promise.resolve(createQueryResult([]));
+        });
+
+        (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
+
+        // Generate enough messages to trigger 5+ activity update failures
+        mockSendQuery.mockImplementation(function* () {
+          yield { type: 'assistant', content: 'Msg 1' };
+          yield { type: 'assistant', content: 'Msg 2' };
+          yield { type: 'assistant', content: 'Msg 3' };
+          yield { type: 'assistant', content: 'Msg 4' };
+          yield { type: 'assistant', content: 'Msg 5' };
+          yield { type: 'assistant', content: 'Msg 6' };
+          yield { type: 'result', sessionId: 'session-1' };
+        });
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          {
+            name: 'test-workflow',
+            description: 'Test',
+            steps: [{ command: 'command-one' }],
+          },
+          'User message',
+          'db-conv-id'
+        );
+
+        // Verify the degradation warning was sent
+        const sendCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+        const warningMessages = sendCalls.filter(
+          (call: unknown[]) =>
+            typeof call[1] === 'string' &&
+            (call[1] as string).includes('health monitoring degraded')
+        );
+        expect(warningMessages.length).toBe(1);
+      });
+    });
+
+    describe('batch mode failure tracking', () => {
+      it('should attempt to warn user when batch send fails', async () => {
+        // Use batch mode and fail sendMessage with unknown error
+        const sendMessageMock = mock(() =>
+          Promise.reject(new Error('Some completely unexpected error'))
+        );
+        mockPlatform.sendMessage = sendMessageMock;
+        (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('batch');
+
+        mockSendQuery.mockImplementation(function* () {
+          yield { type: 'assistant', content: 'Batch message 1' };
+          yield { type: 'assistant', content: 'Batch message 2' };
+          yield { type: 'result', sessionId: 'session-1' };
+        });
+
+        await executeWorkflow(
+          mockPlatform,
+          'conv-123',
+          testDir,
+          {
+            name: 'test-workflow',
+            description: 'Test',
+            steps: [{ command: 'command-one' }],
+          },
+          'User message',
+          'db-conv-id'
+        );
+
+        // Batch send fails (unknown error count = 1), then dropped message warning
+        // also fails (unknown error count = 2) — below threshold so step completes.
+        // Verify the batch send and dropped message warning were both attempted.
+        const sendCalls = sendMessageMock.mock.calls;
+        const droppedWarningAttempts = sendCalls.filter(
+          (call: unknown[]) =>
+            typeof call[1] === 'string' &&
+            (call[1] as string).includes('message(s) failed to deliver')
+        );
+        expect(droppedWarningAttempts.length).toBeGreaterThan(0);
+      });
+    });
+  });
 });
 
 describe('isValidCommandName', () => {

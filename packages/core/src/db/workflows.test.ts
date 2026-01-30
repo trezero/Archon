@@ -374,11 +374,11 @@ describe('workflows database', () => {
       );
     });
 
-    test('does not throw on database error (non-throwing design)', async () => {
+    test('throws on database error so callers can track failures', async () => {
       mockQuery.mockRejectedValueOnce(new Error('Connection lost'));
 
-      // Should not throw - just logs the error
-      await updateWorkflowActivity('workflow-run-123');
+      // Should throw - callers (executor) handle failure tracking
+      await expect(updateWorkflowActivity('workflow-run-123')).rejects.toThrow('Connection lost');
 
       // Verify the query was attempted
       expect(mockQuery).toHaveBeenCalled();

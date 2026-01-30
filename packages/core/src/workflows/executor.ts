@@ -146,19 +146,31 @@ function logSendError(
   });
 }
 
+/** Threshold for consecutive UNKNOWN errors before aborting */
+const UNKNOWN_ERROR_THRESHOLD = 3;
+
+/** Mutable counter for tracking consecutive unknown errors across calls */
+interface UnknownErrorTracker {
+  count: number;
+}
+
 /**
  * Safely send a message to the platform without crashing on failure.
  * Returns true if message was sent successfully, false otherwise.
  * Only suppresses transient/unknown errors; fatal errors are rethrown.
+ * When unknownErrorTracker is provided, consecutive UNKNOWN errors are tracked
+ * and the workflow is aborted after UNKNOWN_ERROR_THRESHOLD consecutive failures.
  */
 async function safeSendMessage(
   platform: IPlatformAdapter,
   conversationId: string,
   message: string,
-  context?: SendMessageContext
+  context?: SendMessageContext,
+  unknownErrorTracker?: UnknownErrorTracker
 ): Promise<boolean> {
   try {
     await platform.sendMessage(conversationId, message);
+    if (unknownErrorTracker) unknownErrorTracker.count = 0;
     return true;
   } catch (error) {
     const err = error as Error;
@@ -173,7 +185,17 @@ async function safeSendMessage(
       throw new Error(`Platform authentication/permission error: ${err.message}`);
     }
 
-    // Transient/unknown errors are suppressed to allow workflow to continue
+    // Track consecutive UNKNOWN errors - abort if threshold exceeded
+    if (errorType === 'UNKNOWN' && unknownErrorTracker) {
+      unknownErrorTracker.count++;
+      if (unknownErrorTracker.count >= UNKNOWN_ERROR_THRESHOLD) {
+        throw new Error(
+          `${String(UNKNOWN_ERROR_THRESHOLD)} consecutive unrecognized errors - aborting workflow: ${err.message}`
+        );
+      }
+    }
+
+    // Transient errors (and below-threshold unknown errors) suppressed to allow workflow to continue
     return false;
   }
 }
@@ -555,14 +577,43 @@ async function executeStepInternal(
   try {
     const assistantMessages: string[] = [];
     let droppedMessageCount = 0;
+    const unknownErrorTracker: UnknownErrorTracker = { count: 0 };
+    let activityUpdateFailures = 0;
+    let activityWarningShown = false;
 
     for await (const msg of aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId)) {
-      // Update activity timestamp on each message (non-blocking, non-critical)
-      void workflowDb.updateWorkflowActivity(workflowRun.id);
+      // Update activity timestamp with failure tracking
+      try {
+        await workflowDb.updateWorkflowActivity(workflowRun.id);
+        activityUpdateFailures = 0;
+      } catch (error) {
+        activityUpdateFailures++;
+        console.warn('[WorkflowExecutor] Activity update failed', {
+          workflowRunId: workflowRun.id,
+          consecutiveFailures: activityUpdateFailures,
+          error: (error as Error).message,
+        });
+        if (activityUpdateFailures >= 5 && !activityWarningShown) {
+          activityWarningShown = true;
+          await safeSendMessage(
+            platform,
+            conversationId,
+            '⚠️ Workflow health monitoring degraded. Staleness detection may be unreliable.',
+            messageContext,
+            unknownErrorTracker
+          );
+        }
+      }
 
       if (msg.type === 'assistant' && msg.content) {
         if (streamingMode === 'stream') {
-          const sent = await safeSendMessage(platform, conversationId, msg.content, messageContext);
+          const sent = await safeSendMessage(
+            platform,
+            conversationId,
+            msg.content,
+            messageContext,
+            unknownErrorTracker
+          );
           if (!sent) droppedMessageCount++;
         } else {
           assistantMessages.push(msg.content);
@@ -571,7 +622,13 @@ async function executeStepInternal(
       } else if (msg.type === 'tool' && msg.toolName) {
         if (streamingMode === 'stream') {
           const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
-          const sent = await safeSendMessage(platform, conversationId, toolMessage, messageContext);
+          const sent = await safeSendMessage(
+            platform,
+            conversationId,
+            toolMessage,
+            messageContext,
+            unknownErrorTracker
+          );
           if (!sent) droppedMessageCount++;
         }
         await logTool(cwd, workflowRun.id, msg.toolName, msg.toolInput ?? {});
@@ -580,23 +637,32 @@ async function executeStepInternal(
       }
     }
 
-    // Batch mode: send accumulated messages
+    // Batch mode: send accumulated messages - track failures
     if (streamingMode === 'batch' && assistantMessages.length > 0) {
-      await safeSendMessage(
+      const sent = await safeSendMessage(
         platform,
         conversationId,
         assistantMessages.join('\n\n'),
-        messageContext
+        messageContext,
+        unknownErrorTracker
       );
+      if (!sent) {
+        console.error('[WorkflowExecutor] Batch send failed - user missed all output for step', {
+          stepName: commandName,
+          messageCount: assistantMessages.length,
+        });
+        droppedMessageCount = assistantMessages.length;
+      }
     }
 
-    // Warn user about dropped messages in streaming mode
+    // Warn user about dropped messages (both stream and batch modes)
     if (droppedMessageCount > 0) {
       await safeSendMessage(
         platform,
         conversationId,
         `⚠️ ${String(droppedMessageCount)} message(s) failed to deliver. Check workflow logs for full output.`,
-        messageContext
+        messageContext,
+        unknownErrorTracker
       );
     }
 
@@ -826,10 +892,33 @@ async function executeLoopWorkflow(
       const assistantMessages: string[] = [];
       let fullOutput = '';
       let droppedMessageCount = 0;
+      const unknownErrorTracker: UnknownErrorTracker = { count: 0 };
+      let activityUpdateFailures = 0;
+      let activityWarningShown = false;
 
       for await (const msg of aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId)) {
-        // Update activity timestamp on each message (non-blocking, non-critical)
-        void workflowDb.updateWorkflowActivity(workflowRun.id);
+        // Update activity timestamp with failure tracking
+        try {
+          await workflowDb.updateWorkflowActivity(workflowRun.id);
+          activityUpdateFailures = 0;
+        } catch (error) {
+          activityUpdateFailures++;
+          console.warn('[WorkflowExecutor] Activity update failed', {
+            workflowRunId: workflowRun.id,
+            consecutiveFailures: activityUpdateFailures,
+            error: (error as Error).message,
+          });
+          if (activityUpdateFailures >= 5 && !activityWarningShown) {
+            activityWarningShown = true;
+            await safeSendMessage(
+              platform,
+              conversationId,
+              '⚠️ Workflow health monitoring degraded. Staleness detection may be unreliable.',
+              workflowContext,
+              unknownErrorTracker
+            );
+          }
+        }
 
         if (msg.type === 'assistant' && msg.content) {
           fullOutput += msg.content;
@@ -838,7 +927,8 @@ async function executeLoopWorkflow(
               platform,
               conversationId,
               msg.content,
-              workflowContext
+              workflowContext,
+              unknownErrorTracker
             );
             if (!sent) droppedMessageCount++;
           } else {
@@ -852,7 +942,8 @@ async function executeLoopWorkflow(
               platform,
               conversationId,
               toolMessage,
-              workflowContext
+              workflowContext,
+              unknownErrorTracker
             );
             if (!sent) droppedMessageCount++;
           }
@@ -862,23 +953,35 @@ async function executeLoopWorkflow(
         }
       }
 
-      // Batch mode: send accumulated messages
+      // Batch mode: send accumulated messages - track failures
       if (streamingMode === 'batch' && assistantMessages.length > 0) {
-        await safeSendMessage(
+        const sent = await safeSendMessage(
           platform,
           conversationId,
           assistantMessages.join('\n\n'),
-          workflowContext
+          workflowContext,
+          unknownErrorTracker
         );
+        if (!sent) {
+          console.error(
+            '[WorkflowExecutor] Batch send failed - user missed all output for loop iteration',
+            {
+              iteration: i,
+              messageCount: assistantMessages.length,
+            }
+          );
+          droppedMessageCount = assistantMessages.length;
+        }
       }
 
-      // Warn user about dropped messages in streaming mode
+      // Warn user about dropped messages (both stream and batch modes)
       if (droppedMessageCount > 0) {
         await safeSendMessage(
           platform,
           conversationId,
           `⚠️ ${String(droppedMessageCount)} message(s) failed to deliver in iteration ${String(i)}. Check workflow logs for full output.`,
-          workflowContext
+          workflowContext,
+          unknownErrorTracker
         );
       }
 
