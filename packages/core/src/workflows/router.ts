@@ -106,16 +106,17 @@ ${workflowList}
 
 ## Rules
 
-1. Read the CONTEXT section FIRST (if present) to understand the situation
-2. Read each workflow's description - especially the "NOT for" and "Use when" sections
-3. Pick the workflow that best matches the user's intent given the full context
-4. IMPORTANT distinctions:
+1. The USER REQUEST is the PRIMARY signal — it determines which workflow to use
+2. The CONTEXT section is supplementary — it tells you WHERE the user is, not WHAT they want
+3. Read each workflow's description - especially the "NOT for" and "Use when" sections
+4. CRITICAL: Being on a GitHub issue does NOT mean the user wants to fix it. Only route to "fix-github-issue" if the user EXPLICITLY asks to fix, resolve, or implement something.
+5. IMPORTANT distinctions:
    - CI failures, test failures, build errors, linting issues → use "assist" (debugging help)
-   - "Fix this GitHub issue" (implement a solution to a tracked issue) → use "fix-github-issue"
-   - Questions, exploration, explanations → use "assist"
+   - "Fix this issue" / "implement this" / "resolve this bug" (explicit action request) → use "fix-github-issue"
+   - Questions, exploration, explanations, general messages → use "assist"
    - PR reviews, code reviews → check for a PR review workflow in the list above
-5. If unsure, prefer "assist" (the catch-all)
-6. You MUST pick a workflow - never respond with just text
+6. If unsure, prefer "assist" (the catch-all)
+7. You MUST pick a workflow - never respond with just text
 
 ## Response Format
 

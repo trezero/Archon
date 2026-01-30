@@ -1,124 +1,10 @@
 # Getting Started
 
-This guide walks you through setting up the Remote Coding Agent from scratch.
+A practical guide to getting the Archon CLI installed and running against your own repository.
 
-## Prerequisites
+## Setup
 
-Before you begin, you'll need:
-
-1. **Docker** (recommended) or **Bun** runtime
-2. **Database** - SQLite (default, zero-config) or PostgreSQL (optional, for multi-container deployments)
-3. **AI Assistant credentials** (Claude or Codex)
-4. **Platform credentials** (Telegram, Discord, Slack, or GitHub)
-
-## Step 1: Choose Your Setup Method
-
-| Method | Best For | Time |
-|--------|----------|------|
-| [Docker Quick Start](#docker-quick-start) | Trying it out, production | ~10 min |
-| [Local Development](#local-development) | Contributing, customizing | ~15 min |
-| [Cloud Deployment](cloud-deployment.md) | 24/7 self-hosted | ~30 min |
-
-## Docker Quick Start
-
-### 1.1 Get the Files
-
-```bash
-mkdir remote-agent && cd remote-agent
-
-# Download docker-compose and env template
-curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/deploy/docker-compose.yml -o docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/deploy/.env.example -o .env
-```
-
-### 1.2 Get Your Credentials
-
-#### Database
-
-**Option A: Use a managed database (recommended)**
-1. Create a free database at [Supabase](https://supabase.com) or [Neon](https://neon.tech)
-2. Copy the connection string
-
-**Option B: Run PostgreSQL locally**
-- Uncomment the postgres service in docker-compose.yml
-- Use: `postgresql://postgres:postgres@postgres:5432/remote_coding_agent`
-
-#### AI Assistant
-
-**Claude (recommended):**
-1. Install Claude Code CLI: https://docs.anthropic.com/claude-code
-2. Run: `claude setup-token`
-3. Copy the token (starts with `sk-ant-oat01-`)
-
-**Codex:**
-1. Run: `codex login`
-2. Copy credentials from `~/.codex/auth.json`
-
-#### Platform (choose at least one)
-
-**Telegram:**
-1. Message [@BotFather](https://t.me/BotFather) on Telegram
-2. Send `/newbot` and follow prompts
-3. Copy the bot token
-
-**Discord:**
-1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
-2. Create New Application > Bot > Reset Token
-3. Enable MESSAGE CONTENT INTENT in Bot settings
-4. Copy the bot token
-
-**Slack:**
-1. Go to [Slack API](https://api.slack.com/apps)
-2. Create New App > From Scratch
-3. See [Slack Setup Guide](slack-setup.md) for detailed steps
-
-**GitHub Webhooks:**
-1. Generate a webhook secret: `openssl rand -hex 32`
-2. Add webhook to your repo (Settings > Webhooks)
-3. Set URL: `https://your-server/webhooks/github`
-4. See [README GitHub Webhooks section](../README.md#-github-webhooks) for detailed steps
-
-### 1.3 Configure
-
-Edit `.env` with your credentials:
-
-```bash
-nano .env
-```
-
-At minimum, set:
-- `DATABASE_URL` (optional - omit to use SQLite at `~/.archon/archon.db`)
-- One AI assistant (`CLAUDE_CODE_OAUTH_TOKEN` or Codex credentials)
-- One platform (`TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, etc.)
-
-### 1.4 Start
-
-```bash
-docker compose up -d
-```
-
-### 1.5 Verify
-
-```bash
-# Check health
-curl http://localhost:3000/health
-# Expected: {"status":"ok"}
-
-# Check database
-curl http://localhost:3000/health/db
-# Expected: {"status":"ok","database":"connected"}
-```
-
-### 1.6 Test Your Bot
-
-Send a message to your bot:
-- **Telegram**: Message your bot with `/help`
-- **Discord**: Mention your bot with `@botname /help`
-- **Slack**: Message your bot with `/help`
-
-## Local Development
-
-### 2.1 Clone and Install
+**Step 1: Clone and install**
 
 ```bash
 git clone https://github.com/dynamous-community/remote-coding-agent
@@ -126,72 +12,185 @@ cd remote-coding-agent
 bun install
 ```
 
-### 2.2 Configure
+**Step 2: Install the CLI globally**
 
 ```bash
-cp .env.example .env
-nano .env  # Add your credentials (same as Docker method)
+cd packages/cli && bun link && cd ../..
 ```
 
-### 2.3 Start Database
+This registers the `archon` command globally so you can run it from any repository.
+
+**Step 3: Authenticate with Claude**
+
+If you already use Claude Code on your system, this is probably already done.
 
 ```bash
-docker compose --profile with-db up -d postgres
+claude /login
 ```
 
-### 2.4 Run Migrations
+The CLI uses your existing Claude authentication by default — no API keys or `.env` file needed.
+
+**Step 4: Run workflows from your repository**
 
 ```bash
-psql $DATABASE_URL < migrations/000_combined.sql
+cd /path/to/your/repository
+
+# See available workflows
+archon workflow list
+
+# Ask a question about the codebase
+archon workflow run archon-assist "How does the auth module work?"
+
+# Plan a feature on an isolated branch
+archon workflow run archon-feature-development --branch feat/dark-mode "Add dark mode"
+
+# Fix a GitHub issue
+archon workflow run archon-fix-github-issue --branch fix/issue-42 "Fix issue #42"
 ```
 
-### 2.5 Validate Setup
+That's it. The CLI auto-detects the git repo, uses SQLite for state tracking (`~/.archon/archon.db`), and streams output to stdout.
+
+---
+
+## CLI Reference
+
+### Workflows
 
 ```bash
-bun run setup:check
+# List all available workflows
+archon workflow list
+
+# Run a workflow
+archon workflow run <name> "<message>"
+
+# Run with worktree isolation (recommended for code changes)
+archon workflow run <name> --branch <branch-name> "<message>"
+
+# Run on branch directly without worktree
+archon workflow run <name> --branch <branch-name> --no-worktree "<message>"
+
+# Run against a different directory
+archon workflow run <name> --cwd /path/to/repo "<message>"
 ```
 
-### 2.6 Start Development Server
+### Worktree Management
 
 ```bash
-bun run dev
+archon isolation list              # show active worktrees
+archon isolation cleanup           # remove stale (>7 days)
+archon isolation cleanup 14        # custom staleness threshold
 ```
 
-The server starts with hot reload. Changes to code automatically restart.
+### Available Workflows
 
-## Next Steps
+| Workflow | What It Does |
+|----------|-------------|
+| `archon-assist` | General questions, debugging, exploration |
+| `archon-fix-github-issue` | Investigate → plan → fix → PR for a GitHub issue |
+| `archon-idea-to-pr` | From idea to plan to implementation to PR |
+| `archon-plan-to-pr` | Execute an existing plan through to PR |
+| `archon-feature-development` | Implement a feature from a plan |
+| `archon-comprehensive-pr-review` | Multi-agent PR review |
+| `archon-resolve-conflicts` | Resolve merge conflicts |
+| `archon-ralph-fresh` | Iterate through PRD stories (stateless) |
+| `archon-ralph-stateful` | Iterate through PRD stories (with memory) |
+| `archon-test-loop` | Run tests in a loop until passing |
 
-- [Configuration Guide](configuration.md) - Customize settings
-- [Command System](../CLAUDE.md#command-system-patterns) - Create custom commands
-- [Cloud Deployment](cloud-deployment.md) - Deploy for 24/7 operation
+---
 
-## Troubleshooting
+## Optional: Customize Your Target Repo
 
-### "Database connection failed"
+Add an `.archon/` directory to your target repo for repo-specific behavior:
 
-1. **Using SQLite (default)**: No configuration needed - database auto-created at `~/.archon/archon.db`
-2. **Using PostgreSQL**: Check `DATABASE_URL` is correct
-3. For managed DB: Ensure IP is whitelisted
-4. For local: Ensure postgres container is running: `docker compose ps`
+```
+your-repo/
+└── .archon/
+    ├── config.yaml         # AI assistant, worktree copy rules
+    ├── commands/            # Custom command templates (.md files)
+    └── workflows/           # Custom multi-step workflows (.yaml files)
+```
 
-### "No AI assistant credentials found"
+**Example `.archon/config.yaml`:**
 
-Set at least one of:
-- `CLAUDE_CODE_OAUTH_TOKEN` (recommended)
-- `CLAUDE_API_KEY`
-- `CODEX_ID_TOKEN` + `CODEX_ACCESS_TOKEN` + `CODEX_REFRESH_TOKEN`
+```yaml
+assistant: claude
+commands:
+  folder: .claude/commands/archon    # additional command search path
+worktree:
+  copyFiles:
+    - .env.example -> .env           # copy + rename into worktrees
+    - .env
+```
 
-### "Bot not responding"
+Without any `.archon/` config, the platform uses sensible defaults (bundled commands and workflows).
 
-1. Check logs: `docker compose logs -f app` or terminal output for `bun run dev`
-2. Verify bot token is correct
-3. For Discord: Ensure MESSAGE CONTENT INTENT is enabled
-4. For Slack: Ensure Socket Mode is enabled
+### Custom Commands
 
-### Archon Directory Not Created
+Place `.md` files in your repo's `.archon/commands/`:
 
-The `~/.archon/` directory is created automatically on first use. To create manually:
+```markdown
+---
+description: Run the full test suite
+argument-hint: <module>
+---
+
+# Test Runner
+
+Run tests for: $ARGUMENTS
+```
+
+Variables available: `$1`, `$2`, `$3` (positional), `$ARGUMENTS` (all args), `$PLAN` (previous plan output), `$CONTEXT` (GitHub issue/PR context).
+
+### Custom Workflows
+
+Place `.yaml` files in your repo's `.archon/workflows/`:
+
+```yaml
+name: my-workflow
+description: Plan then implement a feature
+model: sonnet
+
+steps:
+  - command: plan
+  - command: implement
+    args: |
+      --goal "$ARGUMENTS"
+      --plan "$PLAN"
+```
+
+Workflows chain multiple commands together, support parallel steps, and carry context between steps via variable substitution.
+
+---
+
+## Isolation (Worktrees)
+
+When you use the `--branch` flag, the CLI creates a git worktree so your work happens in an isolated directory under `~/.archon/worktrees/`. This prevents parallel tasks from conflicting with each other or your main branch.
+
+```
+~/.archon/
+├── archon.db              # SQLite database (auto-created)
+├── workspaces/            # Cloned repos (synced from origin)
+│   └── owner/repo/
+└── worktrees/             # Isolated working copies per task
+    └── repo-name/
+        ├── fix/issue-42/
+        └── feat/dark-mode/
+```
+
+---
+
+## Using With Claude Code (Skill)
+
+If you want Claude Code to be able to invoke Archon workflows on your behalf, copy the Archon skill into your Claude configuration:
 
 ```bash
-mkdir -p ~/.archon/workspaces ~/.archon/worktrees
+cp -r remote-coding-agent/.claude/skills/archon /path/to/your/repo/.claude/skills/
 ```
+
+Then in Claude Code, say things like "use archon to fix issue #42" and it will invoke the appropriate workflow.
+
+---
+
+## Running the Full Platform (Server + Chat Adapters)
+
+The CLI is standalone, but if you also want to interact via Telegram, Slack, Discord, or GitHub webhooks, see the [README Server Setup](../README.md#server-quick-start) or run the setup wizard by opening Claude Code in the Archon repo and saying "set up archon".
