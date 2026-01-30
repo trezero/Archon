@@ -1523,4 +1523,48 @@ describe('WorktreeProvider', () => {
       expect(env.status).toBe('active');
     });
   });
+
+  describe('cross-platform path handling', () => {
+    test('getWorktreePath handles Unix-style paths', () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/home/dev/.archon/workspaces/owner/repo',
+        workflowType: 'issue',
+        identifier: '42',
+      };
+      const branchName = provider.generateBranchName(request);
+      const path = provider.getWorktreePath(request, branchName);
+      expect(path).toContain('owner');
+      expect(path).toContain('repo');
+      expect(path).toContain('issue-42');
+    });
+
+    test('getWorktreePath handles Windows-style paths', () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: 'C:\\Users\\dev\\.archon\\workspaces\\owner\\repo',
+        workflowType: 'issue',
+        identifier: '42',
+      };
+      const branchName = provider.generateBranchName(request);
+      const path = provider.getWorktreePath(request, branchName);
+      expect(path).toContain('owner');
+      expect(path).toContain('repo');
+      expect(path).toContain('issue-42');
+    });
+
+    test('getWorktreePath handles mixed separator paths', () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: 'C:/Users/dev\\.archon/workspaces\\owner/repo',
+        workflowType: 'issue',
+        identifier: '42',
+      };
+      const branchName = provider.generateBranchName(request);
+      const path = provider.getWorktreePath(request, branchName);
+      expect(path).toContain('owner');
+      expect(path).toContain('repo');
+      expect(path).toContain('issue-42');
+    });
+  });
 });

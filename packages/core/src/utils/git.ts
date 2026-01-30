@@ -187,7 +187,7 @@ export async function createWorktreeForIssue(
 
   // Extract owner and repo name from repoPath to avoid collisions
   // repoPath format: /.archon/workspaces/owner/repo
-  const pathParts = repoPath.split('/').filter(p => p.length > 0);
+  const pathParts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
   const repoName = pathParts[pathParts.length - 1]; // Last part: "repo"
   const ownerName = pathParts[pathParts.length - 2]; // Second to last: "owner"
 

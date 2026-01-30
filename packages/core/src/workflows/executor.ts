@@ -1217,7 +1217,7 @@ export async function executeWorkflow(
       if (isPrReview && prSha && prBranch) {
         startupMessage += `Reviewing PR at commit \`${prSha.substring(0, 7)}\` (branch: \`${prBranch}\`)\n\n`;
       } else if (branchName) {
-        const repoName = cwd.split('/').pop() || 'repository';
+        const repoName = cwd.split(/[/\\]/).pop() || 'repository';
         startupMessage += `📍 ${repoName} @ \`${branchName}\`\n\n`;
       } else {
         console.warn(
