@@ -31,11 +31,13 @@ services:
       - ARCHON_HOST=${HOST:-localhost}
     networks:
       - app-network
+      - default  # Connects to supabase_default network
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock # Docker socket for MCP container control
       - ./python/src:/app/src # Mount source code for hot reload
       - ./python/tests:/app/tests # Mount tests for UI test execution
       - ./migration:/app/migration # Mount migration files for version tracking
+      - archon-server-data:/app/data # Persistent data storage
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command:
@@ -61,7 +63,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 120s
 
   # Lightweight MCP Server Service (HTTP-based)
   archon-mcp:
@@ -90,6 +92,9 @@ services:
       - ARCHON_AGENTS_PORT=${ARCHON_AGENTS_PORT:-8052}
     networks:
       - app-network
+      - default  # Connects to supabase_default network
+    volumes:
+      - archon-mcp-data:/app/data # Persistent data storage
     depends_on:
       archon-server:
         condition: service_healthy
@@ -133,6 +138,9 @@ services:
       - ARCHON_SERVER_PORT=${ARCHON_SERVER_PORT:-8181}
     networks:
       - app-network
+      - default  # Connects to supabase_default network
+    volumes:
+      - archon-agents-data:/app/data # Persistent data storage
     healthcheck:
       test:
         [
@@ -164,6 +172,7 @@ services:
       - DOCKER_ENV=true
     networks:
       - app-network
+      - default  # Connects to supabase_default network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3737"]
       interval: 30s
@@ -172,6 +181,7 @@ services:
     volumes:
       - ./archon-ui-main/src:/app/src
       - ./archon-ui-main/public:/app/public
+      - archon-ui-data:/app/data # Persistent data storage
     depends_on:
       archon-server:
         condition: service_healthy
@@ -179,3 +189,18 @@ services:
 networks:
   app-network:
     driver: bridge
+  # Use external Supabase network for database connectivity
+  # This allows archon containers to communicate with Supabase services
+  default:
+    name: supabase_default
+    external: true
+
+volumes:
+  archon-server-data:
+    name: archon-server-data
+  archon-mcp-data:
+    name: archon-mcp-data
+  archon-agents-data:
+    name: archon-agents-data
+  archon-ui-data:
+    name: archon-ui-data
