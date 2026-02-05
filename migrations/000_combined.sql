@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS remote_agent_isolation_environments (
   created_by_platform   TEXT,                 -- 'github', 'slack', etc.
 
   -- Cross-reference metadata (for linking)
-  metadata              JSONB DEFAULT '{}',
+  metadata              JSONB DEFAULT '{}'
 
   -- Note: uniqueness enforced via partial index below (only active environments)
 );
