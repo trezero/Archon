@@ -51,14 +51,8 @@ function createMessageErrorHandler(
 async function main(): Promise<void> {
   console.log('[App] Starting Remote Coding Agent');
 
-  // Validate required environment variables
-  const required = ['DATABASE_URL'];
-  const missing = required.filter(v => !process.env[v]);
-  if (missing.length > 0) {
-    console.error('[App] Missing required environment variables:', missing.join(', '));
-    console.error('[App] Please check .env.example for required configuration');
-    process.exit(1);
-  }
+  // Database auto-detected: SQLite (default) or PostgreSQL (if DATABASE_URL set)
+  // No required environment variables - SQLite works out of the box
 
   // Validate AI assistant credentials (warn if missing, don't fail)
   // Using || intentionally: empty string should be treated as missing credential

@@ -12,21 +12,15 @@ import { config } from 'dotenv';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 
-// Load .env from current directory, or home directory, or nowhere
-const envPaths = [
-  resolve(process.cwd(), '.env'),
-  resolve(process.env.HOME ?? '~', '.archon', '.env'),
-];
-
-for (const envPath of envPaths) {
-  if (existsSync(envPath)) {
-    const result = config({ path: envPath });
-    if (result.error) {
-      console.error(`Error loading .env from ${envPath}: ${result.error.message}`);
-      console.error('Hint: Check for syntax errors in your .env file.');
-      process.exit(1);
-    }
-    break;
+// Load .env from global Archon config only
+// Infrastructure config (database, tokens) belongs in ~/.archon/.env, not per-project
+const globalEnvPath = resolve(process.env.HOME ?? '~', '.archon', '.env');
+if (existsSync(globalEnvPath)) {
+  const result = config({ path: globalEnvPath });
+  if (result.error) {
+    console.error(`Error loading .env from ${globalEnvPath}: ${result.error.message}`);
+    console.error('Hint: Check for syntax errors in your .env file.');
+    process.exit(1);
   }
 }
 

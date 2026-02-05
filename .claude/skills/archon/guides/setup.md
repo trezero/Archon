@@ -85,26 +85,66 @@ Discord is also available — mention it as the "Other" option text.
 3. Verify: `archon version`
 4. Check Claude is installed: `which claude`, then `claude /login` if needed
 
-## Step 5: Create `.env` (non-CLI platforms only)
+## Step 5: Database Setup
 
-**Skip this step if "CLI only" was selected** — CLI uses global Claude auth and SQLite automatically, no `.env` needed.
+The CLI loads infrastructure config (database, tokens) from `~/.archon/.env` only. This prevents conflicts with project `.env` files that may contain different database URLs.
 
-If any non-CLI platform was selected, check if `.env` already exists in the **archon repo root**:
+### 5a: Check for existing config
 
 ```bash
-test -f <archon-repo>/.env && echo "exists" || echo "missing"
+test -f ~/.archon/.env && echo "exists" || echo "missing"
 ```
 
-**If `.env` already exists**: Read it and check which values are already filled in. Tell the user: "Found an existing `.env` — I'll check what's already configured and only fill in missing values." Skip creating a new file.
+**If `~/.archon/.env` exists**: Read it and check which values are already filled in. Tell the user: "Found existing Archon config — I'll check what's already configured."
 
-**If `.env` is missing**: Create it from the template:
+### 5b: Choose database mode
+
+Use **AskUserQuestion**:
+
+```
+Header: "Database"
+Question: "Which database should Archon use?"
+Options:
+  1. "PostgreSQL (Recommended)" — Shared database, supports server + CLI, production-ready
+  2. "SQLite" — Local file at ~/.archon/archon.db, CLI-only, simpler setup
+```
+
+**If PostgreSQL selected**:
+1. Ask (plain text): "Paste your PostgreSQL connection string (DATABASE_URL):"
+2. Create the global config:
+   ```bash
+   mkdir -p ~/.archon
+   echo "DATABASE_URL=<value>" >> ~/.archon/.env
+   ```
+3. If running the server, also create `.env` in the archon repo (or symlink):
+   ```bash
+   cp ~/.archon/.env <archon-repo>/.env
+   # Or: ln -s ~/.archon/.env <archon-repo>/.env
+   ```
+4. Run the database migrations:
+   ```bash
+   cd <archon-repo>
+   psql $DATABASE_URL < migrations/000_combined.sql
+   ```
+
+**If SQLite selected**:
+- No additional setup needed — SQLite database is auto-created at `~/.archon/archon.db`
+- Works for both CLI and server (single-developer usage)
+
+### 5c: Verify database connection
+
 ```bash
-cd <archon-repo> && cp .env.example .env
+archon version
 ```
 
-The `.env` file lives in the archon repo root because that's where the server runs. The CLI also checks this location (and `~/.archon/.env`) for environment variables when invoked.
+Should show `Database: postgresql` or `Database: sqlite` based on selection.
 
-Tell the user: "Created `.env` from the template. We'll fill in platform tokens in the next steps."
+**Troubleshooting**:
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| Shows `sqlite` but expected `postgresql` | `~/.archon/.env` missing or no DATABASE_URL | Create `~/.archon/.env` with DATABASE_URL |
+| "relation does not exist" | Tables not created | Run `psql $DATABASE_URL < migrations/000_combined.sql` |
+| Connection refused | Database not running or wrong URL | Check DATABASE_URL and database server status |
 
 ## Step 6: Run Platform-Specific Setup
 
@@ -274,6 +314,8 @@ If verification fails:
 | `Not a git repository` | Not in a git repo | `cd` to the target repo root |
 | `No workflows found` | Missing `.archon/workflows/` | Default workflows load automatically — check `archon version` works first |
 | Auth errors | Claude not authenticated | Run `claude /login` |
+| `relation "remote_agent_*" does not exist` | DATABASE_URL missing or tables not created | Ensure `~/.archon/.env` has DATABASE_URL and run migrations |
+| `Database: sqlite` but expected PostgreSQL | `~/.archon/.env` missing DATABASE_URL | Add DATABASE_URL to `~/.archon/.env` |
 
 ## Step 11: Copy Skill to Target Repo
 
@@ -310,9 +352,29 @@ The end state: user is in their target repo with the Archon skill available, def
 
 For advanced users — these are not needed for basic setup:
 
-- **`.env`** (archon repo root): Platform tokens and secrets. Only needed if running the server for non-CLI platforms. The CLI also checks `$CWD/.env` and `~/.archon/.env` on startup.
-- **`~/.archon/config.yaml`** (global): Auto-created with defaults on first run. Controls bot display name, default AI assistant, streaming modes, and concurrency limits. Environment variables in `.env` override matching config.yaml values.
-- **`<repo>/.archon/config.yaml`** (per-repo): Controls which AI assistant to use, worktree settings, and default loading behavior. Created by guided setup or manually.
+### Environment Files (`.env`)
+
+Infrastructure config (database URL, platform tokens) is stored in `.env` files:
+
+| Location | Used by | Purpose |
+|----------|---------|---------|
+| `~/.archon/.env` | **CLI** | Global infrastructure config — database, AI tokens |
+| `<archon-repo>/.env` | **Server** | Platform tokens for Telegram/Slack/GitHub/Discord |
+
+**Best practice**: Use `~/.archon/.env` as the single source of truth. Symlink or copy to `<archon-repo>/.env` if running the server.
+
+**Note**: The CLI does NOT load `.env` from the current working directory. This prevents conflicts when running Archon from projects that have their own database configurations.
+
+### Config Files (YAML)
+
+Project-specific settings use layered YAML configs:
+
+| Location | Scope | Purpose |
+|----------|-------|---------|
+| `~/.archon/config.yaml` | Global | Default AI assistant, streaming modes, concurrency |
+| `<repo>/.archon/config.yaml` | Per-repo | AI assistant, worktree settings, commands config |
+
+Environment variables in `.env` override matching `config.yaml` values.
 
 ### Repo Config Options Reference
 
