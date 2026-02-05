@@ -533,7 +533,7 @@ async function collectCodexAuth(): Promise<CodexTokens | null> {
  */
 async function collectAIConfig(): Promise<SetupConfig['ai']> {
   const assistants = await multiselect({
-    message: 'Which AI assistant(s) will you use?',
+    message: 'Which AI assistant(s) will you use? (↑↓ navigate, space select, enter confirm)',
     options: [
       { value: 'claude', label: 'Claude (Recommended)', hint: 'Anthropic Claude Code SDK' },
       { value: 'codex', label: 'Codex', hint: 'OpenAI Codex SDK' },
@@ -713,7 +713,7 @@ After upgrading, run 'archon setup' again.`,
  */
 async function collectPlatforms(): Promise<SetupConfig['platforms']> {
   const platforms = await multiselect({
-    message: 'Which platforms do you want to connect?',
+    message: 'Which platforms do you want to connect? (↑↓ navigate, space select, enter confirm)',
     options: [
       { value: 'github', label: 'GitHub', hint: 'Respond to issues/PRs via webhooks' },
       { value: 'telegram', label: 'Telegram', hint: 'Chat bot via BotFather' },
