@@ -85,80 +85,82 @@ Discord is also available — mention it as the "Other" option text.
 3. Verify: `archon version`
 4. Check Claude is installed: `which claude`, then `claude /login` if needed
 
-## Step 5: Database Setup
+## Step 5: Configure Credentials
 
 The CLI loads infrastructure config (database, tokens) from `~/.archon/.env` only. This prevents conflicts with project `.env` files that may contain different database URLs.
 
-### 5a: Check for existing config
+**IMPORTANT**: We'll now open an interactive setup wizard in a new terminal window. This allows you to enter API keys and tokens securely without exposing them to me (the AI assistant).
+
+### 5a: Launch the Setup Wizard
+
+Run this command to open the setup wizard in a new terminal:
 
 ```bash
-test -f ~/.archon/.env && echo "exists" || echo "missing"
+archon setup --spawn
 ```
 
-**If `~/.archon/.env` exists**: Read it and check which values are already filled in. Tell the user: "Found existing Archon config — I'll check what's already configured."
+**CRITICAL**: Do NOT run `archon setup` directly via Bash — it requires interactive input that I cannot provide. The `--spawn` flag opens a new terminal window where the user can interact directly.
 
-### 5b: Choose database mode
+Tell the user:
 
-Use **AskUserQuestion**:
+> "I'm opening the Archon setup wizard in a new terminal window. In that window, you'll:
+> 1. Choose your database (SQLite default or PostgreSQL)
+> 2. Configure AI assistant(s) (Claude and/or Codex)
+> 3. Set up any platforms you selected (GitHub, Telegram, Slack, Discord)
+> 4. Enter API keys and tokens securely
+>
+> The wizard will save configuration to both `~/.archon/.env` and the repo `.env`.
+>
+> **Tell me when you've completed the setup wizard** so I can verify the configuration."
 
-```
-Header: "Database"
-Question: "Which database should Archon use?"
-Options:
-  1. "PostgreSQL (Recommended)" — Shared database, supports server + CLI, production-ready
-  2. "SQLite" — Local file at ~/.archon/archon.db, CLI-only, simpler setup
-```
+### 5b: Wait for User Confirmation
 
-**If PostgreSQL selected**:
-1. Ask (plain text): "Paste your PostgreSQL connection string (DATABASE_URL):"
-2. Create the global config:
-   ```bash
-   mkdir -p ~/.archon
-   echo "DATABASE_URL=<value>" >> ~/.archon/.env
-   ```
-3. If running the server, also create `.env` in the archon repo (or symlink):
-   ```bash
-   cp ~/.archon/.env <archon-repo>/.env
-   # Or: ln -s ~/.archon/.env <archon-repo>/.env
-   ```
-4. Run the database migrations:
-   ```bash
-   cd <archon-repo>
-   psql $DATABASE_URL < migrations/000_combined.sql
-   ```
+Wait for the user to confirm they've completed the setup wizard before proceeding.
 
-**If SQLite selected**:
-- No additional setup needed — SQLite database is auto-created at `~/.archon/archon.db`
-- Works for both CLI and server (single-developer usage)
+### 5c: Verify Configuration
 
-### 5c: Verify database connection
+After the user confirms setup is complete:
 
 ```bash
 archon version
 ```
 
-Should show `Database: postgresql` or `Database: sqlite` based on selection.
+Should show:
+- `Database: postgresql` or `Database: sqlite` based on selection
+- No errors about missing configuration
+
+### 5d: Run Database Migrations (PostgreSQL only)
+
+If the user selected PostgreSQL, run migrations:
+
+```bash
+test -n "$DATABASE_URL" && psql $DATABASE_URL < migrations/000_combined.sql
+```
 
 **Troubleshooting**:
 | Issue | Cause | Fix |
 |-------|-------|-----|
-| Shows `sqlite` but expected `postgresql` | `~/.archon/.env` missing or no DATABASE_URL | Create `~/.archon/.env` with DATABASE_URL |
+| Shows `sqlite` but expected `postgresql` | `~/.archon/.env` missing or no DATABASE_URL | Run `archon setup` again in your terminal |
 | "relation does not exist" | Tables not created | Run `psql $DATABASE_URL < migrations/000_combined.sql` |
 | Connection refused | Database not running or wrong URL | Check DATABASE_URL and database server status |
 
-## Step 6: Run Platform-Specific Setup
+## Step 6: Platform-Specific Verification
 
-Based on the platforms selected in Step 3, read and follow the corresponding guides:
+The setup wizard already collected credentials for platforms selected in Step 3. Verify each one:
 
-| Selection | Guides to follow |
-|-----------|-----------------|
+| Platform | Verification |
+|----------|-------------|
 | CLI only | Done — skip to Step 7 |
-| CLI + GitHub | `guides/github.md` |
-| Telegram | `guides/telegram.md` |
-| Slack | `guides/slack.md` |
-| Discord (Other) | `guides/discord.md` |
+| GitHub | Check `GITHUB_TOKEN` and `WEBHOOK_SECRET` are in `.env` |
+| Telegram | Check `TELEGRAM_BOT_TOKEN` is in `.env` |
+| Slack | Check `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` are in `.env` |
+| Discord | Check `DISCORD_BOT_TOKEN` is in `.env` |
 
-For multiple platforms, follow each platform guide. Each guide will tell the user which values to add to the `.env` created in Step 5.
+For advanced platform configuration (webhook URLs, bot permissions, etc.), refer to the platform-specific guides:
+- `guides/github.md` — GitHub webhook setup details
+- `guides/telegram.md` — BotFather commands
+- `guides/slack.md` — Slack app configuration
+- `guides/discord.md` — Discord bot permissions
 
 ## Step 7: Configure Target Repo (Guided setup only)
 
