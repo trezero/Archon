@@ -102,7 +102,7 @@ Environment variables override all other configuration:
 
 | Variable                       | Description                | Default       |
 | ------------------------------ | -------------------------- | ------------- |
-| `DATABASE_URL`                 | PostgreSQL connection (optional) | SQLite at `~/.archon/archon.db` if not set |
+| `DATABASE_URL`                 | PostgreSQL connection (optional) | SQLite at `~/.archon/archon.db` (recommended for single-developer use) |
 | `ARCHON_HOME`                  | Base directory for Archon  | `~/.archon`   |
 | `DEFAULT_AI_ASSISTANT`         | Default AI assistant       | `claude`      |
 | `TELEGRAM_STREAMING_MODE`      | Telegram streaming         | `stream`      |
@@ -110,6 +110,29 @@ Environment variables override all other configuration:
 | `SLACK_STREAMING_MODE`         | Slack streaming            | `batch`       |
 | `GITHUB_STREAMING_MODE`        | GitHub streaming           | `batch`       |
 | `MAX_CONCURRENT_CONVERSATIONS` | Concurrency limit          | `10`          |
+
+### `.env` File Locations
+
+Infrastructure configuration (database URL, platform tokens) is stored in `.env` files:
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| **CLI** | `~/.archon/.env` | Global infrastructure config |
+| **Server** | `<archon-repo>/.env` | Platform tokens, database |
+
+**Important**: The CLI loads `.env` only from `~/.archon/.env`, not from the current working directory. This prevents conflicts when running Archon from projects that have their own database configurations.
+
+**Best practice**: Use `~/.archon/.env` as the single source of truth. If running the server, symlink or copy to the archon repo:
+
+```bash
+# Create global config
+mkdir -p ~/.archon
+cp .env.example ~/.archon/.env
+# Edit with your values
+
+# For server, symlink to repo
+ln -s ~/.archon/.env .env
+```
 
 ## Docker Configuration
 

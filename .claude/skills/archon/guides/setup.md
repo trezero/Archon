@@ -15,27 +15,59 @@ bun --version
 git --version
 ```
 
-If `bun` is not installed, tell the user to install it from https://bun.sh and stop. If `git` is not installed, tell the user to install it and stop.
+**If `git` is not installed**: Try to install it automatically based on the platform:
+
+**macOS:**
+```bash
+# Try Homebrew first, fall back to Xcode CLI tools
+brew install git || xcode-select --install
+```
+Note: `xcode-select --install` opens a GUI dialog - tell the user to click "Install" and wait.
+
+**Linux (detect package manager):**
+```bash
+# Try in order: apt, dnf, pacman, apk
+sudo apt-get install -y git 2>/dev/null || \
+sudo dnf install -y git 2>/dev/null || \
+sudo pacman -S --noconfirm git 2>/dev/null || \
+sudo apk add git 2>/dev/null
+```
+
+**Windows (PowerShell):**
+```powershell
+winget install Git.Git
+```
+
+If installation fails (e.g., no sudo access, no package manager), tell the user to install Git manually from https://git-scm.com and run setup again.
+
+**If `bun` is not installed**: Install it automatically based on the platform:
+
+**macOS/Linux:**
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+The installer adds Bun to the shell config, but it won't take effect until a new shell starts. For the rest of this setup session, use the full path `~/.bun/bin/bun` instead of just `bun`.
+
+Verify installation:
+```bash
+~/.bun/bin/bun --version
+```
+
+**Windows (PowerShell):**
+```powershell
+irm bun.sh/install.ps1 | iex
+```
+
+On Windows, the installer updates the PATH for the current session, so `bun --version` should work immediately.
+
+**Important**: For all `bun` commands in Steps 3-4, use `~/.bun/bin/bun` on macOS/Linux if bun was just installed. After setup is complete and the user opens a new terminal, `bun` will work without the full path.
 
 ## Context
 
 The user is inside the **remote-coding-agent** repository — that's how they have access to this skill. The Archon repo path is the current working directory. Store it as `<archon-repo>`.
 
-## Step 1: Setup Mode
-
-Use **AskUserQuestion** to determine setup approach:
-
-```
-Header: "Setup mode"
-Question: "How would you like to set up Archon?"
-Options:
-  1. "Quick setup (defaults)" (Recommended) — Use sensible defaults, get running fast
-  2. "Guided setup" — Walk through all configuration options interactively
-```
-
-Store the choice. If "Quick setup", skip Step 7 (repo config) — defaults will be used. If "Guided setup", include Step 7.
-
-## Step 2: Ask for Target Repo
+## Step 1: Ask for Target Repo
 
 **IMPORTANT**: The target repo is the user's own project — **never** the remote-coding-agent (Archon) repo itself. Do not suggest or offer the current directory as an option.
 
@@ -60,7 +92,7 @@ cd ~/.archon/workspaces && git clone <url>
 ```
 Set `<target-repo>` to the cloned directory.
 
-## Step 3: Ask for Platforms
+## Step 2: Ask for Platforms
 
 Use **AskUserQuestion** with `multiSelect: true`:
 
@@ -76,156 +108,95 @@ Options:
 
 Discord is also available — mention it as the "Other" option text.
 
-## Step 4: Run CLI Setup
+## Step 3: Run CLI Setup
 
-**Always run this.** Read and follow `guides/cli.md`:
+**Always run this.** Read and follow `guides/cli.md`.
 
-1. `cd <archon-repo> && bun install`
-2. `cd <archon-repo>/packages/cli && bun link`
+If Bun was just installed in Prerequisites (macOS/Linux), use `~/.bun/bin/bun` instead of `bun`:
+
+1. `cd <archon-repo> && ~/.bun/bin/bun install` (or `bun install` if bun was already in PATH)
+2. `cd <archon-repo>/packages/cli && ~/.bun/bin/bun link` (or `bun link`)
 3. Verify: `archon version`
 4. Check Claude is installed: `which claude`, then `claude /login` if needed
 
-## Step 5: Create `.env` (non-CLI platforms only)
+## Step 4: Configure Credentials
 
-**Skip this step if "CLI only" was selected** — CLI uses global Claude auth and SQLite automatically, no `.env` needed.
+The CLI loads infrastructure config (database, tokens) from `~/.archon/.env` only. This prevents conflicts with project `.env` files that may contain different database URLs.
 
-If any non-CLI platform was selected, check if `.env` already exists in the **archon repo root**:
+**IMPORTANT**: We'll now open an interactive setup wizard in a new terminal window. This allows you to enter API keys and tokens securely without exposing them to me (the AI assistant).
+
+### 5a: Launch the Setup Wizard
+
+Run this command to open the setup wizard in a new terminal:
 
 ```bash
-test -f <archon-repo>/.env && echo "exists" || echo "missing"
+archon setup --spawn
 ```
 
-**If `.env` already exists**: Read it and check which values are already filled in. Tell the user: "Found an existing `.env` — I'll check what's already configured and only fill in missing values." Skip creating a new file.
+**CRITICAL**: Do NOT run `archon setup` directly via Bash — it requires interactive input that I cannot provide. The `--spawn` flag opens a new terminal window where the user can interact directly.
 
-**If `.env` is missing**: Create it from the template:
+Tell the user:
+
+> "I'm opening the Archon setup wizard in a new terminal window. In that window, you'll:
+> 1. Choose your database (SQLite default or PostgreSQL)
+> 2. Configure AI assistant(s) (Claude and/or Codex)
+> 3. Set up any platforms you selected (GitHub, Telegram, Slack, Discord)
+> 4. Enter API keys and tokens securely
+>
+> The wizard will save configuration to both `~/.archon/.env` and the repo `.env`.
+>
+> **Tell me when you've completed the setup wizard** so I can verify the configuration."
+
+### 5b: Wait for User Confirmation
+
+Wait for the user to confirm they've completed the setup wizard before proceeding.
+
+### 5c: Verify Configuration
+
+After the user confirms setup is complete:
+
 ```bash
-cd <archon-repo> && cp .env.example .env
+archon version
 ```
 
-The `.env` file lives in the archon repo root because that's where the server runs. The CLI also checks this location (and `~/.archon/.env`) for environment variables when invoked.
+Should show:
+- `Database: postgresql` or `Database: sqlite` based on selection
+- No errors about missing configuration
 
-Tell the user: "Created `.env` from the template. We'll fill in platform tokens in the next steps."
+### 5d: Run Database Migrations (PostgreSQL only)
 
-## Step 6: Run Platform-Specific Setup
+If the user selected PostgreSQL, run migrations:
 
-Based on the platforms selected in Step 3, read and follow the corresponding guides:
-
-| Selection | Guides to follow |
-|-----------|-----------------|
-| CLI only | Done — skip to Step 7 |
-| CLI + GitHub | `guides/github.md` |
-| Telegram | `guides/telegram.md` |
-| Slack | `guides/slack.md` |
-| Discord (Other) | `guides/discord.md` |
-
-For multiple platforms, follow each platform guide. Each guide will tell the user which values to add to the `.env` created in Step 5.
-
-## Step 7: Configure Target Repo (Guided setup only)
-
-**Skip this step if "Quick setup" was selected in Step 1.** Defaults will be used automatically.
-
-This step creates `.archon/config.yaml` in the target repo. Walk the user through each option using **AskUserQuestion**. Only include non-default values in the generated file.
-
-### 7a: AI Assistant
-
-```
-Header: "AI assistant"
-Question: "Which AI assistant should Archon use for this repo?"
-Options:
-  1. "Claude" (Recommended) — Anthropic's Claude Code SDK
-  2. "Codex" — OpenAI's Codex SDK
-```
-
-Default: `claude`. Only write to config if user picks codex.
-
-### 7b: Worktree Base Branch
-
-```
-Header: "Base branch"
-Question: "What is the main branch for this repo? (Used as base for worktree creation)"
-Options:
-  1. "main" (Recommended) — Most common default
-  2. "master" — Legacy default
-  3. "develop" — Gitflow-style
-```
-
-Default: auto-detected from repo. Only write to config if user picks something non-standard.
-
-### 7c: Worktree Copy Files
-
-```
-Header: "Worktree files"
-Question: "Should Archon copy any files into new worktrees? (Git-ignored files like .env aren't included in worktrees by default)"
-Options:
-  1. "No extra files needed" (Recommended) — Skip this
-  2. "Copy .env" — Copy .env file into worktrees
-  3. "Copy .env.example as .env" — Copy .env.example and rename to .env
-```
-
-If user selects option 2 or 3, or provides a custom answer, add to `worktree.copyFiles` array. Option 3 uses the `"source -> destination"` syntax: `".env.example -> .env"`.
-
-If user provides "Other", let them list files comma-separated. Each entry becomes an item in `copyFiles`.
-
-### 7d: Default Commands & Workflows Loading
-
-```
-Header: "Defaults"
-Question: "Archon bundles default commands and workflows. How should they be loaded?"
-Options:
-  1. "Load at runtime" (Recommended) — Defaults loaded automatically, your repo commands/workflows override by name
-  2. "Disable defaults" — Only use commands and workflows defined in your repo's .archon/ folder
-```
-
-Default: load at runtime. Only write to config if user disables.
-
-### 7e: Generate config.yaml
-
-Based on the answers, generate `<target-repo>/.archon/config.yaml`. Only include options that differ from defaults. If all defaults were kept, create a minimal commented file.
-
-**Template (all defaults — commented reference):**
-```yaml
-# Archon Repo Configuration
-# All values below show defaults — uncomment to override.
-
-# AI assistant for this repo (claude | codex)
-# assistant: claude
-
-# Worktree settings
-# worktree:
-#   baseBranch: main
-#   copyFiles:
-#     - ".env"
-#     - ".env.example -> .env"
-
-# Default commands/workflows
-# defaults:
-#   loadDefaultCommands: true
-#   loadDefaultWorkflows: true
-```
-
-**Template (with user overrides — uncommented values):**
-```yaml
-# Archon Repo Configuration
-
-assistant: codex
-
-worktree:
-  baseBranch: develop
-  copyFiles:
-    - ".env"
-
-defaults:
-  loadDefaultCommands: false
-  loadDefaultWorkflows: false
-```
-
-Write the file:
 ```bash
-mkdir -p <target-repo>/.archon
-# Write config.yaml content
+test -n "$DATABASE_URL" && psql $DATABASE_URL < migrations/000_combined.sql
 ```
 
-## Step 8: Copy Defaults to Target Repo
+**Troubleshooting**:
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| Shows `sqlite` but expected `postgresql` | `~/.archon/.env` missing or no DATABASE_URL | Run `archon setup` again in your terminal |
+| "relation does not exist" | Tables not created | Run `psql $DATABASE_URL < migrations/000_combined.sql` |
+| Connection refused | Database not running or wrong URL | Check DATABASE_URL and database server status |
+
+## Step 5: Platform-Specific Verification
+
+The setup wizard already collected credentials for platforms selected in Step 3. Verify each one:
+
+| Platform | Verification |
+|----------|-------------|
+| CLI only | Done — skip to Step 6 |
+| GitHub | Check `GITHUB_TOKEN` and `WEBHOOK_SECRET` are in `.env` |
+| Telegram | Check `TELEGRAM_BOT_TOKEN` is in `.env` |
+| Slack | Check `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` are in `.env` |
+| Discord | Check `DISCORD_BOT_TOKEN` is in `.env` |
+
+For advanced platform configuration (webhook URLs, bot permissions, etc.), refer to the platform-specific guides:
+- `guides/github.md` — GitHub webhook setup details
+- `guides/telegram.md` — BotFather commands
+- `guides/slack.md` — Slack app configuration
+- `guides/discord.md` — Discord bot permissions
+
+## Step 6: Copy Defaults to Target Repo
 
 Copy the bundled default commands and workflows to the target repo so the user can read, inspect, and modify them:
 
@@ -244,13 +215,13 @@ Tell the user:
 
 Count the files copied to fill in {N} and {M}.
 
-## Step 9: Start the Server (non-CLI platforms only)
+## Step 7: Start the Server (non-CLI platforms only)
 
 **Skip if "CLI only" was selected.**
 
 After all platform tokens are in `.env`, read and follow `guides/server.md` to start the server from the archon repo.
 
-## Step 10: Verify from Target Repo
+## Step 8: Verify from Target Repo
 
 Run a test workflow from the target repo:
 
@@ -274,8 +245,10 @@ If verification fails:
 | `Not a git repository` | Not in a git repo | `cd` to the target repo root |
 | `No workflows found` | Missing `.archon/workflows/` | Default workflows load automatically — check `archon version` works first |
 | Auth errors | Claude not authenticated | Run `claude /login` |
+| `relation "remote_agent_*" does not exist` | DATABASE_URL missing or tables not created | Ensure `~/.archon/.env` has DATABASE_URL and run migrations |
+| `Database: sqlite` but expected PostgreSQL | `~/.archon/.env` missing DATABASE_URL | Add DATABASE_URL to `~/.archon/.env` |
 
-## Step 11: Copy Skill to Target Repo
+## Step 9: Copy Skill to Target Repo
 
 Copy the archon skill so it's available when the user opens Claude Code in their target repo:
 
@@ -284,7 +257,7 @@ mkdir -p <target-repo>/.claude/skills
 cp -r <archon-repo>/.claude/skills/archon <target-repo>/.claude/skills/archon
 ```
 
-## Step 12: Final Summary
+## Step 10: Final Summary
 
 Tell the user what was set up, then give these instructions:
 
@@ -301,8 +274,11 @@ Example first command in the target repo:
 Summarize what was copied to their repo:
 - `.archon/commands/` — {N} command templates (editable prompts)
 - `.archon/workflows/` — {M} workflow definitions (editable YAML pipelines)
-- `.archon/config.yaml` — repo configuration (if guided setup was used)
 - `.claude/skills/archon/` — skill for Claude Code integration
+
+**Important**: End the summary with this message:
+
+> "If you want to configure advanced options later — like changing the default AI assistant, customizing worktree behavior, or adjusting which files get copied into isolated environments — just ask me to help you with 'archon config' and I'll walk you through it."
 
 The end state: user is in their target repo with the Archon skill available, default commands and workflows copied locally for inspection and customization, using Claude Code as the interface.
 
@@ -310,9 +286,29 @@ The end state: user is in their target repo with the Archon skill available, def
 
 For advanced users — these are not needed for basic setup:
 
-- **`.env`** (archon repo root): Platform tokens and secrets. Only needed if running the server for non-CLI platforms. The CLI also checks `$CWD/.env` and `~/.archon/.env` on startup.
-- **`~/.archon/config.yaml`** (global): Auto-created with defaults on first run. Controls bot display name, default AI assistant, streaming modes, and concurrency limits. Environment variables in `.env` override matching config.yaml values.
-- **`<repo>/.archon/config.yaml`** (per-repo): Controls which AI assistant to use, worktree settings, and default loading behavior. Created by guided setup or manually.
+### Environment Files (`.env`)
+
+Infrastructure config (database URL, platform tokens) is stored in `.env` files:
+
+| Location | Used by | Purpose |
+|----------|---------|---------|
+| `~/.archon/.env` | **CLI** | Global infrastructure config — database, AI tokens |
+| `<archon-repo>/.env` | **Server** | Platform tokens for Telegram/Slack/GitHub/Discord |
+
+**Best practice**: Use `~/.archon/.env` as the single source of truth. Symlink or copy to `<archon-repo>/.env` if running the server.
+
+**Note**: The CLI does NOT load `.env` from the current working directory. This prevents conflicts when running Archon from projects that have their own database configurations.
+
+### Config Files (YAML)
+
+Project-specific settings use layered YAML configs:
+
+| Location | Scope | Purpose |
+|----------|-------|---------|
+| `~/.archon/config.yaml` | Global | Default AI assistant, streaming modes, concurrency |
+| `<repo>/.archon/config.yaml` | Per-repo | AI assistant, worktree settings, commands config |
+
+Environment variables in `.env` override matching `config.yaml` values.
 
 ### Repo Config Options Reference
 

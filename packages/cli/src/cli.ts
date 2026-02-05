@@ -12,21 +12,15 @@ import { config } from 'dotenv';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 
-// Load .env from current directory, or home directory, or nowhere
-const envPaths = [
-  resolve(process.cwd(), '.env'),
-  resolve(process.env.HOME ?? '~', '.archon', '.env'),
-];
-
-for (const envPath of envPaths) {
-  if (existsSync(envPath)) {
-    const result = config({ path: envPath });
-    if (result.error) {
-      console.error(`Error loading .env from ${envPath}: ${result.error.message}`);
-      console.error('Hint: Check for syntax errors in your .env file.');
-      process.exit(1);
-    }
-    break;
+// Load .env from global Archon config only
+// Infrastructure config (database, tokens) belongs in ~/.archon/.env, not per-project
+const globalEnvPath = resolve(process.env.HOME ?? '~', '.archon', '.env');
+if (existsSync(globalEnvPath)) {
+  const result = config({ path: globalEnvPath });
+  if (result.error) {
+    console.error(`Error loading .env from ${globalEnvPath}: ${result.error.message}`);
+    console.error('Hint: Check for syntax errors in your .env file.');
+    process.exit(1);
   }
 }
 
@@ -48,6 +42,7 @@ import {
   workflowStatusCommand,
 } from './commands/workflow';
 import { isolationListCommand, isolationCleanupCommand } from './commands/isolation';
+import { setupCommand } from './commands/setup';
 import { closeDatabase } from '@archon/core';
 import * as git from '@archon/core/utils/git';
 
@@ -62,6 +57,7 @@ Usage:
   archon <command> [subcommand] [options] [arguments]
 
 Commands:
+  setup                      Interactive setup wizard for credentials and config
   workflow list              List available workflows in current directory
   workflow run <name> [msg]  Run a workflow with optional message
   workflow status            Show status of running workflows
@@ -74,6 +70,7 @@ Options:
   --cwd <path>               Override working directory (default: current directory)
   --branch, -b <name>        Create worktree for branch (or reuse existing)
   --no-worktree              Run on branch directly without worktree isolation
+  --spawn                    Open setup wizard in a new terminal window (for setup command)
 
 Examples:
   archon workflow list
@@ -124,6 +121,7 @@ async function main(): Promise<number> {
         help: { type: 'boolean', short: 'h' },
         branch: { type: 'string', short: 'b' },
         'no-worktree': { type: 'boolean' },
+        spawn: { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false, // Allow unknown flags to pass through
@@ -140,6 +138,7 @@ async function main(): Promise<number> {
   const cwd = resolve(typeof cwdValue === 'string' ? cwdValue : process.cwd());
   const branchName = values.branch as string | undefined;
   const noWorktree = values['no-worktree'] as boolean | undefined;
+  const spawnFlag = values.spawn as boolean | undefined;
 
   // Handle help flag
   if (values.help) {
@@ -152,7 +151,7 @@ async function main(): Promise<number> {
   const subcommand = positionals[1];
 
   // Commands that don't require git repo validation
-  const noGitCommands = ['version', 'help'];
+  const noGitCommands = ['version', 'help', 'setup'];
   const requiresGitRepo = !noGitCommands.includes(command ?? '');
 
   try {
@@ -183,6 +182,10 @@ async function main(): Promise<number> {
 
       case 'help':
         printUsage();
+        break;
+
+      case 'setup':
+        await setupCommand({ spawn: spawnFlag, repoPath: cwd });
         break;
 
       case 'workflow':

@@ -60,6 +60,10 @@ Thumbs.db
 .test-repo-url
 .test-issue-number
 
+# Test SQLite databases
+*.test*.db
+.test-*.db
+
 coverage
 
 worktrees
