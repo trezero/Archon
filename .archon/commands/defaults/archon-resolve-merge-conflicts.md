@@ -52,16 +52,16 @@ PR #{number} has no merge conflicts. It's ready for review/merge.
 
 ```bash
 # Get branch info
-HEAD_BRANCH=$(gh pr view {number} --json headRefName --jq '.headRefName')
-BASE_BRANCH=$(gh pr view {number} --json baseRefName --jq '.baseRefName')
+PR_HEAD=$(gh pr view {number} --json headRefName --jq '.headRefName')
+PR_BASE=$(gh pr view {number} --json baseRefName --jq '.baseRefName')
 
 # Fetch latest
-git fetch origin $BASE_BRANCH
-git fetch origin $HEAD_BRANCH
+git fetch origin $PR_BASE
+git fetch origin $PR_HEAD
 
 # Checkout the PR branch
-git checkout $HEAD_BRANCH
-git pull origin $HEAD_BRANCH
+git checkout $PR_HEAD
+git pull origin $PR_HEAD
 ```
 
 **PHASE_1_CHECKPOINT:**
@@ -76,7 +76,7 @@ git pull origin $HEAD_BRANCH
 ### 2.1 Attempt Rebase to Surface Conflicts
 
 ```bash
-git rebase origin/$BASE_BRANCH
+git rebase origin/$PR_BASE
 ```
 
 This will stop at the first conflict. Note the output.
@@ -269,7 +269,7 @@ Fix any lint issues.
 ### 5.1 Force Push the Resolved Branch
 
 ```bash
-git push --force-with-lease origin $HEAD_BRANCH
+git push --force-with-lease origin $PR_HEAD
 ```
 
 **Note**: `--force-with-lease` is safer than `--force` as it fails if someone else pushed.

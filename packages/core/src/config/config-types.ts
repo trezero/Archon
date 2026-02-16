@@ -170,4 +170,10 @@ export interface MergedConfig {
     loadDefaultCommands: boolean;
     loadDefaultWorkflows: boolean;
   };
+  /**
+   * Base branch from repo config (worktree.baseBranch).
+   * Used for $BASE_BRANCH substitution in workflow commands.
+   * When undefined, the executor auto-detects the default branch from git.
+   */
+  baseBranch?: string;
 }

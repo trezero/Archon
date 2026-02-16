@@ -83,8 +83,8 @@ gh pr view {number} --json mergeable,mergeStateStatus --jq '.mergeable, .mergeSt
 
 Please resolve conflicts before requesting a review:
 ```bash
-git fetch origin main
-git rebase origin/main
+git fetch origin {base}
+git rebase origin/{base}
 # Resolve conflicts
 git push --force-with-lease
 ```
@@ -108,19 +108,19 @@ gh pr checks {number} --json name,state,conclusion --jq '.[] | "\(.name): \(.sta
 
 **Flag CI status for review report.**
 
-### 2.3 Check Behind Main
+### 2.3 Check Behind Base
 
 ```bash
 # Get branch names
-BASE_BRANCH=$(gh pr view {number} --json baseRefName --jq '.baseRefName')
-HEAD_BRANCH=$(gh pr view {number} --json headRefName --jq '.headRefName')
+PR_BASE=$(gh pr view {number} --json baseRefName --jq '.baseRefName')
+PR_HEAD=$(gh pr view {number} --json headRefName --jq '.headRefName')
 
 # Fetch and count
-git fetch origin $BASE_BRANCH --quiet
-git fetch origin $HEAD_BRANCH --quiet
+git fetch origin $PR_BASE --quiet
+git fetch origin $PR_HEAD --quiet
 
-# Commits behind main
-BEHIND=$(git rev-list --count origin/$HEAD_BRANCH..origin/$BASE_BRANCH 2>/dev/null || echo "0")
+# Commits behind base branch
+BEHIND=$(git rev-list --count origin/$PR_HEAD..origin/$PR_BASE 2>/dev/null || echo "0")
 ```
 
 | Commits Behind | Action |
@@ -175,7 +175,7 @@ Large PRs are harder to review thoroughly. Consider splitting into smaller PRs f
 |-------|--------|-------|
 | Merge Conflicts | ✅ None / ❌ Has conflicts | {details} |
 | CI Status | ✅ Passing / ⚠️ Failing / ⏳ Pending | {details} |
-| Behind Main | ✅ Up to date / ⚠️ {N} commits behind | {details} |
+| Behind Base | ✅ Up to date / ⚠️ {N} commits behind | {details} |
 | Draft | ✅ Ready / 📝 Draft | {details} |
 | Size | ✅ Normal / ⚠️ Large ({N} files) | {details} |
 ```
@@ -183,7 +183,7 @@ Large PRs are harder to review thoroughly. Consider splitting into smaller PRs f
 **PHASE_2_CHECKPOINT:**
 - [ ] No merge conflicts (or workflow stopped)
 - [ ] CI status noted
-- [ ] Behind-main status checked
+- [ ] Behind-base status checked
 - [ ] Draft status noted
 - [ ] Size warnings issued if needed
 
@@ -318,7 +318,7 @@ Write `$ARTIFACTS_DIR/review/scope.md`:
 |-------|--------|-------|
 | Merge Conflicts | {status} | {details} |
 | CI Status | {status} | {passing}/{total} checks |
-| Behind Main | {status} | {N} commits behind |
+| Behind Base | {status} | {N} commits behind |
 | Draft | {status} | {Ready/Draft} |
 | Size | {status} | {files} files, +{add}/-{del} |
 
@@ -458,7 +458,7 @@ Then re-request the review: `@archon review this PR`
 |-------|--------|
 | Conflicts | ✅ None |
 | CI | {✅ Passing / ⚠️ {N} failing} |
-| Behind Main | {✅ Up to date / ⚠️ {N} behind} |
+| Behind Base | {✅ Up to date / ⚠️ {N} behind} |
 | Draft | {✅ Ready / 📝 Draft} |
 | Size | {✅ Normal / ⚠️ Large} |
 

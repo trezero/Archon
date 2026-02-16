@@ -1139,6 +1139,7 @@ EOF
 - `$ARGUMENTS` - All arguments as a single string
 - `$PLAN` - Previous plan from session metadata
 - `$IMPLEMENTATION_SUMMARY` - Previous execution summary
+- `$BASE_BRANCH` - Base branch from config or auto-detected from repo
 
 Commands are version-controlled with your codebase, not stored in the database.
 

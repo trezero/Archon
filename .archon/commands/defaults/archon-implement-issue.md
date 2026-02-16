@@ -159,13 +159,13 @@ git status
 
 ```bash
 # If branch tracks remote
-git pull --rebase origin main 2>/dev/null || git pull origin main
+git pull --rebase origin $BASE_BRANCH 2>/dev/null || git pull origin $BASE_BRANCH
 ```
 
 **PHASE_3_CHECKPOINT:**
 - [ ] Git state is clean and correct
 - [ ] On appropriate branch (created or existing)
-- [ ] Up to date with main
+- [ ] Up to date with base branch
 
 ---
 

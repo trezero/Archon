@@ -191,7 +191,8 @@ git push origin HEAD
 ```bash
 gh pr create \
   --title "{plan-title}" \
-  --body "{prepared-body}"
+  --body "{prepared-body}" \
+  --base $BASE_BRANCH
 ```
 
 **If PR already exists**, update it:
@@ -269,7 +270,7 @@ Write to `$ARTIFACTS_DIR/pr-ready.md`:
 
 ## Files in PR
 
-{From git diff --name-only origin/main}
+{From git diff --name-only origin/$BASE_BRANCH}
 
 | File | Status |
 |------|--------|
@@ -316,7 +317,7 @@ Continue to PR review workflow:
 |-------|-------|
 | PR | #{number} |
 | URL | {url} |
-| Branch | `{branch}` → `main` |
+| Branch | `{branch}` → `{base}` |
 | Status | 🟢 Ready for Review |
 
 ### Commit

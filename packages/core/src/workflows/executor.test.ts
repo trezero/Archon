@@ -89,6 +89,7 @@ describe('Workflow Executor', () => {
   let mockPlatform: IPlatformAdapter;
   let testDir: string;
   let commitAllChangesSpy: Mock<typeof gitUtils.commitAllChanges>;
+  let getDefaultBranchSpy: Mock<typeof gitUtils.getDefaultBranch>;
 
   beforeEach(async () => {
     mockPlatform = createMockPlatform();
@@ -100,6 +101,9 @@ describe('Workflow Executor', () => {
     // Mock commitAllChanges to return false (no changes to commit) by default
     // This prevents sendCriticalMessage retries from causing test timeouts
     commitAllChangesSpy = spyOn(gitUtils, 'commitAllChanges').mockResolvedValue(false);
+
+    // Mock getDefaultBranch since testDir is not a real git repo
+    getDefaultBranchSpy = spyOn(gitUtils, 'getDefaultBranch').mockResolvedValue('main');
 
     // Reset mock implementation to default behavior (prevents test pollution)
     mockSendQuery.mockImplementation(function* () {
@@ -120,6 +124,7 @@ describe('Workflow Executor', () => {
 
   afterEach(async () => {
     commitAllChangesSpy.mockRestore();
+    getDefaultBranchSpy.mockRestore();
     try {
       await rm(testDir, { recursive: true, force: true });
     } catch {
@@ -469,6 +474,87 @@ describe('Workflow Executor', () => {
       // Should contain the fallback artifacts path (since no codebase in mock)
       expect(callArg).toContain('artifacts');
       expect(callArg).toContain('results.md');
+    });
+
+    it('should substitute $BASE_BRANCH from getDefaultBranch fallback', async () => {
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'branch-test.md'), 'git rebase origin/$BASE_BRANCH');
+
+      // Mock getDefaultBranch to return a specific branch
+      getDefaultBranchSpy.mockResolvedValue('develop');
+
+      const callCountBefore = mockSendQuery.mock.calls.length;
+
+      const workflow: WorkflowDefinition = {
+        name: 'base-branch-workflow',
+        description: 'Test $BASE_BRANCH substitution',
+        steps: [{ command: 'branch-test' }],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'Run rebase',
+        'db-conv-id'
+      );
+
+      expect(mockSendQuery.mock.calls.length).toBeGreaterThan(callCountBefore);
+      const callArg = mockSendQuery.mock.calls[callCountBefore][0] as string;
+      // $BASE_BRANCH should be replaced with the resolved branch name
+      expect(callArg).not.toContain('$BASE_BRANCH');
+      expect(callArg).toContain('origin/develop');
+      // getDefaultBranch should have been called since config has no baseBranch
+      expect(getDefaultBranchSpy).toHaveBeenCalledWith(testDir);
+    });
+
+    it('should use config.baseBranch over getDefaultBranch when configured', async () => {
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'branch-test.md'), 'git rebase origin/$BASE_BRANCH');
+
+      // Spy on loadConfig to return config with baseBranch set
+      const loadConfigSpy = spyOn(configLoader, 'loadConfig');
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'claude',
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+        baseBranch: 'staging',
+      });
+
+      // Reset getDefaultBranch call count
+      getDefaultBranchSpy.mockClear();
+
+      const callCountBefore = mockSendQuery.mock.calls.length;
+
+      const workflow: WorkflowDefinition = {
+        name: 'config-branch-workflow',
+        description: 'Test config baseBranch takes precedence',
+        steps: [{ command: 'branch-test' }],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'Run rebase',
+        'db-conv-id'
+      );
+
+      expect(mockSendQuery.mock.calls.length).toBeGreaterThan(callCountBefore);
+      const callArg = mockSendQuery.mock.calls[callCountBefore][0] as string;
+      // $BASE_BRANCH should use config value, not getDefaultBranch
+      expect(callArg).not.toContain('$BASE_BRANCH');
+      expect(callArg).toContain('origin/staging');
+      // getDefaultBranch should NOT have been called
+      expect(getDefaultBranchSpy).not.toHaveBeenCalled();
+
+      loadConfigSpy.mockRestore();
     });
 
     it('should handle codebase_id being undefined', async () => {
@@ -3637,6 +3723,7 @@ describe('app defaults command loading', () => {
   let testDir: string;
   let loadConfigSpy: Mock<typeof configLoader.loadConfig>;
   let commitAllChangesSpy: Mock<typeof gitUtils.commitAllChanges>;
+  let getDefaultBranchSpy: Mock<typeof gitUtils.getDefaultBranch>;
 
   // Create mock platform adapter
   function createMockPlatform(): IPlatformAdapter {
@@ -3695,6 +3782,9 @@ describe('app defaults command loading', () => {
     // Mock commitAllChanges to prevent sendCriticalMessage retries
     commitAllChangesSpy = spyOn(gitUtils, 'commitAllChanges').mockResolvedValue(false);
 
+    // Mock getDefaultBranch since testDir is not a real git repo
+    getDefaultBranchSpy = spyOn(gitUtils, 'getDefaultBranch').mockResolvedValue('main');
+
     // Create temp directory for repo commands
     testDir = join(
       tmpdir(),
@@ -3718,6 +3808,7 @@ describe('app defaults command loading', () => {
   afterEach(async () => {
     loadConfigSpy.mockRestore();
     commitAllChangesSpy.mockRestore();
+    getDefaultBranchSpy.mockRestore();
     try {
       await rm(testDir, { recursive: true, force: true });
     } catch {

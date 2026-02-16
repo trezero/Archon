@@ -1,11 +1,14 @@
 ---
 description: Create a PR from current branch with implementation context
-argument-hint: [base-branch] (default: main)
+argument-hint: [base-branch] (default: auto-detected from config or repo)
 ---
 
 # Create Pull Request
 
-**Base branch**: $ARGUMENTS (default: main)
+**Base branch override**: $ARGUMENTS
+**Default base branch**: $BASE_BRANCH
+
+> If a base branch was provided as argument above, use it for `--base`. Otherwise use the default base branch.
 
 ---
 
@@ -16,7 +19,7 @@ argument-hint: [base-branch] (default: main)
 ```bash
 git branch --show-current
 git status --short
-git log origin/main..HEAD --oneline
+git log origin/$BASE_BRANCH..HEAD --oneline
 ```
 
 ### 1.2 Check for Implementation Report
@@ -36,7 +39,7 @@ If found, read it to extract:
 ### 1.3 Get Commit Summary
 
 ```bash
-git log origin/main..HEAD --pretty=format:"- %s"
+git log origin/$BASE_BRANCH..HEAD --pretty=format:"- %s"
 ```
 
 ---
@@ -107,13 +110,13 @@ git push -u origin HEAD
 gh pr create \
   --title "[title]" \
   --body "[body from above]" \
-  --base ${ARGUMENTS:-main}
+  --base $BASE_BRANCH
 ```
 
 Or if the content is simple:
 
 ```bash
-gh pr create --fill --base ${ARGUMENTS:-main}
+gh pr create --fill --base $BASE_BRANCH
 ```
 
 ---
@@ -145,7 +148,7 @@ Report the result:
 ### No Commits to Push
 
 ```
-No commits between origin/main and HEAD.
+No commits between origin/$BASE_BRANCH and HEAD.
 Nothing to create a PR for.
 ```
 
@@ -160,5 +163,5 @@ Opens the existing PR instead of creating a duplicate.
 ### Push Fails
 
 1. Check if branch exists remotely: `git ls-remote --heads origin [branch]`
-2. If conflicts: `git pull --rebase origin main` then retry push
+2. If conflicts: `git pull --rebase origin $BASE_BRANCH` then retry push
 3. If permission issues: Check GitHub access

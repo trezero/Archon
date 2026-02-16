@@ -11,7 +11,7 @@ import { formatToolCall } from '../utils/tool-formatter';
 import * as archonPaths from '../utils/archon-paths';
 import * as configLoader from '../config/config-loader';
 import { BUNDLED_COMMANDS, isBinaryBuild } from '../defaults/bundled-defaults';
-import { commitAllChanges, execFileAsync } from '../utils/git';
+import { commitAllChanges, execFileAsync, getDefaultBranch } from '../utils/git';
 import type {
   WorkflowDefinition,
   WorkflowRun,
@@ -468,6 +468,7 @@ const CONTEXT_VAR_PATTERN_STR = '\\$(?:CONTEXT|EXTERNAL_CONTEXT|ISSUE_CONTEXT)';
  * - $WORKFLOW_ID - The workflow run ID
  * - $USER_MESSAGE, $ARGUMENTS - The user's trigger message
  * - $ARTIFACTS_DIR - External artifacts directory for this workflow run
+ * - $BASE_BRANCH - The base branch (from config or auto-detected)
  * - $CONTEXT, $EXTERNAL_CONTEXT, $ISSUE_CONTEXT - GitHub issue/PR context (if available)
  *
  * When issueContext is undefined, context variables are replaced with empty string
@@ -477,6 +478,7 @@ const CONTEXT_VAR_PATTERN_STR = '\\$(?:CONTEXT|EXTERNAL_CONTEXT|ISSUE_CONTEXT)';
  * @param workflowId - The workflow run ID for $WORKFLOW_ID substitution
  * @param userMessage - The user's trigger message for $USER_MESSAGE and $ARGUMENTS
  * @param artifactsDir - The external artifacts directory for $ARTIFACTS_DIR substitution
+ * @param baseBranch - The resolved base branch for $BASE_BRANCH substitution
  * @param issueContext - Optional GitHub issue/PR context for $CONTEXT variables
  * @returns Object with substituted prompt and whether context variables were found and substituted
  */
@@ -485,6 +487,7 @@ function substituteWorkflowVariables(
   workflowId: string,
   userMessage: string,
   artifactsDir: string,
+  baseBranch: string,
   issueContext?: string
 ): { prompt: string; contextSubstituted: boolean } {
   // Substitute basic variables
@@ -492,7 +495,8 @@ function substituteWorkflowVariables(
     .replace(/\$WORKFLOW_ID/g, workflowId)
     .replace(/\$USER_MESSAGE/g, userMessage)
     .replace(/\$ARGUMENTS/g, userMessage)
-    .replace(/\$ARTIFACTS_DIR/g, artifactsDir);
+    .replace(/\$ARTIFACTS_DIR/g, artifactsDir)
+    .replace(/\$BASE_BRANCH/g, baseBranch);
 
   // Check if context variables exist (use fresh regex to avoid lastIndex issues)
   const hasContextVariables = new RegExp(CONTEXT_VAR_PATTERN_STR).test(result);
@@ -522,6 +526,7 @@ function substituteWorkflowVariables(
  * @param workflowId - The workflow run ID for variable substitution
  * @param userMessage - The user's trigger message for variable substitution
  * @param artifactsDir - The external artifacts directory for $ARTIFACTS_DIR substitution
+ * @param baseBranch - The resolved base branch for $BASE_BRANCH substitution
  * @param issueContext - Optional GitHub issue/PR context to substitute or append
  * @param logLabel - Human-readable label for logging (e.g., 'workflow step prompt')
  * @returns The final prompt with variables substituted and context optionally appended
@@ -531,6 +536,7 @@ function buildPromptWithContext(
   workflowId: string,
   userMessage: string,
   artifactsDir: string,
+  baseBranch: string,
   issueContext: string | undefined,
   logLabel: string
 ): string {
@@ -539,6 +545,7 @@ function buildPromptWithContext(
     workflowId,
     userMessage,
     artifactsDir,
+    baseBranch,
     issueContext
   );
 
@@ -568,6 +575,7 @@ async function executeStepInternal(
   resolvedModel: string | undefined, // Model from workflow (if any)
   artifactsDir: string, // External artifacts directory
   logDir: string, // External log directory
+  baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
   currentSessionId?: string,
   configuredCommandFolder?: string,
   issueContext?: string
@@ -594,6 +602,7 @@ async function executeStepInternal(
     workflowRun.id,
     workflowRun.user_message,
     artifactsDir,
+    baseBranch,
     issueContext,
     'workflow step prompt'
   );
@@ -852,6 +861,7 @@ async function executeParallelBlock(
   resolvedModel: string | undefined, // Model from workflow (if any)
   artifactsDir: string,
   logDir: string,
+  baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
   configuredCommandFolder?: string,
   issueContext?: string
 ): Promise<ParallelStepResult[]> {
@@ -901,6 +911,7 @@ async function executeParallelBlock(
         resolvedModel,
         artifactsDir,
         logDir,
+        baseBranch,
         undefined, // Always fresh session for parallel (no resume)
         configuredCommandFolder,
         issueContext
@@ -964,6 +975,7 @@ async function executeLoopWorkflow(
   resolvedModel: string | undefined, // Model from workflow (if any)
   artifactsDir: string,
   logDir: string,
+  baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
   issueContext?: string
 ): Promise<void> {
   // Guard for TypeScript type narrowing and runtime safety - caller checks workflow.loop
@@ -1049,6 +1061,7 @@ async function executeLoopWorkflow(
       workflowRun.id,
       workflowRun.user_message,
       artifactsDir,
+      baseBranch,
       issueContext,
       'workflow loop prompt'
     );
@@ -1325,6 +1338,29 @@ export async function executeWorkflow(
   const config = await configLoader.loadConfig(cwd);
   const configuredCommandFolder = config.commands.folder;
 
+  // Resolve base branch once (used for $BASE_BRANCH substitution in all steps)
+  let baseBranch: string;
+  try {
+    baseBranch = config.baseBranch ?? (await getDefaultBranch(cwd));
+  } catch (error) {
+    const err = error as Error;
+    console.error('[WorkflowExecutor] Failed to resolve base branch:', {
+      error: err.message,
+      cwd,
+      configBaseBranch: config.baseBranch,
+    });
+    await sendCriticalMessage(
+      platform,
+      conversationId,
+      `❌ **Workflow failed**: Could not determine the base branch for \`${cwd}\`.\n\nError: ${err.message}\n\nHint: Set \`worktree.baseBranch\` in your \`.archon/config.yaml\` to avoid auto-detection.`
+    );
+    return { success: false, error: `Failed to resolve base branch: ${err.message}` };
+  }
+  const baseBranchSource = config.baseBranch
+    ? 'repo config (worktree.baseBranch)'
+    : 'auto-detected';
+  console.log(`[WorkflowExecutor] Using base branch: ${baseBranch} (from ${baseBranchSource})`);
+
   // Resolve provider and model once (used by all steps/iterations)
   const resolvedProvider = workflow.provider ?? config.assistant;
   const providerSource = workflow.provider ? 'workflow definition' : 'config';
@@ -1547,6 +1583,7 @@ export async function executeWorkflow(
         resolvedModel,
         artifactsDir,
         logDir,
+        baseBranch,
         issueContext
       );
       // Loop workflow handles its own success/failure internally
@@ -1619,6 +1656,7 @@ export async function executeWorkflow(
           resolvedModel,
           artifactsDir,
           logDir,
+          baseBranch,
           configuredCommandFolder,
           issueContext
         );
@@ -1745,6 +1783,7 @@ export async function executeWorkflow(
           resolvedModel,
           artifactsDir,
           logDir,
+          baseBranch,
           resumeSessionId,
           configuredCommandFolder,
           issueContext

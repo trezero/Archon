@@ -84,7 +84,7 @@ Verify you are on the correct PR branch (should be `$HEAD_BRANCH`).
 
 **PHASE_1_CHECKPOINT:**
 - [ ] PR number identified
-- [ ] On the correct PR branch (NOT main, NOT a new branch)
+- [ ] On the correct PR branch (NOT base branch, NOT a new branch)
 - [ ] Consolidated review loaded
 - [ ] CRITICAL/HIGH issues extracted
 
@@ -446,7 +446,7 @@ See fix report: `$ARTIFACTS_DIR/review/fix-report.md`
 
 ## Success Criteria
 
-- **ON_CORRECT_BRANCH**: Working on PR's head branch, not main or new branch
+- **ON_CORRECT_BRANCH**: Working on PR's head branch, not base branch or new branch
 - **CRITICAL_ADDRESSED**: All CRITICAL issues attempted
 - **HIGH_ADDRESSED**: All HIGH issues attempted
 - **VALIDATION_PASSED**: Type check, lint, tests, build all pass

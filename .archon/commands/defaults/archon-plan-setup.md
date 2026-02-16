@@ -115,8 +115,8 @@ gh repo view --json nameWithOwner -q .nameWithOwner
 | Current State | Action |
 |---------------|--------|
 | Already on correct feature branch | Use it, log "Using existing branch: {name}" |
-| On main, clean working directory | Create and checkout: `git checkout -b {branch-name}` |
-| On main, dirty working directory | STOP with error: "Uncommitted changes on main. Stash or commit first." |
+| On base branch, clean working directory | Create and checkout: `git checkout -b {branch-name}` |
+| On base branch, dirty working directory | STOP with error: "Uncommitted changes on base branch. Stash or commit first." |
 | On different feature branch | STOP with error: "On branch {X}, expected {Y}. Switch branches or adjust plan." |
 | In a worktree | Use the worktree's branch, log "Using worktree branch: {name}" |
 
@@ -124,10 +124,10 @@ gh repo view --json nameWithOwner -q .nameWithOwner
 
 ```bash
 git fetch origin
-git rebase origin/main || git merge origin/main
+git rebase origin/$BASE_BRANCH || git merge origin/$BASE_BRANCH
 ```
 
-If conflicts occur, STOP with error: "Merge conflicts with main. Resolve manually."
+If conflicts occur, STOP with error: "Merge conflicts with $BASE_BRANCH. Resolve manually."
 
 ### 2.5 Push Branch (if commits exist)
 
@@ -142,7 +142,7 @@ If no commits yet (fresh branch), skip push - it will happen after implementatio
 
 - [ ] On correct branch
 - [ ] No uncommitted changes
-- [ ] Up to date with main
+- [ ] Up to date with base branch
 
 ---
 
@@ -171,7 +171,7 @@ Write to `$ARTIFACTS_DIR/plan-context.md`:
 | Field | Value |
 |-------|-------|
 | **Branch** | {branch-name} |
-| **Base** | main |
+| **Base** | {base-branch} |
 
 ---
 
@@ -269,7 +269,7 @@ bun run build
 | Field | Value |
 |-------|-------|
 | Branch | `{branch-name}` |
-| Base | `main` |
+| Base | `{base-branch}` |
 
 ### Plan Summary
 
@@ -304,10 +304,10 @@ Proceed to `archon-confirm-plan` to verify the plan's research is still valid.
 Verify the path exists and try again.
 ```
 
-### Uncommitted Changes on Main
+### Uncommitted Changes on Base Branch
 
 ```
-❌ Uncommitted changes on main branch
+❌ Uncommitted changes on base branch
 
 Options:
 1. Stash changes: `git stash`
@@ -320,7 +320,7 @@ Then retry.
 ### Merge Conflicts
 
 ```
-❌ Merge conflicts with main
+❌ Merge conflicts with $BASE_BRANCH
 
 Resolve conflicts manually:
 1. `git status` to see conflicts
@@ -337,5 +337,5 @@ Then retry.
 
 - **PLAN_LOADED**: Plan file read and parsed
 - **SCOPE_LIMITS_CAPTURED**: "NOT Building" section extracted (even if empty)
-- **BRANCH_READY**: On correct branch, synced with main
+- **BRANCH_READY**: On correct branch, synced with base branch
 - **ARTIFACT_WRITTEN**: `plan-context.md` contains all required sections including scope limits

@@ -297,6 +297,11 @@ function mergeRepoConfig(merged: MergedConfig, repo: RepoConfig): MergedConfig {
     };
   }
 
+  // Propagate base branch for $BASE_BRANCH substitution in workflow commands
+  if (repo.worktree?.baseBranch?.trim()) {
+    result.baseBranch = repo.worktree.baseBranch.trim();
+  }
+
   return result;
 }
 

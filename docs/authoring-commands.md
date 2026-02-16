@@ -219,6 +219,7 @@ Archon replaces these variables before sending to the AI:
 | `$ARGUMENTS` | User's input message | Primary input |
 | `$1`, `$2`, `$3` | Positional arguments | Structured input |
 | `$WORKFLOW_ID` | Unique workflow run ID | Artifact naming |
+| `$BASE_BRANCH` | Base branch (config or auto-detected) | Git operations |
 | `$CONTEXT` | GitHub issue/PR context | External context |
 | `$ISSUE_CONTEXT` | Same as `$CONTEXT` | Alias |
 

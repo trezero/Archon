@@ -103,20 +103,20 @@ git worktree list
 | Current State     | Action                                               |
 | ----------------- | ---------------------------------------------------- |
 | In worktree       | Use it (log: "Using worktree")                       |
-| On main, clean    | Create branch: `git checkout -b feature/{plan-slug}` |
-| On main, dirty    | STOP: "Stash or commit changes first"                |
+| On base branch, clean    | Create branch: `git checkout -b feature/{plan-slug}` |
+| On base branch, dirty    | STOP: "Stash or commit changes first"                |
 | On feature branch | Use it (log: "Using existing branch")                |
 
 ### 2.3 Sync with Remote
 
 ```bash
 git fetch origin
-git pull --rebase origin main 2>/dev/null || true
+git pull --rebase origin $BASE_BRANCH 2>/dev/null || true
 ```
 
 **PHASE_2_CHECKPOINT:**
 
-- [ ] On correct branch (not main with uncommitted work)
+- [ ] On correct branch (not base branch with uncommitted work)
 - [ ] Working directory ready
 - [ ] Up to date with remote
 

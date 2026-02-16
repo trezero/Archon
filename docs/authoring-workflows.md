@@ -154,6 +154,7 @@ prompt: |
   - $WORKFLOW_ID - unique run identifier
   - $USER_MESSAGE - original trigger
   - $ARGUMENTS - same as $USER_MESSAGE
+  - $BASE_BRANCH - base branch (config or auto-detected)
   - $CONTEXT - GitHub issue/PR context (if available)
 
   When done, output: <promise>COMPLETE</promise>
@@ -332,6 +333,7 @@ Loop prompts support these variables:
 | `$WORKFLOW_ID` | Unique ID for this workflow run |
 | `$USER_MESSAGE` | Original message that triggered workflow |
 | `$ARGUMENTS` | Same as `$USER_MESSAGE` |
+| `$BASE_BRANCH` | Base branch from config or auto-detected from repo |
 | `$CONTEXT` | GitHub issue/PR context (if available) |
 | `$EXTERNAL_CONTEXT` | Same as `$CONTEXT` |
 | `$ISSUE_CONTEXT` | Same as `$CONTEXT` |
