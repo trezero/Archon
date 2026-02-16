@@ -1,7 +1,7 @@
 name: archon-plan-to-pr
 description: |
   Use when: You have an existing implementation plan and want to execute it end-to-end.
-  Input: Path to a plan file (.archon/artifacts/*/plan.md or .agents/plans/*.md)
+  Input: Path to a plan file ($ARTIFACTS_DIR/plan.md or .agents/plans/*.md)
   Output: PR ready for merge with comprehensive review completed
 
   Full workflow:

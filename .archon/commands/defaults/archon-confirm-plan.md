@@ -27,12 +27,12 @@ Plans can become stale:
 ### 1.1 Load Plan Context
 
 ```bash
-cat .archon/artifacts/runs/$WORKFLOW_ID/plan-context.md
+cat $ARTIFACTS_DIR/plan-context.md
 ```
 
 If not found, STOP with error:
 ```
-❌ Plan context not found at .archon/artifacts/runs/$WORKFLOW_ID/plan-context.md
+❌ Plan context not found at $ARTIFACTS_DIR/plan-context.md
 
 Run archon-plan-setup first.
 ```
@@ -170,7 +170,7 @@ bun test --help 2>/dev/null || echo "test not available"
 
 ### 5.1 Write Confirmation Artifact
 
-Write to `.archon/artifacts/runs/$WORKFLOW_ID/plan-confirmation.md`:
+Write to `$ARTIFACTS_DIR/plan-confirmation.md`:
 
 ```markdown
 # Plan Confirmation
@@ -290,7 +290,7 @@ These are minor and shouldn't block implementation.
 
 ### Artifact
 
-Confirmation written to: `.archon/artifacts/runs/$WORKFLOW_ID/plan-confirmation.md`
+Confirmation written to: `$ARTIFACTS_DIR/plan-confirmation.md`
 
 ### Next Step
 
@@ -320,7 +320,7 @@ The plan references files or patterns that no longer exist. Options:
 
 ### Artifact
 
-Details written to: `.archon/artifacts/runs/$WORKFLOW_ID/plan-confirmation.md`
+Details written to: `$ARTIFACTS_DIR/plan-confirmation.md`
 ```
 
 ---

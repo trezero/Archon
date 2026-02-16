@@ -34,21 +34,24 @@ export interface WorkflowEvent {
 }
 
 /**
- * Get log file path for a workflow run
+ * Get log file path for a workflow run.
+ * @param logDir - The log directory (project-scoped or legacy cwd-based)
+ * @param workflowRunId - The workflow run ID
  */
-function getLogPath(cwd: string, workflowRunId: string): string {
-  return join(cwd, '.archon', 'logs', `${workflowRunId}.jsonl`);
+function getLogPath(logDir: string, workflowRunId: string): string {
+  return join(logDir, `${workflowRunId}.jsonl`);
 }
 
 /**
- * Append event to workflow log
+ * Append event to workflow log.
+ * @param logDir - The log directory (project-scoped or legacy cwd-based)
  */
 export async function logWorkflowEvent(
-  cwd: string,
+  logDir: string,
   workflowRunId: string,
   event: Omit<WorkflowEvent, 'ts' | 'workflow_id'>
 ): Promise<void> {
-  const logPath = getLogPath(cwd, workflowRunId);
+  const logPath = getLogPath(logDir, workflowRunId);
 
   try {
     // Ensure logs directory exists
@@ -81,12 +84,12 @@ export async function logWorkflowEvent(
  * Log workflow start
  */
 export async function logWorkflowStart(
-  cwd: string,
+  logDir: string,
   workflowRunId: string,
   workflowName: string,
   userMessage: string
 ): Promise<void> {
-  await logWorkflowEvent(cwd, workflowRunId, {
+  await logWorkflowEvent(logDir, workflowRunId, {
     type: 'workflow_start',
     workflow_name: workflowName,
     content: userMessage,
@@ -97,12 +100,12 @@ export async function logWorkflowStart(
  * Log step start
  */
 export async function logStepStart(
-  cwd: string,
+  logDir: string,
   workflowRunId: string,
   stepName: string,
   stepIndex: number
 ): Promise<void> {
-  await logWorkflowEvent(cwd, workflowRunId, {
+  await logWorkflowEvent(logDir, workflowRunId, {
     type: 'step_start',
     step: stepName,
     step_index: stepIndex,
@@ -113,12 +116,12 @@ export async function logStepStart(
  * Log step completion
  */
 export async function logStepComplete(
-  cwd: string,
+  logDir: string,
   workflowRunId: string,
   stepName: string,
   stepIndex: number
 ): Promise<void> {
-  await logWorkflowEvent(cwd, workflowRunId, {
+  await logWorkflowEvent(logDir, workflowRunId, {
     type: 'step_complete',
     step: stepName,
     step_index: stepIndex,
@@ -129,11 +132,11 @@ export async function logStepComplete(
  * Log assistant message
  */
 export async function logAssistant(
-  cwd: string,
+  logDir: string,
   workflowRunId: string,
   content: string
 ): Promise<void> {
-  await logWorkflowEvent(cwd, workflowRunId, {
+  await logWorkflowEvent(logDir, workflowRunId, {
     type: 'assistant',
     content,
   });
@@ -143,12 +146,12 @@ export async function logAssistant(
  * Log tool call
  */
 export async function logTool(
-  cwd: string,
+  logDir: string,
   workflowRunId: string,
   toolName: string,
   toolInput: Record<string, unknown>
 ): Promise<void> {
-  await logWorkflowEvent(cwd, workflowRunId, {
+  await logWorkflowEvent(logDir, workflowRunId, {
     type: 'tool',
     tool_name: toolName,
     tool_input: toolInput,
@@ -159,11 +162,11 @@ export async function logTool(
  * Log workflow error
  */
 export async function logWorkflowError(
-  cwd: string,
+  logDir: string,
   workflowRunId: string,
   error: string
 ): Promise<void> {
-  await logWorkflowEvent(cwd, workflowRunId, {
+  await logWorkflowEvent(logDir, workflowRunId, {
     type: 'workflow_error',
     error,
   });
@@ -172,8 +175,8 @@ export async function logWorkflowError(
 /**
  * Log workflow completion
  */
-export async function logWorkflowComplete(cwd: string, workflowRunId: string): Promise<void> {
-  await logWorkflowEvent(cwd, workflowRunId, {
+export async function logWorkflowComplete(logDir: string, workflowRunId: string): Promise<void> {
+  await logWorkflowEvent(logDir, workflowRunId, {
     type: 'workflow_complete',
   });
 }
@@ -182,12 +185,12 @@ export async function logWorkflowComplete(cwd: string, workflowRunId: string): P
  * Log parallel block start
  */
 export async function logParallelBlockStart(
-  cwd: string,
+  logDir: string,
   workflowRunId: string,
   blockIndex: number,
   stepCommands: string[]
 ): Promise<void> {
-  await logWorkflowEvent(cwd, workflowRunId, {
+  await logWorkflowEvent(logDir, workflowRunId, {
     type: 'parallel_block_start',
     block_index: blockIndex,
     steps: stepCommands,
@@ -198,12 +201,12 @@ export async function logParallelBlockStart(
  * Log parallel block completion
  */
 export async function logParallelBlockComplete(
-  cwd: string,
+  logDir: string,
   workflowRunId: string,
   blockIndex: number,
   results: { command: string; success: boolean }[]
 ): Promise<void> {
-  await logWorkflowEvent(cwd, workflowRunId, {
+  await logWorkflowEvent(logDir, workflowRunId, {
     type: 'parallel_block_complete',
     block_index: blockIndex,
     results,

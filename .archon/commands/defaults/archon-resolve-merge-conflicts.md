@@ -292,7 +292,7 @@ Should show `MERGEABLE`.
 
 ### 6.1 Create Resolution Artifact
 
-Write to `.archon/artifacts/reviews/pr-{number}/conflict-resolution.md` (create dir if needed):
+Write to `$ARTIFACTS_DIR/../reviews/pr-{number}/conflict-resolution.md` (create dir if needed):
 
 ```markdown
 # Conflict Resolution: PR #{number}
@@ -384,7 +384,7 @@ gh pr comment {number} --body "$(cat <<'EOF'
 ✅ Type check | ✅ Tests | ✅ Lint
 
 ### Details
-See `.archon/artifacts/reviews/pr-{number}/conflict-resolution.md` for full resolution details.
+See `$ARTIFACTS_DIR/../reviews/pr-{number}/conflict-resolution.md` for full resolution details.
 
 ---
 *Resolved by Archon resolve-conflicts workflow*
@@ -426,7 +426,7 @@ EOF
 | Lint | ✅ |
 
 ### Artifacts
-- Resolution details: `.archon/artifacts/reviews/pr-{number}/conflict-resolution.md`
+- Resolution details: `$ARTIFACTS_DIR/../reviews/pr-{number}/conflict-resolution.md`
 
 ### Next Steps
 1. Review the resolution if needed: `git log -p -1`

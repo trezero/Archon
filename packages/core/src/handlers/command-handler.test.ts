@@ -1150,7 +1150,7 @@ describe('CommandHandler', () => {
           id: 'cb-new-224',
           name: 'user/test-repo',
           repository_url: 'https://github.com/user/test-repo',
-          default_cwd: expect.stringMatching(/test-repo$/),
+          default_cwd: expect.stringMatching(/test-repo\/source$/),
           ai_assistant_type: 'claude',
           commands: {},
           created_at: new Date(),
@@ -1169,7 +1169,7 @@ describe('CommandHandler', () => {
         // CRITICAL: Verify updateConversation was called with correct codebase_id and cwd
         expect(mockUpdateConversation).toHaveBeenCalledWith(baseConversation.id, {
           codebase_id: 'cb-new-224',
-          cwd: expect.stringMatching(/test-repo$/),
+          cwd: expect.stringMatching(/test-repo\/source$/),
         });
       });
     });

@@ -2,12 +2,19 @@
  * Standalone repository clone/register logic.
  * Extracted from command-handler.ts for reuse by REST endpoints.
  */
-import { access } from 'fs/promises';
-import { join, basename } from 'path';
+import { access, rm } from 'fs/promises';
+import { join, basename, resolve } from 'path';
 import * as codebaseDb from '../db/codebases';
 import { sanitizeError } from '../utils/credential-sanitizer';
 import { execFileAsync } from '../utils/git';
-import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
+import {
+  expandTilde,
+  getCommandFolderSearchPaths,
+  ensureProjectStructure,
+  getProjectSourcePath,
+  createProjectSourceSymlink,
+  parseOwnerRepo,
+} from '../utils/archon-paths';
 import { findMarkdownFilesRecursive } from '../utils/commands';
 
 export interface RegisterResult {
@@ -65,7 +72,7 @@ async function registerRepoAtPath(
     // Command loading errors should NOT be swallowed
     const markdownFiles = await findMarkdownFilesRecursive(commandPath);
     if (markdownFiles.length > 0) {
-      const commands = await codebaseDb.getCodebaseCommands(codebase.id);
+      const commands = { ...(await codebaseDb.getCodebaseCommands(codebase.id)) };
       markdownFiles.forEach(({ commandName, relativePath }) => {
         commands[commandName] = {
           path: join(folder, relativePath),
@@ -108,25 +115,33 @@ function normalizeRepoUrl(rawUrl: string): {
   const repoName = urlParts.pop() ?? 'unknown';
   const ownerName = urlParts.pop() ?? 'unknown';
 
-  const workspacePath = getArchonWorkspacesPath();
-  const targetPath = join(workspacePath, ownerName, repoName);
+  // Clone into project-centric source/ directory
+  const targetPath = getProjectSourcePath(ownerName, repoName);
 
   return { workingUrl, ownerName, repoName, targetPath };
 }
 
 /**
  * Clone a repository from a URL and register it in the database.
+ * Local paths (starting with /, ~, or .) are delegated to registerRepository
+ * to avoid wrong owner/repo naming. See #383 for broader rethink.
  */
 export async function cloneRepository(repoUrl: string): Promise<RegisterResult> {
+  // Local paths should be registered (symlink), not cloned (copied)
+  if (repoUrl.startsWith('/') || repoUrl.startsWith('~') || repoUrl.startsWith('.')) {
+    const resolvedPath = repoUrl.startsWith('~') ? expandTilde(repoUrl) : resolve(repoUrl);
+    return registerRepository(resolvedPath);
+  }
+
   const { workingUrl, ownerName, repoName, targetPath } = normalizeRepoUrl(repoUrl);
 
-  // Check if target directory already exists
+  // Check if source directory already has a git repo
   let directoryExists = false;
   try {
-    await access(targetPath);
+    await access(join(targetPath, '.git'));
     directoryExists = true;
   } catch {
-    // Directory doesn't exist, proceed with clone
+    // Directory doesn't exist or isn't a git repo, proceed with clone
   }
 
   if (directoryExists) {
@@ -155,6 +170,9 @@ export async function cloneRepository(repoUrl: string): Promise<RegisterResult> 
     );
   }
 
+  // Create project structure (source/, worktrees/, artifacts/, logs/)
+  await ensureProjectStructure(ownerName, repoName);
+
   console.log(`[Clone] Cloning ${workingUrl} to ${targetPath}`);
 
   // Build clone command with authentication if GitHub token is available
@@ -170,6 +188,16 @@ export async function cloneRepository(repoUrl: string): Promise<RegisterResult> 
       cloneUrl = `https://${ghToken}@${workingUrl}`;
     }
     console.log('[Clone] Using authenticated GitHub clone');
+  }
+
+  // Remove the empty source/ directory before cloning (git clone requires non-existent target)
+  try {
+    await rm(targetPath, { recursive: true });
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code !== 'ENOENT') {
+      throw error;
+    }
   }
 
   try {
@@ -230,6 +258,7 @@ export async function registerRepository(localPath: string): Promise<RegisterRes
 
   // Try to build owner/repo name from remote URL
   let name = repoName;
+  let ownerName = '_local';
   if (remoteUrl) {
     const cleaned = remoteUrl.replace(/\.git$/, '').replace(/\/+$/, '');
     let workingRemote = cleaned;
@@ -241,8 +270,18 @@ export async function registerRepository(localPath: string): Promise<RegisterRes
     const o = parts.pop();
     if (o && r) {
       name = `${o}/${r}`;
+      ownerName = o;
     }
   }
 
+  // Create project structure and source symlink
+  const parsed = parseOwnerRepo(name);
+  const projOwner = parsed?.owner ?? ownerName;
+  const projRepo = parsed?.repo ?? repoName;
+  await ensureProjectStructure(projOwner, projRepo);
+  await createProjectSourceSymlink(projOwner, projRepo, localPath);
+  console.log(`[Clone] Created project structure at ${getProjectSourcePath(projOwner, projRepo)}`);
+
+  // default_cwd is the real local path (not the symlink)
   return registerRepoAtPath(localPath, name, remoteUrl);
 }

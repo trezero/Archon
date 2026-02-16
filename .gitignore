@@ -34,8 +34,9 @@ sessions/
 api_sessions/
 e2e-screenshots/
 
-# Archon logs (generated at runtime)
+# Archon logs and artifacts (generated at runtime)
 .archon/logs/
+.archon/artifacts/
 
 # Agent artifacts (generated, local only)
 .agents/rca-reports/

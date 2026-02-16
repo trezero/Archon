@@ -20,7 +20,7 @@ Transform "$ARGUMENTS" into a battle-tested implementation plan through systemat
 
 **Agent Strategy**: Use Task tool with subagent_type="Explore" for codebase intelligence gathering. This ensures thorough pattern discovery before any external research.
 
-**Output**: `.archon/artifacts/runs/$WORKFLOW_ID/plan.md`
+**Output**: `$ARTIFACTS_DIR/plan.md`
 
 ---
 
@@ -321,12 +321,11 @@ NOT_BUILDING (explicit scope limits):
 ### 6.1 Create Artifact Directory
 
 ```bash
-mkdir -p .archon/artifacts/runs/$WORKFLOW_ID
 ```
 
 ### 6.2 Write Plan
 
-Write to `.archon/artifacts/runs/$WORKFLOW_ID/plan.md`:
+Write to `$ARTIFACTS_DIR/plan.md`:
 
 ```markdown
 # Feature: {Feature Name}
@@ -552,7 +551,7 @@ Also update the PRD file:
 
 **PHASE_6_CHECKPOINT:**
 
-- [ ] Plan file written to `.archon/artifacts/runs/$WORKFLOW_ID/plan.md`
+- [ ] Plan file written to `$ARTIFACTS_DIR/plan.md`
 - [ ] All sections populated with actual codebase data
 - [ ] If PRD: source file updated
 
@@ -601,7 +600,7 @@ If NO → add missing context to plan.
 ```markdown
 ## Plan Created
 
-**File**: `.archon/artifacts/runs/$WORKFLOW_ID/plan.md`
+**File**: `$ARTIFACTS_DIR/plan.md`
 **Workflow ID**: `$WORKFLOW_ID`
 
 {If from PRD:}
@@ -670,4 +669,4 @@ Plan ready. Proceeding to implementation setup.
 - **VALIDATION_DEFINED**: Every task has executable verification command
 - **UX_DOCUMENTED**: Before/After transformation is visually clear with data flows
 - **ONE_PASS_TARGET**: Confidence score 8+ indicates high likelihood of first-attempt success
-- **ARTIFACT_WRITTEN**: Plan saved to `.archon/artifacts/runs/$WORKFLOW_ID/plan.md`
+- **ARTIFACT_WRITTEN**: Plan saved to `$ARTIFACTS_DIR/plan.md`

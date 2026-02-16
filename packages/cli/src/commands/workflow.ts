@@ -1,7 +1,12 @@
 /**
  * Workflow command - list and run workflows
  */
-import { discoverWorkflows, executeWorkflow, getIsolationProvider } from '@archon/core';
+import {
+  discoverWorkflows,
+  executeWorkflow,
+  getIsolationProvider,
+  registerRepository,
+} from '@archon/core';
 import * as conversationDb from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
 import * as isolationDb from '@archon/core/db/isolation-environments';
@@ -112,7 +117,7 @@ export async function workflowRunCommand(
     );
   }
 
-  // Try to find a codebase for this directory (non-critical for non-isolation workflows)
+  // Try to find a codebase for this directory
   let codebase = null;
   let codebaseLookupError: Error | null = null;
   try {
@@ -120,15 +125,30 @@ export async function workflowRunCommand(
   } catch (error) {
     const err = error as Error;
     codebaseLookupError = err;
-    // Non-critical for non-isolation workflows - log with details but continue
     console.warn(`Warning: Could not look up codebase for ${cwd}: ${err.message}`);
-    // If this is a connection error, it might indicate broader database issues
     if (
       err.message.includes('connect') ||
       err.message.includes('ECONNREFUSED') ||
       err.message.includes('ETIMEDOUT')
     ) {
       console.warn('Hint: Check DATABASE_URL and that the database is running.');
+    }
+  }
+
+  // Auto-register unregistered repos (creates project structure for artifacts/logs)
+  if (!codebase && !codebaseLookupError) {
+    const repoRoot = await git.findRepoRoot(cwd);
+    if (repoRoot) {
+      try {
+        const result = await registerRepository(repoRoot);
+        codebase = await codebaseDb.getCodebase(result.codebaseId);
+        if (!result.alreadyExisted) {
+          console.log(`[CLI] Auto-registered codebase: ${result.name}`);
+        }
+      } catch (error) {
+        const err = error as Error;
+        console.warn(`[CLI] Auto-registration failed (non-critical): ${err.message}`);
+      }
     }
   }
 
@@ -139,7 +159,6 @@ export async function workflowRunCommand(
   if (options.branchName) {
     // Need a codebase for isolation
     if (!codebase) {
-      // Check if it's a database issue rather than "not in git repo"
       if (codebaseLookupError) {
         throw new Error(
           'Cannot create worktree: Database lookup failed.\n' +
@@ -147,25 +166,10 @@ export async function workflowRunCommand(
             'Hint: Check your database connection before using --branch.'
         );
       }
-
-      // Try to auto-detect from cwd
-      const repoRoot = await git.findRepoRoot(cwd);
-      if (!repoRoot) {
-        throw new Error(
-          'Cannot create worktree: Not in a git repository.\n' +
-            'Either run from a git repo or use /clone first.'
-        );
-      }
-
-      // Auto-register as codebase
-      const remoteUrl = await git.getRemoteUrl(repoRoot);
-      const repoName = remoteUrl?.split('/').pop()?.replace('.git', '') ?? 'local-repo';
-      codebase = await codebaseDb.createCodebase({
-        name: repoName,
-        repository_url: remoteUrl ?? undefined,
-        default_cwd: repoRoot,
-      });
-      console.log(`[CLI] Auto-registered codebase: ${codebase.repository_url ?? repoRoot}`);
+      throw new Error(
+        'Cannot create worktree: Not in a git repository.\n' +
+          'Either run from a git repo or use /clone first.'
+      );
     }
 
     if (options.noWorktree) {

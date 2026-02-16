@@ -29,12 +29,12 @@ Prepare everything needed for plan implementation:
 **Check in order:**
 
 1. **If `$ARGUMENTS` provided**: Use that path
-2. **If plan already in workflow artifacts**: Use `.archon/artifacts/runs/$WORKFLOW_ID/plan.md`
+2. **If plan already in workflow artifacts**: Use `$ARTIFACTS_DIR/plan.md`
 
 ```bash
 # Check if plan was created by archon-create-plan in this workflow
-if [ -f ".archon/artifacts/runs/$WORKFLOW_ID/plan.md" ]; then
-  PLAN_PATH=".archon/artifacts/runs/$WORKFLOW_ID/plan.md"
+if [ -f "$ARTIFACTS_DIR/plan.md" ]; then
+  PLAN_PATH="$ARTIFACTS_DIR/plan.md"
   echo "Using plan from workflow: $PLAN_PATH"
 elif [ -n "$ARGUMENTS" ] && [ -f "$ARGUMENTS" ]; then
   PLAN_PATH="$ARGUMENTS"
@@ -151,12 +151,11 @@ If no commits yet (fresh branch), skip push - it will happen after implementatio
 ### 3.1 Create Artifact Directory
 
 ```bash
-mkdir -p .archon/artifacts/runs/$WORKFLOW_ID
 ```
 
 ### 3.2 Write Context Artifact
 
-Write to `.archon/artifacts/runs/$WORKFLOW_ID/plan-context.md`:
+Write to `$ARTIFACTS_DIR/plan-context.md`:
 
 ```markdown
 # Plan Context
@@ -286,7 +285,7 @@ bun run build
 
 ### Artifact
 
-Context written to: `.archon/artifacts/runs/$WORKFLOW_ID/plan-context.md`
+Context written to: `$ARTIFACTS_DIR/plan-context.md`
 
 ### Next Step
 

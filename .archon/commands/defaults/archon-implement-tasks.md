@@ -27,7 +27,7 @@ Execute each task from the plan, validating after every change.
 ### 1.1 Load Plan Context
 
 ```bash
-cat .archon/artifacts/runs/$WORKFLOW_ID/plan-context.md
+cat $ARTIFACTS_DIR/plan-context.md
 ```
 
 Extract:
@@ -38,7 +38,7 @@ Extract:
 ### 1.2 Load Plan Confirmation
 
 ```bash
-cat .archon/artifacts/runs/$WORKFLOW_ID/plan-confirmation.md
+cat $ARTIFACTS_DIR/plan-confirmation.md
 ```
 
 Check:
@@ -197,7 +197,7 @@ For each new/changed file, write tests that cover:
 
 ### 4.1 Write Progress Artifact
 
-Write to `.archon/artifacts/runs/$WORKFLOW_ID/implementation.md`:
+Write to `$ARTIFACTS_DIR/implementation.md`:
 
 ```markdown
 # Implementation Progress
@@ -326,7 +326,7 @@ Continue to `archon-validate` for full validation suite.
 
 ### Artifact
 
-Progress written to: `.archon/artifacts/runs/$WORKFLOW_ID/implementation.md`
+Progress written to: `$ARTIFACTS_DIR/implementation.md`
 
 ### Next Step
 

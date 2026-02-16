@@ -22,7 +22,7 @@ This is a focused step: run checks, fix issues, repeat until green.
 ### 1.1 Load Plan Context
 
 ```bash
-cat .archon/artifacts/runs/$WORKFLOW_ID/plan-context.md
+cat $ARTIFACTS_DIR/plan-context.md
 ```
 
 Extract the "Validation Commands" section.
@@ -150,7 +150,7 @@ Run each check in order. Fix any failures before proceeding.
 
 ### 3.1 Write Validation Artifact
 
-Write to `.archon/artifacts/runs/$WORKFLOW_ID/validation.md`:
+Write to `$ARTIFACTS_DIR/validation.md`:
 
 ```markdown
 # Validation Results
@@ -295,7 +295,7 @@ Continue to `archon-finalize-pr` to update PR and mark ready for review.
 
 ### Artifact
 
-Results written to: `.archon/artifacts/runs/$WORKFLOW_ID/validation.md`
+Results written to: `$ARTIFACTS_DIR/validation.md`
 
 ### Next Step
 
@@ -326,7 +326,7 @@ This issue requires manual intervention:
 
 ### Artifact
 
-Partial results written to: `.archon/artifacts/runs/$WORKFLOW_ID/validation.md`
+Partial results written to: `$ARTIFACTS_DIR/validation.md`
 ```
 
 ---

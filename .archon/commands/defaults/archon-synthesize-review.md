@@ -11,7 +11,7 @@ argument-hint: (none - reads from review artifacts)
 
 Read all parallel review agent artifacts, synthesize findings into a consolidated report, create a master artifact, and post a comprehensive review comment to the GitHub PR.
 
-**Output artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/review/consolidated-review.md`
+**Output artifact**: `$ARTIFACTS_DIR/review/consolidated-review.md`
 **GitHub action**: Post PR comment with full review
 
 ---
@@ -21,24 +21,24 @@ Read all parallel review agent artifacts, synthesize findings into a consolidate
 ### 1.1 Get PR Number from Registry
 
 ```bash
-PR_NUMBER=$(cat .archon/artifacts/runs/$WORKFLOW_ID/.pr-number)
+PR_NUMBER=$(cat $ARTIFACTS_DIR/.pr-number)
 ```
 
 ### 1.2 Read Scope
 
 ```bash
-cat .archon/artifacts/runs/$WORKFLOW_ID/review/scope.md
+cat $ARTIFACTS_DIR/review/scope.md
 ```
 
 ### 1.3 Read All Agent Artifacts
 
 ```bash
 # Read each agent's findings
-cat .archon/artifacts/runs/$WORKFLOW_ID/review/code-review-findings.md
-cat .archon/artifacts/runs/$WORKFLOW_ID/review/error-handling-findings.md
-cat .archon/artifacts/runs/$WORKFLOW_ID/review/test-coverage-findings.md
-cat .archon/artifacts/runs/$WORKFLOW_ID/review/comment-quality-findings.md
-cat .archon/artifacts/runs/$WORKFLOW_ID/review/docs-impact-findings.md
+cat $ARTIFACTS_DIR/review/code-review-findings.md
+cat $ARTIFACTS_DIR/review/error-handling-findings.md
+cat $ARTIFACTS_DIR/review/test-coverage-findings.md
+cat $ARTIFACTS_DIR/review/comment-quality-findings.md
+cat $ARTIFACTS_DIR/review/docs-impact-findings.md
 ```
 
 **PHASE_1_CHECKPOINT:**
@@ -100,7 +100,7 @@ By agent:
 
 ## Phase 3: GENERATE - Create Consolidated Artifact
 
-Write to `.archon/artifacts/runs/$WORKFLOW_ID/review/consolidated-review.md`:
+Write to `$ARTIFACTS_DIR/review/consolidated-review.md`:
 
 ```markdown
 # Consolidated Review: PR #{number}
@@ -245,7 +245,7 @@ If not addressing in this PR, create issues for:
 ## Metadata
 
 - **Synthesized**: {ISO timestamp}
-- **Artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/review/consolidated-review.md`
+- **Artifact**: `$ARTIFACTS_DIR/review/consolidated-review.md`
 ```
 
 **PHASE_3_CHECKPOINT:**
@@ -367,7 +367,7 @@ gh pr comment {number} --body "$(cat <<'EOF'
 ---
 
 *Reviewed by Archon comprehensive-pr-review workflow*
-*Artifacts: `.archon/artifacts/runs/$WORKFLOW_ID/review/`*
+*Artifacts: `$ARTIFACTS_DIR/review/`*
 EOF
 )"
 ```

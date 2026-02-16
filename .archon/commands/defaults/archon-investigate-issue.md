@@ -210,10 +210,9 @@ git blame -L {start},{end} {affected-file}
 ### 4.1 Artifact Path
 
 ```bash
-mkdir -p .archon/artifacts/runs/$WORKFLOW_ID
 ```
 
-**Path:** `.archon/artifacts/runs/$WORKFLOW_ID/investigation.md`
+**Path:** `$ARTIFACTS_DIR/investigation.md`
 
 This unified path allows review agents to find the artifact regardless of workflow type.
 
@@ -397,7 +396,7 @@ bun run lint
 
 - **Investigated by**: Claude
 - **Timestamp**: {ISO timestamp}
-- **Artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/investigation.md`
+- **Artifact**: `$ARTIFACTS_DIR/investigation.md`
 ```
 
 **PHASE_4_CHECKPOINT:**
@@ -513,7 +512,7 @@ EOF
 
 ### Artifact
 
-📄 `.archon/artifacts/runs/$WORKFLOW_ID/investigation.md`
+📄 `$ARTIFACTS_DIR/investigation.md`
 
 ### GitHub
 

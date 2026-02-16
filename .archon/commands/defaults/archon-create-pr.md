@@ -24,7 +24,7 @@ git log origin/main..HEAD --oneline
 Look for the most recent implementation report:
 
 ```bash
-ls -t .archon/artifacts/reports/*-report.md 2>/dev/null | head -1
+ls -t $ARTIFACTS_DIR/../reports/*-report.md 2>/dev/null | head -1
 ```
 
 If found, read it to extract:

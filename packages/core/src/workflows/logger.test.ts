@@ -31,7 +31,7 @@ describe('Workflow Logger', () => {
   });
 
   async function readLogFile(workflowRunId: string): Promise<WorkflowEvent[]> {
-    const logPath = join(testDir, '.archon', 'logs', `${workflowRunId}.jsonl`);
+    const logPath = join(testDir, `${workflowRunId}.jsonl`);
     const content = await readFile(logPath, 'utf-8');
     return content
       .trim()
@@ -255,12 +255,8 @@ Line 3`;
 
   describe('filesystem error handling', () => {
     it('should not throw when log directory is not writable', async () => {
-      // Create logs directory first, then make parent read-only
-      const logsDir = join(testDir, '.archon', 'logs');
-      await mkdir(logsDir, { recursive: true });
-
-      // Make logs directory read-only (can't write files)
-      await chmod(logsDir, 0o444);
+      // Make testDir read-only (can't write files)
+      await chmod(testDir, 0o444);
 
       try {
         // Should not throw - logging shouldn't break workflow
@@ -272,11 +268,11 @@ Line 3`;
         ).resolves.toBeUndefined();
       } finally {
         // Restore permissions for cleanup
-        await chmod(logsDir, 0o755);
+        await chmod(testDir, 0o755);
       }
     });
 
-    it('should not throw when cwd does not exist', async () => {
+    it('should not throw when logDir does not exist', async () => {
       const nonExistentDir = join(testDir, 'does-not-exist', 'nested');
 
       // Make parent read-only so mkdir fails

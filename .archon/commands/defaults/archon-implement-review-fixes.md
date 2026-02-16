@@ -21,7 +21,7 @@ argument-hint: (none - reads from consolidated review artifact)
 
 Read the consolidated review artifact and implement all CRITICAL and HIGH priority fixes. Add tests for fixed code if missing. Commit and push changes. Report what was fixed, what wasn't (and why), and suggest follow-up issues for remaining items.
 
-**Output artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/review/fix-report.md`
+**Output artifact**: `$ARTIFACTS_DIR/review/fix-report.md`
 **Git action**: Commit AND push fixes to the PR branch
 **GitHub action**: Post fix report comment
 
@@ -32,7 +32,7 @@ Read the consolidated review artifact and implement all CRITICAL and HIGH priori
 ### 1.1 Get PR Number from Registry
 
 ```bash
-PR_NUMBER=$(cat .archon/artifacts/runs/$WORKFLOW_ID/.pr-number)
+PR_NUMBER=$(cat $ARTIFACTS_DIR/.pr-number)
 
 # Get the PR's head branch name
 HEAD_BRANCH=$(gh pr view $PR_NUMBER --json headRefName --jq '.headRefName')
@@ -53,7 +53,7 @@ git pull origin $HEAD_BRANCH
 ### 1.3 Read Consolidated Review
 
 ```bash
-cat .archon/artifacts/runs/$WORKFLOW_ID/review/consolidated-review.md
+cat $ARTIFACTS_DIR/review/consolidated-review.md
 ```
 
 Extract:
@@ -67,10 +67,10 @@ Extract:
 If consolidated doesn't have full fix code, read original artifacts:
 
 ```bash
-cat .archon/artifacts/runs/$WORKFLOW_ID/review/code-review-findings.md
-cat .archon/artifacts/runs/$WORKFLOW_ID/review/error-handling-findings.md
-cat .archon/artifacts/runs/$WORKFLOW_ID/review/test-coverage-findings.md
-cat .archon/artifacts/runs/$WORKFLOW_ID/review/docs-impact-findings.md
+cat $ARTIFACTS_DIR/review/code-review-findings.md
+cat $ARTIFACTS_DIR/review/error-handling-findings.md
+cat $ARTIFACTS_DIR/review/test-coverage-findings.md
+cat $ARTIFACTS_DIR/review/docs-impact-findings.md
 ```
 
 ### 1.5 Check Current Git State
@@ -194,7 +194,7 @@ Tests added:
 Skipped (see review artifacts):
 - {brief list of unfixable if any}
 
-Review artifacts: .archon/artifacts/runs/$WORKFLOW_ID/review/"
+Review artifacts: $ARTIFACTS_DIR/review/"
 ```
 
 ### 4.3 Push to PR Branch
@@ -220,7 +220,7 @@ git push origin $HEAD_BRANCH
 
 ## Phase 5: GENERATE - Create Fix Report
 
-Write to `.archon/artifacts/runs/$WORKFLOW_ID/review/fix-report.md`:
+Write to `$ARTIFACTS_DIR/review/fix-report.md`:
 
 ```markdown
 # Fix Report: PR #{number}
@@ -416,7 +416,7 @@ Output only this summary (keep it brief):
 **Validation**: ✅ All checks pass
 **Pushed**: ✅ Changes pushed to PR
 
-See fix report: `.archon/artifacts/runs/$WORKFLOW_ID/review/fix-report.md`
+See fix report: `$ARTIFACTS_DIR/review/fix-report.md`
 ```
 
 ---

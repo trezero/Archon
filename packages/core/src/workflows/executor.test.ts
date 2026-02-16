@@ -31,6 +31,14 @@ const mockQuery = mock((query: string) => {
       ])
     );
   }
+  // For getCodebase query (resolveArtifactsDir / resolveLogDir), return null
+  if (query.includes('remote_agent_codebases') && query.includes('WHERE id')) {
+    return Promise.resolve(createQueryResult([]));
+  }
+  // For workflow events INSERT, return empty (fire-and-forget)
+  if (query.includes('INSERT INTO remote_agent_workflow_events')) {
+    return Promise.resolve(createQueryResult([]));
+  }
   // Default: empty result for UPDATE queries and other operations
   return Promise.resolve(createQueryResult([]));
 });
@@ -362,6 +370,105 @@ describe('Workflow Executor', () => {
       const messages = calls.map((call: unknown[]) => call[1]);
 
       expect(messages.some((m: string) => m.includes('❌ **Workflow failed**'))).toBe(true);
+    });
+
+    it('should resolve project-scoped paths when codebase has owner/repo name', async () => {
+      // Override mockQuery to return a codebase with owner/repo name
+      const originalImpl = mockQuery.getMockImplementation();
+      mockQuery.mockImplementation((query: string, params?: unknown[]) => {
+        if (query.includes('remote_agent_codebases') && query.includes('WHERE id') && params) {
+          return Promise.resolve(
+            createQueryResult([
+              {
+                id: 'codebase-456',
+                name: 'acme/widget',
+                default_cwd: '/some/path',
+                commands: '{}',
+                created_at: new Date(),
+                updated_at: new Date(),
+              },
+            ])
+          );
+        }
+        // Delegate to original for all other queries
+        return originalImpl!(query, params);
+      });
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        testWorkflow,
+        'User message',
+        'db-conv-id',
+        'codebase-456'
+      );
+
+      // Verify log file was written to project-scoped path, NOT cwd-based path
+      const { getProjectLogsPath } = await import('../utils/archon-paths');
+      const projectLogDir = getProjectLogsPath('acme', 'widget');
+      const projectLogPath = join(projectLogDir, 'test-workflow-run-id.jsonl');
+      const logContent = await readFile(projectLogPath, 'utf-8');
+      const events = logContent
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line));
+      expect(events.some((e: { type: string }) => e.type === 'workflow_start')).toBe(true);
+
+      // Verify cwd-based fallback path was NOT used
+      const cwdLogPath = join(testDir, '.archon', 'logs', 'test-workflow-run-id.jsonl');
+      let cwdLogExists = false;
+      try {
+        await readFile(cwdLogPath, 'utf-8');
+        cwdLogExists = true;
+      } catch {
+        // Expected - fallback path should not exist
+      }
+      expect(cwdLogExists).toBe(false);
+
+      // Restore original mock
+      mockQuery.mockImplementation(originalImpl!);
+
+      // Clean up project-scoped directory
+      const { getProjectRoot } = await import('../utils/archon-paths');
+      try {
+        await rm(getProjectRoot('acme', 'widget'), { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    });
+
+    it('should substitute $ARTIFACTS_DIR in command prompts', async () => {
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(
+        join(commandsDir, 'artifacts-test.md'),
+        'Write output to $ARTIFACTS_DIR/results.md'
+      );
+
+      const callCountBefore = mockSendQuery.mock.calls.length;
+
+      const workflow: WorkflowDefinition = {
+        name: 'artifacts-dir-workflow',
+        description: 'Test $ARTIFACTS_DIR substitution',
+        steps: [{ command: 'artifacts-test' }],
+      };
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'Run analysis',
+        'db-conv-id'
+      );
+
+      expect(mockSendQuery.mock.calls.length).toBeGreaterThan(callCountBefore);
+      const callArg = mockSendQuery.mock.calls[callCountBefore][0] as string;
+      // $ARTIFACTS_DIR should be replaced with actual path
+      expect(callArg).not.toContain('$ARTIFACTS_DIR');
+      // Should contain the fallback artifacts path (since no codebase in mock)
+      expect(callArg).toContain('artifacts');
+      expect(callArg).toContain('results.md');
     });
 
     it('should handle codebase_id being undefined', async () => {

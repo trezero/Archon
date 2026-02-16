@@ -24,9 +24,9 @@ Finalize the implementation and create the PR:
 ### 1.1 Load Workflow Artifacts
 
 ```bash
-cat .archon/artifacts/runs/$WORKFLOW_ID/plan-context.md
-cat .archon/artifacts/runs/$WORKFLOW_ID/implementation.md
-cat .archon/artifacts/runs/$WORKFLOW_ID/validation.md
+cat $ARTIFACTS_DIR/plan-context.md
+cat $ARTIFACTS_DIR/implementation.md
+cat $ARTIFACTS_DIR/validation.md
 ```
 
 Extract:
@@ -219,11 +219,10 @@ gh pr view --json number,url,headRefName,baseRefName
 Write PR number for downstream review steps:
 
 ```bash
-mkdir -p .archon/artifacts/runs/$WORKFLOW_ID
 PR_NUMBER=$(gh pr view --json number -q '.number')
 PR_URL=$(gh pr view --json url -q '.url')
-echo "$PR_NUMBER" > .archon/artifacts/runs/$WORKFLOW_ID/.pr-number
-echo "$PR_URL" > .archon/artifacts/runs/$WORKFLOW_ID/.pr-url
+echo "$PR_NUMBER" > $ARTIFACTS_DIR/.pr-number
+echo "$PR_URL" > $ARTIFACTS_DIR/.pr-url
 ```
 
 **PHASE_3_CHECKPOINT:**
@@ -240,7 +239,7 @@ echo "$PR_URL" > .archon/artifacts/runs/$WORKFLOW_ID/.pr-url
 
 ### 4.1 Write Final Artifact
 
-Write to `.archon/artifacts/runs/$WORKFLOW_ID/pr-ready.md`:
+Write to `$ARTIFACTS_DIR/pr-ready.md`:
 
 ```markdown
 # PR Ready for Review
@@ -343,7 +342,7 @@ Continue to PR review workflow:
 
 ### Artifact
 
-Status written to: `.archon/artifacts/runs/$WORKFLOW_ID/pr-ready.md`
+Status written to: `$ARTIFACTS_DIR/pr-ready.md`
 
 ### Next Step
 

@@ -1,11 +1,12 @@
 /**
  * Workflow Executor - runs workflow steps sequentially
  */
-import { readFile, access } from 'fs/promises';
+import { readFile, access, mkdir } from 'fs/promises';
 import { join } from 'path';
 import type { IPlatformAdapter } from '../types';
 import { getAssistantClient } from '../clients/factory';
 import * as workflowDb from '../db/workflows';
+import * as codebaseDb from '../db/codebases';
 import { formatToolCall } from '../utils/tool-formatter';
 import * as archonPaths from '../utils/archon-paths';
 import * as configLoader from '../config/config-loader';
@@ -75,6 +76,45 @@ const TRANSIENT_PATTERNS = [
  */
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Resolve the artifacts and log directories for a workflow run.
+ * Looks up the codebase by ID once, parses owner/repo, and returns project-scoped paths.
+ * Falls back to cwd-based paths for unregistered repos.
+ */
+async function resolveProjectPaths(
+  cwd: string,
+  workflowRunId: string,
+  codebaseId?: string
+): Promise<{ artifactsDir: string; logDir: string }> {
+  if (codebaseId) {
+    try {
+      const codebase = await codebaseDb.getCodebase(codebaseId);
+      if (codebase) {
+        const parsed = archonPaths.parseOwnerRepo(codebase.name);
+        if (parsed) {
+          return {
+            artifactsDir: archonPaths.getRunArtifactsPath(parsed.owner, parsed.repo, workflowRunId),
+            logDir: archonPaths.getProjectLogsPath(parsed.owner, parsed.repo),
+          };
+        }
+        console.warn('[WorkflowExecutor] Codebase name not in owner/repo format, using fallback', {
+          codebaseName: codebase.name,
+        });
+      }
+    } catch (error) {
+      console.warn('[WorkflowExecutor] Failed to resolve project paths, using fallback', {
+        codebaseId,
+        error: (error as Error).message,
+      });
+    }
+  }
+  // Fallback for unregistered repos
+  return {
+    artifactsDir: join(cwd, '.archon', 'artifacts', 'runs', workflowRunId),
+    logDir: join(cwd, '.archon', 'logs'),
+  };
 }
 
 /**
@@ -427,6 +467,7 @@ const CONTEXT_VAR_PATTERN_STR = '\\$(?:CONTEXT|EXTERNAL_CONTEXT|ISSUE_CONTEXT)';
  * Supported variables:
  * - $WORKFLOW_ID - The workflow run ID
  * - $USER_MESSAGE, $ARGUMENTS - The user's trigger message
+ * - $ARTIFACTS_DIR - External artifacts directory for this workflow run
  * - $CONTEXT, $EXTERNAL_CONTEXT, $ISSUE_CONTEXT - GitHub issue/PR context (if available)
  *
  * When issueContext is undefined, context variables are replaced with empty string
@@ -435,6 +476,7 @@ const CONTEXT_VAR_PATTERN_STR = '\\$(?:CONTEXT|EXTERNAL_CONTEXT|ISSUE_CONTEXT)';
  * @param prompt - The command prompt template with variable placeholders
  * @param workflowId - The workflow run ID for $WORKFLOW_ID substitution
  * @param userMessage - The user's trigger message for $USER_MESSAGE and $ARGUMENTS
+ * @param artifactsDir - The external artifacts directory for $ARTIFACTS_DIR substitution
  * @param issueContext - Optional GitHub issue/PR context for $CONTEXT variables
  * @returns Object with substituted prompt and whether context variables were found and substituted
  */
@@ -442,13 +484,15 @@ function substituteWorkflowVariables(
   prompt: string,
   workflowId: string,
   userMessage: string,
+  artifactsDir: string,
   issueContext?: string
 ): { prompt: string; contextSubstituted: boolean } {
   // Substitute basic variables
   let result = prompt
     .replace(/\$WORKFLOW_ID/g, workflowId)
     .replace(/\$USER_MESSAGE/g, userMessage)
-    .replace(/\$ARGUMENTS/g, userMessage);
+    .replace(/\$ARGUMENTS/g, userMessage)
+    .replace(/\$ARTIFACTS_DIR/g, artifactsDir);
 
   // Check if context variables exist (use fresh regex to avoid lastIndex issues)
   const hasContextVariables = new RegExp(CONTEXT_VAR_PATTERN_STR).test(result);
@@ -477,6 +521,7 @@ function substituteWorkflowVariables(
  * @param template - The command prompt template with variable placeholders
  * @param workflowId - The workflow run ID for variable substitution
  * @param userMessage - The user's trigger message for variable substitution
+ * @param artifactsDir - The external artifacts directory for $ARTIFACTS_DIR substitution
  * @param issueContext - Optional GitHub issue/PR context to substitute or append
  * @param logLabel - Human-readable label for logging (e.g., 'workflow step prompt')
  * @returns The final prompt with variables substituted and context optionally appended
@@ -485,6 +530,7 @@ function buildPromptWithContext(
   template: string,
   workflowId: string,
   userMessage: string,
+  artifactsDir: string,
   issueContext: string | undefined,
   logLabel: string
 ): string {
@@ -492,6 +538,7 @@ function buildPromptWithContext(
     template,
     workflowId,
     userMessage,
+    artifactsDir,
     issueContext
   );
 
@@ -519,6 +566,8 @@ async function executeStepInternal(
   stepId: string, // For logging: "0", "1", "2.0", "2.1", etc.
   resolvedProvider: string, // Provider resolved from workflow or config
   resolvedModel: string | undefined, // Model from workflow (if any)
+  artifactsDir: string, // External artifacts directory
+  logDir: string, // External log directory
   currentSessionId?: string,
   configuredCommandFolder?: string,
   issueContext?: string
@@ -526,7 +575,7 @@ async function executeStepInternal(
   const commandName = stepDef.command;
 
   console.log(`[WorkflowExecutor] Executing step ${stepId}: ${commandName}`);
-  await logStepStart(cwd, workflowRun.id, commandName, Number(stepId.split('.')[0]));
+  await logStepStart(logDir, workflowRun.id, commandName, Number(stepId.split('.')[0]));
   const stepStartTime = Date.now();
 
   // Load command prompt
@@ -544,6 +593,7 @@ async function executeStepInternal(
     promptResult.content,
     workflowRun.id,
     workflowRun.user_message,
+    artifactsDir,
     issueContext,
     'workflow step prompt'
   );
@@ -630,7 +680,7 @@ async function executeStepInternal(
         } else {
           assistantMessages.push(msg.content);
         }
-        await logAssistant(cwd, workflowRun.id, msg.content);
+        await logAssistant(logDir, workflowRun.id, msg.content);
       } else if (msg.type === 'tool' && msg.toolName) {
         if (streamingMode === 'stream') {
           const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
@@ -648,7 +698,7 @@ async function executeStepInternal(
             await platform.sendStructuredEvent(conversationId, msg);
           }
         }
-        await logTool(cwd, workflowRun.id, msg.toolName, msg.toolInput ?? {});
+        await logTool(logDir, workflowRun.id, msg.toolName, msg.toolInput ?? {});
       } else if (msg.type === 'result' && msg.sessionId) {
         newSessionId = msg.sessionId;
       }
@@ -683,7 +733,7 @@ async function executeStepInternal(
       );
     }
 
-    await logStepComplete(cwd, workflowRun.id, commandName, Number(stepId.split('.')[0]));
+    await logStepComplete(logDir, workflowRun.id, commandName, Number(stepId.split('.')[0]));
 
     // Emit step_completed event (fire-and-forget)
     const emitter = getWorkflowEventEmitter();
@@ -800,6 +850,8 @@ async function executeParallelBlock(
   blockIndex: number,
   resolvedProvider: string, // Provider resolved from workflow or config
   resolvedModel: string | undefined, // Model from workflow (if any)
+  artifactsDir: string,
+  logDir: string,
   configuredCommandFolder?: string,
   issueContext?: string
 ): Promise<ParallelStepResult[]> {
@@ -847,6 +899,8 @@ async function executeParallelBlock(
         `${String(blockIndex)}.${String(i)}`, // Step identifier for logging
         resolvedProvider,
         resolvedModel,
+        artifactsDir,
+        logDir,
         undefined, // Always fresh session for parallel (no resume)
         configuredCommandFolder,
         issueContext
@@ -908,6 +962,8 @@ async function executeLoopWorkflow(
   workflowRun: WorkflowRun,
   resolvedProvider: string, // Provider resolved from workflow or config
   resolvedModel: string | undefined, // Model from workflow (if any)
+  artifactsDir: string,
+  logDir: string,
   issueContext?: string
 ): Promise<void> {
   // Guard for TypeScript type narrowing and runtime safety - caller checks workflow.loop
@@ -992,6 +1048,7 @@ async function executeLoopWorkflow(
       prompt,
       workflowRun.id,
       workflowRun.user_message,
+      artifactsDir,
       issueContext,
       'workflow loop prompt'
     );
@@ -1062,7 +1119,7 @@ async function executeLoopWorkflow(
           } else if (streamingMode === 'batch' && cleanedContent) {
             assistantMessages.push(cleanedContent);
           }
-          await logAssistant(cwd, workflowRun.id, msg.content); // Log raw for debugging
+          await logAssistant(logDir, workflowRun.id, msg.content); // Log raw for debugging
         } else if (msg.type === 'tool' && msg.toolName) {
           if (streamingMode === 'stream') {
             const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
@@ -1075,7 +1132,7 @@ async function executeLoopWorkflow(
             );
             if (!sent) droppedMessageCount++;
           }
-          await logTool(cwd, workflowRun.id, msg.toolName, msg.toolInput ?? {});
+          await logTool(logDir, workflowRun.id, msg.toolName, msg.toolInput ?? {});
         } else if (msg.type === 'result' && msg.sessionId) {
           currentSessionId = msg.sessionId;
         }
@@ -1138,7 +1195,7 @@ async function executeLoopWorkflow(
         });
 
         await workflowDb.completeWorkflowRun(workflowRun.id);
-        await logWorkflowComplete(cwd, workflowRun.id);
+        await logWorkflowComplete(logDir, workflowRun.id);
         await sendCriticalMessage(
           platform,
           conversationId,
@@ -1158,7 +1215,7 @@ async function executeLoopWorkflow(
         return;
       }
 
-      await logStepComplete(cwd, workflowRun.id, `iteration-${String(i)}`, i - 1);
+      await logStepComplete(logDir, workflowRun.id, `iteration-${String(i)}`, i - 1);
 
       // Emit loop_iteration_completed
       loopEmitter.emit({
@@ -1183,7 +1240,7 @@ async function executeLoopWorkflow(
       const err = error as Error;
       console.error(`[WorkflowExecutor] Loop iteration ${String(i)} failed:`, err.message);
       await workflowDb.failWorkflowRun(workflowRun.id, `Iteration ${String(i)}: ${err.message}`);
-      await logWorkflowError(cwd, workflowRun.id, err.message);
+      await logWorkflowError(logDir, workflowRun.id, err.message);
       await sendCriticalMessage(
         platform,
         conversationId,
@@ -1208,7 +1265,7 @@ async function executeLoopWorkflow(
   const errorMsg = `Max iterations (${String(loop.max_iterations)}) reached without completion signal "${loop.until}"`;
   console.warn(`[WorkflowExecutor] ${errorMsg}`);
   await workflowDb.failWorkflowRun(workflowRun.id, errorMsg);
-  await logWorkflowError(cwd, workflowRun.id, errorMsg);
+  await logWorkflowError(logDir, workflowRun.id, errorMsg);
 
   const userMsg = `❌ **Loop incomplete**: \`${workflow.name}\`
 
@@ -1217,7 +1274,7 @@ ${errorMsg}
 **Possible actions:**
 - Increase \`max_iterations\` in your workflow YAML
 - Verify your prompt instructs AI to output \`<promise>${loop.until}</promise>\` when done
-- Review logs at \`.archon/logs/${workflowRun.id}.jsonl\``;
+- Review logs at \`${logDir}/${workflowRun.id}.jsonl\``;
 
   await sendCriticalMessage(platform, conversationId, userMsg, workflowContext);
 
@@ -1362,10 +1419,18 @@ export async function executeWorkflow(
     return { success: false, error: 'Database error creating workflow run' };
   }
 
+  // Resolve external artifact and log directories
+  const { artifactsDir, logDir } = await resolveProjectPaths(cwd, workflowRun.id, codebaseId);
+
+  // Pre-create the artifacts directory so commands can write to it immediately
+  await mkdir(artifactsDir, { recursive: true });
+  console.log(`[WorkflowExecutor] Artifacts dir: ${artifactsDir}`);
+  console.log(`[WorkflowExecutor] Log dir: ${logDir}`);
+
   // Wrap execution in try-catch to ensure workflow is marked as failed on any error
   try {
     console.log(`[WorkflowExecutor] Starting workflow: ${workflow.name} (${workflowRun.id})`);
-    await logWorkflowStart(cwd, workflowRun.id, workflow.name, userMessage);
+    await logWorkflowStart(logDir, workflowRun.id, workflow.name, userMessage);
 
     // Register run with emitter and emit workflow_started
     const emitter = getWorkflowEventEmitter();
@@ -1480,6 +1545,8 @@ export async function executeWorkflow(
         workflowRun,
         resolvedProvider,
         resolvedModel,
+        artifactsDir,
+        logDir,
         issueContext
       );
       // Loop workflow handles its own success/failure internally
@@ -1513,7 +1580,7 @@ export async function executeWorkflow(
         const stepCommands = parallelSteps.map(s => s.command);
 
         // Log parallel block start
-        await logParallelBlockStart(cwd, workflowRun.id, i, stepCommands);
+        await logParallelBlockStart(logDir, workflowRun.id, i, stepCommands);
 
         // Emit step_started for the parallel block
         emitter.emit({
@@ -1550,6 +1617,8 @@ export async function executeWorkflow(
           i,
           resolvedProvider,
           resolvedModel,
+          artifactsDir,
+          logDir,
           configuredCommandFolder,
           issueContext
         );
@@ -1567,7 +1636,7 @@ export async function executeWorkflow(
           });
 
           const errorMsg = `${String(failures.length)} parallel step(s) failed:\n${failureDetails.join('\n')}`;
-          await logWorkflowError(cwd, workflowRun.id, errorMsg);
+          await logWorkflowError(logDir, workflowRun.id, errorMsg);
 
           // Emit workflow_failed for parallel block failure
           emitter.emit({
@@ -1613,7 +1682,7 @@ export async function executeWorkflow(
           command: parallelSteps[r.index].command,
           success: r.result.success,
         }));
-        await logParallelBlockComplete(cwd, workflowRun.id, i, blockResults);
+        await logParallelBlockComplete(logDir, workflowRun.id, i, blockResults);
 
         // Emit step_completed for the parallel block
         emitter.emit({
@@ -1674,13 +1743,15 @@ export async function executeWorkflow(
           String(i),
           resolvedProvider,
           resolvedModel,
+          artifactsDir,
+          logDir,
           resumeSessionId,
           configuredCommandFolder,
           issueContext
         );
 
         if (!result.success) {
-          await logWorkflowError(cwd, workflowRun.id, result.error);
+          await logWorkflowError(logDir, workflowRun.id, result.error);
 
           // Emit workflow_failed for step failure
           emitter.emit({
@@ -1753,7 +1824,7 @@ export async function executeWorkflow(
         workflowId: workflowRun.id,
       });
     }
-    await logWorkflowComplete(cwd, workflowRun.id);
+    await logWorkflowComplete(logDir, workflowRun.id);
     // Critical message - retry to ensure user knows about completion
     // Only send completion message for non-GitHub platforms
     // GitHub's comment-based interface makes explicit completion messages redundant
@@ -1826,7 +1897,7 @@ export async function executeWorkflow(
 
     // Log to file (separate from database - non-blocking)
     try {
-      await logWorkflowError(cwd, workflowRun.id, err.message);
+      await logWorkflowError(logDir, workflowRun.id, err.message);
     } catch (logError) {
       console.error('[WorkflowExecutor] Failed to write workflow error to log file:', {
         workflowId: workflowRun.id,

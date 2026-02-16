@@ -2,7 +2,11 @@ import { readFile, access, mkdir as fsMkdir } from 'fs/promises';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
-import { getArchonWorktreesPath } from './archon-paths';
+import {
+  getArchonWorktreesPath,
+  getArchonWorkspacesPath,
+  getProjectWorktreesPath,
+} from './archon-paths';
 
 const promisifiedExecFile = promisify(execFile);
 
@@ -26,11 +30,41 @@ export async function mkdirAsync(path: string, options?: { recursive?: boolean }
 }
 
 /**
- * Get the base directory for worktrees
- * Now delegates to archon-paths module for consistency
+ * Get the base directory for worktrees.
+ *
+ * For paths under ~/.archon/workspaces/owner/repo/..., returns the project-scoped
+ * worktrees path: ~/.archon/workspaces/owner/repo/worktrees/
+ *
+ * For paths outside the workspaces directory, returns the legacy global path:
+ * ~/.archon/worktrees/
  */
-export function getWorktreeBase(_repoPath: string): string {
+export function getWorktreeBase(repoPath: string): string {
+  const workspacesPath = getArchonWorkspacesPath();
+  if (repoPath.startsWith(workspacesPath)) {
+    // Extract owner/repo from the path
+    const relative = repoPath.substring(workspacesPath.length + 1);
+    const parts = relative.split('/').filter(p => p.length > 0);
+    if (parts.length >= 2) {
+      return getProjectWorktreesPath(parts[0], parts[1]);
+    }
+  }
+  // Legacy fallback
   return getArchonWorktreesPath();
+}
+
+/**
+ * Check if the worktree base for a given repo path is project-scoped
+ * (under ~/.archon/workspaces/owner/repo/worktrees/) vs legacy global.
+ *
+ * When project-scoped, the worktree base already includes the owner/repo context,
+ * so callers should NOT append owner/repo again.
+ */
+export function isProjectScopedWorktreeBase(repoPath: string): boolean {
+  const workspacesPath = getArchonWorkspacesPath();
+  if (!repoPath.startsWith(workspacesPath)) return false;
+  const relative = repoPath.substring(workspacesPath.length + 1);
+  const parts = relative.split('/').filter(p => p.length > 0);
+  return parts.length >= 2;
 }
 
 /**

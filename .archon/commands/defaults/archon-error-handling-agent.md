@@ -11,7 +11,7 @@ argument-hint: (none - reads from scope artifact)
 
 Hunt for silent failures, inadequate error handling, broad catch blocks, and inappropriate fallback behavior. Produce a structured artifact with findings, fix suggestions with options, and reasoning.
 
-**Output artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/review/error-handling-findings.md`
+**Output artifact**: `$ARTIFACTS_DIR/review/error-handling-findings.md`
 
 ---
 
@@ -20,13 +20,13 @@ Hunt for silent failures, inadequate error handling, broad catch blocks, and ina
 ### 1.1 Get PR Number from Registry
 
 ```bash
-PR_NUMBER=$(cat .archon/artifacts/runs/$WORKFLOW_ID/.pr-number)
+PR_NUMBER=$(cat $ARTIFACTS_DIR/.pr-number)
 ```
 
 ### 1.2 Read Scope
 
 ```bash
-cat .archon/artifacts/runs/$WORKFLOW_ID/review/scope.md
+cat $ARTIFACTS_DIR/review/scope.md
 ```
 
 **CRITICAL**: Check for "NOT Building (Scope Limits)" section. Items listed there are **intentionally excluded** - do NOT flag them as bugs or missing features!
@@ -104,7 +104,7 @@ grep -r "console.error" src/ --include="*.ts" -B 2 -A 2 | head -30
 
 ## Phase 3: GENERATE - Create Artifact
 
-Write to `.archon/artifacts/runs/$WORKFLOW_ID/review/error-handling-findings.md`:
+Write to `$ARTIFACTS_DIR/review/error-handling-findings.md`:
 
 ```markdown
 # Error Handling Findings: PR #{number}
@@ -237,7 +237,7 @@ This catch block could silently hide:
 
 - **Agent**: error-handling-agent
 - **Timestamp**: {ISO timestamp}
-- **Artifact**: `.archon/artifacts/runs/$WORKFLOW_ID/review/error-handling-findings.md`
+- **Artifact**: `$ARTIFACTS_DIR/review/error-handling-findings.md`
 ```
 
 **PHASE_3_CHECKPOINT:**

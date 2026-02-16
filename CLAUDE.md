@@ -489,13 +489,17 @@ All Archon-managed files are organized under a dedicated namespace:
 **User-level (`~/.archon/`):**
 ```
 ~/.archon/
-├── workspaces/     # Cloned repositories (via /clone, auto-synced before worktree creation)
-│   └── owner/repo/
-├── worktrees/      # Git worktrees for isolation
-│   └── repo-name/
-│       └── branch-name/
-├── archon.db       # SQLite database (when DATABASE_URL not set)
-└── config.yaml     # Global configuration (non-secrets)
+├── workspaces/owner/repo/        # Project-centric layout
+│   ├── source/                   # Clone (from /clone) or symlink → local path
+│   ├── worktrees/                # Git worktrees for this project
+│   │   └── feature-auth/
+│   ├── artifacts/                # Workflow artifacts (NEVER in git)
+│   │   └── runs/{workflow-id}/
+│   └── logs/                     # Workflow execution logs
+│       └── {workflow-id}.jsonl
+├── worktrees/                    # Legacy global worktrees (deprecated)
+├── archon.db                     # SQLite database (when DATABASE_URL not set)
+└── config.yaml                   # Global configuration (non-secrets)
 ```
 
 **Repo-level (`.archon/` in any repository):**
@@ -629,6 +633,8 @@ console.log('Processing...');
 - `$ARGUMENTS` - All arguments as single string
 - `$PLAN` - Previous plan from session metadata
 - `$IMPLEMENTATION_SUMMARY` - Previous execution summary
+- `$ARTIFACTS_DIR` - External artifacts directory for the current workflow run (pre-created by executor)
+- `$WORKFLOW_ID` - The workflow run ID
 
 **Command Types:**
 

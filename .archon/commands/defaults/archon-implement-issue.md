@@ -33,7 +33,7 @@ Look for the investigation artifact from the previous step:
 
 ```bash
 # Check for artifact in workflow runs directory
-ls .archon/artifacts/runs/$WORKFLOW_ID/investigation.md
+ls $ARTIFACTS_DIR/investigation.md
 ```
 
 **If input is a specific path**, use that path directly.
@@ -56,7 +56,7 @@ cat {artifact-path}
 
 **If artifact not found:**
 ```
-❌ Investigation artifact not found at .archon/artifacts/runs/$WORKFLOW_ID/investigation.md
+❌ Investigation artifact not found at $ARTIFACTS_DIR/investigation.md
 
 Run `/investigate-issue {number}` first to create the implementation plan.
 ```
@@ -363,7 +363,7 @@ Fixes #{number}
 <summary>📋 Implementation Details</summary>
 
 ### Implementation followed artifact:
-`.archon/artifacts/issues/issue-{number}.md`
+`$ARTIFACTS_DIR/../issues/issue-{number}.md`
 
 ### Deviations from plan:
 {None | List any deviations}
@@ -394,7 +394,7 @@ PR_NUMBER=$(gh pr view --json number -q '.number')
 
 ### 8.1 Write Implementation Artifact
 
-Write to `.archon/artifacts/runs/$WORKFLOW_ID/implementation.md`:
+Write to `$ARTIFACTS_DIR/implementation.md`:
 
 ```markdown
 # Implementation Report
@@ -488,8 +488,8 @@ Skip archiving - artifacts remain in place for review workflow to access.
 
 ### Artifacts
 
-- 📄 Investigation: `.archon/artifacts/runs/$WORKFLOW_ID/investigation.md`
-- 📄 Implementation: `.archon/artifacts/runs/$WORKFLOW_ID/implementation.md`
+- 📄 Investigation: `$ARTIFACTS_DIR/investigation.md`
+- 📄 Implementation: `$ARTIFACTS_DIR/implementation.md`
 
 ### Next Step
 

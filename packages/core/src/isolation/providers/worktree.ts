@@ -16,6 +16,7 @@ import {
   findWorktreeByBranch,
   getCanonicalRepoPath,
   getWorktreeBase,
+  isProjectScopedWorktreeBase,
   listWorktrees,
   mkdirAsync,
   syncWorkspace,
@@ -442,16 +443,24 @@ export class WorktreeProvider implements IIsolationProvider {
   }
 
   /**
-   * Get worktree path for request
+   * Get worktree path for request.
+   *
+   * When the worktree base is project-scoped (under workspaces/owner/repo/worktrees/),
+   * only append the branch name. When using the legacy global worktrees path,
+   * append owner/repo/branch to avoid collisions.
    */
   getWorktreePath(request: IsolationRequest, branchName: string): string {
-    // Extract owner and repo name from canonicalRepoPath to avoid collisions
-    // canonicalRepoPath format: /.archon/workspaces/owner/repo (or C:\...\ on Windows)
-    const pathParts = request.canonicalRepoPath.split(/[/\\]/).filter(p => p.length > 0);
-    const repoName = pathParts[pathParts.length - 1]; // Last part: "repo"
-    const ownerName = pathParts[pathParts.length - 2]; // Second to last: "owner"
-
     const worktreeBase = getWorktreeBase(request.canonicalRepoPath);
+
+    if (isProjectScopedWorktreeBase(request.canonicalRepoPath)) {
+      // Project-scoped: worktreeBase is already .../workspaces/owner/repo/worktrees/
+      return join(worktreeBase, branchName);
+    }
+
+    // Legacy global: need to include owner/repo to avoid collisions
+    const pathParts = request.canonicalRepoPath.split(/[/\\]/).filter(p => p.length > 0);
+    const repoName = pathParts[pathParts.length - 1];
+    const ownerName = pathParts[pathParts.length - 2];
     return join(worktreeBase, ownerName, repoName, branchName);
   }
 
@@ -526,16 +535,19 @@ export class WorktreeProvider implements IIsolationProvider {
 
     await this.syncWorkspaceBeforeCreate(repoPath, repoConfig?.worktree?.baseBranch);
 
-    // Extract owner and repo name from canonicalRepoPath to avoid collisions
-    const pathParts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
-    const repoName = pathParts[pathParts.length - 1];
-    const ownerName = pathParts[pathParts.length - 2];
-
     const worktreeBase = getWorktreeBase(repoPath);
-    const projectWorktreeDir = join(worktreeBase, ownerName, repoName);
 
-    // Ensure worktree base directory exists
-    await mkdirAsync(projectWorktreeDir, { recursive: true });
+    if (isProjectScopedWorktreeBase(repoPath)) {
+      // Project-scoped: worktreeBase is the directory we need
+      await mkdirAsync(worktreeBase, { recursive: true });
+    } else {
+      // Legacy global: need to create owner/repo subdirectory
+      const pathParts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
+      const repoName = pathParts[pathParts.length - 1];
+      const ownerName = pathParts[pathParts.length - 2];
+      const projectWorktreeDir = join(worktreeBase, ownerName, repoName);
+      await mkdirAsync(projectWorktreeDir, { recursive: true });
+    }
 
     if (request.workflowType === 'pr') {
       // For PRs: fetch and checkout the PR branch (actual or synthetic)

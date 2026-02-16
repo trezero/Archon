@@ -31,10 +31,10 @@ Create the final summary report for the workflow run:
 
 ```bash
 # List all artifacts from this workflow run
-ls -la .archon/artifacts/runs/$WORKFLOW_ID/
+ls -la $ARTIFACTS_DIR/
 
 # Read each one
-for file in .archon/artifacts/runs/$WORKFLOW_ID/*.md; do
+for file in $ARTIFACTS_DIR/*.md; do
   echo "=== $file ==="
   cat "$file"
 done
@@ -53,10 +53,10 @@ done
 
 ```bash
 # Read review artifacts from workflow-scoped directory
-ls -la .archon/artifacts/runs/$WORKFLOW_ID/review/
+ls -la $ARTIFACTS_DIR/review/
 
 # Read each review finding
-for file in .archon/artifacts/runs/$WORKFLOW_ID/review/*.md; do
+for file in $ARTIFACTS_DIR/review/*.md; do
   echo "=== $file ==="
   cat "$file"
 done
@@ -324,7 +324,7 @@ These were **intentionally excluded** from scope:
 
 ---
 
-**Artifacts**: `.archon/artifacts/runs/$WORKFLOW_ID/`
+**Artifacts**: `$ARTIFACTS_DIR/`
 ```
 
 ### 4.2 Post to GitHub
@@ -344,7 +344,7 @@ gh pr comment {pr-number} --body "{formatted-summary}"
 
 ### 5.1 Write Summary Artifact
 
-Write to `.archon/artifacts/runs/$WORKFLOW_ID/workflow-summary.md`:
+Write to `$ARTIFACTS_DIR/workflow-summary.md`:
 
 ```markdown
 # Workflow Summary
@@ -434,14 +434,14 @@ Posted to: {PR URL}#comment-{id}
 Create symlink for backward compatibility with PR-based artifact lookup:
 
 ```bash
-PR_NUMBER=$(cat .archon/artifacts/runs/$WORKFLOW_ID/.pr-number 2>/dev/null)
+PR_NUMBER=$(cat $ARTIFACTS_DIR/.pr-number 2>/dev/null)
 if [ -n "$PR_NUMBER" ]; then
-  mkdir -p .archon/artifacts/reviews
-  ln -sfn ../runs/$WORKFLOW_ID/review .archon/artifacts/reviews/pr-$PR_NUMBER
+  mkdir -p $ARTIFACTS_DIR/../reviews
+  ln -sfn ../runs/$WORKFLOW_ID/review $ARTIFACTS_DIR/../reviews/pr-$PR_NUMBER
 fi
 ```
 
-This allows legacy tools to find review artifacts at `.archon/artifacts/reviews/pr-{number}/`.
+This allows legacy tools to find review artifacts at `$ARTIFACTS_DIR/../reviews/pr-{number}/`.
 
 **PHASE_5.5_CHECKPOINT:**
 
@@ -482,8 +482,8 @@ Summary comment added to PR with:
 
 ### Artifacts
 
-- Summary: `.archon/artifacts/runs/$WORKFLOW_ID/workflow-summary.md`
-- All artifacts: `.archon/artifacts/runs/$WORKFLOW_ID/`
+- Summary: `$ARTIFACTS_DIR/workflow-summary.md`
+- All artifacts: `$ARTIFACTS_DIR/`
 ```
 
 ---

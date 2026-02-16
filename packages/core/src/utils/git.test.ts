@@ -179,6 +179,74 @@ describe('git utilities', () => {
       const result = git.getWorktreeBase('/workspace/my-repo');
       expect(result).toBe(join('/', '.archon', 'worktrees'));
     });
+
+    test('returns project-scoped worktrees path when repo is under workspaces', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_DOCKER;
+      delete process.env.ARCHON_HOME;
+      const workspacesPath = join(homedir(), '.archon', 'workspaces');
+      const repoPath = join(workspacesPath, 'acme', 'widget', 'source');
+      const result = git.getWorktreeBase(repoPath);
+      expect(result).toBe(join(workspacesPath, 'acme', 'widget', 'worktrees'));
+    });
+
+    test('returns project-scoped path with ARCHON_HOME override', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_DOCKER;
+      process.env.ARCHON_HOME = '/custom/archon';
+      const repoPath = '/custom/archon/workspaces/acme/widget/source';
+      const result = git.getWorktreeBase(repoPath);
+      expect(result).toBe('/custom/archon/workspaces/acme/widget/worktrees');
+    });
+  });
+
+  describe('isProjectScopedWorktreeBase', () => {
+    const originalArchonHome = process.env.ARCHON_HOME;
+    const originalWorkspacePath = process.env.WORKSPACE_PATH;
+    const originalArchonDocker = process.env.ARCHON_DOCKER;
+
+    afterEach(() => {
+      if (originalArchonHome === undefined) {
+        delete process.env.ARCHON_HOME;
+      } else {
+        process.env.ARCHON_HOME = originalArchonHome;
+      }
+      if (originalWorkspacePath === undefined) {
+        delete process.env.WORKSPACE_PATH;
+      } else {
+        process.env.WORKSPACE_PATH = originalWorkspacePath;
+      }
+      if (originalArchonDocker === undefined) {
+        delete process.env.ARCHON_DOCKER;
+      } else {
+        process.env.ARCHON_DOCKER = originalArchonDocker;
+      }
+    });
+
+    test('returns true for path under workspaces with owner/repo', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_DOCKER;
+      delete process.env.ARCHON_HOME;
+      const workspacesPath = join(homedir(), '.archon', 'workspaces');
+      expect(
+        git.isProjectScopedWorktreeBase(join(workspacesPath, 'acme', 'widget', 'source'))
+      ).toBe(true);
+    });
+
+    test('returns false for path outside workspaces', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_DOCKER;
+      delete process.env.ARCHON_HOME;
+      expect(git.isProjectScopedWorktreeBase('/workspace/my-repo')).toBe(false);
+    });
+
+    test('returns false for path under workspaces with only owner (no repo)', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_DOCKER;
+      delete process.env.ARCHON_HOME;
+      const workspacesPath = join(homedir(), '.archon', 'workspaces');
+      expect(git.isProjectScopedWorktreeBase(join(workspacesPath, 'acme'))).toBe(false);
+    });
   });
 
   describe('worktreeExists', () => {

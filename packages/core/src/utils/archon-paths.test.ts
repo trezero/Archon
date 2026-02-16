@@ -1,6 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { homedir } from 'os';
 import { join } from 'path';
+import { mkdir, rm, writeFile, lstat, readlink } from 'fs/promises';
+import { tmpdir } from 'os';
 
 import {
   isDocker,
@@ -13,6 +15,17 @@ import {
   getAppArchonBasePath,
   getDefaultCommandsPath,
   getDefaultWorkflowsPath,
+  parseOwnerRepo,
+  getProjectRoot,
+  getProjectSourcePath,
+  getProjectWorktreesPath,
+  getProjectArtifactsPath,
+  getProjectLogsPath,
+  getRunArtifactsPath,
+  getRunLogPath,
+  resolveProjectRootFromCwd,
+  ensureProjectStructure,
+  createProjectSourceSymlink,
 } from './archon-paths';
 
 describe('archon-paths', () => {
@@ -229,5 +242,383 @@ describe('archon-paths', () => {
       expect(path).toContain('defaults');
       expect(path).not.toContain('packages/core');
     });
+  });
+
+  // =========================================================================
+  // Project-centric path functions
+  // =========================================================================
+
+  describe('parseOwnerRepo', () => {
+    test('parses owner/repo format', () => {
+      expect(parseOwnerRepo('acme/widget')).toEqual({ owner: 'acme', repo: 'widget' });
+    });
+
+    test('returns null for bare name', () => {
+      expect(parseOwnerRepo('widget')).toBeNull();
+    });
+
+    test('returns null for empty string', () => {
+      expect(parseOwnerRepo('')).toBeNull();
+    });
+
+    test('returns null for trailing slash', () => {
+      expect(parseOwnerRepo('acme/')).toBeNull();
+    });
+
+    test('returns null for leading slash', () => {
+      expect(parseOwnerRepo('/widget')).toBeNull();
+    });
+
+    test('rejects nested paths with more than one slash', () => {
+      const result = parseOwnerRepo('acme/nested/widget');
+      expect(result).toBeNull();
+    });
+
+    test('rejects path traversal in owner', () => {
+      expect(parseOwnerRepo('../etc/passwd')).toBeNull();
+    });
+
+    test('rejects path traversal in repo', () => {
+      expect(parseOwnerRepo('acme/../../etc')).toBeNull();
+    });
+
+    test('rejects dot and dotdot segments', () => {
+      expect(parseOwnerRepo('./widget')).toBeNull();
+      expect(parseOwnerRepo('acme/..')).toBeNull();
+      expect(parseOwnerRepo('../widget')).toBeNull();
+      expect(parseOwnerRepo('.')).toBeNull();
+    });
+
+    test('accepts valid GitHub-style names with dots, hyphens, underscores', () => {
+      expect(parseOwnerRepo('my-org/my_repo.js')).toEqual({
+        owner: 'my-org',
+        repo: 'my_repo.js',
+      });
+    });
+
+    test('rejects names with spaces', () => {
+      expect(parseOwnerRepo('my org/repo')).toBeNull();
+    });
+
+    test('rejects names with special characters', () => {
+      expect(parseOwnerRepo('acme/repo;rm -rf')).toBeNull();
+      expect(parseOwnerRepo('acme/$HOME')).toBeNull();
+    });
+  });
+
+  describe('getProjectRoot', () => {
+    test('returns path under workspaces', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_HOME;
+      delete process.env.ARCHON_DOCKER;
+      const result = getProjectRoot('acme', 'widget');
+      expect(result).toBe(join(homedir(), '.archon', 'workspaces', 'acme', 'widget'));
+    });
+
+    test('respects ARCHON_HOME', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_DOCKER;
+      process.env.ARCHON_HOME = '/custom/archon';
+      expect(getProjectRoot('acme', 'widget')).toBe(
+        join('/custom/archon', 'workspaces', 'acme', 'widget')
+      );
+    });
+
+    test('works in Docker', () => {
+      process.env.ARCHON_DOCKER = 'true';
+      expect(getProjectRoot('acme', 'widget')).toBe('/.archon/workspaces/acme/widget');
+    });
+  });
+
+  describe('getProjectSourcePath', () => {
+    test('appends source/ to project root', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_HOME;
+      delete process.env.ARCHON_DOCKER;
+      expect(getProjectSourcePath('acme', 'widget')).toBe(
+        join(homedir(), '.archon', 'workspaces', 'acme', 'widget', 'source')
+      );
+    });
+  });
+
+  describe('getProjectWorktreesPath', () => {
+    test('appends worktrees/ to project root', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_HOME;
+      delete process.env.ARCHON_DOCKER;
+      expect(getProjectWorktreesPath('acme', 'widget')).toBe(
+        join(homedir(), '.archon', 'workspaces', 'acme', 'widget', 'worktrees')
+      );
+    });
+  });
+
+  describe('getProjectArtifactsPath', () => {
+    test('appends artifacts/ to project root', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_HOME;
+      delete process.env.ARCHON_DOCKER;
+      expect(getProjectArtifactsPath('acme', 'widget')).toBe(
+        join(homedir(), '.archon', 'workspaces', 'acme', 'widget', 'artifacts')
+      );
+    });
+  });
+
+  describe('getProjectLogsPath', () => {
+    test('appends logs/ to project root', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_HOME;
+      delete process.env.ARCHON_DOCKER;
+      expect(getProjectLogsPath('acme', 'widget')).toBe(
+        join(homedir(), '.archon', 'workspaces', 'acme', 'widget', 'logs')
+      );
+    });
+  });
+
+  describe('getRunArtifactsPath', () => {
+    test('returns artifacts/runs/{id}/ path', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_HOME;
+      delete process.env.ARCHON_DOCKER;
+      expect(getRunArtifactsPath('acme', 'widget', 'run-123')).toBe(
+        join(homedir(), '.archon', 'workspaces', 'acme', 'widget', 'artifacts', 'runs', 'run-123')
+      );
+    });
+  });
+
+  describe('getRunLogPath', () => {
+    test('returns logs/{id}.jsonl path', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_HOME;
+      delete process.env.ARCHON_DOCKER;
+      expect(getRunLogPath('acme', 'widget', 'run-123')).toBe(
+        join(homedir(), '.archon', 'workspaces', 'acme', 'widget', 'logs', 'run-123.jsonl')
+      );
+    });
+  });
+
+  describe('resolveProjectRootFromCwd', () => {
+    test('resolves project root from a path under workspaces', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_HOME;
+      delete process.env.ARCHON_DOCKER;
+      const workspacesPath = getArchonWorkspacesPath();
+      const cwd = join(workspacesPath, 'acme', 'widget', 'source');
+      expect(resolveProjectRootFromCwd(cwd)).toBe(join(workspacesPath, 'acme', 'widget'));
+    });
+
+    test('resolves from worktrees subpath', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_HOME;
+      delete process.env.ARCHON_DOCKER;
+      const workspacesPath = getArchonWorkspacesPath();
+      const cwd = join(workspacesPath, 'acme', 'widget', 'worktrees', 'feature-auth');
+      expect(resolveProjectRootFromCwd(cwd)).toBe(join(workspacesPath, 'acme', 'widget'));
+    });
+
+    test('returns null for path outside workspaces', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_HOME;
+      delete process.env.ARCHON_DOCKER;
+      expect(resolveProjectRootFromCwd('/home/user/projects/my-repo')).toBeNull();
+    });
+
+    test('returns null for path with only owner (no repo)', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_HOME;
+      delete process.env.ARCHON_DOCKER;
+      const workspacesPath = getArchonWorkspacesPath();
+      expect(resolveProjectRootFromCwd(join(workspacesPath, 'acme'))).toBeNull();
+    });
+
+    test('works with ARCHON_HOME override', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_DOCKER;
+      process.env.ARCHON_HOME = '/custom/archon';
+      const cwd = '/custom/archon/workspaces/acme/widget/source';
+      expect(resolveProjectRootFromCwd(cwd)).toBe('/custom/archon/workspaces/acme/widget');
+    });
+  });
+});
+
+// =========================================================================
+// Async filesystem tests (use temp directories for isolation)
+// =========================================================================
+
+describe('ensureProjectStructure', () => {
+  let tempArchonHome: string;
+  const envVars = ['WORKSPACE_PATH', 'ARCHON_HOME', 'ARCHON_DOCKER', 'HOME'];
+  const originalEnv: Record<string, string | undefined> = {};
+
+  beforeEach(async () => {
+    envVars.forEach(key => {
+      originalEnv[key] = process.env[key];
+    });
+    delete process.env.WORKSPACE_PATH;
+    delete process.env.ARCHON_DOCKER;
+    tempArchonHome = join(
+      tmpdir(),
+      `archon-paths-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    process.env.ARCHON_HOME = tempArchonHome;
+  });
+
+  afterEach(async () => {
+    envVars.forEach(key => {
+      if (originalEnv[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = originalEnv[key];
+      }
+    });
+    try {
+      await rm(tempArchonHome, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  test('creates all four project subdirectories', async () => {
+    await ensureProjectStructure('acme', 'widget');
+
+    const sourcePath = getProjectSourcePath('acme', 'widget');
+    const worktreesPath = getProjectWorktreesPath('acme', 'widget');
+    const artifactsPath = getProjectArtifactsPath('acme', 'widget');
+    const logsPath = getProjectLogsPath('acme', 'widget');
+
+    // All directories should exist
+    expect((await lstat(sourcePath)).isDirectory()).toBe(true);
+    expect((await lstat(worktreesPath)).isDirectory()).toBe(true);
+    expect((await lstat(artifactsPath)).isDirectory()).toBe(true);
+    expect((await lstat(logsPath)).isDirectory()).toBe(true);
+  });
+
+  test('is idempotent - safe to call twice', async () => {
+    await ensureProjectStructure('acme', 'widget');
+    await ensureProjectStructure('acme', 'widget');
+
+    const sourcePath = getProjectSourcePath('acme', 'widget');
+    expect((await lstat(sourcePath)).isDirectory()).toBe(true);
+  });
+});
+
+describe('createProjectSourceSymlink', () => {
+  let tempArchonHome: string;
+  let tempTarget: string;
+  const envVars = ['WORKSPACE_PATH', 'ARCHON_HOME', 'ARCHON_DOCKER', 'HOME'];
+  const originalEnv: Record<string, string | undefined> = {};
+
+  beforeEach(async () => {
+    envVars.forEach(key => {
+      originalEnv[key] = process.env[key];
+    });
+    delete process.env.WORKSPACE_PATH;
+    delete process.env.ARCHON_DOCKER;
+    tempArchonHome = join(
+      tmpdir(),
+      `archon-symlink-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    process.env.ARCHON_HOME = tempArchonHome;
+
+    // Create a target directory to symlink to
+    tempTarget = join(
+      tmpdir(),
+      `archon-target-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    await mkdir(tempTarget, { recursive: true });
+  });
+
+  afterEach(async () => {
+    envVars.forEach(key => {
+      if (originalEnv[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = originalEnv[key];
+      }
+    });
+    try {
+      await rm(tempArchonHome, { recursive: true, force: true });
+    } catch {
+      // Ignore
+    }
+    try {
+      await rm(tempTarget, { recursive: true, force: true });
+    } catch {
+      // Ignore
+    }
+  });
+
+  test('creates a symlink pointing to the target', async () => {
+    await ensureProjectStructure('acme', 'widget');
+    await createProjectSourceSymlink('acme', 'widget', tempTarget);
+
+    const linkPath = getProjectSourcePath('acme', 'widget');
+    const stats = await lstat(linkPath);
+    expect(stats.isSymbolicLink()).toBe(true);
+    expect(await readlink(linkPath)).toBe(tempTarget);
+  });
+
+  test('is a no-op if symlink already points to same target', async () => {
+    await ensureProjectStructure('acme', 'widget');
+    await createProjectSourceSymlink('acme', 'widget', tempTarget);
+    // Call again - should not throw
+    await createProjectSourceSymlink('acme', 'widget', tempTarget);
+
+    const linkPath = getProjectSourcePath('acme', 'widget');
+    expect(await readlink(linkPath)).toBe(tempTarget);
+  });
+
+  test('throws when symlink points to a different target', async () => {
+    await ensureProjectStructure('acme', 'widget');
+    await createProjectSourceSymlink('acme', 'widget', tempTarget);
+
+    const otherTarget = join(tmpdir(), 'other-target');
+    await mkdir(otherTarget, { recursive: true });
+
+    try {
+      await expect(createProjectSourceSymlink('acme', 'widget', otherTarget)).rejects.toThrow(
+        'already points to'
+      );
+    } finally {
+      await rm(otherTarget, { recursive: true, force: true });
+    }
+  });
+
+  test('is a no-op when real directory with contents exists (clone case)', async () => {
+    await ensureProjectStructure('acme', 'widget');
+
+    // Put a file in the source dir to simulate a clone
+    const sourcePath = getProjectSourcePath('acme', 'widget');
+    await writeFile(join(sourcePath, 'README.md'), '# Hello');
+
+    // Should not overwrite the directory with a symlink
+    await createProjectSourceSymlink('acme', 'widget', tempTarget);
+
+    const stats = await lstat(sourcePath);
+    expect(stats.isDirectory()).toBe(true);
+    expect(stats.isSymbolicLink()).toBe(false);
+  });
+
+  test('replaces empty directory with symlink (ensureProjectStructure case)', async () => {
+    await ensureProjectStructure('acme', 'widget');
+
+    // source/ is empty from ensureProjectStructure
+    await createProjectSourceSymlink('acme', 'widget', tempTarget);
+
+    const linkPath = getProjectSourcePath('acme', 'widget');
+    const stats = await lstat(linkPath);
+    expect(stats.isSymbolicLink()).toBe(true);
+    expect(await readlink(linkPath)).toBe(tempTarget);
+  });
+
+  test('creates symlink when source path does not exist', async () => {
+    // Only create the parent, not the source dir itself
+    const projectRoot = getProjectRoot('acme', 'widget');
+    await mkdir(projectRoot, { recursive: true });
+
+    await createProjectSourceSymlink('acme', 'widget', tempTarget);
+
+    const linkPath = getProjectSourcePath('acme', 'widget');
+    const stats = await lstat(linkPath);
+    expect(stats.isSymbolicLink()).toBe(true);
   });
 });

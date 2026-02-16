@@ -214,6 +214,18 @@ export {
   getDefaultWorkflowsPath,
   logArchonPaths,
   validateAppDefaultsPaths,
+  // Project-centric path functions
+  parseOwnerRepo,
+  getProjectRoot,
+  getProjectSourcePath,
+  getProjectWorktreesPath,
+  getProjectArtifactsPath,
+  getProjectLogsPath,
+  getRunArtifactsPath,
+  getRunLogPath,
+  resolveProjectRootFromCwd,
+  ensureProjectStructure,
+  createProjectSourceSymlink,
 } from './utils/archon-paths';
 
 // Git utilities
@@ -221,6 +233,7 @@ export {
   execFileAsync,
   mkdirAsync,
   getWorktreeBase,
+  isProjectScopedWorktreeBase,
   worktreeExists,
   listWorktrees,
   findWorktreeByBranch,

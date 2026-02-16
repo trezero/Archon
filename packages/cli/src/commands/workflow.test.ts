@@ -8,6 +8,22 @@ import { workflowListCommand, workflowRunCommand, workflowStatusCommand } from '
 mock.module('@archon/core', () => ({
   discoverWorkflows: mock(() => Promise.resolve([])),
   executeWorkflow: mock(() => Promise.resolve({ success: true, workflowRunId: 'test-run-id' })),
+  registerRepository: mock(() =>
+    Promise.resolve({
+      codebaseId: 'cb-auto',
+      name: 'test/repo',
+      repositoryUrl: null,
+      defaultCwd: '/test/path',
+      commandCount: 0,
+      alreadyExisted: false,
+    })
+  ),
+}));
+
+mock.module('@archon/core/utils/git', () => ({
+  findRepoRoot: mock(() => Promise.resolve(null)),
+  getRemoteUrl: mock(() => Promise.resolve(null)),
+  checkout: mock(() => Promise.resolve()),
 }));
 
 mock.module('@archon/core/db/conversations', () => ({

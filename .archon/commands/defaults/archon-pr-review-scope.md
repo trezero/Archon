@@ -21,8 +21,8 @@ Verify the PR is in a reviewable state, gather all context needed for the parall
 
 ```bash
 # From workflow registry (if in workflow context)
-if [ -f ".archon/artifacts/runs/$WORKFLOW_ID/.pr-number" ]; then
-  PR_NUMBER=$(cat .archon/artifacts/runs/$WORKFLOW_ID/.pr-number)
+if [ -f "$ARTIFACTS_DIR/.pr-number" ]; then
+  PR_NUMBER=$(cat $ARTIFACTS_DIR/.pr-number)
 # From arguments (standalone review)
 elif [ -n "$ARGUMENTS" ]; then
   PR_NUMBER=$(echo "$ARGUMENTS" | grep -oE '[0-9]+' | head -1)
@@ -37,8 +37,7 @@ if [ -z "$PR_NUMBER" ]; then
 fi
 
 # Write to registry for downstream steps (if not already there)
-mkdir -p .archon/artifacts/runs/$WORKFLOW_ID
-echo "$PR_NUMBER" > .archon/artifacts/runs/$WORKFLOW_ID/.pr-number
+echo "$PR_NUMBER" > $ARTIFACTS_DIR/.pr-number
 ```
 
 ### 1.2 Fetch PR Details
@@ -238,10 +237,10 @@ Check for artifacts from EITHER workflow type:
 
 ```bash
 # Option 1: Plan-based workflow (archon-plan-to-merge)
-ls -t .archon/artifacts/runs/*/plan-context.md 2>/dev/null | head -1
+ls -t $ARTIFACTS_DIR/../runs/*/plan-context.md 2>/dev/null | head -1
 
 # Option 2: Issue-based workflow (archon-fix-github-issue)
-ls -t .archon/artifacts/runs/*/investigation.md 2>/dev/null | head -1
+ls -t $ARTIFACTS_DIR/../runs/*/investigation.md 2>/dev/null | head -1
 ```
 
 ### 3.5.2 Extract Scope Limits
@@ -250,14 +249,14 @@ ls -t .archon/artifacts/runs/*/investigation.md 2>/dev/null | head -1
 
 ```bash
 # Extract the NOT Building section
-sed -n '/## NOT Building/,/^## /p' .archon/artifacts/runs/*/plan-context.md | head -30
+sed -n '/## NOT Building/,/^## /p' $ARTIFACTS_DIR/../runs/*/plan-context.md | head -30
 ```
 
 **If investigation.md exists** (from issue workflow):
 
 ```bash
 # Extract the Scope Boundaries / OUT OF SCOPE section
-sed -n '/## Scope Boundaries/,/^## /p' .archon/artifacts/runs/*/investigation.md | head -30
+sed -n '/## Scope Boundaries/,/^## /p' $ARTIFACTS_DIR/../runs/*/investigation.md | head -30
 ```
 
 **These are INTENTIONAL exclusions** - do NOT flag them as bugs or missing features!
@@ -266,14 +265,14 @@ sed -n '/## Scope Boundaries/,/^## /p' .archon/artifacts/runs/*/investigation.md
 
 ```bash
 # Look for implementation report (either workflow)
-ls -t .archon/artifacts/runs/*/implementation.md 2>/dev/null | head -1
+ls -t $ARTIFACTS_DIR/../runs/*/implementation.md 2>/dev/null | head -1
 ```
 
 **If implementation.md exists**, note any deviations:
 
 ```bash
 # Extract deviations section
-sed -n '/## Deviations/,/^## /p' .archon/artifacts/runs/*/implementation.md | head -20
+sed -n '/## Deviations/,/^## /p' $ARTIFACTS_DIR/../runs/*/implementation.md | head -20
 ```
 
 **PHASE_3.5_CHECKPOINT:**
@@ -288,19 +287,19 @@ sed -n '/## Deviations/,/^## /p' .archon/artifacts/runs/*/implementation.md | he
 ### 4.1 Create Directory Structure
 
 ```bash
-mkdir -p .archon/artifacts/runs/$WORKFLOW_ID/review
+mkdir -p $ARTIFACTS_DIR/review
 ```
 
 ### 4.2 Clean Stale Artifacts
 
 ```bash
 # Remove review directories older than 7 days
-find .archon/artifacts/reviews/pr-* -maxdepth 0 -mtime +7 -exec rm -rf {} \; 2>/dev/null || true
+find $ARTIFACTS_DIR/../reviews/pr-* -maxdepth 0 -mtime +7 -exec rm -rf {} \; 2>/dev/null || true
 ```
 
 ### 4.3 Create Scope Manifest
 
-Write `.archon/artifacts/runs/$WORKFLOW_ID/review/scope.md`:
+Write `$ARTIFACTS_DIR/review/scope.md`:
 
 ```markdown
 # PR Review Scope: #{number}
@@ -410,7 +409,7 @@ _No workflow artifacts found - this appears to be a manual PR._
 ## Metadata
 
 - **Scope created**: {ISO timestamp}
-- **Artifact path**: `.archon/artifacts/runs/$WORKFLOW_ID/review/`
+- **Artifact path**: `$ARTIFACTS_DIR/review/`
 ```
 
 **PHASE_4_CHECKPOINT:**
@@ -470,7 +469,7 @@ Then re-request the review: `@archon review this PR`
 - Config: {count} files
 
 ### Artifacts Directory
-`.archon/artifacts/runs/$WORKFLOW_ID/review/`
+`$ARTIFACTS_DIR/review/`
 
 ### Next Step
 Launching 5 parallel review agents...

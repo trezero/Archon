@@ -275,12 +275,12 @@ Run any edge case tests specified in the plan.
 ### 5.1 Create Report Directory
 
 ```bash
-mkdir -p .archon/artifacts/reports
+mkdir -p $ARTIFACTS_DIR/../reports
 ```
 
 ### 5.2 Generate Report
 
-**Path**: `.archon/artifacts/reports/{plan-name}-report.md`
+**Path**: `$ARTIFACTS_DIR/../reports/{plan-name}-report.md`
 
 ```markdown
 # Implementation Report
@@ -374,13 +374,13 @@ Compare the original plan's assessment with what actually happened:
 ### 5.3 Archive Plan
 
 ```bash
-mkdir -p .archon/artifacts/plans/completed
-cp $ARGUMENTS .archon/artifacts/plans/completed/ 2>/dev/null || true
+mkdir -p $ARTIFACTS_DIR/../plans/completed
+cp $ARGUMENTS $ARTIFACTS_DIR/../plans/completed/ 2>/dev/null || true
 ```
 
 **PHASE_5_CHECKPOINT:**
 
-- [ ] Report created at `.archon/artifacts/reports/`
+- [ ] Report created at `$ARTIFACTS_DIR/../reports/`
 - [ ] Plan copied to completed folder (if local file)
 
 ---
@@ -417,7 +417,7 @@ cp $ARGUMENTS .archon/artifacts/plans/completed/ 2>/dev/null || true
 
 ### Artifacts
 
-- Report: `.archon/artifacts/reports/{name}-report.md`
+- Report: `$ARTIFACTS_DIR/../reports/{name}-report.md`
 
 ### Next Steps
 
