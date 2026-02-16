@@ -886,6 +886,7 @@ describe('WorktreeProvider', () => {
       expect(result.worktreeRemoved).toBe(true);
       expect(result.directoryClean).toBe(true);
       expect(result.branchDeleted).toBe(true);
+      expect(result.remoteBranchDeleted).toBeNull(); // Not requested
       expect(result.warnings).toHaveLength(0);
     });
 
@@ -898,19 +899,20 @@ describe('WorktreeProvider', () => {
       const result = await provider.destroy(worktreePath, { branchName: 'test-branch' });
 
       expect(result.worktreeRemoved).toBe(true);
-      expect(result.branchDeleted).toBe(false);
+      expect(result.branchDeleted).toBeNull(); // Could not attempt (no repo path)
       expect(result.warnings).toHaveLength(1);
       expect(result.warnings[0]).toContain('Cannot delete branch');
     });
 
-    test('returns branchDeleted=true when no branch requested', async () => {
+    test('returns branchDeleted=null when no branch requested', async () => {
       const worktreePath = '/workspace/worktrees/repo/issue-42';
       getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
 
       const result = await provider.destroy(worktreePath);
 
       expect(result.worktreeRemoved).toBe(true);
-      expect(result.branchDeleted).toBe(true); // No branch to delete counts as success
+      expect(result.branchDeleted).toBeNull(); // No branch specified
+      expect(result.remoteBranchDeleted).toBeNull(); // Not requested
       expect(result.warnings).toHaveLength(0);
     });
 
@@ -933,6 +935,82 @@ describe('WorktreeProvider', () => {
       expect(result.branchDeleted).toBe(false);
       expect(result.warnings).toHaveLength(1);
       expect(result.warnings[0]).toContain('checked out elsewhere');
+    });
+
+    test('deletes remote branch when deleteRemoteBranch is true', async () => {
+      const worktreePath = '/workspace/worktrees/repo/pr-99';
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+
+      const result = await provider.destroy(worktreePath, {
+        branchName: 'feature-branch',
+        deleteRemoteBranch: true,
+      });
+
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'push', 'origin', '--delete', 'feature-branch'],
+        expect.any(Object)
+      );
+      expect(result.remoteBranchDeleted).toBe(true);
+    });
+
+    test('returns remoteBranchDeleted=true when remote ref does not exist', async () => {
+      const worktreePath = '/workspace/worktrees/repo/pr-99';
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('push') && args.includes('--delete')) {
+          const error = new Error('error') as Error & { stderr?: string };
+          error.stderr = "error: unable to delete 'feature-branch': remote ref does not exist";
+          throw error;
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      const result = await provider.destroy(worktreePath, {
+        branchName: 'feature-branch',
+        deleteRemoteBranch: true,
+      });
+
+      expect(result.remoteBranchDeleted).toBe(true);
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    test('returns remoteBranchDeleted=false with warning on network error', async () => {
+      const worktreePath = '/workspace/worktrees/repo/pr-99';
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('push') && args.includes('--delete')) {
+          throw new Error('fatal: Could not read from remote repository');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      const result = await provider.destroy(worktreePath, {
+        branchName: 'feature-branch',
+        deleteRemoteBranch: true,
+      });
+
+      expect(result.remoteBranchDeleted).toBe(false);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toContain('Failed to delete remote branch');
+    });
+
+    test('does not attempt remote branch deletion when deleteRemoteBranch is not set', async () => {
+      const worktreePath = '/workspace/worktrees/repo/pr-99';
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+
+      const result = await provider.destroy(worktreePath, {
+        branchName: 'feature-branch',
+      });
+
+      expect(execSpy).not.toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['push', 'origin', '--delete']),
+        expect.any(Object)
+      );
+      expect(result.remoteBranchDeleted).toBeNull(); // Not requested
     });
   });
 

@@ -79,6 +79,7 @@ archon workflow run <name> --cwd /path/to/repo "<message>"
 archon isolation list              # show active worktrees
 archon isolation cleanup           # remove stale (>7 days)
 archon isolation cleanup 14        # custom staleness threshold
+archon isolation cleanup --merged  # remove merged branches (deletes remote too)
 ```
 
 ### Available Workflows

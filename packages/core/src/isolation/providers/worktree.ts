@@ -90,7 +90,8 @@ export class WorktreeProvider implements IIsolationProvider {
     const worktreePath = envId;
     const result: DestroyResult = {
       worktreeRemoved: false,
-      branchDeleted: false,
+      branchDeleted: null,
+      remoteBranchDeleted: null,
       directoryClean: false,
       warnings: [],
     };
@@ -116,8 +117,6 @@ export class WorktreeProvider implements IIsolationProvider {
         const warning = `Cannot delete branch '${options.branchName}': worktree path gone and no canonicalRepoPath provided`;
         console.warn(`[WorktreeProvider] ${warning}`, { worktreePath });
         result.warnings.push(warning);
-      } else {
-        result.branchDeleted = true; // No branch to delete counts as success
       }
       return result;
     }
@@ -167,8 +166,15 @@ export class WorktreeProvider implements IIsolationProvider {
     // Delete associated branch if provided (best-effort cleanup)
     if (options?.branchName) {
       result.branchDeleted = await this.deleteBranchTracked(repoPath, options.branchName, result);
-    } else {
-      result.branchDeleted = true; // No branch to delete counts as success
+
+      // Delete remote branch if requested (e.g., after PR merge)
+      if (options.deleteRemoteBranch) {
+        result.remoteBranchDeleted = await this.deleteRemoteBranchTracked(
+          repoPath,
+          options.branchName,
+          result
+        );
+      }
     }
 
     return result;
@@ -215,6 +221,40 @@ export class WorktreeProvider implements IIsolationProvider {
         return false;
       } else {
         const warning = `Unexpected error deleting branch '${branchName}': ${err.message}`;
+        console.error(`[WorktreeProvider] ${warning}`, { stderr: err.stderr });
+        result.warnings.push(warning);
+        return false;
+      }
+    }
+  }
+
+  /**
+   * Delete a remote branch and track the result. Never throws - remote branch deletion is best-effort.
+   * Returns true if branch was deleted or already gone, false if deletion failed.
+   */
+  private async deleteRemoteBranchTracked(
+    repoPath: string,
+    branchName: string,
+    result: DestroyResult
+  ): Promise<boolean> {
+    try {
+      await execFileAsync('git', ['-C', repoPath, 'push', 'origin', '--delete', branchName], {
+        timeout: 30000,
+      });
+      console.log(`[WorktreeProvider] Deleted remote branch ${branchName}`);
+      return true;
+    } catch (error) {
+      const err = error as Error & { stderr?: string };
+      const errorText = `${err.message} ${err.stderr ?? ''}`;
+
+      if (
+        errorText.includes('remote ref does not exist') ||
+        errorText.includes("couldn't find remote ref")
+      ) {
+        console.log(`[WorktreeProvider] Remote branch ${branchName} already deleted or not found`);
+        return true; // Already gone counts as success
+      } else {
+        const warning = `Failed to delete remote branch '${branchName}': ${err.message}`;
         console.error(`[WorktreeProvider] ${warning}`, { stderr: err.stderr });
         result.warnings.push(warning);
         return false;

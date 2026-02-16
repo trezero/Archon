@@ -46,6 +46,7 @@ interface WebhookEvent {
     body: string | null;
     user: { login: string };
     state: string;
+    merged?: boolean;
     changed_files?: number;
     additions?: number;
     deletions?: number;
@@ -327,6 +328,7 @@ export class GitHubAdapter implements IPlatformAdapter {
     issue?: WebhookEvent['issue'];
     pullRequest?: WebhookEvent['pull_request'];
     isCloseEvent?: boolean;
+    isMerged?: boolean;
   } | null {
     const owner = event.repository.owner.login;
     const repo = event.repository.name;
@@ -354,6 +356,7 @@ export class GitHubAdapter implements IPlatformAdapter {
         eventType: 'pull_request',
         pullRequest: event.pull_request,
         isCloseEvent: true,
+        isMerged: event.pull_request.merged === true,
       };
     }
 
@@ -638,12 +641,17 @@ export class GitHubAdapter implements IPlatformAdapter {
    * Clean up worktree when an issue/PR is closed
    * Delegates to cleanup service for unified handling
    */
-  private async cleanupWorktree(owner: string, repo: string, number: number): Promise<void> {
+  private async cleanupWorktree(
+    owner: string,
+    repo: string,
+    number: number,
+    merged = false
+  ): Promise<void> {
     const conversationId = this.buildConversationId(owner, repo, number);
-    console.log(`[GitHub] Cleaning up isolation for ${conversationId}`);
+    console.log(`[GitHub] Cleaning up isolation for ${conversationId} (merged=${String(merged)})`);
 
     try {
-      await onConversationClosed('github', conversationId);
+      await onConversationClosed('github', conversationId, { merged });
       console.log(`[GitHub] Cleanup complete for ${conversationId}`);
     } catch (error) {
       const err = error as Error;
@@ -727,12 +735,14 @@ ${userComment}`;
     const parsed = this.parseEvent(event);
     if (!parsed) return;
 
-    const { owner, repo, number, comment, eventType, issue, pullRequest, isCloseEvent } = parsed;
+    const { owner, repo, number, comment, eventType, issue, pullRequest, isCloseEvent, isMerged } =
+      parsed;
 
     // 3. Handle close/merge events (cleanup worktree)
     if (isCloseEvent) {
-      console.log(`[GitHub] Handling close event for ${owner}/${repo}#${String(number)}`);
-      await this.cleanupWorktree(owner, repo, number);
+      const mergeLabel = isMerged ? 'merge' : 'close';
+      console.log(`[GitHub] Handling ${mergeLabel} event for ${owner}/${repo}#${String(number)}`);
+      await this.cleanupWorktree(owner, repo, number, isMerged ?? false);
       return; // Don't process as a message
     }
 

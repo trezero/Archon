@@ -41,7 +41,11 @@ import {
   workflowRunCommand,
   workflowStatusCommand,
 } from './commands/workflow';
-import { isolationListCommand, isolationCleanupCommand } from './commands/isolation';
+import {
+  isolationListCommand,
+  isolationCleanupCommand,
+  isolationCleanupMergedCommand,
+} from './commands/isolation';
 import { setupCommand } from './commands/setup';
 import { closeDatabase } from '@archon/core';
 import * as git from '@archon/core/utils/git';
@@ -63,6 +67,7 @@ Commands:
   workflow status            Show status of running workflows
   isolation list             List all active worktrees/environments
   isolation cleanup [days]   Remove stale environments (default: 7 days)
+  isolation cleanup --merged Remove environments with branches merged into main
   version                    Show version info
   help                       Show this help message
 
@@ -229,8 +234,14 @@ async function main(): Promise<number> {
             break;
 
           case 'cleanup': {
-            const days = parseInt(positionals[2] ?? '7', 10);
-            await isolationCleanupCommand(days);
+            // Check for --merged flag in remaining args
+            const mergedFlag = args.includes('--merged') || positionals.includes('--merged');
+            if (mergedFlag) {
+              await isolationCleanupMergedCommand();
+            } else {
+              const days = parseInt(positionals[2] ?? '7', 10);
+              await isolationCleanupCommand(days);
+            }
             break;
           }
 

@@ -14,6 +14,7 @@ const mockDestroy = mock(() =>
   Promise.resolve({
     worktreeRemoved: true,
     branchDeleted: true,
+    remoteBranchDeleted: true,
     directoryClean: true,
     warnings: [],
   })
@@ -43,15 +44,19 @@ mock.module('../db/isolation-environments', () => ({
 }));
 
 // Mock conversations DB
+const mockGetConversationByPlatformId = mock(() => Promise.resolve(null));
+const mockUpdateConversation = mock(() => Promise.resolve());
 mock.module('../db/conversations', () => ({
-  getConversationByPlatformId: mock(() => Promise.resolve(null)),
-  updateConversation: mock(() => Promise.resolve()),
+  getConversationByPlatformId: mockGetConversationByPlatformId,
+  updateConversation: mockUpdateConversation,
 }));
 
 // Mock sessions DB
+const mockGetActiveSession = mock(() => Promise.resolve(null));
+const mockDeactivateSession = mock(() => Promise.resolve());
 mock.module('../db/sessions', () => ({
-  getActiveSession: mock(() => Promise.resolve(null)),
-  deactivateSession: mock(() => Promise.resolve()),
+  getActiveSession: mockGetActiveSession,
+  deactivateSession: mockDeactivateSession,
 }));
 
 // Mock codebases DB
@@ -71,6 +76,7 @@ import {
   cleanupMergedWorktrees,
   cleanupStaleWorktrees,
   removeEnvironment,
+  onConversationClosed,
   MAX_WORKTREES_PER_CODEBASE,
 } from './cleanup-service';
 import { hasUncommittedChanges } from '../utils/git';
@@ -352,6 +358,7 @@ describe('cleanup-service', () => {
       mockDestroy.mockResolvedValueOnce({
         worktreeRemoved: true,
         branchDeleted: false,
+        remoteBranchDeleted: null,
         directoryClean: true,
         warnings: ["Cannot delete branch 'issue-42': branch is checked out elsewhere"],
       });
@@ -360,6 +367,79 @@ describe('cleanup-service', () => {
 
       // Should still mark as destroyed despite partial cleanup
       expect(mockUpdateStatus).toHaveBeenCalledWith(envId, 'destroyed');
+    });
+
+    test('passes deleteRemoteBranch to provider.destroy when specified', async () => {
+      const envId = 'env-remote-delete';
+
+      mockGetById.mockResolvedValueOnce({
+        id: envId,
+        codebase_id: 'codebase-123',
+        workflow_type: 'pr',
+        workflow_id: '99',
+        provider: 'worktree',
+        working_path: '/workspace/worktrees/pr-99',
+        branch_name: 'feature-branch',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'github',
+        metadata: {},
+      });
+
+      mockGetCodebase.mockResolvedValueOnce({
+        id: 'codebase-123',
+        name: 'test-repo',
+        default_cwd: '/workspace/repo',
+      });
+
+      // Internal worktreeExists returns false (path gone)
+      mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+
+      await removeEnvironment(envId, { deleteRemoteBranch: true });
+
+      expect(mockDestroy).toHaveBeenCalledWith('/workspace/worktrees/pr-99', {
+        force: undefined,
+        branchName: 'feature-branch',
+        canonicalRepoPath: '/workspace/repo',
+        deleteRemoteBranch: true,
+      });
+      expect(mockUpdateStatus).toHaveBeenCalledWith(envId, 'destroyed');
+    });
+
+    test('does not pass deleteRemoteBranch when not specified', async () => {
+      const envId = 'env-no-remote-delete';
+
+      mockGetById.mockResolvedValueOnce({
+        id: envId,
+        codebase_id: 'codebase-123',
+        workflow_type: 'issue',
+        workflow_id: '42',
+        provider: 'worktree',
+        working_path: '/workspace/worktrees/issue-42',
+        branch_name: 'issue-42',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'github',
+        metadata: {},
+      });
+
+      mockGetCodebase.mockResolvedValueOnce({
+        id: 'codebase-123',
+        name: 'test-repo',
+        default_cwd: '/workspace/repo',
+      });
+
+      // Internal worktreeExists returns false (path gone)
+      mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+
+      await removeEnvironment(envId);
+
+      expect(mockDestroy).toHaveBeenCalledWith('/workspace/worktrees/issue-42', {
+        force: undefined,
+        branchName: 'issue-42',
+        canonicalRepoPath: '/workspace/repo',
+        deleteRemoteBranch: undefined,
+      });
     });
 
     test('re-throws non-directory errors from provider.destroy', async () => {
@@ -521,6 +601,63 @@ describe('runScheduledCleanup', () => {
     const report = await runScheduledCleanup();
 
     expect(report.removed).toContain('env-456 (merged)');
+  });
+
+  test('passes deleteRemoteBranch: true for merged branches in scheduled cleanup', async () => {
+    mockListAllActiveWithCodebase.mockResolvedValueOnce([
+      {
+        id: 'env-merged-remote',
+        working_path: '/workspace/repo/worktrees/pr-50',
+        branch_name: 'pr-50',
+        status: 'active',
+        created_by_platform: 'github',
+        created_at: new Date(),
+        codebase_default_cwd: '/workspace/repo',
+        codebase_id: 'codebase-1',
+        workflow_type: 'pr',
+        workflow_id: '50',
+        provider: 'worktree',
+        metadata: {},
+      },
+    ]);
+    // Internal worktreeExists returns true
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
+    // Get main branch
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
+    // Branch is merged
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  pr-50\n  main\n', stderr: '' });
+    // No uncommitted changes (runScheduledCleanup)
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    // No conversations
+    mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
+    // For removeEnvironment: getById
+    mockGetById.mockResolvedValueOnce({
+      id: 'env-merged-remote',
+      codebase_id: 'codebase-1',
+      working_path: '/workspace/repo/worktrees/pr-50',
+      branch_name: 'pr-50',
+      status: 'active',
+    });
+    // removeEnvironment: getCodebase
+    mockGetCodebase.mockResolvedValueOnce({
+      id: 'codebase-1',
+      name: 'test-repo',
+      default_cwd: '/workspace/repo',
+    });
+    // removeEnvironment: internal worktreeExists
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
+    // removeEnvironment: hasUncommittedChanges
+    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+    await runScheduledCleanup();
+
+    // Verify deleteRemoteBranch: true was passed through
+    expect(mockDestroy).toHaveBeenCalledWith('/workspace/repo/worktrees/pr-50', {
+      force: false,
+      branchName: 'pr-50',
+      canonicalRepoPath: '/workspace/repo',
+      deleteRemoteBranch: true,
+    });
   });
 
   test('skips merged branches with uncommitted changes', async () => {
@@ -809,6 +946,11 @@ describe('cleanupMergedWorktrees', () => {
 
     expect(result.removed).toContain('merged-branch');
     expect(result.skipped).toHaveLength(0);
+    // Verify deleteRemoteBranch: true is passed for merged branches
+    expect(mockDestroy).toHaveBeenCalledWith(
+      '/workspace/repo/worktrees/merged-branch',
+      expect.objectContaining({ deleteRemoteBranch: true })
+    );
   });
 
   test('skips merged branches with uncommitted changes', async () => {
@@ -862,6 +1004,122 @@ describe('cleanupMergedWorktrees', () => {
     expect(result.skipped).toContainEqual({
       branchName: 'in-use-branch',
       reason: 'still used by 2 conversation(s)',
+    });
+  });
+});
+
+describe('onConversationClosed', () => {
+  beforeEach(() => {
+    mockExecFileAsync.mockClear();
+    mockDestroy.mockClear();
+    mockUpdateStatus.mockClear();
+    mockGetById.mockClear();
+    mockGetCodebase.mockClear();
+    mockGetConversationsUsingEnv.mockClear();
+    mockGetConversationByPlatformId.mockClear();
+    mockGetActiveSession.mockClear();
+    mockUpdateConversation.mockClear();
+  });
+
+  test('passes deleteRemoteBranch: true when merged option is set', async () => {
+    // Conversation with isolation env
+    mockGetConversationByPlatformId.mockResolvedValueOnce({
+      id: 'conv-1',
+      isolation_env_id: 'env-merged-pr',
+    });
+
+    // No active session
+    mockGetActiveSession.mockResolvedValueOnce(null);
+
+    // Environment exists
+    mockGetById.mockResolvedValueOnce({
+      id: 'env-merged-pr',
+      codebase_id: 'codebase-1',
+      working_path: '/workspace/worktrees/pr-100',
+      branch_name: 'feature-x',
+      status: 'active',
+    });
+
+    // No other conversations use this env
+    mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
+
+    // For removeEnvironment: getById
+    mockGetById.mockResolvedValueOnce({
+      id: 'env-merged-pr',
+      codebase_id: 'codebase-1',
+      working_path: '/workspace/worktrees/pr-100',
+      branch_name: 'feature-x',
+      status: 'active',
+    });
+
+    // removeEnvironment: getCodebase
+    mockGetCodebase.mockResolvedValueOnce({
+      id: 'codebase-1',
+      name: 'test-repo',
+      default_cwd: '/workspace/repo',
+    });
+
+    // removeEnvironment: worktreeExists returns false
+    mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+
+    await onConversationClosed('github', 'owner/repo#100', { merged: true });
+
+    expect(mockDestroy).toHaveBeenCalledWith('/workspace/worktrees/pr-100', {
+      force: false,
+      branchName: 'feature-x',
+      canonicalRepoPath: '/workspace/repo',
+      deleteRemoteBranch: true,
+    });
+  });
+
+  test('does not pass deleteRemoteBranch when merged is not set', async () => {
+    // Conversation with isolation env
+    mockGetConversationByPlatformId.mockResolvedValueOnce({
+      id: 'conv-2',
+      isolation_env_id: 'env-closed-pr',
+    });
+
+    // No active session
+    mockGetActiveSession.mockResolvedValueOnce(null);
+
+    // Environment exists
+    mockGetById.mockResolvedValueOnce({
+      id: 'env-closed-pr',
+      codebase_id: 'codebase-1',
+      working_path: '/workspace/worktrees/pr-101',
+      branch_name: 'feature-y',
+      status: 'active',
+    });
+
+    // No other conversations use this env
+    mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
+
+    // For removeEnvironment: getById
+    mockGetById.mockResolvedValueOnce({
+      id: 'env-closed-pr',
+      codebase_id: 'codebase-1',
+      working_path: '/workspace/worktrees/pr-101',
+      branch_name: 'feature-y',
+      status: 'active',
+    });
+
+    // removeEnvironment: getCodebase
+    mockGetCodebase.mockResolvedValueOnce({
+      id: 'codebase-1',
+      name: 'test-repo',
+      default_cwd: '/workspace/repo',
+    });
+
+    // removeEnvironment: worktreeExists returns false
+    mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+
+    await onConversationClosed('github', 'owner/repo#101');
+
+    expect(mockDestroy).toHaveBeenCalledWith('/workspace/worktrees/pr-101', {
+      force: false,
+      branchName: 'feature-y',
+      canonicalRepoPath: '/workspace/repo',
+      deleteRemoteBranch: undefined,
     });
   });
 });

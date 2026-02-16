@@ -3,6 +3,7 @@
  */
 import * as isolationDb from '@archon/core/db/isolation-environments';
 import { getIsolationProvider } from '@archon/core';
+import { cleanupMergedWorktrees } from '@archon/core/services/cleanup-service';
 
 /**
  * Codebase info for display (extracted from isolation environment JOIN)
@@ -96,6 +97,49 @@ export async function isolationCleanupCommand(daysStale = 7): Promise<void> {
   }
 
   console.log(`\nCleanup complete: ${String(cleaned)} cleaned, ${String(failed)} failed`);
+}
+
+/**
+ * Cleanup merged isolation environments (branches merged into main)
+ * Also deletes remote branches for merged environments
+ */
+export async function isolationCleanupMergedCommand(): Promise<void> {
+  console.log('Finding environments with branches merged into main...');
+
+  const codebases = await getCodebases();
+
+  if (codebases.length === 0) {
+    console.log('No codebases with active environments found.');
+    return;
+  }
+
+  let totalCleaned = 0;
+  let totalSkipped = 0;
+
+  for (const codebase of codebases) {
+    try {
+      console.log(`\nChecking ${codebase.repository_url ?? codebase.default_cwd}...`);
+
+      const result = await cleanupMergedWorktrees(codebase.id, codebase.default_cwd);
+
+      for (const branch of result.removed) {
+        console.log(`  Cleaned: ${branch}`);
+      }
+      for (const skip of result.skipped) {
+        console.log(`  Skipped: ${skip.branchName} (${skip.reason})`);
+      }
+
+      totalCleaned += result.removed.length;
+      totalSkipped += result.skipped.length;
+    } catch (error) {
+      const err = error as Error;
+      console.error(`  Error processing codebase: ${err.message}`);
+    }
+  }
+
+  console.log(
+    `\nMerged cleanup complete: ${String(totalCleaned)} cleaned, ${String(totalSkipped)} skipped`
+  );
 }
 
 /**

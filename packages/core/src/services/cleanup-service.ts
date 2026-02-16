@@ -33,7 +33,8 @@ export interface CleanupReport {
  */
 export async function onConversationClosed(
   platformType: string,
-  platformConversationId: string
+  platformConversationId: string,
+  options?: { merged?: boolean }
 ): Promise<void> {
   console.log(`[Cleanup] Conversation closed: ${platformType}/${platformConversationId}`);
 
@@ -81,7 +82,18 @@ export async function onConversationClosed(
   }
 
   // No other users - attempt removal
-  await removeEnvironment(envId, { force: false });
+  await removeEnvironment(envId, {
+    force: false,
+    deleteRemoteBranch: options?.merged,
+  });
+}
+
+/**
+ * Options for removing an isolation environment
+ */
+export interface RemoveEnvironmentOptions {
+  force?: boolean;
+  deleteRemoteBranch?: boolean;
 }
 
 /**
@@ -89,7 +101,7 @@ export async function onConversationClosed(
  */
 export async function removeEnvironment(
   envId: string,
-  options?: { force?: boolean }
+  options?: RemoveEnvironmentOptions
 ): Promise<void> {
   const env = await isolationEnvDb.getById(envId);
   if (!env) {
@@ -130,6 +142,7 @@ export async function removeEnvironment(
       force: options?.force,
       branchName: env.branch_name,
       canonicalRepoPath,
+      deleteRemoteBranch: options?.deleteRemoteBranch,
     });
 
     // Log warnings from partial failures
@@ -304,8 +317,8 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
             continue;
           }
 
-          // Safe to remove merged branch
-          await removeEnvironment(env.id, { force: false });
+          // Safe to remove merged branch (also delete remote branch)
+          await removeEnvironment(env.id, { force: false, deleteRemoteBranch: true });
           report.removed.push(`${env.id} (merged)`);
           continue;
         }
@@ -396,8 +409,21 @@ async function getMainBranch(repoPath: string): Promise<string> {
     // Output is like "refs/remotes/origin/main"
     const match = /refs\/remotes\/origin\/(.+)/.exec(stdout.trim());
     return match?.[1] ?? 'main';
-  } catch {
-    // Fallback to 'main'
+  } catch (error) {
+    const err = error as Error & { stderr?: string };
+    const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
+
+    // Expected: origin/HEAD not configured (common for fresh clones)
+    const isExpected =
+      errorText.includes('ref refs/remotes/origin/head is not a symbolic ref') ||
+      errorText.includes('no such file');
+
+    if (!isExpected) {
+      console.warn('[Cleanup] Unexpected error detecting main branch, falling back to "main"', {
+        repoPath,
+        error: err.message,
+      });
+    }
     return 'main';
   }
 }
@@ -600,9 +626,9 @@ export async function cleanupMergedWorktrees(
       continue;
     }
 
-    // Safe to remove
+    // Safe to remove (also delete remote branch since it's merged)
     try {
-      await removeEnvironment(env.id);
+      await removeEnvironment(env.id, { deleteRemoteBranch: true });
       result.removed.push(env.branch_name);
     } catch (error) {
       const err = error as Error;

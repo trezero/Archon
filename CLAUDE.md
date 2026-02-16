@@ -237,6 +237,9 @@ bun run cli isolation list
 bun run cli isolation cleanup
 bun run cli isolation cleanup 14  # Custom days
 
+# Clean up environments with branches merged into main (also deletes remote branches)
+bun run cli isolation cleanup --merged
+
 # Show version
 bun run cli version
 ```

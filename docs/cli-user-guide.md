@@ -103,6 +103,9 @@ archon isolation cleanup
 
 # Custom threshold
 archon isolation cleanup 14
+
+# Remove environments with branches merged into main (also deletes remote branches)
+archon isolation cleanup --merged
 ```
 
 ### `version`

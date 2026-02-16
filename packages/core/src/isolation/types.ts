@@ -203,6 +203,8 @@ export interface WorktreeDestroyOptions extends DestroyOptions {
   branchName?: string;
   /** Canonical repo path (required for branch cleanup if worktree path doesn't exist) */
   canonicalRepoPath?: string;
+  /** Delete the remote branch (best-effort, e.g., after PR merge) */
+  deleteRemoteBranch?: boolean;
 }
 
 /**
@@ -214,8 +216,10 @@ export interface WorktreeDestroyOptions extends DestroyOptions {
 export interface DestroyResult {
   /** Whether the worktree itself was removed (the primary operation) */
   worktreeRemoved: boolean;
-  /** Whether the branch was deleted (if requested) */
-  branchDeleted: boolean;
+  /** Whether the branch was deleted (null = no branch specified) */
+  branchDeleted: boolean | null;
+  /** Whether the remote branch was deleted (null = not requested) */
+  remoteBranchDeleted: boolean | null;
   /** Whether the directory was fully cleaned (no orphan files remain) */
   directoryClean: boolean;
   /** Warnings for partial failures (non-fatal issues) */
