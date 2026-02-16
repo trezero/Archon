@@ -1,5 +1,12 @@
 import { mock, describe, test, expect, beforeEach, afterAll } from 'bun:test';
+import { createMockLogger } from '../test/mocks/logger';
 import * as gitUtils from '../utils/git';
+
+// Mock logger to suppress noisy output during tests
+const mockLogger = createMockLogger();
+mock.module('../utils/logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
 
 // Mock git utility - note: cleanup-service.ts has its own internal worktreeExists function
 // that uses execFileAsync, so we only need to mock execFileAsync

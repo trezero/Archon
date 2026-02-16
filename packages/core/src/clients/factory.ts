@@ -7,6 +7,14 @@
 import { IAssistantClient } from '../types';
 import { ClaudeClient } from './claude';
 import { CodexClient } from './codex';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('client.factory');
+  return cachedLog;
+}
 
 /**
  * Get the appropriate AI assistant client based on type
@@ -18,8 +26,10 @@ import { CodexClient } from './codex';
 export function getAssistantClient(type: string): IAssistantClient {
   switch (type) {
     case 'claude':
+      getLog().debug({ provider: 'claude' }, 'client_selected');
       return new ClaudeClient();
     case 'codex':
+      getLog().debug({ provider: 'codex' }, 'client_selected');
       return new CodexClient();
     default:
       throw new Error(`Unknown assistant type: ${type}. Supported types: 'claude', 'codex'`);

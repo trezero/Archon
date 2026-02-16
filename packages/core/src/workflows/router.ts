@@ -3,6 +3,14 @@
  */
 import type { WorkflowDefinition } from './types';
 import type { IsolationHints } from '../types';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('workflow.router');
+  return cachedLog;
+}
 
 /**
  * Optional context for router to make informed decisions.
@@ -166,7 +174,7 @@ export function parseWorkflowInvocation(
       };
     }
 
-    console.warn(`[Router] Unknown workflow: ${workflowName}`);
+    getLog().warn({ workflowName }, 'unknown_workflow');
   }
 
   return {

@@ -7,6 +7,26 @@
  */
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
 import type { Mock } from 'bun:test';
+
+// Mock logger to suppress noisy output during tests
+const mockLogger = {
+  fatal: mock(() => undefined),
+  error: mock(() => undefined),
+  warn: mock(() => undefined),
+  info: mock(() => undefined),
+  debug: mock(() => undefined),
+  trace: mock(() => undefined),
+  child: mock(function (this: unknown) {
+    return this;
+  }),
+  bindings: mock(() => ({ module: 'test' })),
+  isLevelEnabled: mock(() => true),
+  level: 'info',
+};
+mock.module('@archon/core/utils/logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
+
 import { TelegramAdapter } from './telegram';
 
 describe('TelegramAdapter', () => {

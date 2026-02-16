@@ -2,6 +2,12 @@ import { describe, test, expect, beforeEach, afterEach, mock, spyOn, type Mock }
 import { writeFile, mkdir as realMkdir, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
+import { createMockLogger } from '../test/mocks/logger';
+
+const mockLogger = createMockLogger();
+mock.module('./logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
 
 import * as git from './git';
 
@@ -48,7 +54,7 @@ describe('git utilities', () => {
       // Mock readFile to throw EACCES
       const fsPromises = await import('fs/promises');
       const readFileSpy = spyOn(fsPromises, 'readFile');
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
+      mockLogger.error.mockClear();
       const eaccesError = new Error('Permission denied') as NodeJS.ErrnoException;
       eaccesError.code = 'EACCES';
       readFileSpy.mockRejectedValue(eaccesError);
@@ -57,17 +63,15 @@ describe('git utilities', () => {
         await expect(git.isWorktreePath(testPath)).rejects.toThrow(
           `Cannot determine if ${testPath} is a worktree: Permission denied`
         );
-        expect(consoleSpy).toHaveBeenCalledWith(
-          '[Git] Failed to check worktree status',
+        expect(mockLogger.error).toHaveBeenCalledWith(
           expect.objectContaining({
             path: testPath,
-            error: 'Permission denied',
             code: 'EACCES',
-          })
+          }),
+          'worktree_status_check_failed'
         );
       } finally {
         readFileSpy.mockRestore();
-        consoleSpy.mockRestore();
       }
     });
   });
@@ -277,7 +281,7 @@ describe('git utilities', () => {
       // Mock the access function by using a temp import and spying on fs/promises
       const fsPromises = await import('fs/promises');
       const accessSpy = spyOn(fsPromises, 'access');
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
+      mockLogger.error.mockClear();
       const eaccesError = new Error('Permission denied') as NodeJS.ErrnoException;
       eaccesError.code = 'EACCES';
       accessSpy.mockRejectedValue(eaccesError);
@@ -286,17 +290,15 @@ describe('git utilities', () => {
         await expect(git.worktreeExists(testPath)).rejects.toThrow(
           `Failed to check worktree at ${testPath}: Permission denied`
         );
-        expect(consoleSpy).toHaveBeenCalledWith(
-          '[Git] Failed to check worktree existence',
+        expect(mockLogger.error).toHaveBeenCalledWith(
           expect.objectContaining({
             worktreePath: testPath,
-            error: 'Permission denied',
             code: 'EACCES',
-          })
+          }),
+          'worktree_existence_check_failed'
         );
       } finally {
         accessSpy.mockRestore();
-        consoleSpy.mockRestore();
       }
     });
   });
@@ -376,23 +378,16 @@ branch refs/heads/feature/auth
       const mockError = new Error('permission denied') as Error & { stderr?: string };
       mockError.stderr = 'fatal: permission denied';
       execSpy.mockRejectedValue(mockError);
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
+      mockLogger.error.mockClear();
 
-      try {
-        await expect(git.listWorktrees('/path/to/repo')).rejects.toThrow(
-          'Failed to list worktrees'
-        );
-        expect(consoleSpy).toHaveBeenCalledWith(
-          '[Git] Failed to list worktrees',
-          expect.objectContaining({
-            repoPath: '/path/to/repo',
-            error: 'permission denied',
-            stderr: 'fatal: permission denied',
-          })
-        );
-      } finally {
-        consoleSpy.mockRestore();
-      }
+      await expect(git.listWorktrees('/path/to/repo')).rejects.toThrow('Failed to list worktrees');
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repoPath: '/path/to/repo',
+          stderr: 'fatal: permission denied',
+        }),
+        'list_worktrees_failed'
+      );
     });
   });
 
@@ -1216,27 +1211,22 @@ branch refs/heads/feature/auth
     });
 
     test('throws for unexpected symbolic-ref errors (permission denied)', async () => {
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
+      mockLogger.error.mockClear();
       execSpy.mockRejectedValue(new Error('fatal: permission denied'));
 
-      try {
-        await expect(git.getDefaultBranch('/workspace/repo')).rejects.toThrow(
-          'Failed to get default branch for /workspace/repo: fatal: permission denied'
-        );
-        expect(consoleSpy).toHaveBeenCalledWith(
-          '[Git] Failed to get default branch via symbolic-ref',
-          expect.objectContaining({
-            repoPath: '/workspace/repo',
-            error: 'fatal: permission denied',
-          })
-        );
-      } finally {
-        consoleSpy.mockRestore();
-      }
+      await expect(git.getDefaultBranch('/workspace/repo')).rejects.toThrow(
+        'Failed to get default branch for /workspace/repo: fatal: permission denied'
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repoPath: '/workspace/repo',
+        }),
+        'default_branch_symbolic_ref_failed'
+      );
     });
 
     test('throws for unexpected rev-parse errors (permission denied)', async () => {
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
+      mockLogger.error.mockClear();
       execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
         if (args.includes('symbolic-ref')) {
           // Expected error - falls through to rev-parse
@@ -1249,20 +1239,15 @@ branch refs/heads/feature/auth
         return { stdout: '', stderr: '' };
       });
 
-      try {
-        await expect(git.getDefaultBranch('/workspace/repo')).rejects.toThrow(
-          'Failed to get default branch for /workspace/repo: fatal: permission denied'
-        );
-        expect(consoleSpy).toHaveBeenCalledWith(
-          '[Git] Failed to verify origin/main branch',
-          expect.objectContaining({
-            repoPath: '/workspace/repo',
-            error: 'fatal: permission denied',
-          })
-        );
-      } finally {
-        consoleSpy.mockRestore();
-      }
+      await expect(git.getDefaultBranch('/workspace/repo')).rejects.toThrow(
+        'Failed to get default branch for /workspace/repo: fatal: permission denied'
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repoPath: '/workspace/repo',
+        }),
+        'verify_origin_main_failed'
+      );
     });
 
     test('falls back to master for "unknown revision" error', async () => {

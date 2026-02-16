@@ -4,8 +4,15 @@
  */
 import { App, LogLevel } from '@slack/bolt';
 import type { IPlatformAdapter } from '@archon/core';
-import { isSlackUserAuthorized } from '@archon/core';
+import { isSlackUserAuthorized, createLogger } from '@archon/core';
 import { parseAllowedUserIds } from '@archon/core/utils/slack-auth';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('adapter.slack');
+  return cachedLog;
+}
 
 const MAX_MARKDOWN_BLOCK_LENGTH = 12000; // Slack markdown block limit
 
@@ -38,12 +45,12 @@ export class SlackAdapter implements IPlatformAdapter {
     // Parse Slack user whitelist (optional - empty = open access)
     this.allowedUserIds = parseAllowedUserIds(process.env.SLACK_ALLOWED_USER_IDS);
     if (this.allowedUserIds.length > 0) {
-      console.log(`[Slack] User whitelist enabled (${String(this.allowedUserIds.length)} users)`);
+      getLog().info({ userCount: this.allowedUserIds.length }, 'whitelist_enabled');
     } else {
-      console.log('[Slack] User whitelist disabled (open access)');
+      getLog().info('whitelist_disabled');
     }
 
-    console.log(`[Slack] Adapter initialized (mode: ${mode})`);
+    getLog().info({ mode }, 'adapter_initialized');
   }
 
   /**
@@ -52,7 +59,7 @@ export class SlackAdapter implements IPlatformAdapter {
    * Automatically splits messages longer than 12000 characters
    */
   async sendMessage(channelId: string, message: string): Promise<void> {
-    console.log(`[Slack] sendMessage called, length=${String(message.length)}`);
+    getLog().debug({ channelId, messageLength: message.length }, 'send_message');
 
     // Parse channelId - may include thread_ts as "channel:thread_ts"
     const [channel, threadTs] = channelId.includes(':')
@@ -64,7 +71,7 @@ export class SlackAdapter implements IPlatformAdapter {
       await this.sendWithMarkdownBlock(channel, message, threadTs);
     } else {
       // Long message: split by paragraphs
-      console.log(`[Slack] Message too long (${String(message.length)}), splitting by paragraphs`);
+      getLog().debug({ messageLength: message.length }, 'message_splitting');
       const chunks = this.splitIntoParagraphChunks(message, MAX_MARKDOWN_BLOCK_LENGTH - 500);
 
       for (const chunk of chunks) {
@@ -95,11 +102,11 @@ export class SlackAdapter implements IPlatformAdapter {
         // Fallback text for notifications/accessibility
         text: message.substring(0, 150) + (message.length > 150 ? '...' : ''),
       });
-      console.log(`[Slack] Markdown block sent (${String(message.length)} chars)`);
+      getLog().debug({ messageLength: message.length }, 'markdown_block_sent');
     } catch (error) {
       // Fallback to plain text
       const err = error as Error;
-      console.warn('[Slack] Markdown block failed, using plain text:', err.message);
+      getLog().warn({ err, channel, threadTs }, 'markdown_block_failed_fallback_plain_text');
       await this.app.client.chat.postMessage({
         channel,
         thread_ts: threadTs,
@@ -152,7 +159,7 @@ export class SlackAdapter implements IPlatformAdapter {
       }
     }
 
-    console.log(`[Slack] Split into ${String(finalChunks.length)} chunks`);
+    getLog().debug({ chunkCount: finalChunks.length }, 'message_split_complete');
     return finalChunks;
   }
 
@@ -222,7 +229,7 @@ export class SlackAdapter implements IPlatformAdapter {
         return `${author}: ${msg.text ?? ''}`;
       });
     } catch (error) {
-      console.error('[Slack] Failed to fetch thread history:', error);
+      getLog().error({ err: error }, 'thread_history_fetch_failed');
       return [];
     }
   }
@@ -293,7 +300,7 @@ export class SlackAdapter implements IPlatformAdapter {
       const userId = event.user;
       if (!isSlackUserAuthorized(userId, this.allowedUserIds)) {
         const maskedId = userId ? `${userId.slice(0, 4)}***` : 'unknown';
-        console.log(`[Slack] Unauthorized message from user ${maskedId}`);
+        getLog().info({ maskedUserId: maskedId }, 'unauthorized_message');
         return;
       }
 
@@ -329,7 +336,7 @@ export class SlackAdapter implements IPlatformAdapter {
       const userId = 'user' in event ? event.user : undefined;
       if (!isSlackUserAuthorized(userId, this.allowedUserIds)) {
         const maskedId = userId ? `${userId.slice(0, 4)}***` : 'unknown';
-        console.log(`[Slack] Unauthorized DM from user ${maskedId}`);
+        getLog().info({ maskedUserId: maskedId }, 'unauthorized_dm');
         return;
       }
 
@@ -346,7 +353,7 @@ export class SlackAdapter implements IPlatformAdapter {
     });
 
     await this.app.start();
-    console.log('[Slack] Bot started (Socket Mode)');
+    getLog().info('bot_started');
   }
 
   /**
@@ -354,6 +361,6 @@ export class SlackAdapter implements IPlatformAdapter {
    */
   stop(): void {
     void this.app.stop();
-    console.log('[Slack] Bot stopped');
+    getLog().info('bot_stopped');
   }
 }

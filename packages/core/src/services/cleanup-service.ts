@@ -9,7 +9,15 @@ import { SessionNotFoundError } from '../db/sessions';
 import * as codebaseDb from '../db/codebases';
 import { getIsolationProvider } from '../isolation';
 import { execFileAsync, hasUncommittedChanges } from '../utils/git';
+import { createLogger } from '../utils/logger';
 import { IsolationEnvironmentRow, ConversationNotFoundError } from '../types';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('cleanup');
+  return cachedLog;
+}
 
 // Configuration constants (configurable via env vars)
 const STALE_THRESHOLD_DAYS = parseInt(process.env.STALE_THRESHOLD_DAYS ?? '14', 10);
@@ -37,7 +45,7 @@ export async function onConversationClosed(
   platformConversationId: string,
   options?: { merged?: boolean }
 ): Promise<void> {
-  console.log(`[Cleanup] Conversation closed: ${platformType}/${platformConversationId}`);
+  getLog().info({ platformType, platformConversationId }, 'conversation_closed');
 
   // Find the conversation
   const conversation = await conversationDb.getConversationByPlatformId(
@@ -46,7 +54,7 @@ export async function onConversationClosed(
   );
 
   if (!conversation?.isolation_env_id) {
-    console.log('[Cleanup] No isolation environment to clean up');
+    getLog().debug({ platformType, platformConversationId }, 'no_isolation_env_to_cleanup');
     return;
   }
 
@@ -57,10 +65,13 @@ export async function onConversationClosed(
   if (session) {
     try {
       await sessionDb.deactivateSession(session.id, 'conversation-closed');
-      console.log(`[Cleanup] Deactivated session ${session.id}: conversation-closed`);
+      getLog().info(
+        { sessionId: session.id, trigger: 'conversation-closed' },
+        'session_deactivated'
+      );
     } catch (error) {
       if (error instanceof SessionNotFoundError) {
-        console.log(`[Cleanup] Session ${session.id} already deactivated (race condition)`);
+        getLog().debug({ sessionId: session.id }, 'session_already_deactivated');
       } else {
         throw error;
       }
@@ -70,7 +81,7 @@ export async function onConversationClosed(
   // Get the environment
   const env = await isolationEnvDb.getById(envId);
   if (!env) {
-    console.log(`[Cleanup] Environment ${envId} not found in database`);
+    getLog().debug({ envId }, 'env_not_found_in_db');
     return;
   }
 
@@ -84,9 +95,7 @@ export async function onConversationClosed(
   // Check if other conversations still use this environment
   const otherConversations = await isolationEnvDb.getConversationsUsingEnv(envId);
   if (otherConversations.length > 0) {
-    console.log(
-      `[Cleanup] Environment still used by ${String(otherConversations.length)} conversation(s), keeping`
-    );
+    getLog().info({ envId, conversationCount: otherConversations.length }, 'env_still_in_use');
     return;
   }
 
@@ -114,12 +123,12 @@ export async function removeEnvironment(
 ): Promise<void> {
   const env = await isolationEnvDb.getById(envId);
   if (!env) {
-    console.log(`[Cleanup] Environment ${envId} not found`);
+    getLog().debug({ envId }, 'env_not_found');
     return;
   }
 
   if (env.status === 'destroyed') {
-    console.log(`[Cleanup] Environment ${envId} already destroyed`);
+    getLog().debug({ envId }, 'env_already_destroyed');
     return;
   }
 
@@ -140,7 +149,7 @@ export async function removeEnvironment(
     if (pathExists && !options?.force) {
       const hasChanges = await hasUncommittedChanges(env.working_path);
       if (hasChanges) {
-        console.warn(`[Cleanup] Environment ${envId} has uncommitted changes, skipping`);
+        getLog().warn({ envId, workingPath: env.working_path }, 'env_has_uncommitted_changes');
         return;
       }
     }
@@ -156,13 +165,13 @@ export async function removeEnvironment(
 
     // Log warnings from partial failures
     if (destroyResult.warnings.length > 0) {
-      console.warn(`[Cleanup] Partial cleanup for ${envId}:`, destroyResult.warnings);
+      getLog().warn({ envId, warnings: destroyResult.warnings }, 'env_partial_cleanup');
     }
 
     // Mark as destroyed in database
     await isolationEnvDb.updateStatus(envId, 'destroyed');
 
-    console.log(`[Cleanup] Removed environment ${envId} at ${env.working_path}`);
+    getLog().info({ envId, workingPath: env.working_path }, 'env_removed');
   } catch (error) {
     const err = error as Error & { code?: string; stderr?: string };
     const errorText = `${err.message} ${err.stderr ?? ''}`;
@@ -178,11 +187,11 @@ export async function removeEnvironment(
 
     if (isPathNotFoundError) {
       await isolationEnvDb.updateStatus(envId, 'destroyed');
-      console.log(`[Cleanup] Directory removed externally for ${envId}, marked as destroyed`);
+      getLog().info({ envId }, 'env_removed_externally');
       return;
     }
 
-    console.error(`[Cleanup] Failed to remove environment ${envId}:`, err.message);
+    getLog().error({ err, envId }, 'env_remove_failed');
     throw err;
   }
 }
@@ -219,12 +228,7 @@ export async function isBranchMerged(
 
     if (!isExpectedError) {
       // Log unexpected errors for debugging (permission issues, corruption, etc.)
-      console.warn('[Cleanup] Unexpected error checking branch merge status', {
-        repoPath,
-        branchName,
-        mainBranch,
-        error: err.message,
-      });
+      getLog().warn({ err: error, repoPath, branchName, mainBranch }, 'branch_merge_check_failed');
     }
     return false;
   }
@@ -250,10 +254,7 @@ export async function getLastCommitDate(workingPath: string): Promise<Date | nul
       err.code === 'ENOENT';
 
     if (!isExpectedError) {
-      console.warn('[Cleanup] Unexpected error getting last commit date', {
-        workingPath,
-        error: err.message,
-      });
+      getLog().warn({ err: error, workingPath }, 'last_commit_date_check_failed');
     }
     return null;
   }
@@ -278,13 +279,13 @@ export async function cleanupToMakeRoom(
  * 2. Find and remove stale environments
  */
 export async function runScheduledCleanup(): Promise<CleanupReport> {
-  console.log('[Cleanup] Starting scheduled cleanup');
+  getLog().info('cleanup_started');
   const report: CleanupReport = { removed: [], skipped: [], errors: [] };
 
   try {
     // Get all active environments with their codebase info
     const environments = await isolationEnvDb.listAllActiveWithCodebase();
-    console.log(`[Cleanup] Found ${String(environments.length)} active environments`);
+    getLog().info({ count: environments.length }, 'active_environments_found');
 
     for (const env of environments) {
       try {
@@ -309,7 +310,7 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
           const hasChanges = await hasUncommittedChanges(env.working_path);
           if (hasChanges) {
             report.skipped.push({ id: env.id, reason: 'merged but has uncommitted changes' });
-            console.log(`[Cleanup] Skipping ${env.id}: merged but has uncommitted changes`);
+            getLog().warn({ envId: env.id }, 'skip_merged_uncommitted_changes');
             continue;
           }
 
@@ -320,8 +321,9 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
               id: env.id,
               reason: `merged but still used by ${String(conversations.length)} conversations`,
             });
-            console.log(
-              `[Cleanup] Skipping ${env.id}: still used by ${String(conversations.length)} conversations`
+            getLog().info(
+              { envId: env.id, conversationCount: conversations.length },
+              'skip_merged_still_in_use'
             );
             continue;
           }
@@ -343,7 +345,7 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
           const hasChanges = await hasUncommittedChanges(env.working_path);
           if (hasChanges) {
             report.skipped.push({ id: env.id, reason: 'stale but has uncommitted changes' });
-            console.log(`[Cleanup] Skipping ${env.id}: stale but has uncommitted changes`);
+            getLog().warn({ envId: env.id }, 'skip_stale_uncommitted_changes');
             continue;
           }
 
@@ -362,21 +364,24 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
       } catch (error) {
         const err = error as Error;
         report.errors.push({ id: env.id, error: err.message });
-        console.error(`[Cleanup] Error processing ${env.id}:`, err.message);
+        getLog().error({ err: error, envId: env.id }, 'env_cleanup_error');
         // Continue to next environment - don't crash the cleanup cycle
       }
     }
   } catch (error) {
     const err = error as Error;
-    console.error('[Cleanup] Scheduled cleanup failed:', err.message);
+    getLog().error({ err: error }, 'scheduled_cleanup_failed');
     report.errors.push({ id: 'scheduler', error: err.message });
   }
 
-  console.log('[Cleanup] Scheduled cleanup complete:', {
-    removed: report.removed.length,
-    skipped: report.skipped.length,
-    errors: report.errors.length,
-  });
+  getLog().info(
+    {
+      removed: report.removed.length,
+      skipped: report.skipped.length,
+      errors: report.errors.length,
+    },
+    'cleanup_complete'
+  );
 
   return report;
 }
@@ -428,10 +433,7 @@ async function getMainBranch(repoPath: string): Promise<string> {
       errorText.includes('no such file');
 
     if (!isExpected) {
-      console.warn('[Cleanup] Unexpected error detecting main branch, falling back to "main"', {
-        repoPath,
-        error: err.message,
-      });
+      getLog().warn({ err: error, repoPath }, 'main_branch_detect_failed');
     }
     return 'main';
   }
@@ -463,11 +465,7 @@ async function worktreeExists(path: string): Promise<boolean> {
     }
 
     // Log and re-throw unexpected errors (EACCES, timeout, etc.)
-    console.error('[Cleanup] Unexpected error checking worktree existence:', {
-      path,
-      error: err.message,
-      code: err.code,
-    });
+    getLog().error({ err: error, path }, 'worktree_existence_check_failed');
     throw err;
   }
 }
@@ -654,25 +652,25 @@ export async function cleanupMergedWorktrees(
  */
 export function startCleanupScheduler(): void {
   if (cleanupIntervalId) {
-    console.warn('[Cleanup] Scheduler already running');
+    getLog().warn('scheduler_already_running');
     return;
   }
 
   const intervalMs = CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000;
-  console.log(`[Cleanup] Starting scheduler (interval: ${String(CLEANUP_INTERVAL_HOURS)} hours)`);
+  getLog().info({ intervalHours: CLEANUP_INTERVAL_HOURS }, 'scheduler_starting');
 
   // Run immediately on startup, then at interval
   void runScheduledCleanup().catch(err => {
-    console.error('[Cleanup] Initial cleanup failed:', (err as Error).message);
+    getLog().error({ err }, 'initial_cleanup_failed');
   });
 
   cleanupIntervalId = setInterval(() => {
     void runScheduledCleanup().catch(err => {
-      console.error('[Cleanup] Scheduled cleanup failed:', (err as Error).message);
+      getLog().error({ err }, 'scheduled_cleanup_failed');
     });
   }, intervalMs);
 
-  console.log('[Cleanup] Scheduler started');
+  getLog().info('scheduler_started');
 }
 
 /**
@@ -682,7 +680,7 @@ export function stopCleanupScheduler(): void {
   if (cleanupIntervalId) {
     clearInterval(cleanupIntervalId);
     cleanupIntervalId = null;
-    console.log('[Cleanup] Scheduler stopped');
+    getLog().info('scheduler_stopped');
   }
 }
 

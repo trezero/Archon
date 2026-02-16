@@ -9,6 +9,14 @@ export async function readCommandFile(path: string): Promise<string> {
   return fsReadFile(path, 'utf-8');
 }
 import { join } from 'path';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('orchestrator');
+  return cachedLog;
+}
 import {
   IPlatformAdapter,
   IsolationHints,
@@ -71,11 +79,10 @@ async function tryPersistSessionId(sessionId: string, assistantSessionId: string
     await sessionDb.updateSession(sessionId, assistantSessionId);
   } catch (error) {
     const err = error as Error;
-    console.error('[Orchestrator] Failed to persist session ID - session may not be resumable', {
-      sessionId,
-      newSessionId: assistantSessionId,
-      error: err.message,
-    });
+    getLog().error(
+      { err, sessionId, newSessionId: assistantSessionId },
+      'session_id_persist_failed'
+    );
   }
 }
 
@@ -91,14 +98,7 @@ async function tryUpdateSessionMetadata(
     await sessionDb.updateSessionMetadata(sessionId, metadata);
   } catch (error) {
     const err = error as Error;
-    console.error(
-      '[Orchestrator] Failed to update session metadata - plan→execute detection may not work',
-      {
-        sessionId,
-        metadata,
-        error: err.message,
-      }
-    );
+    getLog().error({ err, sessionId, metadata }, 'session_metadata_update_failed');
   }
 }
 
@@ -150,7 +150,7 @@ async function validateAndResolveIsolation(
     }
 
     // Stale reference - clean up (best-effort, don't fail on missing conversation)
-    console.warn(`[Orchestrator] Stale isolation: ${conversation.isolation_env_id}`);
+    getLog().warn({ isolationEnvId: conversation.isolation_env_id }, 'stale_isolation_reference');
     await db.updateConversation(conversation.id, { isolation_env_id: null }).catch(err => {
       if (!(err instanceof ConversationNotFoundError)) throw err;
     });
@@ -175,10 +175,10 @@ async function validateAndResolveIsolation(
       });
     } catch (updateError) {
       // If we can't link the isolation to the conversation, clean up and rethrow
-      console.error('[Orchestrator] Failed to link new isolation - cleaning up', {
-        conversationId: conversation.id,
-        isolationEnvId: env.id,
-      });
+      getLog().error(
+        { err: updateError, conversationId: conversation.id, isolationEnvId: env.id },
+        'isolation_link_failed'
+      );
       // Mark isolation as destroyed since we can't use it
       await isolationEnvDb.updateStatus(env.id, 'destroyed');
       throw updateError;
@@ -217,7 +217,7 @@ async function resolveIsolation(
   // 1. Check for existing environment with same workflow
   const existing = await isolationEnvDb.findByWorkflow(codebase.id, workflowType, workflowId);
   if (existing && (await worktreeExists(existing.working_path))) {
-    console.log(`[Orchestrator] Reusing environment for ${workflowType}/${workflowId}`);
+    getLog().debug({ workflowType, workflowId }, 'isolation_reuse_existing');
     return existing;
   }
 
@@ -226,7 +226,7 @@ async function resolveIsolation(
     for (const issueNum of hints.linkedIssues) {
       const linkedEnv = await isolationEnvDb.findByWorkflow(codebase.id, 'issue', String(issueNum));
       if (linkedEnv && (await worktreeExists(linkedEnv.working_path))) {
-        console.log(`[Orchestrator] Sharing worktree with linked issue #${String(issueNum)}`);
+        getLog().debug({ issueNum, codebaseId: codebase.id }, 'isolation_share_linked_issue');
         // Send UX message
         await platform.sendMessage(
           conversationId,
@@ -242,7 +242,7 @@ async function resolveIsolation(
     const canonicalPath = await getCanonicalRepoPath(codebase.default_cwd);
     const adoptedPath = await findWorktreeByBranch(canonicalPath, hints.prBranch);
     if (adoptedPath && (await worktreeExists(adoptedPath))) {
-      console.log(`[Orchestrator] Adopting existing worktree at ${adoptedPath}`);
+      getLog().info({ adoptedPath, prBranch: hints.prBranch }, 'isolation_worktree_adopted');
       const env = await isolationEnvDb.create({
         codebase_id: codebase.id,
         workflow_type: workflowType,
@@ -260,8 +260,9 @@ async function resolveIsolation(
   const canonicalPath = await getCanonicalRepoPath(codebase.default_cwd);
   const count = await isolationEnvDb.countByCodebase(codebase.id);
   if (count >= MAX_WORKTREES_PER_CODEBASE) {
-    console.log(
-      `[Orchestrator] Worktree limit reached (${String(count)}/${String(MAX_WORKTREES_PER_CODEBASE)}), attempting auto-cleanup`
+    getLog().warn(
+      { count, limit: MAX_WORKTREES_PER_CODEBASE, codebaseId: codebase.id },
+      'worktree_limit_reached'
     );
 
     const cleanupResult = await cleanupToMakeRoom(codebase.id, canonicalPath);
@@ -336,13 +337,15 @@ async function resolveIsolation(
     const err = error as Error;
     const userMessage = classifyIsolationError(err);
 
-    console.error('[Orchestrator] Failed to create isolation:', {
-      error: err.message,
-      stack: err.stack,
-      codebaseId: codebase.id,
-      codebaseName: codebase.name,
-      defaultCwd: codebase.default_cwd,
-    });
+    getLog().error(
+      {
+        err,
+        codebaseId: codebase.id,
+        codebaseName: codebase.name,
+        defaultCwd: codebase.default_cwd,
+      },
+      'isolation_creation_failed'
+    );
 
     await platform.sendMessage(
       conversationId,
@@ -466,7 +469,7 @@ async function tryWorkflowRouting(
     return false;
   }
 
-  console.log(`[Orchestrator] Routing to workflow: ${workflowName}`);
+  getLog().info({ workflowName }, 'workflow_routing');
 
   if (remainingMessage) {
     await ctx.platform.sendMessage(ctx.conversationId, remainingMessage);
@@ -578,11 +581,14 @@ async function dispatchBackgroundWorkflow(
           await workflowDb.updateWorkflowRunParent(result.workflowRunId, ctx.conversationDbId);
         }
       } catch (error) {
-        console.error('[Orchestrator] Background workflow failed:', {
-          workflowName: workflow.name,
-          workerConversationId: workerPlatformId,
-          error: (error as Error).message,
-        });
+        getLog().error(
+          {
+            err: error as Error,
+            workflowName: workflow.name,
+            workerConversationId: workerPlatformId,
+          },
+          'background_workflow_failed'
+        );
         // Surface error to parent conversation so the user knows
         await ctx.platform
           .sendMessage(
@@ -590,9 +596,7 @@ async function dispatchBackgroundWorkflow(
             `Workflow **${workflow.name}** failed: ${(error as Error).message}`
           )
           .catch((sendErr: unknown) => {
-            console.error('[Orchestrator] Failed to notify parent of workflow error:', {
-              error: (sendErr as Error).message,
-            });
+            getLog().error({ err: sendErr as Error }, 'background_workflow_notify_failed');
           });
       } finally {
         // Clean up event bridge
@@ -605,9 +609,7 @@ async function dispatchBackgroundWorkflow(
         }
       }
     } catch (outerError) {
-      console.error('[Orchestrator] Unhandled error in background workflow:', {
-        error: (outerError as Error).message,
-      });
+      getLog().error({ err: outerError as Error }, 'background_workflow_unhandled_error');
     }
   })();
 }
@@ -641,7 +643,7 @@ export async function handleMessage(
   isolationHints?: IsolationHints // Optional hints from adapter for isolation decisions
 ): Promise<void> {
   try {
-    console.log(`[Orchestrator] Handling message for conversation ${conversationId}`);
+    getLog().debug({ conversationId }, 'message_handling_started');
 
     // Get or create conversation (with optional parent context for thread inheritance)
     let conversation = await db.getOrCreateConversation(
@@ -667,12 +669,10 @@ export async function handleMessage(
             platform.getPlatformType(),
             conversationId
           );
-          console.log('[Orchestrator] Thread inherited context from parent channel');
+          getLog().debug({ conversationId, parentConversationId }, 'thread_context_inherited');
         } catch (err) {
           if (err instanceof ConversationNotFoundError) {
-            console.warn(
-              `[Orchestrator] Thread inheritance failed: conversation ${conversation.id} not found during update`
-            );
+            getLog().warn({ conversationId: conversation.id }, 'thread_inheritance_failed');
           } else {
             throw err;
           }
@@ -713,7 +713,7 @@ export async function handleMessage(
       ];
 
       if (deterministicCommands.includes(command)) {
-        console.log(`[Orchestrator] Processing slash command: ${message}`);
+        getLog().debug({ command, conversationId }, 'slash_command_processing');
         const result = await commandHandler.handleCommand(conversation, message);
         await platform.sendMessage(conversationId, result.message);
 
@@ -728,7 +728,7 @@ export async function handleMessage(
         // Handle workflow execution trigger from /workflow run
         if (result.workflow) {
           const { name: workflowName, args: workflowArgs } = result.workflow;
-          console.log(`[Orchestrator] Workflow run triggered: ${workflowName}`);
+          getLog().info({ workflowName }, 'workflow_run_triggered');
 
           // Get codebase to determine cwd
           if (!conversation.codebase_id) {
@@ -756,11 +756,7 @@ export async function handleMessage(
             workflows = await discoverWorkflows(cwd);
           } catch (error) {
             const err = error as Error;
-            console.error('[Orchestrator] Workflow discovery failed during /workflow run:', {
-              workflowName,
-              cwd,
-              error: err.message,
-            });
+            getLog().error({ err, workflowName, cwd }, 'workflow_discovery_failed');
             await platform.sendMessage(
               conversationId,
               `Workflow execution failed: Could not load workflows (${err.message}). ` +
@@ -862,12 +858,10 @@ export async function handleMessage(
           // Append issue/PR context AFTER command loading (if provided)
           if (issueContext) {
             promptToSend = promptToSend + '\n\n---\n\n' + issueContext;
-            console.log('[Orchestrator] Appended issue/PR context to command prompt');
+            getLog().debug({ commandName }, 'issue_context_appended');
           }
 
-          console.log(
-            `[Orchestrator] Executing '${commandName}' with ${String(commandArgs.length)} args`
-          );
+          getLog().debug({ commandName, argCount: commandArgs.length }, 'command_executing');
         } catch (error) {
           const err = error as Error;
           await platform.sendMessage(conversationId, `Failed to read command file: ${err.message}`);
@@ -877,19 +871,17 @@ export async function handleMessage(
         // Check if it's a global template command
         const template = await templateDb.getTemplate(command);
         if (template) {
-          console.log(`[Orchestrator] Found template: ${command}`);
+          getLog().debug({ command }, 'template_found');
           commandName = command;
           const substituted = substituteVariables(template.content, args);
           promptToSend = wrapCommandForExecution(commandName, substituted);
 
           if (issueContext) {
             promptToSend = promptToSend + '\n\n---\n\n' + issueContext;
-            console.log('[Orchestrator] Appended issue/PR context to template prompt');
+            getLog().debug({ commandName }, 'issue_context_appended_to_template');
           }
 
-          console.log(
-            `[Orchestrator] Executing template '${command}' with ${String(args.length)} args`
-          );
+          getLog().debug({ command, argCount: args.length }, 'template_executing');
         } else {
           // Unknown command
           await platform.sendMessage(
@@ -914,29 +906,22 @@ export async function handleMessage(
       const codebaseForWorkflows = await codebaseDb.getCodebase(conversation.codebase_id);
       if (codebaseForWorkflows) {
         const workflowCwd = conversation.cwd ?? codebaseForWorkflows.default_cwd;
-        console.log(`[Orchestrator] Discovering workflows from: ${workflowCwd}`);
+        getLog().debug({ workflowCwd }, 'workflow_discovery_started');
         try {
           // Sync .archon from canonical repo to worktree if needed
           await syncArchonToWorktree(workflowCwd);
 
           availableWorkflows = await discoverWorkflows(workflowCwd);
-          console.log(
-            `[Orchestrator] Workflow discovery result: ${String(availableWorkflows.length)} workflows found`
+          getLog().debug(
+            { count: availableWorkflows.length, workflows: availableWorkflows.map(w => w.name) },
+            'workflow_discovery_complete'
           );
-          if (availableWorkflows.length > 0) {
-            console.log(
-              `[Orchestrator] Available workflows: ${availableWorkflows.map(w => w.name).join(', ')}`
-            );
-          }
         } catch (error) {
           const err = error as Error;
           if (isExpectedWorkflowDiscoveryError(err)) {
-            console.log('[Orchestrator] No workflows directory found, using direct conversation');
+            getLog().debug('workflow_directory_not_found');
           } else {
-            console.error(`[Orchestrator] Workflow discovery failed: ${err.message}`, {
-              error: err.message,
-              stack: err.stack,
-            });
+            getLog().error({ err }, 'workflow_discovery_failed');
             await platform.sendMessage(
               conversationId,
               `Note: Could not load workflows (${err.message}). This may be a configuration error. ` +
@@ -945,14 +930,12 @@ export async function handleMessage(
           }
         }
       } else {
-        console.warn(
-          `[Orchestrator] Codebase not found for ID: ${conversation.codebase_id ?? 'null'}`
-        );
+        getLog().warn({ codebaseId: conversation.codebase_id }, 'codebase_not_found');
       }
 
       // If workflows are available, use workflow-aware router prompt
       if (availableWorkflows.length > 0) {
-        console.log('[Orchestrator] Using workflow-aware router prompt');
+        getLog().debug('using_workflow_router_prompt');
         commandName = 'workflow-router';
 
         // Build router context from available data
@@ -979,9 +962,7 @@ export async function handleMessage(
           if (titleMatch?.[1]) {
             routerContext.title = titleMatch[1];
           } else {
-            console.log(
-              '[Orchestrator] GitHub context present but could not extract title (format mismatch)'
-            );
+            getLog().debug('github_context_title_extraction_failed');
           }
 
           // Detect if it's a PR vs issue (only when markers are present)
@@ -1007,31 +988,35 @@ export async function handleMessage(
         }
 
         promptToSend = buildRouterPrompt(message, availableWorkflows, routerContext);
-        console.log('[Orchestrator] Router context:', {
-          platformType: routerContext.platformType,
-          isPullRequest: routerContext.isPullRequest,
-          hasTitle: !!routerContext.title,
-          hasLabels: !!(routerContext.labels && routerContext.labels.length > 0),
-          hasThreadHistory: !!routerContext.threadHistory,
-          contextSource: issueContext
-            ? 'issueContext'
-            : hasGitHubMarkersInMessage
-              ? 'message'
-              : 'none',
-        });
+        getLog().debug(
+          {
+            platformType: routerContext.platformType,
+            isPullRequest: routerContext.isPullRequest,
+            hasTitle: !!routerContext.title,
+            hasLabels: !!(routerContext.labels && routerContext.labels.length > 0),
+            hasThreadHistory: !!routerContext.threadHistory,
+            contextSource: issueContext
+              ? 'issueContext'
+              : hasGitHubMarkersInMessage
+                ? 'message'
+                : 'none',
+          },
+          'router_context_built'
+        );
       } else {
         // Fall back to router template for natural language routing
-        console.log(
-          `[Orchestrator] No workflows available (count: ${String(availableWorkflows.length)}), checking router template`
+        getLog().debug(
+          { count: availableWorkflows.length },
+          'no_workflows_checking_router_template'
         );
         const routerTemplate = await templateDb.getTemplate('router');
         if (routerTemplate) {
-          console.log('[Orchestrator] Routing through router template');
+          getLog().debug('routing_through_router_template');
           commandName = 'router';
           // Pass the entire message as $ARGUMENTS for the router
           promptToSend = substituteVariables(routerTemplate.content, [message]);
         } else {
-          console.log('[Orchestrator] No router template found, using raw message');
+          getLog().debug('no_router_template_using_raw_message');
         }
         // If no router template, message passes through as-is (backward compatible)
       }
@@ -1040,14 +1025,14 @@ export async function handleMessage(
     // Prepend thread context if provided
     if (threadContext) {
       promptToSend = `## Thread Context (previous messages)\n\n${threadContext}\n\n---\n\n## Current Request\n\n${promptToSend}`;
-      console.log('[Orchestrator] Prepended thread context to prompt');
+      getLog().debug({ conversationId }, 'thread_context_prepended');
     }
 
-    console.log('[Orchestrator] Starting AI conversation');
+    getLog().debug({ conversationId }, 'ai_conversation_starting');
 
     // Dynamically get the appropriate AI client based on conversation's assistant type
     const aiClient = getAssistantClient(conversation.ai_assistant_type);
-    console.log(`[Orchestrator] Using ${conversation.ai_assistant_type} assistant`);
+    getLog().debug({ assistantType: conversation.ai_assistant_type }, 'assistant_client_selected');
 
     // Get codebase for isolation and session management
     const codebase = conversation.codebase_id
@@ -1074,7 +1059,7 @@ export async function handleMessage(
         // Isolation was blocked (e.g., worktree limit reached)
         // User has already been informed by validateAndResolveIsolation
         // Stop execution by returning early
-        console.log(`[Orchestrator] Isolation blocked: ${error.message}`);
+        getLog().info({ reason: error.message }, 'isolation_blocked');
         return;
       }
       // Re-throw other errors
@@ -1086,7 +1071,10 @@ export async function handleMessage(
 
     // If cwd changed (new isolation), transition to new session with audit trail
     if (isNewIsolation && session) {
-      console.log('[Orchestrator] isolation-changed: transitioning session');
+      getLog().info(
+        { conversationId, sessionId: session.id },
+        'session_transition_isolation_changed'
+      );
       session = await sessionDb.transitionSession(conversation.id, 'isolation-changed', {
         codebase_id: conversation.codebase_id ?? undefined,
         ai_assistant_type: conversation.ai_assistant_type,
@@ -1104,24 +1092,24 @@ export async function handleMessage(
     );
 
     if (planToExecuteTrigger) {
-      console.log(`[Orchestrator] ${planToExecuteTrigger}: transitioning session`);
+      getLog().info({ conversationId, trigger: planToExecuteTrigger }, 'session_transition');
       session = await sessionDb.transitionSession(conversation.id, planToExecuteTrigger, {
         codebase_id: conversation.codebase_id ?? undefined,
         ai_assistant_type: conversation.ai_assistant_type,
       });
     } else if (!session) {
-      console.log('[Orchestrator] first-message: creating new session');
+      getLog().info({ conversationId }, 'session_created_first_message');
       session = await sessionDb.transitionSession(conversation.id, 'first-message', {
         codebase_id: conversation.codebase_id ?? undefined,
         ai_assistant_type: conversation.ai_assistant_type,
       });
     } else {
-      console.log(`[Orchestrator] Resuming session ${session.id}`);
+      getLog().debug({ sessionId: session.id }, 'session_resuming');
     }
 
     // Send to AI and stream responses
     const mode = platform.getStreamingMode();
-    console.log(`[Orchestrator] Streaming mode: ${mode}`);
+    getLog().debug({ mode }, 'streaming_mode');
 
     // Build workflow routing context once
     const routingCtx: WorkflowRoutingContext = {
@@ -1204,15 +1192,17 @@ export async function handleMessage(
           // Format and log tool call for observability
           const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
           allChunks.push({ type: 'tool', content: toolMessage });
-          console.log(`[Orchestrator] Tool call: ${msg.toolName}`);
+          getLog().debug({ toolName: msg.toolName }, 'tool_call');
         } else if (msg.type === 'result' && msg.sessionId) {
           await tryPersistSessionId(session.id, msg.sessionId);
         }
       }
 
       // Log all chunks for observability
-      console.log(`[Orchestrator] Received ${String(allChunks.length)} chunks total`);
-      console.log(`[Orchestrator] Assistant messages: ${String(assistantMessages.length)}`);
+      getLog().debug(
+        { totalChunks: allChunks.length, assistantMessages: assistantMessages.length },
+        'batch_mode_chunks_received'
+      );
 
       // Join all assistant messages and filter tool indicators
       // Tool indicators from Claude Code SDK responses:
@@ -1253,7 +1243,7 @@ export async function handleMessage(
         }
 
         // No workflow routing - send the final message
-        console.log(`[Orchestrator] Sending final message (${String(finalMessage.length)} chars)`);
+        getLog().debug({ messageLength: finalMessage.length }, 'sending_final_message');
         await platform.sendMessage(conversationId, finalMessage);
       }
     }
@@ -1264,10 +1254,10 @@ export async function handleMessage(
       await tryUpdateSessionMetadata(session.id, { lastCommand: commandName });
     }
 
-    console.log('[Orchestrator] Message handling complete');
+    getLog().debug({ conversationId }, 'message_handling_complete');
   } catch (error) {
     const err = error as Error;
-    console.error('[Orchestrator] Error:', error);
+    getLog().error({ err: error as Error, conversationId }, 'message_handling_failed');
     const userMessage = classifyAndFormatError(err);
     await platform.sendMessage(conversationId, userMessage);
   }

@@ -592,26 +592,34 @@ You can also run all CLI commands directly for regression testing and testing ne
 
 ### Logging
 
-**Use `console.log` with structured data for MVP:**
+**Structured logging with Pino** (`packages/core/src/utils/logger.ts`):
 
 ```typescript
-// Good: Structured logging
-console.log('[Orchestrator] Starting session', {
-  conversationId,
-  codebaseId,
-  command: 'plan',
-  timestamp: new Date().toISOString()
-});
+import { createLogger } from '@archon/core';
 
-// Good: Error logging with context
-console.error('[GitHub] Webhook signature verification failed', {
-  error: err.message,
-  timestamp: new Date().toISOString()
-});
+const log = createLogger('orchestrator');
 
-// Bad: Generic logs
-console.log('Processing...');
+// Object first, message second (Pino convention)
+log.info({ conversationId, codebaseId }, 'session_started');
+log.error({ err, conversationId }, 'session_failed');
+log.debug({ step, provider }, 'step_config_loaded');
+log.warn({ envVar: 'MISSING_KEY' }, 'optional_config_missing');
 ```
+
+**Log Levels:**
+- `fatal` (60) - Process cannot continue
+- `error` (50) - Failures needing immediate attention
+- `warn` (40) - Degraded behavior, fallbacks
+- `info` (30) - Key user-visible events (DEFAULT)
+- `debug` (20) - Internal details, tool calls, state transitions
+- `trace` (10) - Fine-grained diagnostic output
+
+**Controlling Verbosity:**
+- CLI: `archon --quiet ...` (errors only) or `archon --verbose ...` (debug)
+- Server: `LOG_LEVEL=debug bun run start`
+- TTY output is pretty-printed; piped output is newline-delimited JSON
+
+**Migration Note:** Existing `console.log` calls are being migrated to Pino in phases. New code should use `createLogger()`. Existing console calls will be replaced in Phase 2-3.
 
 **What to Log:**
 - Session start/end with IDs
@@ -670,7 +678,7 @@ console.log('Processing...');
 try {
   await db.query('INSERT INTO conversations ...', params);
 } catch (error) {
-  console.error('[DB] Insert failed', { error, params });
+  log.error({ err: error, params }, 'db_insert_failed');
   throw new Error('Failed to create conversation');
 }
 
@@ -679,7 +687,7 @@ try {
   await db.updateConversation(conversationId, { codebase_id: codebaseId });
 } catch (error) {
   // updateConversation throws if no rows matched (conversation not found)
-  console.error('[DB] Update failed', { error, conversationId });
+  log.error({ err: error, conversationId }, 'db_update_failed');
   throw error; // Re-throw to surface the issue
 }
 ```
@@ -689,7 +697,7 @@ try {
 try {
   await telegram.sendMessage(chatId, message);
 } catch (error) {
-  console.error('[Telegram] Send failed', { error, chatId });
+  log.error({ err: error, chatId }, 'telegram_send_failed');
   // Don't retry - let user know manually
 }
 ```
@@ -699,7 +707,7 @@ try {
 try {
   await claudeClient.sendMessage(session, prompt);
 } catch (error) {
-  console.error('[Claude] Session error', { error, sessionId });
+  log.error({ err: error, sessionId }, 'claude_session_error');
   await platform.sendMessage(conversationId, '❌ AI error. Try /reset');
 }
 ```

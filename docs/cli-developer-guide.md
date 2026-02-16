@@ -234,7 +234,7 @@ Implements `IPlatformAdapter` for terminal output.
 ┌─────────────────────────────────────────────────────────────────┐
 │ CLIAdapter                                                      │
 ├─────────────────────────────────────────────────────────────────┤
-│ sendMessage(convId, msg) → console.log(msg)                     │
+│ sendMessage(convId, msg) → Output to stdout                     │
 │ getStreamingMode()       → 'batch'                              │
 │ getPlatformType()        → 'cli'                                │
 │ ensureThread()           → passthrough                          │

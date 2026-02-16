@@ -14,6 +14,14 @@ import { access, readdir, mkdir, copyFile } from 'fs/promises';
 import { join } from 'path';
 import { getDefaultCommandsPath, getDefaultWorkflowsPath } from './archon-paths';
 import { loadRepoConfig } from '../config/config-loader';
+import { createLogger } from './logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('defaults-copy');
+  return cachedLog;
+}
 
 export interface CopyDefaultsResult {
   commandsCopied: number;
@@ -49,11 +57,7 @@ async function directoryExists(dirPath: string): Promise<boolean> {
       return false;
     }
     // For other errors (EACCES, ELOOP, etc.), log and treat as non-existent
-    console.error('[DefaultsCopy] Cannot access directory:', {
-      path: dirPath,
-      errorCode: err.code,
-      errorMessage: err.message,
-    });
+    getLog().error({ path: dirPath, err, code: err.code }, 'directory_access_failed');
     return false;
   }
 }
@@ -66,7 +70,7 @@ async function copyFiles(options: CopyFilesOptions): Promise<CopyFilesResult> {
   const { sourceDir, targetDir, extensions, label } = options;
 
   if (!(await directoryExists(sourceDir))) {
-    console.log(`[DefaultsCopy] No default ${label} found at`, sourceDir);
+    getLog().debug({ label, sourceDir }, 'no_defaults_found');
     return { copied: 0, failed: 0 };
   }
 
@@ -75,11 +79,10 @@ async function copyFiles(options: CopyFilesOptions): Promise<CopyFilesResult> {
     entries = await readdir(sourceDir, { withFileTypes: true });
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
-    console.error('[DefaultsCopy] Failed to read source directory:', {
-      path: sourceDir,
-      errorCode: err.code ?? 'UNKNOWN',
-      errorMessage: err.message,
-    });
+    getLog().error(
+      { path: sourceDir, err, code: err.code ?? 'UNKNOWN' },
+      'read_source_directory_failed'
+    );
     return { copied: 0, failed: 0 };
   }
 
@@ -95,11 +98,10 @@ async function copyFiles(options: CopyFilesOptions): Promise<CopyFilesResult> {
     await mkdir(targetDir, { recursive: true });
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
-    console.error('[DefaultsCopy] Failed to create target directory:', {
-      path: targetDir,
-      errorCode: err.code ?? 'UNKNOWN',
-      errorMessage: err.message,
-    });
+    getLog().error(
+      { path: targetDir, err, code: err.code ?? 'UNKNOWN' },
+      'create_target_directory_failed'
+    );
     return { copied: 0, failed: matchingFiles.length };
   }
 
@@ -111,21 +113,18 @@ async function copyFiles(options: CopyFilesOptions): Promise<CopyFilesResult> {
       copied++;
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
-      console.error(`[DefaultsCopy] Failed to copy ${label.slice(0, -1)}`, {
-        file: file.name,
-        errorCode: err.code ?? 'UNKNOWN',
-        errorMessage: err.message,
-      });
+      getLog().error(
+        { file: file.name, label, err, code: err.code ?? 'UNKNOWN' },
+        'copy_file_failed'
+      );
       failed++;
     }
   }
 
   if (failed > 0) {
-    console.warn(
-      `[DefaultsCopy] Warning: ${String(failed)}/${String(matchingFiles.length)} ${label} failed to copy`
-    );
+    getLog().warn({ failed, total: matchingFiles.length, label }, 'partial_copy_failure');
   }
-  console.log(`[DefaultsCopy] Copied ${String(copied)} default ${label} to ${targetDir}`);
+  getLog().info({ copied, label, targetDir }, 'defaults_copied');
   return { copied, failed };
 }
 
@@ -145,7 +144,7 @@ export async function copyDefaultsToRepo(targetPath: string): Promise<CopyDefaul
   }
 
   if (config.defaults?.copyDefaults === false) {
-    console.log('[DefaultsCopy] Skipped - opted out via config');
+    getLog().info('defaults_copy_skipped_opted_out');
     return {
       commandsCopied: 0,
       commandsFailed: 0,
@@ -162,7 +161,7 @@ export async function copyDefaultsToRepo(targetPath: string): Promise<CopyDefaul
   // Copy commands if target doesn't have any
   let commandsResult: CopyFilesResult = { copied: 0, failed: 0 };
   if (await directoryExists(targetCommandsPath)) {
-    console.log('[DefaultsCopy] Target already has .archon/commands/, skipping command copy');
+    getLog().debug({ targetCommandsPath }, 'commands_skipped_already_exists');
   } else {
     commandsResult = await copyFiles({
       sourceDir: getDefaultCommandsPath(),
@@ -175,7 +174,7 @@ export async function copyDefaultsToRepo(targetPath: string): Promise<CopyDefaul
   // Copy workflows if target doesn't have any
   let workflowsResult: CopyFilesResult = { copied: 0, failed: 0 };
   if (await directoryExists(targetWorkflowsPath)) {
-    console.log('[DefaultsCopy] Target already has .archon/workflows/, skipping workflow copy');
+    getLog().debug({ targetWorkflowsPath }, 'workflows_skipped_already_exists');
   } else {
     workflowsResult = await copyFiles({
       sourceDir: getDefaultWorkflowsPath(),

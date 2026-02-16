@@ -3,6 +3,14 @@
  */
 import { Pool } from 'pg';
 import type { IDatabase, QueryResult, SqlDialect } from './types';
+import { createLogger } from '../../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('db.postgres');
+  return cachedLog;
+}
 
 export class PostgresAdapter implements IDatabase {
   private pool: Pool;
@@ -18,11 +26,7 @@ export class PostgresAdapter implements IDatabase {
     });
 
     this.pool.on('error', err => {
-      console.error('[PostgreSQL] CRITICAL: Pool-level connection error', {
-        error: err.message,
-        code: (err as NodeJS.ErrnoException).code,
-        timestamp: new Date().toISOString(),
-      });
+      getLog().fatal({ err, code: (err as NodeJS.ErrnoException).code }, 'pool_connection_error');
       // Pool-level errors indicate infrastructure problems (DB unreachable, auth failed, etc.)
       // We don't throw here as this is an event handler, but the error is now properly logged
       // with enough context to diagnose. Individual queries will fail with their own errors.

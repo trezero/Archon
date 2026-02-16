@@ -16,6 +16,14 @@ import {
   parseOwnerRepo,
 } from '../utils/archon-paths';
 import { findMarkdownFilesRecursive } from '../utils/commands';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('clone');
+  return cachedLog;
+}
 
 export interface RegisterResult {
   codebaseId: string;
@@ -42,14 +50,14 @@ async function registerRepoAtPath(
   try {
     await access(codexFolder);
     suggestedAssistant = 'codex';
-    console.log('[Clone] Detected .codex folder - using Codex assistant');
+    getLog().debug({ path: codexFolder }, 'assistant_detected_codex');
   } catch {
     try {
       await access(claudeFolder);
       suggestedAssistant = 'claude';
-      console.log('[Clone] Detected .claude folder - using Claude assistant');
+      getLog().debug({ path: claudeFolder }, 'assistant_detected_claude');
     } catch {
-      console.log('[Clone] No assistant folder detected - defaulting to Claude');
+      getLog().debug('assistant_default_claude');
     }
   }
 
@@ -173,7 +181,7 @@ export async function cloneRepository(repoUrl: string): Promise<RegisterResult> 
   // Create project structure (source/, worktrees/, artifacts/, logs/)
   await ensureProjectStructure(ownerName, repoName);
 
-  console.log(`[Clone] Cloning ${workingUrl} to ${targetPath}`);
+  getLog().info({ url: workingUrl, targetPath }, 'clone_started');
 
   // Build clone command with authentication if GitHub token is available
   let cloneUrl = workingUrl;
@@ -187,7 +195,7 @@ export async function cloneRepository(repoUrl: string): Promise<RegisterResult> 
     } else if (!workingUrl.startsWith('http')) {
       cloneUrl = `https://${ghToken}@${workingUrl}`;
     }
-    console.log('[Clone] Using authenticated GitHub clone');
+    getLog().debug('clone_authenticated');
   }
 
   // Remove the empty source/ directory before cloning (git clone requires non-existent target)
@@ -209,7 +217,7 @@ export async function cloneRepository(repoUrl: string): Promise<RegisterResult> 
 
   // Add to git safe.directory
   await execFileAsync('git', ['config', '--global', '--add', 'safe.directory', targetPath]);
-  console.log(`[Clone] Added ${targetPath} to git safe.directory`);
+  getLog().debug({ path: targetPath }, 'safe_directory_added');
 
   return registerRepoAtPath(targetPath, `${ownerName}/${repoName}`, workingUrl);
 }
@@ -246,10 +254,7 @@ export async function registerRepository(localPath: string): Promise<RegisterRes
   } catch (error) {
     const msg = (error as Error).message ?? '';
     if (!msg.includes('No such remote')) {
-      console.warn('[Clone] Unexpected error fetching remote URL', {
-        path: localPath,
-        error: msg,
-      });
+      getLog().warn({ path: localPath, err: error }, 'remote_url_fetch_unexpected_error');
     }
   }
 
@@ -280,7 +285,10 @@ export async function registerRepository(localPath: string): Promise<RegisterRes
   const projRepo = parsed?.repo ?? repoName;
   await ensureProjectStructure(projOwner, projRepo);
   await createProjectSourceSymlink(projOwner, projRepo, localPath);
-  console.log(`[Clone] Created project structure at ${getProjectSourcePath(projOwner, projRepo)}`);
+  getLog().info(
+    { owner: projOwner, repo: projRepo, path: getProjectSourcePath(projOwner, projRepo) },
+    'project_structure_created'
+  );
 
   // default_cwd is the real local path (not the symlink)
   return registerRepoAtPath(localPath, name, remoteUrl);

@@ -9,6 +9,7 @@
  * without replacing the entire module in the global cache.
  */
 import { describe, test, expect, mock, beforeEach, afterAll, spyOn, type Mock } from 'bun:test';
+import { createMockLogger } from '../test/mocks/logger';
 import { Conversation } from '../types';
 import { resolve, join } from 'path';
 import * as fsPromises from 'fs/promises';
@@ -136,6 +137,12 @@ mock.module('../isolation', () => ({
 //
 // We also use spyOn for fs/promises and internal modules to avoid polluting
 // other test files (like git.test.ts)
+
+// Mock logger to suppress noisy output during tests
+const mockLogger = createMockLogger();
+mock.module('../utils/logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
 
 import { parseCommand, handleCommand } from './command-handler';
 

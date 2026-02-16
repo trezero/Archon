@@ -6,12 +6,20 @@ import {
   executeWorkflow,
   getIsolationProvider,
   registerRepository,
+  createLogger,
 } from '@archon/core';
 import * as conversationDb from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
 import * as isolationDb from '@archon/core/db/isolation-environments';
 import * as git from '@archon/core/utils/git';
 import { CLIAdapter } from '../adapters/cli-adapter';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('cli.workflow');
+  return cachedLog;
+}
 
 /**
  * Options for workflow run command
@@ -125,13 +133,16 @@ export async function workflowRunCommand(
   } catch (error) {
     const err = error as Error;
     codebaseLookupError = err;
-    console.warn(`Warning: Could not look up codebase for ${cwd}: ${err.message}`);
+    getLog().warn({ err, cwd }, 'codebase_lookup_failed');
     if (
       err.message.includes('connect') ||
       err.message.includes('ECONNREFUSED') ||
       err.message.includes('ETIMEDOUT')
     ) {
-      console.warn('Hint: Check DATABASE_URL and that the database is running.');
+      getLog().warn(
+        { hint: 'Check DATABASE_URL and that the database is running.' },
+        'db_connection_hint'
+      );
     }
   }
 
@@ -143,11 +154,11 @@ export async function workflowRunCommand(
         const result = await registerRepository(repoRoot);
         codebase = await codebaseDb.getCodebase(result.codebaseId);
         if (!result.alreadyExisted) {
-          console.log(`[CLI] Auto-registered codebase: ${result.name}`);
+          getLog().info({ name: result.name }, 'codebase_auto_registered');
         }
       } catch (error) {
         const err = error as Error;
-        console.warn(`[CLI] Auto-registration failed (non-critical): ${err.message}`);
+        getLog().warn({ err }, 'codebase_auto_registration_failed');
       }
     }
   }
@@ -174,7 +185,7 @@ export async function workflowRunCommand(
 
     if (options.noWorktree) {
       // Checkout branch in cwd, no worktree
-      console.log(`[CLI] Checking out branch: ${options.branchName}`);
+      getLog().info({ branch: options.branchName }, 'branch_checkout');
       await git.checkout(cwd, options.branchName);
       workingCwd = cwd;
     } else {
@@ -185,12 +196,12 @@ export async function workflowRunCommand(
       const existingEnv = await isolationDb.findByWorkflow(codebase.id, 'task', options.branchName);
 
       if (existingEnv && (await provider.healthCheck(existingEnv.working_path))) {
-        console.log(`[CLI] Reusing existing worktree: ${existingEnv.working_path}`);
+        getLog().info({ path: existingEnv.working_path }, 'worktree_reused');
         workingCwd = existingEnv.working_path;
         isolationEnvId = existingEnv.id;
       } else {
         // Create new worktree
-        console.log(`[CLI] Creating worktree for branch: ${options.branchName}`);
+        getLog().info({ branch: options.branchName }, 'worktree_creating');
 
         const isolatedEnv = await provider.create({
           workflowType: 'task',
@@ -218,7 +229,7 @@ export async function workflowRunCommand(
 
         workingCwd = isolatedEnv.workingPath;
         isolationEnvId = envRecord.id;
-        console.log(`[CLI] Worktree created: ${workingCwd}`);
+        getLog().info({ path: workingCwd }, 'worktree_created');
       }
     }
   }

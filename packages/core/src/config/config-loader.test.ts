@@ -1,6 +1,12 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { homedir } from 'os';
 import { join } from 'path';
+import { createMockLogger } from '../test/mocks/logger';
+
+const mockLogger = createMockLogger();
+mock.module('../utils/logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
 
 // Mock for reading config files (replaces fs/promises mock)
 const mockReadConfigFile = mock(() => Promise.resolve(''));
@@ -98,55 +104,41 @@ concurrency:
     });
 
     test('logs error for invalid YAML syntax', async () => {
-      const errorSpy = mock(() => {});
-      const originalError = console.error;
-      console.error = errorSpy;
+      mockLogger.error.mockClear();
 
-      try {
-        // Simulate YAML parse error (SyntaxError has no .code property)
-        const syntaxError = new SyntaxError('YAML Parse error: Multiline implicit key');
-        mockReadConfigFile.mockRejectedValue(syntaxError);
+      // Simulate YAML parse error (SyntaxError has no .code property)
+      const syntaxError = new SyntaxError('YAML Parse error: Multiline implicit key');
+      mockReadConfigFile.mockRejectedValue(syntaxError);
 
-        const config = await loadGlobalConfig();
+      const config = await loadGlobalConfig();
 
-        // Should fall back to empty config
-        expect(config).toEqual({});
+      // Should fall back to empty config
+      expect(config).toEqual({});
 
-        // Should log both error lines
-        expect(errorSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
-        const firstLine = errorSpy.mock.calls[0][0] as string;
-        const secondLine = errorSpy.mock.calls[1][0] as string;
-        expect(firstLine).toContain('[Config] Invalid YAML in');
-        expect(secondLine).toContain('Please fix the YAML syntax');
-      } finally {
-        console.error = originalError;
-      }
+      // Should log error via structured logger
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: syntaxError }),
+        'config_invalid_yaml'
+      );
     });
 
     test('logs error for permission denied', async () => {
-      const errorSpy = mock(() => {});
-      const originalError = console.error;
-      console.error = errorSpy;
+      mockLogger.error.mockClear();
 
-      try {
-        const permError = new Error('Permission denied') as NodeJS.ErrnoException;
-        permError.code = 'EACCES';
-        mockReadConfigFile.mockRejectedValue(permError);
+      const permError = new Error('Permission denied') as NodeJS.ErrnoException;
+      permError.code = 'EACCES';
+      mockReadConfigFile.mockRejectedValue(permError);
 
-        const config = await loadGlobalConfig();
+      const config = await loadGlobalConfig();
 
-        // Should fall back to empty config
-        expect(config).toEqual({});
+      // Should fall back to empty config
+      expect(config).toEqual({});
 
-        // Should log both error lines with permission message
-        expect(errorSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
-        const firstLine = errorSpy.mock.calls[0][0] as string;
-        const secondLine = errorSpy.mock.calls[1][0] as string;
-        expect(firstLine).toContain('[Config] Permission denied');
-        expect(secondLine).toContain('Check file permissions');
-      } finally {
-        console.error = originalError;
-      }
+      // Should log error via structured logger
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: permError, code: 'EACCES' }),
+        'config_permission_denied'
+      );
     });
   });
 
@@ -168,55 +160,41 @@ concurrency:
     });
 
     test('logs error for invalid YAML syntax', async () => {
-      const errorSpy = mock(() => {});
-      const originalError = console.error;
-      console.error = errorSpy;
+      mockLogger.error.mockClear();
 
-      try {
-        // Simulate YAML parse error (SyntaxError has no .code property)
-        const syntaxError = new SyntaxError('YAML Parse error: Multiline implicit key');
-        mockReadConfigFile.mockRejectedValue(syntaxError);
+      // Simulate YAML parse error (SyntaxError has no .code property)
+      const syntaxError = new SyntaxError('YAML Parse error: Multiline implicit key');
+      mockReadConfigFile.mockRejectedValue(syntaxError);
 
-        const config = await loadRepoConfig('/test/repo');
+      const config = await loadRepoConfig('/test/repo');
 
-        // Should fall back to empty config
-        expect(config).toEqual({});
+      // Should fall back to empty config
+      expect(config).toEqual({});
 
-        // Should log both error lines
-        expect(errorSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
-        const firstLine = errorSpy.mock.calls[0][0] as string;
-        const secondLine = errorSpy.mock.calls[1][0] as string;
-        expect(firstLine).toContain('[Config] Invalid YAML in');
-        expect(secondLine).toContain('Please fix the YAML syntax');
-      } finally {
-        console.error = originalError;
-      }
+      // Should log error via structured logger
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: syntaxError }),
+        'config_invalid_yaml'
+      );
     });
 
     test('logs error for permission denied', async () => {
-      const errorSpy = mock(() => {});
-      const originalError = console.error;
-      console.error = errorSpy;
+      mockLogger.error.mockClear();
 
-      try {
-        const permError = new Error('Permission denied') as NodeJS.ErrnoException;
-        permError.code = 'EACCES';
-        mockReadConfigFile.mockRejectedValue(permError);
+      const permError = new Error('Permission denied') as NodeJS.ErrnoException;
+      permError.code = 'EACCES';
+      mockReadConfigFile.mockRejectedValue(permError);
 
-        const config = await loadRepoConfig('/test/repo');
+      const config = await loadRepoConfig('/test/repo');
 
-        // Should fall back to empty config
-        expect(config).toEqual({});
+      // Should fall back to empty config
+      expect(config).toEqual({});
 
-        // Should log both error lines with permission message
-        expect(errorSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
-        const firstLine = errorSpy.mock.calls[0][0] as string;
-        const secondLine = errorSpy.mock.calls[1][0] as string;
-        expect(firstLine).toContain('[Config] Permission denied');
-        expect(secondLine).toContain('Check file permissions');
-      } finally {
-        console.error = originalError;
-      }
+      // Should log error via structured logger
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: permError, code: 'EACCES' }),
+        'config_permission_denied'
+      );
     });
   });
 

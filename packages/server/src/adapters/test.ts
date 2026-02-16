@@ -3,6 +3,14 @@
  * Exposes HTTP endpoints to send/receive messages for testing
  */
 import type { IPlatformAdapter } from '@archon/core';
+import { createLogger } from '@archon/core';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('adapter.test');
+  return cachedLog;
+}
 
 interface TestMessage {
   conversationId: string;
@@ -16,7 +24,7 @@ export class TestAdapter implements IPlatformAdapter {
   private streamingMode: 'stream' | 'batch' = 'stream';
 
   async sendMessage(conversationId: string, message: string): Promise<void> {
-    console.log(`[Test] Sending to ${conversationId}: ${message.substring(0, 100)}...`);
+    getLog().debug({ conversationId, messagePreview: message.substring(0, 100) }, 'send_message');
 
     const msgs = this.messages.get(conversationId) ?? [];
     if (!this.messages.has(conversationId)) {
@@ -52,11 +60,11 @@ export class TestAdapter implements IPlatformAdapter {
   }
 
   async start(): Promise<void> {
-    console.log('[Test] Test adapter ready');
+    getLog().info('adapter_ready');
   }
 
   stop(): void {
-    console.log('[Test] Test adapter stopped');
+    getLog().info('adapter_stopped');
     this.messages.clear();
   }
 

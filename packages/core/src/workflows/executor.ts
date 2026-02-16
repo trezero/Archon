@@ -12,6 +12,7 @@ import * as archonPaths from '../utils/archon-paths';
 import * as configLoader from '../config/config-loader';
 import { BUNDLED_COMMANDS, isBinaryBuild } from '../defaults/bundled-defaults';
 import { commitAllChanges, execFileAsync, getDefaultBranch } from '../utils/git';
+import { createLogger } from '../utils/logger';
 import type {
   WorkflowDefinition,
   WorkflowRun,
@@ -34,6 +35,13 @@ import {
 } from './logger';
 import { getWorkflowEventEmitter } from './event-emitter';
 import * as workflowEventDb from '../db/workflow-events';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('workflow.executor');
+  return cachedLog;
+}
 
 /** Context for platform message sending */
 interface SendMessageContext {
@@ -99,15 +107,10 @@ async function resolveProjectPaths(
             logDir: archonPaths.getProjectLogsPath(parsed.owner, parsed.repo),
           };
         }
-        console.warn('[WorkflowExecutor] Codebase name not in owner/repo format, using fallback', {
-          codebaseName: codebase.name,
-        });
+        getLog().warn({ codebaseName: codebase.name }, 'codebase_name_not_owner_repo_format');
       }
     } catch (error) {
-      console.warn('[WorkflowExecutor] Failed to resolve project paths, using fallback', {
-        codebaseId,
-        error: (error as Error).message,
-      });
+      getLog().warn({ err: error as Error, codebaseId }, 'project_paths_resolve_failed');
     }
   }
   // Fallback for unregistered repos
@@ -182,15 +185,18 @@ function logSendError(
   context?: SendMessageContext,
   extra?: Record<string, unknown>
 ): void {
-  console.error(`[WorkflowExecutor] ${label}`, {
-    conversationId,
-    messageLength: message.length,
-    error: error.message,
-    errorType: classifyError(error),
-    platformType: platform.getPlatformType(),
-    ...context,
-    ...extra,
-  });
+  getLog().error(
+    {
+      err: error,
+      conversationId,
+      messageLength: message.length,
+      errorType: classifyError(error),
+      platformType: platform.getPlatformType(),
+      ...context,
+      ...extra,
+    },
+    label
+  );
 }
 
 /** Threshold for consecutive UNKNOWN errors before aborting */
@@ -302,11 +308,10 @@ async function sendCriticalMessage(
   }
 
   // Log prominently so operators can manually notify user
-  console.error('[WorkflowExecutor] CRITICAL: Could not deliver message to user after retries', {
-    conversationId,
-    messagePreview: message.slice(0, 100),
-    ...context,
-  });
+  getLog().error(
+    { conversationId, messagePreview: message.slice(0, 100), ...context },
+    'critical_message_delivery_failed'
+  );
 
   return false;
 }
@@ -340,7 +345,7 @@ async function loadCommandPrompt(
 ): Promise<LoadCommandResult> {
   // Validate command name first
   if (!isValidCommandName(commandName)) {
-    console.error(`[WorkflowExecutor] Invalid command name: ${commandName}`);
+    getLog().error({ commandName }, 'invalid_command_name');
     return {
       success: false,
       reason: 'invalid_name',
@@ -354,12 +359,14 @@ async function loadCommandPrompt(
     config = await configLoader.loadConfig(cwd);
   } catch (error) {
     const err = error as Error;
-    console.warn('[WorkflowExecutor] Failed to load config, using defaults:', {
-      cwd,
-      error: err.message,
-      errorType: err.name,
-      note: 'Default commands will be loaded. Check your .archon/config.yaml if this is unexpected.',
-    });
+    getLog().warn(
+      {
+        err,
+        cwd,
+        note: 'Default commands will be loaded. Check your .archon/config.yaml if this is unexpected.',
+      },
+      'config_load_failed_using_defaults'
+    );
     config = { defaults: { loadDefaultCommands: true } };
   }
 
@@ -373,14 +380,14 @@ async function loadCommandPrompt(
       await access(filePath);
       const content = await readFile(filePath, 'utf-8');
       if (!content.trim()) {
-        console.error(`[WorkflowExecutor] Empty command file: ${commandName}.md`);
+        getLog().error({ commandName }, 'command_file_empty');
         return {
           success: false,
           reason: 'empty_file',
           message: `Command file is empty: ${commandName}.md`,
         };
       }
-      console.log(`[WorkflowExecutor] Loaded command from: ${folder}/${commandName}.md`);
+      getLog().debug({ commandName, folder }, 'command_loaded');
       return { success: true, content };
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
@@ -389,7 +396,7 @@ async function loadCommandPrompt(
         continue;
       }
       if (err.code === 'EACCES') {
-        console.error(`[WorkflowExecutor] Permission denied reading ${filePath}`);
+        getLog().error({ commandName, filePath }, 'command_file_permission_denied');
         return {
           success: false,
           reason: 'permission_denied',
@@ -397,7 +404,7 @@ async function loadCommandPrompt(
         };
       }
       // Other unexpected errors
-      console.error(`[WorkflowExecutor] Unexpected error reading ${filePath}: ${err.message}`);
+      getLog().error({ err, commandName, filePath }, 'command_file_read_error');
       return {
         success: false,
         reason: 'read_error',
@@ -413,10 +420,10 @@ async function loadCommandPrompt(
       // Binary: check bundled commands
       const bundledContent = BUNDLED_COMMANDS[commandName];
       if (bundledContent) {
-        console.log(`[WorkflowExecutor] Loaded command from bundled defaults: ${commandName}.md`);
+        getLog().debug({ commandName }, 'command_loaded_bundled');
         return { success: true, content: bundledContent };
       }
-      console.log(`[WorkflowExecutor] Bundled default command not found: ${commandName}.md`);
+      getLog().debug({ commandName }, 'command_bundled_not_found');
     } else {
       // Bun: load from filesystem
       const appDefaultsPath = archonPaths.getDefaultCommandsPath();
@@ -425,21 +432,21 @@ async function loadCommandPrompt(
         await access(filePath);
         const content = await readFile(filePath, 'utf-8');
         if (!content.trim()) {
-          console.error(`[WorkflowExecutor] Empty app default command file: ${commandName}.md`);
+          getLog().error({ commandName }, 'command_app_default_empty');
           return {
             success: false,
             reason: 'empty_file',
             message: `App default command file is empty: ${commandName}.md`,
           };
         }
-        console.log(`[WorkflowExecutor] Loaded command from app defaults: ${commandName}.md`);
+        getLog().debug({ commandName }, 'command_loaded_app_defaults');
         return { success: true, content };
       } catch (error) {
         const err = error as NodeJS.ErrnoException;
         if (err.code !== 'ENOENT') {
-          console.warn(`[WorkflowExecutor] Error reading app default: ${err.message}`);
+          getLog().warn({ err, commandName }, 'command_app_default_read_error');
         } else {
-          console.log(`[WorkflowExecutor] App default command not found: ${commandName}.md`);
+          getLog().debug({ commandName }, 'command_app_default_not_found');
         }
         // Fall through to not found
       }
@@ -448,9 +455,7 @@ async function loadCommandPrompt(
 
   // Not found anywhere
   const allSearchPaths = loadDefaultCommands ? [...searchPaths, 'app defaults'] : searchPaths;
-  console.error(
-    `[WorkflowExecutor] Command prompt not found: ${commandName}.md (searched: ${allSearchPaths.join(', ')})`
-  );
+  getLog().error({ commandName, searchPaths: allSearchPaths }, 'command_not_found');
   return {
     success: false,
     reason: 'not_found',
@@ -504,10 +509,13 @@ function substituteWorkflowVariables(
   // Substitute or clear context variables (use fresh global regex for replace)
   const contextValue = issueContext ?? '';
   if (!issueContext && hasContextVariables) {
-    console.log('[WorkflowExecutor] Context variables found but no issueContext provided', {
-      action: 'clearing variables',
-      variables: ['$CONTEXT', '$EXTERNAL_CONTEXT', '$ISSUE_CONTEXT'],
-    });
+    getLog().debug(
+      {
+        action: 'clearing variables',
+        variables: ['$CONTEXT', '$EXTERNAL_CONTEXT', '$ISSUE_CONTEXT'],
+      },
+      'context_variables_cleared'
+    );
   }
   result = result.replace(new RegExp(CONTEXT_VAR_PATTERN_STR, 'g'), contextValue);
 
@@ -550,7 +558,7 @@ function buildPromptWithContext(
   );
 
   if (issueContext && !contextSubstituted) {
-    console.log(`[WorkflowExecutor] Appended issue/PR context to ${logLabel}`);
+    getLog().debug({ logLabel }, 'issue_context_appended');
     return prompt + '\n\n---\n\n' + issueContext;
   }
 
@@ -582,7 +590,7 @@ async function executeStepInternal(
 ): Promise<StepResult> {
   const commandName = stepDef.command;
 
-  console.log(`[WorkflowExecutor] Executing step ${stepId}: ${commandName}`);
+  getLog().debug({ stepId, commandName }, 'step_executing');
   await logStepStart(logDir, workflowRun.id, commandName, Number(stepId.split('.')[0]));
   const stepStartTime = Date.now();
 
@@ -612,14 +620,15 @@ async function executeStepInternal(
   const resumeSessionId = needsFreshSession ? undefined : currentSessionId;
 
   if (needsFreshSession) {
-    console.log(`[WorkflowExecutor] Starting fresh session for step: ${commandName}`);
+    getLog().debug({ commandName }, 'step_fresh_session');
   } else if (resumeSessionId) {
-    console.log(`[WorkflowExecutor] Resuming session: ${resumeSessionId}`);
+    getLog().debug({ resumeSessionId }, 'step_resuming_session');
   }
 
   // Log provider/model selection
-  console.log(
-    `[WorkflowExecutor] Step "${commandName}" using provider: ${resolvedProvider}${resolvedModel ? `, model: ${resolvedModel}` : ' (default model)'}`
+  getLog().debug(
+    { commandName, provider: resolvedProvider, model: resolvedModel },
+    'step_provider_selected'
   );
 
   // Get AI client with enhanced error context
@@ -658,12 +667,14 @@ async function executeStepInternal(
         activityUpdateFailures = 0;
       } catch (error) {
         activityUpdateFailures++;
-        console.warn('[WorkflowExecutor] Activity update failed', {
-          workflowRunId: workflowRun.id,
-          consecutiveFailures: activityUpdateFailures,
-          error: (error as Error).message,
-          errorName: (error as Error).name,
-        });
+        getLog().warn(
+          {
+            err: error as Error,
+            workflowRunId: workflowRun.id,
+            consecutiveFailures: activityUpdateFailures,
+          },
+          'activity_update_failed'
+        );
         if (activityUpdateFailures >= ACTIVITY_WARNING_THRESHOLD && !activityWarningShown) {
           activityWarningShown = true;
           await safeSendMessage(
@@ -723,10 +734,10 @@ async function executeStepInternal(
         unknownErrorTracker
       );
       if (!sent) {
-        console.error('[WorkflowExecutor] Batch send failed - user missed all output for step', {
-          stepName: commandName,
-          messageCount: assistantMessages.length,
-        });
+        getLog().error(
+          { stepName: commandName, messageCount: assistantMessages.length },
+          'batch_send_failed'
+        );
         droppedMessageCount = assistantMessages.length;
       }
     }
@@ -770,10 +781,7 @@ async function executeStepInternal(
   } catch (error) {
     const err = error as Error;
     const errorType = classifyError(err);
-    console.error(`[WorkflowExecutor] Step failed: ${commandName}`, {
-      error: err.message,
-      errorType,
-    });
+    getLog().error({ err, commandName, errorType }, 'step_failed');
 
     // Emit step_failed event (fire-and-forget)
     const emitter = getWorkflowEventEmitter();
@@ -865,9 +873,7 @@ async function executeParallelBlock(
   configuredCommandFolder?: string,
   issueContext?: string
 ): Promise<ParallelStepResult[]> {
-  console.log(
-    `[WorkflowExecutor] Starting parallel block with ${String(parallelSteps.length)} agents on ${cwd}`
-  );
+  getLog().info({ agentCount: parallelSteps.length, cwd }, 'parallel_block_starting');
 
   const emitter = getWorkflowEventEmitter();
   const totalAgents = parallelSteps.length;
@@ -875,8 +881,9 @@ async function executeParallelBlock(
   // Spawn all agents concurrently - each gets its own fresh session
   const results = await Promise.all(
     parallelSteps.map(async (step, i) => {
-      console.log(
-        `[WorkflowExecutor] Spawning agent ${String(blockIndex)}.${String(i)}: ${step.command}`
+      getLog().debug(
+        { blockIndex, agentIndex: i, command: step.command },
+        'parallel_agent_spawning'
       );
 
       // Emit parallel_agent_started
@@ -956,8 +963,9 @@ async function executeParallelBlock(
     })
   );
 
-  console.log(
-    `[WorkflowExecutor] Parallel block complete: ${String(results.filter(r => r.result.success).length)}/${String(results.length)} succeeded`
+  getLog().info(
+    { succeeded: results.filter(r => r.result.success).length, total: results.length },
+    'parallel_block_complete'
   );
   return results;
 }
@@ -986,8 +994,9 @@ async function executeLoopWorkflow(
   const loop = workflow.loop;
   const prompt = workflow.prompt;
 
-  console.log(
-    `[WorkflowExecutor] Starting loop workflow: ${workflow.name} (max ${String(loop.max_iterations)} iterations)`
+  getLog().info(
+    { workflowName: workflow.name, maxIterations: loop.max_iterations },
+    'loop_workflow_starting'
   );
 
   const workflowContext: SendMessageContext = { workflowId: workflowRun.id };
@@ -1002,11 +1011,10 @@ async function executeLoopWorkflow(
         metadata: { iteration_count: i, max_iterations: loop.max_iterations },
       });
     } catch (dbError) {
-      console.error('[WorkflowExecutor] Database error updating loop iteration metadata', {
-        error: (dbError as Error).message,
-        workflowId: workflowRun.id,
-        iteration: i,
-      });
+      getLog().error(
+        { err: dbError as Error, workflowId: workflowRun.id, iteration: i },
+        'db_loop_metadata_update_failed'
+      );
       // Warn user once about tracking issues
       if (!metadataTrackingFailed) {
         metadataTrackingFailed = true;
@@ -1048,11 +1056,9 @@ async function executeLoopWorkflow(
     const resumeSessionId = needsFreshSession ? undefined : currentSessionId;
 
     if (needsFreshSession && i > 1) {
-      console.log(`[WorkflowExecutor] Starting fresh session for iteration ${String(i)}`);
+      getLog().debug({ iteration: i }, 'loop_iteration_fresh_session');
     } else if (resumeSessionId) {
-      console.log(
-        `[WorkflowExecutor] Resuming session for iteration ${String(i)}: ${resumeSessionId}`
-      );
+      getLog().debug({ iteration: i, resumeSessionId }, 'loop_iteration_resuming_session');
     }
 
     // Substitute variables and append context if needed
@@ -1067,8 +1073,9 @@ async function executeLoopWorkflow(
     );
 
     // Log provider/model selection for this iteration
-    console.log(
-      `[WorkflowExecutor] Loop iteration ${String(i)} using provider: ${resolvedProvider}${resolvedModel ? `, model: ${resolvedModel}` : ' (default model)'}`
+    getLog().debug(
+      { iteration: i, provider: resolvedProvider, model: resolvedModel },
+      'loop_iteration_provider_selected'
     );
 
     // Get AI client with enhanced error context
@@ -1100,11 +1107,14 @@ async function executeLoopWorkflow(
           activityUpdateFailures = 0;
         } catch (error) {
           activityUpdateFailures++;
-          console.warn('[WorkflowExecutor] Activity update failed', {
-            workflowRunId: workflowRun.id,
-            consecutiveFailures: activityUpdateFailures,
-            error: (error as Error).message,
-          });
+          getLog().warn(
+            {
+              err: error as Error,
+              workflowRunId: workflowRun.id,
+              consecutiveFailures: activityUpdateFailures,
+            },
+            'activity_update_failed'
+          );
           if (activityUpdateFailures >= ACTIVITY_WARNING_THRESHOLD && !activityWarningShown) {
             activityWarningShown = true;
             await safeSendMessage(
@@ -1161,12 +1171,9 @@ async function executeLoopWorkflow(
           unknownErrorTracker
         );
         if (!sent) {
-          console.error(
-            '[WorkflowExecutor] Batch send failed - user missed all output for loop iteration',
-            {
-              iteration: i,
-              messageCount: assistantMessages.length,
-            }
+          getLog().error(
+            { iteration: i, messageCount: assistantMessages.length },
+            'loop_batch_send_failed'
           );
           droppedMessageCount = assistantMessages.length;
         }
@@ -1185,7 +1192,7 @@ async function executeLoopWorkflow(
 
       // Check for completion signal
       if (detectCompletionSignal(fullOutput, loop.until)) {
-        console.log(`[WorkflowExecutor] Completion signal detected at iteration ${String(i)}`);
+        getLog().info({ iteration: i }, 'loop_completion_signal_detected');
 
         // Emit loop_iteration_completed with completionDetected
         loopEmitter.emit({
@@ -1251,7 +1258,7 @@ async function executeLoopWorkflow(
       });
     } catch (error) {
       const err = error as Error;
-      console.error(`[WorkflowExecutor] Loop iteration ${String(i)} failed:`, err.message);
+      getLog().error({ err, iteration: i }, 'loop_iteration_failed');
       await workflowDb.failWorkflowRun(workflowRun.id, `Iteration ${String(i)}: ${err.message}`);
       await logWorkflowError(logDir, workflowRun.id, err.message);
       await sendCriticalMessage(
@@ -1276,7 +1283,10 @@ async function executeLoopWorkflow(
 
   // Max iterations reached without completion
   const errorMsg = `Max iterations (${String(loop.max_iterations)}) reached without completion signal "${loop.until}"`;
-  console.warn(`[WorkflowExecutor] ${errorMsg}`);
+  getLog().warn(
+    { maxIterations: loop.max_iterations, signal: loop.until },
+    'loop_max_iterations_reached'
+  );
   await workflowDb.failWorkflowRun(workflowRun.id, errorMsg);
   await logWorkflowError(logDir, workflowRun.id, errorMsg);
 
@@ -1344,11 +1354,7 @@ export async function executeWorkflow(
     baseBranch = config.baseBranch ?? (await getDefaultBranch(cwd));
   } catch (error) {
     const err = error as Error;
-    console.error('[WorkflowExecutor] Failed to resolve base branch:', {
-      error: err.message,
-      cwd,
-      configBaseBranch: config.baseBranch,
-    });
+    getLog().error({ err, cwd, configBaseBranch: config.baseBranch }, 'base_branch_resolve_failed');
     await sendCriticalMessage(
       platform,
       conversationId,
@@ -1359,18 +1365,24 @@ export async function executeWorkflow(
   const baseBranchSource = config.baseBranch
     ? 'repo config (worktree.baseBranch)'
     : 'auto-detected';
-  console.log(`[WorkflowExecutor] Using base branch: ${baseBranch} (from ${baseBranchSource})`);
+  getLog().info({ baseBranch, source: baseBranchSource }, 'base_branch_resolved');
 
   // Resolve provider and model once (used by all steps/iterations)
   const resolvedProvider = workflow.provider ?? config.assistant;
   const providerSource = workflow.provider ? 'workflow definition' : 'config';
   const resolvedModel = workflow.model; // TODO: Pass to client when model validation is implemented
-  console.log(
-    `[WorkflowExecutor] Workflow "${workflow.name}" using provider: ${resolvedProvider} (from ${providerSource})${resolvedModel ? `, model: ${resolvedModel}` : ' (default model)'}`
+  getLog().info(
+    {
+      workflowName: workflow.name,
+      provider: resolvedProvider,
+      providerSource,
+      model: resolvedModel,
+    },
+    'workflow_provider_resolved'
   );
 
   if (configuredCommandFolder) {
-    console.log(`[WorkflowExecutor] Using configured command folder: ${configuredCommandFolder}`);
+    getLog().debug({ configuredCommandFolder }, 'command_folder_configured');
   }
 
   // Check for concurrent workflow execution with staleness detection
@@ -1379,10 +1391,7 @@ export async function executeWorkflow(
     activeWorkflow = await workflowDb.getActiveWorkflowRun(conversationDbId);
   } catch (error) {
     const err = error as Error;
-    console.error('[WorkflowExecutor] Failed to check for active workflow:', {
-      error: err.message,
-      conversationId,
-    });
+    getLog().error({ err, conversationId }, 'db_active_workflow_check_failed');
     // Do NOT proceed when we can't verify safety - block workflow execution
     await sendCriticalMessage(
       platform,
@@ -1398,8 +1407,9 @@ export async function executeWorkflow(
 
     const STALE_MINUTES = 15; // Workflow is stale if no activity for 15 minutes
     if (minutesSinceActivity > STALE_MINUTES) {
-      console.log(
-        `[WorkflowExecutor] Marking stale workflow as failed: ${activeWorkflow.id} (${Math.floor(minutesSinceActivity)} min inactive)`
+      getLog().info(
+        { staleWorkflowId: activeWorkflow.id, minutesInactive: Math.floor(minutesSinceActivity) },
+        'stale_workflow_detected'
       );
       try {
         await workflowDb.failWorkflowRun(
@@ -1407,10 +1417,10 @@ export async function executeWorkflow(
           `Workflow timed out after ${Math.floor(minutesSinceActivity)} minutes of inactivity`
         );
       } catch (cleanupError) {
-        console.error('[WorkflowExecutor] Failed to cleanup stale workflow:', {
-          staleWorkflowId: activeWorkflow.id,
-          error: (cleanupError as Error).message,
-        });
+        getLog().error(
+          { err: cleanupError as Error, staleWorkflowId: activeWorkflow.id },
+          'stale_workflow_cleanup_failed'
+        );
         await sendCriticalMessage(
           platform,
           conversationId,
@@ -1442,11 +1452,10 @@ export async function executeWorkflow(
     });
   } catch (error) {
     const err = error as Error;
-    console.error('[WorkflowExecutor] Database error creating workflow run', {
-      error: err.message,
-      workflow: workflow.name,
-      conversationId,
-    });
+    getLog().error(
+      { err, workflowName: workflow.name, conversationId },
+      'db_create_workflow_run_failed'
+    );
     await sendCriticalMessage(
       platform,
       conversationId,
@@ -1460,12 +1469,14 @@ export async function executeWorkflow(
 
   // Pre-create the artifacts directory so commands can write to it immediately
   await mkdir(artifactsDir, { recursive: true });
-  console.log(`[WorkflowExecutor] Artifacts dir: ${artifactsDir}`);
-  console.log(`[WorkflowExecutor] Log dir: ${logDir}`);
+  getLog().debug({ artifactsDir, logDir }, 'workflow_paths_resolved');
 
   // Wrap execution in try-catch to ensure workflow is marked as failed on any error
   try {
-    console.log(`[WorkflowExecutor] Starting workflow: ${workflow.name} (${workflowRun.id})`);
+    getLog().info(
+      { workflowName: workflow.name, workflowRunId: workflowRun.id },
+      'workflow_starting'
+    );
     await logWorkflowStart(logDir, workflowRun.id, workflow.name, userMessage);
 
     // Register run with emitter and emit workflow_started
@@ -1493,10 +1504,10 @@ export async function executeWorkflow(
     try {
       await workflowDb.updateWorkflowRun(workflowRun.id, { status: 'running' });
     } catch (dbError) {
-      console.error('[WorkflowExecutor] Failed to set workflow status to running', {
-        error: (dbError as Error).message,
-        workflowRunId: workflowRun.id,
-      });
+      getLog().error(
+        { err: dbError as Error, workflowRunId: workflowRun.id },
+        'db_workflow_status_update_failed'
+      );
       await sendCriticalMessage(
         platform,
         conversationId,
@@ -1523,8 +1534,7 @@ export async function executeWorkflow(
         const repoName = cwd.split(/[/\\]/).pop() || 'repository';
         startupMessage += `📍 ${repoName} @ \`${branchName}\`\n\n`;
       } else {
-        console.warn(
-          '[WorkflowExecutor] Incomplete isolation context - omitting from startup message',
+        getLog().warn(
           {
             workflowId: workflowRun.id,
             hasFields: {
@@ -1533,7 +1543,8 @@ export async function executeWorkflow(
               prBranch: !!prBranch,
               branchName: !!branchName,
             },
-          }
+          },
+          'isolation_context_incomplete'
         );
       }
     }
@@ -1561,12 +1572,9 @@ export async function executeWorkflow(
       2 // maxRetries=2 means 2 total attempts (1 initial + 1 retry), 1s max delay
     );
     if (!startupSent) {
-      console.error(
-        '[WorkflowExecutor] Failed to send startup message after retries - user may not be aware workflow is running',
-        {
-          workflowId: workflowRun.id,
-          conversationId,
-        }
+      getLog().error(
+        { workflowId: workflowRun.id, conversationId },
+        'startup_message_delivery_failed'
       );
       // Continue anyway - workflow is already recorded in database
     }
@@ -1696,10 +1704,10 @@ export async function executeWorkflow(
           try {
             await workflowDb.failWorkflowRun(workflowRun.id, errorMsg);
           } catch (dbError) {
-            console.error('[WorkflowExecutor] Database error recording parallel block failure', {
-              error: (dbError as Error).message,
-              workflowId: workflowRun.id,
-            });
+            getLog().error(
+              { err: dbError as Error, workflowId: workflowRun.id },
+              'db_parallel_block_failure_record_failed'
+            );
           }
 
           // Always attempt to notify user with all failure details
@@ -1813,11 +1821,10 @@ export async function executeWorkflow(
           try {
             await workflowDb.failWorkflowRun(workflowRun.id, result.error);
           } catch (dbError) {
-            console.error('[WorkflowExecutor] Database error recording step failure', {
-              error: (dbError as Error).message,
-              workflowId: workflowRun.id,
-              stepName: result.commandName,
-            });
+            getLog().error(
+              { err: dbError as Error, workflowId: workflowRun.id, stepName: result.commandName },
+              'db_step_failure_record_failed'
+            );
           }
 
           // Always attempt to notify user
@@ -1845,11 +1852,10 @@ export async function executeWorkflow(
           current_step_index: i + 1,
         });
       } catch (dbError) {
-        console.error('[WorkflowExecutor] Database error updating workflow progress', {
-          error: (dbError as Error).message,
-          workflowId: workflowRun.id,
-          stepIndex: i + 1,
-        });
+        getLog().error(
+          { err: dbError as Error, workflowId: workflowRun.id, stepIndex: i + 1 },
+          'db_workflow_progress_update_failed'
+        );
         // Continue execution - progress tracking is non-critical
       }
     }
@@ -1858,10 +1864,10 @@ export async function executeWorkflow(
     try {
       await workflowDb.completeWorkflowRun(workflowRun.id);
     } catch (dbError) {
-      console.error('[WorkflowExecutor] Database error recording workflow completion', {
-        error: (dbError as Error).message,
-        workflowId: workflowRun.id,
-      });
+      getLog().error(
+        { err: dbError as Error, workflowId: workflowRun.id },
+        'db_workflow_completion_record_failed'
+      );
     }
     await logWorkflowComplete(logDir, workflowRun.id);
     // Critical message - retry to ensure user knows about completion
@@ -1877,14 +1883,13 @@ export async function executeWorkflow(
         workflowContext
       );
     } else {
-      console.log('[WorkflowExecutor] Suppressing completion message for GitHub', {
-        workflowName: workflow.name,
-        workflowId: workflowRun.id,
-        conversationId,
-      });
+      getLog().debug(
+        { workflowName: workflow.name, workflowId: workflowRun.id, conversationId },
+        'github_completion_message_suppressed'
+      );
     }
 
-    console.log(`[WorkflowExecutor] Workflow completed: ${workflow.name}`);
+    getLog().info({ workflowName: workflow.name }, 'workflow_completed');
 
     // Emit workflow_completed
     emitter.emit({
@@ -1914,34 +1919,29 @@ export async function executeWorkflow(
   } catch (error) {
     // Top-level error handler: ensure workflow is marked as failed
     const err = error as Error;
-    console.error('[WorkflowExecutor] Workflow execution failed with unhandled error:', {
-      error: err.message,
-      errorName: err.name,
-      stack: err.stack,
-      cause: err.cause,
-      workflow: workflow.name,
-      workflowId: workflowRun.id,
-    });
+    getLog().error(
+      { err, workflowName: workflow.name, workflowId: workflowRun.id },
+      'workflow_execution_unhandled_error'
+    );
 
     // Record failure in database (non-blocking - log but don't re-throw on DB error)
     try {
       await workflowDb.failWorkflowRun(workflowRun.id, err.message);
     } catch (dbError) {
-      console.error('[WorkflowExecutor] Failed to record workflow failure in database:', {
-        workflowId: workflowRun.id,
-        originalError: err.message,
-        dbError: (dbError as Error).message,
-      });
+      getLog().error(
+        { err: dbError as Error, workflowId: workflowRun.id, originalError: err.message },
+        'db_record_failure_failed'
+      );
     }
 
     // Log to file (separate from database - non-blocking)
     try {
       await logWorkflowError(logDir, workflowRun.id, err.message);
     } catch (logError) {
-      console.error('[WorkflowExecutor] Failed to write workflow error to log file:', {
-        workflowId: workflowRun.id,
-        logError: (logError as Error).message,
-      });
+      getLog().error(
+        { err: logError as Error, workflowId: workflowRun.id },
+        'workflow_error_log_write_failed'
+      );
     }
 
     // Emit workflow_failed event
@@ -1966,10 +1966,10 @@ export async function executeWorkflow(
       `❌ **Workflow failed**: ${err.message}`
     );
     if (!delivered) {
-      console.error('[WorkflowExecutor] ALERT: User was NOT notified of workflow failure', {
-        workflowId: workflowRun.id,
-        originalError: err.message,
-      });
+      getLog().error(
+        { workflowId: workflowRun.id, originalError: err.message },
+        'user_failure_notification_failed'
+      );
     }
     // Return failure result instead of re-throwing
     return { success: false, workflowRunId: workflowRun.id, error: err.message };
@@ -1996,7 +1996,7 @@ async function commitWorkflowArtifacts(
       `chore: Auto-commit workflow artifacts (${workflowName})`
     );
     if (committed) {
-      console.log(`[WorkflowExecutor] Committed remaining artifacts for workflow: ${workflowName}`);
+      getLog().info({ workflowName }, 'workflow_artifacts_committed');
 
       // Emit workflow_artifact event
       const emitter = getWorkflowEventEmitter();
@@ -2018,17 +2018,10 @@ async function commitWorkflowArtifacts(
       // Push the committed artifacts
       try {
         await execFileAsync('git', ['-C', cwd, 'push', 'origin', 'HEAD'], { timeout: 30000 });
-        console.log(`[WorkflowExecutor] Pushed workflow artifacts for: ${workflowName}`);
+        getLog().info({ workflowName }, 'workflow_artifacts_pushed');
       } catch (pushError) {
         const pushErr = pushError as Error;
-        console.warn(
-          '[WorkflowExecutor] Failed to push workflow artifacts (commit preserved locally)',
-          {
-            error: pushErr.message,
-            workflowName,
-            cwd,
-          }
-        );
+        getLog().warn({ err: pushErr, workflowName, cwd }, 'workflow_artifacts_push_failed');
       }
 
       // Notify user about the commit (non-GitHub platforms only)
@@ -2043,14 +2036,10 @@ async function commitWorkflowArtifacts(
     }
   } catch (commitError) {
     const err = commitError as Error;
-    console.error('[WorkflowExecutor] Failed to commit workflow artifacts', {
-      error: err.message,
-      stack: err.stack,
-      workflowName,
-      workflowId,
-      conversationId,
-      cwd,
-    });
+    getLog().error(
+      { err, workflowName, workflowId, conversationId, cwd },
+      'workflow_artifacts_commit_failed'
+    );
 
     await sendCriticalMessage(
       platform,

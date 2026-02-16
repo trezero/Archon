@@ -21,6 +21,14 @@ import {
   getArchonWorktreesPath,
 } from '../utils/archon-paths';
 import type { GlobalConfig, RepoConfig, MergedConfig } from './config-types';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('config');
+  return cachedLog;
+}
 
 /**
  * Parse YAML using Bun's native YAML parser
@@ -64,14 +72,11 @@ function logConfigError(configPath: string, error: unknown): void {
   const message = err.message ?? String(error);
 
   if (err.code === 'EACCES' || err.code === 'EPERM') {
-    console.error(`[Config] Permission denied reading ${configPath}: ${message}`);
-    console.error('[Config] Using default configuration. Check file permissions.');
+    getLog().error({ configPath, err: error, code: err.code }, 'config_permission_denied');
   } else if (error instanceof SyntaxError || message.includes('YAML')) {
-    console.error(`[Config] Invalid YAML in ${configPath}: ${message}`);
-    console.error('[Config] Using default configuration. Please fix the YAML syntax.');
+    getLog().error({ configPath, err: error }, 'config_invalid_yaml');
   } else {
-    console.error(`[Config] Unexpected error loading ${configPath}: ${message}`);
-    console.error('[Config] Using default configuration.');
+    getLog().error({ configPath, err: error }, 'config_load_error');
   }
 }
 
@@ -82,12 +87,12 @@ async function createDefaultConfig(configPath: string): Promise<void> {
   try {
     await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, DEFAULT_CONFIG_CONTENT, { flag: 'wx' }); // wx = fail if exists
-    console.log(`[Config] Created default config at ${configPath}`);
+    getLog().info({ configPath }, 'default_config_created');
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     if (err.code !== 'EEXIST') {
       // Only log if it's not a "file exists" error
-      console.warn(`[Config] Could not create default config: ${err.message}`);
+      getLog().warn({ err, configPath }, 'default_config_create_failed');
     }
   }
 }
@@ -342,10 +347,11 @@ export function clearConfigCache(): void {
  * Log current configuration (for startup)
  */
 export function logConfig(config: MergedConfig): void {
-  console.log('[Config] Loaded configuration:');
-  console.log(`  AI Assistant: ${config.assistant}`);
-  console.log(`  Telegram Streaming: ${config.streaming.telegram}`);
-  console.log(`  Discord Streaming: ${config.streaming.discord}`);
-  console.log(`  Slack Streaming: ${config.streaming.slack}`);
-  console.log(`  GitHub Streaming: ${config.streaming.github}`);
+  getLog().info(
+    {
+      assistant: config.assistant,
+      streaming: config.streaming,
+    },
+    'config_loaded'
+  );
 }

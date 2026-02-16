@@ -150,7 +150,7 @@ if (yourPlatformToken) {
   });
 
   await adapter.start();
-  console.log('[YourPlatform] Adapter started');
+  log.info({ platform: 'your-platform' }, 'adapter_started');
 }
 ```
 
@@ -323,10 +323,10 @@ export class YourAssistantClient implements IAssistantClient {
     // Initialize or resume session
     let session;
     if (resumeSessionId) {
-      console.log(`[YourAssistant] Resuming session: ${resumeSessionId}`);
+      log.info({ sessionId: resumeSessionId }, 'session_resumed');
       session = await this.resumeSession(resumeSessionId);
     } else {
-      console.log(`[YourAssistant] Starting new session in ${cwd}`);
+      log.info({ cwd }, 'session_started');
       session = await this.startSession(cwd);
     }
 
@@ -411,7 +411,7 @@ if (trigger && shouldCreateNewSession(trigger)) {
   session = await sessionDb.transitionSession(conversationId, 'first-message', {...});
 } else {
   // Resume existing session
-  console.log(`Resuming session ${session.id}`);
+  log.info({ sessionId: session.id }, 'session_resumed');
 }
 ```
 
@@ -474,7 +474,7 @@ try {
     yield mapEventToChunk(event);
   }
 } catch (error) {
-  console.error('[YourAssistant] Query error:', error);
+  log.error({ err: error }, 'query_failed');
   throw new Error(`Query failed: ${error.message}`);
 }
 ```
@@ -484,7 +484,7 @@ try {
 ```typescript
 if (event.type === 'error') {
   // Log but don't crash - some errors are non-fatal
-  console.error('[YourAssistant] Stream error:', event.message);
+  log.error({ message: event.message }, 'stream_error');
 
   // Only yield user-facing errors
   if (!event.message.includes('internal')) {
@@ -1337,7 +1337,7 @@ try {
     }
   }
 } catch (error) {
-  console.error('[Orchestrator] Error:', error);
+  log.error({ err: error, conversationId }, 'orchestrator_error');
   await platform.sendMessage(
     conversationId,
     '⚠️ An error occurred. Try /reset.'

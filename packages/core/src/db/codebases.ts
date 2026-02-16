@@ -3,6 +3,14 @@
  */
 import { pool, getDialect } from './connection';
 import type { Codebase } from '../types';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('db.codebases');
+  return cachedLog;
+}
 
 export async function createCodebase(data: {
   name: string;
@@ -105,6 +113,7 @@ export async function listCodebases(): Promise<readonly Codebase[]> {
 }
 
 export async function deleteCodebase(id: string): Promise<void> {
+  getLog().debug({ codebaseId: id }, 'codebase_delete_cascade_started');
   // First, unlink any sessions referencing this codebase (FK has no cascade)
   await pool.query('UPDATE remote_agent_sessions SET codebase_id = NULL WHERE codebase_id = $1', [
     id,
@@ -116,4 +125,5 @@ export async function deleteCodebase(id: string): Promise<void> {
   );
   // Then delete the codebase
   await pool.query('DELETE FROM remote_agent_codebases WHERE id = $1', [id]);
+  getLog().info({ codebaseId: id }, 'codebase_deleted');
 }

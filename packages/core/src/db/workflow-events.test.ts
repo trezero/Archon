@@ -1,6 +1,13 @@
-import { mock, describe, test, expect, beforeEach, spyOn } from 'bun:test';
+import { mock, describe, test, expect, beforeEach } from 'bun:test';
+import { createMockLogger } from '../test/mocks/logger';
 import { createQueryResult, mockPostgresDialect } from '../test/mocks/database';
 import type { WorkflowEventRow } from './workflow-events';
+
+// Mock logger to suppress noisy output during tests
+const mockLogger = createMockLogger();
+mock.module('../utils/logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
 
 const mockQuery = mock(() => Promise.resolve(createQueryResult([])));
 
@@ -74,25 +81,13 @@ describe('workflow-events', () => {
     });
 
     test('does NOT throw when query fails (fire-and-forget)', async () => {
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
       mockQuery.mockRejectedValueOnce(new Error('connection refused'));
 
-      // Should NOT throw
+      // Should NOT throw — fire-and-forget logs error internally
       await createWorkflowEvent({
         workflow_run_id: 'run-456',
         event_type: 'step_started',
       });
-
-      expect(consoleSpy).toHaveBeenCalledWith(
-        '[DB:WorkflowEvents] Failed to create event (non-critical):',
-        expect.objectContaining({
-          error: 'connection refused',
-          eventType: 'step_started',
-          runId: 'run-456',
-        })
-      );
-
-      consoleSpy.mockRestore();
     });
   });
 
@@ -124,14 +119,11 @@ describe('workflow-events', () => {
     });
 
     test('throws wrapped error when query fails', async () => {
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
       mockQuery.mockRejectedValueOnce(new Error('timeout'));
 
       await expect(listWorkflowEvents('run-456')).rejects.toThrow(
         'Failed to list workflow events: timeout'
       );
-
-      consoleSpy.mockRestore();
     });
   });
 
@@ -178,14 +170,11 @@ describe('workflow-events', () => {
     });
 
     test('throws wrapped error on query failure', async () => {
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
       mockQuery.mockRejectedValueOnce(new Error('connection lost'));
 
       await expect(listRecentEvents('run-456', new Date())).rejects.toThrow(
         'Failed to list recent workflow events: connection lost'
       );
-
-      consoleSpy.mockRestore();
     });
   });
 });

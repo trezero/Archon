@@ -1,7 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { mkdir, rm, readFile, chmod } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { createMockLogger } from '../test/mocks/logger';
+
+// Mock logger to suppress noisy output during tests
+const mockLogger = createMockLogger();
+mock.module('../utils/logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
+
 import {
   logWorkflowEvent,
   logWorkflowStart,

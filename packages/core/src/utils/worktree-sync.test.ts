@@ -1,5 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test';
-import { syncArchonToWorktree } from './worktree-sync';
+import { describe, test, expect, beforeEach, afterEach, spyOn, mock, type Mock } from 'bun:test';
 import * as git from './git';
 import * as worktreeCopy from './worktree-copy';
 import * as configLoader from '../config/config-loader';
@@ -7,6 +6,14 @@ import * as fs from 'fs/promises';
 import type { Stats } from 'fs';
 import type { RepoConfig } from '../config/config-types';
 import type { CopyFileEntry } from './worktree-copy';
+import { createMockLogger } from '../test/mocks/logger';
+
+const mockLogger = createMockLogger();
+mock.module('./logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
+
+import { syncArchonToWorktree } from './worktree-sync';
 
 describe('syncArchonToWorktree', () => {
   let isWorktreePathSpy: Mock<(path: string) => Promise<boolean>>;
@@ -16,9 +23,6 @@ describe('syncArchonToWorktree', () => {
   let copyWorktreeFilesSpy: Mock<
     (canonicalPath: string, worktreePath: string, files: string[]) => Promise<CopyFileEntry[]>
   >;
-  let consoleLogSpy: Mock<(...args: unknown[]) => void>;
-  let consoleWarnSpy: Mock<(...args: unknown[]) => void>;
-  let consoleErrorSpy: Mock<(...args: unknown[]) => void>;
 
   beforeEach(() => {
     isWorktreePathSpy = spyOn(git, 'isWorktreePath');
@@ -26,9 +30,10 @@ describe('syncArchonToWorktree', () => {
     statSpy = spyOn(fs, 'stat');
     loadRepoConfigSpy = spyOn(configLoader, 'loadRepoConfig');
     copyWorktreeFilesSpy = spyOn(worktreeCopy, 'copyWorktreeFiles');
-    consoleLogSpy = spyOn(console, 'log').mockImplementation(() => {});
-    consoleWarnSpy = spyOn(console, 'warn').mockImplementation(() => {});
-    consoleErrorSpy = spyOn(console, 'error').mockImplementation(() => {});
+    mockLogger.info.mockClear();
+    mockLogger.warn.mockClear();
+    mockLogger.error.mockClear();
+    mockLogger.debug.mockClear();
   });
 
   afterEach(() => {
@@ -37,9 +42,6 @@ describe('syncArchonToWorktree', () => {
     statSpy.mockRestore();
     loadRepoConfigSpy.mockRestore();
     copyWorktreeFilesSpy.mockRestore();
-    consoleLogSpy.mockRestore();
-    consoleWarnSpy.mockRestore();
-    consoleErrorSpy.mockRestore();
   });
 
   test('returns false for non-worktree paths', async () => {
@@ -63,7 +65,7 @@ describe('syncArchonToWorktree', () => {
     expect(statSpy).toHaveBeenCalledWith('/canonical/repo/.archon');
     expect(copyWorktreeFilesSpy).not.toHaveBeenCalled();
     // Should not log warning for ENOENT (expected case)
-    expect(consoleWarnSpy).not.toHaveBeenCalled();
+    expect(mockLogger.warn).not.toHaveBeenCalled();
   });
 
   test('logs warning and returns false for non-ENOENT canonical stat error', async () => {
@@ -75,13 +77,13 @@ describe('syncArchonToWorktree', () => {
 
     expect(result).toBe(false);
     expect(copyWorktreeFilesSpy).not.toHaveBeenCalled();
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      '[WorktreeSync] Could not stat canonical .archon',
+    expect(mockLogger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
+        context: 'canonical',
         path: '/canonical/repo/.archon',
-        errorCode: 'EACCES',
-        errorMessage: 'Permission denied',
-      })
+        code: 'EACCES',
+      }),
+      'stat_failed'
     );
   });
 
@@ -138,13 +140,13 @@ describe('syncArchonToWorktree', () => {
       '.archon',
       '.env',
     ]);
-    expect(consoleLogSpy).toHaveBeenCalledWith(
-      '[WorktreeSync] Synced .archon to worktree',
+    expect(mockLogger.info).toHaveBeenCalledWith(
       expect.objectContaining({
         canonicalRepo: '/canonical/repo',
         worktree: '/worktree/path',
         filesCopied: 1,
-      })
+      }),
+      'archon_synced_to_worktree'
     );
   });
 
@@ -198,21 +200,21 @@ describe('syncArchonToWorktree', () => {
 
     expect(result).toBe(false);
     expect(copyWorktreeFilesSpy).not.toHaveBeenCalled();
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      '[WorktreeSync] Could not stat worktree .archon',
+    expect(mockLogger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
+        context: 'worktree',
         path: '/worktree/path/.archon',
-        errorCode: 'EACCES',
-        errorMessage: 'Permission denied',
-      })
+        code: 'EACCES',
+      }),
+      'stat_failed'
     );
     // Should also log the outer catch error
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      '[WorktreeSync] Failed to sync .archon',
+    expect(mockLogger.error).toHaveBeenCalledWith(
       expect.objectContaining({
         worktreePath: '/worktree/path',
-        errorCode: 'EACCES',
-      })
+        code: 'EACCES',
+      }),
+      'archon_sync_failed'
     );
   });
 
@@ -274,12 +276,11 @@ describe('syncArchonToWorktree', () => {
     expect(copyWorktreeFilesSpy).toHaveBeenCalledWith('/canonical/repo', '/worktree/path', [
       '.archon',
     ]);
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      '[WorktreeSync] Could not load repo config, using default',
+    expect(mockLogger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         canonicalRepoPath: '/canonical/repo',
-        errorMessage: 'Config not found',
-      })
+      }),
+      'repo_config_load_failed_using_default'
     );
   });
 
@@ -343,14 +344,13 @@ describe('syncArchonToWorktree', () => {
     const result = await syncArchonToWorktree('/worktree/path');
 
     expect(result).toBe(false);
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      '[WorktreeSync] Failed to sync .archon',
+    expect(mockLogger.error).toHaveBeenCalledWith(
       expect.objectContaining({
         worktreePath: '/worktree/path',
         errorName: 'Error',
-        errorCode: 'UNKNOWN',
-        errorMessage: 'Permission denied',
-      })
+        code: 'UNKNOWN',
+      }),
+      'archon_sync_failed'
     );
   });
 
@@ -361,14 +361,13 @@ describe('syncArchonToWorktree', () => {
     const result = await syncArchonToWorktree('/worktree/path');
 
     expect(result).toBe(false);
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      '[WorktreeSync] Failed to sync .archon',
+    expect(mockLogger.error).toHaveBeenCalledWith(
       expect.objectContaining({
         worktreePath: '/worktree/path',
         errorName: 'Error',
-        errorCode: 'UNKNOWN',
-        errorMessage: 'Failed to read .git file',
-      })
+        code: 'UNKNOWN',
+      }),
+      'archon_sync_failed'
     );
   });
 });

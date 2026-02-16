@@ -9,7 +9,15 @@ import {
   isTelegramUserAuthorized,
   convertToTelegramMarkdown,
   stripMarkdown,
+  createLogger,
 } from '@archon/core';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('adapter.telegram');
+  return cachedLog;
+}
 
 const MAX_LENGTH = 4096;
 
@@ -42,14 +50,12 @@ export class TelegramAdapter implements IPlatformAdapter {
       process.env.TELEGRAM_ALLOWED_USER_IDS ?? process.env.TELEGRAM_ALLOWED_USERS
     );
     if (this.allowedUserIds.length > 0) {
-      console.log(
-        `[Telegram] User whitelist enabled (${String(this.allowedUserIds.length)} users)`
-      );
+      getLog().info({ userCount: this.allowedUserIds.length }, 'whitelist_enabled');
     } else {
-      console.log('[Telegram] User whitelist disabled (open access)');
+      getLog().info('whitelist_disabled');
     }
 
-    console.log(`[Telegram] Adapter initialized (mode: ${mode}, timeout: disabled)`);
+    getLog().info({ mode }, 'adapter_initialized');
   }
 
   /**
@@ -63,16 +69,14 @@ export class TelegramAdapter implements IPlatformAdapter {
    */
   async sendMessage(chatId: string, message: string): Promise<void> {
     const id = parseInt(chatId);
-    console.log(`[Telegram] sendMessage called, length=${String(message.length)}`);
+    getLog().debug({ chatId, messageLength: message.length }, 'send_message');
 
     if (message.length <= MAX_LENGTH) {
       // Short message: try MarkdownV2 formatting
       await this.sendFormattedChunk(id, message);
     } else {
       // Long message: split by paragraphs, format each chunk
-      console.log(
-        `[Telegram] Message too long (${String(message.length)}), splitting by paragraphs`
-      );
+      getLog().debug({ messageLength: message.length }, 'message_splitting');
       const chunks = this.splitIntoParagraphChunks(message, MAX_LENGTH - 200);
 
       for (const chunk of chunks) {
@@ -108,7 +112,7 @@ export class TelegramAdapter implements IPlatformAdapter {
       chunks.push(currentChunk);
     }
 
-    console.log(`[Telegram] Split into ${String(chunks.length)} paragraph chunks`);
+    getLog().debug({ chunkCount: chunks.length }, 'message_split_complete');
     return chunks;
   }
 
@@ -118,7 +122,7 @@ export class TelegramAdapter implements IPlatformAdapter {
   private async sendFormattedChunk(id: number, chunk: string): Promise<void> {
     // If chunk is still too long after paragraph splitting, fall back to plain text
     if (chunk.length > MAX_LENGTH) {
-      console.log(`[Telegram] Chunk too long (${String(chunk.length)}), sending as plain text`);
+      getLog().debug({ chunkLength: chunk.length }, 'chunk_too_long_plain_text');
       const plainText = stripMarkdown(chunk);
       // Split by lines if still too long
       const lines = plainText.split('\n');
@@ -139,16 +143,17 @@ export class TelegramAdapter implements IPlatformAdapter {
     const formatted = convertToTelegramMarkdown(chunk);
     try {
       await this.bot.telegram.sendMessage(id, formatted, { parse_mode: 'MarkdownV2' });
-      console.log(`[Telegram] MarkdownV2 chunk sent (${String(chunk.length)} chars)`);
+      getLog().debug({ chunkLength: chunk.length }, 'markdownv2_chunk_sent');
     } catch (error) {
       // Fallback to stripped plain text for this chunk
       const err = error as Error;
-      console.warn('[Telegram] MarkdownV2 failed for chunk, using plain text:', err.message);
-      console.warn('[Telegram] Original chunk (first 500 chars):', chunk.substring(0, 500));
-      console.warn('[Telegram] Formatted chunk (first 500 chars):', formatted.substring(0, 500));
-      console.warn(
-        '[Telegram] Formatted chunk (around byte 4059):',
-        formatted.substring(4000, 4100)
+      getLog().warn(
+        {
+          err,
+          originalPreview: chunk.substring(0, 200),
+          formattedPreview: formatted.substring(0, 200),
+        },
+        'markdownv2_failed_fallback_plain_text'
       );
       await this.bot.telegram.sendMessage(id, stripMarkdown(chunk));
     }
@@ -218,7 +223,7 @@ export class TelegramAdapter implements IPlatformAdapter {
       if (!isTelegramUserAuthorized(userId, this.allowedUserIds)) {
         // Log unauthorized attempt (mask user ID for privacy)
         const maskedId = `${String(userId).slice(0, 4)}***`;
-        console.log(`[Telegram] Unauthorized message from user ${maskedId}`);
+        getLog().info({ maskedUserId: maskedId }, 'unauthorized_message');
         return; // Silent rejection
       }
 
@@ -234,7 +239,7 @@ export class TelegramAdapter implements IPlatformAdapter {
     await this.bot.launch({
       dropPendingUpdates: true,
     });
-    console.log('[Telegram] Bot started (polling mode, pending updates dropped)');
+    getLog().info('bot_started');
   }
 
   /**
@@ -242,6 +247,6 @@ export class TelegramAdapter implements IPlatformAdapter {
    */
   stop(): void {
     this.bot.stop();
-    console.log('[Telegram] Bot stopped');
+    getLog().info('bot_stopped');
   }
 }

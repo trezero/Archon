@@ -369,7 +369,7 @@ async function validateAndResolveIsolation(
     }
 
     // Stale reference - clean up
-    console.warn(`[Orchestrator] Stale isolation: ${conversation.isolation_env_id}`);
+    log.warn({ isolationEnvId: conversation.isolation_env_id }, 'stale_isolation_reference');
     await db.updateConversation(conversation.id, { isolation_env_id: null });
 
     if (env) {
@@ -440,10 +440,10 @@ async function migrateToIsolationEnvironment(
       isolation_env_id: env.id,
     });
 
-    console.log(`[Orchestrator] Migrated legacy worktree to environment: ${env.id}`);
+    log.info({ envId: env.id }, 'worktree_migrated');
     return env;
   } catch (error) {
-    console.error('[Orchestrator] Failed to migrate legacy worktree:', error);
+    log.error({ err: error }, 'worktree_migration_failed');
     return null;
   }
 }
@@ -663,7 +663,7 @@ if (hints?.linkedIssues?.length) {
     const linkedEnv = await isolationEnvDb.findByWorkflow(codebase.id, 'issue', String(issueNum));
     if (linkedEnv) {
       // Found! Share this environment
-      console.log(`[Orchestrator] Sharing worktree with linked issue #${issueNum}`);
+      log.info({ issueNum, envId: linkedEnv.id }, 'worktree_shared_with_linked_issue');
       await db.updateConversation(conversation.id, {
         isolation_env_id: linkedEnv.id,
       });
@@ -718,7 +718,7 @@ if (hints?.prBranch) {
       metadata: { adopted: true, adopted_from: 'skill' },
     });
 
-    console.log(`[Orchestrator] Adopted skill worktree: ${existingPath}`);
+    log.info({ path: existingPath, envId: env.id }, 'skill_worktree_adopted');
     return env;
   }
 }

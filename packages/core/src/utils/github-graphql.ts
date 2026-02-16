@@ -4,6 +4,14 @@
  */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { createLogger } from './logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('github-graphql');
+  return cachedLog;
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -60,7 +68,7 @@ export async function getLinkedIssueNumbers(
   } catch (error) {
     // GraphQL query failed (no token, network issue, etc.)
     // Gracefully return empty - we'll create a new worktree
-    console.warn('[GitHub GraphQL] Failed to fetch linked issues:', (error as Error).message);
+    getLog().warn({ err: error, owner, repo, prNumber }, 'linked_issues_fetch_failed');
     return [];
   }
 }

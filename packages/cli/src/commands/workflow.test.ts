@@ -4,6 +4,16 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
 import { workflowListCommand, workflowRunCommand, workflowStatusCommand } from './workflow';
 
+const mockLogger = {
+  fatal: mock(() => undefined),
+  error: mock(() => undefined),
+  warn: mock(() => undefined),
+  info: mock(() => undefined),
+  debug: mock(() => undefined),
+  trace: mock(() => undefined),
+  child: mock(() => mockLogger),
+};
+
 // Mock the @archon/core modules
 mock.module('@archon/core', () => ({
   discoverWorkflows: mock(() => Promise.resolve([])),
@@ -18,6 +28,7 @@ mock.module('@archon/core', () => ({
       alreadyExisted: false,
     })
   ),
+  createLogger: mock(() => mockLogger),
 }));
 
 mock.module('@archon/core/utils/git', () => ({
@@ -89,16 +100,15 @@ describe('workflowListCommand', () => {
 
 describe('workflowRunCommand', () => {
   let consoleSpy: ReturnType<typeof spyOn>;
-  let consoleWarnSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     consoleSpy = spyOn(console, 'log').mockImplementation(() => {});
-    consoleWarnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+    mockLogger.warn.mockClear();
+    mockLogger.info.mockClear();
   });
 
   afterEach(() => {
     consoleSpy.mockRestore();
-    consoleWarnSpy.mockRestore();
   });
 
   it('should throw error when no workflows found', async () => {
@@ -177,11 +187,14 @@ describe('workflowRunCommand', () => {
 
     await workflowRunCommand('/test/path', 'assist', 'hello');
 
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Could not look up codebase')
+    // Diagnostic warnings now go through Pino logger instead of console.warn
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: '/test/path' }),
+      'codebase_lookup_failed'
     );
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Check DATABASE_URL and that the database is running')
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      { hint: 'Check DATABASE_URL and that the database is running.' },
+      'db_connection_hint'
     );
   });
 

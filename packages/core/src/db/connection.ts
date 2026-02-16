@@ -10,6 +10,14 @@ import { getArchonHome } from '../utils/archon-paths';
 import type { IDatabase, SqlDialect, QueryResult } from './adapters/types';
 import { PostgresAdapter, postgresDialect } from './adapters/postgres';
 import { SqliteAdapter, sqliteDialect } from './adapters/sqlite';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('db.connection');
+  return cachedLog;
+}
 
 // Singleton database instance
 let database: IDatabase | null = null;
@@ -25,12 +33,12 @@ export function getDatabase(): IDatabase {
   }
 
   if (process.env.DATABASE_URL) {
-    console.log('[Database] Using PostgreSQL');
+    getLog().info('using_postgresql');
     database = new PostgresAdapter(process.env.DATABASE_URL);
     dialect = postgresDialect;
   } else {
     const dbPath = join(getArchonHome(), 'archon.db');
-    console.log(`[Database] Using SQLite at ${dbPath}`);
+    getLog().info({ dbPath }, 'using_sqlite');
     database = new SqliteAdapter(dbPath);
     dialect = sqliteDialect;
   }

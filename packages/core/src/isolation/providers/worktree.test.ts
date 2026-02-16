@@ -1,4 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn, mock, type Mock } from 'bun:test';
+import { createMockLogger } from '../../test/mocks/logger';
+
+// Mock logger to suppress noisy output during tests
+const mockLogger = createMockLogger();
+mock.module('../../utils/logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
 
 import * as configLoader from '../../config/config-loader';
 import * as git from '../../utils/git';

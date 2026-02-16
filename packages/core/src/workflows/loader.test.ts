@@ -1,7 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, spyOn, mock, type Mock } from 'bun:test';
 import { mkdir, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { createMockLogger } from '../test/mocks/logger';
+
+// Mock logger to suppress noisy output during tests
+const mockLogger = createMockLogger();
+mock.module('../utils/logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
+
 import { discoverWorkflows } from './loader';
 import { isParallelBlock } from './types';
 import * as configLoader from '../config/config-loader';
