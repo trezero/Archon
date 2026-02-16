@@ -23,6 +23,7 @@ const globalEnvPath = resolve(process.env.HOME ?? '~', '.archon', '.env');
 if (existsSync(globalEnvPath)) {
   const result = config({ path: globalEnvPath, override: true });
   if (result.error) {
+    // Logger may not be available yet (early startup), so use console for user-facing error
     console.error(`Error loading .env from ${globalEnvPath}: ${result.error.message}`);
     console.error('Hint: Check for syntax errors in your .env file.');
     process.exit(1);
@@ -52,8 +53,15 @@ import {
   isolationCleanupMergedCommand,
 } from './commands/isolation';
 import { setupCommand } from './commands/setup';
-import { closeDatabase } from '@archon/core';
+import { closeDatabase, setLogLevel, createLogger } from '@archon/core';
 import * as git from '@archon/core/utils/git';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('cli');
+  return cachedLog;
+}
 
 /**
  * Print usage information
@@ -81,6 +89,8 @@ Options:
   --branch, -b <name>        Create worktree for branch (or reuse existing)
   --no-worktree              Run on branch directly without worktree isolation
   --spawn                    Open setup wizard in a new terminal window (for setup command)
+  --quiet, -q                Reduce log verbosity to warnings and errors only
+  --verbose, -v              Show debug-level output
 
 Examples:
   archon workflow list
@@ -100,10 +110,7 @@ async function closeDb(): Promise<void> {
   } catch (error) {
     const err = error as Error;
     // Log with details but don't throw - we want the original error to be visible
-    console.error(`Warning: Error closing database connection: ${err.message}`);
-    if (process.env.DEBUG) {
-      console.error(err.stack);
-    }
+    getLog().warn({ err }, 'db_close_failed');
   }
 }
 
@@ -132,6 +139,8 @@ async function main(): Promise<number> {
         branch: { type: 'string', short: 'b' },
         'no-worktree': { type: 'boolean' },
         spawn: { type: 'boolean' },
+        quiet: { type: 'boolean', short: 'q' },
+        verbose: { type: 'boolean', short: 'v' },
       },
       allowPositionals: true,
       strict: false, // Allow unknown flags to pass through
@@ -165,6 +174,13 @@ async function main(): Promise<number> {
   const requiresGitRepo = !noGitCommands.includes(command ?? '');
 
   try {
+    // Set log level from flags (quiet > verbose > default)
+    if (values.quiet) {
+      setLogLevel('warn');
+    } else if (values.verbose) {
+      setLogLevel('debug');
+    }
+
     // Validate working directory exists
     let effectiveCwd = cwd;
     if (requiresGitRepo) {

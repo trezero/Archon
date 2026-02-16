@@ -7,6 +7,14 @@
 
 import { copyFile, cp, stat, mkdir } from 'fs/promises';
 import { join, dirname, relative, isAbsolute, normalize } from 'path';
+import { createLogger } from './logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('worktree-copy');
+  return cachedLog;
+}
 
 export interface CopyFileEntry {
   source: string;
@@ -90,20 +98,22 @@ export async function copyWorktreeFile(
 ): Promise<boolean> {
   // Security: Validate paths don't escape their roots (prevents path traversal)
   if (!isPathWithinRoot(sourceRoot, entry.source)) {
-    console.error('[WorktreeCopy] Path traversal blocked', {
-      source: entry.source,
-      sourceRoot,
-      reason: 'Source path escapes repository root',
-    });
+    getLog().error(
+      { source: entry.source, sourceRoot, reason: 'Source path escapes repository root' },
+      'path_traversal_blocked'
+    );
     return false;
   }
 
   if (!isPathWithinRoot(destRoot, entry.destination)) {
-    console.error('[WorktreeCopy] Path traversal blocked', {
-      destination: entry.destination,
-      destRoot,
-      reason: 'Destination path escapes worktree root',
-    });
+    getLog().error(
+      {
+        destination: entry.destination,
+        destRoot,
+        reason: 'Destination path escapes worktree root',
+      },
+      'path_traversal_blocked'
+    );
     return false;
   }
 
@@ -124,7 +134,7 @@ export async function copyWorktreeFile(
       await copyFile(sourcePath, destPath);
     }
 
-    console.log(`[WorktreeCopy] Copied ${entry.source} -> ${entry.destination}`);
+    getLog().debug({ source: entry.source, destination: entry.destination }, 'file_copied');
     return true;
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
@@ -132,19 +142,22 @@ export async function copyWorktreeFile(
     if (err.code === 'ENOENT') {
       // Source doesn't exist - expected case, skip silently
       // This matches worktree-manager skill behavior
-      console.log(`[WorktreeCopy] Skipped ${entry.source} (not found)`);
+      getLog().debug({ source: entry.source }, 'file_skipped_not_found');
       return false;
     }
 
     // Unexpected error - log with full context for debugging
-    console.error('[WorktreeCopy] Copy failed', {
-      source: entry.source,
-      destination: entry.destination,
-      sourcePath,
-      destPath,
-      errorCode: err.code ?? 'UNKNOWN',
-      errorMessage: err.message,
-    });
+    getLog().error(
+      {
+        source: entry.source,
+        destination: entry.destination,
+        sourcePath,
+        destPath,
+        err,
+        code: err.code ?? 'UNKNOWN',
+      },
+      'copy_failed'
+    );
     return false;
   }
 }
@@ -174,10 +187,7 @@ export async function copyWorktreeFiles(
     } catch (parseError) {
       // Invalid config entry - log and continue with other entries
       const err = parseError as Error;
-      console.error('[WorktreeCopy] Invalid config entry', {
-        entry: fileConfig,
-        error: err.message,
-      });
+      getLog().error({ entry: fileConfig, err }, 'invalid_config_entry');
     }
   }
 

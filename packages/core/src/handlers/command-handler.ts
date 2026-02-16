@@ -28,6 +28,14 @@ import { getTriggerForCommand, type DeactivatingCommand } from '../state/session
 import { SessionNotFoundError } from '../db/sessions';
 import { cloneRepository } from './clone';
 import { findMarkdownFilesRecursive } from '../utils/commands';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('command-handler');
+  return cachedLog;
+}
 
 // Workflow staleness thresholds (in milliseconds)
 const WORKFLOW_SLOW_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
@@ -121,10 +129,7 @@ async function getCurrentBranch(repoPath: string): Promise<string> {
     // Handle detached HEAD state - git returns literal "HEAD"
     return branch === 'HEAD' ? 'detached HEAD' : branch;
   } catch (error) {
-    console.error('[getCurrentBranch] Failed to get branch name', {
-      repoPath,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    getLog().debug({ err: error, repoPath }, 'get_branch_failed');
     return 'unknown';
   }
 }
@@ -151,17 +156,13 @@ async function formatRepoContext(
         return `${codebase.name} @ ${env.branch_name} (worktree)`;
       }
       // Log data integrity issue - isolation_env_id exists but record missing or incomplete
-      console.warn('[formatRepoContext] Isolation environment record missing or incomplete', {
-        isolationEnvId,
-        found: !!env,
-        hasBranchName: !!env?.branch_name,
-      });
+      getLog().warn(
+        { isolationEnvId, found: !!env, hasBranchName: !!env?.branch_name },
+        'isolation_env_incomplete'
+      );
       // Fallthrough to git branch detection
     } catch (error) {
-      console.error('[formatRepoContext] Failed to get isolation environment', {
-        isolationEnvId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      getLog().error({ err: error, isolationEnvId }, 'isolation_env_lookup_failed');
       // Fallthrough to git branch detection on DB error
     }
   }
@@ -207,23 +208,17 @@ async function listRepositories(workspacePath: string): Promise<RepoEntry[]> {
       } catch (error) {
         // Log skipped owner folders so issues can be diagnosed
         const err = error as NodeJS.ErrnoException;
-        console.warn('[listRepositories] Skipping owner folder:', {
-          owner: owner.name,
-          path: ownerPath,
-          code: err.code,
-          message: err.message,
-        });
+        getLog().warn(
+          { owner: owner.name, path: ownerPath, code: err.code, err },
+          'repo_list_skip_owner'
+        );
       }
     }
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     // ENOENT is expected when workspace hasn't been created yet
     if (err.code !== 'ENOENT') {
-      console.error('[listRepositories] Failed to read workspace:', {
-        path: workspacePath,
-        code: err.code,
-        message: err.message,
-      });
+      getLog().error({ path: workspacePath, code: err.code, err }, 'repo_list_failed');
       throw err;
     }
   }
@@ -264,12 +259,10 @@ async function safeDeactivateSession(
   const trigger = getTriggerForCommand(commandName);
   try {
     await sessionDb.deactivateSession(sessionId, trigger);
-    console.log(`[Command] Deactivated session: ${trigger}`);
+    getLog().debug({ sessionId, trigger }, 'session_deactivated');
   } catch (error) {
     if (error instanceof SessionNotFoundError) {
-      console.log(`[Command] Session already deactivated (race condition): ${trigger}`, {
-        sessionId,
-      });
+      getLog().debug({ sessionId, trigger }, 'session_already_deactivated');
     } else {
       throw error;
     }
@@ -350,7 +343,10 @@ export async function handleCommand(
           await db
             .updateConversation(conversation.id, { codebase_id: detectedCodebase.id })
             .then(() => {
-              console.log(`[Status] Auto-linked codebase ${detectedCodebase.name} to conversation`);
+              getLog().debug(
+                { conversationId: conversation.id, codebaseName: detectedCodebase.name },
+                'codebase_auto_linked'
+              );
             })
             .catch(err => {
               if (!(err instanceof ConversationNotFoundError)) throw err;
@@ -397,7 +393,10 @@ export async function handleCommand(
         }
       } catch (error) {
         // Don't fail status if workflow query fails
-        console.error('[Status] Failed to get workflow status:', error);
+        getLog().error(
+          { err: error, conversationId: conversation.id },
+          'workflow_status_query_failed'
+        );
       }
 
       // Add worktree breakdown if codebase is configured (Phase 3D)
@@ -416,7 +415,7 @@ export async function handleCommand(
           }
         } catch (error) {
           // Don't fail status if breakdown fails
-          console.error('[Status] Failed to get worktree breakdown:', error);
+          getLog().error({ err: error, codebaseId: codebase.id }, 'worktree_breakdown_failed');
         }
       }
 
@@ -465,12 +464,10 @@ export async function handleCommand(
       // Use execFile instead of execAsync to prevent command injection
       try {
         await execFileAsync('git', ['config', '--global', '--add', 'safe.directory', resolvedCwd]);
-        console.log(`[Command] Added ${resolvedCwd} to git safe.directory`);
+        getLog().debug({ path: resolvedCwd }, 'safe_directory_added');
       } catch (_error) {
         // Ignore errors - directory might not be a git repo
-        console.log(
-          `[Command] Could not add ${resolvedCwd} to safe.directory (might not be a git repo)`
-        );
+        getLog().debug({ path: resolvedCwd }, 'safe_directory_skip');
       }
 
       // Reset session when changing working directory
@@ -555,7 +552,7 @@ export async function handleCommand(
       } catch (error) {
         const err = error as Error;
         const safeErr = sanitizeError(err);
-        console.error('[Clone] Failed:', safeErr.message);
+        getLog().error({ err: safeErr }, 'clone_failed');
         return {
           success: false,
           message: `Failed to clone repository: ${safeErr.message}`,
@@ -598,7 +595,7 @@ export async function handleCommand(
         };
       } catch (error) {
         const err = error as Error;
-        console.error('[Command] command-set failed:', err);
+        getLog().error({ err, command: 'command-set' }, 'command_set_failed');
         return { success: false, message: `Failed: ${err.message}` };
       }
     }
@@ -650,7 +647,7 @@ export async function handleCommand(
         };
       } catch (error) {
         const err = error as Error;
-        console.error('[Command] load-commands failed:', err);
+        getLog().error({ err, command: 'load-commands' }, 'load_commands_failed');
         return { success: false, message: `Failed: ${err.message}` };
       }
     }
@@ -715,7 +712,7 @@ export async function handleCommand(
         return { success: true, message: msg };
       } catch (error) {
         const err = error as Error;
-        console.error('[Command] repos failed:', err);
+        getLog().error({ err, command: 'repos' }, 'repos_list_failed');
         return { success: false, message: `Failed to list repositories: ${err.message}` };
       }
     }
@@ -805,10 +802,10 @@ export async function handleCommand(
         if (shouldPull) {
           try {
             await execFileAsync('git', ['-C', targetPath, 'pull']);
-            console.log(`[Command] Pulled latest for ${targetFolder}`);
+            getLog().info({ repo: targetFolder }, 'repo_pulled');
           } catch (pullError) {
             const err = pullError as Error;
-            console.error('[Command] git pull failed:', err);
+            getLog().error({ err, repo: targetFolder }, 'repo_pull_failed');
             return {
               success: false,
               message: `Failed to pull: ${err.message}`,
@@ -835,7 +832,7 @@ export async function handleCommand(
             default_cwd: targetPath,
             ai_assistant_type: suggestedAssistant,
           });
-          console.log(`[Command] Created codebase for ${targetFolder}`);
+          getLog().info({ repo: targetFolder, codebaseId: codebase.id }, 'codebase_created');
         }
 
         // Link conversation to codebase
@@ -897,7 +894,7 @@ export async function handleCommand(
         return { success: true, message: msg, modified: true };
       } catch (error) {
         const err = error as Error;
-        console.error('[Command] repo switch failed:', err);
+        getLog().error({ err, command: 'repo' }, 'repo_switch_failed');
         return { success: false, message: `Failed: ${err.message}` };
       }
     }
@@ -976,12 +973,15 @@ export async function handleCommand(
         // Delete codebase record (this also unlinks sessions)
         if (codebase) {
           await codebaseDb.deleteCodebase(codebase.id);
-          console.log(`[Command] Deleted codebase: ${codebase.name}`);
+          getLog().info(
+            { codebaseId: codebase.id, codebaseName: codebase.name },
+            'codebase_deleted'
+          );
         }
 
         // Remove directory
         await rm(targetPath, { recursive: true, force: true });
-        console.log(`[Command] Removed directory: ${targetPath}`);
+        getLog().info({ path: targetPath, repo: targetFolder }, 'repo_directory_removed');
 
         let msg = `Removed: ${targetFolder}`;
         if (codebase) {
@@ -994,7 +994,7 @@ export async function handleCommand(
         return { success: true, message: msg, modified: true };
       } catch (error) {
         const err = error as Error;
-        console.error('[Command] repo-remove failed:', err);
+        getLog().error({ err, command: 'repo-remove' }, 'repo_remove_failed');
         return { success: false, message: `Failed to remove: ${err.message}` };
       }
     }
@@ -1163,7 +1163,7 @@ export async function handleCommand(
             };
           } catch (error) {
             const err = error as Error;
-            console.error('[Worktree] Create failed:', err);
+            getLog().error({ err, branch: branchName }, 'worktree_create_failed');
 
             // Check for common errors
             if (error instanceof ConversationNotFoundError) {
@@ -1256,7 +1256,7 @@ export async function handleCommand(
             };
           } catch (error) {
             const err = error as Error;
-            console.error('[Worktree] Remove failed:', err);
+            getLog().error({ err }, 'worktree_remove_failed');
 
             // Check for common errors
             if (error instanceof ConversationNotFoundError) {
@@ -1468,7 +1468,10 @@ export async function handleCommand(
 
             return { success: true, message: msg };
           } catch (error) {
-            console.error('[Workflow Status] Failed to get workflow status:', error);
+            getLog().error(
+              { err: error, conversationId: conversation.id },
+              'workflow_status_failed'
+            );
             return {
               success: false,
               message: 'Failed to retrieve workflow status. Please try again.',
@@ -1489,11 +1492,10 @@ export async function handleCommand(
             };
           }
 
-          console.log('[Command] /workflow run invoked', {
-            workflowName,
-            args: workflowArgs,
-            cwd: codebase.default_cwd,
-          });
+          getLog().debug(
+            { workflowName, args: workflowArgs, cwd: codebase.default_cwd },
+            'workflow_run_invoked'
+          );
 
           // Discover workflows with error handling
           let workflows: WorkflowDefinition[];
@@ -1501,39 +1503,36 @@ export async function handleCommand(
             workflows = await discoverWorkflows(codebase.default_cwd);
           } catch (error) {
             const err = error as Error;
-            console.error('[Workflow Run] Failed to discover workflows:', {
-              cwd: codebase.default_cwd,
-              error: err.message,
-            });
+            getLog().error({ err, cwd: codebase.default_cwd }, 'workflow_discovery_failed');
             return {
               success: false,
               message: `Failed to load workflows: ${err.message}\n\nCheck .archon/workflows/ for YAML syntax issues.`,
             };
           }
 
-          console.log('[Command] Discovered workflows for /workflow run', {
-            count: workflows.length,
-            names: workflows.map(w => w.name),
-            searchingFor: workflowName,
-          });
+          getLog().debug(
+            {
+              count: workflows.length,
+              names: workflows.map(w => w.name),
+              searchingFor: workflowName,
+            },
+            'workflows_discovered'
+          );
 
           const workflow = workflows.find(w => w.name === workflowName);
 
           if (!workflow) {
-            console.warn('[Command] Workflow not found', {
-              requested: workflowName,
-              available: workflows.map(w => w.name),
-            });
+            getLog().warn(
+              { requested: workflowName, available: workflows.map(w => w.name) },
+              'workflow_not_found'
+            );
             return {
               success: false,
               message: `Workflow \`${workflowName}\` not found.\n\nUse /workflow list to see available workflows.`,
             };
           }
 
-          console.log('[Command] Starting workflow execution', {
-            workflow: workflowName,
-            args: workflowArgs,
-          });
+          getLog().info({ workflow: workflowName, args: workflowArgs }, 'workflow_starting');
 
           // Return special result that triggers workflow execution in orchestrator
           return {
@@ -1626,7 +1625,7 @@ Use /load-commands .archon/commands to register commands.`,
         };
       } catch (error) {
         const err = error as Error;
-        console.error('[Command] init failed:', err);
+        getLog().error({ err, command: 'init' }, 'init_failed');
         return { success: false, message: `Failed to initialize: ${err.message}` };
       }
     }

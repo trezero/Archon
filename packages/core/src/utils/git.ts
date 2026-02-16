@@ -7,6 +7,14 @@ import {
   getArchonWorkspacesPath,
   getProjectWorktreesPath,
 } from './archon-paths';
+import { createLogger } from './logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('git');
+  return cachedLog;
+}
 
 const promisifiedExecFile = promisify(execFile);
 
@@ -86,11 +94,7 @@ export async function worktreeExists(worktreePath: string): Promise<boolean> {
       return false;
     }
     // Unexpected error - permission denied, I/O error, etc.
-    console.error('[Git] Failed to check worktree existence', {
-      worktreePath,
-      error: err.message,
-      code: err.code,
-    });
+    getLog().error({ worktreePath, err, code: err.code }, 'worktree_existence_check_failed');
     throw new Error(`Failed to check worktree at ${worktreePath}: ${err.message}`);
   }
 }
@@ -138,12 +142,7 @@ export async function listWorktrees(repoPath: string): Promise<{ path: string; b
     }
 
     // Unexpected error - log and throw
-    console.error('[Git] Failed to list worktrees', {
-      repoPath,
-      error: err.message,
-      code: err.code,
-      stderr: err.stderr,
-    });
+    getLog().error({ repoPath, err, code: err.code, stderr: err.stderr }, 'list_worktrees_failed');
     throw new Error(`Failed to list worktrees for ${repoPath}: ${err.message}`);
   }
 }
@@ -192,11 +191,7 @@ export async function isWorktreePath(path: string): Promise<boolean> {
       return false;
     }
     // Unexpected error - throw since this affects critical path decisions
-    console.error('[Git] Failed to check worktree status', {
-      path,
-      error: err.message,
-      code: err.code,
-    });
+    getLog().error({ path, err, code: err.code }, 'worktree_status_check_failed');
     throw new Error(`Cannot determine if ${path} is a worktree: ${err.message}`);
   }
 }
@@ -230,7 +225,7 @@ export async function createWorktreeForIssue(
 
   // Check if worktree already exists at expected path (possibly created by skill)
   if (await worktreeExists(worktreePath)) {
-    console.log(`[Git] Adopting existing worktree: ${worktreePath}`);
+    getLog().info({ worktreePath }, 'worktree_adopted');
     return worktreePath;
   }
 
@@ -238,9 +233,7 @@ export async function createWorktreeForIssue(
   if (isPR && prHeadBranch) {
     const existingByBranch = await findWorktreeByBranch(repoPath, prHeadBranch);
     if (existingByBranch) {
-      console.log(
-        `[Git] Adopting existing worktree for branch ${prHeadBranch}: ${existingByBranch}`
-      );
+      getLog().info({ prHeadBranch, worktreePath: existingByBranch }, 'worktree_adopted_by_branch');
       return existingByBranch;
     }
   }
@@ -396,19 +389,16 @@ export async function hasUncommittedChanges(workingPath: string): Promise<boolea
 
     // Only return false for expected "path doesn't exist" scenarios
     if (err.code === 'ENOENT' || err.message.includes('No such file or directory')) {
-      console.log('[Git] Path does not exist, treating as no uncommitted changes', {
-        workingPath,
-      });
+      getLog().debug({ workingPath }, 'path_not_found_no_uncommitted_changes');
       return false;
     }
 
     // FAIL-SAFE: For any other error, assume changes exist to prevent data loss
     // This is intentionally conservative - better to block cleanup than lose work
-    console.error('[Git] Failed to check uncommitted changes - assuming changes exist for safety', {
-      workingPath,
-      error: err.message,
-      code: err.code,
-    });
+    getLog().error(
+      { workingPath, err, code: err.code },
+      'uncommitted_changes_check_failed_assuming_dirty'
+    );
     return true;
   }
 }
@@ -448,10 +438,10 @@ export async function syncWorkspace(
   // Safety check: refuse to sync if there are uncommitted changes
   const hasChanges = await hasUncommittedChanges(workspacePath);
   if (hasChanges) {
-    console.warn('[Git] Workspace has uncommitted changes, skipping sync to prevent data loss', {
-      workspacePath,
-      branch: branchToSync,
-    });
+    getLog().warn(
+      { workspacePath, branch: branchToSync },
+      'workspace_sync_skipped_uncommitted_changes'
+    );
     return { branch: branchToSync, synced: false };
   }
 
@@ -556,17 +546,10 @@ export async function getDefaultBranch(repoPath: string): Promise<string> {
       errorText.includes('not a symbolic ref') ||
       errorText.includes('No such file or directory')
     ) {
-      console.log('[Git] symbolic-ref failed, trying fallback', {
-        repoPath,
-        error: err.message,
-      });
+      getLog().debug({ repoPath, err }, 'symbolic_ref_fallback');
     } else {
       // Unexpected error (permission denied, git corruption, etc.) - surface it
-      console.error('[Git] Failed to get default branch via symbolic-ref', {
-        repoPath,
-        error: err.message,
-        stderr: err.stderr,
-      });
+      getLog().error({ repoPath, err, stderr: err.stderr }, 'default_branch_symbolic_ref_failed');
       throw new Error(`Failed to get default branch for ${repoPath}: ${err.message}`);
     }
   }
@@ -587,19 +570,12 @@ export async function getDefaultBranch(repoPath: string): Promise<string> {
       errorText.includes('Needed a single revision') ||
       errorText.includes('unknown revision')
     ) {
-      console.log('[Git] origin/main not found, defaulting to master', {
-        repoPath,
-        error: err.message,
-      });
+      getLog().debug({ repoPath, err }, 'origin_main_not_found_defaulting_to_master');
       return 'master';
     }
 
     // Unexpected error - surface it
-    console.error('[Git] Failed to verify origin/main branch', {
-      repoPath,
-      error: err.message,
-      stderr: err.stderr,
-    });
+    getLog().error({ repoPath, err, stderr: err.stderr }, 'verify_origin_main_failed');
     throw new Error(`Failed to get default branch for ${repoPath}: ${err.message}`);
   }
 }
@@ -626,11 +602,7 @@ export async function findRepoRoot(startPath: string): Promise<string | null> {
     }
 
     // Unexpected error - surface it
-    console.error('[Git] Failed to find repo root', {
-      startPath,
-      error: err.message,
-      stderr: err.stderr,
-    });
+    getLog().error({ startPath, err, stderr: err.stderr }, 'find_repo_root_failed');
     throw new Error(`Failed to find repo root for ${startPath}: ${err.message}`);
   }
 }
@@ -658,11 +630,7 @@ export async function getRemoteUrl(repoPath: string): Promise<string | null> {
     }
 
     // Unexpected error - surface it
-    console.error('[Git] Failed to get remote URL', {
-      repoPath,
-      error: err.message,
-      stderr: err.stderr,
-    });
+    getLog().error({ repoPath, err, stderr: err.stderr }, 'get_remote_url_failed');
     throw new Error(`Failed to get remote URL for ${repoPath}: ${err.message}`);
   }
 }
@@ -693,12 +661,7 @@ export async function checkout(repoPath: string, branchName: string): Promise<vo
     }
 
     // Unexpected error - surface it
-    console.error('[Git] Failed to checkout branch', {
-      repoPath,
-      branchName,
-      error: err.message,
-      stderr: err.stderr,
-    });
+    getLog().error({ repoPath, branchName, err, stderr: err.stderr }, 'checkout_failed');
     throw new Error(`Failed to checkout branch ${branchName}: ${err.message}`);
   }
 }

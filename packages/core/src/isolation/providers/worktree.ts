@@ -10,6 +10,7 @@ import { access, rm } from 'fs/promises';
 import { join } from 'path';
 
 import { loadRepoConfig } from '../../config/config-loader';
+import { createLogger } from '../../utils/logger';
 import type { RepoConfig } from '../../config/config-types';
 import {
   execFileAsync,
@@ -32,6 +33,13 @@ import type {
   WorktreeDestroyOptions,
   WorktreeEnvironment,
 } from '../types';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('isolation.worktree');
+  return cachedLog;
+}
 
 export class WorktreeProvider implements IIsolationProvider {
   readonly providerType = 'worktree';
@@ -100,7 +108,7 @@ export class WorktreeProvider implements IIsolationProvider {
     // Check if worktree path exists before attempting removal (optimization to avoid spawning git)
     const pathExists = await this.directoryExists(worktreePath);
     if (!pathExists) {
-      console.log(`[WorktreeProvider] Path ${worktreePath} already removed`);
+      getLog().debug({ worktreePath }, 'worktree_path_already_removed');
       result.worktreeRemoved = true; // Already gone counts as removed
       result.directoryClean = true;
     }
@@ -116,7 +124,7 @@ export class WorktreeProvider implements IIsolationProvider {
       // This is expected when worktree was already fully cleaned up externally
       if (options?.branchName) {
         const warning = `Cannot delete branch '${options.branchName}': worktree path gone and no canonicalRepoPath provided`;
-        console.warn(`[WorktreeProvider] ${warning}`, { worktreePath });
+        getLog().warn({ worktreePath, branchName: options.branchName }, 'branch_cleanup_skipped');
         result.warnings.push(warning);
       }
       return result;
@@ -137,7 +145,7 @@ export class WorktreeProvider implements IIsolationProvider {
         if (!this.isWorktreeMissingError(error)) {
           throw error;
         }
-        console.log(`[WorktreeProvider] Worktree ${worktreePath} already removed`);
+        getLog().debug({ worktreePath }, 'worktree_already_removed');
         result.worktreeRemoved = true;
         // Continue to branch deletion below - branch may still exist
       }
@@ -145,17 +153,15 @@ export class WorktreeProvider implements IIsolationProvider {
       // Ensure directory is fully removed (git may leave untracked files like .archon/)
       const dirExists = await this.directoryExists(worktreePath);
       if (dirExists) {
-        console.log(`[WorktreeProvider] Cleaning remaining directory at ${worktreePath}`);
+        getLog().debug({ worktreePath }, 'cleaning_remaining_directory');
         try {
           await rm(worktreePath, { recursive: true, force: true });
-          console.log(
-            `[WorktreeProvider] Successfully cleaned remaining directory at ${worktreePath}`
-          );
+          getLog().debug({ worktreePath }, 'remaining_directory_cleaned');
           result.directoryClean = true;
         } catch (error) {
           const err = error as NodeJS.ErrnoException;
           const warning = `Failed to clean remaining directory at ${worktreePath}: ${err.message}`;
-          console.error(`[WorktreeProvider] ${warning}`);
+          getLog().error({ err: error, worktreePath }, 'remaining_directory_cleanup_failed');
           result.warnings.push(warning);
           // directoryClean stays false
         }
@@ -206,23 +212,23 @@ export class WorktreeProvider implements IIsolationProvider {
   ): Promise<boolean> {
     try {
       await execFileAsync('git', ['-C', repoPath, 'branch', '-D', branchName], { timeout: 30000 });
-      console.log(`[WorktreeProvider] Deleted branch ${branchName}`);
+      getLog().debug({ repoPath, branchName }, 'branch_deleted');
       return true;
     } catch (error) {
       const err = error as Error & { stderr?: string };
       const errorText = `${err.message} ${err.stderr ?? ''}`;
 
       if (errorText.includes('not found') || errorText.includes('did not match any')) {
-        console.log(`[WorktreeProvider] Branch ${branchName} already deleted or not found`);
+        getLog().debug({ repoPath, branchName }, 'branch_already_deleted');
         return true; // Already gone counts as success
       } else if (errorText.includes('checked out at')) {
         const warning = `Cannot delete branch '${branchName}': branch is checked out elsewhere`;
-        console.warn(`[WorktreeProvider] ${warning}`);
+        getLog().warn({ repoPath, branchName }, 'branch_checked_out_elsewhere');
         result.warnings.push(warning);
         return false;
       } else {
         const warning = `Unexpected error deleting branch '${branchName}': ${err.message}`;
-        console.error(`[WorktreeProvider] ${warning}`, { stderr: err.stderr });
+        getLog().error({ err: error, repoPath, branchName }, 'branch_delete_failed');
         result.warnings.push(warning);
         return false;
       }
@@ -242,7 +248,7 @@ export class WorktreeProvider implements IIsolationProvider {
       await execFileAsync('git', ['-C', repoPath, 'push', 'origin', '--delete', branchName], {
         timeout: 30000,
       });
-      console.log(`[WorktreeProvider] Deleted remote branch ${branchName}`);
+      getLog().debug({ repoPath, branchName }, 'remote_branch_deleted');
       return true;
     } catch (error) {
       const err = error as Error & { stderr?: string };
@@ -252,11 +258,11 @@ export class WorktreeProvider implements IIsolationProvider {
         errorText.includes('remote ref does not exist') ||
         errorText.includes("couldn't find remote ref")
       ) {
-        console.log(`[WorktreeProvider] Remote branch ${branchName} already deleted or not found`);
+        getLog().debug({ repoPath, branchName }, 'remote_branch_already_deleted');
         return true; // Already gone counts as success
       } else {
         const warning = `Failed to delete remote branch '${branchName}': ${err.message}`;
-        console.error(`[WorktreeProvider] ${warning}`, { stderr: err.stderr });
+        getLog().error({ err: error, repoPath, branchName }, 'remote_branch_delete_failed');
         result.warnings.push(warning);
         return false;
       }
@@ -287,11 +293,7 @@ export class WorktreeProvider implements IIsolationProvider {
       repoPath = await getCanonicalRepoPath(worktreePath);
       worktrees = await listWorktrees(repoPath);
     } catch (error) {
-      const err = error as Error;
-      console.error('[WorktreeProvider] Failed to query worktree info for get()', {
-        worktreePath,
-        error: err.message,
-      });
+      getLog().error({ err: error, worktreePath }, 'worktree_query_failed');
       throw error;
     }
 
@@ -299,10 +301,7 @@ export class WorktreeProvider implements IIsolationProvider {
 
     // If worktree exists on disk but not in git's list, it's a corrupted state
     if (!wt) {
-      console.warn('[WorktreeProvider] Worktree exists but not registered with git', {
-        worktreePath,
-        repoPath,
-      });
+      getLog().warn({ worktreePath, repoPath }, 'worktree_not_registered');
       return null;
     }
 
@@ -357,11 +356,7 @@ export class WorktreeProvider implements IIsolationProvider {
       repoPath = await getCanonicalRepoPath(path);
       worktrees = await listWorktrees(repoPath);
     } catch (error) {
-      const err = error as Error;
-      console.error('[WorktreeProvider] Failed to query worktree info for adopt()', {
-        path,
-        error: err.message,
-      });
+      getLog().error({ err: error, path }, 'worktree_adopt_query_failed');
       return null;
     }
 
@@ -369,18 +364,14 @@ export class WorktreeProvider implements IIsolationProvider {
 
     if (!wt) {
       // Worktree directory exists but isn't registered with git - possible corruption
-      console.warn(
-        '[WorktreeProvider] Adoption failed: worktree exists at path but not registered with git',
-        {
-          path,
-          repoPath,
-          registeredWorktreeCount: worktrees.length,
-        }
+      getLog().warn(
+        { path, repoPath, registeredWorktreeCount: worktrees.length },
+        'worktree_adopt_not_registered'
       );
       return null;
     }
 
-    console.log(`[WorktreeProvider] Adopting existing worktree: ${path}`);
+    getLog().info({ path, branchName: wt.branch }, 'worktree_adopted');
     return {
       id: path,
       provider: 'worktree',
@@ -474,7 +465,7 @@ export class WorktreeProvider implements IIsolationProvider {
   ): Promise<WorktreeEnvironment | null> {
     // Check if worktree already exists at expected path
     if (await worktreeExists(worktreePath)) {
-      console.log(`[WorktreeProvider] Adopting existing worktree: ${worktreePath}`);
+      getLog().info({ worktreePath, branchName }, 'worktree_adopted');
       return {
         id: worktreePath,
         provider: 'worktree',
@@ -494,8 +485,9 @@ export class WorktreeProvider implements IIsolationProvider {
         request.prBranch
       );
       if (existingByBranch) {
-        console.log(
-          `[WorktreeProvider] Adopting existing worktree for branch ${request.prBranch}: ${existingByBranch}`
+        getLog().info(
+          { worktreePath: existingByBranch, branchName: request.prBranch },
+          'worktree_adopted'
         );
         return {
           id: existingByBranch,
@@ -526,11 +518,7 @@ export class WorktreeProvider implements IIsolationProvider {
     try {
       repoConfig = await loadRepoConfig(repoPath);
     } catch (error) {
-      const err = error as Error;
-      console.error('[WorktreeProvider] Failed to load repo config', {
-        repoPath,
-        error: err.message,
-      });
+      getLog().error({ err: error, repoPath }, 'repo_config_load_failed');
     }
 
     await this.syncWorkspaceBeforeCreate(repoPath, repoConfig?.worktree?.baseBranch);
@@ -584,17 +572,15 @@ export class WorktreeProvider implements IIsolationProvider {
     configuredBaseBranch?: string
   ): Promise<void> {
     try {
-      console.log('[WorktreeProvider] Syncing workspace before worktree creation', {
-        repoPath,
-        branch: configuredBaseBranch ?? 'auto-detect',
-      });
+      getLog().debug(
+        { repoPath, branch: configuredBaseBranch ?? 'auto-detect' },
+        'workspace_sync_starting'
+      );
       const { branch, synced } = await syncWorkspace(repoPath, configuredBaseBranch);
       if (synced) {
-        console.log(`[WorktreeProvider] Workspace synced to latest ${branch}`);
+        getLog().debug({ repoPath, branch }, 'workspace_synced');
       } else {
-        console.log(
-          '[WorktreeProvider] Workspace sync skipped (uncommitted changes), proceeding with existing code'
-        );
+        getLog().debug({ repoPath }, 'workspace_sync_skipped');
       }
     } catch (error) {
       const err = error as Error & { code?: string };
@@ -616,10 +602,7 @@ export class WorktreeProvider implements IIsolationProvider {
         throw err;
       } else {
         // Network errors, timeouts, etc. - truly non-fatal
-        console.warn(
-          '[WorktreeProvider] Failed to sync workspace (proceeding with worktree creation):',
-          { repoPath, error: err.message }
-        );
+        getLog().warn({ err: error, repoPath }, 'workspace_sync_failed');
       }
     }
   }
@@ -644,12 +627,8 @@ export class WorktreeProvider implements IIsolationProvider {
         const loadedConfig = await loadRepoConfig(canonicalRepoPath);
         userCopyFiles = loadedConfig.worktree?.copyFiles ?? [];
       } catch (error) {
-        const err = error as Error;
         // Config errors are more serious - log as error, not warning
-        console.error('[WorktreeProvider] Failed to load repo config', {
-          canonicalRepoPath,
-          error: err.message,
-        });
+        getLog().error({ err: error, canonicalRepoPath }, 'repo_config_load_failed');
         // Don't return - still copy default files even if config fails
       }
     }
@@ -666,25 +645,19 @@ export class WorktreeProvider implements IIsolationProvider {
     try {
       const copied = await copyWorktreeFiles(canonicalRepoPath, worktreePath, copyFiles);
       if (copied.length > 0) {
-        console.log(`[WorktreeProvider] Copied ${String(copied.length)} file(s) to worktree`);
+        getLog().debug({ worktreePath, copiedCount: copied.length }, 'worktree_files_copied');
       }
 
       // Log summary if some files were configured but not all were copied
       const attemptedCount = copyFiles.length;
       const copiedCount = copied.length;
       if (copiedCount < attemptedCount) {
-        console.log(
-          `[WorktreeProvider] File copy summary: ${String(copiedCount)}/${String(attemptedCount)} succeeded (check logs above for details)`
-        );
+        getLog().debug({ worktreePath, copiedCount, attemptedCount }, 'worktree_file_copy_partial');
       }
     } catch (error) {
       // Should not happen as copyWorktreeFiles handles errors internally,
       // but guard against unexpected errors
-      const err = error as Error;
-      console.error('[WorktreeProvider] Unexpected error in file copying', {
-        worktreePath,
-        error: err.message,
-      });
+      getLog().error({ err: error, worktreePath }, 'worktree_file_copy_failed');
     }
   }
 
@@ -759,12 +732,7 @@ export class WorktreeProvider implements IIsolationProvider {
         { timeout: 30000 }
       );
     } catch (trackingError) {
-      const err = trackingError as Error;
-      console.warn('[WorktreeProvider] Failed to set upstream tracking (worktree usable):', {
-        worktreePath,
-        prBranch,
-        error: err.message,
-      });
+      getLog().warn({ err: trackingError, worktreePath, prBranch }, 'upstream_tracking_failed');
       // Continue - the worktree was created successfully, tracking is just convenience
     }
   }
@@ -835,9 +803,7 @@ export class WorktreeProvider implements IIsolationProvider {
     } catch (error) {
       const err = error as Error & { stderr?: string };
       if (err.stderr?.includes('already exists')) {
-        console.log(
-          `[WorktreeProvider] Branch ${branchName} exists (stale), deleting and retrying...`
-        );
+        getLog().debug({ repoPath, branchName }, 'stale_branch_retry');
         await execFileAsync('git', ['-C', repoPath, 'branch', '-D', branchName], {
           timeout: 30000,
         });
@@ -918,10 +884,10 @@ export class WorktreeProvider implements IIsolationProvider {
     }
 
     // Orphan directory - remove it before creating worktree
-    console.log(`[WorktreeProvider] Cleaning orphan directory at ${worktreePath}`);
+    getLog().debug({ worktreePath }, 'orphan_directory_cleaning');
     try {
       await rm(worktreePath, { recursive: true, force: true });
-      console.log(`[WorktreeProvider] Successfully removed orphan directory at ${worktreePath}`);
+      getLog().debug({ worktreePath }, 'orphan_directory_removed');
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       // Provide context for the error - orphan cleanup is critical for worktree creation

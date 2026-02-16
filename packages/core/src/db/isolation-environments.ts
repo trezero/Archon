@@ -3,6 +3,14 @@
  */
 import { pool, getDialect } from './connection';
 import type { IsolationEnvironmentRow } from '../types';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('db.isolation-environments');
+  return cachedLog;
+}
 
 /**
  * Get an isolation environment by UUID
@@ -92,6 +100,10 @@ export async function create(env: {
     throw new Error('Failed to create isolation environment: INSERT succeeded but no row returned');
   }
 
+  getLog().debug(
+    { envId: result.rows[0].id, codebaseId: env.codebase_id, branch: env.branch_name },
+    'isolation_env_created'
+  );
   return result.rows[0];
 }
 
@@ -109,6 +121,7 @@ export async function updateStatus(id: string, status: 'active' | 'destroyed'): 
       `Failed to update isolation environment status: no environment found with id '${id}'`
     );
   }
+  getLog().debug({ envId: id, status }, 'isolation_env_status_updated');
 }
 
 /**

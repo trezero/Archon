@@ -270,6 +270,10 @@ export {
 // Worktree sync
 export { syncArchonToWorktree } from './utils/worktree-sync';
 
+// Logger
+export { createLogger, setLogLevel, getLogLevel } from './utils/logger';
+export type { Logger } from './utils/logger';
+
 // Defaults copy
 export { copyDefaultsToRepo } from './utils/defaults-copy';
 

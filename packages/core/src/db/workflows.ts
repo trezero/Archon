@@ -3,6 +3,14 @@
  */
 import { pool, getDialect } from './connection';
 import type { WorkflowRun } from '../workflows/types';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('db.workflows');
+  return cachedLog;
+}
 
 export async function createWorkflowRun(data: {
   workflow_name: string;
@@ -23,10 +31,10 @@ export async function createWorkflowRun(data: {
       // Critical context (e.g., GitHub issue/PR details) must not be silently discarded.
       // Failing here surfaces the problem to the user instead of running the workflow
       // with empty context variables ($CONTEXT, $EXTERNAL_CONTEXT, $ISSUE_CONTEXT).
-      console.error('[DB:Workflows] Failed to serialize metadata with critical context:', {
-        error: err.message,
-        metadataKeys: Object.keys(data.metadata),
-      });
+      getLog().error(
+        { err, metadataKeys: Object.keys(data.metadata) },
+        'metadata_serialize_failed_critical'
+      );
       throw new Error(
         `Failed to serialize workflow metadata: ${err.message}. ` +
           'Metadata contains github_context which is required for this workflow.'
@@ -34,12 +42,9 @@ export async function createWorkflowRun(data: {
     }
 
     // Non-critical metadata: fall back to empty object and log warning
-    console.error(
-      '[DB:Workflows] Failed to serialize metadata (non-critical, falling back to {}):',
-      {
-        error: err.message,
-        metadataKeys: data.metadata ? Object.keys(data.metadata) : [],
-      }
+    getLog().warn(
+      { err, metadataKeys: data.metadata ? Object.keys(data.metadata) : [] },
+      'metadata_serialize_fallback'
     );
     metadataJson = '{}';
   }
@@ -67,7 +72,7 @@ export async function createWorkflowRun(data: {
     return row;
   } catch (error) {
     const err = error as Error;
-    console.error('[DB:Workflows] Failed to create workflow run:', err.message);
+    getLog().error({ err }, 'create_workflow_run_failed');
     throw new Error(`Failed to create workflow run: ${err.message}`);
   }
 }
@@ -81,7 +86,7 @@ export async function getWorkflowRun(id: string): Promise<WorkflowRun | null> {
     return result.rows[0] || null;
   } catch (error) {
     const err = error as Error;
-    console.error('[DB:Workflows] Failed to get workflow run:', err.message);
+    getLog().error({ err }, 'get_workflow_run_failed');
     throw new Error(`Failed to get workflow run: ${err.message}`);
   }
 }
@@ -97,7 +102,7 @@ export async function getActiveWorkflowRun(conversationId: string): Promise<Work
     return result.rows[0] || null;
   } catch (error) {
     const err = error as Error;
-    console.error('[DB:Workflows] Failed to get active workflow run:', err.message);
+    getLog().error({ err }, 'get_active_workflow_run_failed');
     throw new Error(`Failed to get active workflow run: ${err.message}`);
   }
 }
@@ -120,7 +125,7 @@ export async function getWorkflowRunByWorkerPlatformId(
     return result.rows[0] || null;
   } catch (error) {
     const err = error as Error;
-    console.error('[DB:Workflows] Failed to get workflow run by worker platform ID:', err.message);
+    getLog().error({ err }, 'get_workflow_run_by_worker_platform_id_failed');
     throw new Error(`Failed to get workflow run by worker platform ID: ${err.message}`);
   }
 }
@@ -174,7 +179,7 @@ export async function updateWorkflowRun(
     );
   } catch (error) {
     const err = error as Error;
-    console.error('[DB:Workflows] Failed to update workflow run:', err.message);
+    getLog().error({ err }, 'update_workflow_run_failed');
     throw new Error(`Failed to update workflow run: ${err.message}`);
   }
 }
@@ -190,7 +195,7 @@ export async function completeWorkflowRun(id: string): Promise<void> {
     );
   } catch (error) {
     const err = error as Error;
-    console.error('[DB:Workflows] Failed to complete workflow run:', err.message);
+    getLog().error({ err }, 'complete_workflow_run_failed');
     throw new Error(`Failed to complete workflow run: ${err.message}`);
   }
 }
@@ -206,7 +211,7 @@ export async function failWorkflowRun(id: string, error: string): Promise<void> 
     );
   } catch (dbError) {
     const err = dbError as Error;
-    console.error('[DB:Workflows] Failed to fail workflow run:', err.message);
+    getLog().error({ err }, 'fail_workflow_run_failed');
     throw new Error(`Failed to fail workflow run: ${err.message}`);
   }
 }
@@ -252,7 +257,7 @@ export async function listWorkflowRuns(options?: {
     return [...result.rows];
   } catch (error) {
     const err = error as Error;
-    console.error('[DB:Workflows] Failed to list workflow runs:', err.message);
+    getLog().error({ err }, 'list_workflow_runs_failed');
     throw new Error(`Failed to list workflow runs: ${err.message}`);
   }
 }
@@ -272,7 +277,7 @@ export async function updateWorkflowRunParent(
     );
   } catch (error) {
     const err = error as Error;
-    console.error('[DB:Workflows] Failed to update parent conversation:', err.message);
+    getLog().error({ err, runId, parentConversationId }, 'update_workflow_run_parent_failed');
     // Non-critical — don't throw
   }
 }

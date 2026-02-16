@@ -1,4 +1,10 @@
-import { describe, test, expect, mock, beforeEach, spyOn } from 'bun:test';
+import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import { createMockLogger } from '../test/mocks/logger';
+
+const mockLogger = createMockLogger();
+mock.module('../utils/logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
 
 // Create mock runStreamed first (before it's referenced)
 const mockRunStreamed = mock(() =>
@@ -40,6 +46,10 @@ describe('CodexClient', () => {
     mockStartThread.mockClear();
     mockResumeThread.mockClear();
     mockRunStreamed.mockClear();
+    mockLogger.info.mockClear();
+    mockLogger.warn.mockClear();
+    mockLogger.error.mockClear();
+    mockLogger.debug.mockClear();
 
     // Setup default mock thread
     mockStartThread.mockReturnValue(createMockThread('new-thread-id'));
@@ -156,8 +166,9 @@ describe('CodexClient', () => {
     });
 
     test('falls back to new thread when resume fails and notifies user', async () => {
+      const resumeError = new Error('Thread not found');
       mockResumeThread.mockImplementation(() => {
-        throw new Error('Thread not found');
+        throw resumeError;
       });
       mockStartThread.mockReturnValue(createMockThread('fallback-thread'));
 
@@ -166,8 +177,6 @@ describe('CodexClient', () => {
           yield { type: 'turn.completed' };
         })(),
       });
-
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
       const chunks = [];
       for await (const chunk of client.sendQuery('test', '/workspace', 'bad-thread-id')) {
@@ -183,14 +192,17 @@ describe('CodexClient', () => {
         networkAccessEnabled: true,
         approvalPolicy: 'never',
       });
+      // Verify error was logged
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        { err: resumeError, sessionId: 'bad-thread-id' },
+        'resume_thread_failed'
+      );
       // Verify user is notified about session loss
       expect(chunks[0]).toEqual({
         type: 'system',
         content: expect.stringContaining('Could not resume previous session'),
       });
       expect(chunks[1]).toEqual({ type: 'result', sessionId: 'fallback-thread' });
-
-      consoleSpy.mockRestore();
     });
 
     test('breaks on turn.completed event', async () => {
@@ -226,25 +238,27 @@ describe('CodexClient', () => {
         })(),
       });
 
-      const consoleSpy = spyOn(console, 'log').mockImplementation(() => {});
-
       const chunks = [];
       for await (const chunk of client.sendQuery('test', '/workspace')) {
         chunks.push(chunk);
       }
 
       // Verify item.started logging with correct format
-      expect(consoleSpy).toHaveBeenCalledWith('[Codex] item.started: command_execution', {
-        id: 'item-1',
-      });
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        { eventType: 'item.started', itemType: 'command_execution', itemId: 'item-1' },
+        'item_started'
+      );
 
       // Verify item.completed logging includes command context
-      expect(consoleSpy).toHaveBeenCalledWith('[Codex] item.completed: command_execution', {
-        id: 'item-1',
-        command: 'npm test',
-      });
-
-      consoleSpy.mockRestore();
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        {
+          eventType: 'item.completed',
+          itemType: 'command_execution',
+          itemId: 'item-1',
+          command: 'npm test',
+        },
+        'item_completed'
+      );
     });
 
     test('handles error events', async () => {
@@ -255,15 +269,16 @@ describe('CodexClient', () => {
         })(),
       });
 
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
-
       const chunks = [];
       for await (const chunk of client.sendQuery('test', '/workspace')) {
         chunks.push(chunk);
       }
 
       expect(chunks[0]).toEqual({ type: 'system', content: '⚠️ Something went wrong' });
-      consoleSpy.mockRestore();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        { message: 'Something went wrong' },
+        'stream_error'
+      );
     });
 
     test('suppresses MCP timeout errors', async () => {
@@ -274,8 +289,6 @@ describe('CodexClient', () => {
         })(),
       });
 
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
-
       const chunks = [];
       for await (const chunk of client.sendQuery('test', '/workspace')) {
         chunks.push(chunk);
@@ -285,7 +298,11 @@ describe('CodexClient', () => {
       expect(chunks).toHaveLength(1);
       expect(chunks[0]).toEqual({ type: 'result', sessionId: 'new-thread-id' });
 
-      consoleSpy.mockRestore();
+      // Error is still logged even though not sent to user
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        { message: 'MCP client connection timeout' },
+        'stream_error'
+      );
     });
 
     test('handles turn.failed events', async () => {
@@ -295,15 +312,16 @@ describe('CodexClient', () => {
         })(),
       });
 
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
-
       const chunks = [];
       for await (const chunk of client.sendQuery('test', '/workspace')) {
         chunks.push(chunk);
       }
 
       expect(chunks[0]).toEqual({ type: 'system', content: '❌ Turn failed: Rate limit exceeded' });
-      consoleSpy.mockRestore();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        { errorMessage: 'Rate limit exceeded' },
+        'turn_failed'
+      );
     });
 
     test('handles turn.failed without error message', async () => {
@@ -313,21 +331,21 @@ describe('CodexClient', () => {
         })(),
       });
 
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
-
       const chunks = [];
       for await (const chunk of client.sendQuery('test', '/workspace')) {
         chunks.push(chunk);
       }
 
       expect(chunks[0]).toEqual({ type: 'system', content: '❌ Turn failed: Unknown error' });
-      consoleSpy.mockRestore();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        { errorMessage: 'Unknown error' },
+        'turn_failed'
+      );
     });
 
     test('throws on runStreamed error', async () => {
-      mockRunStreamed.mockRejectedValue(new Error('Network failure'));
-
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
+      const networkError = new Error('Network failure');
+      mockRunStreamed.mockRejectedValue(networkError);
 
       const consumeGenerator = async () => {
         for await (const _ of client.sendQuery('test', '/workspace')) {
@@ -337,7 +355,7 @@ describe('CodexClient', () => {
 
       await expect(consumeGenerator()).rejects.toThrow('Codex query failed: Network failure');
 
-      consoleSpy.mockRestore();
+      expect(mockLogger.error).toHaveBeenCalledWith({ err: networkError }, 'query_error');
     });
 
     test('ignores items without text or command', async () => {

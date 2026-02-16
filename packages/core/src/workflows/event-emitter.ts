@@ -11,6 +11,14 @@
  */
 import { EventEmitter } from 'events';
 import type { ArtifactType } from './types';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('workflow.emitter');
+  return cachedLog;
+}
 
 // ---------------------------------------------------------------------------
 // Event types
@@ -174,10 +182,7 @@ class WorkflowEventEmitter {
     try {
       this.emitter.emit(WORKFLOW_EVENT, event);
     } catch (error) {
-      console.error('[WorkflowEventEmitter] Error emitting event', {
-        eventType: event.type,
-        error: (error as Error).message,
-      });
+      getLog().error({ err: error as Error, eventType: event.type }, 'event_emit_failed');
     }
   }
 
@@ -190,10 +195,7 @@ class WorkflowEventEmitter {
       try {
         listener(event);
       } catch (error) {
-        console.error('[WorkflowEventEmitter] Listener error', {
-          eventType: event.type,
-          error: (error as Error).message,
-        });
+        getLog().error({ err: error as Error, eventType: event.type }, 'event_listener_error');
       }
     };
 

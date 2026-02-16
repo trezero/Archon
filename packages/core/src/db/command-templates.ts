@@ -3,6 +3,14 @@
  */
 import { pool } from './connection';
 import { CommandTemplate } from '../types';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('db.command-templates');
+  return cachedLog;
+}
 
 export async function createTemplate(data: {
   name: string;
@@ -53,5 +61,6 @@ export async function upsertTemplate(data: {
      RETURNING *`,
     [data.name, data.description ?? null, data.content]
   );
+  getLog().debug({ templateName: data.name }, 'template_upserted');
   return result.rows[0];
 }

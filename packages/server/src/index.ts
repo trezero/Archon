@@ -27,8 +27,16 @@ import {
   loadConfig,
   logConfig,
   getPort,
+  createLogger,
 } from '@archon/core';
 import type { IPlatformAdapter } from '@archon/core';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('server');
+  return cachedLog;
+}
 
 /**
  * Creates an error handler for message processing failures.
@@ -40,18 +48,18 @@ function createMessageErrorHandler(
   conversationId: string
 ): (error: unknown) => Promise<void> {
   return async (error: unknown): Promise<void> => {
-    console.error(`[${platform}] Failed to process message:`, error);
+    getLog().error({ err: error, platform, conversationId }, 'message_processing_failed');
     try {
       const userMessage = classifyAndFormatError(error as Error);
       await adapter.sendMessage(conversationId, userMessage);
     } catch (sendError) {
-      console.error(`[${platform}] Failed to send error message to user:`, sendError);
+      getLog().error({ err: sendError, platform, conversationId }, 'error_message_send_failed');
     }
   };
 }
 
 async function main(): Promise<void> {
-  console.log('[App] Starting Remote Coding Agent');
+  getLog().info('server_starting');
 
   // Database auto-detected: SQLite (default) or PostgreSQL (if DATABASE_URL set)
   // No required environment variables - SQLite works out of the box
@@ -67,23 +75,23 @@ async function main(): Promise<void> {
   const hasCodexCredentials = process.env.CODEX_ID_TOKEN && process.env.CODEX_ACCESS_TOKEN;
 
   if (!hasClaudeCredentials && !hasCodexCredentials) {
-    console.error('[App] No AI assistant credentials found. Set Claude or Codex credentials.');
+    getLog().fatal('no_ai_credentials');
     process.exit(1);
   }
 
   if (!hasClaudeCredentials) {
-    console.warn('[App] Claude credentials not found. Claude assistant will be unavailable.');
+    getLog().warn('claude_credentials_missing');
   }
   if (!hasCodexCredentials) {
-    console.warn('[App] Codex credentials not found. Codex assistant will be unavailable.');
+    getLog().warn('codex_credentials_missing');
   }
 
   // Test database connection
   try {
     await pool.query('SELECT 1');
-    console.log('[Database] Connected successfully');
+    getLog().info('database_connected');
   } catch (error) {
-    console.error('[Database] Connection failed:', error);
+    getLog().fatal({ err: error }, 'database_connection_failed');
     process.exit(1);
   }
 
@@ -103,7 +111,7 @@ async function main(): Promise<void> {
   // Initialize conversation lock manager
   const maxConcurrent = parseInt(process.env.MAX_CONCURRENT_CONVERSATIONS ?? '10');
   const lockManager = new ConversationLockManager(maxConcurrent);
-  console.log(`[App] Lock manager initialized (max concurrent: ${String(maxConcurrent)})`);
+  getLog().info({ maxConcurrent }, 'lock_manager_initialized');
 
   // Initialize test adapter
   const testAdapter = new TestAdapter();
@@ -119,11 +127,7 @@ async function main(): Promise<void> {
   const hasGitHub = Boolean(process.env.GITHUB_TOKEN && process.env.WEBHOOK_SECRET);
 
   if (!hasTelegram && !hasDiscord && !hasGitHub) {
-    console.warn('[App] No platform adapters configured.');
-    console.warn('[App] Web UI is available. To enable other platforms:');
-    console.warn('[App]   - Telegram: Set TELEGRAM_BOT_TOKEN');
-    console.warn('[App]   - Discord: Set DISCORD_BOT_TOKEN');
-    console.warn('[App]   - GitHub: Set GITHUB_TOKEN and WEBHOOK_SECRET');
+    getLog().warn('no_platform_adapters_configured');
   }
 
   // Initialize GitHub adapter (conditional)
@@ -139,7 +143,7 @@ async function main(): Promise<void> {
     );
     await github.start();
   } else {
-    console.log('[GitHub] Adapter not initialized (missing GITHUB_TOKEN or WEBHOOK_SECRET)');
+    getLog().info('github_adapter_skipped');
   }
 
   // Initialize Discord adapter (conditional)
@@ -205,7 +209,7 @@ async function main(): Promise<void> {
 
     await discord.start();
   } else {
-    console.log('[Discord] Adapter not initialized (missing DISCORD_BOT_TOKEN)');
+    getLog().info('discord_adapter_skipped');
   }
 
   // Initialize Slack adapter (conditional)
@@ -262,7 +266,7 @@ async function main(): Promise<void> {
 
     await slack.start();
   } else {
-    console.log('[Slack] Adapter not initialized (missing SLACK_BOT_TOKEN or SLACK_APP_TOKEN)');
+    getLog().info('slack_adapter_skipped');
   }
 
   // Setup Hono server
@@ -271,11 +275,7 @@ async function main(): Promise<void> {
 
   // Global error handler for unhandled exceptions
   app.onError((err, c) => {
-    console.error('[Hono] Unhandled error:', {
-      error: err,
-      path: c.req.path,
-      method: c.req.method,
-    });
+    getLog().error({ err, path: c.req.path, method: c.req.method }, 'unhandled_request_error');
     return c.json({ error: 'Internal server error' }, 500);
   });
 
@@ -301,24 +301,16 @@ async function main(): Promise<void> {
         // Note: github.handleWebhook() has internal error handling that notifies users
         // This catch is a fallback for truly unexpected errors (e.g., signature verification bugs)
         github.handleWebhook(payload, signature).catch((error: unknown) => {
-          console.error('[GitHub] Webhook processing error:', {
-            error,
-            eventType,
-            deliveryId,
-          });
+          getLog().error({ err: error, eventType, deliveryId }, 'webhook_processing_error');
         });
 
         return c.text('OK', 200);
       } catch (error) {
-        console.error('[GitHub] Webhook endpoint error:', {
-          error,
-          eventType,
-          deliveryId,
-        });
+        getLog().error({ err: error, eventType, deliveryId }, 'webhook_endpoint_error');
         return c.json({ error: 'Internal server error' }, 500);
       }
     });
-    console.log('[Hono] GitHub webhook endpoint registered');
+    getLog().info('github_webhook_registered');
   }
 
   // Health check endpoints
@@ -331,7 +323,7 @@ async function main(): Promise<void> {
       await pool.query('SELECT 1');
       return c.json({ status: 'ok', database: 'connected' });
     } catch (error) {
-      console.error('[Health] Database health check failed:', error);
+      getLog().error({ err: error }, 'health_check_db_failed');
       return c.json({ status: 'error', database: 'disconnected' }, 500);
     }
   });
@@ -425,7 +417,7 @@ async function main(): Promise<void> {
     port,
     idleTimeout: 255, // Max value (seconds) - prevents SSE connections from being killed
   });
-  console.log(`[Hono] Server listening on port ${String(server.port)}`);
+  getLog().info({ port: server.port }, 'server_listening');
 
   // Initialize Telegram adapter (conditional)
   let telegram: TelegramAdapter | null = null;
@@ -446,12 +438,12 @@ async function main(): Promise<void> {
 
     await telegramAdapter.start();
   } else {
-    console.log('[Telegram] Adapter not initialized (missing TELEGRAM_BOT_TOKEN)');
+    getLog().info('telegram_adapter_skipped');
   }
 
   // Graceful shutdown
   const shutdown = (): void => {
-    console.log('[App] Shutting down gracefully...');
+    getLog().info('server_shutting_down');
     stopCleanupScheduler();
 
     // Stop adapters (these should not throw, but be defensive)
@@ -461,17 +453,17 @@ async function main(): Promise<void> {
       slack?.stop();
       webAdapter.stop();
     } catch (error) {
-      console.error('[App] Error stopping adapters:', error);
+      getLog().error({ err: error }, 'adapter_stop_error');
     }
 
     pool
       .end()
       .then(() => {
-        console.log('[Database] Connection pool closed');
+        getLog().info('database_pool_closed');
         process.exit(0);
       })
       .catch((error: unknown) => {
-        console.error('[Database] Error closing connection pool:', error);
+        getLog().error({ err: error }, 'database_pool_close_failed');
         process.exit(1);
       });
   };
@@ -486,15 +478,11 @@ async function main(): Promise<void> {
   if (slack) activePlatforms.push('Slack');
   if (github) activePlatforms.push('GitHub');
 
-  console.log('[App] Remote Coding Agent is ready!');
-  console.log(`[App] Active platforms: ${activePlatforms.join(', ')}`);
-  console.log(
-    '[App] Test endpoint available: POST http://localhost:' + String(port) + '/test/message'
-  );
+  getLog().info({ activePlatforms, port }, 'server_ready');
 }
 
 // Run the application
 main().catch(error => {
-  console.error('[App] Fatal error:', error);
+  getLog().fatal({ err: error }, 'startup_failed');
   process.exit(1);
 });

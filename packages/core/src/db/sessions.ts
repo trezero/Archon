@@ -4,6 +4,14 @@
 import { pool, getDialect } from './connection';
 import type { Session } from '../types';
 import type { TransitionTrigger } from '../state/session-transitions';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('db.sessions');
+  return cachedLog;
+}
 
 /**
  * Error thrown when a session is not found during update operations
@@ -107,13 +115,18 @@ export async function transitionSession(
     await deactivateSession(current.id, reason);
   }
 
-  return createSession({
+  const newSession = await createSession({
     conversation_id: conversationId,
     codebase_id: data.codebase_id,
     ai_assistant_type: data.ai_assistant_type,
     parent_session_id: current?.id,
     transition_reason: reason,
   });
+  getLog().debug(
+    { conversationId, reason, parentSessionId: current?.id, newSessionId: newSession.id },
+    'session_transitioned'
+  );
+  return newSession;
 }
 
 /**

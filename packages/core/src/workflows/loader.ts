@@ -8,6 +8,14 @@ import * as archonPaths from '../utils/archon-paths';
 import * as configLoader from '../config/config-loader';
 import { isValidCommandName } from './executor';
 import { BUNDLED_WORKFLOWS, isBinaryBuild } from '../defaults/bundled-defaults';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('workflow.loader');
+  return cachedLog;
+}
 
 /**
  * Parse YAML using Bun's native YAML parser
@@ -88,11 +96,11 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
     const raw = parseYaml(content) as Record<string, unknown>;
 
     if (!raw.name || typeof raw.name !== 'string') {
-      console.warn(`[WorkflowLoader] Missing 'name' in ${filename}`);
+      getLog().warn({ filename }, 'workflow_missing_name');
       return null;
     }
     if (!raw.description || typeof raw.description !== 'string') {
-      console.warn(`[WorkflowLoader] Missing 'description' in ${filename}`);
+      getLog().warn({ filename }, 'workflow_missing_description');
       return null;
     }
 
@@ -104,17 +112,17 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
     const hasPrompt = typeof raw.prompt === 'string' && raw.prompt.trim().length > 0;
 
     if (hasSteps && hasLoop) {
-      console.warn(`[WorkflowLoader] Cannot have both 'steps' and 'loop' in ${filename}`);
+      getLog().warn({ filename }, 'workflow_steps_and_loop_conflict');
       return null;
     }
 
     if (hasLoop && !hasPrompt) {
-      console.warn(`[WorkflowLoader] Loop workflow requires 'prompt' in ${filename}`);
+      getLog().warn({ filename }, 'workflow_loop_missing_prompt');
       return null;
     }
 
     if (!hasSteps && !hasLoop) {
-      console.warn(`[WorkflowLoader] Workflow must have 'steps' or 'loop' in ${filename}`);
+      getLog().warn({ filename }, 'workflow_missing_steps_or_loop');
       return null;
     }
 
@@ -123,11 +131,11 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
     if (hasLoop) {
       const loop = raw.loop as Record<string, unknown>;
       if (typeof loop.until !== 'string' || !loop.until.trim()) {
-        console.warn(`[WorkflowLoader] Loop requires 'until' signal in ${filename}`);
+        getLog().warn({ filename }, 'workflow_loop_missing_until');
         return null;
       }
       if (typeof loop.max_iterations !== 'number' || loop.max_iterations < 1) {
-        console.warn(`[WorkflowLoader] Loop requires positive 'max_iterations' in ${filename}`);
+        getLog().warn({ filename }, 'workflow_loop_invalid_max_iterations');
         return null;
       }
       loopConfig = {
@@ -149,7 +157,7 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
 
       // Reject workflow if any steps were invalid - report all errors at once
       if (steps.length !== (raw.steps as unknown[]).length) {
-        console.warn(`[WorkflowLoader] Workflow ${filename} failed validation:`, validationErrors);
+        getLog().warn({ filename, validationErrors }, 'workflow_step_validation_failed');
         return null;
       }
     }
@@ -174,9 +182,7 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
     // Guard for TypeScript type narrowing - if we reach here without steps,
     // it means step validation failed (see errors logged above at line 150)
     if (!steps) {
-      console.error(
-        `[WorkflowLoader] Workflow ${filename} failed step validation (see errors above)`
-      );
+      getLog().error({ filename }, 'workflow_step_validation_unexpected_failure');
       return null;
     }
 
@@ -193,10 +199,15 @@ function parseWorkflow(content: string, filename: string): WorkflowDefinition | 
     const linePattern = /line (\d+)/i;
     const lineMatch = linePattern.exec(err.message);
     const lineInfo = lineMatch ? ` (near line ${lineMatch[1]})` : '';
-    console.error(`[WorkflowLoader] Failed to parse ${filename}${lineInfo}:`, {
-      error: err.message,
-      contentPreview: content.slice(0, 200) + (content.length > 200 ? '...' : ''),
-    });
+    getLog().error(
+      {
+        err,
+        filename,
+        lineInfo: lineInfo || undefined,
+        contentPreview: content.slice(0, 200) + (content.length > 200 ? '...' : ''),
+      },
+      'workflow_parse_failed'
+    );
     return null;
   }
 }
@@ -227,16 +238,16 @@ async function loadWorkflowsFromDir(dirPath: string): Promise<Map<string, Workfl
 
         if (workflow) {
           workflows.set(entry, workflow);
-          console.log(`[WorkflowLoader] Loaded workflow: ${workflow.name}`);
+          getLog().debug({ workflowName: workflow.name, dirPath }, 'workflow_loaded');
         }
       }
     }
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     if (err.code === 'ENOENT') {
-      console.log(`[WorkflowLoader] Directory not found: ${dirPath}`);
+      getLog().debug({ dirPath }, 'workflow_directory_not_found');
     } else {
-      console.warn(`[WorkflowLoader] Error reading ${dirPath}: ${err.message}`);
+      getLog().warn({ err, dirPath }, 'workflow_directory_read_error');
     }
   }
 
@@ -258,12 +269,13 @@ function loadBundledWorkflows(): Map<string, WorkflowDefinition> {
     const workflow = parseWorkflow(content, filename);
     if (workflow) {
       workflows.set(filename, workflow);
-      console.log(`[WorkflowLoader] Loaded bundled workflow: ${workflow.name}`);
+      getLog().debug({ workflowName: workflow.name }, 'bundled_workflow_loaded');
     } else {
       // Bundled workflows should ALWAYS be valid - this indicates a build-time error
-      console.error(`[WorkflowLoader] CRITICAL: Bundled workflow failed to parse: ${filename}`);
-      console.error('[WorkflowLoader] This indicates build-time corruption or invalid YAML.');
-      console.error(`[WorkflowLoader] Content preview: ${content.slice(0, 200)}...`);
+      getLog().error(
+        { filename, contentPreview: content.slice(0, 200) + '...' },
+        'bundled_workflow_parse_failed'
+      );
     }
   }
 
@@ -289,12 +301,14 @@ export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition
     config = await configLoader.loadConfig(cwd);
   } catch (error) {
     const err = error as Error;
-    console.warn('[WorkflowLoader] Failed to load config, using defaults:', {
-      cwd,
-      error: err.message,
-      errorType: err.name,
-      note: 'Default workflows will be loaded. Check your .archon/config.yaml if this is unexpected.',
-    });
+    getLog().warn(
+      {
+        err,
+        cwd,
+        note: 'Default workflows will be loaded. Check your .archon/config.yaml if this is unexpected.',
+      },
+      'config_load_failed_using_defaults'
+    );
     config = { defaults: { loadDefaultWorkflows: true } };
   }
 
@@ -303,31 +317,29 @@ export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition
   if (loadDefaultWorkflows) {
     if (isBinaryBuild()) {
       // Binary: load from embedded bundled content
-      console.log('[WorkflowLoader] Loading bundled default workflows (binary mode)');
+      getLog().debug('loading_bundled_default_workflows');
       const bundledWorkflows = loadBundledWorkflows();
       for (const [filename, workflow] of bundledWorkflows) {
         workflowsByFile.set(filename, workflow);
       }
-      console.log(
-        `[WorkflowLoader] Loaded ${String(bundledWorkflows.size)} bundled default workflows`
-      );
+      getLog().info({ count: bundledWorkflows.size }, 'bundled_default_workflows_loaded');
     } else {
       // Bun: load from filesystem (development mode)
       const appDefaultsPath = archonPaths.getDefaultWorkflowsPath();
-      console.log(`[WorkflowLoader] Loading app defaults from: ${appDefaultsPath}`);
+      getLog().debug({ appDefaultsPath }, 'loading_app_default_workflows');
       try {
         await access(appDefaultsPath);
         const appWorkflows = await loadWorkflowsFromDir(appDefaultsPath);
         for (const [filename, workflow] of appWorkflows) {
           workflowsByFile.set(filename, workflow);
         }
-        console.log(`[WorkflowLoader] Loaded ${String(appWorkflows.size)} app default workflows`);
+        getLog().info({ count: appWorkflows.size }, 'app_default_workflows_loaded');
       } catch (error) {
         const err = error as NodeJS.ErrnoException;
         if (err.code !== 'ENOENT') {
-          console.warn(`[WorkflowLoader] Could not access app defaults: ${err.message}`);
+          getLog().warn({ err, appDefaultsPath }, 'app_defaults_access_error');
         } else {
-          console.log(`[WorkflowLoader] No app defaults directory found at: ${appDefaultsPath}`);
+          getLog().debug({ appDefaultsPath }, 'app_defaults_directory_not_found');
         }
       }
     }
@@ -337,7 +349,7 @@ export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition
   const [workflowFolder] = archonPaths.getWorkflowFolderSearchPaths();
   const workflowPath = join(cwd, workflowFolder);
 
-  console.log(`[WorkflowLoader] Searching for workflows in: ${workflowPath}`);
+  getLog().debug({ workflowPath }, 'searching_repo_workflows');
 
   try {
     await access(workflowPath);
@@ -346,7 +358,7 @@ export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition
     // Repo workflows override app defaults by exact filename match
     for (const [filename, workflow] of repoWorkflows) {
       if (workflowsByFile.has(filename)) {
-        console.log(`[WorkflowLoader] Repo workflow '${filename}' overrides app default`);
+        getLog().debug({ filename }, 'repo_workflow_overrides_default');
       }
       workflowsByFile.set(filename, workflow);
     }
@@ -360,22 +372,15 @@ export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition
         f => (f.endsWith('.yaml') || f.endsWith('.yml')) && !f.startsWith('archon-')
       );
       if (oldDefaults.length > 0) {
-        console.warn(
-          `[WorkflowLoader] DEPRECATED: Found ${String(oldDefaults.length)} old-style workflow defaults in ${repoDefaultsPath}`
+        getLog().warn(
+          { count: oldDefaults.length, repoDefaultsPath, hint: `rm -rf "${repoDefaultsPath}"` },
+          'deprecated_workflow_defaults_found'
         );
-        console.warn(
-          '[WorkflowLoader] These are from an older version. Delete the folder to use updated app defaults:'
-        );
-        console.warn(`[WorkflowLoader]   rm -rf "${repoDefaultsPath}"`);
       }
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       if (err.code !== 'ENOENT') {
-        console.warn('[WorkflowLoader] Could not check for deprecated defaults folder:', {
-          path: repoDefaultsPath,
-          error: err.message,
-          code: err.code,
-        });
+        getLog().warn({ err, repoDefaultsPath }, 'deprecated_defaults_check_failed');
       }
       // ENOENT (not found) is expected - no defaults folder exists
     }
@@ -386,10 +391,10 @@ export async function discoverWorkflows(cwd: string): Promise<WorkflowDefinition
         `Cannot access workflow folder at ${workflowPath}: ${err.message} (${err.code ?? 'unknown'})`
       );
     }
-    console.log(`[WorkflowLoader] No workflow folder found at: ${workflowPath}`);
+    getLog().debug({ workflowPath }, 'workflow_folder_not_found');
   }
 
   const workflows = Array.from(workflowsByFile.values());
-  console.log(`[WorkflowLoader] Total workflows loaded: ${String(workflows.length)}`);
+  getLog().info({ count: workflows.length }, 'workflows_discovery_complete');
   return workflows;
 }

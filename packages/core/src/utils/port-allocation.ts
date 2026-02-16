@@ -4,6 +4,14 @@
  */
 import { createHash } from 'crypto';
 import { isWorktreePath } from './git';
+import { createLogger } from './logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('port-allocation');
+  return cachedLog;
+}
 
 /**
  * Calculate hash-based port offset for worktree paths.
@@ -32,9 +40,7 @@ export async function getPort(): Promise<number> {
   if (envPort) {
     const parsedPort = Number(envPort);
     if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
-      console.error(
-        `[Hono] Invalid PORT environment variable: "${envPort}". Must be an integer between 1-65535.`
-      );
+      getLog().fatal({ envPort }, 'invalid_port_env_var');
       process.exit(1);
     }
     return parsedPort;
@@ -46,11 +52,10 @@ export async function getPort(): Promise<number> {
   if (await isWorktreePath(cwd)) {
     const offset = calculatePortOffset(cwd);
     const port = basePort + offset;
-    console.log(`[Hono] Worktree detected (${cwd})`);
-    console.log(`[Hono] Auto-allocated port: ${port} (base: ${basePort}, offset: +${offset})`);
+    getLog().info({ cwd, port, basePort, offset }, 'worktree_port_allocated');
     return port;
   }
 
-  console.log(`[Hono] Using default port: ${basePort} (not in worktree)`);
+  getLog().info({ port: basePort }, 'default_port_selected');
   return basePort;
 }

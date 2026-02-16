@@ -15,6 +15,14 @@
  */
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { IAssistantClient, MessageChunk } from '../types';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('client.claude');
+  return cachedLog;
+}
 
 /**
  * Content block type for assistant messages
@@ -42,7 +50,7 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
   const tokenVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_API_KEY', 'ANTHROPIC_API_KEY'] as const;
   const emptyTokens = tokenVars.filter(v => process.env[v] === '');
   if (emptyTokens.length > 0) {
-    console.warn(`[Claude] Warning: Empty token values found for: ${emptyTokens.join(', ')}`);
+    getLog().warn({ emptyTokens }, 'empty_token_values');
   }
 
   const hasExplicitTokens = Boolean(
@@ -55,29 +63,26 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
   let useGlobalAuth: boolean;
   if (globalAuthSetting === 'true') {
     useGlobalAuth = true;
-    console.log('[Claude] CLAUDE_USE_GLOBAL_AUTH=true, using global auth');
+    getLog().info({ authMode: 'global' }, 'using_global_auth');
   } else if (globalAuthSetting === 'false') {
     useGlobalAuth = false;
-    console.log('[Claude] CLAUDE_USE_GLOBAL_AUTH=false, using explicit tokens');
+    getLog().info({ authMode: 'explicit' }, 'using_explicit_tokens');
   } else if (globalAuthSetting !== undefined) {
     // Unrecognized value - warn and fall back to auto-detect
-    console.warn(
-      `[Claude] Unrecognized CLAUDE_USE_GLOBAL_AUTH value: "${globalAuthSetting}". ` +
-        'Expected "true" or "false". Using auto-detect.'
-    );
+    getLog().warn({ value: globalAuthSetting }, 'unrecognized_global_auth_setting');
     useGlobalAuth = !hasExplicitTokens;
   } else {
     // Not set - auto-detect: use tokens if present, otherwise global auth
     useGlobalAuth = !hasExplicitTokens;
     if (hasExplicitTokens) {
-      console.log('[Claude] CLAUDE_USE_GLOBAL_AUTH not set, using explicit tokens from env');
+      getLog().info({ authMode: 'explicit', autoDetected: true }, 'using_explicit_tokens');
     } else {
-      console.log('[Claude] CLAUDE_USE_GLOBAL_AUTH not set, no tokens found - using global auth');
+      getLog().info({ authMode: 'global', autoDetected: true }, 'using_global_auth');
     }
   }
 
   if (useGlobalAuth) {
-    // Filter out auth tokens - let Claude use global auth from `claude /login`
+    // Filter out auth tokens - let Claude use global auth from 'claude /login'
     const { CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_API_KEY, ANTHROPIC_API_KEY, ...envWithoutAuth } =
       process.env;
 
@@ -89,7 +94,7 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
     ].filter(Boolean);
 
     if (filtered.length > 0) {
-      console.log(`[Claude] Using global auth (filtered: ${filtered.join(', ')})`);
+      getLog().info({ filteredVars: filtered }, 'global_auth_filtered_tokens');
     }
 
     return envWithoutAuth;
@@ -143,16 +148,16 @@ export class ClaudeClient implements IAssistantClient {
           output.includes('--permission-mode');
 
         if (isError && !isInfoMessage) {
-          console.error(`[Claude stderr] ${output}`);
+          getLog().error({ stderr: output }, 'subprocess_error');
         }
       },
     };
 
     if (resumeSessionId) {
       options.resume = resumeSessionId;
-      console.log(`[Claude] Resuming session: ${resumeSessionId}`);
+      getLog().debug({ sessionId: resumeSessionId }, 'resuming_session');
     } else {
-      console.log(`[Claude] Starting new session in ${cwd}`);
+      getLog().debug({ cwd }, 'starting_new_session');
     }
 
     try {
@@ -186,7 +191,7 @@ export class ClaudeClient implements IAssistantClient {
         // Ignore other message types (system, thinking, tool_result, etc.)
       }
     } catch (error) {
-      console.error('[Claude] Query error:', error);
+      getLog().error({ err: error }, 'query_error');
       throw error;
     }
   }

@@ -1,4 +1,10 @@
-import { describe, test, expect, mock, beforeEach, spyOn } from 'bun:test';
+import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import { createMockLogger } from '../test/mocks/logger';
+
+const mockLogger = createMockLogger();
+mock.module('../utils/logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
 
 // Create mock query function
 const mockQuery = mock(async function* () {
@@ -18,6 +24,10 @@ describe('ClaudeClient', () => {
   beforeEach(() => {
     client = new ClaudeClient();
     mockQuery.mockClear();
+    mockLogger.info.mockClear();
+    mockLogger.warn.mockClear();
+    mockLogger.error.mockClear();
+    mockLogger.debug.mockClear();
   });
 
   describe('getType', () => {
@@ -208,8 +218,6 @@ describe('ClaudeClient', () => {
         throw error;
       });
 
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
-
       const consumeGenerator = async () => {
         for await (const _ of client.sendQuery('test', '/workspace')) {
           // consume
@@ -218,8 +226,7 @@ describe('ClaudeClient', () => {
 
       await expect(consumeGenerator()).rejects.toThrow('API connection failed');
 
-      expect(consoleSpy).toHaveBeenCalledWith('[Claude] Query error:', error);
-      consoleSpy.mockRestore();
+      expect(mockLogger.error).toHaveBeenCalledWith({ err: error }, 'query_error');
     });
 
     test('ignores empty text blocks', async () => {

@@ -10,6 +10,7 @@ import * as git from '@archon/core/utils/git';
 
 // Test the argument parsing logic used in cli.ts
 describe('CLI argument parsing', () => {
+  // Mirror the actual parseArgs options from cli.ts
   const parseCliArgs = (
     args: string[]
   ): { values: Record<string, unknown>; positionals: string[] } => {
@@ -18,6 +19,11 @@ describe('CLI argument parsing', () => {
       options: {
         cwd: { type: 'string', default: process.cwd() },
         help: { type: 'boolean', short: 'h' },
+        branch: { type: 'string', short: 'b' },
+        'no-worktree': { type: 'boolean' },
+        spawn: { type: 'boolean' },
+        quiet: { type: 'boolean', short: 'q' },
+        verbose: { type: 'boolean', short: 'v' },
       },
       allowPositionals: true,
       strict: false,
@@ -52,6 +58,35 @@ describe('CLI argument parsing', () => {
     it('should parse -h short flag', () => {
       const result = parseCliArgs(['-h']);
       expect(result.values.help).toBe(true);
+    });
+  });
+
+  describe('--quiet and --verbose flags', () => {
+    it('should parse --quiet flag', () => {
+      const result = parseCliArgs(['--quiet', 'workflow', 'list']);
+      expect(result.values.quiet).toBe(true);
+    });
+
+    it('should parse -q short flag', () => {
+      const result = parseCliArgs(['-q', 'workflow', 'list']);
+      expect(result.values.quiet).toBe(true);
+    });
+
+    it('should parse --verbose flag', () => {
+      const result = parseCliArgs(['--verbose', 'workflow', 'list']);
+      expect(result.values.verbose).toBe(true);
+    });
+
+    it('should parse -v short flag', () => {
+      const result = parseCliArgs(['-v', 'workflow', 'list']);
+      expect(result.values.verbose).toBe(true);
+    });
+
+    it('should parse both --quiet and --verbose when provided', () => {
+      const result = parseCliArgs(['-q', '-v', 'workflow', 'list']);
+      expect(result.values.quiet).toBe(true);
+      expect(result.values.verbose).toBe(true);
+      // Precedence (quiet > verbose) is enforced in cli.ts main(), not in parsing
     });
   });
 

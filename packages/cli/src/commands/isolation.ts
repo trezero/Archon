@@ -2,8 +2,15 @@
  * Isolation commands - list and cleanup worktrees
  */
 import * as isolationDb from '@archon/core/db/isolation-environments';
-import { getIsolationProvider } from '@archon/core';
+import { createLogger, getIsolationProvider } from '@archon/core';
 import { cleanupMergedWorktrees } from '@archon/core/services/cleanup-service';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('cli.isolation');
+  return cachedLog;
+}
 
 /**
  * Codebase info for display (extracted from isolation environment JOIN)
@@ -91,6 +98,7 @@ export async function isolationCleanupCommand(daysStale = 7): Promise<void> {
       cleaned++;
     } catch (error) {
       const err = error as Error;
+      getLog().warn({ err, envId: env.id, path: env.working_path }, 'worktree_destroy_failed');
       console.error(`  Status: Failed - ${err.message}`);
       failed++;
     }
@@ -133,6 +141,7 @@ export async function isolationCleanupMergedCommand(): Promise<void> {
       totalSkipped += result.skipped.length;
     } catch (error) {
       const err = error as Error;
+      getLog().warn({ err, codebaseId: codebase.id }, 'merged_cleanup_failed');
       console.error(`  Error processing codebase: ${err.message}`);
     }
   }

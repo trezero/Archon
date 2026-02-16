@@ -7,6 +7,14 @@
  */
 import { Codex } from '@openai/codex-sdk';
 import { IAssistantClient, MessageChunk } from '../types';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('client.codex');
+  return cachedLog;
+}
 
 // Singleton Codex instance
 let codexInstance: Codex | null = null;
@@ -70,22 +78,19 @@ export class CodexClient implements IAssistantClient {
     // Get or create thread (synchronous operations!)
     let thread;
     if (resumeSessionId) {
-      console.log(`[Codex] Resuming thread: ${resumeSessionId}`);
+      getLog().debug({ sessionId: resumeSessionId }, 'resuming_thread');
       try {
         // NOTE: resumeThread is synchronous, not async
         // IMPORTANT: Must pass options when resuming!
         thread = codex.resumeThread(resumeSessionId, threadOptions);
       } catch (error) {
-        console.error(
-          `[Codex] Failed to resume thread ${resumeSessionId}, creating new one:`,
-          error
-        );
+        getLog().error({ err: error, sessionId: resumeSessionId }, 'resume_thread_failed');
         // Fall back to creating new thread
         thread = codex.startThread(threadOptions);
         sessionResumeFailed = true;
       }
     } else {
-      console.log(`[Codex] Starting new thread in ${cwd}`);
+      getLog().debug({ cwd }, 'starting_new_thread');
       // NOTE: startThread is synchronous, not async
       thread = codex.startThread(threadOptions);
     }
@@ -107,12 +112,15 @@ export class CodexClient implements IAssistantClient {
         // Log progress for item.started (visibility fix for Codex appearing to hang)
         if (event.type === 'item.started') {
           const item = event.item;
-          console.log(`[Codex] ${event.type}: ${item.type}`, { id: item.id });
+          getLog().debug(
+            { eventType: event.type, itemType: item.type, itemId: item.id },
+            'item_started'
+          );
         }
 
         // Handle error events
         if (event.type === 'error') {
-          console.error('[Codex] Stream error:', event.message);
+          getLog().error({ message: event.message }, 'stream_error');
           // Don't send MCP timeout errors (they're optional)
           if (!event.message.includes('MCP client')) {
             yield { type: 'system', content: `⚠️ ${event.message}` };
@@ -124,7 +132,7 @@ export class CodexClient implements IAssistantClient {
         if (event.type === 'turn.failed') {
           const errorObj = event.error as { message?: string } | undefined;
           const errorMessage = errorObj?.message ?? 'Unknown error';
-          console.error('[Codex] Turn failed:', errorMessage);
+          getLog().error({ errorMessage }, 'turn_failed');
           yield {
             type: 'system',
             content: `❌ Turn failed: ${errorMessage}`,
@@ -137,11 +145,15 @@ export class CodexClient implements IAssistantClient {
           const item = event.item;
 
           // Log progress with context for debugging
-          const logContext: Record<string, unknown> = { id: item.id };
+          const logContext: Record<string, unknown> = {
+            eventType: event.type,
+            itemType: item.type,
+            itemId: item.id,
+          };
           if (item.type === 'command_execution' && item.command) {
             logContext.command = item.command;
           }
-          console.log(`[Codex] ${event.type}: ${item.type}`, logContext);
+          getLog().debug(logContext, 'item_completed');
 
           switch (item.type) {
             case 'agent_message':
@@ -171,7 +183,7 @@ export class CodexClient implements IAssistantClient {
 
         // Handle turn.completed event
         if (event.type === 'turn.completed') {
-          console.log('[Codex] Turn completed');
+          getLog().debug('turn_completed');
           // Yield result with thread ID for persistence
           yield { type: 'result', sessionId: thread.id ?? undefined };
           // CRITICAL: Break out of event loop - turn is complete!
@@ -180,7 +192,7 @@ export class CodexClient implements IAssistantClient {
         }
       }
     } catch (error) {
-      console.error('[Codex] Query error:', error);
+      getLog().error({ err: error }, 'query_error');
       throw new Error(`Codex query failed: ${(error as Error).message}`);
     }
   }

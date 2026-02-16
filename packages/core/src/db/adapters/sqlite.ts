@@ -5,6 +5,14 @@ import { Database, type SQLQueryBindings } from 'bun:sqlite';
 import { existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import type { IDatabase, QueryResult, SqlDialect } from './types';
+import { createLogger } from '../../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('db.sqlite');
+  return cachedLog;
+}
 
 export class SqliteAdapter implements IDatabase {
   private db: Database;
@@ -75,9 +83,7 @@ export class SqliteAdapter implements IDatabase {
       }
     } catch (error) {
       const err = error as Error;
-      console.error('[SQLite] Query error:', err.message);
-      console.error('[SQLite] SQL:', convertedSql);
-      console.error('[SQLite] Params:', params);
+      getLog().error({ err, sql: convertedSql, params }, 'query_error');
       throw error;
     }
   }
@@ -132,7 +138,7 @@ export class SqliteAdapter implements IDatabase {
         this.db.run('ALTER TABLE remote_agent_conversations ADD COLUMN hidden INTEGER DEFAULT 0');
       }
     } catch (e: unknown) {
-      console.warn('[SQLite] Migration for conversations columns failed:', (e as Error).message);
+      getLog().warn({ err: e as Error }, 'migration_conversations_columns_failed');
     }
 
     // Workflow runs columns
@@ -148,7 +154,7 @@ export class SqliteAdapter implements IDatabase {
         );
       }
     } catch (e: unknown) {
-      console.warn('[SQLite] Migration for workflow_runs columns failed:', (e as Error).message);
+      getLog().warn({ err: e as Error }, 'migration_workflow_runs_columns_failed');
     }
 
     // Sessions columns
@@ -162,7 +168,7 @@ export class SqliteAdapter implements IDatabase {
         this.db.run('ALTER TABLE remote_agent_sessions ADD COLUMN ended_reason TEXT');
       }
     } catch (e: unknown) {
-      console.warn('[SQLite] Migration for sessions columns failed:', (e as Error).message);
+      getLog().warn({ err: e as Error }, 'session_columns_migration_failed');
     }
   }
 
@@ -312,7 +318,7 @@ export class SqliteAdapter implements IDatabase {
       CREATE INDEX IF NOT EXISTS idx_sessions_conversation_started
         ON remote_agent_sessions(conversation_id, started_at DESC);
     `);
-    console.log('[SQLite] Schema initialized successfully');
+    getLog().info('schema_initialized');
   }
 }
 

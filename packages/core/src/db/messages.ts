@@ -2,6 +2,14 @@
  * Database operations for conversation messages (Web UI history)
  */
 import { pool, getDialect } from './connection';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('db.messages');
+  return cachedLog;
+}
 
 export interface MessageRow {
   id: string;
@@ -35,6 +43,7 @@ export async function addMessage(
       `Failed to persist message: INSERT returned no rows (conversation: ${conversationId})`
     );
   }
+  getLog().debug({ conversationId, role, messageId: row.id }, 'message_persisted');
   return row;
 }
 

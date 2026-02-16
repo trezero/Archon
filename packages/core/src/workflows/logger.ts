@@ -3,6 +3,14 @@
  */
 import { appendFile, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('workflow.file-logger');
+  return cachedLog;
+}
 
 // Track whether we've warned about logging failures (warn once per session)
 let logWarningShown = false;
@@ -66,14 +74,11 @@ export async function logWorkflowEvent(
     await appendFile(logPath, JSON.stringify(fullEvent) + '\n');
   } catch (error) {
     const err = error as Error;
-    console.error(`[WorkflowLogger] Failed to write log: ${err.message}`);
+    getLog().error({ err, logPath }, 'log_write_failed');
 
     // Warn user once per session about logging failures
     if (!logWarningShown) {
-      console.warn(
-        '[WorkflowLogger] WARNING: Workflow logs may be incomplete. ' +
-          `Check disk space and permissions at ${logPath}`
-      );
+      getLog().warn({ logPath }, 'workflow_logs_may_be_incomplete');
       logWarningShown = true;
     }
     // Don't throw - logging shouldn't break workflow execution

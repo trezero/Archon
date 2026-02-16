@@ -3,7 +3,14 @@
  * Bridge between the orchestrator and the React frontend via Server-Sent Events.
  */
 import type { IWebPlatformAdapter, MessageChunk, WorkflowEmitterEvent } from '@archon/core';
-import { getWorkflowEventEmitter } from '@archon/core';
+import { getWorkflowEventEmitter, createLogger } from '@archon/core';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('adapter.web');
+  return cachedLog;
+}
 
 interface SSEWriter {
   writeSSE(data: { data: string; event?: string; id?: string }): Promise<void>;
@@ -46,7 +53,7 @@ export class WebAdapter implements IWebPlatformAdapter {
     const existing = this.streams.get(conversationId);
     if (existing && !existing.closed) {
       existing.close().catch((e: unknown) => {
-        console.warn('[Web] SSE write failed', { conversationId, error: (e as Error).message });
+        getLog().warn({ conversationId, err: e }, 'sse_write_failed');
       });
     }
     this.streams.set(conversationId, stream);
@@ -119,10 +126,7 @@ export class WebAdapter implements IWebPlatformAdapter {
 
     // Prevent unbounded buffer growth — force flush if too many segments
     if (buf.segments.length > 50) {
-      console.warn('[Web] Assistant buffer overflow, force-flushing', {
-        conversationId,
-        segments: buf.segments.length,
-      });
+      getLog().warn({ conversationId, segments: buf.segments.length }, 'assistant_buffer_overflow');
       void this.flushAssistantMessage(conversationId);
     }
 
@@ -139,10 +143,7 @@ export class WebAdapter implements IWebPlatformAdapter {
       try {
         callback(message);
       } catch (e: unknown) {
-        console.warn('[Web] Output callback failed', {
-          conversationId,
-          error: (e as Error).message,
-        });
+        getLog().warn({ conversationId, err: e }, 'output_callback_failed');
       }
     }
 
@@ -227,7 +228,7 @@ export class WebAdapter implements IWebPlatformAdapter {
       }
     }, 300_000);
 
-    console.log('[Web] Web adapter ready');
+    getLog().info('adapter_ready');
   }
 
   stop(): void {
@@ -246,13 +247,10 @@ export class WebAdapter implements IWebPlatformAdapter {
     for (const [id, stream] of this.streams) {
       if (!stream.closed) {
         stream.close().catch((e: unknown) => {
-          console.warn('[Web] SSE write failed', {
-            conversationId: id,
-            error: (e as Error).message,
-          });
+          getLog().warn({ conversationId: id, err: e }, 'sse_close_failed');
         });
       }
-      console.log(`[Web] Closed stream for ${id}`);
+      getLog().debug({ conversationId: id }, 'sse_stream_closed');
     }
     this.streams.clear();
     this.messageBuffer.clear();
@@ -260,7 +258,7 @@ export class WebAdapter implements IWebPlatformAdapter {
       clearTimeout(timer);
     }
     this.cleanupTimers.clear();
-    console.log('[Web] Web adapter stopped');
+    getLog().info('adapter_stopped');
   }
 
   /**
@@ -282,10 +280,7 @@ export class WebAdapter implements IWebPlatformAdapter {
     const stream = this.streams.get(conversationId);
     if (stream && !stream.closed) {
       stream.writeSSE({ data: event }).catch((e: unknown) => {
-        console.warn('[Web] Critical SSE write failed, buffering for reconnect', {
-          conversationId,
-          error: (e as Error).message,
-        });
+        getLog().warn({ conversationId, err: e }, 'sse_lock_event_write_failed');
         this.bufferMessage(conversationId, event);
         this.streams.delete(conversationId);
       });
@@ -428,9 +423,10 @@ export class WebAdapter implements IWebPlatformAdapter {
 
       default: {
         const exhaustiveCheck: never = event;
-        console.warn('[Web] Unhandled workflow event type', {
-          type: (exhaustiveCheck as { type: string }).type,
-        });
+        getLog().warn(
+          { type: (exhaustiveCheck as { type: string }).type },
+          'unhandled_workflow_event'
+        );
         return null;
       }
     }
@@ -443,10 +439,7 @@ export class WebAdapter implements IWebPlatformAdapter {
     const stream = this.streams.get(conversationId);
     if (stream && !stream.closed) {
       stream.writeSSE({ data: event }).catch((e: unknown) => {
-        console.warn('[Web] SSE workflow event write failed, buffering for reconnect', {
-          conversationId,
-          error: (e as Error).message,
-        });
+        getLog().warn({ conversationId, err: e }, 'sse_workflow_event_write_failed');
         this.bufferMessage(conversationId, event);
         this.streams.delete(conversationId);
       });
@@ -465,10 +458,10 @@ export class WebAdapter implements IWebPlatformAdapter {
 
     const dbId = this.dbIdMap.get(conversationId);
     if (!dbId) {
-      console.warn('[Web] Cannot persist assistant message: no DB ID mapping', {
-        conversationId,
-        segmentCount: buf.segments.length,
-      });
+      getLog().warn(
+        { conversationId, segmentCount: buf.segments.length },
+        'assistant_persist_no_db_id'
+      );
       return;
     }
 
@@ -501,10 +494,7 @@ export class WebAdapter implements IWebPlatformAdapter {
       }
       this.dispatchBuffer.delete(conversationId);
     } catch (e: unknown) {
-      console.error('[Web] Message persistence failed (data loss)', {
-        conversationId,
-        error: (e as Error).message,
-      });
+      getLog().error({ conversationId, err: e }, 'message_persistence_failed');
       void this.emitSSE(
         conversationId,
         JSON.stringify({
@@ -532,10 +522,10 @@ export class WebAdapter implements IWebPlatformAdapter {
           const parentStream = this.streams.get(parentConversationId);
           if (parentStream && !parentStream.closed) {
             parentStream.writeSSE({ data: sseEvent }).catch((e: unknown) => {
-              console.warn('[Web] SSE bridge write failed, buffering for reconnect', {
-                conversationId: parentConversationId,
-                error: (e as Error).message,
-              });
+              getLog().warn(
+                { conversationId: parentConversationId, err: e },
+                'sse_bridge_write_failed'
+              );
               this.bufferMessage(parentConversationId, sseEvent);
               this.streams.delete(parentConversationId);
             });
@@ -568,12 +558,10 @@ export class WebAdapter implements IWebPlatformAdapter {
       try {
         await stream.writeSSE({ data: messages[i] });
       } catch (e: unknown) {
-        console.warn('[Web] SSE flush failed, re-buffering remaining messages', {
-          conversationId,
-          error: (e as Error).message,
-          flushed: i,
-          remaining: messages.length - i,
-        });
+        getLog().warn(
+          { conversationId, err: e, flushed: i, remaining: messages.length - i },
+          'sse_flush_failed'
+        );
         const remaining = messages.slice(i);
         for (const msg of remaining) {
           this.bufferMessage(conversationId, msg);
@@ -607,10 +595,7 @@ export class WebAdapter implements IWebPlatformAdapter {
           this.outputCallbacks.delete(conversationId);
         }
       } catch (e: unknown) {
-        console.warn('[Web] Cleanup timer failed', {
-          conversationId,
-          error: (e as Error).message,
-        });
+        getLog().warn({ conversationId, err: e }, 'cleanup_timer_failed');
       }
     }, delayMs);
 
@@ -623,10 +608,7 @@ export class WebAdapter implements IWebPlatformAdapter {
       try {
         await stream.writeSSE({ data: event });
       } catch (e: unknown) {
-        console.warn('[Web] SSE write failed, buffering event', {
-          conversationId,
-          error: (e as Error).message,
-        });
+        getLog().warn({ conversationId, err: e }, 'sse_write_failed');
         this.removeStream(conversationId);
         this.bufferMessage(conversationId, event);
       }
@@ -640,7 +622,7 @@ export class WebAdapter implements IWebPlatformAdapter {
 
   private bufferMessage(conversationId: string, event: string): void {
     if (!this.messageBuffer.has(conversationId) && this.messageBuffer.size > 200) {
-      console.warn('[Web] Too many buffered conversations, skipping buffer', { conversationId });
+      getLog().warn({ conversationId }, 'buffer_conversation_limit_exceeded');
       return;
     }
     const buffer = this.messageBuffer.get(conversationId) ?? [];
@@ -648,7 +630,7 @@ export class WebAdapter implements IWebPlatformAdapter {
     this.messageBuffer.set(conversationId, buffer);
     // Cap buffer size to prevent memory leaks
     if (buffer.length > 100) {
-      console.warn('[Web] Message buffer overflow, dropping oldest event', { conversationId });
+      getLog().warn({ conversationId }, 'message_buffer_overflow');
       buffer.shift();
     }
   }

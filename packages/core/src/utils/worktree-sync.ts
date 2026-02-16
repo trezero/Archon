@@ -4,6 +4,14 @@ import { stat } from 'fs/promises';
 import type { Stats } from 'fs';
 import { join } from 'path';
 import { loadRepoConfig } from '../config/config-loader';
+import { createLogger } from './logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('worktree-sync');
+  return cachedLog;
+}
 
 /** Check if an error is ENOENT (file not found) */
 function isNotFoundError(error: unknown): boolean {
@@ -13,11 +21,7 @@ function isNotFoundError(error: unknown): boolean {
 /** Log a warning for filesystem errors (non-ENOENT) */
 function logStatWarning(context: string, path: string, error: unknown): void {
   const err = error as NodeJS.ErrnoException;
-  console.warn(`[WorktreeSync] Could not stat ${context} .archon`, {
-    path,
-    errorCode: err.code,
-    errorMessage: err.message,
-  });
+  getLog().warn({ context, path, err, code: err.code }, 'stat_failed');
 }
 
 /** Safely stat a path, returning null for ENOENT or logging warnings for other errors */
@@ -90,10 +94,7 @@ export async function syncArchonToWorktree(worktreePath: string): Promise<boolea
       const repoConfig = await loadRepoConfig(canonicalRepoPath);
       copyFiles = repoConfig.worktree?.copyFiles;
     } catch (error) {
-      console.warn('[WorktreeSync] Could not load repo config, using default', {
-        canonicalRepoPath,
-        errorMessage: (error as Error).message,
-      });
+      getLog().warn({ canonicalRepoPath, err: error }, 'repo_config_load_failed_using_default');
       copyFiles = ['.archon'];
     }
 
@@ -104,21 +105,18 @@ export async function syncArchonToWorktree(worktreePath: string): Promise<boolea
       normalizeCopyFiles(copyFiles)
     );
 
-    console.log('[WorktreeSync] Synced .archon to worktree', {
-      canonicalRepo: canonicalRepoPath,
-      worktree: worktreePath,
-      filesCopied: copied.length,
-    });
+    getLog().info(
+      { canonicalRepo: canonicalRepoPath, worktree: worktreePath, filesCopied: copied.length },
+      'archon_synced_to_worktree'
+    );
 
     return true;
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
-    console.error('[WorktreeSync] Failed to sync .archon', {
-      worktreePath,
-      errorName: err.name,
-      errorCode: err.code ?? 'UNKNOWN',
-      errorMessage: err.message,
-    });
+    getLog().error(
+      { worktreePath, err, errorName: err.name, code: err.code ?? 'UNKNOWN' },
+      'archon_sync_failed'
+    );
     return false;
   }
 }

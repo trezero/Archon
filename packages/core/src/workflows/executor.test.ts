@@ -5,6 +5,7 @@ import { tmpdir } from 'os';
 import type { IPlatformAdapter } from '../types';
 import type { WorkflowDefinition } from './types';
 import { createQueryResult } from '../test/mocks/database';
+import { createMockLogger } from '../test/mocks/logger';
 
 // Mock at the connection level to avoid polluting db/workflows module
 const mockQuery = mock((query: string) => {
@@ -49,8 +50,11 @@ mock.module('../db/connection', () => ({
   },
 }));
 
-// Note: We use the REAL logger (not mocked) so it writes to temp directories
-// This avoids test pollution with logger.test.ts
+// Mock Pino logger so executor log calls can be asserted
+const mockLogger = createMockLogger();
+mock.module('../utils/logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
 
 // Mock AI client
 const mockSendQuery = mock(function* () {
@@ -97,6 +101,10 @@ describe('Workflow Executor', () => {
     mockSendQuery.mockClear();
     mockGetAssistantClient.mockClear();
     (mockPlatform.sendMessage as ReturnType<typeof mock>).mockClear();
+    mockLogger.error.mockClear();
+    mockLogger.warn.mockClear();
+    mockLogger.info.mockClear();
+    mockLogger.debug.mockClear();
 
     // Mock commitAllChanges to return false (no changes to commit) by default
     // This prevents sendCriticalMessage retries from causing test timeouts
@@ -1419,11 +1427,7 @@ describe('Workflow Executor', () => {
     });
 
     it('should log errors with context when sendMessage fails', async () => {
-      const errorLogs: unknown[][] = [];
-      const originalConsoleError = console.error;
-      console.error = mock((...args: unknown[]) => {
-        errorLogs.push(args);
-      });
+      mockLogger.error.mockClear();
 
       const sendMessageMock = mock(() => Promise.reject(new Error('API timeout')));
       mockPlatform.sendMessage = sendMessageMock;
@@ -1437,19 +1441,15 @@ describe('Workflow Executor', () => {
         'db-conv-id'
       );
 
-      // Restore console.error
-      console.error = originalConsoleError;
-
-      // Verify error was logged with correct structure
-      const safeSendLogs = errorLogs.filter(
-        log => log[0] === '[WorkflowExecutor] Failed to send message'
+      // Verify error was logged via Pino logger with correct structure
+      const safeSendLogs = mockLogger.error.mock.calls.filter(
+        (call: unknown[]) => call[1] === 'Failed to send message'
       );
       expect(safeSendLogs.length).toBeGreaterThan(0);
 
-      // Check that context is included
-      const logContext = safeSendLogs[0][1] as Record<string, unknown>;
+      // Check that context is included in the first argument (Pino object)
+      const logContext = safeSendLogs[0][0] as Record<string, unknown>;
       expect(logContext).toHaveProperty('conversationId', 'conv-123');
-      expect(logContext).toHaveProperty('error', 'API timeout');
       expect(logContext).toHaveProperty('errorType');
       expect(logContext).toHaveProperty('platformType');
     });

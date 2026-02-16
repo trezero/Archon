@@ -7,6 +7,15 @@
  * - Explicit queueing with observability
  */
 
+import { createLogger } from './logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('conversation-lock');
+  return cachedLog;
+}
+
 /**
  * Represents a queued message waiting for processing
  */
@@ -38,7 +47,7 @@ export class ConversationLockManager {
     this.activeConversations = new Map<string, Promise<void>>();
     this.messageQueues = new Map<string, QueuedMessage[]>();
     this.maxConcurrent = maxConcurrent;
-    console.log('[ConversationLock] Initialized', { maxConcurrent });
+    getLog().info({ maxConcurrent }, 'initialized');
   }
 
   /**
@@ -59,40 +68,38 @@ export class ConversationLockManager {
 
     // Check if at max capacity - queue if yes
     if (this.activeConversations.size >= this.maxConcurrent) {
-      console.log(
-        `[ConversationLock] At max capacity (${String(this.maxConcurrent)}), queuing ${conversationId}`
-      );
+      getLog().info({ maxConcurrent: this.maxConcurrent, conversationId }, 'queued_at_capacity');
       this.queueMessage(conversationId, handler);
       return { status: 'queued-capacity' };
     }
 
     // Execute immediately
-    console.log(`[ConversationLock] Starting ${conversationId}`, {
-      active: this.activeConversations.size + 1,
-      queued: this.getQueuedCount(),
-    });
+    getLog().debug(
+      { conversationId, active: this.activeConversations.size + 1, queued: this.getQueuedCount() },
+      'conversation_started'
+    );
 
     // Store Promise in Map BEFORE awaiting (prevents race conditions)
     const promise = handler()
       .catch(error => {
-        console.error(`[ConversationLock] Error in ${conversationId}:`, error);
+        getLog().error({ err: error, conversationId }, 'conversation_handler_error');
       })
       .finally(() => {
         // Clean up active conversation
         this.activeConversations.delete(conversationId);
-        console.log(`[ConversationLock] Completed ${conversationId}`, {
-          active: this.activeConversations.size,
-          queued: this.getQueuedCount(),
-        });
+        getLog().debug(
+          { conversationId, active: this.activeConversations.size, queued: this.getQueuedCount() },
+          'conversation_completed'
+        );
 
         // Process next queued message for this conversation
         this.processQueue(conversationId).catch(error => {
-          console.error(`[ConversationLock] Queue processing error for ${conversationId}:`, error);
+          getLog().error({ err: error, conversationId }, 'queue_processing_error');
         });
 
         // Also check if we can process any other queued conversations (global capacity freed up)
         this.processGlobalQueue().catch(error => {
-          console.error('[ConversationLock] Global queue processing error:', error);
+          getLog().error({ err: error }, 'global_queue_processing_error');
         });
       });
 
@@ -116,9 +123,7 @@ export class ConversationLockManager {
       handler,
       timestamp: Date.now(),
     });
-    console.log(`[ConversationLock] Queued message for ${conversationId}`, {
-      queueLength: queue.length,
-    });
+    getLog().debug({ conversationId, queueLength: queue.length }, 'message_queued');
   }
 
   /**
@@ -135,10 +140,7 @@ export class ConversationLockManager {
     const next = queue.shift();
     if (!next) return;
     const waitTime = Date.now() - next.timestamp;
-    console.log('[ConversationLock] Processing queued message', {
-      conversationId,
-      waitTimeMs: waitTime,
-    });
+    getLog().debug({ conversationId, waitTimeMs: waitTime }, 'queued_message_processing');
 
     await this.acquireLock(conversationId, next.handler);
   }

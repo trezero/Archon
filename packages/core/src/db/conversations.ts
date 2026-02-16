@@ -4,6 +4,14 @@
 import { pool, getDialect } from './connection';
 import type { Conversation } from '../types';
 import { ConversationNotFoundError } from '../types';
+import { createLogger } from '../utils/logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('db.conversations');
+  return cachedLog;
+}
 
 /**
  * Get a conversation by its database ID
@@ -60,9 +68,7 @@ export async function getOrCreateConversation(
       inheritedCodebaseId = parent.rows[0].codebase_id;
       inheritedCwd = parent.rows[0].cwd;
       assistantType = parent.rows[0].ai_assistant_type;
-      console.log(
-        `[DB] Inheriting context from parent conversation: codebase=${inheritedCodebaseId ?? 'none'}, cwd=${inheritedCwd ?? 'none'}`
-      );
+      getLog().debug({ inheritedCodebaseId, inheritedCwd }, 'inheriting_parent_context');
     }
   }
 
@@ -129,10 +135,7 @@ export async function updateConversation(
   );
 
   if (result.rowCount === 0) {
-    console.error(`[DB] updateConversation: No rows updated for id=${id}`, {
-      fields,
-      updates,
-    });
+    getLog().error({ conversationId: id, fields, updates }, 'update_conversation_not_found');
     throw new ConversationNotFoundError(id);
   }
 }

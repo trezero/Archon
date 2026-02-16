@@ -1,5 +1,6 @@
 import { mock, describe, test, expect, beforeEach, afterEach, afterAll, spyOn } from 'bun:test';
 import { MockPlatformAdapter } from '../test/mocks/platform';
+import { createMockLogger } from '../test/mocks/logger';
 import { Conversation, Codebase, Session, ConversationNotFoundError } from '../types';
 import type { WorkflowDefinition } from '../workflows/types';
 import { join } from 'path';
@@ -10,6 +11,12 @@ import * as gitUtils from '../utils/git';
  * Using mock.module() for internal modules causes test isolation issues since
  * Bun's mock.module() persists globally across test files.
  */
+
+// Mock logger before importing the module under test
+const mockLogger = createMockLogger();
+mock.module('../utils/logger', () => ({
+  createLogger: mock(() => mockLogger),
+}));
 
 // Setup mocks before importing the module under test
 const mockGetOrCreateConversation = mock(() => Promise.resolve(null));
@@ -245,6 +252,15 @@ describe('orchestrator', () => {
 
   beforeEach(() => {
     platform = new MockPlatformAdapter();
+
+    // Clear logger mocks
+    mockLogger.fatal.mockClear();
+    mockLogger.error.mockClear();
+    mockLogger.warn.mockClear();
+    mockLogger.info.mockClear();
+    mockLogger.debug.mockClear();
+    mockLogger.trace.mockClear();
+
     mockGetOrCreateConversation.mockClear();
     mockGetConversationByPlatformId.mockClear();
     mockUpdateConversation.mockClear();
@@ -1781,16 +1797,15 @@ Labels: correct`;
       mockGetAssistantClient.mockReturnValue(mockClient);
       mockIsolationEnvGetById.mockResolvedValue(null);
 
-      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
-
       // Should not throw - ConversationNotFoundError is handled gracefully
       await handleMessage(platform, 'thread-123', 'hello', undefined, undefined, 'channel-456');
 
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Thread inheritance failed'));
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ conversationId: 'conv-thread' }),
+        'thread_inheritance_failed'
+      );
       // Conversation NOT reloaded since update failed
       expect(mockGetOrCreateConversation).toHaveBeenCalledTimes(1);
-
-      warnSpy.mockRestore();
     });
   });
 });

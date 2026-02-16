@@ -6,6 +6,14 @@
  */
 
 import telegramifyMarkdown from 'telegramify-markdown';
+import { createLogger } from './logger';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('telegram-markdown');
+  return cachedLog;
+}
 
 /**
  * Convert GitHub-flavored markdown to Telegram MarkdownV2 format
@@ -36,7 +44,7 @@ export function convertToTelegramMarkdown(markdown: string): string {
 
     return result;
   } catch (error) {
-    console.warn('[TelegramMarkdown] Conversion failed, returning original:', error);
+    getLog().warn({ err: error }, 'conversion_failed');
     return escapeMarkdownV2(markdown);
   }
 }

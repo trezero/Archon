@@ -11,8 +11,15 @@ import {
   ThreadAutoArchiveDuration,
 } from 'discord.js';
 import type { IPlatformAdapter } from '@archon/core';
-import { isDiscordUserAuthorized } from '@archon/core';
+import { isDiscordUserAuthorized, createLogger } from '@archon/core';
 import { parseAllowedUserIds } from '@archon/core/utils/discord-auth';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('adapter.discord');
+  return cachedLog;
+}
 
 const MAX_LENGTH = 2000;
 
@@ -40,12 +47,12 @@ export class DiscordAdapter implements IPlatformAdapter {
     // Parse Discord user whitelist (optional - empty = open access)
     this.allowedUserIds = parseAllowedUserIds(process.env.DISCORD_ALLOWED_USER_IDS);
     if (this.allowedUserIds.length > 0) {
-      console.log(`[Discord] User whitelist enabled (${String(this.allowedUserIds.length)} users)`);
+      getLog().info({ userCount: this.allowedUserIds.length }, 'whitelist_enabled');
     } else {
-      console.log('[Discord] User whitelist disabled (open access)');
+      getLog().info('whitelist_disabled');
     }
 
-    console.log(`[Discord] Adapter initialized (mode: ${mode})`);
+    getLog().info({ mode }, 'adapter_initialized');
   }
 
   /**
@@ -53,20 +60,18 @@ export class DiscordAdapter implements IPlatformAdapter {
    * Automatically splits messages longer than 2000 characters
    */
   async sendMessage(channelId: string, message: string): Promise<void> {
-    console.log(`[Discord] sendMessage called, length=${String(message.length)}`);
+    getLog().debug({ channelId, messageLength: message.length }, 'send_message');
 
     const channel = await this.client.channels.fetch(channelId);
     if (!channel?.isSendable()) {
-      console.error('[Discord] Invalid or non-sendable channel:', channelId);
+      getLog().error({ channelId }, 'invalid_or_non_sendable_channel');
       return;
     }
 
     if (message.length <= MAX_LENGTH) {
       await channel.send(message);
     } else {
-      console.log(
-        `[Discord] Message too long (${String(message.length)}), splitting by paragraphs`
-      );
+      getLog().debug({ messageLength: message.length }, 'message_splitting');
       const chunks = this.splitIntoParagraphChunks(message, MAX_LENGTH - 100);
 
       for (const chunk of chunks) {
@@ -123,7 +128,7 @@ export class DiscordAdapter implements IPlatformAdapter {
       }
     }
 
-    console.log(`[Discord] Split into ${String(finalChunks.length)} chunks`);
+    getLog().debug({ chunkCount: finalChunks.length }, 'message_split_complete');
     return finalChunks;
   }
 
@@ -196,7 +201,7 @@ export class DiscordAdapter implements IPlatformAdapter {
         return `${author}: ${msg.content}`;
       });
     } catch (error) {
-      console.error('[Discord] Failed to fetch thread history:', error);
+      getLog().error({ err: error, channelId: message.channel.id }, 'thread_history_fetch_failed');
       return [];
     }
   }
@@ -278,7 +283,7 @@ export class DiscordAdapter implements IPlatformAdapter {
       const content = this.stripBotMention(message);
       const threadName = this.generateThreadName(content);
 
-      console.log(`[Discord] Creating thread "${threadName}" from message ${message.id}`);
+      getLog().info({ threadName, messageId: message.id }, 'thread_creating');
 
       const thread = await message.startThread({
         name: threadName,
@@ -286,11 +291,11 @@ export class DiscordAdapter implements IPlatformAdapter {
         reason: 'Bot response thread',
       });
 
-      console.log(`[Discord] Thread created: ${thread.id}`);
+      getLog().info({ threadId: thread.id }, 'thread_created');
       return thread.id;
     } catch (error) {
       const err = error as Error;
-      console.error('[Discord] Failed to create thread:', err.message);
+      getLog().error({ err }, 'thread_creation_failed');
       // Fall back to channel ID if thread creation fails
       return message.channelId;
     }
@@ -337,7 +342,7 @@ export class DiscordAdapter implements IPlatformAdapter {
       if (!isDiscordUserAuthorized(userId, this.allowedUserIds)) {
         // Log unauthorized attempt (mask user ID for privacy)
         const maskedId = userId ? `${userId.slice(0, 4)}***` : 'unknown';
-        console.log(`[Discord] Unauthorized message from user ${maskedId}`);
+        getLog().info({ maskedUserId: maskedId }, 'unauthorized_message');
         return; // Silent rejection
       }
 
@@ -349,12 +354,12 @@ export class DiscordAdapter implements IPlatformAdapter {
 
     // Log when ready
     this.client.once(Events.ClientReady, readyClient => {
-      console.log(`[Discord] Bot logged in as ${readyClient.user.tag}`);
+      getLog().info({ tag: readyClient.user.tag }, 'bot_logged_in');
     });
 
     // Login with stored token
     await this.client.login(this.token);
-    console.log('[Discord] Bot started (WebSocket connection established)');
+    getLog().info('bot_started');
   }
 
   /**
@@ -362,6 +367,6 @@ export class DiscordAdapter implements IPlatformAdapter {
    */
   stop(): void {
     void this.client.destroy();
-    console.log('[Discord] Bot stopped');
+    getLog().info('bot_stopped');
   }
 }

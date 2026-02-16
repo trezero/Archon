@@ -20,7 +20,15 @@ import {
   removeWorktree,
   ConversationNotFoundError,
   getArchonWorkspacesPath,
+  createLogger,
 } from '@archon/core';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('api');
+  return cachedLog;
+}
 import * as conversationDb from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
 import * as isolationEnvDb from '@archon/core/db/isolation-environments';
@@ -58,10 +66,7 @@ export function registerApiRoutes(
       try {
         await handleMessage(webAdapter, conversationId, message);
       } catch (error) {
-        console.error('[API] handleMessage failed', {
-          conversationId,
-          error,
-        });
+        getLog().error({ err: error, conversationId }, 'handle_message_failed');
         try {
           await webAdapter.emitSSE(
             conversationId,
@@ -73,10 +78,7 @@ export function registerApiRoutes(
             })
           );
         } catch (sseError) {
-          console.error('[API] Failed to emit error SSE', {
-            conversationId,
-            sseError,
-          });
+          getLog().error({ err: sseError, conversationId }, 'sse_error_emit_failed');
         }
       } finally {
         webAdapter.emitLockEvent(conversationId, false);
@@ -98,7 +100,7 @@ export function registerApiRoutes(
       const conversations = await conversationDb.listConversations(50, platformType, codebaseId);
       return c.json(conversations);
     } catch (error) {
-      console.error('[API] Failed to list conversations', { error });
+      getLog().error({ err: error }, 'list_conversations_failed');
       return c.json({ error: 'Failed to list conversations' }, 500);
     }
   });
@@ -126,7 +128,7 @@ export function registerApiRoutes(
       );
       return c.json({ conversationId: conversation.platform_conversation_id, id: conversation.id });
     } catch (error) {
-      console.error('[API] Failed to create conversation', { error });
+      getLog().error({ err: error }, 'create_conversation_failed');
       return apiError(c, 500, 'Failed to create conversation');
     }
   });
@@ -145,7 +147,7 @@ export function registerApiRoutes(
       if (error instanceof ConversationNotFoundError) {
         return apiError(c, 404, 'Conversation not found');
       }
-      console.error('[API] Failed to update conversation', { error });
+      getLog().error({ err: error }, 'update_conversation_failed');
       return apiError(c, 500, 'Failed to update conversation');
     }
   });
@@ -160,7 +162,7 @@ export function registerApiRoutes(
       if (error instanceof ConversationNotFoundError) {
         return apiError(c, 404, 'Conversation not found');
       }
-      console.error('[API] Failed to delete conversation', { error });
+      getLog().error({ err: error }, 'delete_conversation_failed');
       return apiError(c, 500, 'Failed to delete conversation');
     }
   });
@@ -184,7 +186,7 @@ export function registerApiRoutes(
         }))
       );
     } catch (error) {
-      console.error('[API] Failed to list messages', { error });
+      getLog().error({ err: error }, 'list_messages_failed');
       return c.json({ error: 'Failed to list messages' }, 500);
     }
   });
@@ -211,10 +213,7 @@ export function registerApiRoutes(
     try {
       conv = await conversationDb.getConversationByPlatformId('web', conversationId);
     } catch (e: unknown) {
-      console.error('[API] Failed to look up conversation', {
-        conversationId,
-        error: (e as Error).message,
-      });
+      getLog().error({ err: e, conversationId }, 'conversation_lookup_failed');
     }
 
     // Auto-title from first non-command message (non-critical)
@@ -223,10 +222,7 @@ export function registerApiRoutes(
         const title = message.length > 80 ? message.slice(0, 77) + '...' : message;
         await conversationDb.updateConversationTitle(conv.id, title);
       } catch (e: unknown) {
-        console.warn('[API] Auto-title failed', {
-          conversationId,
-          error: (e as Error).message,
-        });
+        getLog().warn({ err: e, conversationId }, 'auto_title_failed');
       }
     }
 
@@ -235,10 +231,7 @@ export function registerApiRoutes(
       try {
         await messageDb.addMessage(conv.id, 'user', message);
       } catch (e: unknown) {
-        console.error('[API] Message persistence failed', {
-          conversationId: conv.id,
-          error: (e as Error).message,
-        });
+        getLog().error({ err: e, conversationId: conv.id }, 'message_persistence_failed');
         try {
           await webAdapter.emitSSE(
             conversationId,
@@ -249,10 +242,7 @@ export function registerApiRoutes(
             })
           );
         } catch (sseErr: unknown) {
-          console.error('[API] SSE warning also failed (double failure)', {
-            conversationId: conv?.id,
-            error: (sseErr as Error).message,
-          });
+          getLog().error({ err: sseErr, conversationId: conv?.id }, 'sse_warning_double_failure');
         }
       }
       webAdapter.setConversationDbId(conversationId, conv.id);
@@ -274,10 +264,10 @@ export function registerApiRoutes(
       });
 
       webAdapter.registerStream(conversationId, stream);
-      console.log(`[Web] SSE stream opened: ${conversationId}`);
+      getLog().debug({ conversationId }, 'sse_stream_opened');
 
       stream.onAbort(() => {
-        console.log(`[Web] SSE client disconnected: ${conversationId}`);
+        getLog().debug({ conversationId }, 'sse_client_disconnected');
         webAdapter.removeStream(conversationId);
       });
 
@@ -295,11 +285,11 @@ export function registerApiRoutes(
         // Log unexpected errors for debugging.
         const msg = (e as Error).message ?? '';
         if (!msg.includes('aborted') && !msg.includes('closed') && !msg.includes('cancel')) {
-          console.warn('[Web] Unexpected SSE heartbeat error', { error: msg });
+          getLog().warn({ err: e as Error, conversationId }, 'sse_heartbeat_error');
         }
       } finally {
         webAdapter.removeStream(conversationId);
-        console.log(`[Web] SSE stream closed: ${conversationId}`);
+        getLog().debug({ conversationId }, 'sse_stream_closed');
       }
     });
   });
@@ -334,10 +324,7 @@ export function registerApiRoutes(
             try {
               commands = JSON.parse(commands);
             } catch (parseErr) {
-              console.error('[API] Corrupted commands JSON for codebase', {
-                codebaseId: cb.id,
-                error: (parseErr as Error).message,
-              });
+              getLog().error({ err: parseErr, codebaseId: cb.id }, 'corrupted_commands_json');
               commands = {};
             }
           }
@@ -345,7 +332,7 @@ export function registerApiRoutes(
         })
       );
     } catch (error) {
-      console.error('[API] Failed to list codebases', { error });
+      getLog().error({ err: error }, 'list_codebases_failed');
       return c.json({ error: 'Failed to list codebases' }, 500);
     }
   });
@@ -362,16 +349,13 @@ export function registerApiRoutes(
         try {
           commands = JSON.parse(commands);
         } catch (parseErr) {
-          console.error('[API] Corrupted commands JSON for codebase', {
-            codebaseId: codebase.id,
-            error: (parseErr as Error).message,
-          });
+          getLog().error({ err: parseErr, codebaseId: codebase.id }, 'corrupted_commands_json');
           commands = {};
         }
       }
       return c.json({ ...codebase, commands });
     } catch (error) {
-      console.error('[API] Failed to get codebase', { error });
+      getLog().error({ err: error }, 'get_codebase_failed');
       return c.json({ error: 'Failed to get codebase' }, 500);
     }
   });
@@ -405,7 +389,7 @@ export function registerApiRoutes(
 
       return c.json(codebase, result.alreadyExisted ? 200 : 201);
     } catch (error) {
-      console.error('[API] Failed to add codebase', { error });
+      getLog().error({ err: error }, 'add_codebase_failed');
       return c.json(
         { error: `Failed to add codebase: ${(error as Error).message ?? 'unknown error'}` },
         500
@@ -427,13 +411,10 @@ export function registerApiRoutes(
       for (const env of environments) {
         try {
           await removeWorktree(codebase.default_cwd, env.working_path);
-          console.log(`[API] Removed worktree: ${env.working_path}`);
+          getLog().info({ path: env.working_path }, 'worktree_removed');
         } catch (wtErr) {
           // Worktree may already be gone — log but continue
-          console.warn('[API] Failed to remove worktree', {
-            path: env.working_path,
-            error: (wtErr as Error).message,
-          });
+          getLog().warn({ err: wtErr, path: env.working_path }, 'worktree_remove_failed');
         }
         await isolationEnvDb.updateStatus(env.id, 'destroyed');
       }
@@ -450,23 +431,18 @@ export function registerApiRoutes(
       ) {
         try {
           await rm(normalizedCwd, { recursive: true, force: true });
-          console.log(`[API] Removed workspace: ${normalizedCwd}`);
+          getLog().info({ path: normalizedCwd }, 'workspace_removed');
         } catch (rmErr) {
           // Directory may not exist — log but don't fail
-          console.warn('[API] Failed to remove workspace directory', {
-            path: codebase.default_cwd,
-            error: (rmErr as Error).message,
-          });
+          getLog().warn({ err: rmErr, path: codebase.default_cwd }, 'workspace_remove_failed');
         }
       } else {
-        console.log(
-          `[API] Skipping filesystem deletion for externally registered repo: ${codebase.default_cwd}`
-        );
+        getLog().info({ path: codebase.default_cwd }, 'external_repo_skip_deletion');
       }
 
       return c.json({ success: true });
     } catch (error) {
-      console.error('[API] Failed to delete codebase', { error });
+      getLog().error({ err: error }, 'delete_codebase_failed');
       return c.json({ error: 'Failed to delete codebase' }, 500);
     }
   });
@@ -497,7 +473,7 @@ export function registerApiRoutes(
       return c.json({ workflows });
     } catch (error) {
       // Workflow discovery can fail if cwd is stale or deleted — return empty with warning
-      console.warn('[API] Failed to discover workflows, returning empty', { error });
+      getLog().warn({ err: error }, 'workflow_discovery_failed');
       return c.json({
         workflows: [],
         warning: `Workflow discovery failed: ${(error as Error).message}`,
@@ -530,7 +506,7 @@ export function registerApiRoutes(
       const result = await dispatchToOrchestrator(conversationId, fullMessage);
       return c.json(result);
     } catch (error) {
-      console.error('[API] Failed to run workflow', { error });
+      getLog().error({ err: error }, 'run_workflow_failed');
       return c.json({ error: 'Failed to run workflow' }, 500);
     }
   });
@@ -558,7 +534,7 @@ export function registerApiRoutes(
       });
       return c.json({ runs });
     } catch (error) {
-      console.error('[API] Failed to list workflow runs', { error });
+      getLog().error({ err: error }, 'list_workflow_runs_failed');
       return c.json({ error: 'Failed to list workflow runs' }, 500);
     }
   });
@@ -574,7 +550,7 @@ export function registerApiRoutes(
       }
       return c.json({ run });
     } catch (error) {
-      console.error('[API] Failed to look up workflow run by worker', { error });
+      getLog().error({ err: error }, 'workflow_run_by_worker_lookup_failed');
       return c.json({ error: 'Failed to look up workflow run' }, 500);
     }
   });
@@ -608,7 +584,7 @@ export function registerApiRoutes(
         events,
       });
     } catch (error) {
-      console.error('[API] Failed to get workflow run', { error });
+      getLog().error({ err: error }, 'get_workflow_run_failed');
       return c.json({ error: 'Failed to get workflow run' }, 500);
     }
   });
@@ -622,7 +598,7 @@ export function registerApiRoutes(
         database: getDatabaseType(),
       });
     } catch (error) {
-      console.error('[API] Failed to get config', { error });
+      getLog().error({ err: error }, 'get_config_failed');
       return c.json({ error: 'Failed to get config' }, 500);
     }
   });
