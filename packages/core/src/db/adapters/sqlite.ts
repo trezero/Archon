@@ -150,6 +150,20 @@ export class SqliteAdapter implements IDatabase {
     } catch (e: unknown) {
       console.warn('[SQLite] Migration for workflow_runs columns failed:', (e as Error).message);
     }
+
+    // Sessions columns
+    try {
+      const sessCols = this.db.prepare("PRAGMA table_info('remote_agent_sessions')").all() as {
+        name: string;
+      }[];
+      const sessColNames = new Set(sessCols.map(c => c.name));
+
+      if (!sessColNames.has('ended_reason')) {
+        this.db.run('ALTER TABLE remote_agent_sessions ADD COLUMN ended_reason TEXT');
+      }
+    } catch (e: unknown) {
+      console.warn('[SQLite] Migration for sessions columns failed:', (e as Error).message);
+    }
   }
 
   /**
@@ -200,7 +214,8 @@ export class SqliteAdapter implements IDatabase {
         started_at TEXT DEFAULT (datetime('now')),
         ended_at TEXT,
         parent_session_id TEXT REFERENCES remote_agent_sessions(id),
-        transition_reason TEXT
+        transition_reason TEXT,
+        ended_reason TEXT
       );
 
       -- Command templates table

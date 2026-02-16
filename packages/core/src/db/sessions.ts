@@ -59,11 +59,11 @@ export async function updateSession(id: string, sessionId: string): Promise<void
   }
 }
 
-export async function deactivateSession(id: string): Promise<void> {
+export async function deactivateSession(id: string, reason: TransitionTrigger): Promise<void> {
   const dialect = getDialect();
   const result = await pool.query(
-    `UPDATE remote_agent_sessions SET active = false, ended_at = ${dialect.now()} WHERE id = $1`,
-    [id]
+    `UPDATE remote_agent_sessions SET active = false, ended_at = ${dialect.now()}, ended_reason = $2 WHERE id = $1`,
+    [id, reason]
   );
   if (result.rowCount === 0) {
     throw new SessionNotFoundError(id);
@@ -104,7 +104,7 @@ export async function transitionSession(
   const current = await getActiveSession(conversationId);
 
   if (current) {
-    await deactivateSession(current.id);
+    await deactivateSession(current.id, reason);
   }
 
   return createSession({

@@ -5,6 +5,7 @@
 import * as isolationEnvDb from '../db/isolation-environments';
 import * as conversationDb from '../db/conversations';
 import * as sessionDb from '../db/sessions';
+import { SessionNotFoundError } from '../db/sessions';
 import * as codebaseDb from '../db/codebases';
 import { getIsolationProvider } from '../isolation';
 import { execFileAsync, hasUncommittedChanges } from '../utils/git';
@@ -54,8 +55,16 @@ export async function onConversationClosed(
   // Deactivate any active sessions first
   const session = await sessionDb.getActiveSession(conversation.id);
   if (session) {
-    await sessionDb.deactivateSession(session.id);
-    console.log(`[Cleanup] Deactivated session ${session.id}: conversation-closed`);
+    try {
+      await sessionDb.deactivateSession(session.id, 'conversation-closed');
+      console.log(`[Cleanup] Deactivated session ${session.id}: conversation-closed`);
+    } catch (error) {
+      if (error instanceof SessionNotFoundError) {
+        console.log(`[Cleanup] Session ${session.id} already deactivated (race condition)`);
+      } else {
+        throw error;
+      }
+    }
   }
 
   // Get the environment

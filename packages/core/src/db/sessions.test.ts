@@ -41,6 +41,7 @@ describe('sessions', () => {
     ended_at: null,
     parent_session_id: null,
     transition_reason: null,
+    ended_reason: null,
   };
 
   describe('getActiveSession', () => {
@@ -166,21 +167,32 @@ describe('sessions', () => {
   });
 
   describe('deactivateSession', () => {
-    test('sets active=false and ended_at', async () => {
+    test('sets active=false, ended_at, and ended_reason', async () => {
       mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
 
-      await deactivateSession('session-123');
+      await deactivateSession('session-123', 'reset-requested');
 
       expect(mockQuery).toHaveBeenCalledWith(
-        'UPDATE remote_agent_sessions SET active = false, ended_at = NOW() WHERE id = $1',
-        ['session-123']
+        'UPDATE remote_agent_sessions SET active = false, ended_at = NOW(), ended_reason = $2 WHERE id = $1',
+        ['session-123', 'reset-requested']
+      );
+    });
+
+    test('stores the provided reason in ended_reason', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
+
+      await deactivateSession('session-123', 'cwd-changed');
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        'UPDATE remote_agent_sessions SET active = false, ended_at = NOW(), ended_reason = $2 WHERE id = $1',
+        ['session-123', 'cwd-changed']
       );
     });
 
     test('throws SessionNotFoundError when session does not exist', async () => {
       mockQuery.mockResolvedValueOnce(createQueryResult([], 0)); // rowCount = 0
 
-      const error = await deactivateSession('non-existent').catch(e => e);
+      const error = await deactivateSession('non-existent', 'reset-requested').catch(e => e);
       expect(error).toBeInstanceOf(SessionNotFoundError);
       expect(error.message).toBe('Session not found: non-existent');
     });
@@ -251,6 +263,7 @@ describe('sessions', () => {
         ended_at: null,
         parent_session_id: null,
         transition_reason: 'first-message',
+        ended_reason: null,
       };
 
       const newSession: Session = {
@@ -265,6 +278,7 @@ describe('sessions', () => {
         ended_at: null,
         parent_session_id: 'session-123',
         transition_reason: 'plan-to-execute',
+        ended_reason: null,
       };
 
       // Mock getActiveSession, deactivateSession, and createSession calls
@@ -281,11 +295,11 @@ describe('sessions', () => {
       expect(result).toEqual(newSession);
       expect(mockQuery).toHaveBeenCalledTimes(3);
 
-      // Verify deactivateSession was called
+      // Verify deactivateSession was called with reason
       expect(mockQuery).toHaveBeenNthCalledWith(
         2,
-        'UPDATE remote_agent_sessions SET active = false, ended_at = NOW() WHERE id = $1',
-        ['session-123']
+        'UPDATE remote_agent_sessions SET active = false, ended_at = NOW(), ended_reason = $2 WHERE id = $1',
+        ['session-123', 'plan-to-execute']
       );
 
       // Verify createSession was called with parent_session_id
@@ -312,6 +326,7 @@ describe('sessions', () => {
         ended_at: null,
         parent_session_id: null,
         transition_reason: 'first-message',
+        ended_reason: null,
       };
 
       // Mock getActiveSession (no session) and createSession
@@ -351,6 +366,7 @@ describe('sessions', () => {
         ended_at: null,
         parent_session_id: null,
         transition_reason: 'first-message',
+        ended_reason: null,
       };
 
       // Mock: getActiveSession succeeds, deactivateSession succeeds, createSession fails
@@ -386,6 +402,7 @@ describe('sessions', () => {
           ended_at: null,
           parent_session_id: 'session-2',
           transition_reason: 'plan-to-execute',
+          ended_reason: null,
         },
         {
           id: 'session-2',
@@ -399,6 +416,7 @@ describe('sessions', () => {
           ended_at: new Date('2024-01-03'),
           parent_session_id: 'session-1',
           transition_reason: 'isolation-changed',
+          ended_reason: null,
         },
         {
           id: 'session-1',
@@ -412,6 +430,7 @@ describe('sessions', () => {
           ended_at: new Date('2024-01-02'),
           parent_session_id: null,
           transition_reason: 'first-message',
+          ended_reason: null,
         },
       ];
 
@@ -452,6 +471,7 @@ describe('sessions', () => {
           ended_at: new Date('2024-01-02'),
           parent_session_id: null,
           transition_reason: 'first-message',
+          ended_reason: null,
         },
         {
           id: 'session-2',
@@ -465,6 +485,7 @@ describe('sessions', () => {
           ended_at: new Date('2024-01-03'),
           parent_session_id: 'session-1',
           transition_reason: 'isolation-changed',
+          ended_reason: null,
         },
         {
           id: 'session-3',
@@ -478,6 +499,7 @@ describe('sessions', () => {
           ended_at: null,
           parent_session_id: 'session-2',
           transition_reason: 'plan-to-execute',
+          ended_reason: null,
         },
       ];
 
@@ -511,6 +533,7 @@ describe('sessions', () => {
         ended_at: null,
         parent_session_id: null,
         transition_reason: 'first-message',
+        ended_reason: null,
       };
 
       mockQuery.mockResolvedValueOnce(createQueryResult([rootSession]));

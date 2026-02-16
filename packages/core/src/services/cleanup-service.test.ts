@@ -1021,6 +1021,50 @@ describe('onConversationClosed', () => {
     mockUpdateConversation.mockClear();
   });
 
+  test('deactivates session with conversation-closed reason', async () => {
+    mockGetConversationByPlatformId.mockResolvedValueOnce({
+      id: 'conv-active-session',
+      isolation_env_id: 'env-with-session',
+    });
+
+    mockGetActiveSession.mockResolvedValueOnce({
+      id: 'session-to-close',
+      conversation_id: 'conv-active-session',
+      active: true,
+    });
+    mockDeactivateSession.mockResolvedValueOnce(undefined);
+
+    mockGetById.mockResolvedValueOnce({
+      id: 'env-with-session',
+      codebase_id: 'codebase-1',
+      working_path: '/workspace/worktrees/pr-200',
+      branch_name: 'feature-y',
+      status: 'active',
+    });
+
+    mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
+
+    mockGetById.mockResolvedValueOnce({
+      id: 'env-with-session',
+      codebase_id: 'codebase-1',
+      working_path: '/workspace/worktrees/pr-200',
+      branch_name: 'feature-y',
+      status: 'active',
+    });
+
+    mockGetCodebase.mockResolvedValueOnce({
+      id: 'codebase-1',
+      name: 'test-repo',
+      default_cwd: '/workspace/repo',
+    });
+
+    mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+
+    await onConversationClosed('github', 'owner/repo#200');
+
+    expect(mockDeactivateSession).toHaveBeenCalledWith('session-to-close', 'conversation-closed');
+  });
+
   test('passes deleteRemoteBranch: true when merged option is set', async () => {
     // Conversation with isolation env
     mockGetConversationByPlatformId.mockResolvedValueOnce({

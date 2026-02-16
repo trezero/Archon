@@ -1,6 +1,7 @@
 /**
  * Core type definitions for the Remote Coding Agent platform
  */
+import type { TransitionTrigger } from '../state/session-transitions';
 
 /**
  * Custom error for when a conversation is not found during update operations
@@ -92,7 +93,8 @@ export interface Session {
   ended_at: Date | null;
   // Audit trail fields (added in migration 010)
   parent_session_id: string | null;
-  transition_reason: string | null;
+  transition_reason: TransitionTrigger | null;
+  ended_reason: TransitionTrigger | null;
 }
 
 export interface CommandTemplate {

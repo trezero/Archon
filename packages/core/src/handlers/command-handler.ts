@@ -24,7 +24,8 @@ import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/a
 import { discoverWorkflows } from '../workflows';
 import { isSingleStep, type WorkflowDefinition } from '../workflows/types';
 import * as workflowDb from '../db/workflows';
-import { getTriggerForCommand } from '../state/session-transitions';
+import { getTriggerForCommand, type DeactivatingCommand } from '../state/session-transitions';
+import { SessionNotFoundError } from '../db/sessions';
 import { cloneRepository } from './clone';
 import { findMarkdownFilesRecursive } from '../utils/commands';
 
@@ -250,6 +251,31 @@ export function parseCommand(text: string): { command: string; args: string[] } 
   return { command, args };
 }
 
+/**
+ * Safely deactivate a session with TOCTOU race handling.
+ * Between getActiveSession() and deactivateSession(), another process
+ * (cleanup service, concurrent command) may have already deactivated it.
+ * Treats SessionNotFoundError as benign in that case.
+ */
+async function safeDeactivateSession(
+  sessionId: string,
+  commandName: DeactivatingCommand
+): Promise<void> {
+  const trigger = getTriggerForCommand(commandName);
+  try {
+    await sessionDb.deactivateSession(sessionId, trigger);
+    console.log(`[Command] Deactivated session: ${trigger}`);
+  } catch (error) {
+    if (error instanceof SessionNotFoundError) {
+      console.log(`[Command] Session already deactivated (race condition): ${trigger}`, {
+        sessionId,
+      });
+    } else {
+      throw error;
+    }
+  }
+}
+
 export async function handleCommand(
   conversation: Conversation,
   message: string
@@ -450,10 +476,7 @@ export async function handleCommand(
       // Reset session when changing working directory
       const session = await sessionDb.getActiveSession(conversation.id);
       if (session) {
-        await sessionDb.deactivateSession(session.id);
-        console.log(
-          `[Command] Deactivated session: ${getTriggerForCommand('setcwd') ?? 'cwd-changed'}`
-        );
+        await safeDeactivateSession(session.id, 'setcwd');
       }
 
       // Format response with repo context instead of filesystem path
@@ -496,10 +519,7 @@ export async function handleCommand(
         // Reset session when cloning/switching codebases
         const session = await sessionDb.getActiveSession(conversation.id);
         if (session) {
-          await sessionDb.deactivateSession(session.id);
-          console.log(
-            `[Command] Deactivated session: ${getTriggerForCommand('clone') ?? 'codebase-cloned'}`
-          );
+          await safeDeactivateSession(session.id, 'clone');
         }
 
         if (result.alreadyExisted) {
@@ -703,10 +723,7 @@ export async function handleCommand(
     case 'reset': {
       const session = await sessionDb.getActiveSession(conversation.id);
       if (session) {
-        await sessionDb.deactivateSession(session.id);
-        console.log(
-          `[Command] Deactivated session: ${getTriggerForCommand('reset') ?? 'reset-requested'}`
-        );
+        await safeDeactivateSession(session.id, 'reset');
         return {
           success: true,
           message:
@@ -723,10 +740,7 @@ export async function handleCommand(
       // Reset AI session while keeping worktree
       const activeSession = await sessionDb.getActiveSession(conversation.id);
       if (activeSession) {
-        await sessionDb.deactivateSession(activeSession.id);
-        console.log(
-          `[Command] Deactivated session: ${getTriggerForCommand('reset-context') ?? 'context-reset'}`
-        );
+        await safeDeactivateSession(activeSession.id, 'reset-context');
         return {
           success: true,
           message:
@@ -843,10 +857,7 @@ export async function handleCommand(
         // Reset session when switching
         const session = await sessionDb.getActiveSession(conversation.id);
         if (session) {
-          await sessionDb.deactivateSession(session.id);
-          console.log(
-            `[Command] Deactivated session: ${getTriggerForCommand('repo') ?? 'codebase-changed'}`
-          );
+          await safeDeactivateSession(session.id, 'repo');
         }
 
         // Auto-load commands if found
@@ -958,10 +969,7 @@ export async function handleCommand(
           // Also deactivate any active session
           const session = await sessionDb.getActiveSession(conversation.id);
           if (session) {
-            await sessionDb.deactivateSession(session.id);
-            console.log(
-              `[Command] Deactivated session: ${getTriggerForCommand('repo-remove') ?? 'repo-removed'}`
-            );
+            await safeDeactivateSession(session.id, 'repo-remove');
           }
         }
 
@@ -1237,10 +1245,7 @@ export async function handleCommand(
             // Reset session
             const session = await sessionDb.getActiveSession(conversation.id);
             if (session) {
-              await sessionDb.deactivateSession(session.id);
-              console.log(
-                `[Command] Deactivated session: ${getTriggerForCommand('worktree-remove') ?? 'worktree-removed'}`
-              );
+              await safeDeactivateSession(session.id, 'worktree-remove');
             }
 
             const shortPath = shortenPath(isolationEnv.working_path, mainPath);

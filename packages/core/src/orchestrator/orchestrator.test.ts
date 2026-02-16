@@ -231,6 +231,9 @@ describe('orchestrator', () => {
     metadata: {},
     started_at: new Date(),
     ended_at: null,
+    parent_session_id: null,
+    transition_reason: null,
+    ended_reason: null,
   };
 
   const mockClient = {

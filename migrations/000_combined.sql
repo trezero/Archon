@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS remote_agent_sessions (
   metadata JSONB DEFAULT '{}'::jsonb,
   parent_session_id UUID REFERENCES remote_agent_sessions(id),
   transition_reason TEXT,
+  ended_reason TEXT,
   started_at TIMESTAMP DEFAULT NOW(),
   ended_at TIMESTAMP
 );
@@ -282,3 +283,13 @@ CREATE INDEX IF NOT EXISTS idx_conversations_hidden
   ON remote_agent_conversations(hidden);
 CREATE INDEX IF NOT EXISTS idx_conversations_codebase
   ON remote_agent_conversations(codebase_id) WHERE deleted_at IS NULL;
+
+-- ============================================================================
+-- Migration 016: Session ended_reason
+-- ============================================================================
+
+ALTER TABLE remote_agent_sessions
+  ADD COLUMN IF NOT EXISTS ended_reason TEXT;
+
+COMMENT ON COLUMN remote_agent_sessions.ended_reason IS
+  'Why this session was deactivated: reset-requested, cwd-changed, conversation-closed, etc.';

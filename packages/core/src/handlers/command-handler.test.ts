@@ -445,6 +445,21 @@ describe('CommandHandler', () => {
         expect(result.message).toContain('repo');
         expect(mockUpdateConversation).toHaveBeenCalled();
       });
+
+      test('should deactivate session with cwd-changed reason', async () => {
+        spyIsPathWithinWorkspace.mockReturnValue(true);
+        mockUpdateConversation.mockResolvedValue(undefined);
+        mockGetActiveSession.mockResolvedValue({
+          id: 'session-123',
+          conversation_id: 'conv-123',
+          active: true,
+        });
+        mockDeactivateSession.mockResolvedValue(undefined);
+
+        const result = await handleCommand(baseConversation, '/setcwd /workspace/repo');
+        expect(result.success).toBe(true);
+        expect(mockDeactivateSession).toHaveBeenCalledWith('session-123', 'cwd-changed');
+      });
     });
 
     describe('/status', () => {
@@ -608,7 +623,7 @@ describe('CommandHandler', () => {
         const result = await handleCommand(baseConversation, '/reset');
         expect(result.success).toBe(true);
         expect(result.message).toContain('cleared');
-        expect(mockDeactivateSession).toHaveBeenCalledWith('session-123');
+        expect(mockDeactivateSession).toHaveBeenCalledWith('session-123', 'reset-requested');
       });
 
       test('should handle no active session gracefully', async () => {
@@ -639,7 +654,7 @@ describe('CommandHandler', () => {
         expect(result.success).toBe(true);
         expect(result.message).toContain('AI context reset');
         expect(result.message).toContain('keeping your current working directory');
-        expect(mockDeactivateSession).toHaveBeenCalledWith('session-456');
+        expect(mockDeactivateSession).toHaveBeenCalledWith('session-456', 'context-reset');
       });
 
       test('should handle no active session gracefully', async () => {
@@ -905,6 +920,39 @@ describe('CommandHandler', () => {
           expect(result.message).toMatch(/worktrees[\\\/]feat-x/);
           expect(mockUpdateConversation).toHaveBeenCalled();
         });
+
+        test('should deactivate session with worktree-removed reason', async () => {
+          const convWithWorktree: Conversation = {
+            ...conversationWithCodebase,
+            isolation_env_id: 'env-uuid-feat-x',
+          };
+
+          mockIsolationEnvDbGet.mockResolvedValue({
+            id: 'env-uuid-feat-x',
+            codebase_id: 'codebase-123',
+            workflow_type: 'task',
+            workflow_id: 'task-feat-x',
+            provider: 'worktree',
+            working_path: '/workspace/my-repo/worktrees/feat-x',
+            branch_name: 'feat-x',
+            status: 'active',
+            created_at: new Date(),
+            created_by_platform: 'test',
+          });
+
+          spyExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
+          mockGetActiveSession.mockResolvedValue({
+            id: 'session-789',
+            conversation_id: 'conv-123',
+            active: true,
+          });
+          mockDeactivateSession.mockResolvedValue(undefined);
+
+          const result = await handleCommand(convWithWorktree, '/worktree remove');
+
+          expect(result.success).toBe(true);
+          expect(mockDeactivateSession).toHaveBeenCalledWith('session-789', 'worktree-removed');
+        });
       });
 
       describe('default', () => {
@@ -1139,7 +1187,7 @@ describe('CommandHandler', () => {
         );
 
         expect(result.success).toBe(true);
-        expect(mockDeactivateSession).toHaveBeenCalledWith('session-123');
+        expect(mockDeactivateSession).toHaveBeenCalledWith('session-123', 'codebase-cloned');
       });
 
       test('should link conversation to codebase after clone (Issue #224)', async () => {
@@ -1554,6 +1602,41 @@ describe('CommandHandler', () => {
         expect(result.success).toBe(true);
         expect(result.message).toContain('Switched to: alice/utils');
       });
+
+      test('/repo should deactivate session with codebase-changed reason', async () => {
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        mockFindCodebaseByDefaultCwd.mockResolvedValue({
+          id: 'codebase-hw',
+          name: 'octocat/Hello-World',
+          default_cwd: `${process.env.HOME ?? '/home/user'}/.archon/workspaces/octocat/Hello-World`,
+        } as never);
+
+        mockGetActiveSession.mockResolvedValue({
+          id: 'session-repo',
+          conversation_id: 'conv-123',
+          active: true,
+        });
+        mockDeactivateSession.mockResolvedValue(undefined);
+
+        const result = await handleCommand(baseConversation, '/repo Hello-World');
+
+        expect(result.success).toBe(true);
+        expect(mockDeactivateSession).toHaveBeenCalledWith('session-repo', 'codebase-changed');
+      });
     });
 
     describe('/repo-remove with nested structure (Issue #95)', () => {
@@ -1684,6 +1767,45 @@ describe('CommandHandler', () => {
 
         expect(result.success).toBe(false);
         expect(result.message).toContain('Repository not found: NonExistent');
+      });
+
+      test('/repo-remove should deactivate session with repo-removed reason', async () => {
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        spyFsRm.mockResolvedValue(undefined);
+
+        mockFindCodebaseByDefaultCwd.mockResolvedValue({
+          id: 'codebase-hw',
+          name: 'octocat/Hello-World',
+          default_cwd: `${process.env.HOME ?? '/home/user'}/.archon/workspaces/octocat/Hello-World`,
+        } as never);
+
+        mockGetActiveSession.mockResolvedValue({
+          id: 'session-remove',
+          conversation_id: 'conv-123',
+          active: true,
+        });
+        mockDeactivateSession.mockResolvedValue(undefined);
+
+        // Conversation must have matching codebase_id for session deactivation path
+        const convWithCodebase = { ...baseConversation, codebase_id: 'codebase-hw' };
+        const result = await handleCommand(convWithCodebase, '/repo-remove Hello-World');
+
+        expect(result.success).toBe(true);
+        expect(mockDeactivateSession).toHaveBeenCalledWith('session-remove', 'repo-removed');
       });
     });
 

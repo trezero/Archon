@@ -75,18 +75,37 @@ export function detectPlanToExecuteTransition(
 }
 
 /**
+ * Commands that have known trigger mappings.
+ * Used for function overloads to return non-null for known commands.
+ */
+export type DeactivatingCommand =
+  | 'setcwd'
+  | 'clone'
+  | 'reset'
+  | 'reset-context'
+  | 'repo'
+  | 'repo-remove'
+  | 'worktree-remove';
+
+const COMMAND_TRIGGER_MAP: Record<DeactivatingCommand, TransitionTrigger> = {
+  setcwd: 'cwd-changed',
+  clone: 'codebase-cloned',
+  reset: 'reset-requested',
+  'reset-context': 'context-reset',
+  repo: 'codebase-changed',
+  'repo-remove': 'repo-removed',
+  'worktree-remove': 'worktree-removed',
+};
+
+/**
  * Map command names to their transition triggers.
  * Used by command handler to determine which trigger to use.
+ *
+ * Known commands (DeactivatingCommand) return TransitionTrigger (non-null).
+ * Unknown commands return TransitionTrigger | null.
  */
+export function getTriggerForCommand(commandName: DeactivatingCommand): TransitionTrigger;
+export function getTriggerForCommand(commandName: string): TransitionTrigger | null;
 export function getTriggerForCommand(commandName: string): TransitionTrigger | null {
-  const mapping: Record<string, TransitionTrigger> = {
-    setcwd: 'cwd-changed',
-    clone: 'codebase-cloned',
-    reset: 'reset-requested',
-    'reset-context': 'context-reset',
-    repo: 'codebase-changed',
-    'repo-remove': 'repo-removed',
-    'worktree-remove': 'worktree-removed',
-  };
-  return mapping[commandName] ?? null;
+  return (COMMAND_TRIGGER_MAP as Record<string, TransitionTrigger>)[commandName] ?? null;
 }
