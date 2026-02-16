@@ -12,11 +12,16 @@ import { config } from 'dotenv';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 
-// Load .env from global Archon config only
-// Infrastructure config (database, tokens) belongs in ~/.archon/.env, not per-project
+// Neutralize DATABASE_URL that Bun may have auto-loaded from CWD's .env
+// The CLI runs from target repos whose .env often contains DATABASE_URL
+// pointing at the target app's database — not Archon's.
+delete process.env.DATABASE_URL;
+
+// Load .env from global Archon config only (override: true so ~/.archon/.env
+// always wins over any remaining Bun-auto-loaded vars)
 const globalEnvPath = resolve(process.env.HOME ?? '~', '.archon', '.env');
 if (existsSync(globalEnvPath)) {
-  const result = config({ path: globalEnvPath });
+  const result = config({ path: globalEnvPath, override: true });
   if (result.error) {
     console.error(`Error loading .env from ${globalEnvPath}: ${result.error.message}`);
     console.error('Hint: Check for syntax errors in your .env file.');

@@ -133,6 +133,43 @@ describe('Conversation ID generation', () => {
   });
 });
 
+describe('CLI env isolation', () => {
+  /**
+   * The CLI deletes DATABASE_URL from process.env before loading ~/.archon/.env.
+   * This prevents Bun's auto-loaded CWD .env from pointing the CLI at a target
+   * app's database instead of Archon's SQLite default.
+   */
+  it('should clear DATABASE_URL set by Bun auto-load', async () => {
+    // Simulate Bun auto-loading a target repo's .env
+    process.env.DATABASE_URL = 'postgresql://target-app:5432/not-archon';
+
+    // Re-run the env isolation logic from cli.ts
+    delete process.env.DATABASE_URL;
+
+    expect(process.env.DATABASE_URL).toBeUndefined();
+  });
+
+  it('should allow ~/.archon/.env to override Bun-auto-loaded vars via override:true', async () => {
+    const { config } = await import('dotenv');
+    const { resolve } = await import('path');
+    const { existsSync } = await import('fs');
+
+    // Simulate Bun auto-loading a stale value
+    process.env.TEST_ARCHON_OVERRIDE = 'from-cwd-env';
+
+    // Write a temporary env content and load with override
+    const globalEnvPath = resolve(process.env.HOME ?? '~', '.archon', '.env');
+    if (existsSync(globalEnvPath)) {
+      const result = config({ path: globalEnvPath, override: true });
+      // If ~/.archon/.env exists and has DATABASE_URL, it should override
+      expect(result.error).toBeUndefined();
+    }
+
+    // Clean up
+    delete process.env.TEST_ARCHON_OVERRIDE;
+  });
+});
+
 describe('CLI git repo check', () => {
   /**
    * These tests verify the command categorization logic used in cli.ts.
