@@ -172,6 +172,21 @@ describe('codebases', () => {
 
       expect(result).toEqual({});
     });
+
+    test('returns mutable object even when source is frozen (SQLite behavior)', async () => {
+      const frozenCommands = Object.freeze({
+        plan: { path: '.archon/commands/plan.md', description: 'Plan feature' },
+      });
+      mockQuery.mockResolvedValueOnce(createQueryResult([{ commands: frozenCommands }]));
+
+      const commands = await getCodebaseCommands('codebase-123');
+
+      // Must not throw - result should be a mutable copy
+      commands['new-command'] = { path: 'test.md', description: 'Test' };
+      expect(commands['new-command']).toEqual({ path: 'test.md', description: 'Test' });
+      // Original frozen object should be unchanged
+      expect(frozenCommands).not.toHaveProperty('new-command');
+    });
   });
 
   describe('registerCommand', () => {

@@ -45,7 +45,8 @@ export async function getCodebaseCommands(
   const result = await pool.query<{
     commands: Record<string, { path: string; description: string }>;
   }>('SELECT commands FROM remote_agent_codebases WHERE id = $1', [id]);
-  return result.rows[0]?.commands ?? {};
+  // Spread to ensure mutable copy - Bun's SQLite driver returns frozen objects
+  return { ...(result.rows[0]?.commands ?? {}) };
 }
 
 export async function registerCommand(
