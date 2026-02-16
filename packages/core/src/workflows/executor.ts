@@ -19,7 +19,7 @@ import type {
   SingleStep,
   WorkflowExecutionResult,
 } from './types';
-import { isParallelBlock, isSingleStep } from './types';
+import { isParallelBlock } from './types';
 import {
   logWorkflowStart,
   logStepStart,
@@ -31,6 +31,8 @@ import {
   logParallelBlockStart,
   logParallelBlockComplete,
 } from './logger';
+import { getWorkflowEventEmitter } from './event-emitter';
+import * as workflowEventDb from '../db/workflow-events';
 
 /** Context for platform message sending */
 interface SendMessageContext {
@@ -101,6 +103,11 @@ function detectCompletionSignal(output: string, signal: string): boolean {
   return endPattern.test(output) || ownLinePattern.test(output);
 }
 
+/** Strip internal completion signal tags before sending to user-facing output. */
+function stripCompletionTags(content: string): string {
+  return content.replace(/<promise>[\s\S]*?<\/promise>/gi, '').trim();
+}
+
 /**
  * Check if error message matches any pattern in the list
  */
@@ -150,7 +157,7 @@ function logSendError(
 const UNKNOWN_ERROR_THRESHOLD = 3;
 
 /** Threshold for consecutive activity update failures before warning user */
-const ACTIVITY_WARNING_THRESHOLD = 5;
+const ACTIVITY_WARNING_THRESHOLD = 3;
 
 /** Mutable counter for tracking consecutive unknown errors across calls */
 interface UnknownErrorTracker {
@@ -520,6 +527,7 @@ async function executeStepInternal(
 
   console.log(`[WorkflowExecutor] Executing step ${stepId}: ${commandName}`);
   await logStepStart(cwd, workflowRun.id, commandName, Number(stepId.split('.')[0]));
+  const stepStartTime = Date.now();
 
   // Load command prompt
   const promptResult = await loadCommandPrompt(cwd, commandName, configuredCommandFolder);
@@ -634,6 +642,11 @@ async function executeStepInternal(
             unknownErrorTracker
           );
           if (!sent) droppedMessageCount++;
+
+          // Send structured event to adapters that support it (Web UI)
+          if (platform.sendStructuredEvent) {
+            await platform.sendStructuredEvent(conversationId, msg);
+          }
         }
         await logTool(cwd, workflowRun.id, msg.toolName, msg.toolInput ?? {});
       } else if (msg.type === 'result' && msg.sessionId) {
@@ -672,6 +685,24 @@ async function executeStepInternal(
 
     await logStepComplete(cwd, workflowRun.id, commandName, Number(stepId.split('.')[0]));
 
+    // Emit step_completed event (fire-and-forget)
+    const emitter = getWorkflowEventEmitter();
+    const stepIdx = Number(stepId.split('.')[0]);
+    emitter.emit({
+      type: 'step_completed',
+      runId: workflowRun.id,
+      stepIndex: stepIdx,
+      stepName: commandName,
+      duration: Date.now() - stepStartTime,
+    });
+    void workflowEventDb.createWorkflowEvent({
+      workflow_run_id: workflowRun.id,
+      event_type: 'step_completed',
+      step_index: stepIdx,
+      step_name: commandName,
+      data: { duration_ms: Date.now() - stepStartTime },
+    });
+
     return {
       commandName,
       success: true,
@@ -683,6 +714,24 @@ async function executeStepInternal(
     console.error(`[WorkflowExecutor] Step failed: ${commandName}`, {
       error: err.message,
       errorType,
+    });
+
+    // Emit step_failed event (fire-and-forget)
+    const emitter = getWorkflowEventEmitter();
+    const stepIdx = Number(stepId.split('.')[0]);
+    emitter.emit({
+      type: 'step_failed',
+      runId: workflowRun.id,
+      stepIndex: stepIdx,
+      stepName: commandName,
+      error: err.message,
+    });
+    void workflowEventDb.createWorkflowEvent({
+      workflow_run_id: workflowRun.id,
+      event_type: 'step_failed',
+      step_index: stepIdx,
+      step_name: commandName,
+      data: { error: err.message },
     });
 
     // Add user-friendly hints based on error classification
@@ -758,12 +807,34 @@ async function executeParallelBlock(
     `[WorkflowExecutor] Starting parallel block with ${String(parallelSteps.length)} agents on ${cwd}`
   );
 
+  const emitter = getWorkflowEventEmitter();
+  const totalAgents = parallelSteps.length;
+
   // Spawn all agents concurrently - each gets its own fresh session
   const results = await Promise.all(
     parallelSteps.map(async (step, i) => {
       console.log(
         `[WorkflowExecutor] Spawning agent ${String(blockIndex)}.${String(i)}: ${step.command}`
       );
+
+      // Emit parallel_agent_started
+      emitter.emit({
+        type: 'parallel_agent_started',
+        runId: workflowRun.id,
+        stepIndex: blockIndex,
+        agentIndex: i,
+        totalAgents,
+        agentName: step.command,
+      });
+      void workflowEventDb.createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'parallel_agent_started',
+        step_index: blockIndex,
+        step_name: step.command,
+        data: { agentIndex: i, totalAgents },
+      });
+
+      const agentStart = Date.now();
 
       // Each parallel step is an independent agent
       // clearContext is always effectively true (fresh session)
@@ -780,6 +851,41 @@ async function executeParallelBlock(
         configuredCommandFolder,
         issueContext
       );
+
+      // Emit parallel_agent_completed or parallel_agent_failed
+      if (result.success) {
+        emitter.emit({
+          type: 'parallel_agent_completed',
+          runId: workflowRun.id,
+          stepIndex: blockIndex,
+          agentIndex: i,
+          agentName: step.command,
+          duration: Date.now() - agentStart,
+        });
+        void workflowEventDb.createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'parallel_agent_completed',
+          step_index: blockIndex,
+          step_name: step.command,
+          data: { agentIndex: i, duration_ms: Date.now() - agentStart },
+        });
+      } else {
+        emitter.emit({
+          type: 'parallel_agent_failed',
+          runId: workflowRun.id,
+          stepIndex: blockIndex,
+          agentIndex: i,
+          agentName: step.command,
+          error: result.error,
+        });
+        void workflowEventDb.createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'parallel_agent_failed',
+          step_index: blockIndex,
+          step_name: step.command,
+          data: { agentIndex: i, error: result.error },
+        });
+      }
 
       return { index: i, result };
     })
@@ -848,9 +954,26 @@ async function executeLoopWorkflow(
     await safeSendMessage(
       platform,
       conversationId,
-      `⏳ **Iteration ${String(i)}/${String(loop.max_iterations)}**`,
+      `\n⏳ **Iteration ${String(i)}/${String(loop.max_iterations)}**\n`,
       workflowContext
     );
+
+    // Emit loop_iteration_started
+    const loopEmitter = getWorkflowEventEmitter();
+    const iterationStart = Date.now();
+    loopEmitter.emit({
+      type: 'loop_iteration_started',
+      runId: workflowRun.id,
+      iteration: i,
+      maxIterations: loop.max_iterations,
+    });
+    void workflowEventDb.createWorkflowEvent({
+      workflow_run_id: workflowRun.id,
+      event_type: 'loop_iteration_started',
+      step_index: i - 1,
+      step_name: `iteration-${String(i)}`,
+      data: { iteration: i, maxIterations: loop.max_iterations },
+    });
 
     // Determine session handling
     const needsFreshSession = loop.fresh_context === true || i === 1;
@@ -925,20 +1048,21 @@ async function executeLoopWorkflow(
         }
 
         if (msg.type === 'assistant' && msg.content) {
-          fullOutput += msg.content;
-          if (streamingMode === 'stream') {
+          fullOutput += msg.content; // Keep raw content for signal detection
+          const cleanedContent = stripCompletionTags(msg.content);
+          if (streamingMode === 'stream' && cleanedContent) {
             const sent = await safeSendMessage(
               platform,
               conversationId,
-              msg.content,
+              cleanedContent,
               workflowContext,
               unknownErrorTracker
             );
             if (!sent) droppedMessageCount++;
-          } else {
-            assistantMessages.push(msg.content);
+          } else if (streamingMode === 'batch' && cleanedContent) {
+            assistantMessages.push(cleanedContent);
           }
-          await logAssistant(cwd, workflowRun.id, msg.content);
+          await logAssistant(cwd, workflowRun.id, msg.content); // Log raw for debugging
         } else if (msg.type === 'tool' && msg.toolName) {
           if (streamingMode === 'stream') {
             const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
@@ -992,6 +1116,27 @@ async function executeLoopWorkflow(
       // Check for completion signal
       if (detectCompletionSignal(fullOutput, loop.until)) {
         console.log(`[WorkflowExecutor] Completion signal detected at iteration ${String(i)}`);
+
+        // Emit loop_iteration_completed with completionDetected
+        loopEmitter.emit({
+          type: 'loop_iteration_completed',
+          runId: workflowRun.id,
+          iteration: i,
+          duration: Date.now() - iterationStart,
+          completionDetected: true,
+        });
+        void workflowEventDb.createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'loop_iteration_completed',
+          step_index: i - 1,
+          step_name: `iteration-${String(i)}`,
+          data: {
+            iteration: i,
+            duration_ms: Date.now() - iterationStart,
+            completionDetected: true,
+          },
+        });
+
         await workflowDb.completeWorkflowRun(workflowRun.id);
         await logWorkflowComplete(cwd, workflowRun.id);
         await sendCriticalMessage(
@@ -1014,6 +1159,26 @@ async function executeLoopWorkflow(
       }
 
       await logStepComplete(cwd, workflowRun.id, `iteration-${String(i)}`, i - 1);
+
+      // Emit loop_iteration_completed
+      loopEmitter.emit({
+        type: 'loop_iteration_completed',
+        runId: workflowRun.id,
+        iteration: i,
+        duration: Date.now() - iterationStart,
+        completionDetected: false,
+      });
+      void workflowEventDb.createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'loop_iteration_completed',
+        step_index: i - 1,
+        step_name: `iteration-${String(i)}`,
+        data: {
+          iteration: i,
+          duration_ms: Date.now() - iterationStart,
+          completionDetected: false,
+        },
+      });
     } catch (error) {
       const err = error as Error;
       console.error(`[WorkflowExecutor] Loop iteration ${String(i)} failed:`, err.message);
@@ -1202,6 +1367,43 @@ export async function executeWorkflow(
     console.log(`[WorkflowExecutor] Starting workflow: ${workflow.name} (${workflowRun.id})`);
     await logWorkflowStart(cwd, workflowRun.id, workflow.name, userMessage);
 
+    // Register run with emitter and emit workflow_started
+    const emitter = getWorkflowEventEmitter();
+    const workflowStartTime = Date.now();
+    emitter.registerRun(workflowRun.id, conversationId);
+
+    const totalSteps = workflow.steps ? workflow.steps.length : 0;
+    const isLoop = !!workflow.loop;
+    emitter.emit({
+      type: 'workflow_started',
+      runId: workflowRun.id,
+      workflowName: workflow.name,
+      conversationId: conversationDbId,
+      totalSteps,
+      isLoop,
+    });
+    void workflowEventDb.createWorkflowEvent({
+      workflow_run_id: workflowRun.id,
+      event_type: 'workflow_started',
+      data: { workflowName: workflow.name, totalSteps, isLoop },
+    });
+
+    // Set status to running now that execution has started
+    try {
+      await workflowDb.updateWorkflowRun(workflowRun.id, { status: 'running' });
+    } catch (dbError) {
+      console.error('[WorkflowExecutor] Failed to set workflow status to running', {
+        error: (dbError as Error).message,
+        workflowRunId: workflowRun.id,
+      });
+      await sendCriticalMessage(
+        platform,
+        conversationId,
+        'Workflow blocked: Unable to update status. Please try again.'
+      );
+      return { success: false, error: 'Database error setting workflow to running' };
+    }
+
     // Context for error logging
     const workflowContext: SendMessageContext = {
       workflowId: workflowRun.id,
@@ -1235,14 +1437,18 @@ export async function executeWorkflow(
       }
     }
 
-    // Add workflow start message
-    startupMessage += `🚀 **Starting workflow**: \`${workflow.name}\`\n\n> ${workflow.description}`;
-
-    // Add steps info - use type narrowing from discriminated union
-    const stepsInfo = workflow.steps
-      ? `\n\n**Steps**: ${workflow.steps.map(s => (isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`)).join(' → ')}`
-      : `\n\n**Loop**: until \`${workflow.loop.until}\` (max ${String(workflow.loop.max_iterations)} iterations)`;
-    startupMessage += stepsInfo;
+    // Add workflow start message (steps shown visually in WorkflowProgressCard)
+    // Strip routing metadata from description (Use when:, Handles:, NOT for:, Capability:, Triggers:)
+    const cleanDescription = (workflow.description ?? '')
+      .split('\n')
+      .filter(
+        line =>
+          !/^\s*(Use when|Handles|NOT for|Capability|Triggers)[:\s]/i.test(line) && line.trim()
+      )
+      .join('\n')
+      .trim();
+    const descriptionText = cleanDescription || workflow.name;
+    startupMessage += `🚀 **Starting workflow**: \`${workflow.name}\`\n\n> ${descriptionText}`;
 
     // Send consolidated message - use critical send with limited retries (1 retry max)
     // to avoid blocking workflow execution while still catching transient failures
@@ -1309,6 +1515,22 @@ export async function executeWorkflow(
         // Log parallel block start
         await logParallelBlockStart(cwd, workflowRun.id, i, stepCommands);
 
+        // Emit step_started for the parallel block
+        emitter.emit({
+          type: 'step_started',
+          runId: workflowRun.id,
+          stepIndex: i,
+          stepName: `parallel(${stepCommands.join(', ')})`,
+          totalSteps: steps.length,
+        });
+        void workflowEventDb.createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'step_started',
+          step_index: i,
+          step_name: `parallel(${stepCommands.join(', ')})`,
+          data: { totalSteps: steps.length, parallelAgents: stepCount },
+        });
+
         // Notify user
         const stepNames = parallelSteps.map(s => `\`${s.command}\``).join(', ');
         await safeSendMessage(
@@ -1347,6 +1569,22 @@ export async function executeWorkflow(
           const errorMsg = `${String(failures.length)} parallel step(s) failed:\n${failureDetails.join('\n')}`;
           await logWorkflowError(cwd, workflowRun.id, errorMsg);
 
+          // Emit workflow_failed for parallel block failure
+          emitter.emit({
+            type: 'workflow_failed',
+            runId: workflowRun.id,
+            workflowName: workflow.name,
+            error: errorMsg,
+            stepIndex: i,
+          });
+          void workflowEventDb.createWorkflowEvent({
+            workflow_run_id: workflowRun.id,
+            event_type: 'workflow_failed',
+            step_index: i,
+            data: { error: errorMsg },
+          });
+          emitter.unregisterRun(workflowRun.id);
+
           // Record failure in database (non-critical - log but don't prevent user notification)
           try {
             await workflowDb.failWorkflowRun(workflowRun.id, errorMsg);
@@ -1377,6 +1615,22 @@ export async function executeWorkflow(
         }));
         await logParallelBlockComplete(cwd, workflowRun.id, i, blockResults);
 
+        // Emit step_completed for the parallel block
+        emitter.emit({
+          type: 'step_completed',
+          runId: workflowRun.id,
+          stepIndex: i,
+          stepName: `parallel(${stepCommands.join(', ')})`,
+          duration: 0, // Duration tracked per-agent, not per-block
+        });
+        void workflowEventDb.createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'step_completed',
+          step_index: i,
+          step_name: `parallel(${stepCommands.join(', ')})`,
+          data: {},
+        });
+
         // All parallel steps succeeded - no session to carry forward
         currentSessionId = undefined;
       } else {
@@ -1395,6 +1649,22 @@ export async function executeWorkflow(
           );
         }
 
+        // Emit step_started event
+        emitter.emit({
+          type: 'step_started',
+          runId: workflowRun.id,
+          stepIndex: i,
+          stepName: step.command,
+          totalSteps: steps.length,
+        });
+        void workflowEventDb.createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'step_started',
+          step_index: i,
+          step_name: step.command,
+          data: { totalSteps: steps.length },
+        });
+
         const result = await executeStepInternal(
           platform,
           conversationId,
@@ -1411,6 +1681,23 @@ export async function executeWorkflow(
 
         if (!result.success) {
           await logWorkflowError(cwd, workflowRun.id, result.error);
+
+          // Emit workflow_failed for step failure
+          emitter.emit({
+            type: 'workflow_failed',
+            runId: workflowRun.id,
+            workflowName: workflow.name,
+            error: result.error,
+            stepIndex: i,
+          });
+          void workflowEventDb.createWorkflowEvent({
+            workflow_run_id: workflowRun.id,
+            event_type: 'workflow_failed',
+            step_index: i,
+            step_name: result.commandName,
+            data: { error: result.error },
+          });
+          emitter.unregisterRun(workflowRun.id);
 
           // Record failure in database (non-critical - log but don't prevent user notification)
           try {
@@ -1489,6 +1776,20 @@ export async function executeWorkflow(
 
     console.log(`[WorkflowExecutor] Workflow completed: ${workflow.name}`);
 
+    // Emit workflow_completed
+    emitter.emit({
+      type: 'workflow_completed',
+      runId: workflowRun.id,
+      workflowName: workflow.name,
+      duration: Date.now() - workflowStartTime,
+    });
+    void workflowEventDb.createWorkflowEvent({
+      workflow_run_id: workflowRun.id,
+      event_type: 'workflow_completed',
+      data: { duration_ms: Date.now() - workflowStartTime },
+    });
+    emitter.unregisterRun(workflowRun.id);
+
     // Safety net: Commit any artifacts created during workflow but not yet committed
     await commitWorkflowArtifacts(
       platform,
@@ -1533,6 +1834,21 @@ export async function executeWorkflow(
       });
     }
 
+    // Emit workflow_failed event
+    const emitter = getWorkflowEventEmitter();
+    emitter.emit({
+      type: 'workflow_failed',
+      runId: workflowRun.id,
+      workflowName: workflow.name,
+      error: err.message,
+    });
+    void workflowEventDb.createWorkflowEvent({
+      workflow_run_id: workflowRun.id,
+      event_type: 'workflow_failed',
+      data: { error: err.message },
+    });
+    emitter.unregisterRun(workflowRun.id);
+
     // Notify user about the failure
     const delivered = await sendCriticalMessage(
       platform,
@@ -1571,6 +1887,23 @@ async function commitWorkflowArtifacts(
     );
     if (committed) {
       console.log(`[WorkflowExecutor] Committed remaining artifacts for workflow: ${workflowName}`);
+
+      // Emit workflow_artifact event
+      const emitter = getWorkflowEventEmitter();
+      emitter.emit({
+        type: 'workflow_artifact',
+        runId: workflowId,
+        artifactType: 'commit',
+        label: `Auto-commit workflow artifacts (${workflowName})`,
+      });
+      void workflowEventDb.createWorkflowEvent({
+        workflow_run_id: workflowId,
+        event_type: 'workflow_artifact',
+        data: {
+          artifactType: 'commit',
+          label: `Auto-commit workflow artifacts (${workflowName})`,
+        },
+      });
 
       // Push the committed artifacts
       try {

@@ -16,6 +16,13 @@ interface QueuedMessage {
 }
 
 /**
+ * Result of acquiring a lock, indicating whether the message was started or queued
+ */
+export interface LockAcquisitionResult {
+  status: 'started' | 'queued-conversation' | 'queued-capacity';
+}
+
+/**
  * Manages conversation locks for concurrent message processing
  */
 export class ConversationLockManager {
@@ -40,11 +47,14 @@ export class ConversationLockManager {
    * @param conversationId - Unique conversation identifier
    * @param handler - Async function to execute
    */
-  async acquireLock(conversationId: string, handler: () => Promise<void>): Promise<void> {
+  async acquireLock(
+    conversationId: string,
+    handler: () => Promise<void>
+  ): Promise<LockAcquisitionResult> {
     // Check if conversation already active - queue if yes
     if (this.activeConversations.has(conversationId)) {
       this.queueMessage(conversationId, handler);
-      return;
+      return { status: 'queued-conversation' };
     }
 
     // Check if at max capacity - queue if yes
@@ -53,7 +63,7 @@ export class ConversationLockManager {
         `[ConversationLock] At max capacity (${String(this.maxConcurrent)}), queuing ${conversationId}`
       );
       this.queueMessage(conversationId, handler);
-      return;
+      return { status: 'queued-capacity' };
     }
 
     // Execute immediately
@@ -89,6 +99,7 @@ export class ConversationLockManager {
     this.activeConversations.set(conversationId, promise);
 
     // Fire-and-forget: don't await here, return immediately
+    return { status: 'started' };
   }
 
   /**

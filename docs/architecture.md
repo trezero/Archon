@@ -8,15 +8,17 @@ Comprehensive guide to understanding and extending the Remote Coding Agent platf
 
 ## System Overview
 
-The Remote Coding Agent is a **platform-agnostic AI coding assistant orchestrator** that connects messaging platforms (Telegram, GitHub, Slack) to AI coding assistants (Claude Code, Codex) via a unified interface.
+The Remote Coding Agent is a **platform-agnostic AI coding assistant orchestrator** that connects messaging platforms (Web UI, Telegram, GitHub, Slack, Discord) to AI coding assistants (Claude Code, Codex) via a unified interface. The built-in Web UI provides a complete standalone experience with real-time streaming, tool call visualization, and workflow management.
 
 ### Core Architecture
 
 ```
 ┌─────────────────────────────────────────────┐
-│   Platform Adapters (Telegram, GitHub, CLI) │
+│  Platform Adapters (Web UI, Telegram,       │
+│         GitHub, Slack, Discord, CLI)        │
 │   • IPlatformAdapter interface              │
-│   • Handle platform-specific messaging      │
+│   • Web: SSE streaming + REST API           │
+│   • Others: Platform-specific messaging     │
 └──────────────────┬──────────────────────────┘
                    │
                    ▼
@@ -26,6 +28,7 @@ The Remote Coding Agent is a **platform-agnostic AI coding assistant orchestrato
 │   • Route AI queries → Assistant Clients    │
 │   • Manage session lifecycle                │
 │   • Stream responses back to platforms      │
+│   • Emit workflow events to Web UI          │
 └──────────────┬──────────────────────────────┘
                │
        ┌───────┼────────┐
@@ -42,8 +45,10 @@ The Remote Coding Agent is a **platform-agnostic AI coding assistant orchestrato
       └───────────────┼───────────────────┘
                       ▼
 ┌─────────────────────────────────────────────┐
-│    PostgreSQL/SQLite (3 Tables)             │
+│    PostgreSQL/SQLite (8 Tables)             │
 │  • Codebases  • Conversations  • Sessions   │
+│  • Command Templates • Isolation Envs       │
+│  • Workflow Runs • Workflow Events • Messages│
 └─────────────────────────────────────────────┘
 ```
 
@@ -163,6 +168,7 @@ YOUR_PLATFORM_STREAMING_MODE=stream  # stream | batch
 
 Each platform must provide a unique, stable conversation ID:
 
+- **Web UI**: User-provided string or auto-generated UUID
 - **Telegram**: `chat_id` (e.g., `"123456789"`)
 - **GitHub**: `owner/repo#issue_number` (e.g., `"user/repo#42"`)
 - **Slack**: `thread_ts` or `channel_id+thread_ts`
@@ -189,6 +195,40 @@ async sendMessage(conversationId: string, message: string): Promise<void> {
 ```
 
 **Reference:** `packages/server/src/adapters/telegram.ts`
+
+#### Server-Sent Events (SSE)
+
+**SSE** (Web UI pattern):
+
+```typescript
+// Web adapter maintains SSE connections per conversation
+registerStream(conversationId: string, stream: SSEWriter): void {
+  this.streams.set(conversationId, stream);
+}
+
+async sendMessage(conversationId: string, message: string): Promise<void> {
+  const stream = this.streams.get(conversationId);
+  if (stream && !stream.closed) {
+    await stream.writeSSE({ data: JSON.stringify({ type: 'text', content: message }) });
+  } else {
+    // Buffer messages if client disconnected (reconnection recovery)
+    this.messageBuffer.set(conversationId, [...(this.messageBuffer.get(conversationId) ?? []), message]);
+  }
+}
+
+// Structured events for tool calls, workflow progress, errors
+async sendStructuredEvent(conversationId: string, event: MessageChunk): Promise<void> {
+  await this.emitSSE(conversationId, JSON.stringify(event));
+}
+```
+
+**Benefits:**
+- Real-time streaming without polling overhead
+- Automatic reconnection handling in browser
+- Message buffering during disconnections
+- Structured events (tool calls, workflow progress, lock state)
+
+**Reference:** `packages/server/src/adapters/web.ts`
 
 #### Polling vs Webhooks
 
@@ -965,7 +1005,7 @@ export function formatToolCall(toolName: string, toolInput?: Record<string, unkn
 
 ## Database Schema
 
-The platform uses a minimal 3-table schema with `remote_agent_` prefix.
+The platform uses an 8-table schema with `remote_agent_` prefix.
 
 ### Schema Overview
 
@@ -980,11 +1020,13 @@ remote_agent_codebases
 
 remote_agent_conversations
 ├── id (UUID)
-├── platform_type (VARCHAR) -- 'telegram' | 'github' | 'slack'
+├── platform_type (VARCHAR) -- 'web' | 'telegram' | 'github' | 'slack'
 ├── platform_conversation_id (VARCHAR) -- Platform-specific ID
 ├── codebase_id (UUID → remote_agent_codebases.id)
 ├── cwd (VARCHAR) -- Current working directory
 ├── ai_assistant_type (VARCHAR) -- LOCKED at creation
+├── title (VARCHAR) -- User-friendly conversation title (Web UI)
+├── deleted_at (TIMESTAMP) -- Soft-delete support
 └── UNIQUE(platform_type, platform_conversation_id)
 
 remote_agent_sessions
@@ -997,6 +1039,49 @@ remote_agent_sessions
 ├── parent_session_id (UUID → remote_agent_sessions.id) -- Previous session for audit trail
 ├── transition_reason (TEXT) -- Why this session was created (TransitionTrigger)
 └── metadata (JSONB) -- {lastCommand: "plan-feature", ...}
+
+remote_agent_command_templates
+├── id (UUID)
+├── name (VARCHAR, UNIQUE)
+├── description (TEXT)
+└── content (TEXT)
+
+remote_agent_isolation_environments
+├── id (UUID)
+├── codebase_id (UUID → remote_agent_codebases.id)
+├── workflow_type (VARCHAR)
+├── workflow_id (VARCHAR)
+├── working_path (VARCHAR)
+├── branch_name (VARCHAR)
+├── status (VARCHAR) -- 'active' | 'destroyed'
+└── metadata (JSONB)
+
+remote_agent_workflow_runs
+├── id (UUID)
+├── conversation_id (UUID → remote_agent_conversations.id)
+├── codebase_id (UUID → remote_agent_codebases.id)
+├── workflow_name (VARCHAR)
+├── status (VARCHAR) -- 'pending' | 'running' | 'completed' | 'failed'
+├── current_step_index (INTEGER)
+├── parent_conversation_id (UUID) -- Parent chat that dispatched this run
+└── metadata (JSONB)
+
+remote_agent_workflow_events
+├── id (UUID)
+├── workflow_run_id (UUID → remote_agent_workflow_runs.id)
+├── event_type (VARCHAR) -- 'step-start' | 'step-complete' | 'step-fail' | 'artifact' | 'error'
+├── step_index (INTEGER)
+├── step_name (VARCHAR)
+├── data (JSONB) -- Event-specific data (artifacts, error messages, etc.)
+└── created_at (TIMESTAMP)
+
+remote_agent_messages
+├── id (UUID)
+├── conversation_id (UUID → remote_agent_conversations.id)
+├── role (VARCHAR) -- 'user' | 'assistant'
+├── content (TEXT)
+├── metadata (JSONB) -- {toolCalls: [{name, input, duration}], workflowDispatch, ...}
+└── created_at (TIMESTAMP)
 ```
 
 ### Database Operations

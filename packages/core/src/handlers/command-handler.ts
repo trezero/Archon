@@ -25,6 +25,8 @@ import { discoverWorkflows } from '../workflows';
 import { isSingleStep, type WorkflowDefinition } from '../workflows/types';
 import * as workflowDb from '../db/workflows';
 import { getTriggerForCommand } from '../state/session-transitions';
+import { cloneRepository } from './clone';
+import { findMarkdownFilesRecursive } from '../utils/commands';
 
 // Workflow staleness thresholds (in milliseconds)
 const WORKFLOW_SLOW_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
@@ -169,40 +171,6 @@ async function formatRepoContext(
 }
 
 /**
- * Recursively find all .md files in a directory and its subdirectories
- */
-async function findMarkdownFilesRecursive(
-  rootPath: string,
-  relativePath = ''
-): Promise<{ commandName: string; relativePath: string }[]> {
-  const results: { commandName: string; relativePath: string }[] = [];
-  const fullPath = join(rootPath, relativePath);
-
-  const entries = await readdir(fullPath, { withFileTypes: true });
-
-  for (const entry of entries) {
-    // Skip hidden directories and common exclusions
-    if (entry.name.startsWith('.') || entry.name === 'node_modules') {
-      continue;
-    }
-
-    if (entry.isDirectory()) {
-      // Recurse into subdirectory
-      const subResults = await findMarkdownFilesRecursive(rootPath, join(relativePath, entry.name));
-      results.push(...subResults);
-    } else if (entry.isFile() && entry.name.endsWith('.md')) {
-      // Found a markdown file - use filename as command name
-      results.push({
-        commandName: basename(entry.name, '.md'),
-        relativePath: join(relativePath, entry.name),
-      });
-    }
-  }
-
-  return results;
-}
-
-/**
  * Represents a repository with nested owner/repo structure
  */
 interface RepoEntry {
@@ -292,52 +260,52 @@ export async function handleCommand(
     case 'help':
       return {
         success: true,
-        message: `Available Commands:
+        message: `## Available Commands
 
-Command Templates (global):
-  /<name> [args] - Invoke a template directly
-  /templates - List all templates
-  /template-add <name> <path> - Add template from file
-  /template-delete <name> - Remove a template
+### Command Templates (global)
+- \`/<name> [args]\` - Invoke a template directly
+- \`/templates\` - List all templates
+- \`/template-add <name> <path>\` - Add template from file
+- \`/template-delete <name>\` - Remove a template
 
-Codebase Commands (per-project):
-  /command-set <name> <path> [text] - Register command
-  /load-commands <folder> - Bulk load (recursive)
-  /command-invoke <name> [args] - Execute
-  /commands - List registered
-  Note: Commands use relative paths (e.g., .archon/commands)
+### Codebase Commands (per-project)
+- \`/command-set <name> <path> [text]\` - Register command
+- \`/load-commands <folder>\` - Bulk load (recursive)
+- \`/command-invoke <name> [args]\` - Execute
+- \`/commands\` - List registered
+- *Commands use relative paths (e.g., .archon/commands)*
 
-Codebase:
-  /clone <repo-url> - Clone repository
-  /repos - List repositories (numbered)
-  /repo <#|name> [pull] - Switch repo (auto-loads commands)
-  /repo-remove <#|name> - Remove repo and codebase record
-  /getcwd - Show working directory
-  /setcwd <path> - Set directory
-  Note: Use /repo for quick switching, /setcwd for manual paths
+### Codebase
+- \`/clone <repo-url>\` - Clone repository
+- \`/repos\` - List repositories (numbered)
+- \`/repo <#|name> [pull]\` - Switch repo (auto-loads commands)
+- \`/repo-remove <#|name>\` - Remove repo and codebase record
+- \`/getcwd\` - Show working directory
+- \`/setcwd <path>\` - Set directory
+- *Use /repo for quick switching, /setcwd for manual paths*
 
-Worktrees:
-  /worktree create <branch> - Create isolated worktree
-  /worktree list - Show worktrees for this repo
-  /worktree remove [--force] - Remove current worktree
-  /worktree cleanup merged|stale - Clean up worktrees
-  /worktree orphans - Show all worktrees from git
+### Worktrees
+- \`/worktree create <branch>\` - Create isolated worktree
+- \`/worktree list\` - Show worktrees for this repo
+- \`/worktree remove [--force]\` - Remove current worktree
+- \`/worktree cleanup merged|stale\` - Clean up worktrees
+- \`/worktree orphans\` - Show all worktrees from git
 
-Workflows:
-  /workflow list - Show available workflows
-  /workflow reload - Reload workflow definitions
-  /workflow status - Show running workflow details
-  /workflow cancel - Cancel running workflow
-  Note: Workflows are YAML files in .archon/workflows/
+### Workflows
+- \`/workflow list\` - Show available workflows
+- \`/workflow reload\` - Reload workflow definitions
+- \`/workflow status\` - Show running workflow details
+- \`/workflow cancel\` - Cancel running workflow
+- *Workflows are YAML files in .archon/workflows/*
 
-Session:
-  /status - Show state
-  /reset - Clear session
-  /reset-context - Reset AI context, keep worktree
-  /help - Show help
+### Session
+- \`/status\` - Show state
+- \`/reset\` - Clear session
+- \`/reset-context\` - Reset AI context, keep worktree
+- \`/help\` - Show help
 
-Setup:
-  /init - Create .archon structure in current repo`,
+### Setup
+- \`/init\` - Create .archon structure in current repo`,
       };
 
     case 'status': {
@@ -506,180 +474,26 @@ Setup:
         return { success: false, message: 'Usage: /clone <repo-url>' };
       }
 
-      // Normalize URL: strip trailing slashes
-      const normalizedUrl: string = args[0].replace(/\/+$/, '');
-
-      // Convert SSH URL to HTTPS format if needed
-      // git@github.com:user/repo.git -> https://github.com/user/repo.git
-      let workingUrl = normalizedUrl;
-      if (normalizedUrl.startsWith('git@github.com:')) {
-        workingUrl = normalizedUrl.replace('git@github.com:', 'https://github.com/');
-      }
-
-      // Extract owner and repo from URL
-      // https://github.com/owner/repo.git -> owner, repo
-      const urlParts = workingUrl.replace(/\.git$/, '').split('/');
-      const repoName = urlParts.pop() ?? 'unknown';
-      const ownerName = urlParts.pop() ?? 'unknown';
-
-      // Use Archon workspaces path (ARCHON_HOME/workspaces or ~/.archon/workspaces)
-      // Include owner in path to prevent collisions (e.g., alice/utils vs bob/utils)
-      const workspacePath = getArchonWorkspacesPath();
-      const targetPath = join(workspacePath, ownerName, repoName);
-
       try {
-        // Check if target directory already exists
-        try {
-          await access(targetPath);
+        const result = await cloneRepository(args[0]);
 
-          // Directory exists - try to find existing codebase by repo URL
-          // Check both with and without .git suffix (per github.ts pattern)
-          const urlNoGit = workingUrl.replace(/\.git$/, '');
-          const urlWithGit = urlNoGit + '.git';
-
-          const existingCodebase =
-            (await codebaseDb.findCodebaseByRepoUrl(urlNoGit)) ??
-            (await codebaseDb.findCodebaseByRepoUrl(urlWithGit));
-
-          if (existingCodebase) {
-            // Link conversation to existing codebase
-            try {
-              await db.updateConversation(conversation.id, {
-                codebase_id: existingCodebase.id,
-                cwd: targetPath,
-              });
-            } catch (updateError) {
-              if (updateError instanceof ConversationNotFoundError) {
-                return {
-                  success: false,
-                  message:
-                    'Failed to link existing codebase: conversation state changed. Please try again.',
-                };
-              }
-              throw updateError;
-            }
-
-            // Reset session when switching codebases
-            const session = await sessionDb.getActiveSession(conversation.id);
-            if (session) {
-              await sessionDb.deactivateSession(session.id);
-              console.log(
-                `[Command] Deactivated session: ${getTriggerForCommand('clone') ?? 'codebase-cloned'}`
-              );
-            }
-
-            // Check for command folders (same logic as successful clone)
-            let commandFolder: string | null = null;
-            for (const folder of getCommandFolderSearchPaths()) {
-              try {
-                await access(join(targetPath, folder));
-                commandFolder = folder;
-                break;
-              } catch {
-                /* ignore */
-              }
-            }
-
-            let responseMessage = `Repository already cloned.\n\nLinked to existing codebase: ${existingCodebase.name}\nPath: ${targetPath}\n\nSession reset - starting fresh on next message.`;
-
-            if (commandFolder) {
-              responseMessage += `\n\n📁 Found: ${commandFolder}/\nUse /load-commands ${commandFolder} to register commands.`;
-            }
-
-            return {
-              success: true,
-              message: responseMessage,
-              modified: true,
-            };
-          }
-
-          // Directory exists but no codebase found
-          return {
-            success: false,
-            message: `Directory already exists: ${targetPath}\n\nNo matching codebase found in database. Options:\n- Remove the directory and re-clone\n- Use /setcwd ${targetPath} (limited functionality)`,
-          };
-        } catch {
-          // Directory doesn't exist, proceed with clone
-        }
-
-        console.log(`[Clone] Cloning ${workingUrl} to ${targetPath}`);
-
-        // Build clone command with authentication if GitHub token is available
-        let cloneUrl = workingUrl;
-        const ghToken = process.env.GH_TOKEN;
-
-        if (ghToken && workingUrl.includes('github.com')) {
-          // Inject token into GitHub URL for private repo access
-          // Convert: https://github.com/user/repo.git -> https://token@github.com/user/repo.git
-          if (workingUrl.startsWith('https://github.com')) {
-            cloneUrl = workingUrl.replace('https://github.com', `https://${ghToken}@github.com`);
-          } else if (workingUrl.startsWith('http://github.com')) {
-            cloneUrl = workingUrl.replace('http://github.com', `https://${ghToken}@github.com`);
-          } else if (!workingUrl.startsWith('http')) {
-            // Handle github.com/user/repo format (bare domain)
-            cloneUrl = `https://${ghToken}@${workingUrl}`;
-          }
-          console.log('[Clone] Using authenticated GitHub clone');
-        }
-
-        await execFileAsync('git', ['clone', cloneUrl, targetPath]);
-
-        // Add the cloned repository to git safe.directory to prevent ownership errors
-        // This is needed because we run as non-root user but git might see different ownership
-        await execFileAsync('git', ['config', '--global', '--add', 'safe.directory', targetPath]);
-        console.log(`[Clone] Added ${targetPath} to git safe.directory`);
-
-        // Auto-detect assistant type based on folder structure
-        let suggestedAssistant = 'claude';
-        const codexFolder = join(targetPath, '.codex');
-        const claudeFolder = join(targetPath, '.claude');
-
-        try {
-          await access(codexFolder);
-          suggestedAssistant = 'codex';
-          console.log('[Clone] Detected .codex folder - using Codex assistant');
-        } catch {
-          try {
-            await access(claudeFolder);
-            suggestedAssistant = 'claude';
-            console.log('[Clone] Detected .claude folder - using Claude assistant');
-          } catch {
-            // Default to claude
-            console.log('[Clone] No assistant folder detected - defaulting to Claude');
-          }
-        }
-
-        const codebase = await codebaseDb.createCodebase({
-          name: `${ownerName}/${repoName}`,
-          repository_url: workingUrl,
-          default_cwd: targetPath,
-          ai_assistant_type: suggestedAssistant,
-        });
-
-        console.log(
-          `[Clone] Updating conversation ${conversation.id} with codebase ${codebase.id}`
-        );
+        // Link conversation to the codebase
         try {
           await db.updateConversation(conversation.id, {
-            codebase_id: codebase.id,
-            cwd: targetPath,
+            codebase_id: result.codebaseId,
+            cwd: result.defaultCwd,
           });
         } catch (updateError) {
           if (updateError instanceof ConversationNotFoundError) {
-            console.error('[Clone] Failed to link conversation - state changed unexpectedly', {
-              conversationId: conversation.id,
-              codebaseId: codebase.id,
-            });
             return {
               success: false,
-              message:
-                'Failed to complete clone: conversation state changed unexpectedly. Please try again.',
+              message: 'Failed to link codebase: conversation state changed. Please try again.',
             };
           }
           throw updateError;
         }
 
-        // Reset session when cloning a new repository
+        // Reset session when cloning/switching codebases
         const session = await sessionDb.getActiveSession(conversation.id);
         if (session) {
           await sessionDb.deactivateSession(session.id);
@@ -688,44 +502,36 @@ Setup:
           );
         }
 
-        // Auto-load commands if found (defaults loaded at runtime, not copied)
-        let commandsLoaded = 0;
-        for (const folder of getCommandFolderSearchPaths()) {
-          try {
-            const commandPath = join(targetPath, folder);
-            await access(commandPath);
-
-            const markdownFiles = await findMarkdownFilesRecursive(commandPath);
-            if (markdownFiles.length > 0) {
-              const commands = await codebaseDb.getCodebaseCommands(codebase.id);
-              markdownFiles.forEach(({ commandName, relativePath }) => {
-                commands[commandName] = {
-                  path: join(folder, relativePath),
-                  description: `From ${folder}`,
-                };
-              });
-              await codebaseDb.updateCodebaseCommands(codebase.id, commands);
-              commandsLoaded = markdownFiles.length;
+        if (result.alreadyExisted) {
+          // Check for command folders
+          let commandFolder: string | null = null;
+          for (const folder of getCommandFolderSearchPaths()) {
+            try {
+              await access(join(result.defaultCwd, folder));
+              commandFolder = folder;
               break;
+            } catch {
+              /* ignore */
             }
-          } catch {
-            // Folder doesn't exist, try next
           }
+
+          let responseMessage = `Repository already cloned.\n\nLinked to existing codebase: ${result.name}\nPath: ${result.defaultCwd}\n\nSession reset - starting fresh on next message.`;
+          if (commandFolder) {
+            responseMessage += `\n\n📁 Found: ${commandFolder}/\nUse /load-commands ${commandFolder} to register commands.`;
+          }
+
+          return { success: true, message: responseMessage, modified: true };
         }
 
-        let responseMessage = `Repository cloned successfully!\n\nRepository: ${repoName}`;
-        if (commandsLoaded > 0) {
-          responseMessage += `\n✓ Loaded ${String(commandsLoaded)} repo commands`;
+        let responseMessage = `Repository cloned successfully!\n\nRepository: ${result.name}`;
+        if (result.commandCount > 0) {
+          responseMessage += `\n✓ Loaded ${String(result.commandCount)} repo commands`;
         }
         responseMessage += '\n✓ App defaults available at runtime';
         responseMessage +=
           '\n\nSession reset - starting fresh on next message.\n\nYou can now start asking questions about the code.';
 
-        return {
-          success: true,
-          message: responseMessage,
-          modified: true,
-        };
+        return { success: true, message: responseMessage, modified: true };
       } catch (error) {
         const err = error as Error;
         const safeErr = sanitizeError(err);

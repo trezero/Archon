@@ -21,6 +21,9 @@ export interface Conversation {
   cwd: string | null;
   isolation_env_id: string | null; // UUID FK to isolation_environments
   ai_assistant_type: string;
+  title: string | null;
+  hidden: boolean;
+  deleted_at: Date | null;
   last_activity_at: Date | null; // For staleness detection
   created_at: Date;
   updated_at: Date;
@@ -151,20 +154,47 @@ export interface IPlatformAdapter {
    * Stop the platform adapter gracefully
    */
   stop(): void;
+
+  /**
+   * Optional: Send a structured event (MessageChunk) to the platform.
+   * Only implemented by adapters that can display rich structured data (e.g., Web UI).
+   * Other adapters (Telegram, Slack) continue using sendMessage() for formatted text.
+   */
+  sendStructuredEvent?(conversationId: string, event: MessageChunk): Promise<void>;
 }
 
 /**
- * Message chunk from AI assistant
+ * Extended platform adapter for the Web UI.
+ * Adds methods for SSE event bridging, message persistence, and lock events
+ * that are only meaningful in the web context.
  */
-export interface MessageChunk {
-  type: 'assistant' | 'result' | 'system' | 'tool' | 'thinking';
-  content?: string;
-  sessionId?: string;
-
-  // For tool calls
-  toolName?: string;
-  toolInput?: Record<string, unknown>;
+export interface IWebPlatformAdapter extends IPlatformAdapter {
+  sendStructuredEvent(conversationId: string, event: MessageChunk): Promise<void>;
+  setConversationDbId(platformConversationId: string, dbId: string): void;
+  setupEventBridge(workerConversationId: string, parentConversationId: string): () => void;
+  emitLockEvent(conversationId: string, locked: boolean, queuePosition?: number): void;
+  registerOutputCallback(conversationId: string, callback: (text: string) => void): void;
+  removeOutputCallback(conversationId: string): void;
 }
+
+/**
+ * Type guard for web platform adapter.
+ */
+export function isWebAdapter(adapter: IPlatformAdapter): adapter is IWebPlatformAdapter {
+  return adapter.getPlatformType() === 'web';
+}
+
+/**
+ * Message chunk from AI assistant.
+ * Discriminated union with per-type required fields for type safety.
+ */
+export type MessageChunk =
+  | { type: 'assistant'; content: string }
+  | { type: 'system'; content: string }
+  | { type: 'thinking'; content: string }
+  | { type: 'result'; sessionId?: string }
+  | { type: 'tool'; toolName: string; toolInput?: Record<string, unknown> }
+  | { type: 'workflow_dispatch'; workerConversationId: string; workflowName: string };
 
 /**
  * Generic AI assistant client interface

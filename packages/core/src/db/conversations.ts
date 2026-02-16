@@ -6,6 +6,17 @@ import type { Conversation } from '../types';
 import { ConversationNotFoundError } from '../types';
 
 /**
+ * Get a conversation by its database ID
+ */
+export async function getConversationById(id: string): Promise<Conversation | null> {
+  const result = await pool.query<Conversation>(
+    'SELECT * FROM remote_agent_conversations WHERE id = $1',
+    [id]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
  * Get a conversation by platform type and platform ID
  * Returns null if not found (unlike getOrCreate which creates)
  */
@@ -79,10 +90,12 @@ export async function getOrCreateConversation(
 
 export async function updateConversation(
   id: string,
-  updates: Partial<Pick<Conversation, 'codebase_id' | 'cwd' | 'isolation_env_id'>>
+  updates: Partial<Pick<Conversation, 'codebase_id' | 'cwd' | 'isolation_env_id'>> & {
+    hidden?: boolean;
+  }
 ): Promise<void> {
   const fields: string[] = [];
-  const values: (string | null)[] = [];
+  const values: (string | number | null)[] = [];
   let i = 1;
 
   if (updates.codebase_id !== undefined) {
@@ -96,6 +109,10 @@ export async function updateConversation(
   if (updates.isolation_env_id !== undefined) {
     fields.push(`isolation_env_id = $${String(i++)}`);
     values.push(updates.isolation_env_id);
+  }
+  if (updates.hidden !== undefined) {
+    fields.push(`hidden = $${String(i++)}`);
+    values.push(updates.hidden ? 1 : 0);
   }
 
   if (fields.length === 0) {
@@ -146,6 +163,36 @@ export async function getConversationsByIsolationEnvId(
 }
 
 /**
+ * List all conversations ordered by recent activity
+ */
+export async function listConversations(
+  limit = 50,
+  platformType?: string,
+  codebaseId?: string
+): Promise<readonly Conversation[]> {
+  const params: unknown[] = [];
+  let sql =
+    'SELECT * FROM remote_agent_conversations WHERE deleted_at IS NULL AND (hidden IS NULL OR hidden = false)';
+
+  if (platformType) {
+    params.push(platformType);
+    sql += ` AND platform_type = $${String(params.length)}`;
+  }
+
+  if (codebaseId) {
+    params.push(codebaseId);
+    sql += ` AND codebase_id = $${String(params.length)}`;
+  }
+
+  sql += ' ORDER BY last_activity_at DESC NULLS LAST';
+  params.push(limit);
+  sql += ` LIMIT $${String(params.length)}`;
+
+  const result = await pool.query<Conversation>(sql, params);
+  return result.rows;
+}
+
+/**
  * Update last_activity_at for staleness tracking
  */
 export async function touchConversation(id: string): Promise<void> {
@@ -154,4 +201,32 @@ export async function touchConversation(id: string): Promise<void> {
     `UPDATE remote_agent_conversations SET last_activity_at = ${dialect.now()} WHERE id = $1`,
     [id]
   );
+}
+
+/**
+ * Update conversation title
+ */
+export async function updateConversationTitle(id: string, title: string): Promise<void> {
+  const dialect = getDialect();
+  const result = await pool.query(
+    `UPDATE remote_agent_conversations SET title = $1, updated_at = ${dialect.now()} WHERE id = $2`,
+    [title, id]
+  );
+  if (result.rowCount === 0) {
+    throw new ConversationNotFoundError(id);
+  }
+}
+
+/**
+ * Soft delete a conversation (sets deleted_at timestamp)
+ */
+export async function softDeleteConversation(id: string): Promise<void> {
+  const dialect = getDialect();
+  const result = await pool.query(
+    `UPDATE remote_agent_conversations SET deleted_at = ${dialect.now()}, updated_at = ${dialect.now()} WHERE id = $1`,
+    [id]
+  );
+  if (result.rowCount === 0) {
+    throw new ConversationNotFoundError(id);
+  }
 }

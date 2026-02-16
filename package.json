@@ -8,7 +8,8 @@
   "type": "module",
   "scripts": {
     "cli": "bun --env-file=.env --cwd packages/cli src/cli.ts",
-    "dev": "bun --filter @archon/server dev",
+    "dev": "bun --filter '*' dev",
+    "dev:server": "bun --filter @archon/server dev",
     "start": "bun --filter @archon/server start",
     "build": "bun --filter '*' build",
     "build:binaries": "bash scripts/build-binaries.sh",
@@ -20,6 +21,8 @@
     "lint:fix": "bun x eslint . --cache --fix",
     "format": "bun x prettier --write .",
     "format:check": "bun x prettier --check .",
+    "dev:web": "bun --filter @archon/web dev",
+    "build:web": "bun --filter @archon/web build",
     "validate": "bun run type-check && bun run lint --max-warnings 0 && bun run format:check && bun run test",
     "prepare": "husky",
     "setup-auth": "bun --filter @archon/server setup-auth"

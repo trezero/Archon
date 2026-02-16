@@ -16,6 +16,7 @@ import {
   Conversation,
   Codebase,
   ConversationNotFoundError,
+  isWebAdapter,
 } from '../types';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
@@ -38,6 +39,7 @@ import {
   executeWorkflow,
 } from '../workflows';
 import type { WorkflowDefinition, RouterContext } from '../workflows';
+import * as workflowDb from '../db/workflows';
 import {
   cleanupToMakeRoom,
   getWorktreeStatusBreakdown,
@@ -338,6 +340,8 @@ async function resolveIsolation(
       error: err.message,
       stack: err.stack,
       codebaseId: codebase.id,
+      codebaseName: codebase.name,
+      defaultCwd: codebase.default_cwd,
     });
 
     await platform.sendMessage(
@@ -477,7 +481,13 @@ async function tryWorkflowRouting(
     ? { branchName: ctx.isolationEnv.branch_name, isPrReview, prSha, prBranch }
     : undefined;
 
-  // executeWorkflow handles its own errors and user messaging
+  // Background dispatch for web platform — workflow runs in a worker conversation
+  if (ctx.platform.getPlatformType() === 'web') {
+    await dispatchBackgroundWorkflow(ctx, workflow, isolationContext);
+    return true;
+  }
+
+  // Inline execution for all other platforms
   await executeWorkflow(
     ctx.platform,
     ctx.conversationId,
@@ -491,6 +501,115 @@ async function tryWorkflowRouting(
   );
 
   return true;
+}
+
+/**
+ * Dispatch a workflow to run in a background worker conversation (web platform only).
+ * Creates a hidden worker conversation, sets up event bridging from worker to parent,
+ * and fires-and-forgets the workflow execution.
+ */
+async function dispatchBackgroundWorkflow(
+  ctx: WorkflowRoutingContext,
+  workflow: WorkflowDefinition,
+  isolationContext?: {
+    branchName?: string;
+    isPrReview?: boolean;
+    prSha?: string;
+    prBranch?: string;
+  }
+): Promise<void> {
+  // 1. Generate worker conversation ID
+  const workerPlatformId = `web-worker-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+
+  // 2. Create worker conversation in DB (inherit context from parent)
+  const workerConv = await db.getOrCreateConversation('web', workerPlatformId);
+  await db.updateConversation(workerConv.id, {
+    cwd: ctx.cwd,
+    codebase_id: ctx.codebaseId ?? null,
+    hidden: true,
+  });
+
+  // 3. Notify parent chat that workflow is dispatching
+  await ctx.platform.sendMessage(
+    ctx.conversationId,
+    `\u{1F680} Dispatching workflow: **${workflow.name}** (background)`
+  );
+
+  // Narrow to web adapter for web-specific operations
+  const webAdapter = isWebAdapter(ctx.platform) ? ctx.platform : null;
+
+  // Send structured dispatch event for Web UI
+  if (webAdapter) {
+    await webAdapter.sendStructuredEvent(ctx.conversationId, {
+      type: 'workflow_dispatch',
+      workerConversationId: workerPlatformId,
+      workflowName: workflow.name,
+    });
+  }
+
+  // 4. Set up DB ID mapping for worker (needed for message persistence)
+  if (webAdapter) {
+    webAdapter.setConversationDbId(workerPlatformId, workerConv.id);
+  }
+
+  // 5. Set up event bridge (worker events → parent SSE stream)
+  let unsubscribeBridge: (() => void) | undefined;
+  if (webAdapter) {
+    unsubscribeBridge = webAdapter.setupEventBridge(workerPlatformId, ctx.conversationId);
+  }
+
+  // 6. Fire-and-forget: run workflow in background
+  void (async (): Promise<void> => {
+    try {
+      try {
+        const result = await executeWorkflow(
+          ctx.platform,
+          workerPlatformId,
+          ctx.cwd,
+          workflow,
+          ctx.originalMessage,
+          workerConv.id,
+          ctx.codebaseId,
+          ctx.issueContext,
+          isolationContext
+        );
+        // Store parent link on the workflow run (regardless of success/failure)
+        if (result.workflowRunId) {
+          await workflowDb.updateWorkflowRunParent(result.workflowRunId, ctx.conversationDbId);
+        }
+      } catch (error) {
+        console.error('[Orchestrator] Background workflow failed:', {
+          workflowName: workflow.name,
+          workerConversationId: workerPlatformId,
+          error: (error as Error).message,
+        });
+        // Surface error to parent conversation so the user knows
+        await ctx.platform
+          .sendMessage(
+            ctx.conversationId,
+            `Workflow **${workflow.name}** failed: ${(error as Error).message}`
+          )
+          .catch((sendErr: unknown) => {
+            console.error('[Orchestrator] Failed to notify parent of workflow error:', {
+              error: (sendErr as Error).message,
+            });
+          });
+      } finally {
+        // Clean up event bridge
+        if (unsubscribeBridge) {
+          unsubscribeBridge();
+        }
+        if (webAdapter) {
+          webAdapter.removeOutputCallback(workerPlatformId);
+          webAdapter.emitLockEvent(workerPlatformId, false);
+        }
+      }
+    } catch (outerError) {
+      console.error('[Orchestrator] Unhandled error in background workflow:', {
+        error: (outerError as Error).message,
+      });
+    }
+  })();
 }
 
 /**
@@ -663,17 +782,32 @@ export async function handleMessage(
           // Build the user message with workflow args
           const userMessage = workflowArgs || message;
 
-          // Execute the workflow
-          await executeWorkflow(
-            platform,
-            conversationId,
-            cwd,
-            workflow,
-            userMessage,
-            conversation.id,
-            conversation.codebase_id,
-            issueContext
-          );
+          // Background dispatch for web platform
+          if (platform.getPlatformType() === 'web') {
+            const routingContext: WorkflowRoutingContext = {
+              platform,
+              conversationId,
+              cwd,
+              originalMessage: userMessage,
+              conversationDbId: conversation.id,
+              codebaseId: conversation.codebase_id ?? undefined,
+              availableWorkflows: workflows,
+              issueContext,
+            };
+            await dispatchBackgroundWorkflow(routingContext, workflow);
+          } else {
+            // Inline execution for all other platforms
+            await executeWorkflow(
+              platform,
+              conversationId,
+              cwd,
+              workflow,
+              userMessage,
+              conversation.id,
+              conversation.codebase_id,
+              issueContext
+            );
+          }
         }
         return;
       }
@@ -1018,8 +1152,18 @@ export async function handleMessage(
         } else if (msg.type === 'tool' && msg.toolName) {
           const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
           await platform.sendMessage(conversationId, toolMessage);
+
+          // Send structured event to adapters that support it (Web UI)
+          if (platform.sendStructuredEvent) {
+            await platform.sendStructuredEvent(conversationId, msg);
+          }
         } else if (msg.type === 'result' && msg.sessionId) {
           newSessionId = msg.sessionId;
+
+          // Send session info to adapters that support structured events
+          if (platform.sendStructuredEvent) {
+            await platform.sendStructuredEvent(conversationId, msg);
+          }
         }
       }
 

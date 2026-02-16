@@ -23,6 +23,8 @@ export {
   type CommandTemplate,
   type CommandResult,
   type IPlatformAdapter,
+  type IWebPlatformAdapter,
+  isWebAdapter,
   type MessageChunk,
   type IAssistantClient,
 } from './types';
@@ -47,6 +49,7 @@ export * as sessionDb from './db/sessions';
 export * as commandTemplateDb from './db/command-templates';
 export * as isolationEnvDb from './db/isolation-environments';
 export * as workflowDb from './db/workflows';
+export * as messageDb from './db/messages';
 
 // Re-export SessionNotFoundError for error handling
 export { SessionNotFoundError } from './db/sessions';
@@ -72,6 +75,9 @@ export {
   type LoopConfig,
   type WorkflowDefinition,
   type WorkflowRun,
+  type WorkflowRunStatus,
+  type WorkflowStepStatus,
+  type ArtifactType,
   type StepResult,
   type LoadCommandResult,
   type WorkflowExecutionResult,
@@ -108,6 +114,16 @@ export {
   logParallelBlockComplete,
 } from './workflows/logger';
 
+// Event Emitter
+export {
+  type WorkflowEmitterEvent,
+  getWorkflowEventEmitter,
+  resetWorkflowEventEmitter,
+} from './workflows/event-emitter';
+
+// Workflow Events DB
+export * as workflowEventDb from './db/workflow-events';
+
 // =============================================================================
 // Isolation
 // =============================================================================
@@ -128,6 +144,7 @@ export { handleMessage } from './orchestrator/orchestrator';
 // Handlers
 // =============================================================================
 export { handleCommand, parseCommand } from './handlers/command-handler';
+export { cloneRepository, registerRepository, type RegisterResult } from './handlers/clone';
 
 // =============================================================================
 // Config
@@ -168,7 +185,7 @@ export {
 // =============================================================================
 
 // Conversation lock
-export { ConversationLockManager } from './utils/conversation-lock';
+export { ConversationLockManager, type LockAcquisitionResult } from './utils/conversation-lock';
 
 // Error formatting
 export { classifyAndFormatError } from './utils/error-formatter';

@@ -8,7 +8,7 @@
 - No multi-tenant complexity
 - Commands versioned with Git (not stored in database)
 - All credentials in environment variables only
-- 5-table database schema (see Database Schema section)
+- 8-table database schema (see Database Schema section)
 
 **User-Controlled Workflows**
 - Manual phase transitions via slash commands
@@ -41,19 +41,25 @@
 
 ### Development (Recommended)
 
-Run postgres in Docker, app locally for hot reload:
+Run app locally for hot reload (SQLite auto-detected if no `DATABASE_URL`):
 
 ```bash
-# Terminal 1: Start postgres only
-docker-compose --profile with-db up -d postgres
-
-# Terminal 2: Run app with hot reload
+# Start server + Web UI together (hot reload for both)
 bun run dev
+
+# Or start individually
+bun run dev:server  # Backend only (port 3090)
+bun run dev:web     # Frontend only (port 5173)
 ```
 
-Requires `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/remote_coding_agent` in `.env` (or omit for SQLite auto-detection).
+Optional: Use PostgreSQL instead of SQLite by setting `DATABASE_URL` in `.env`:
 
-Code changes auto-reload instantly. Telegram/Slack work from any device (polling-based, no port forwarding needed).
+```bash
+docker-compose --profile with-db up -d postgres
+# Set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/remote_coding_agent in .env
+```
+
+Code changes auto-reload instantly. Web UI available at `http://localhost:5173`. Telegram/Slack work from any device (polling-based, no port forwarding needed).
 
 ### Build Commands
 
@@ -284,16 +290,26 @@ packages/
 │       │   └── archon-paths.ts
 │       ├── workflows/        # YAML workflow engine
 │       └── index.ts          # Package exports
-└── server/                   # @archon/server - HTTP server + adapters
+├── server/                   # @archon/server - HTTP server + adapters
+│   └── src/
+│       ├── adapters/         # Platform adapters (Slack, Telegram, GitHub, Discord, Web, Test)
+│       │   ├── slack.ts
+│       │   ├── telegram.ts
+│       │   ├── github.ts
+│       │   ├── discord.ts
+│       │   ├── web.ts        # Web UI adapter (SSE streaming)
+│       │   └── test.ts
+│       ├── routes/           # API routes
+│       │   └── api.ts        # REST + SSE endpoints for Web UI
+│       ├── scripts/          # Setup utilities
+│       └── index.ts          # Hono server entry point
+└── web/                      # @archon/web - React frontend (Web UI)
     └── src/
-        ├── adapters/         # Platform adapters (Slack, Telegram, GitHub, Discord, Test)
-        │   ├── slack.ts
-        │   ├── telegram.ts
-        │   ├── github.ts
-        │   ├── discord.ts
-        │   └── test.ts
-        ├── scripts/          # Setup utilities
-        └── index.ts          # Hono server entry point
+        ├── components/       # React components (chat, layout, projects, ui)
+        ├── hooks/            # Custom hooks (useSSE, etc.)
+        ├── lib/              # API client, types, utilities
+        ├── pages/            # Route pages (ChatPage, ProjectsPage)
+        └── App.tsx           # Router + layout
 ```
 
 **Import Patterns:**
@@ -323,12 +339,15 @@ import * as core from '@archon/core';  // Don't do this
 
 ### Database Schema
 
-**5 Tables (all prefixed with `remote_agent_`):**
+**8 Tables (all prefixed with `remote_agent_`):**
 1. **`codebases`** - Repository metadata and commands (JSONB)
-2. **`conversations`** - Track platform conversations (Slack thread, Telegram chat, GitHub issue)
+2. **`conversations`** - Track platform conversations with titles and soft-delete support
 3. **`sessions`** - Track AI SDK sessions with resume capability
 4. **`command_templates`** - Global command templates (manually added via `/template-add`)
 5. **`isolation_environments`** - Git worktree isolation tracking
+6. **`workflow_runs`** - Workflow execution tracking and state
+7. **`workflow_events`** - Step-level workflow event log (step transitions, artifacts, errors)
+8. **`messages`** - Conversation message history with tool call metadata (JSONB)
 
 **Key Patterns:**
 - Conversation ID format: Platform-specific (`thread_ts`, `chat_id`, `user/repo#123`)
@@ -347,11 +366,13 @@ import * as core from '@archon/core';  // Don't do this
 **Package Split:**
 - **@archon/cli**: Command-line interface for running workflows
 - **@archon/core**: Business logic, database, orchestration, workflows
-- **@archon/server**: Platform adapters, Hono server, HTTP endpoints
+- **@archon/server**: Platform adapters, Hono server, HTTP endpoints, Web UI static serving
+- **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui), SSE streaming to server
 
 **1. Platform Adapters** (`packages/server/src/adapters/`)
 - Implement `IPlatformAdapter` interface
 - Handle platform-specific message formats
+- **Web**: Server-Sent Events (SSE) streaming, conversation ID = user-provided string
 - **Slack**: SDK with polling (not webhooks), conversation ID = `thread_ts`
 - **Telegram**: Bot API with polling, conversation ID = `chat_id`
 - **GitHub**: Webhooks + GitHub CLI, conversation ID = `owner/repo#number`
@@ -676,6 +697,22 @@ try {
 **Git Operation Errors (Graceful Handling but dont fail silently):**
 
 ### API Endpoints
+
+**Web UI REST API** (`packages/server/src/routes/api.ts`):
+- `GET /api/conversations` - List all conversations
+- `POST /api/conversations` - Create new conversation
+- `GET /api/conversations/:id` - Get conversation details
+- `DELETE /api/conversations/:id` - Soft-delete conversation
+- `POST /api/conversations/:id/messages` - Send message to conversation
+- `GET /api/conversations/:id/messages` - Get message history
+- `GET /api/conversations/:id/stream` - SSE stream for real-time updates
+- `POST /api/conversations/:id/workflow` - Invoke workflow
+- `GET /api/codebases` - List registered codebases
+- `POST /api/codebases` - Clone or register repository
+- `DELETE /api/codebases/:id` - Remove codebase
+- `GET /api/workflows` - List available workflows
+- `GET /api/workflow-runs/:id` - Get workflow run details
+- `GET /api/workflow-runs/:id/events` - Get workflow event log
 
 **Webhooks:**
 - `POST /webhooks/github` - GitHub webhook events

@@ -185,7 +185,7 @@ describe('Workflow Executor', () => {
       // First call should be the workflow start notification
       expect(calls[0][1]).toContain('🚀 **Starting workflow**: `test-workflow`');
       expect(calls[0][1]).toContain('A test workflow');
-      expect(calls[0][1]).toContain('`command-one` → `command-two`');
+      // Steps are now shown visually in WorkflowProgressCard, not in the text notification
     });
 
     it('should execute each step and send notifications', async () => {

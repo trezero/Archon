@@ -1,5 +1,5 @@
 -- Remote Coding Agent - Combined Schema
--- Version: Combined (includes migrations 001-008)
+-- Version: Combined (includes migrations 001-015)
 -- Description: Complete database schema (idempotent - safe to run multiple times)
 
 -- ============================================================================
@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS remote_agent_conversations (
   codebase_id UUID REFERENCES remote_agent_codebases(id),
   cwd VARCHAR(500),
   ai_assistant_type VARCHAR(20) DEFAULT 'claude',
+  title VARCHAR(255),
+  deleted_at TIMESTAMP WITH TIME ZONE,
+  hidden BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
   UNIQUE(platform_type, platform_conversation_id)
@@ -42,6 +45,8 @@ CREATE TABLE IF NOT EXISTS remote_agent_sessions (
   assistant_session_id VARCHAR(255),
   active BOOLEAN DEFAULT true,
   metadata JSONB DEFAULT '{}'::jsonb,
+  parent_session_id UUID REFERENCES remote_agent_sessions(id),
+  transition_reason TEXT,
   started_at TIMESTAMP DEFAULT NOW(),
   ended_at TIMESTAMP
 );
@@ -167,3 +172,113 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_status
 
 COMMENT ON TABLE remote_agent_workflow_runs IS
   'Tracks workflow execution state for resumption and observability';
+
+-- ============================================================================
+-- Migration 009: Workflow Last Activity
+-- ============================================================================
+
+ALTER TABLE remote_agent_workflow_runs
+ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+-- Partial index for efficient staleness queries on running workflows
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_last_activity
+ON remote_agent_workflow_runs(last_activity_at)
+WHERE status = 'running';
+
+-- ============================================================================
+-- Migration 010: Immutable Sessions (parent linkage + transition tracking)
+-- ============================================================================
+
+ALTER TABLE remote_agent_sessions
+  ADD COLUMN IF NOT EXISTS parent_session_id UUID REFERENCES remote_agent_sessions(id);
+
+ALTER TABLE remote_agent_sessions
+  ADD COLUMN IF NOT EXISTS transition_reason TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_sessions_parent ON remote_agent_sessions(parent_session_id);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_conversation_started
+  ON remote_agent_sessions(conversation_id, started_at DESC);
+
+COMMENT ON COLUMN remote_agent_sessions.parent_session_id IS
+  'Links to the previous session in this conversation (for audit trail)';
+COMMENT ON COLUMN remote_agent_sessions.transition_reason IS
+  'Why this session was created: plan-to-execute, isolation-changed, reset-requested, etc.';
+
+-- ============================================================================
+-- Migration 011: Partial Unique Constraint Fix
+-- ============================================================================
+
+-- Drop the existing full constraint (if it exists from older migrations)
+ALTER TABLE remote_agent_isolation_environments
+  DROP CONSTRAINT IF EXISTS unique_workflow;
+
+-- Partial unique index already created in Migration 006 above (unique_active_workflow)
+
+-- ============================================================================
+-- Migration 012: Workflow Events
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS remote_agent_workflow_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workflow_run_id UUID NOT NULL REFERENCES remote_agent_workflow_runs(id) ON DELETE CASCADE,
+  event_type VARCHAR(50) NOT NULL,
+  step_index INTEGER,
+  step_name VARCHAR(255),
+  data JSONB DEFAULT '{}',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_events_run_id
+  ON remote_agent_workflow_events(workflow_run_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_events_type
+  ON remote_agent_workflow_events(event_type);
+
+COMMENT ON TABLE remote_agent_workflow_events IS
+  'Lean UI-relevant workflow events for observability (step transitions, artifacts, errors)';
+
+-- ============================================================================
+-- Migration 013: Conversation Titles + Soft Delete
+-- ============================================================================
+
+-- title and deleted_at already included in conversations CREATE TABLE above.
+-- ALTER statements kept for idempotent upgrades from older schemas:
+ALTER TABLE remote_agent_conversations
+  ADD COLUMN IF NOT EXISTS title VARCHAR(255);
+
+ALTER TABLE remote_agent_conversations
+  ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
+
+-- ============================================================================
+-- Migration 014: Message History
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS remote_agent_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID NOT NULL REFERENCES remote_agent_conversations(id) ON DELETE CASCADE,
+  role VARCHAR(20) NOT NULL,
+  content TEXT NOT NULL DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_id
+  ON remote_agent_messages(conversation_id, created_at ASC);
+
+-- ============================================================================
+-- Migration 015: Background Dispatch
+-- ============================================================================
+
+ALTER TABLE remote_agent_workflow_runs
+  ADD COLUMN IF NOT EXISTS parent_conversation_id UUID
+  REFERENCES remote_agent_conversations(id) ON DELETE SET NULL;
+
+ALTER TABLE remote_agent_conversations
+  ADD COLUMN IF NOT EXISTS hidden BOOLEAN DEFAULT FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_parent_conv
+  ON remote_agent_workflow_runs(parent_conversation_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_hidden
+  ON remote_agent_conversations(hidden);
+CREATE INDEX IF NOT EXISTS idx_conversations_codebase
+  ON remote_agent_conversations(codebase_id) WHERE deleted_at IS NULL;

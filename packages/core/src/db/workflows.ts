@@ -58,7 +58,13 @@ export async function createWorkflowRun(data: {
         metadataJson,
       ]
     );
-    return result.rows[0];
+    const row = result.rows[0];
+    if (!row) {
+      throw new Error(
+        `Failed to create workflow run: INSERT returned no rows (workflow: ${data.workflow_name})`
+      );
+    }
+    return row;
   } catch (error) {
     const err = error as Error;
     console.error('[DB:Workflows] Failed to create workflow run:', err.message);
@@ -93,6 +99,29 @@ export async function getActiveWorkflowRun(conversationId: string): Promise<Work
     const err = error as Error;
     console.error('[DB:Workflows] Failed to get active workflow run:', err.message);
     throw new Error(`Failed to get active workflow run: ${err.message}`);
+  }
+}
+
+/**
+ * Find the most recent workflow run for a worker platform conversation ID.
+ * Joins with conversations table to resolve platform_conversation_id → DB id.
+ */
+export async function getWorkflowRunByWorkerPlatformId(
+  platformConversationId: string
+): Promise<WorkflowRun | null> {
+  try {
+    const result = await pool.query<WorkflowRun>(
+      `SELECT r.* FROM remote_agent_workflow_runs r
+       JOIN remote_agent_conversations c ON r.conversation_id = c.id
+       WHERE c.platform_conversation_id = $1
+       ORDER BY r.started_at DESC LIMIT 1`,
+      [platformConversationId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    const err = error as Error;
+    console.error('[DB:Workflows] Failed to get workflow run by worker platform ID:', err.message);
+    throw new Error(`Failed to get workflow run by worker platform ID: ${err.message}`);
   }
 }
 
@@ -179,6 +208,72 @@ export async function failWorkflowRun(id: string, error: string): Promise<void> 
     const err = dbError as Error;
     console.error('[DB:Workflows] Failed to fail workflow run:', err.message);
     throw new Error(`Failed to fail workflow run: ${err.message}`);
+  }
+}
+
+/**
+ * List workflow runs with optional filters.
+ */
+export async function listWorkflowRuns(options?: {
+  conversationId?: string;
+  status?: 'pending' | 'running' | 'completed' | 'failed';
+  limit?: number;
+  codebaseId?: string;
+}): Promise<WorkflowRun[]> {
+  const whereClauses: string[] = [];
+  const values: unknown[] = [];
+
+  if (options?.conversationId) {
+    values.push(options.conversationId);
+    whereClauses.push(`conversation_id = $${String(values.length)}`);
+  }
+  if (options?.status) {
+    values.push(options.status);
+    whereClauses.push(`status = $${String(values.length)}`);
+  }
+  if (options?.codebaseId) {
+    values.push(options.codebaseId);
+    whereClauses.push(
+      `conversation_id IN (SELECT id FROM remote_agent_conversations WHERE codebase_id = $${String(values.length)})`
+    );
+  }
+
+  const limit = options?.limit ?? 50;
+  values.push(limit);
+  const limitParam = `$${String(values.length)}`;
+
+  const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+  try {
+    const result = await pool.query<WorkflowRun>(
+      `SELECT * FROM remote_agent_workflow_runs ${whereStr} ORDER BY started_at DESC LIMIT ${limitParam}`,
+      values
+    );
+    return [...result.rows];
+  } catch (error) {
+    const err = error as Error;
+    console.error('[DB:Workflows] Failed to list workflow runs:', err.message);
+    throw new Error(`Failed to list workflow runs: ${err.message}`);
+  }
+}
+
+/**
+ * Update parent_conversation_id on a workflow run.
+ * Non-critical — logs error but does not throw.
+ */
+export async function updateWorkflowRunParent(
+  runId: string,
+  parentConversationId: string
+): Promise<void> {
+  try {
+    await pool.query(
+      'UPDATE remote_agent_workflow_runs SET parent_conversation_id = $1 WHERE id = $2',
+      [parentConversationId, runId]
+    );
+  } catch (error) {
+    const err = error as Error;
+    console.error('[DB:Workflows] Failed to update parent conversation:', err.message);
+    // Non-critical — don't throw
   }
 }
 

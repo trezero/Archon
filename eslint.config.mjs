@@ -18,6 +18,10 @@ export default tseslint.config(
       '*.mjs',
       '**/*.test.ts',
       '*.d.ts', // Root-level declaration files (not in tsconfig project scope)
+      'packages/web/vite.config.ts', // Vite config doesn't need type-checked linting
+      'packages/web/components.json',
+      'packages/web/src/components/ui/**', // shadcn/ui auto-generated components
+      'packages/web/src/lib/utils.ts', // shadcn/ui utility file
     ],
   },
 
@@ -32,7 +36,7 @@ export default tseslint.config(
 
   // Project-specific settings
   {
-    files: ['packages/*/src/**/*.ts'],
+    files: ['packages/*/src/**/*.{ts,tsx}'],
     languageOptions: {
       parserOptions: {
         projectService: true,
@@ -61,7 +65,7 @@ export default tseslint.config(
           custom: { regex: '^I?[A-Z]', match: true },
         },
         { selector: 'typeAlias', format: ['PascalCase'] },
-        { selector: 'function', format: ['camelCase'] },
+        { selector: 'function', format: ['camelCase', 'PascalCase'] },
         { selector: 'variable', format: ['camelCase', 'UPPER_CASE'] },
       ],
       '@typescript-eslint/no-non-null-assertion': 'error',

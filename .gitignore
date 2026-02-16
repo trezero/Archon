@@ -32,14 +32,17 @@ Caddyfile
 # Session files
 sessions/
 api_sessions/
+e2e-screenshots/
 
 # Archon logs (generated at runtime)
 .archon/logs/
 
-# RCA reports (generated, local only)
+# Agent artifacts (generated, local only)
 .agents/rca-reports/
-.claude/PRPs/features
+.agents/plans/
 .agents/pr-reviews
+.claude/PRPs/
+e2e-testing-findings-session2.md
 
 # Local workspace
 workspace/

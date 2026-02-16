@@ -9,6 +9,10 @@
  * types to enforce mutual exclusivity between steps and loop at compile time.
  */
 
+export type WorkflowRunStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type ArtifactType = 'pr' | 'commit' | 'file_created' | 'file_modified' | 'branch';
+
 /**
  * A single step with a command
  */
@@ -97,9 +101,10 @@ export interface WorkflowRun {
   id: string;
   workflow_name: string;
   conversation_id: string;
+  parent_conversation_id: string | null;
   codebase_id: string | null;
   current_step_index: number;
-  status: 'running' | 'completed' | 'failed';
+  status: WorkflowRunStatus;
   user_message: string; // Original user intent
   metadata: Record<string, unknown>;
   started_at: Date;

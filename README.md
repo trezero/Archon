@@ -1,12 +1,13 @@
 # Dynamous Remote Coding Agent
 
-Control AI coding assistants (Claude Code, Codex) remotely from Telegram, GitHub, and more. Built for developers who want to code from anywhere with persistent sessions and flexible workflows/systems.
+Control AI coding assistants (Claude Code, Codex) remotely from a Web UI, Telegram, GitHub, and more. Built for developers who want to code from anywhere with persistent sessions and flexible workflows/systems.
 
 **Quick Start:** [Getting Started](#getting-started) • [Server Setup](#server-quick-start) • [AI Assistant Setup](#2-ai-assistant-setup-choose-at-least-one) • [Platform Setup](#3-platform-adapter-setup-choose-at-least-one) • [Usage Guide](#usage)
 
 ## Features
 
-- **Multi-Platform Support**: Interact via Telegram, Slack, Discord, GitHub issues/PRs, and more
+- **Web UI**: Built-in React dashboard with real-time streaming, tool call visualization, and conversation management — no external platform required
+- **Multi-Platform Support**: Interact via Web UI, Telegram, Slack, Discord, GitHub issues/PRs, and more
 - **Multiple AI Assistants**: Choose between Claude Code or Codex (or both)
 - **Persistent Sessions**: Sessions survive container restarts with full context preservation
 - **Codebase Management**: Clone and work with any GitHub repository
@@ -105,7 +106,7 @@ archon workflow run assist "What does this codebase do?"
 **Accounts Required:**
 - GitHub account (for repository cloning via `/clone` command)
 - At least one of: Claude Pro/Max subscription OR Codex account
-- At least one of: Telegram, Slack, Discord, or GitHub account (for server interaction)
+- Optional: Telegram, Slack, Discord, or GitHub account (the built-in Web UI works without any external platform)
 
 ---
 
@@ -139,19 +140,21 @@ bun install
 
 # 2. Configure
 cp .env.example .env
-nano .env  # Add your tokens
+nano .env  # Add your AI assistant tokens (Claude or Codex)
 
-# 3. Start database
-docker compose --profile with-db up -d postgres
-
-# 4. Run migrations
-psql $DATABASE_URL < migrations/000_combined.sql
-
-# 5. Start with hot reload
+# 3. Start server + Web UI (SQLite auto-detected, no database setup needed)
 bun run dev
 
-# 6. Validate setup
-bun run validate
+# 4. Open Web UI
+# http://localhost:5173
+```
+
+Optional: Use PostgreSQL instead of SQLite:
+
+```bash
+docker compose --profile with-db up -d postgres
+# Set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/remote_coding_agent in .env
+psql $DATABASE_URL < migrations/000_combined.sql
 ```
 
 ### Option 3: Self-Hosted Production
@@ -264,12 +267,15 @@ DATABASE_URL=postgresql://user:password@host:5432/dbname
 psql $DATABASE_URL < migrations/000_combined.sql
 ```
 
-This creates 5 tables:
+This creates 8 tables:
 - `remote_agent_codebases` - Repository metadata
 - `remote_agent_conversations` - Platform conversation tracking
 - `remote_agent_sessions` - AI session management
 - `remote_agent_command_templates` - Global command templates
 - `remote_agent_isolation_environments` - Worktree isolation tracking
+- `remote_agent_workflow_runs` - Workflow execution tracking
+- `remote_agent_workflow_events` - Step-level workflow event log
+- `remote_agent_messages` - Conversation message history
 
 **For updates to existing installations**, run only the migrations you haven't applied yet:
 
@@ -432,9 +438,39 @@ DEFAULT_AI_ASSISTANT=codex
 
 ---
 
-### 3. Platform Adapter Setup (Choose At Least One)
+### 3. Platform Adapter Setup (Optional)
 
-You must configure **at least one** platform to interact with your AI assistant.
+The built-in **Web UI** works out of the box with no additional configuration. Optionally, configure one or more external platforms for remote access:
+
+<details>
+<summary><b>🌐 Web UI (Built-in — No Setup Required)</b></summary>
+
+The Web UI is available automatically when you start the server. No tokens or configuration needed.
+
+**Development:**
+```bash
+bun run dev
+# Web UI: http://localhost:5173
+# API server: http://localhost:3090
+```
+
+**Production:**
+```bash
+bun run build    # Build the frontend
+bun run start    # Server serves both API and Web UI on port 3090
+```
+
+**Features:**
+- Real-time streaming of AI responses via Server-Sent Events (SSE)
+- Tool call visualization with collapsible cards showing inputs/outputs
+- Conversation management (create, switch, rename, delete, persist across sessions)
+- Project/codebase browsing and management (clone, register, remove)
+- Workflow invocation from UI with real-time progress tracking
+- Lock indicator showing when the agent is working
+- Connected/disconnected status indicator
+- Message history persistence across page refreshes
+
+</details>
 
 <details>
 <summary><b>💬 Telegram</b></summary>
@@ -759,11 +795,13 @@ docker compose logs -f app-with-db
 
 **Option C: Local Development (No Docker)**
 
-Run directly with Bun (requires local PostgreSQL or remote `DATABASE_URL` in `.env`):
+Run directly with Bun. Uses SQLite by default (no database setup needed), or set `DATABASE_URL` for PostgreSQL:
 
 ```bash
 bun install  # First time only
-bun run dev
+bun run dev  # Starts server + Web UI with hot reload
+# Web UI: http://localhost:5173
+# API: http://localhost:3090
 ```
 
 **Stop the application:**
@@ -1168,7 +1206,8 @@ prompt: |
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│   Platform Adapters (Telegram, Slack, Discord, GitHub) │
+│  Platform Adapters (Web UI, Telegram, Slack, Discord,  │
+│                    GitHub)                               │
 └──────────────────────────┬──────────────────────────────┘
                            │
                            ▼
@@ -1190,14 +1229,16 @@ prompt: |
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────┐
-│                   PostgreSQL (6 Tables)                 │
+│              SQLite / PostgreSQL (8 Tables)             │
 │   Codebases • Conversations • Sessions • Workflow Runs  │
-│        Command Templates • Isolation Environments       │
+│ Command Templates • Isolation Environments • Messages   │
+│              Workflow Events                             │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ### Key Design Patterns
 
+- **Web UI**: React dashboard with SSE streaming, served by the backend in production
 - **Adapter Pattern**: Platform-agnostic via `IPlatformAdapter` interface
 - **Strategy Pattern**: Swappable AI assistants via `IAssistantClient` interface
 - **Session Persistence**: AI context survives restarts via database storage
@@ -1209,7 +1250,7 @@ prompt: |
 ### Database Schema
 
 <details>
-<summary><b>6 tables with `remote_agent_` prefix</b></summary>
+<summary><b>8 tables with `remote_agent_` prefix</b></summary>
 
 1. **`remote_agent_codebases`** - Repository metadata
    - Commands stored as JSONB: `{command_name: {path, description}}`
@@ -1237,7 +1278,17 @@ prompt: |
 6. **`remote_agent_workflow_runs`** - Workflow execution tracking
    - Tracks active workflows per conversation
    - Prevents concurrent workflow execution
-   - Stores workflow state and step progress
+   - Stores workflow state, step progress, and parent conversation linkage
+
+7. **`remote_agent_workflow_events`** - Step-level workflow event log
+   - Records step transitions, artifacts, and errors per workflow run
+   - Lean UI-relevant events (verbose logs stored in JSONL files)
+   - Enables workflow run detail views and debugging
+
+8. **`remote_agent_messages`** - Conversation message history
+   - Persists user and assistant messages with timestamps
+   - Stores tool call metadata (name, input, duration) in JSONB
+   - Enables message history in Web UI across page refreshes
 
 </details>
 

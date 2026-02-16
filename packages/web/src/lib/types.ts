@@ -1,0 +1,234 @@
+/**
+ * Frontend-specific types for the Archon Web UI.
+ * SSE event types match what the Web adapter emits.
+ */
+
+import type {
+  WorkflowRunStatus,
+  WorkflowStepStatus,
+  ArtifactType,
+} from '@archon/core/workflows/types';
+export type { WorkflowRunStatus, WorkflowStepStatus, ArtifactType };
+
+// Base SSE event
+interface BaseSSEEvent {
+  type: string;
+  timestamp: number;
+}
+
+// Text streaming
+export interface TextEvent extends BaseSSEEvent {
+  type: 'text';
+  content: string;
+  isComplete: boolean;
+}
+
+// Tool call started
+export interface ToolCallEvent extends BaseSSEEvent {
+  type: 'tool_call';
+  name: string;
+  input: Record<string, unknown>;
+}
+
+// Tool call completed
+export interface ToolResultEvent extends BaseSSEEvent {
+  type: 'tool_result';
+  name: string;
+  output: string;
+  duration: number;
+}
+
+// Session metadata
+export interface SessionInfoEvent extends BaseSSEEvent {
+  type: 'session_info';
+  sessionId: string;
+  cost?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+}
+
+// Conversation lock status
+export interface ConversationLockEvent extends BaseSSEEvent {
+  type: 'conversation_lock';
+  conversationId: string;
+  locked: boolean;
+  queuePosition?: number;
+}
+
+// Error with classification
+export interface ErrorEvent extends BaseSSEEvent {
+  type: 'error';
+  message: string;
+  classification?: 'transient' | 'fatal';
+  suggestedActions?: string[];
+}
+
+// Warning (non-fatal, informational)
+export interface WarningEvent extends BaseSSEEvent {
+  type: 'warning';
+  message: string;
+}
+
+// Keep-alive
+export interface HeartbeatEvent extends BaseSSEEvent {
+  type: 'heartbeat';
+}
+
+// Workflow step update
+export interface WorkflowStepEvent extends BaseSSEEvent {
+  type: 'workflow_step';
+  runId: string;
+  step: number;
+  total: number;
+  name: string;
+  status: WorkflowStepStatus;
+  duration?: number;
+  iteration?: number;
+}
+
+/** SSE events only carry active run statuses — 'pending' is excluded because
+ *  the server never emits a status event for a run that hasn't started yet. */
+export type ActiveWorkflowRunStatus = Exclude<WorkflowRunStatus, 'pending'>;
+
+// Workflow run status
+export interface WorkflowStatusEvent extends BaseSSEEvent {
+  type: 'workflow_status';
+  runId: string;
+  workflowName: string;
+  status: ActiveWorkflowRunStatus;
+  error?: string;
+}
+
+// Parallel agent status
+export interface ParallelAgentEvent extends BaseSSEEvent {
+  type: 'parallel_agent';
+  runId: string;
+  step: number;
+  agentIndex: number;
+  totalAgents: number;
+  name: string;
+  status: WorkflowStepStatus;
+  duration?: number;
+  error?: string;
+}
+
+// Workflow artifact
+export interface WorkflowArtifactEvent extends BaseSSEEvent {
+  type: 'workflow_artifact';
+  runId: string;
+  artifactType: ArtifactType;
+  label: string;
+  url?: string;
+  path?: string;
+}
+
+// Background workflow dispatch
+export interface WorkflowDispatchEvent extends BaseSSEEvent {
+  type: 'workflow_dispatch';
+  workerConversationId: string;
+  workflowName: string;
+}
+
+// Background workflow output preview
+export interface WorkflowOutputPreviewEvent extends BaseSSEEvent {
+  type: 'workflow_output_preview';
+  runId: string;
+  lines: string[];
+}
+
+/**
+ * Discriminated union of all SSE event types emitted by the Web adapter.
+ * Parsed from JSON with no runtime validation — the server is trusted.
+ */
+export type SSEEvent =
+  | TextEvent
+  | ToolCallEvent
+  | ToolResultEvent
+  | SessionInfoEvent
+  | ConversationLockEvent
+  | ErrorEvent
+  | WarningEvent
+  | HeartbeatEvent
+  | WorkflowStepEvent
+  | WorkflowStatusEvent
+  | ParallelAgentEvent
+  | WorkflowArtifactEvent
+  | WorkflowDispatchEvent
+  | WorkflowOutputPreviewEvent;
+
+// UI State types
+
+/**
+ * UI state for a single chat message. Mixes display state (isStreaming, isExpanded)
+ * with persisted data (content, toolCalls). When loading from the API, display
+ * fields default to their inactive states.
+ */
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  toolCalls?: ToolCallDisplay[];
+  error?: ErrorDisplay;
+  timestamp: number;
+  isStreaming?: boolean;
+  workflowDispatch?: {
+    workerConversationId: string;
+    workflowName: string;
+  };
+}
+
+export interface ToolCallDisplay {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+  output?: string;
+  duration?: number;
+  startedAt: number;
+  isExpanded: boolean;
+}
+
+export interface ErrorDisplay {
+  message: string;
+  classification: 'transient' | 'fatal';
+  suggestedActions: string[];
+}
+
+// Workflow UI State types
+
+export interface WorkflowStepState {
+  index: number;
+  name: string;
+  status: WorkflowStepStatus;
+  duration?: number;
+  agents?: ParallelAgentState[];
+}
+
+export interface ParallelAgentState {
+  index: number;
+  name: string;
+  status: WorkflowStepStatus;
+  duration?: number;
+  error?: string;
+}
+
+export interface WorkflowArtifact {
+  type: ArtifactType;
+  label: string;
+  url?: string;
+  path?: string;
+}
+
+export interface WorkflowState {
+  runId: string;
+  workflowName: string;
+  status: WorkflowRunStatus;
+  steps: WorkflowStepState[];
+  artifacts: WorkflowArtifact[];
+  isLoop: boolean;
+  currentIteration?: number;
+  maxIterations?: number;
+  startedAt: number;
+  completedAt?: number;
+  error?: string;
+  stale?: boolean;
+}

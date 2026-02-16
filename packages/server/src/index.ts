@@ -10,9 +10,11 @@ import 'dotenv/config';
 import { Hono } from 'hono';
 import { TelegramAdapter } from './adapters/telegram';
 import { TestAdapter } from './adapters/test';
+import { WebAdapter } from './adapters/web';
 import { GitHubAdapter } from './adapters/github';
 import { DiscordAdapter } from './adapters/discord';
 import { SlackAdapter } from './adapters/slack';
+import { registerApiRoutes } from './routes/api';
 import {
   handleMessage,
   pool,
@@ -107,18 +109,21 @@ async function main(): Promise<void> {
   const testAdapter = new TestAdapter();
   await testAdapter.start();
 
+  // Initialize web adapter (always enabled)
+  const webAdapter = new WebAdapter();
+  await webAdapter.start();
+
   // Check that at least one platform is configured
   const hasTelegram = Boolean(process.env.TELEGRAM_BOT_TOKEN);
   const hasDiscord = Boolean(process.env.DISCORD_BOT_TOKEN);
   const hasGitHub = Boolean(process.env.GITHUB_TOKEN && process.env.WEBHOOK_SECRET);
 
   if (!hasTelegram && !hasDiscord && !hasGitHub) {
-    console.error('[App] No platform adapters configured.');
-    console.error('[App] You must configure at least one platform:');
-    console.error('[App]   - Telegram: Set TELEGRAM_BOT_TOKEN');
-    console.error('[App]   - Discord: Set DISCORD_BOT_TOKEN');
-    console.error('[App]   - GitHub: Set GITHUB_TOKEN and WEBHOOK_SECRET');
-    process.exit(1);
+    console.warn('[App] No platform adapters configured.');
+    console.warn('[App] Web UI is available. To enable other platforms:');
+    console.warn('[App]   - Telegram: Set TELEGRAM_BOT_TOKEN');
+    console.warn('[App]   - Discord: Set DISCORD_BOT_TOKEN');
+    console.warn('[App]   - GitHub: Set GITHUB_TOKEN and WEBHOOK_SECRET');
   }
 
   // Initialize GitHub adapter (conditional)
@@ -274,6 +279,9 @@ async function main(): Promise<void> {
     return c.json({ error: 'Internal server error' }, 500);
   });
 
+  // Register Web UI API routes
+  registerApiRoutes(app, webAdapter, lockManager);
+
   // GitHub webhook endpoint
   if (github) {
     app.post('/webhooks/github', async c => {
@@ -396,9 +404,26 @@ async function main(): Promise<void> {
     return c.json({ success: true, mode });
   });
 
+  // Serve web UI static files in production
+  // Uses import.meta.dir for absolute path (CWD varies with bun --filter)
+  if (process.env.NODE_ENV === 'production' || !process.env.WEB_UI_DEV) {
+    const { serveStatic } = await import('hono/bun');
+    const pathModule = await import('path');
+    const webDistPath = pathModule.join(
+      pathModule.dirname(pathModule.dirname(import.meta.dir)),
+      'web',
+      'dist'
+    );
+
+    app.use('/assets/*', serveStatic({ root: webDistPath }));
+    // SPA fallback - serve index.html for unmatched routes (after all API routes)
+    app.get('*', serveStatic({ root: webDistPath, path: 'index.html' }));
+  }
+
   const server = Bun.serve({
     fetch: app.fetch,
     port,
+    idleTimeout: 255, // Max value (seconds) - prevents SSE connections from being killed
   });
   console.log(`[Hono] Server listening on port ${String(server.port)}`);
 
@@ -434,6 +459,7 @@ async function main(): Promise<void> {
       telegram?.stop();
       discord?.stop();
       slack?.stop();
+      webAdapter.stop();
     } catch (error) {
       console.error('[App] Error stopping adapters:', error);
     }
@@ -454,7 +480,7 @@ async function main(): Promise<void> {
   process.once('SIGTERM', shutdown);
 
   // Show active platforms
-  const activePlatforms = [];
+  const activePlatforms = ['Web'];
   if (telegram) activePlatforms.push('Telegram');
   if (discord) activePlatforms.push('Discord');
   if (slack) activePlatforms.push('Slack');

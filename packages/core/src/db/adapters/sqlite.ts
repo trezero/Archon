@@ -99,18 +99,56 @@ export class SqliteAdapter implements IDatabase {
   }
 
   /**
-   * Initialize database schema
+   * Initialize database schema.
+   * Always runs createSchema() since all statements use IF NOT EXISTS,
+   * ensuring new tables from migrations are created in existing databases.
    */
   private initSchema(): void {
-    const schemaExists = this.db
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='remote_agent_codebases'"
-      )
-      .get();
+    this.createSchema();
+    this.migrateColumns();
+  }
 
-    if (!schemaExists) {
-      console.log('[SQLite] Initializing database schema...');
-      this.createSchema();
+  /**
+   * Add columns to existing tables that predate newer schema additions.
+   * SQLite's CREATE TABLE IF NOT EXISTS skips entirely for existing tables,
+   * so new columns must be added via ALTER TABLE for databases created before
+   * the columns were added to createSchema().
+   */
+  private migrateColumns(): void {
+    // Conversations columns
+    try {
+      const cols = this.db.prepare("PRAGMA table_info('remote_agent_conversations')").all() as {
+        name: string;
+      }[];
+      const colNames = new Set(cols.map(c => c.name));
+
+      if (!colNames.has('title')) {
+        this.db.run('ALTER TABLE remote_agent_conversations ADD COLUMN title TEXT');
+      }
+      if (!colNames.has('deleted_at')) {
+        this.db.run('ALTER TABLE remote_agent_conversations ADD COLUMN deleted_at TEXT');
+      }
+      if (!colNames.has('hidden')) {
+        this.db.run('ALTER TABLE remote_agent_conversations ADD COLUMN hidden INTEGER DEFAULT 0');
+      }
+    } catch (e: unknown) {
+      console.warn('[SQLite] Migration for conversations columns failed:', (e as Error).message);
+    }
+
+    // Workflow runs columns
+    try {
+      const wfCols = this.db.prepare("PRAGMA table_info('remote_agent_workflow_runs')").all() as {
+        name: string;
+      }[];
+      const wfColNames = new Set(wfCols.map(c => c.name));
+
+      if (!wfColNames.has('parent_conversation_id')) {
+        this.db.run(
+          'ALTER TABLE remote_agent_workflow_runs ADD COLUMN parent_conversation_id TEXT'
+        );
+      }
+    } catch (e: unknown) {
+      console.warn('[SQLite] Migration for workflow_runs columns failed:', (e as Error).message);
     }
   }
 
@@ -141,6 +179,9 @@ export class SqliteAdapter implements IDatabase {
         codebase_id TEXT REFERENCES remote_agent_codebases(id) ON DELETE SET NULL,
         cwd TEXT,
         isolation_env_id TEXT,
+        title TEXT,
+        deleted_at TEXT,
+        hidden INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
         last_activity_at TEXT DEFAULT (datetime('now')),
@@ -204,9 +245,31 @@ export class SqliteAdapter implements IDatabase {
         status TEXT NOT NULL DEFAULT 'pending',
         current_step_index INTEGER,
         metadata TEXT DEFAULT '{}',
+        parent_conversation_id TEXT REFERENCES remote_agent_conversations(id) ON DELETE SET NULL,
         started_at TEXT DEFAULT (datetime('now')),
         completed_at TEXT,
         last_activity_at TEXT DEFAULT (datetime('now'))
+      );
+
+      -- Workflow events table
+      CREATE TABLE IF NOT EXISTS remote_agent_workflow_events (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        workflow_run_id TEXT NOT NULL REFERENCES remote_agent_workflow_runs(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,
+        step_index INTEGER,
+        step_name TEXT,
+        data TEXT DEFAULT '{}',
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      -- Messages table (conversation history for Web UI)
+      CREATE TABLE IF NOT EXISTS remote_agent_messages (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        conversation_id TEXT NOT NULL REFERENCES remote_agent_conversations(id) ON DELETE CASCADE,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        metadata TEXT DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
       -- Indexes
@@ -217,6 +280,22 @@ export class SqliteAdapter implements IDatabase {
       CREATE INDEX IF NOT EXISTS idx_isolation_workflow ON remote_agent_isolation_environments(workflow_type, workflow_id);
       CREATE INDEX IF NOT EXISTS idx_workflow_runs_conversation ON remote_agent_workflow_runs(conversation_id);
       CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON remote_agent_workflow_runs(status);
+      CREATE INDEX IF NOT EXISTS idx_workflow_events_run_id ON remote_agent_workflow_events(workflow_run_id);
+      CREATE INDEX IF NOT EXISTS idx_workflow_events_type ON remote_agent_workflow_events(event_type);
+      CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON remote_agent_messages(conversation_id, created_at ASC);
+      CREATE INDEX IF NOT EXISTS idx_workflow_runs_parent_conv ON remote_agent_workflow_runs(parent_conversation_id);
+      CREATE INDEX IF NOT EXISTS idx_conversations_hidden ON remote_agent_conversations(hidden);
+      CREATE INDEX IF NOT EXISTS idx_conversations_codebase ON remote_agent_conversations(codebase_id);
+
+      -- From PG migration 009: staleness detection for running workflows
+      CREATE INDEX IF NOT EXISTS idx_workflow_runs_last_activity
+        ON remote_agent_workflow_runs(last_activity_at) WHERE status = 'running';
+
+      -- From PG migration 010: session audit trail
+      CREATE INDEX IF NOT EXISTS idx_sessions_parent
+        ON remote_agent_sessions(parent_session_id);
+      CREATE INDEX IF NOT EXISTS idx_sessions_conversation_started
+        ON remote_agent_sessions(conversation_id, started_at DESC);
     `);
     console.log('[SQLite] Schema initialized successfully');
   }

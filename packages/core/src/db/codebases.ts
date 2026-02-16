@@ -96,6 +96,13 @@ export async function updateCodebase(id: string, data: { default_cwd?: string })
   );
 }
 
+export async function listCodebases(): Promise<readonly Codebase[]> {
+  const result = await pool.query<Codebase>(
+    'SELECT * FROM remote_agent_codebases ORDER BY name ASC'
+  );
+  return result.rows;
+}
+
 export async function deleteCodebase(id: string): Promise<void> {
   // First, unlink any sessions referencing this codebase (FK has no cascade)
   await pool.query('UPDATE remote_agent_sessions SET codebase_id = NULL WHERE codebase_id = $1', [
