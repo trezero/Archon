@@ -8,8 +8,7 @@ import {
   type ConversationResponse,
   type WorkflowRunResponse,
 } from '@/lib/api';
-
-const PROJECT_STORAGE_KEY = 'archon-selected-project';
+import { useProject } from '@/contexts/ProjectContext';
 
 function formatTime(dateStr: string | null): string {
   if (!dateStr) return '';
@@ -64,7 +63,7 @@ function WorkflowRunRow({ run }: { run: WorkflowRunResponse }): React.ReactEleme
 
 export function DashboardPage(): React.ReactElement {
   const navigate = useNavigate();
-  const savedProjectId = localStorage.getItem(PROJECT_STORAGE_KEY);
+  const { selectedProjectId: savedProjectId } = useProject();
 
   const { data: conversations, isLoading: loadingConvs } = useQuery({
     queryKey: ['conversations', { codebaseId: savedProjectId }],

@@ -4,15 +4,13 @@ import { useQuery } from '@tanstack/react-query';
 import {
   listWorkflows,
   listWorkflowRuns,
-  listCodebases,
   createConversation,
   runWorkflow,
   type WorkflowDefinitionResponse,
   type WorkflowRunResponse,
 } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-
-const PROJECT_STORAGE_KEY = 'archon-selected-project';
+import { useProject } from '@/contexts/ProjectContext';
 
 export function WorkflowList(): React.ReactElement {
   const navigate = useNavigate();
@@ -21,14 +19,11 @@ export function WorkflowList(): React.ReactElement {
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
 
-  const [projectId, setProjectId] = useState<string | null>(
-    localStorage.getItem(PROJECT_STORAGE_KEY)
-  );
-
-  const { data: codebases } = useQuery({
-    queryKey: ['codebases'],
-    queryFn: listCodebases,
-  });
+  const {
+    selectedProjectId: projectId,
+    setSelectedProjectId: setProjectId,
+    codebases,
+  } = useProject();
 
   const handleRun = async (workflowName: string): Promise<void> => {
     if (!runMessage.trim() || running || !projectId) return;

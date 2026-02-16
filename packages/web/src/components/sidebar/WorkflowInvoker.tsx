@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, X } from 'lucide-react';
+import { Loader2, X, ChevronDown } from 'lucide-react';
 import { listWorkflows, createConversation, runWorkflow } from '@/lib/api';
+import { cn } from '@/lib/utils';
 
 interface WorkflowInvokerProps {
   codebaseId: string;
@@ -14,11 +15,27 @@ export function WorkflowInvoker({ codebaseId }: WorkflowInvokerProps): React.Rea
   const [message, setMessage] = useState('');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const { data: workflows } = useQuery({
     queryKey: ['workflows'],
     queryFn: () => listWorkflows(),
   });
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handleClick = (e: MouseEvent): void => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return (): void => {
+      document.removeEventListener('mousedown', handleClick);
+    };
+  }, [dropdownOpen]);
 
   if (!workflows || workflows.length === 0) return null;
 
@@ -47,24 +64,38 @@ export function WorkflowInvoker({ codebaseId }: WorkflowInvokerProps): React.Rea
 
   if (!selectedWorkflow) {
     return (
-      <div className="mx-1">
-        <select
-          value=""
-          onChange={(e): void => {
-            setSelectedWorkflow(e.target.value);
-            setError(null);
+      <div className="mx-1" ref={dropdownRef}>
+        <button
+          onClick={(): void => {
+            setDropdownOpen(prev => !prev);
           }}
-          className="w-full rounded-md border border-border bg-surface-elevated px-2 py-1.5 text-xs text-text-secondary cursor-pointer focus:border-primary focus:outline-none"
+          className="flex w-full items-center justify-between rounded-md border border-border bg-surface-elevated px-2 py-1.5 text-xs text-text-secondary hover:border-primary hover:text-text-primary transition-colors"
         >
-          <option value="" disabled>
-            Run workflow...
-          </option>
-          {workflows.map(wf => (
-            <option key={wf.name} value={wf.name}>
-              {wf.name}
-            </option>
-          ))}
-        </select>
+          <span>Run workflow...</span>
+          <ChevronDown
+            className={cn(
+              'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
+              dropdownOpen && 'rotate-180'
+            )}
+          />
+        </button>
+        {dropdownOpen && (
+          <div className="mt-1 rounded-md border border-border bg-surface-elevated overflow-hidden">
+            {workflows.map(wf => (
+              <button
+                key={wf.name}
+                onClick={(): void => {
+                  setSelectedWorkflow(wf.name);
+                  setDropdownOpen(false);
+                  setError(null);
+                }}
+                className="flex w-full items-center px-2 py-1.5 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors text-left"
+              >
+                {wf.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     );
   }

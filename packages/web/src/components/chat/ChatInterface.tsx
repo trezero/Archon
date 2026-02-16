@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { MessageList } from './MessageList';
@@ -23,6 +23,7 @@ import type {
   WorkflowDispatchEvent,
 } from '@/lib/types';
 import { getCachedMessages, setCachedMessages } from '@/lib/message-cache';
+import { useProject } from '@/contexts/ProjectContext';
 
 interface ChatInterfaceProps {
   conversationId: string;
@@ -30,6 +31,9 @@ interface ChatInterfaceProps {
 
 export function ChatInterface({ conversationId }: ChatInterfaceProps): React.ReactElement {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { selectedProjectId } = useProject();
+  const hasTriggeredTitleRefresh = useRef(false);
   const isNewChat = conversationId === 'new';
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     isNewChat ? [] : getCachedMessages(conversationId).map(m => ({ ...m, isStreaming: false }))
@@ -351,7 +355,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       // Create conversation on first message if this is a new chat
       if (isNewChat) {
         try {
-          const selectedProjectId = localStorage.getItem('archon-selected-project');
           const { conversationId: newId } = await createConversation(
             selectedProjectId ?? undefined
           );
@@ -371,6 +374,14 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
 
       try {
         await apiSendMessage(targetConversationId, message);
+        // Invalidate conversations cache once after first non-command message
+        // so the auto-generated title appears in the sidebar immediately
+        if (!hasTriggeredTitleRefresh.current && !message.startsWith('/')) {
+          hasTriggeredTitleRefresh.current = true;
+          setTimeout(() => {
+            void queryClient.invalidateQueries({ queryKey: ['conversations'] });
+          }, 2000);
+        }
       } catch (error) {
         console.error('[Chat] Failed to send message', { error });
         onError({
@@ -382,7 +393,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         setSending(false);
       }
     },
-    [conversationId, isNewChat, navigate, onError]
+    [conversationId, isNewChat, navigate, onError, selectedProjectId, queryClient]
   );
 
   const handleCancelWorkflow = useCallback((): void => {

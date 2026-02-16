@@ -1,0 +1,62 @@
+import { createContext, useContext, useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { listCodebases } from '@/lib/api';
+import type { CodebaseResponse } from '@/lib/api';
+
+const PROJECT_STORAGE_KEY = 'archon-selected-project';
+
+interface ProjectContextValue {
+  selectedProjectId: string | null;
+  setSelectedProjectId: (id: string | null) => void;
+  codebases: CodebaseResponse[] | undefined;
+  isLoadingCodebases: boolean;
+}
+
+const projectContext = createContext<ProjectContextValue | null>(null);
+
+export function ProjectProvider({ children }: { children: React.ReactNode }): React.ReactElement {
+  const [selectedProjectId, setSelectedProjectIdRaw] = useState<string | null>(() =>
+    localStorage.getItem(PROJECT_STORAGE_KEY)
+  );
+
+  const { data: codebases, isLoading: isLoadingCodebases } = useQuery({
+    queryKey: ['codebases'],
+    queryFn: listCodebases,
+    refetchInterval: 30_000,
+  });
+
+  const setSelectedProjectId = (id: string | null): void => {
+    setSelectedProjectIdRaw(id);
+    if (id) {
+      localStorage.setItem(PROJECT_STORAGE_KEY, id);
+    } else {
+      localStorage.removeItem(PROJECT_STORAGE_KEY);
+    }
+  };
+
+  // Auto-select: clear stale selection or auto-select first project
+  useEffect(() => {
+    if (!codebases) return;
+    if (selectedProjectId && !codebases.some(cb => cb.id === selectedProjectId)) {
+      setSelectedProjectId(null);
+    } else if (!selectedProjectId && codebases.length > 0) {
+      setSelectedProjectId(codebases[0].id);
+    }
+  }, [codebases, selectedProjectId]);
+
+  return (
+    <projectContext.Provider
+      value={{ selectedProjectId, setSelectedProjectId, codebases, isLoadingCodebases }}
+    >
+      {children}
+    </projectContext.Provider>
+  );
+}
+
+export function useProject(): ProjectContextValue {
+  const ctx = useContext(projectContext);
+  if (!ctx) {
+    throw new Error('useProject must be used within a ProjectProvider');
+  }
+  return ctx;
+}

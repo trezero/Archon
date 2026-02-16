@@ -1472,445 +1472,445 @@ export async function executeWorkflow(
     const emitter = getWorkflowEventEmitter();
     const workflowStartTime = Date.now();
     emitter.registerRun(workflowRun.id, conversationId);
-
-    const totalSteps = workflow.steps ? workflow.steps.length : 0;
-    const isLoop = !!workflow.loop;
-    emitter.emit({
-      type: 'workflow_started',
-      runId: workflowRun.id,
-      workflowName: workflow.name,
-      conversationId: conversationDbId,
-      totalSteps,
-      isLoop,
-    });
-    void workflowEventDb.createWorkflowEvent({
-      workflow_run_id: workflowRun.id,
-      event_type: 'workflow_started',
-      data: { workflowName: workflow.name, totalSteps, isLoop },
-    });
-
-    // Set status to running now that execution has started
     try {
-      await workflowDb.updateWorkflowRun(workflowRun.id, { status: 'running' });
-    } catch (dbError) {
-      console.error('[WorkflowExecutor] Failed to set workflow status to running', {
-        error: (dbError as Error).message,
-        workflowRunId: workflowRun.id,
+      const totalSteps = workflow.steps ? workflow.steps.length : 0;
+      const isLoop = !!workflow.loop;
+      emitter.emit({
+        type: 'workflow_started',
+        runId: workflowRun.id,
+        workflowName: workflow.name,
+        conversationId: conversationDbId,
+        totalSteps,
+        isLoop,
       });
-      await sendCriticalMessage(
-        platform,
-        conversationId,
-        'Workflow blocked: Unable to update status. Please try again.'
-      );
-      return { success: false, error: 'Database error setting workflow to running' };
-    }
+      void workflowEventDb.createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'workflow_started',
+        data: { workflowName: workflow.name, totalSteps, isLoop },
+      });
 
-    // Context for error logging
-    const workflowContext: SendMessageContext = {
-      workflowId: workflowRun.id,
-    };
-
-    // Build consolidated startup message
-    let startupMessage = '';
-
-    // Add isolation context to startup message
-    if (isolationContext) {
-      const { isPrReview, prSha, prBranch, branchName } = isolationContext;
-
-      if (isPrReview && prSha && prBranch) {
-        startupMessage += `Reviewing PR at commit \`${prSha.substring(0, 7)}\` (branch: \`${prBranch}\`)\n\n`;
-      } else if (branchName) {
-        const repoName = cwd.split(/[/\\]/).pop() || 'repository';
-        startupMessage += `📍 ${repoName} @ \`${branchName}\`\n\n`;
-      } else {
-        console.warn(
-          '[WorkflowExecutor] Incomplete isolation context - omitting from startup message',
-          {
-            workflowId: workflowRun.id,
-            hasFields: {
-              isPrReview: !!isPrReview,
-              prSha: !!prSha,
-              prBranch: !!prBranch,
-              branchName: !!branchName,
-            },
-          }
-        );
-      }
-    }
-
-    // Add workflow start message (steps shown visually in WorkflowProgressCard)
-    // Strip routing metadata from description (Use when:, Handles:, NOT for:, Capability:, Triggers:)
-    const cleanDescription = (workflow.description ?? '')
-      .split('\n')
-      .filter(
-        line =>
-          !/^\s*(Use when|Handles|NOT for|Capability|Triggers)[:\s]/i.test(line) && line.trim()
-      )
-      .join('\n')
-      .trim();
-    const descriptionText = cleanDescription || workflow.name;
-    startupMessage += `🚀 **Starting workflow**: \`${workflow.name}\`\n\n> ${descriptionText}`;
-
-    // Send consolidated message - use critical send with limited retries (1 retry max)
-    // to avoid blocking workflow execution while still catching transient failures
-    const startupSent = await sendCriticalMessage(
-      platform,
-      conversationId,
-      startupMessage,
-      workflowContext,
-      2 // maxRetries=2 means 2 total attempts (1 initial + 1 retry), 1s max delay
-    );
-    if (!startupSent) {
-      console.error(
-        '[WorkflowExecutor] Failed to send startup message after retries - user may not be aware workflow is running',
-        {
-          workflowId: workflowRun.id,
-          conversationId,
-        }
-      );
-      // Continue anyway - workflow is already recorded in database
-    }
-
-    // Dispatch to appropriate execution mode
-    if (workflow.loop) {
-      await executeLoopWorkflow(
-        platform,
-        conversationId,
-        cwd,
-        workflow,
-        workflowRun,
-        resolvedProvider,
-        resolvedModel,
-        artifactsDir,
-        logDir,
-        baseBranch,
-        issueContext
-      );
-      // Loop workflow handles its own success/failure internally
-      // Check the database status to determine result
-      const finalStatus = await workflowDb.getWorkflowRun(workflowRun.id);
-      if (finalStatus?.status === 'completed') {
-        return { success: true, workflowRunId: workflowRun.id };
-      } else {
-        return {
-          success: false,
+      // Set status to running now that execution has started
+      try {
+        await workflowDb.updateWorkflowRun(workflowRun.id, { status: 'running' });
+      } catch (dbError) {
+        console.error('[WorkflowExecutor] Failed to set workflow status to running', {
+          error: (dbError as Error).message,
           workflowRunId: workflowRun.id,
-          error: 'Loop workflow did not complete successfully',
-        };
-      }
-    }
-
-    let currentSessionId: string | undefined;
-    let stepNumber = 0; // For user-facing step count
-
-    // Execute steps sequentially (for step-based workflows)
-    // After the loop check above, TypeScript knows workflow.steps exists
-    const steps = workflow.steps;
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-
-      if (isParallelBlock(step)) {
-        // Parallel block execution
-        const parallelSteps = step.parallel;
-        const stepCount = parallelSteps.length;
-        stepNumber++;
-        const stepCommands = parallelSteps.map(s => s.command);
-
-        // Log parallel block start
-        await logParallelBlockStart(logDir, workflowRun.id, i, stepCommands);
-
-        // Emit step_started for the parallel block
-        emitter.emit({
-          type: 'step_started',
-          runId: workflowRun.id,
-          stepIndex: i,
-          stepName: `parallel(${stepCommands.join(', ')})`,
-          totalSteps: steps.length,
         });
-        void workflowEventDb.createWorkflowEvent({
-          workflow_run_id: workflowRun.id,
-          event_type: 'step_started',
-          step_index: i,
-          step_name: `parallel(${stepCommands.join(', ')})`,
-          data: { totalSteps: steps.length, parallelAgents: stepCount },
-        });
-
-        // Notify user
-        const stepNames = parallelSteps.map(s => `\`${s.command}\``).join(', ');
-        await safeSendMessage(
+        await sendCriticalMessage(
           platform,
           conversationId,
-          `⏳ **Parallel block** (${String(stepCount)} steps): ${stepNames}`,
-          { workflowId: workflowRun.id }
+          'Workflow blocked: Unable to update status. Please try again.'
         );
+        return { success: false, error: 'Database error setting workflow to running' };
+      }
 
-        // Execute all in parallel
-        const results = await executeParallelBlock(
+      // Context for error logging
+      const workflowContext: SendMessageContext = {
+        workflowId: workflowRun.id,
+      };
+
+      // Build consolidated startup message
+      let startupMessage = '';
+
+      // Add isolation context to startup message
+      if (isolationContext) {
+        const { isPrReview, prSha, prBranch, branchName } = isolationContext;
+
+        if (isPrReview && prSha && prBranch) {
+          startupMessage += `Reviewing PR at commit \`${prSha.substring(0, 7)}\` (branch: \`${prBranch}\`)\n\n`;
+        } else if (branchName) {
+          const repoName = cwd.split(/[/\\]/).pop() || 'repository';
+          startupMessage += `📍 ${repoName} @ \`${branchName}\`\n\n`;
+        } else {
+          console.warn(
+            '[WorkflowExecutor] Incomplete isolation context - omitting from startup message',
+            {
+              workflowId: workflowRun.id,
+              hasFields: {
+                isPrReview: !!isPrReview,
+                prSha: !!prSha,
+                prBranch: !!prBranch,
+                branchName: !!branchName,
+              },
+            }
+          );
+        }
+      }
+
+      // Add workflow start message (steps shown visually in WorkflowProgressCard)
+      // Strip routing metadata from description (Use when:, Handles:, NOT for:, Capability:, Triggers:)
+      const cleanDescription = (workflow.description ?? '')
+        .split('\n')
+        .filter(
+          line =>
+            !/^\s*(Use when|Handles|NOT for|Capability|Triggers)[:\s]/i.test(line) && line.trim()
+        )
+        .join('\n')
+        .trim();
+      const descriptionText = cleanDescription || workflow.name;
+      startupMessage += `🚀 **Starting workflow**: \`${workflow.name}\`\n\n> ${descriptionText}`;
+
+      // Send consolidated message - use critical send with limited retries (1 retry max)
+      // to avoid blocking workflow execution while still catching transient failures
+      const startupSent = await sendCriticalMessage(
+        platform,
+        conversationId,
+        startupMessage,
+        workflowContext,
+        2 // maxRetries=2 means 2 total attempts (1 initial + 1 retry), 1s max delay
+      );
+      if (!startupSent) {
+        console.error(
+          '[WorkflowExecutor] Failed to send startup message after retries - user may not be aware workflow is running',
+          {
+            workflowId: workflowRun.id,
+            conversationId,
+          }
+        );
+        // Continue anyway - workflow is already recorded in database
+      }
+
+      // Dispatch to appropriate execution mode
+      if (workflow.loop) {
+        await executeLoopWorkflow(
           platform,
           conversationId,
           cwd,
+          workflow,
           workflowRun,
-          parallelSteps,
-          i,
           resolvedProvider,
           resolvedModel,
           artifactsDir,
           logDir,
           baseBranch,
-          configuredCommandFolder,
           issueContext
         );
-
-        // Check for failures - report ALL failures, not just the first one
-        const failures = results.filter(r => !r.result.success);
-        if (failures.length > 0) {
-          // Build error message with all failures
-          const failureDetails = failures.map(f => {
-            const failedStep = parallelSteps[f.index];
-            const failedResult = f.result;
-            // Type narrowing: we know success is false from the filter
-            const errorText = !failedResult.success ? failedResult.error : 'Unknown error';
-            return `- \`${failedStep.command}\`: ${errorText}`;
-          });
-
-          const errorMsg = `${String(failures.length)} parallel step(s) failed:\n${failureDetails.join('\n')}`;
-          await logWorkflowError(logDir, workflowRun.id, errorMsg);
-
-          // Emit workflow_failed for parallel block failure
-          emitter.emit({
-            type: 'workflow_failed',
-            runId: workflowRun.id,
-            workflowName: workflow.name,
-            error: errorMsg,
-            stepIndex: i,
-          });
-          void workflowEventDb.createWorkflowEvent({
-            workflow_run_id: workflowRun.id,
-            event_type: 'workflow_failed',
-            step_index: i,
-            data: { error: errorMsg },
-          });
-          emitter.unregisterRun(workflowRun.id);
-
-          // Record failure in database (non-critical - log but don't prevent user notification)
-          try {
-            await workflowDb.failWorkflowRun(workflowRun.id, errorMsg);
-          } catch (dbError) {
-            console.error('[WorkflowExecutor] Database error recording parallel block failure', {
-              error: (dbError as Error).message,
-              workflowId: workflowRun.id,
-            });
-          }
-
-          // Always attempt to notify user with all failure details
-          await sendCriticalMessage(
-            platform,
-            conversationId,
-            `❌ **Workflow failed** in parallel block:\n\n${failureDetails.join('\n')}`
-          );
+        // Loop workflow handles its own success/failure internally
+        // Check the database status to determine result
+        const finalStatus = await workflowDb.getWorkflowRun(workflowRun.id);
+        if (finalStatus?.status === 'completed') {
+          return { success: true, workflowRunId: workflowRun.id };
+        } else {
           return {
             success: false,
             workflowRunId: workflowRun.id,
-            error: `Parallel block failed: ${failureDetails.join('; ')}`,
+            error: 'Loop workflow did not complete successfully',
           };
         }
+      }
 
-        // Log parallel block complete
-        const blockResults = results.map(r => ({
-          command: parallelSteps[r.index].command,
-          success: r.result.success,
-        }));
-        await logParallelBlockComplete(logDir, workflowRun.id, i, blockResults);
+      let currentSessionId: string | undefined;
+      let stepNumber = 0; // For user-facing step count
 
-        // Emit step_completed for the parallel block
-        emitter.emit({
-          type: 'step_completed',
-          runId: workflowRun.id,
-          stepIndex: i,
-          stepName: `parallel(${stepCommands.join(', ')})`,
-          duration: 0, // Duration tracked per-agent, not per-block
-        });
-        void workflowEventDb.createWorkflowEvent({
-          workflow_run_id: workflowRun.id,
-          event_type: 'step_completed',
-          step_index: i,
-          step_name: `parallel(${stepCommands.join(', ')})`,
-          data: {},
-        });
+      // Execute steps sequentially (for step-based workflows)
+      // After the loop check above, TypeScript knows workflow.steps exists
+      const steps = workflow.steps;
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
 
-        // All parallel steps succeeded - no session to carry forward
-        currentSessionId = undefined;
-      } else {
-        // Single step execution (existing logic)
-        stepNumber++;
-        const needsFreshSession = step.clearContext === true || i === 0;
-        const resumeSessionId = needsFreshSession ? undefined : currentSessionId;
+        if (isParallelBlock(step)) {
+          // Parallel block execution
+          const parallelSteps = step.parallel;
+          const stepCount = parallelSteps.length;
+          stepNumber++;
+          const stepCommands = parallelSteps.map(s => s.command);
 
-        // Send step notification
-        if (steps.length > 1) {
+          // Log parallel block start
+          await logParallelBlockStart(logDir, workflowRun.id, i, stepCommands);
+
+          // Emit step_started for the parallel block
+          emitter.emit({
+            type: 'step_started',
+            runId: workflowRun.id,
+            stepIndex: i,
+            stepName: `parallel(${stepCommands.join(', ')})`,
+            totalSteps: steps.length,
+          });
+          void workflowEventDb.createWorkflowEvent({
+            workflow_run_id: workflowRun.id,
+            event_type: 'step_started',
+            step_index: i,
+            step_name: `parallel(${stepCommands.join(', ')})`,
+            data: { totalSteps: steps.length, parallelAgents: stepCount },
+          });
+
+          // Notify user
+          const stepNames = parallelSteps.map(s => `\`${s.command}\``).join(', ');
           await safeSendMessage(
             platform,
             conversationId,
-            `⏳ **Step ${String(stepNumber)}/${String(steps.length)}**: \`${step.command}\``,
-            workflowContext
+            `⏳ **Parallel block** (${String(stepCount)} steps): ${stepNames}`,
+            { workflowId: workflowRun.id }
           );
-        }
 
-        // Emit step_started event
-        emitter.emit({
-          type: 'step_started',
-          runId: workflowRun.id,
-          stepIndex: i,
-          stepName: step.command,
-          totalSteps: steps.length,
-        });
-        void workflowEventDb.createWorkflowEvent({
-          workflow_run_id: workflowRun.id,
-          event_type: 'step_started',
-          step_index: i,
-          step_name: step.command,
-          data: { totalSteps: steps.length },
-        });
+          // Execute all in parallel
+          const results = await executeParallelBlock(
+            platform,
+            conversationId,
+            cwd,
+            workflowRun,
+            parallelSteps,
+            i,
+            resolvedProvider,
+            resolvedModel,
+            artifactsDir,
+            logDir,
+            baseBranch,
+            configuredCommandFolder,
+            issueContext
+          );
 
-        const result = await executeStepInternal(
-          platform,
-          conversationId,
-          cwd,
-          workflowRun,
-          step,
-          String(i),
-          resolvedProvider,
-          resolvedModel,
-          artifactsDir,
-          logDir,
-          baseBranch,
-          resumeSessionId,
-          configuredCommandFolder,
-          issueContext
-        );
+          // Check for failures - report ALL failures, not just the first one
+          const failures = results.filter(r => !r.result.success);
+          if (failures.length > 0) {
+            // Build error message with all failures
+            const failureDetails = failures.map(f => {
+              const failedStep = parallelSteps[f.index];
+              const failedResult = f.result;
+              // Type narrowing: we know success is false from the filter
+              const errorText = !failedResult.success ? failedResult.error : 'Unknown error';
+              return `- \`${failedStep.command}\`: ${errorText}`;
+            });
 
-        if (!result.success) {
-          await logWorkflowError(logDir, workflowRun.id, result.error);
+            const errorMsg = `${String(failures.length)} parallel step(s) failed:\n${failureDetails.join('\n')}`;
+            await logWorkflowError(logDir, workflowRun.id, errorMsg);
 
-          // Emit workflow_failed for step failure
+            // Emit workflow_failed for parallel block failure
+            emitter.emit({
+              type: 'workflow_failed',
+              runId: workflowRun.id,
+              workflowName: workflow.name,
+              error: errorMsg,
+              stepIndex: i,
+            });
+            void workflowEventDb.createWorkflowEvent({
+              workflow_run_id: workflowRun.id,
+              event_type: 'workflow_failed',
+              step_index: i,
+              data: { error: errorMsg },
+            });
+
+            // Record failure in database (non-critical - log but don't prevent user notification)
+            try {
+              await workflowDb.failWorkflowRun(workflowRun.id, errorMsg);
+            } catch (dbError) {
+              console.error('[WorkflowExecutor] Database error recording parallel block failure', {
+                error: (dbError as Error).message,
+                workflowId: workflowRun.id,
+              });
+            }
+
+            // Always attempt to notify user with all failure details
+            await sendCriticalMessage(
+              platform,
+              conversationId,
+              `❌ **Workflow failed** in parallel block:\n\n${failureDetails.join('\n')}`
+            );
+            return {
+              success: false,
+              workflowRunId: workflowRun.id,
+              error: `Parallel block failed: ${failureDetails.join('; ')}`,
+            };
+          }
+
+          // Log parallel block complete
+          const blockResults = results.map(r => ({
+            command: parallelSteps[r.index].command,
+            success: r.result.success,
+          }));
+          await logParallelBlockComplete(logDir, workflowRun.id, i, blockResults);
+
+          // Emit step_completed for the parallel block
           emitter.emit({
-            type: 'workflow_failed',
+            type: 'step_completed',
             runId: workflowRun.id,
-            workflowName: workflow.name,
-            error: result.error,
             stepIndex: i,
+            stepName: `parallel(${stepCommands.join(', ')})`,
+            duration: 0, // Duration tracked per-agent, not per-block
           });
           void workflowEventDb.createWorkflowEvent({
             workflow_run_id: workflowRun.id,
-            event_type: 'workflow_failed',
+            event_type: 'step_completed',
             step_index: i,
-            step_name: result.commandName,
-            data: { error: result.error },
+            step_name: `parallel(${stepCommands.join(', ')})`,
+            data: {},
           });
-          emitter.unregisterRun(workflowRun.id);
 
-          // Record failure in database (non-critical - log but don't prevent user notification)
-          try {
-            await workflowDb.failWorkflowRun(workflowRun.id, result.error);
-          } catch (dbError) {
-            console.error('[WorkflowExecutor] Database error recording step failure', {
-              error: (dbError as Error).message,
-              workflowId: workflowRun.id,
-              stepName: result.commandName,
-            });
+          // All parallel steps succeeded - no session to carry forward
+          currentSessionId = undefined;
+        } else {
+          // Single step execution (existing logic)
+          stepNumber++;
+          const needsFreshSession = step.clearContext === true || i === 0;
+          const resumeSessionId = needsFreshSession ? undefined : currentSessionId;
+
+          // Send step notification
+          if (steps.length > 1) {
+            await safeSendMessage(
+              platform,
+              conversationId,
+              `⏳ **Step ${String(stepNumber)}/${String(steps.length)}**: \`${step.command}\``,
+              workflowContext
+            );
           }
 
-          // Always attempt to notify user
-          await sendCriticalMessage(
+          // Emit step_started event
+          emitter.emit({
+            type: 'step_started',
+            runId: workflowRun.id,
+            stepIndex: i,
+            stepName: step.command,
+            totalSteps: steps.length,
+          });
+          void workflowEventDb.createWorkflowEvent({
+            workflow_run_id: workflowRun.id,
+            event_type: 'step_started',
+            step_index: i,
+            step_name: step.command,
+            data: { totalSteps: steps.length },
+          });
+
+          const result = await executeStepInternal(
             platform,
             conversationId,
-            `❌ **Workflow failed** at step: \`${result.commandName}\`\n\nError: ${result.error}`,
-            { ...workflowContext, stepName: result.commandName }
+            cwd,
+            workflowRun,
+            step,
+            String(i),
+            resolvedProvider,
+            resolvedModel,
+            artifactsDir,
+            logDir,
+            baseBranch,
+            resumeSessionId,
+            configuredCommandFolder,
+            issueContext
           );
-          return {
-            success: false,
-            workflowRunId: workflowRun.id,
-            error: `Step '${result.commandName}' failed: ${result.error}`,
-          };
+
+          if (!result.success) {
+            await logWorkflowError(logDir, workflowRun.id, result.error);
+
+            // Emit workflow_failed for step failure
+            emitter.emit({
+              type: 'workflow_failed',
+              runId: workflowRun.id,
+              workflowName: workflow.name,
+              error: result.error,
+              stepIndex: i,
+            });
+            void workflowEventDb.createWorkflowEvent({
+              workflow_run_id: workflowRun.id,
+              event_type: 'workflow_failed',
+              step_index: i,
+              step_name: result.commandName,
+              data: { error: result.error },
+            });
+
+            // Record failure in database (non-critical - log but don't prevent user notification)
+            try {
+              await workflowDb.failWorkflowRun(workflowRun.id, result.error);
+            } catch (dbError) {
+              console.error('[WorkflowExecutor] Database error recording step failure', {
+                error: (dbError as Error).message,
+                workflowId: workflowRun.id,
+                stepName: result.commandName,
+              });
+            }
+
+            // Always attempt to notify user
+            await sendCriticalMessage(
+              platform,
+              conversationId,
+              `❌ **Workflow failed** at step: \`${result.commandName}\`\n\nError: ${result.error}`,
+              { ...workflowContext, stepName: result.commandName }
+            );
+            return {
+              success: false,
+              workflowRunId: workflowRun.id,
+              error: `Step '${result.commandName}' failed: ${result.error}`,
+            };
+          }
+
+          if (result.sessionId) {
+            currentSessionId = result.sessionId;
+          }
         }
 
-        if (result.sessionId) {
-          currentSessionId = result.sessionId;
+        // Update progress (non-critical - log but don't fail workflow on db error)
+        try {
+          await workflowDb.updateWorkflowRun(workflowRun.id, {
+            current_step_index: i + 1,
+          });
+        } catch (dbError) {
+          console.error('[WorkflowExecutor] Database error updating workflow progress', {
+            error: (dbError as Error).message,
+            workflowId: workflowRun.id,
+            stepIndex: i + 1,
+          });
+          // Continue execution - progress tracking is non-critical
         }
       }
 
-      // Update progress (non-critical - log but don't fail workflow on db error)
+      // Workflow complete
       try {
-        await workflowDb.updateWorkflowRun(workflowRun.id, {
-          current_step_index: i + 1,
-        });
+        await workflowDb.completeWorkflowRun(workflowRun.id);
       } catch (dbError) {
-        console.error('[WorkflowExecutor] Database error updating workflow progress', {
+        console.error('[WorkflowExecutor] Database error recording workflow completion', {
           error: (dbError as Error).message,
           workflowId: workflowRun.id,
-          stepIndex: i + 1,
         });
-        // Continue execution - progress tracking is non-critical
       }
-    }
+      await logWorkflowComplete(logDir, workflowRun.id);
+      // Critical message - retry to ensure user knows about completion
+      // Only send completion message for non-GitHub platforms
+      // GitHub's comment-based interface makes explicit completion messages redundant
+      // (the final step's output already signals completion)
+      const platformType = platform.getPlatformType();
+      if (platformType !== 'github') {
+        await sendCriticalMessage(
+          platform,
+          conversationId,
+          `✅ **Workflow complete**: \`${workflow.name}\``,
+          workflowContext
+        );
+      } else {
+        console.log('[WorkflowExecutor] Suppressing completion message for GitHub', {
+          workflowName: workflow.name,
+          workflowId: workflowRun.id,
+          conversationId,
+        });
+      }
 
-    // Workflow complete
-    try {
-      await workflowDb.completeWorkflowRun(workflowRun.id);
-    } catch (dbError) {
-      console.error('[WorkflowExecutor] Database error recording workflow completion', {
-        error: (dbError as Error).message,
-        workflowId: workflowRun.id,
+      console.log(`[WorkflowExecutor] Workflow completed: ${workflow.name}`);
+
+      // Emit workflow_completed
+      emitter.emit({
+        type: 'workflow_completed',
+        runId: workflowRun.id,
+        workflowName: workflow.name,
+        duration: Date.now() - workflowStartTime,
       });
-    }
-    await logWorkflowComplete(logDir, workflowRun.id);
-    // Critical message - retry to ensure user knows about completion
-    // Only send completion message for non-GitHub platforms
-    // GitHub's comment-based interface makes explicit completion messages redundant
-    // (the final step's output already signals completion)
-    const platformType = platform.getPlatformType();
-    if (platformType !== 'github') {
-      await sendCriticalMessage(
+      void workflowEventDb.createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'workflow_completed',
+        data: { duration_ms: Date.now() - workflowStartTime },
+      });
+
+      // Safety net: Commit any artifacts created during workflow but not yet committed
+      await commitWorkflowArtifacts(
         platform,
         conversationId,
-        `✅ **Workflow complete**: \`${workflow.name}\``,
+        cwd,
+        workflow.name,
+        workflowRun.id,
         workflowContext
       );
-    } else {
-      console.log('[WorkflowExecutor] Suppressing completion message for GitHub', {
-        workflowName: workflow.name,
-        workflowId: workflowRun.id,
-        conversationId,
-      });
+
+      return { success: true, workflowRunId: workflowRun.id };
+    } finally {
+      emitter.unregisterRun(workflowRun.id);
     }
-
-    console.log(`[WorkflowExecutor] Workflow completed: ${workflow.name}`);
-
-    // Emit workflow_completed
-    emitter.emit({
-      type: 'workflow_completed',
-      runId: workflowRun.id,
-      workflowName: workflow.name,
-      duration: Date.now() - workflowStartTime,
-    });
-    void workflowEventDb.createWorkflowEvent({
-      workflow_run_id: workflowRun.id,
-      event_type: 'workflow_completed',
-      data: { duration_ms: Date.now() - workflowStartTime },
-    });
-    emitter.unregisterRun(workflowRun.id);
-
-    // Safety net: Commit any artifacts created during workflow but not yet committed
-    await commitWorkflowArtifacts(
-      platform,
-      conversationId,
-      cwd,
-      workflow.name,
-      workflowRun.id,
-      workflowContext
-    );
-
-    return { success: true, workflowRunId: workflowRun.id };
   } catch (error) {
     // Top-level error handler: ensure workflow is marked as failed
     const err = error as Error;
@@ -1957,7 +1957,6 @@ export async function executeWorkflow(
       event_type: 'workflow_failed',
       data: { error: err.message },
     });
-    emitter.unregisterRun(workflowRun.id);
 
     // Notify user about the failure
     const delivered = await sendCriticalMessage(

@@ -20,6 +20,7 @@ interface ProjectSelectorProps {
   selectedProjectId: string | null;
   onSelectProject: (id: string) => void;
   isLoading: boolean;
+  searchQuery?: string;
 }
 
 export function ProjectSelector({
@@ -27,6 +28,7 @@ export function ProjectSelector({
   selectedProjectId,
   onSelectProject,
   isLoading,
+  searchQuery,
 }: ProjectSelectorProps): React.ReactElement {
   const queryClient = useQueryClient();
   const [deleteTarget, setDeleteTarget] = useState<CodebaseResponse | null>(null);
@@ -64,10 +66,24 @@ export function ProjectSelector({
     );
   }
 
+  const filteredProjects = projects.filter(p => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return p.name.toLowerCase().includes(q) || (p.repository_url ?? '').toLowerCase().includes(q);
+  });
+
+  if (filteredProjects.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-4">
+        <span className="text-xs text-text-tertiary">No matching projects</span>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="flex flex-col gap-0.5 mt-1">
-        {projects.map(project => (
+        {filteredProjects.map(project => (
           <div key={project.id} className="group relative">
             <button
               onClick={(): void => {

@@ -3,6 +3,7 @@ import type { ReactNode, ErrorInfo } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from '@/components/layout/Layout';
+import { ProjectProvider } from '@/contexts/ProjectContext';
 import { DashboardPage } from '@/routes/DashboardPage';
 import { ChatPage } from '@/routes/ChatPage';
 import { WorkflowsPage } from '@/routes/WorkflowsPage';
@@ -71,19 +72,21 @@ export function App(): React.ReactElement {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Routes>
-            <Route element={<Layout />}>
-              <Route path="/" element={<DashboardPage />} />
-              <Route path="/chat" element={<ChatPage />} />
-              <Route path="/chat/*" element={<ChatPage />} />
-              <Route path="/workflows" element={<WorkflowsPage />} />
-              <Route path="/workflows/builder" element={<WorkflowBuilderPage />} />
-              <Route path="/workflows/runs/:runId" element={<WorkflowExecutionPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
+        <ProjectProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route path="/" element={<DashboardPage />} />
+                <Route path="/chat" element={<ChatPage />} />
+                <Route path="/chat/*" element={<ChatPage />} />
+                <Route path="/workflows" element={<WorkflowsPage />} />
+                <Route path="/workflows/builder" element={<WorkflowBuilderPage />} />
+                <Route path="/workflows/runs/:runId" element={<WorkflowExecutionPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </ProjectProvider>
       </QueryClientProvider>
     </ErrorBoundary>
   );

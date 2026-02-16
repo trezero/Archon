@@ -9,7 +9,10 @@
  * to the backend server. In production, uses relative URLs (same origin).
  * Uses the page hostname so it works from any network interface.
  */
-export const SSE_BASE_URL = import.meta.env.DEV ? `http://${window.location.hostname}:3090` : '';
+const apiPort = (import.meta.env.VITE_API_PORT as string | undefined) ?? '3090';
+export const SSE_BASE_URL = import.meta.env.DEV
+  ? `http://${window.location.hostname}:${apiPort}`
+  : '';
 
 export interface ConversationResponse {
   id: string;

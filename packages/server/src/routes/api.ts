@@ -175,7 +175,14 @@ export function registerApiRoutes(
         return c.json({ error: 'Conversation not found' }, 404);
       }
       const messages = await messageDb.listMessages(conv.id, limit);
-      return c.json(messages);
+      // Normalize metadata: PostgreSQL JSONB auto-deserializes to object,
+      // but frontend expects JSON string. SQLite returns string already.
+      return c.json(
+        messages.map(m => ({
+          ...m,
+          metadata: typeof m.metadata === 'string' ? m.metadata : JSON.stringify(m.metadata),
+        }))
+      );
     } catch (error) {
       console.error('[API] Failed to list messages', { error });
       return c.json({ error: 'Failed to list messages' }, 500);
@@ -301,8 +308,27 @@ export function registerApiRoutes(
   app.get('/api/codebases', async c => {
     try {
       const codebases = await codebaseDb.listCodebases();
+
+      // Deduplicate by repository_url (keep most recently updated)
+      const normalizeUrl = (url: string): string => url.replace(/\.git$/, '');
+      const seen = new Map<string, (typeof codebases)[number]>();
+      const deduped: (typeof codebases)[number][] = [];
+      for (const cb of codebases) {
+        if (!cb.repository_url) {
+          deduped.push(cb);
+          continue;
+        }
+        const key = normalizeUrl(cb.repository_url);
+        const existing = seen.get(key);
+        if (!existing || cb.updated_at > existing.updated_at) {
+          seen.set(key, cb);
+        }
+      }
+      deduped.push(...seen.values());
+      deduped.sort((a, b) => a.name.localeCompare(b.name));
+
       return c.json(
-        codebases.map(cb => {
+        deduped.map(cb => {
           let commands = cb.commands;
           if (typeof commands === 'string') {
             try {

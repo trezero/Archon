@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { listConversations, listWorkflowRuns, createConversation } from '@/lib/api';
@@ -61,6 +62,19 @@ export function ProjectDetail({
     refetchInterval: 10_000,
   });
 
+  const conversationStatusMap = useMemo((): Map<string, 'running' | 'failed'> => {
+    const map = new Map<string, 'running' | 'failed'>();
+    if (!runs) return map;
+    for (const run of runs) {
+      if (run.status === 'running') {
+        map.set(run.conversation_id, 'running');
+      } else if (run.status === 'failed' && !map.has(run.conversation_id)) {
+        map.set(run.conversation_id, 'failed');
+      }
+    }
+    return map;
+  }, [runs]);
+
   const handleNewChat = async (): Promise<void> => {
     try {
       const { conversationId } = await createConversation(codebaseId);
@@ -118,7 +132,11 @@ export function ProjectDetail({
         <div className="mt-1 flex flex-col gap-0.5">
           {filteredConversations && filteredConversations.length > 0 ? (
             filteredConversations.map(conv => (
-              <ConversationItem key={conv.id} conversation={conv} />
+              <ConversationItem
+                key={conv.id}
+                conversation={conv}
+                status={conversationStatusMap.get(conv.id) ?? 'idle'}
+              />
             ))
           ) : (
             <span className="px-1 text-xs text-text-tertiary">No conversations</span>

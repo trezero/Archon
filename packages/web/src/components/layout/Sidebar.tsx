@@ -1,21 +1,22 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { NavLink } from 'react-router';
-import { Plus, Settings, Loader2, Workflow, Hammer } from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plus, Settings, Loader2, Workflow, Hammer, ChevronDown, FolderGit2 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { SearchBar } from '@/components/sidebar/SearchBar';
 import { ProjectSelector } from '@/components/sidebar/ProjectSelector';
 import { ProjectDetail } from '@/components/sidebar/ProjectDetail';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { listCodebases, addCodebase } from '@/lib/api';
+import { useProject } from '@/contexts/ProjectContext';
+import { addCodebase } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const SIDEBAR_MIN = 240;
 const SIDEBAR_MAX = 400;
 const SIDEBAR_DEFAULT = 260;
 const STORAGE_KEY = 'archon-sidebar-width';
-const PROJECT_STORAGE_KEY = 'archon-selected-project';
 
 function getInitialWidth(): number {
   const stored = localStorage.getItem(STORAGE_KEY);
@@ -24,10 +25,6 @@ function getInitialWidth(): number {
     if (parsed >= SIDEBAR_MIN && parsed <= SIDEBAR_MAX) return parsed;
   }
   return SIDEBAR_DEFAULT;
-}
-
-function getInitialProjectId(): string | null {
-  return localStorage.getItem(PROJECT_STORAGE_KEY);
 }
 
 const navLinkClass = ({ isActive }: { isActive: boolean }): string =>
@@ -43,7 +40,11 @@ export function Sidebar(): React.ReactElement {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [width, setWidth] = useState(getInitialWidth);
   const isResizing = useRef(false);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(getInitialProjectId);
+  const [projectsExpanded, setProjectsExpanded] = useState(false);
+
+  const { selectedProjectId, setSelectedProjectId, codebases, isLoadingCodebases } = useProject();
+
+  const selectedProject = codebases?.find(cb => cb.id === selectedProjectId) ?? null;
 
   // Add-project state
   const [showAddInput, setShowAddInput] = useState(false);
@@ -52,29 +53,6 @@ export function Sidebar(): React.ReactElement {
   const [addError, setAddError] = useState<string | null>(null);
   const addInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
-
-  const { data: codebases, isLoading: isLoadingCodebases } = useQuery({
-    queryKey: ['codebases'],
-    queryFn: listCodebases,
-    refetchInterval: 30_000,
-  });
-
-  const selectedProject = codebases?.find(cb => cb.id === selectedProjectId) ?? null;
-
-  // Auto-select: clear stale selection or auto-select first project
-  useEffect(() => {
-    if (!codebases) return;
-    if (selectedProjectId && !codebases.some(cb => cb.id === selectedProjectId)) {
-      // Selected project was deleted — clear it
-      setSelectedProjectId(null);
-      localStorage.removeItem(PROJECT_STORAGE_KEY);
-    } else if (!selectedProjectId && codebases.length > 0) {
-      // No project selected but projects exist — auto-select first
-      const firstId = codebases[0].id;
-      setSelectedProjectId(firstId);
-      localStorage.setItem(PROJECT_STORAGE_KEY, firstId);
-    }
-  }, [codebases, selectedProjectId]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, String(width));
@@ -119,10 +97,13 @@ export function Sidebar(): React.ReactElement {
     [width]
   );
 
-  const handleSelectProject = useCallback((id: string): void => {
-    setSelectedProjectId(id);
-    localStorage.setItem(PROJECT_STORAGE_KEY, id);
-  }, []);
+  const handleSelectProject = useCallback(
+    (id: string): void => {
+      setSelectedProjectId(id);
+      setProjectsExpanded(false);
+    },
+    [setSelectedProjectId]
+  );
 
   const handleAddSubmit = useCallback((): void => {
     const trimmed = addValue.trim();
@@ -194,7 +175,19 @@ export function Sidebar(): React.ReactElement {
 
       <Separator className="bg-border" />
 
-      {/* Project Selector */}
+      {/* Search - always visible */}
+      <div className="px-3 py-2">
+        <SearchBar
+          value={searchQuery}
+          onChange={setSearchQuery}
+          placeholder="Search..."
+          inputRef={searchInputRef}
+        />
+      </div>
+
+      <Separator className="bg-border" />
+
+      {/* Collapsible Project Selector */}
       <div className="px-2 py-2">
         <div className="flex items-center justify-between px-1">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">
@@ -239,41 +232,56 @@ export function Sidebar(): React.ReactElement {
           </div>
         )}
 
-        <ProjectSelector
-          projects={codebases ?? []}
-          selectedProjectId={selectedProjectId}
-          onSelectProject={handleSelectProject}
-          isLoading={isLoadingCodebases}
-        />
+        <Collapsible open={projectsExpanded} onOpenChange={setProjectsExpanded}>
+          {selectedProjectId && !projectsExpanded ? (
+            <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 mt-1 text-left text-sm text-primary hover:bg-surface-elevated transition-colors">
+              <FolderGit2 className="h-4 w-4 shrink-0" />
+              <span className="truncate flex-1">{selectedProject?.name ?? 'Project'}</span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
+            </CollapsibleTrigger>
+          ) : (
+            <CollapsibleTrigger className="hidden" />
+          )}
+          <CollapsibleContent>
+            <div className="max-h-[35vh] overflow-y-auto">
+              <ProjectSelector
+                projects={codebases ?? []}
+                selectedProjectId={selectedProjectId}
+                onSelectProject={handleSelectProject}
+                isLoading={isLoadingCodebases}
+                searchQuery={searchQuery}
+              />
+            </div>
+          </CollapsibleContent>
+          {/* Show full list when no project selected (not inside collapsible content) */}
+        </Collapsible>
+        {!selectedProjectId && (
+          <div className="max-h-[35vh] overflow-y-auto">
+            <ProjectSelector
+              projects={codebases ?? []}
+              selectedProjectId={selectedProjectId}
+              onSelectProject={handleSelectProject}
+              isLoading={isLoadingCodebases}
+              searchQuery={searchQuery}
+            />
+          </div>
+        )}
       </div>
 
       <Separator className="bg-border" />
 
       {/* Project-scoped content */}
       {selectedProjectId ? (
-        <>
-          {/* Search */}
-          <div className="px-3 py-2">
-            <SearchBar
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder="Search..."
-              inputRef={searchInputRef}
+        <div className="flex-1 overflow-hidden">
+          <ScrollArea className="h-full px-2 pb-2">
+            <ProjectDetail
+              codebaseId={selectedProjectId}
+              projectName={selectedProject?.name ?? ''}
+              repositoryUrl={selectedProject?.repository_url}
+              searchQuery={searchQuery}
             />
-          </div>
-
-          {/* Scoped content */}
-          <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-full px-2 pb-2">
-              <ProjectDetail
-                codebaseId={selectedProjectId}
-                projectName={selectedProject?.name ?? ''}
-                repositoryUrl={selectedProject?.repository_url}
-                searchQuery={searchQuery}
-              />
-            </ScrollArea>
-          </div>
-        </>
+          </ScrollArea>
+        </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4">
           <span className="text-xs text-text-tertiary text-center">
