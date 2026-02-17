@@ -144,6 +144,8 @@ export class CodexClient implements IAssistantClient {
       };
     }
 
+    let lastTodoListSignature: string | undefined;
+
     try {
       // Run streamed query (this IS async)
       const result = await thread.runStreamed(prompt);
@@ -217,6 +219,92 @@ export class CodexClient implements IAssistantClient {
                 yield { type: 'thinking', content: item.text };
               }
               break;
+
+            case 'web_search':
+              if (item.query) {
+                yield { type: 'tool', toolName: `🔍 Searching: ${item.query}` };
+              } else {
+                getLog().debug({ itemId: item.id }, 'web_search_missing_query');
+              }
+              break;
+
+            case 'todo_list':
+              if (Array.isArray(item.items) && item.items.length > 0) {
+                const normalizedItems = item.items.map(t => ({
+                  text: typeof t.text === 'string' ? t.text : '(unnamed task)',
+                  completed: t.completed ?? false,
+                }));
+                const signature = JSON.stringify(normalizedItems);
+                if (signature !== lastTodoListSignature) {
+                  lastTodoListSignature = signature;
+                  const taskList = normalizedItems
+                    .map(t => `${t.completed ? '✅' : '⬜'} ${t.text}`)
+                    .join('\n');
+                  yield { type: 'system', content: `📋 Tasks:\n${taskList}` };
+                }
+              } else {
+                getLog().debug({ itemId: item.id }, 'todo_list_empty_or_invalid');
+              }
+              break;
+
+            case 'file_change': {
+              const statusIcon = item.status === 'failed' ? '❌' : '✅';
+              const rawError = 'error' in item ? (item as { error?: unknown }).error : undefined;
+              const fileErrorMessage =
+                typeof rawError === 'string'
+                  ? rawError
+                  : typeof rawError === 'object' && rawError !== null && 'message' in rawError
+                    ? String((rawError as { message: unknown }).message)
+                    : undefined;
+
+              if (Array.isArray(item.changes) && item.changes.length > 0) {
+                const changeList = item.changes
+                  .map(c => {
+                    const icon = c.kind === 'add' ? '➕' : c.kind === 'delete' ? '➖' : '📝';
+                    return `${icon} ${c.path ?? '(unknown file)'}`;
+                  })
+                  .join('\n');
+                const errorSuffix =
+                  item.status === 'failed' && fileErrorMessage ? `\n${fileErrorMessage}` : '';
+                yield {
+                  type: 'system',
+                  content: `${statusIcon} File changes:\n${changeList}${errorSuffix}`,
+                };
+              } else if (item.status === 'failed') {
+                getLog().warn(
+                  { itemId: item.id, status: item.status },
+                  'file_change_failed_no_changes'
+                );
+                const failMsg = fileErrorMessage
+                  ? `❌ File change failed: ${fileErrorMessage}`
+                  : '❌ File change failed';
+                yield { type: 'system', content: failMsg };
+              } else {
+                getLog().debug({ itemId: item.id, status: item.status }, 'file_change_no_changes');
+              }
+              break;
+            }
+
+            case 'mcp_tool_call': {
+              const toolInfo =
+                item.server && item.tool
+                  ? `${item.server}/${item.tool}`
+                  : (item.tool ?? item.server ?? 'MCP tool');
+
+              if (item.status === 'failed') {
+                getLog().warn(
+                  { server: item.server, tool: item.tool, error: item.error, itemId: item.id },
+                  'mcp_tool_call_failed'
+                );
+                const message = item.error?.message
+                  ? `⚠️ MCP ${toolInfo} failed: ${item.error.message}`
+                  : `⚠️ MCP ${toolInfo} failed`;
+                yield { type: 'system', content: message };
+              } else if (item.status !== 'completed') {
+                yield { type: 'tool', toolName: `🔌 MCP: ${toolInfo}` };
+              }
+              break;
+            }
 
             // Other item types are ignored (like file edits, etc.)
           }

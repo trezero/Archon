@@ -122,6 +122,309 @@ describe('CodexClient', () => {
       expect(chunks[0]).toEqual({ type: 'thinking', content: 'Let me think about this...' });
     });
 
+    test('yields tool events from web_search items', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield { type: 'item.completed', item: { type: 'web_search', query: 'codex sdk' } };
+          yield { type: 'turn.completed' };
+        })(),
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[0]).toEqual({ type: 'tool', toolName: '🔍 Searching: codex sdk' });
+    });
+
+    test('yields system task list for todo_list items and deduplicates', async () => {
+      const todoItem = {
+        type: 'todo_list',
+        items: [
+          { text: 'Scan repo', completed: true },
+          { text: 'Add tests', completed: false },
+        ],
+      };
+
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield { type: 'item.completed', item: todoItem };
+          yield { type: 'item.completed', item: todoItem };
+          yield { type: 'turn.completed' };
+        })(),
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[0]).toEqual({
+        type: 'system',
+        content: '📋 Tasks:\n✅ Scan repo\n⬜ Add tests',
+      });
+      expect(chunks).toHaveLength(2);
+    });
+
+    test('yields updated todo_list when items change', async () => {
+      const todoV1 = {
+        type: 'todo_list',
+        items: [
+          { text: 'Scan repo', completed: false },
+          { text: 'Add tests', completed: false },
+        ],
+      };
+      const todoV2 = {
+        type: 'todo_list',
+        items: [
+          { text: 'Scan repo', completed: true },
+          { text: 'Add tests', completed: false },
+        ],
+      };
+
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield { type: 'item.completed', item: todoV1 };
+          yield { type: 'item.completed', item: todoV2 };
+          yield { type: 'turn.completed' };
+        })(),
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks).toHaveLength(3); // todoV1 + todoV2 + result
+      expect(chunks[0]).toEqual({
+        type: 'system',
+        content: '📋 Tasks:\n⬜ Scan repo\n⬜ Add tests',
+      });
+      expect(chunks[1]).toEqual({
+        type: 'system',
+        content: '📋 Tasks:\n✅ Scan repo\n⬜ Add tests',
+      });
+    });
+
+    test('yields file change summary for file_change items', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield {
+            type: 'item.completed',
+            item: {
+              type: 'file_change',
+              status: 'completed',
+              changes: [
+                { kind: 'add', path: 'src/new.ts' },
+                { kind: 'update', path: 'src/app.ts' },
+                { kind: 'delete', path: 'src/old.ts' },
+              ],
+            },
+          };
+          yield { type: 'turn.completed' };
+        })(),
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[0]).toEqual({
+        type: 'system',
+        content: '✅ File changes:\n➕ src/new.ts\n📝 src/app.ts\n➖ src/old.ts',
+      });
+    });
+
+    test('yields failed file change with error message', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield {
+            type: 'item.completed',
+            item: {
+              type: 'file_change',
+              status: 'failed',
+              error: { message: 'Permission denied' },
+              changes: [{ kind: 'update', path: 'src/locked.ts' }],
+            },
+          };
+          yield { type: 'turn.completed' };
+        })(),
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[0]).toEqual({
+        type: 'system',
+        content: '❌ File changes:\n📝 src/locked.ts\nPermission denied',
+      });
+    });
+
+    test('yields failed file change without changes array', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield {
+            type: 'item.completed',
+            item: {
+              type: 'file_change',
+              status: 'failed',
+              error: { message: 'Disk full' },
+            },
+          };
+          yield { type: 'turn.completed' };
+        })(),
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[0]).toEqual({
+        type: 'system',
+        content: '❌ File change failed: Disk full',
+      });
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'failed' }),
+        'file_change_failed_no_changes'
+      );
+    });
+
+    test('yields failed file change without error message', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield {
+            type: 'item.completed',
+            item: { type: 'file_change', status: 'failed' },
+          };
+          yield { type: 'turn.completed' };
+        })(),
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[0]).toEqual({
+        type: 'system',
+        content: '❌ File change failed',
+      });
+    });
+
+    test('yields MCP tool call events and failures', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield {
+            type: 'item.completed',
+            item: { type: 'mcp_tool_call', server: 'fs', tool: 'readFile', status: 'in_progress' },
+          };
+          yield {
+            type: 'item.completed',
+            item: {
+              type: 'mcp_tool_call',
+              server: 'fs',
+              tool: 'readFile',
+              status: 'failed',
+              error: { message: 'Permission denied' },
+            },
+          };
+          yield { type: 'turn.completed' };
+        })(),
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[0]).toEqual({ type: 'tool', toolName: '🔌 MCP: fs/readFile' });
+      expect(chunks[1]).toEqual({
+        type: 'system',
+        content: '⚠️ MCP fs/readFile failed: Permission denied',
+      });
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ server: 'fs', tool: 'readFile' }),
+        'mcp_tool_call_failed'
+      );
+    });
+
+    test('yields MCP tool call with partial identification', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield {
+            type: 'item.completed',
+            item: { type: 'mcp_tool_call', tool: 'readFile', status: 'in_progress' },
+          };
+          yield {
+            type: 'item.completed',
+            item: { type: 'mcp_tool_call', server: 'fs', status: 'in_progress' },
+          };
+          yield {
+            type: 'item.completed',
+            item: { type: 'mcp_tool_call', status: 'in_progress' },
+          };
+          yield { type: 'turn.completed' };
+        })(),
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[0]).toEqual({ type: 'tool', toolName: '🔌 MCP: readFile' });
+      expect(chunks[1]).toEqual({ type: 'tool', toolName: '🔌 MCP: fs' });
+      expect(chunks[2]).toEqual({ type: 'tool', toolName: '🔌 MCP: MCP tool' });
+    });
+
+    test('yields MCP failure without error message', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield {
+            type: 'item.completed',
+            item: { type: 'mcp_tool_call', server: 'db', tool: 'query', status: 'failed' },
+          };
+          yield { type: 'turn.completed' };
+        })(),
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[0]).toEqual({
+        type: 'system',
+        content: '⚠️ MCP db/query failed',
+      });
+    });
+
+    test('skips MCP tool call with completed status', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield {
+            type: 'item.completed',
+            item: { type: 'mcp_tool_call', server: 'fs', tool: 'readFile', status: 'completed' },
+          };
+          yield { type: 'turn.completed' };
+        })(),
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      // Only the result — completed MCP calls should not yield a duplicate tool event
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toEqual({ type: 'result', sessionId: 'new-thread-id' });
+    });
+
     test('creates new thread with sandbox/network settings', async () => {
       mockRunStreamed.mockResolvedValue({
         events: (async function* () {
@@ -366,6 +669,13 @@ describe('CodexClient', () => {
           yield { type: 'item.completed', item: { type: 'command_execution' } }; // no command
           yield { type: 'item.completed', item: { type: 'reasoning' } }; // no text
           yield { type: 'item.completed', item: { type: 'file_edit' } }; // ignored type
+          yield { type: 'item.completed', item: { type: 'web_search' } }; // no query
+          yield { type: 'item.completed', item: { type: 'todo_list', items: [] } }; // empty items
+          yield { type: 'item.completed', item: { type: 'todo_list' } }; // no items
+          yield {
+            type: 'item.completed',
+            item: { type: 'file_change', status: 'completed', changes: [] },
+          }; // empty changes
           yield { type: 'turn.completed' };
         })(),
       });
