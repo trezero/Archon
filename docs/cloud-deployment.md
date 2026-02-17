@@ -273,8 +273,10 @@ ARCHON_HOME=/tmp/archon  # Override base directory (optional)
 
 **Database Options:**
 
+> **Note:** SQLite is the default for local development and requires zero setup. For cloud deployments, PostgreSQL is recommended for reliability and network accessibility.
+
 <details>
-<summary><b>Recommended: Remote Managed PostgreSQL</b></summary>
+<summary><b>Recommended for Cloud: Remote Managed PostgreSQL</b></summary>
 
 Use a managed database service for easier backups and scaling.
 

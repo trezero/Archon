@@ -121,7 +121,7 @@ Environment variables override all other configuration:
 
 | Variable                       | Description                | Default       |
 | ------------------------------ | -------------------------- | ------------- |
-| `DATABASE_URL`                 | PostgreSQL connection (optional) | SQLite at `~/.archon/archon.db` (recommended for single-developer use) |
+| `DATABASE_URL`                 | PostgreSQL connection (optional — omit for SQLite) | SQLite at `~/.archon/archon.db` (default, zero setup, recommended) |
 | `ARCHON_HOME`                  | Base directory for Archon  | `~/.archon`   |
 | `DEFAULT_AI_ASSISTANT`         | Default AI assistant       | `claude`      |
 | `TELEGRAM_STREAMING_MODE`      | Telegram streaming         | `stream`      |

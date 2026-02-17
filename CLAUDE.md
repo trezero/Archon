@@ -1,6 +1,6 @@
 ## Project Overview
 
-**Remote Agentic Coding Platform**: Control AI coding assistants (Claude Code SDK, Codex SDK) remotely from Slack, Telegram, and GitHub. Built with **Bun + TypeScript + PostgreSQL/SQLite**, single-developer tool for practitioners of the Dynamous Agentic Coding Course. Architecture prioritizes simplicity, flexibility, and user control.
+**Remote Agentic Coding Platform**: Control AI coding assistants (Claude Code SDK, Codex SDK) remotely from Slack, Telegram, and GitHub. Built with **Bun + TypeScript + SQLite/PostgreSQL**, single-developer tool for practitioners of the Dynamous Agentic Coding Course. Architecture prioritizes simplicity, flexibility, and user control.
 
 ## Core Principles
 
@@ -181,13 +181,13 @@ if (!steps) {
 
 ### Database
 
-**Auto-Detection:**
-- **With `DATABASE_URL` set**: Uses PostgreSQL
-- **Without `DATABASE_URL`**: Uses SQLite at `~/.archon/archon.db` (auto-initialized)
+**Auto-Detection (SQLite is the default — zero setup):**
+- **Without `DATABASE_URL`**: Uses SQLite at `~/.archon/archon.db` (auto-initialized, recommended for most users)
+- **With `DATABASE_URL` set**: Uses PostgreSQL (optional, for cloud/advanced deployments)
 
 ```bash
-# PostgreSQL: Run SQL migrations (manual)
-psql $DATABASE_URL < migrations/001_initial_schema.sql
+# PostgreSQL only: Run SQL migrations (manual)
+psql $DATABASE_URL < migrations/000_combined.sql
 ```
 
 ### Docker (Production)

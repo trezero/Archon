@@ -139,10 +139,10 @@ Auto-enables global Claude auth if no explicit tokens are set.
 
 ## Database
 
-- **With `DATABASE_URL`:** Uses PostgreSQL
-- **Without:** Uses SQLite at `~/.archon/archon.db`
+- **Without `DATABASE_URL` (default):** Uses SQLite at `~/.archon/archon.db` — zero setup, auto-initialized on first run
+- **With `DATABASE_URL`:** Uses PostgreSQL (optional, for cloud/advanced deployments)
 
-Both work transparently. SQLite is auto-initialized on first run.
+Both work transparently. Most users never need to configure a database.
 
 ## Examples
 

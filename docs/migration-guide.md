@@ -103,15 +103,17 @@ TRUNCATE remote_agent_codebases CASCADE;
 
 After a fresh start, the app defaults are loaded **automatically at runtime** - no manual steps needed.
 
+> **Note:** SQLite is the default database and requires zero setup. The PostgreSQL steps below are only needed if you've set `DATABASE_URL`.
+
 **1. Start the app:**
 
 ```bash
-# Development (with hot reload)
-docker-compose --profile with-db up -d postgres
+# Development (with hot reload) — SQLite is used by default, no database setup needed
 bun run dev
 
-# Or production
-docker-compose --profile with-db up -d
+# Optional: Use PostgreSQL instead
+docker-compose --profile with-db up -d postgres
+# Set DATABASE_URL in .env, then: bun run dev
 ```
 
 **2. Verify defaults are available:**
