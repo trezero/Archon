@@ -1,4 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach, mock, spyOn, type Mock } from 'bun:test';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  afterAll,
+  mock,
+  spyOn,
+  type Mock,
+} from 'bun:test';
 import { mkdir, writeFile, rm, readFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -138,6 +148,12 @@ describe('Workflow Executor', () => {
     } catch {
       // Ignore cleanup errors
     }
+  });
+
+  afterAll(() => {
+    // Clear module mocks and pending timers to prevent leaks to other test files
+    // and avoid keeping the process alive (e.g., from sendCriticalMessage retry delays)
+    mock.restore();
   });
 
   // Helper: Get count of workflow status updates in database

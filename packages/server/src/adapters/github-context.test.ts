@@ -95,13 +95,10 @@ mock.module('child_process', () => ({
   ),
 }));
 
-mock.module('fs/promises', () => ({
-  readdir: mock(async () => []),
-  access: mock(async () => {}),
-  stat: mock(async () => ({ isDirectory: () => true })),
-  readFile: mock(async () => ''),
-  mkdir: mock(async () => {}),
-}));
+// Note: fs/promises is NOT mocked here. The adapter methods that use readdir/access
+// (ensureRepoReady, autoDetectAndLoadCommands) are mocked at the adapter level in
+// createTestAdapter(). Using mock.module('fs/promises') would leak globally and break
+// other tests (e.g., version.test.ts) since Bun's mock.module persists across files.
 
 // --- Imports (after mocks) ---
 
