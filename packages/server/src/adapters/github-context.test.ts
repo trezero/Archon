@@ -245,7 +245,7 @@ describe('GitHubAdapter non-slash command context passing', () => {
     await adapter.handleWebhook(payload, signPayload(payload));
 
     expect(mockHandleMessage).toHaveBeenCalledTimes(1);
-    const contextArg = mockHandleMessage.mock.calls[0][3] as string;
+    const contextArg = mockHandleMessage.mock.calls[0][3]?.issueContext as string;
     expect(contextArg).toBe(
       'GitHub Issue #99: "Bug in login flow"\nUse \'gh issue view 99\' for full details if needed.'
     );
@@ -265,7 +265,7 @@ describe('GitHubAdapter non-slash command context passing', () => {
     await adapter.handleWebhook(payload, signPayload(payload));
 
     expect(mockHandleMessage).toHaveBeenCalledTimes(1);
-    const contextArg = mockHandleMessage.mock.calls[0][3] as string;
+    const contextArg = mockHandleMessage.mock.calls[0][3]?.issueContext as string;
     expect(contextArg).toBe(
       'GitHub Issue #55: "Add dark mode"\nUse \'gh issue view 55\' for full details if needed.'
     );
@@ -280,7 +280,7 @@ describe('GitHubAdapter non-slash command context passing', () => {
     await adapter.handleWebhook(payload, signPayload(payload));
 
     expect(mockHandleMessage).toHaveBeenCalledTimes(1);
-    const contextArg = mockHandleMessage.mock.calls[0][3] as string;
+    const contextArg = mockHandleMessage.mock.calls[0][3]?.issueContext as string;
     expect(contextArg).toBe(
       'GitHub Issue #33: "Memory leak in worker"\nUse \'gh issue view 33\' for full details if needed.'
     );
@@ -295,7 +295,7 @@ describe('GitHubAdapter non-slash command context passing', () => {
     await adapter.handleWebhook(payload, signPayload(payload));
 
     expect(mockHandleMessage).toHaveBeenCalledTimes(1);
-    const contextArg = mockHandleMessage.mock.calls[0][3] as string;
+    const contextArg = mockHandleMessage.mock.calls[0][3]?.issueContext as string;
     expect(contextArg).toBe(
       'GitHub Issue #10: "Setup tracking"\nUse \'gh issue view 10\' for full details if needed.'
     );
@@ -308,7 +308,7 @@ describe('GitHubAdapter non-slash command context passing', () => {
       issueTitle: 'Test Issue',
     });
     await adapter.handleWebhook(slashPayload, signPayload(slashPayload));
-    const slashContext = mockHandleMessage.mock.calls[0][3] as string;
+    const slashContext = mockHandleMessage.mock.calls[0][3]?.issueContext as string;
 
     mockHandleMessage.mockClear();
 
@@ -318,7 +318,7 @@ describe('GitHubAdapter non-slash command context passing', () => {
       issueTitle: 'Test Issue',
     });
     await adapter.handleWebhook(nonSlashPayload, signPayload(nonSlashPayload));
-    const nonSlashContext = mockHandleMessage.mock.calls[0][3] as string;
+    const nonSlashContext = mockHandleMessage.mock.calls[0][3]?.issueContext as string;
 
     // Both should produce the same context string
     expect(slashContext).toBe(nonSlashContext);

@@ -35,6 +35,8 @@ import {
   IPlatformAdapter,
   IsolationHints,
   IsolationEnvironmentRow,
+  IsolationBlockReason,
+  HandleMessageContext,
   Conversation,
   Codebase,
   ConversationNotFoundError,
@@ -48,6 +50,7 @@ import * as commandHandler from '../handlers/command-handler';
 import { formatToolCall } from '../utils/tool-formatter';
 import { substituteVariables } from '../utils/variable-substitution';
 import { classifyAndFormatError } from '../utils/error-formatter';
+import { toError } from '../utils/error';
 import { getAssistantClient } from '../clients/factory';
 import { getIsolationProvider } from '../isolation';
 import { worktreeExists, findWorktreeByBranch, getCanonicalRepoPath } from '../utils/git';
@@ -78,11 +81,23 @@ import { detectPlanToExecuteTransition } from '../state/session-transitions';
  * isolation creation failure, etc.) before this error is thrown.
  */
 class IsolationBlockedError extends Error {
-  constructor(message: string) {
+  readonly reason: IsolationBlockReason;
+
+  constructor(message: string, reason: IsolationBlockReason) {
     super(message);
     this.name = 'IsolationBlockedError';
+    this.reason = reason;
   }
 }
+
+type IsolationResolution =
+  | { status: 'existing'; cwd: string; env: IsolationEnvironmentRow }
+  | { status: 'new'; cwd: string; env: IsolationEnvironmentRow }
+  | { status: 'none'; cwd: string; env: null };
+
+type IsolationCreationResult =
+  | { status: 'ready'; env: IsolationEnvironmentRow }
+  | { status: 'blocked'; reason: IsolationBlockReason };
 
 /**
  * Attempt to persist session ID to database. Non-critical operation - if it fails,
@@ -92,7 +107,7 @@ async function tryPersistSessionId(sessionId: string, assistantSessionId: string
   try {
     await sessionDb.updateSession(sessionId, assistantSessionId);
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     getLog().error(
       { err, sessionId, newSessionId: assistantSessionId },
       'session_id_persist_failed'
@@ -111,7 +126,7 @@ async function tryUpdateSessionMetadata(
   try {
     await sessionDb.updateSessionMetadata(sessionId, metadata);
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     getLog().error({ err, sessionId, metadata }, 'session_metadata_update_failed');
   }
 }
@@ -140,6 +155,9 @@ function formatWorktreeLimitMessage(
   return msg;
 }
 
+const MAX_BATCH_ASSISTANT_CHUNKS = 20;
+const MAX_BATCH_TOTAL_CHUNKS = 200;
+
 /**
  * Validate existing isolation reference and coordinate creation of new isolation if needed.
  * Orchestrates the isolation lifecycle but delegates creation decisions (reuse, sharing,
@@ -153,35 +171,61 @@ async function validateAndResolveIsolation(
   platform: IPlatformAdapter,
   conversationId: string,
   hints?: IsolationHints
-): Promise<{ cwd: string; env: IsolationEnvironmentRow | null; isNew: boolean }> {
+): Promise<IsolationResolution> {
   // 1. Check existing isolation reference (new UUID model)
   if (conversation.isolation_env_id) {
+    const staleIsolationEnvId = conversation.isolation_env_id;
     const env = await isolationEnvDb.getById(conversation.isolation_env_id);
 
     if (env && (await worktreeExists(env.working_path))) {
       // Valid - use it
-      return { cwd: env.working_path, env, isNew: false };
+      return { status: 'existing', cwd: env.working_path, env };
     }
 
-    // Stale reference - clean up (best-effort, don't fail on missing conversation)
-    getLog().warn({ isolationEnvId: conversation.isolation_env_id }, 'stale_isolation_reference');
-    await db.updateConversation(conversation.id, { isolation_env_id: null }).catch(err => {
-      if (!(err instanceof ConversationNotFoundError)) throw err;
+    // Stale reference - clean up (best-effort, don't fail the request)
+    getLog().warn({ isolationEnvId: staleIsolationEnvId }, 'stale_isolation_reference');
+    await db.updateConversation(conversation.id, { isolation_env_id: null }).catch(updateErr => {
+      if (!(updateErr instanceof ConversationNotFoundError)) {
+        getLog().error(
+          { err: toError(updateErr), conversationId: conversation.id },
+          'stale_isolation_clear_failed'
+        );
+      }
     });
 
     if (env) {
-      await isolationEnvDb.updateStatus(env.id, 'destroyed');
+      try {
+        await isolationEnvDb.updateStatus(env.id, 'destroyed');
+      } catch (cleanupError) {
+        const err = toError(cleanupError);
+        getLog().error({ err, isolationEnvId: env.id, conversationId }, 'isolation_cleanup_failed');
+      }
+    }
+
+    const staleMessage = codebase
+      ? 'Detected a stale isolated workspace reference and cleared it. Creating a new isolated workspace now.'
+      : 'Detected a stale isolated workspace reference and cleared it. Continuing without an isolated workspace.';
+
+    try {
+      await platform.sendMessage(conversationId, staleMessage);
+    } catch (notifyError) {
+      const err = toError(notifyError);
+      getLog().error(
+        { err, conversationId, isolationEnvId: staleIsolationEnvId },
+        'stale_isolation_notice_failed'
+      );
     }
   }
 
   // 2. No valid isolation - check if we should create
   if (!codebase) {
-    return { cwd: conversation.cwd ?? '/workspace', env: null, isNew: false };
+    return { status: 'none', cwd: conversation.cwd ?? '/workspace', env: null };
   }
 
   // 3. Create new isolation (auto-isolation for all platforms!)
-  const env = await resolveIsolation(codebase, platform, conversationId, hints);
-  if (env) {
+  const isolationResult = await resolveIsolation(codebase, platform, conversationId, hints);
+  if (isolationResult.status === 'ready') {
+    const env = isolationResult.env;
     try {
       await db.updateConversation(conversation.id, {
         isolation_env_id: env.id,
@@ -189,22 +233,32 @@ async function validateAndResolveIsolation(
       });
     } catch (updateError) {
       // If we can't link the isolation to the conversation, clean up and rethrow
+      const err = toError(updateError);
       getLog().error(
-        { err: updateError, conversationId: conversation.id, isolationEnvId: env.id },
+        { err, conversationId: conversation.id, isolationEnvId: env.id },
         'isolation_link_failed'
       );
       // Mark isolation as destroyed since we can't use it
-      await isolationEnvDb.updateStatus(env.id, 'destroyed');
-      throw updateError;
+      try {
+        await isolationEnvDb.updateStatus(env.id, 'destroyed');
+      } catch (cleanupError) {
+        const cleanupErr = toError(cleanupError);
+        getLog().error(
+          { err: cleanupErr, conversationId: conversation.id, isolationEnvId: env.id },
+          'isolation_cleanup_failed'
+        );
+      }
+      throw err;
     }
-    return { cwd: env.working_path, env, isNew: true };
+    return { status: 'new', cwd: env.working_path, env };
   }
 
-  // When resolveIsolation returns null, it means isolation was required but blocked (e.g., limit reached)
+  // When resolveIsolation reports blocked, it means isolation was required but could not be created
   // The limit message has already been sent to the user by resolveIsolation
   // We must block execution by throwing an error
   throw new IsolationBlockedError(
-    'Isolation environment required but could not be created (limit reached or other blocking condition)'
+    'Isolation environment required but could not be created (limit reached or other blocking condition)',
+    isolationResult.reason
   );
 }
 
@@ -214,7 +268,7 @@ async function validateAndResolveIsolation(
  * (3) adoption of skill-created worktrees, (4) limit enforcement with auto-cleanup,
  * and (5) creation of new worktrees.
  *
- * @returns The isolation environment to use, or null if blocked:
+ * @returns The isolation environment to use, or blocked reason:
  *   - Worktree limit reached and auto-cleanup failed (user shown limit message)
  *   - Worktree creation failed (user shown specific error message)
  */
@@ -223,7 +277,7 @@ async function resolveIsolation(
   platform: IPlatformAdapter,
   conversationId: string,
   hints?: IsolationHints
-): Promise<IsolationEnvironmentRow | null> {
+): Promise<IsolationCreationResult> {
   // Determine workflow identity
   const workflowType = hints?.workflowType ?? 'thread';
   const workflowId = hints?.workflowId ?? conversationId;
@@ -232,7 +286,7 @@ async function resolveIsolation(
   const existing = await isolationEnvDb.findByWorkflow(codebase.id, workflowType, workflowId);
   if (existing && (await worktreeExists(existing.working_path))) {
     getLog().debug({ workflowType, workflowId }, 'isolation_reuse_existing');
-    return existing;
+    return { status: 'ready', env: existing };
   }
 
   // 2. Check linked issues for sharing (cross-conversation)
@@ -246,7 +300,7 @@ async function resolveIsolation(
           conversationId,
           `Reusing worktree from issue #${String(issueNum)}`
         );
-        return linkedEnv;
+        return { status: 'ready', env: linkedEnv };
       }
     }
   }
@@ -266,7 +320,7 @@ async function resolveIsolation(
         created_by_platform: platform.getPlatformType(),
         metadata: { adopted: true, adopted_from: 'skill' },
       });
-      return env;
+      return { status: 'ready', env };
     }
   }
 
@@ -292,7 +346,7 @@ async function resolveIsolation(
       const breakdown = await getWorktreeStatusBreakdown(codebase.id, canonicalPath);
       const limitMessage = formatWorktreeLimitMessage(codebase.name, breakdown);
       await platform.sendMessage(conversationId, limitMessage);
-      return null; // Don't create new isolation
+      return { status: 'blocked', reason: 'limit_reached' }; // Don't create new isolation
     }
 
     // Re-check count after cleanup
@@ -302,7 +356,7 @@ async function resolveIsolation(
       const breakdown = await getWorktreeStatusBreakdown(codebase.id, canonicalPath);
       const limitMessage = formatWorktreeLimitMessage(codebase.name, breakdown);
       await platform.sendMessage(conversationId, limitMessage);
-      return null;
+      return { status: 'blocked', reason: 'limit_reached' };
     }
   }
 
@@ -346,9 +400,9 @@ async function resolveIsolation(
       },
     });
 
-    return env;
+    return { status: 'ready', env };
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     const userMessage = classifyIsolationError(err);
 
     getLog().error(
@@ -366,7 +420,7 @@ async function resolveIsolation(
       userMessage +
         ' Execution blocked to prevent changes to shared codebase. Please resolve the issue and try again.'
     );
-    return null;
+    return { status: 'blocked', reason: 'creation_failed' };
   }
 }
 
@@ -430,29 +484,29 @@ function isExpectedWorkflowDiscoveryError(err: Error): boolean {
  * Context for workflow routing - avoids passing many parameters
  */
 interface WorkflowRoutingContext {
-  platform: IPlatformAdapter;
-  conversationId: string;
-  cwd: string;
-  originalMessage: string;
-  conversationDbId: string;
-  codebaseId?: string;
-  availableWorkflows: readonly WorkflowDefinition[];
+  readonly platform: IPlatformAdapter;
+  readonly conversationId: string;
+  readonly cwd: string;
+  readonly originalMessage: string;
+  readonly conversationDbId: string;
+  readonly codebaseId?: string;
+  readonly availableWorkflows: readonly WorkflowDefinition[];
   /**
    * GitHub issue/PR context built from webhook events.
    * Contains formatted markdown with: issue title, author, labels, and body.
    * Passed to workflow executor for substitution into $CONTEXT variables.
    */
-  issueContext?: string;
+  readonly issueContext?: string;
   /**
    * Isolation environment context for consolidated startup message.
    */
-  isolationEnv?: {
-    branch_name: string;
+  readonly isolationEnv?: {
+    readonly branch_name: string;
   };
   /**
    * Hints for isolation environment (PR review context, etc.)
    */
-  isolationHints?: IsolationHints;
+  readonly isolationHints?: IsolationHints;
 }
 
 /**
@@ -614,9 +668,10 @@ async function dispatchBackgroundWorkflow(
           await workflowDb.updateWorkflowRunParent(result.workflowRunId, ctx.conversationDbId);
         }
       } catch (error) {
+        const err = toError(error);
         getLog().error(
           {
-            err: error as Error,
+            err,
             workflowName: workflow.name,
             workerConversationId: workerPlatformId,
           },
@@ -624,12 +679,9 @@ async function dispatchBackgroundWorkflow(
         );
         // Surface error to parent conversation so the user knows
         await ctx.platform
-          .sendMessage(
-            ctx.conversationId,
-            `Workflow **${workflow.name}** failed: ${(error as Error).message}`
-          )
+          .sendMessage(ctx.conversationId, `Workflow **${workflow.name}** failed: ${err.message}`)
           .catch((sendErr: unknown) => {
-            getLog().error({ err: sendErr as Error }, 'background_workflow_notify_failed');
+            getLog().error({ err: toError(sendErr) }, 'background_workflow_notify_failed');
           });
       } finally {
         // Clean up event bridge
@@ -642,7 +694,7 @@ async function dispatchBackgroundWorkflow(
         }
       }
     } catch (outerError) {
-      getLog().error({ err: outerError as Error }, 'background_workflow_unhandled_error');
+      getLog().error({ err: toError(outerError) }, 'background_workflow_unhandled_error');
     }
   })();
 }
@@ -670,11 +722,9 @@ export async function handleMessage(
   platform: IPlatformAdapter,
   conversationId: string,
   message: string,
-  issueContext?: string, // Optional GitHub issue/PR context to append AFTER command loading
-  threadContext?: string, // Optional thread message history for context
-  parentConversationId?: string, // Optional parent channel ID for thread inheritance
-  isolationHints?: IsolationHints // Optional hints from adapter for isolation decisions
+  context?: HandleMessageContext
 ): Promise<void> {
+  const { issueContext, threadContext, parentConversationId, isolationHints } = context ?? {};
   try {
     getLog().debug({ conversationId }, 'message_handling_started');
 
@@ -785,7 +835,7 @@ export async function handleMessage(
             const result = await discoverWorkflows(cwd);
             workflows = result.workflows;
           } catch (error) {
-            const err = error as Error;
+            const err = toError(error);
             getLog().error({ err, workflowName, cwd }, 'workflow_discovery_failed');
             await platform.sendMessage(
               conversationId,
@@ -907,7 +957,7 @@ export async function handleMessage(
 
           getLog().debug({ commandName, argCount: commandArgs.length }, 'command_executing');
         } catch (error) {
-          const err = error as Error;
+          const err = toError(error);
           await platform.sendMessage(conversationId, `Failed to read command file: ${err.message}`);
           return;
         }
@@ -952,7 +1002,7 @@ export async function handleMessage(
             'workflow_discovery_complete'
           );
         } catch (error) {
-          const err = error as Error;
+          const err = toError(error);
           if (isExpectedWorkflowDiscoveryError(err)) {
             getLog().debug('workflow_directory_not_found');
           } else {
@@ -1075,13 +1125,13 @@ export async function handleMessage(
       );
       cwd = result.cwd;
       env = result.env;
-      isNewIsolation = result.isNew;
+      isNewIsolation = result.status === 'new';
     } catch (error) {
       if (error instanceof IsolationBlockedError) {
         // Isolation was blocked (e.g., worktree limit reached)
         // User has already been informed by validateAndResolveIsolation
         // Stop execution by returning early
-        getLog().info({ reason: error.message }, 'isolation_blocked');
+        getLog().info({ reason: error.reason }, 'isolation_blocked');
         return;
       }
       // Re-throw other errors
@@ -1203,6 +1253,8 @@ export async function handleMessage(
       // Batch mode: Accumulate all chunks for logging, send only final clean summary
       const allChunks: { type: string; content: string }[] = [];
       const assistantMessages: string[] = [];
+      let assistantChunksTruncated = false;
+      let totalChunksTruncated = false;
 
       for await (const msg of aiClient.sendQuery(
         promptToSend,
@@ -1212,6 +1264,11 @@ export async function handleMessage(
         if (msg.type === 'assistant' && msg.content) {
           assistantMessages.push(msg.content);
           allChunks.push({ type: 'assistant', content: msg.content });
+
+          if (assistantMessages.length > MAX_BATCH_ASSISTANT_CHUNKS) {
+            assistantMessages.shift();
+            assistantChunksTruncated = true;
+          }
         } else if (msg.type === 'tool' && msg.toolName) {
           // Format and log tool call for observability
           const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
@@ -1220,6 +1277,23 @@ export async function handleMessage(
         } else if (msg.type === 'result' && msg.sessionId) {
           await tryPersistSessionId(session.id, msg.sessionId);
         }
+
+        if (allChunks.length > MAX_BATCH_TOTAL_CHUNKS) {
+          allChunks.shift();
+          totalChunksTruncated = true;
+        }
+      }
+
+      if (assistantChunksTruncated || totalChunksTruncated) {
+        getLog().warn(
+          {
+            assistantChunksTruncated,
+            totalChunksTruncated,
+            maxAssistantChunks: MAX_BATCH_ASSISTANT_CHUNKS,
+            maxTotalChunks: MAX_BATCH_TOTAL_CHUNKS,
+          },
+          'batch_mode_chunks_truncated'
+        );
       }
 
       // Log all chunks for observability
@@ -1280,9 +1354,13 @@ export async function handleMessage(
 
     getLog().debug({ conversationId }, 'message_handling_complete');
   } catch (error) {
-    const err = error as Error;
-    getLog().error({ err: error as Error, conversationId }, 'message_handling_failed');
+    const err = toError(error);
+    getLog().error({ err, conversationId }, 'message_handling_failed');
     const userMessage = classifyAndFormatError(err);
-    await platform.sendMessage(conversationId, userMessage);
+    try {
+      await platform.sendMessage(conversationId, userMessage);
+    } catch (sendError) {
+      getLog().error({ err: toError(sendError), conversationId }, 'error_notification_failed');
+    }
   }
 }

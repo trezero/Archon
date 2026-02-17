@@ -53,6 +53,15 @@ export interface IsolationHints {
   suggestedBranch?: string;
 }
 
+export type IsolationBlockReason = 'limit_reached' | 'creation_failed';
+
+export interface HandleMessageContext {
+  readonly issueContext?: string;
+  readonly threadContext?: string;
+  readonly parentConversationId?: string;
+  readonly isolationHints?: IsolationHints;
+}
+
 /**
  * Database row for isolation_environments table
  */

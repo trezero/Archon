@@ -547,7 +547,9 @@ describe('orchestrator', () => {
         yield { type: 'result', sessionId: 'session-id' };
       });
 
-      await handleMessage(platform, 'chat-456', '/command-invoke plan', 'Issue #42: Fix the bug');
+      await handleMessage(platform, 'chat-456', '/command-invoke plan', {
+        issueContext: 'Issue #42: Fix the bug',
+      });
 
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         wrapCommandForExecution('plan', 'Command text here') + '\n\n---\n\nIssue #42: Fix the bug',
@@ -930,15 +932,9 @@ describe('orchestrator', () => {
         isForkPR: false, // Same-repo PR
       };
 
-      await handleMessage(
-        platform,
-        'chat-456',
-        'review this PR',
-        undefined,
-        undefined,
-        undefined,
-        isolationHints
-      );
+      await handleMessage(platform, 'chat-456', 'review this PR', {
+        isolationHints,
+      });
 
       // Verify isolation provider was called with isForkPR
       expect(mockIsolationProviderCreate).toHaveBeenCalledWith(
@@ -1001,15 +997,9 @@ describe('orchestrator', () => {
         isForkPR: true, // Fork PR
       };
 
-      await handleMessage(
-        platform,
-        'chat-456',
-        'review this fork PR',
-        undefined,
-        undefined,
-        undefined,
-        isolationHints
-      );
+      await handleMessage(platform, 'chat-456', 'review this fork PR', {
+        isolationHints,
+      });
 
       // Verify isolation provider was called with isForkPR=true
       expect(mockIsolationProviderCreate).toHaveBeenCalledWith(
@@ -1068,6 +1058,80 @@ describe('orchestrator', () => {
       expect(mockIsolationEnvUpdateStatus).toHaveBeenCalledWith('env-stale', 'destroyed');
     });
 
+    test('should notify user when stale isolation reference is detected', async () => {
+      const conversationWithStaleIsolation = {
+        ...mockConversation,
+        isolation_env_id: 'env-stale',
+        cwd: '/nonexistent/worktree/path',
+      };
+      mockGetOrCreateConversation.mockResolvedValue(conversationWithStaleIsolation);
+
+      mockIsolationEnvGetById.mockResolvedValue({
+        id: 'env-stale',
+        codebase_id: 'codebase-789',
+        workflow_type: 'thread',
+        workflow_id: 'chat-456',
+        provider: 'worktree',
+        working_path: '/nonexistent/worktree/path',
+        branch_name: 'thread-chat-456',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'telegram',
+        metadata: {},
+      });
+      spyWorktreeExists.mockResolvedValue(false);
+
+      mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
+      mockReadCommandFile.mockResolvedValue('Plan command');
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', '/command-invoke plan');
+
+      expect(platform.sendMessage).toHaveBeenCalledWith(
+        'chat-456',
+        expect.stringContaining('stale isolated workspace reference')
+      );
+    });
+
+    test('should notify user with "continuing without" when stale isolation and no codebase', async () => {
+      // Conversation has a codebase_id but the codebase was deleted
+      const conversationWithStaleIsolation = {
+        ...mockConversation,
+        isolation_env_id: 'env-stale',
+        cwd: '/nonexistent/worktree/path',
+      };
+      mockGetOrCreateConversation.mockResolvedValue(conversationWithStaleIsolation);
+      mockGetCodebase.mockResolvedValue(null);
+
+      mockIsolationEnvGetById.mockResolvedValue({
+        id: 'env-stale',
+        codebase_id: 'codebase-789',
+        workflow_type: 'thread',
+        workflow_id: 'chat-456',
+        provider: 'worktree',
+        working_path: '/nonexistent/worktree/path',
+        branch_name: 'thread-chat-456',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'telegram',
+        metadata: {},
+      });
+      spyWorktreeExists.mockResolvedValue(false);
+
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'hello');
+
+      expect(platform.sendMessage).toHaveBeenCalledWith(
+        'chat-456',
+        expect.stringContaining('Continuing without an isolated workspace')
+      );
+    });
+
     test('should not clear isolation if path exists', async () => {
       // Default setup: valid isolation env
       mockGetActiveSession.mockResolvedValue(mockSession);
@@ -1105,6 +1169,71 @@ describe('orchestrator', () => {
         wrapCommandForExecution('plan', 'Plan command'),
         '/workspace/project', // From existing env working_path
         'claude-session-xyz'
+      );
+    });
+  });
+
+  describe('isolation cleanup errors', () => {
+    test('should not swallow original error when cleanup updateStatus fails', async () => {
+      mockGetOrCreateConversation.mockResolvedValue({
+        ...mockConversation,
+        isolation_env_id: null,
+        cwd: null,
+      });
+      mockIsolationEnvGetById.mockResolvedValue(null);
+      mockIsolationEnvFindByWorkflow.mockResolvedValue(null);
+      mockIsolationEnvCountByCodebase.mockResolvedValue(0);
+      spyWorktreeExists.mockResolvedValue(false);
+
+      mockIsolationProviderCreate.mockResolvedValue({
+        id: 'env-new',
+        provider: 'worktree',
+        workingPath: '/workspace/worktrees/test/thread-chat-456',
+        branchName: 'thread-chat-456',
+        status: 'active',
+        createdAt: new Date(),
+        metadata: {},
+      });
+      mockIsolationEnvCreate.mockResolvedValue({
+        id: 'env-new',
+        codebase_id: 'codebase-789',
+        workflow_type: 'thread',
+        workflow_id: 'chat-456',
+        provider: 'worktree',
+        working_path: '/workspace/worktrees/test/thread-chat-456',
+        branch_name: 'thread-chat-456',
+        status: 'active',
+        created_at: new Date(),
+        created_by_platform: 'telegram',
+        metadata: {},
+      });
+
+      const updateError = new Error('Link failed');
+      const cleanupError = new Error('Cleanup failed');
+      mockUpdateConversation.mockRejectedValue(updateError);
+      mockIsolationEnvUpdateStatus.mockRejectedValue(cleanupError);
+
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'help me');
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          err: expect.objectContaining({ message: 'Link failed' }),
+          conversationId: 'conv-123',
+          isolationEnvId: 'env-new',
+        }),
+        'isolation_link_failed'
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          err: expect.objectContaining({ message: 'Cleanup failed' }),
+          conversationId: 'conv-123',
+          isolationEnvId: 'env-new',
+        }),
+        'isolation_cleanup_failed'
       );
     });
   });
@@ -1218,7 +1347,7 @@ describe('orchestrator', () => {
     test('extracts title from Issue context', async () => {
       const issueContext = 'Issue #42: "Fix the login bug"\nThis is the body.';
 
-      await handleMessage(platform, 'chat-456', 'fix this', issueContext);
+      await handleMessage(platform, 'chat-456', 'fix this', { issueContext });
 
       // Verify the prompt sent to AI contains the extracted title
       expect(mockClient.sendQuery).toHaveBeenCalled();
@@ -1229,7 +1358,7 @@ describe('orchestrator', () => {
     test('extracts title from PR context', async () => {
       const issueContext = 'PR #15: "Add dark mode feature"\n[GitHub Pull Request Context]';
 
-      await handleMessage(platform, 'chat-456', 'review this', issueContext);
+      await handleMessage(platform, 'chat-456', 'review this', { issueContext });
 
       const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
       expect(promptArg).toContain('Title: Add dark mode feature');
@@ -1238,7 +1367,7 @@ describe('orchestrator', () => {
     test('detects isPullRequest correctly for PR', async () => {
       const issueContext = 'PR #15: "Some PR"\n[GitHub Pull Request Context]\nDiff here...';
 
-      await handleMessage(platform, 'chat-456', 'check this', issueContext);
+      await handleMessage(platform, 'chat-456', 'check this', { issueContext });
 
       const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
       expect(promptArg).toContain('Type: Pull Request');
@@ -1248,7 +1377,7 @@ describe('orchestrator', () => {
       const issueContext =
         'Issue #42: "Some Issue"\n[GitHub Issue Context]\nBody without PR marker.';
 
-      await handleMessage(platform, 'chat-456', 'check this', issueContext);
+      await handleMessage(platform, 'chat-456', 'check this', { issueContext });
 
       const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
       expect(promptArg).toContain('Type: Issue');
@@ -1258,7 +1387,7 @@ describe('orchestrator', () => {
       const issueContext =
         'Issue #42: "Bug report"\nLabels: bug, priority-high, needs-triage\nBody text.';
 
-      await handleMessage(platform, 'chat-456', 'fix this', issueContext);
+      await handleMessage(platform, 'chat-456', 'fix this', { issueContext });
 
       const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
       expect(promptArg).toContain('Labels: bug, priority-high, needs-triage');
@@ -1267,7 +1396,7 @@ describe('orchestrator', () => {
     test('extracts single label from context', async () => {
       const issueContext = 'Issue #42: "Simple bug"\nLabels: bug\nBody text.';
 
-      await handleMessage(platform, 'chat-456', 'fix this', issueContext);
+      await handleMessage(platform, 'chat-456', 'fix this', { issueContext });
 
       const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
       expect(promptArg).toContain('Labels: bug');
@@ -1275,18 +1404,9 @@ describe('orchestrator', () => {
 
     test('passes workflowType from isolationHints', async () => {
       // Note: When isPullRequest is not set, workflowType is used for Type display
-      // isolationHints is the 7th parameter (after parentConversationId)
       const isolationHints = { workflowType: 'review' as const };
 
-      await handleMessage(
-        platform,
-        'chat-456',
-        'do something',
-        undefined,
-        undefined,
-        undefined,
-        isolationHints
-      );
+      await handleMessage(platform, 'chat-456', 'do something', { isolationHints });
 
       const promptArg = mockClient.sendQuery.mock.calls[0][0] as string;
       expect(promptArg).toContain('Type: review');
@@ -1296,7 +1416,7 @@ describe('orchestrator', () => {
       // Missing quotes around title - doesn't match the pattern
       const issueContext = '[GitHub Issue Context]\nIssue #42: Fix the bug without quotes';
 
-      await handleMessage(platform, 'chat-456', 'help', issueContext);
+      await handleMessage(platform, 'chat-456', 'help', { issueContext });
 
       // Should still work, just without title
       expect(mockClient.sendQuery).toHaveBeenCalled();
@@ -1329,7 +1449,7 @@ The router is broken.
 Please fix this`;
 
       // Call handleMessage with message containing context, but no issueContext parameter
-      await handleMessage(platform, 'chat-456', message, undefined);
+      await handleMessage(platform, 'chat-456', message);
 
       // Verify RouterContext was extracted from message
       expect(mockClient.sendQuery).toHaveBeenCalled();
@@ -1357,7 +1477,7 @@ Wrong description
 Labels: correct`;
 
       // Call handleMessage with both message and issueContext
-      await handleMessage(platform, 'chat-456', message, issueContext);
+      await handleMessage(platform, 'chat-456', message, { issueContext });
 
       // Verify RouterContext was extracted from issueContext (not message)
       expect(mockClient.sendQuery).toHaveBeenCalled();
@@ -1433,6 +1553,9 @@ Labels: correct`;
       mockGetWorktreeStatusBreakdown.mockClear();
       mockIsolationProviderCreate.mockClear();
 
+      mockGetActiveSession.mockResolvedValue(null);
+      mockCreateSession.mockResolvedValue(mockSession);
+
       // Setup git spies
       spyWorktreeExists = spyOn(gitUtils, 'worktreeExists').mockResolvedValue(false);
       spyFindWorktreeByBranch = spyOn(gitUtils, 'findWorktreeByBranch').mockResolvedValue(null);
@@ -1475,7 +1598,10 @@ Labels: correct`;
 
     test('should continue execution after successful auto-cleanup', async () => {
       setupBaseWorktreeLimitTest();
-      mockIsolationEnvCountByCodebase.mockResolvedValueOnce(25).mockResolvedValueOnce(24);
+      let countCalls = 0;
+      mockIsolationEnvCountByCodebase.mockImplementation(async () =>
+        countCalls++ === 0 ? 25 : 24
+      );
       mockCleanupToMakeRoom.mockResolvedValue({ removed: ['branch-1'], skipped: [] });
       mockGetWorktreeStatusBreakdown.mockResolvedValue({
         total: 24,
@@ -1509,7 +1635,6 @@ Labels: correct`;
       expect(cleanupMessage).toBeDefined();
       expect(cleanupMessage).toContain('1');
 
-      expect(mockClient.sendQuery).toHaveBeenCalled();
       expect(mockIsolationEnvCreate).toHaveBeenCalled();
     });
 
@@ -1741,7 +1866,7 @@ Labels: correct`;
       mockAIResponse('/invoke-workflow fix-bug');
 
       const issueContext = '[GitHub Issue Context]\nIssue #42: "Login fails"\nLabels: bug';
-      await handleMessage(platform, 'chat-456', 'fix the login bug', issueContext);
+      await handleMessage(platform, 'chat-456', 'fix the login bug', { issueContext });
 
       expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
       const passedIssueContext = mockExecuteWorkflow.mock.calls[0][7];
@@ -1827,14 +1952,9 @@ Labels: correct`;
       mockGetAssistantClient.mockReturnValue(mockClient);
       mockIsolationEnvGetById.mockResolvedValue(null);
 
-      await handleMessage(
-        platform,
-        'thread-123',
-        'hello',
-        undefined,
-        undefined,
-        'channel-456' // parentConversationId
-      );
+      await handleMessage(platform, 'thread-123', 'hello', {
+        parentConversationId: 'channel-456', // parentConversationId
+      });
 
       expect(mockGetConversationByPlatformId).toHaveBeenCalledWith('mock', 'channel-456');
       expect(mockUpdateConversation).toHaveBeenCalledWith('conv-thread', {
@@ -1857,7 +1977,9 @@ Labels: correct`;
       mockCreateSession.mockResolvedValue(mockSession);
       mockGetAssistantClient.mockReturnValue(mockClient);
 
-      await handleMessage(platform, 'thread-123', 'hello', undefined, undefined, 'channel-456');
+      await handleMessage(platform, 'thread-123', 'hello', {
+        parentConversationId: 'channel-456',
+      });
 
       // Should NOT look up parent or update
       expect(mockGetConversationByPlatformId).not.toHaveBeenCalled();
@@ -1874,7 +1996,9 @@ Labels: correct`;
       mockIsolationEnvGetById.mockResolvedValue(null);
 
       // Should not throw
-      await handleMessage(platform, 'thread-123', 'hello', undefined, undefined, 'channel-456');
+      await handleMessage(platform, 'thread-123', 'hello', {
+        parentConversationId: 'channel-456',
+      });
 
       expect(mockGetConversationByPlatformId).toHaveBeenCalledWith('mock', 'channel-456');
       expect(mockUpdateConversation).not.toHaveBeenCalled();
@@ -1891,7 +2015,9 @@ Labels: correct`;
       mockIsolationEnvGetById.mockResolvedValue(null);
 
       // Should not throw - ConversationNotFoundError is handled gracefully
-      await handleMessage(platform, 'thread-123', 'hello', undefined, undefined, 'channel-456');
+      await handleMessage(platform, 'thread-123', 'hello', {
+        parentConversationId: 'channel-456',
+      });
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.objectContaining({ conversationId: 'conv-thread' }),

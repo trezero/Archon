@@ -13,6 +13,7 @@ import {
   ConversationNotFoundError,
   handleMessage,
   classifyAndFormatError,
+  toError,
   parseGitHubAllowedUsers,
   isGitHubUserAuthorized,
   getLinkedIssueNumbers,
@@ -941,23 +942,19 @@ ${userComment}`;
     // 13. Route to orchestrator with isolation hints (with lock for concurrency control)
     await this.lockManager.acquireLock(conversationId, async () => {
       try {
-        await handleMessage(
-          this,
-          conversationId,
-          finalMessage,
-          contextToAppend,
+        await handleMessage(this, conversationId, finalMessage, {
+          issueContext: contextToAppend,
           threadContext, // Pass comment history as thread context
-          undefined, // parentConversationId
-          isolationHints
-        );
+          isolationHints,
+        });
       } catch (error) {
-        const err = error as Error;
-        getLog().error({ err: error, conversationId }, 'message_handling_error');
+        const err = toError(error);
+        getLog().error({ err, conversationId }, 'message_handling_error');
         try {
           const userMessage = classifyAndFormatError(err);
           await this.sendMessage(conversationId, userMessage);
         } catch (sendError) {
-          getLog().error({ err: sendError, conversationId }, 'error_message_send_failed');
+          getLog().error({ err: toError(sendError), conversationId }, 'error_message_send_failed');
         }
       }
     });

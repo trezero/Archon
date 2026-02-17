@@ -237,14 +237,10 @@ async function main(): Promise<void> {
       // Fire-and-forget: handler returns immediately, processing happens async
       lockManager
         .acquireLock(conversationId, async () => {
-          await handleMessage(
-            discordAdapter,
-            conversationId,
-            content,
-            undefined,
+          await handleMessage(discordAdapter, conversationId, content, {
             threadContext,
-            parentConversationId
-          );
+            parentConversationId,
+          });
         })
         .catch(createMessageErrorHandler('Discord', discordAdapter, conversationId));
     });
@@ -294,14 +290,10 @@ async function main(): Promise<void> {
       // Fire-and-forget: handler returns immediately, processing happens async
       lockManager
         .acquireLock(conversationId, async () => {
-          await handleMessage(
-            slackAdapter,
-            conversationId,
-            content,
-            undefined,
+          await handleMessage(slackAdapter, conversationId, content, {
             threadContext,
-            parentConversationId
-          );
+            parentConversationId,
+          });
         })
         .catch(createMessageErrorHandler('Slack', slackAdapter, conversationId));
     });

@@ -607,7 +607,7 @@ describe('GitHubAdapter', () => {
         // Verify handleMessage was called with context mentioning PR branch
         expect(handleMessageMock).toHaveBeenCalled();
         const messageCall = handleMessageMock.mock.calls[0];
-        const contextMessage = messageCall[3]; // Fourth parameter is context
+        const contextMessage = messageCall[3]?.issueContext as string | undefined;
 
         // Verify context mentions the actual PR branch and SHA
         expect(contextMessage).toContain('feature/new-ui');
@@ -682,7 +682,7 @@ describe('GitHubAdapter', () => {
         // Verify handleMessage was called with fallback context (isolated branch message)
         expect(handleMessageMock).toHaveBeenCalled();
         const messageCall = handleMessageMock.mock.calls[0];
-        const contextMessage = messageCall[3];
+        const contextMessage = messageCall[3]?.issueContext as string | undefined;
 
         // Verify context shows fallback message (no SHA, just pr-42 branch)
         expect(contextMessage).toContain('isolated branch');

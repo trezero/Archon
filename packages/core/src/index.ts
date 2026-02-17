@@ -18,6 +18,8 @@ export {
   type Conversation,
   type IsolationHints,
   type IsolationEnvironmentRow,
+  type IsolationBlockReason,
+  type HandleMessageContext,
   type Codebase,
   type Session,
   type CommandResult,
@@ -190,6 +192,7 @@ export { ConversationLockManager, type LockAcquisitionResult } from './utils/con
 
 // Error formatting
 export { classifyAndFormatError } from './utils/error-formatter';
+export { toError } from './utils/error';
 
 // Tool formatting
 export { formatToolCall, formatThinking } from './utils/tool-formatter';
