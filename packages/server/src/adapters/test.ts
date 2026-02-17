@@ -13,7 +13,6 @@ function getLog(): ReturnType<typeof createLogger> {
 }
 
 interface TestMessage {
-  conversationId: string;
   message: string;
   timestamp: Date;
   direction: 'sent' | 'received';
@@ -32,7 +31,6 @@ export class TestAdapter implements IPlatformAdapter {
     }
 
     msgs.push({
-      conversationId,
       message,
       timestamp: new Date(),
       direction: 'sent',
@@ -77,7 +75,6 @@ export class TestAdapter implements IPlatformAdapter {
     }
 
     msgs.push({
-      conversationId,
       message,
       timestamp: new Date(),
       direction: 'received',

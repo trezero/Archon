@@ -14,7 +14,6 @@ describe('TestAdapter', () => {
       const messages = adapter.getMessages('conv-123');
       expect(messages).toHaveLength(1);
       expect(messages[0]).toMatchObject({
-        conversationId: 'conv-123',
         message: 'Hello, world!',
         direction: 'sent',
       });
@@ -47,7 +46,6 @@ describe('TestAdapter', () => {
       const messages = adapter.getMessages('conv-123');
       expect(messages).toHaveLength(1);
       expect(messages[0]).toMatchObject({
-        conversationId: 'conv-123',
         message: 'User input',
         direction: 'received',
       });

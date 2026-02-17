@@ -367,7 +367,7 @@ async function main(): Promise<void> {
 
   app.get('/test/messages/:conversationId', c => {
     const conversationId = c.req.param('conversationId');
-    const messages = testAdapter.getSentMessages(conversationId);
+    const messages = testAdapter.getMessages(conversationId);
     return c.json({ conversationId, messages });
   });
 
