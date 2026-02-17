@@ -45,10 +45,10 @@ The Remote Coding Agent is a **platform-agnostic AI coding assistant orchestrato
       └───────────────┼───────────────────┘
                       ▼
 ┌─────────────────────────────────────────────┐
-│    PostgreSQL/SQLite (8 Tables)             │
+│    SQLite (default) / PostgreSQL (7 Tables)  │
 │  • Codebases  • Conversations  • Sessions   │
-│  • Command Templates • Isolation Envs       │
-│  • Workflow Runs • Workflow Events • Messages│
+│  • Isolation Envs • Workflow Runs            │
+│  • Workflow Events • Messages                │
 └─────────────────────────────────────────────┘
 ```
 
@@ -1005,7 +1005,7 @@ export function formatToolCall(toolName: string, toolInput?: Record<string, unkn
 
 ## Database Schema
 
-The platform uses an 8-table schema with `remote_agent_` prefix.
+The platform uses a 7-table schema with `remote_agent_` prefix. SQLite is the default (zero setup); PostgreSQL is optional for cloud/advanced deployments.
 
 ### Schema Overview
 

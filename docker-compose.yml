@@ -19,7 +19,8 @@ services:
     sysctls:
       - net.ipv6.conf.all.disable_ipv6=1
 
-  # Use this for local Docker database
+  # Use this for local Docker database (only needed when using PostgreSQL)
+  # SQLite is the default for local dev — no database container required.
   # Command: docker-compose --profile with-db up
   app-with-db:
     profiles: ["with-db"]

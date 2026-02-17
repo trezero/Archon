@@ -212,7 +212,7 @@ cp .env.example .env
 
 | Variable | Purpose | How to Get |
 |----------|---------|------------|
-| `DATABASE_URL` | PostgreSQL connection (optional) | See database options below. Omit to use SQLite |
+| `DATABASE_URL` | PostgreSQL connection (optional) | Omit for SQLite (default, zero setup). See database options below |
 | `GH_TOKEN` | Repository cloning | [Generate token](https://github.com/settings/tokens) with `repo` scope |
 | `GITHUB_TOKEN` | Same as `GH_TOKEN` | Use same token value |
 | `PORT` | HTTP server port | Default: `3090` (optional) |
@@ -232,9 +232,9 @@ GITHUB_TOKEN=ghp_your_token_here  # Same value
 
 **Note:** Repository clones are stored in `~/.archon/workspaces/` by default (or `/.archon/workspaces/` in Docker). Set `ARCHON_HOME` to override the base directory.
 
-**Database Setup - Choose One:**
+**Database Setup — SQLite is the default (zero setup, recommended for most users):**
 
-<details>
+<details open>
 <summary><b>Option A: SQLite (Default - No Setup Required)</b></summary>
 
 Simply **omit the `DATABASE_URL` variable** from your `.env` file. The app will automatically:
@@ -254,7 +254,7 @@ Simply **omit the `DATABASE_URL` variable** from your `.env` file. The app will 
 </details>
 
 <details>
-<summary><b>Option B: Remote PostgreSQL (Supabase, Neon)</b></summary>
+<summary><b>Option B: Remote PostgreSQL — Advanced (Supabase, Neon)</b></summary>
 
 Set your remote connection string:
 
@@ -292,7 +292,7 @@ psql $DATABASE_URL < migrations/011_partial_unique_constraint.sql
 </details>
 
 <details>
-<summary><b>Option C: Local PostgreSQL (via Docker)</b></summary>
+<summary><b>Option C: Local PostgreSQL — Advanced (via Docker)</b></summary>
 
 Use the `with-db` profile for automatic PostgreSQL setup:
 
@@ -765,9 +765,20 @@ The bot responds to:
 
 ### 4. Start the Application
 
-Choose the Docker Compose profile based on your database setup:
+Choose how to start the application based on your setup:
 
-**Option A: With Remote PostgreSQL (Supabase, Neon, etc.)**
+**Option A: Local Development (Recommended — SQLite, No Docker)**
+
+Run directly with Bun. SQLite is the default — no database setup needed:
+
+```bash
+bun install  # First time only
+bun run dev  # Starts server + Web UI with hot reload
+# Web UI: http://localhost:5173
+# API: http://localhost:3090
+```
+
+**Option B: With Remote PostgreSQL (Supabase, Neon, etc.)**
 
 Starts only the app container (requires `DATABASE_URL` set to remote database in `.env`):
 
@@ -779,7 +790,7 @@ docker compose --profile external-db up -d --build
 docker compose logs -f app
 ```
 
-**Option B: With Local PostgreSQL (Docker)**
+**Option C: With Local PostgreSQL (Docker)**
 
 Starts both the app and PostgreSQL containers:
 
@@ -791,17 +802,6 @@ docker compose --profile with-db up -d --build
 docker compose logs -f app-with-db
 
 # Database tables are created automatically via init script
-```
-
-**Option C: Local Development (No Docker)**
-
-Run directly with Bun. Uses SQLite by default (no database setup needed), or set `DATABASE_URL` for PostgreSQL:
-
-```bash
-bun install  # First time only
-bun run dev  # Starts server + Web UI with hot reload
-# Web UI: http://localhost:5173
-# API: http://localhost:3090
 ```
 
 **Stop the application:**

@@ -1,12 +1,28 @@
 -- Remote Coding Agent - Combined Schema
--- Version: Combined (includes migrations 001-015)
+-- Version: Combined (final state after migrations 001-018)
 -- Description: Complete database schema (idempotent - safe to run multiple times)
+--
+-- 7 Tables:
+--   1. remote_agent_codebases
+--   2. remote_agent_conversations
+--   3. remote_agent_sessions
+--   4. remote_agent_isolation_environments
+--   5. remote_agent_workflow_runs
+--   6. remote_agent_workflow_events
+--   7. remote_agent_messages
+--
+-- Dropped tables (via migrations):
+--   - remote_agent_command_templates (017)
+--
+-- Dropped columns (via migrations):
+--   - conversations.worktree_path (007)
+--   - conversations.isolation_env_id_legacy (007)
+--   - conversations.isolation_provider (007)
 
 -- ============================================================================
--- Migration 001: Initial Schema
--- ============================================================================
-
 -- Table 1: Codebases
+-- ============================================================================
+
 CREATE TABLE IF NOT EXISTS remote_agent_codebases (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(255) NOT NULL,
@@ -18,29 +34,48 @@ CREATE TABLE IF NOT EXISTS remote_agent_codebases (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
+COMMENT ON TABLE remote_agent_codebases IS
+  'Repository metadata: name, URL, working directory, AI assistant type, and command paths (JSONB)';
+
+-- ============================================================================
 -- Table 2: Conversations
+-- ============================================================================
+
 CREATE TABLE IF NOT EXISTS remote_agent_conversations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   platform_type VARCHAR(20) NOT NULL,
   platform_conversation_id VARCHAR(255) NOT NULL,
-  codebase_id UUID REFERENCES remote_agent_codebases(id),
+  codebase_id UUID REFERENCES remote_agent_codebases(id) ON DELETE SET NULL,
   cwd VARCHAR(500),
   ai_assistant_type VARCHAR(20) DEFAULT 'claude',
+  isolation_env_id UUID,  -- FK added after isolation_environments table exists
   title VARCHAR(255),
   deleted_at TIMESTAMP WITH TIME ZONE,
   hidden BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
+  last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(platform_type, platform_conversation_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_remote_agent_conversations_codebase ON remote_agent_conversations(codebase_id);
+CREATE INDEX IF NOT EXISTS idx_remote_agent_conversations_codebase
+  ON remote_agent_conversations(codebase_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_hidden
+  ON remote_agent_conversations(hidden);
+CREATE INDEX IF NOT EXISTS idx_conversations_codebase
+  ON remote_agent_conversations(codebase_id) WHERE deleted_at IS NULL;
 
+COMMENT ON COLUMN remote_agent_conversations.isolation_env_id IS
+  'UUID reference to isolation_environments table (the only isolation reference)';
+
+-- ============================================================================
 -- Table 3: Sessions
+-- ============================================================================
+
 CREATE TABLE IF NOT EXISTS remote_agent_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   conversation_id UUID REFERENCES remote_agent_conversations(id) ON DELETE CASCADE,
-  codebase_id UUID REFERENCES remote_agent_codebases(id),
+  codebase_id UUID REFERENCES remote_agent_codebases(id) ON DELETE SET NULL,
   ai_assistant_type VARCHAR(20) NOT NULL,
   assistant_session_id VARCHAR(255),
   active BOOLEAN DEFAULT true,
@@ -52,29 +87,24 @@ CREATE TABLE IF NOT EXISTS remote_agent_sessions (
   ended_at TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_remote_agent_sessions_conversation ON remote_agent_sessions(conversation_id, active);
-CREATE INDEX IF NOT EXISTS idx_remote_agent_sessions_codebase ON remote_agent_sessions(codebase_id);
+CREATE INDEX IF NOT EXISTS idx_remote_agent_sessions_conversation
+  ON remote_agent_sessions(conversation_id, active);
+CREATE INDEX IF NOT EXISTS idx_remote_agent_sessions_codebase
+  ON remote_agent_sessions(codebase_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_parent
+  ON remote_agent_sessions(parent_session_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_conversation_started
+  ON remote_agent_sessions(conversation_id, started_at DESC);
+
+COMMENT ON COLUMN remote_agent_sessions.parent_session_id IS
+  'Links to the previous session in this conversation (for audit trail)';
+COMMENT ON COLUMN remote_agent_sessions.transition_reason IS
+  'Why this session was created: plan-to-execute, isolation-changed, reset-requested, etc.';
+COMMENT ON COLUMN remote_agent_sessions.ended_reason IS
+  'Why this session was deactivated: reset-requested, cwd-changed, conversation-closed, etc.';
 
 -- ============================================================================
--- Migration 003: Add Worktree Support
--- ============================================================================
-
-ALTER TABLE remote_agent_conversations
-ADD COLUMN IF NOT EXISTS worktree_path VARCHAR(500);
-
-COMMENT ON COLUMN remote_agent_conversations.worktree_path IS
-  'Path to git worktree for this conversation. If set, AI works here instead of cwd.';
-
--- ============================================================================
--- Migration 004: Worktree Sharing Index
--- ============================================================================
-
-CREATE INDEX IF NOT EXISTS idx_remote_agent_conversations_worktree
-ON remote_agent_conversations(worktree_path)
-WHERE worktree_path IS NOT NULL;
-
--- ============================================================================
--- Migration 006: Isolation Environments
+-- Table 4: Isolation Environments
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS remote_agent_isolation_environments (
@@ -97,8 +127,6 @@ CREATE TABLE IF NOT EXISTS remote_agent_isolation_environments (
 
   -- Cross-reference metadata (for linking)
   metadata              JSONB DEFAULT '{}'
-
-  -- Note: uniqueness enforced via partial index below (only active environments)
 );
 
 -- Partial unique index: only active environments need uniqueness
@@ -114,16 +142,11 @@ CREATE INDEX IF NOT EXISTS idx_isolation_env_status
 CREATE INDEX IF NOT EXISTS idx_isolation_env_workflow
   ON remote_agent_isolation_environments(workflow_type, workflow_id);
 
--- Add FK to conversations
+-- Add FK from conversations to isolation_environments (deferred to avoid circular dependency)
 ALTER TABLE remote_agent_conversations
   ADD COLUMN IF NOT EXISTS isolation_env_id UUID
     REFERENCES remote_agent_isolation_environments(id) ON DELETE SET NULL;
 
--- Add last_activity_at for staleness detection
-ALTER TABLE remote_agent_conversations
-  ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-
--- Create index for FK lookups
 CREATE INDEX IF NOT EXISTS idx_conversations_isolation_env_id
   ON remote_agent_conversations(isolation_env_id);
 
@@ -135,7 +158,7 @@ COMMENT ON COLUMN remote_agent_isolation_environments.workflow_id IS
   'Identifier for the work (issue number, PR number, thread hash, etc.)';
 
 -- ============================================================================
--- Migration 008: Workflow Runs
+-- Table 5: Workflow Runs
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS remote_agent_workflow_runs (
@@ -143,66 +166,33 @@ CREATE TABLE IF NOT EXISTS remote_agent_workflow_runs (
   workflow_name VARCHAR(255) NOT NULL,
   conversation_id UUID REFERENCES remote_agent_conversations(id) ON DELETE CASCADE,
   codebase_id UUID REFERENCES remote_agent_codebases(id) ON DELETE SET NULL,
-  current_step_index INTEGER DEFAULT 0,
-  status VARCHAR(20) NOT NULL DEFAULT 'running',  -- running, completed, failed
+  current_step_index INTEGER,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending, running, completed, failed
   user_message TEXT NOT NULL,
   metadata JSONB DEFAULT '{}',
+  parent_conversation_id UUID REFERENCES remote_agent_conversations(id) ON DELETE SET NULL,
   started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  completed_at TIMESTAMP WITH TIME ZONE
+  completed_at TIMESTAMP WITH TIME ZONE,
+  last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_conversation
   ON remote_agent_workflow_runs(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_status
   ON remote_agent_workflow_runs(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_parent_conv
+  ON remote_agent_workflow_runs(parent_conversation_id);
+
+-- Partial index for efficient staleness queries on running workflows
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_last_activity
+  ON remote_agent_workflow_runs(last_activity_at)
+  WHERE status = 'running';
 
 COMMENT ON TABLE remote_agent_workflow_runs IS
   'Tracks workflow execution state for resumption and observability';
 
 -- ============================================================================
--- Migration 009: Workflow Last Activity
--- ============================================================================
-
-ALTER TABLE remote_agent_workflow_runs
-ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-
--- Partial index for efficient staleness queries on running workflows
-CREATE INDEX IF NOT EXISTS idx_workflow_runs_last_activity
-ON remote_agent_workflow_runs(last_activity_at)
-WHERE status = 'running';
-
--- ============================================================================
--- Migration 010: Immutable Sessions (parent linkage + transition tracking)
--- ============================================================================
-
-ALTER TABLE remote_agent_sessions
-  ADD COLUMN IF NOT EXISTS parent_session_id UUID REFERENCES remote_agent_sessions(id);
-
-ALTER TABLE remote_agent_sessions
-  ADD COLUMN IF NOT EXISTS transition_reason TEXT;
-
-CREATE INDEX IF NOT EXISTS idx_sessions_parent ON remote_agent_sessions(parent_session_id);
-
-CREATE INDEX IF NOT EXISTS idx_sessions_conversation_started
-  ON remote_agent_sessions(conversation_id, started_at DESC);
-
-COMMENT ON COLUMN remote_agent_sessions.parent_session_id IS
-  'Links to the previous session in this conversation (for audit trail)';
-COMMENT ON COLUMN remote_agent_sessions.transition_reason IS
-  'Why this session was created: plan-to-execute, isolation-changed, reset-requested, etc.';
-
--- ============================================================================
--- Migration 011: Partial Unique Constraint Fix
--- ============================================================================
-
--- Drop the existing full constraint (if it exists from older migrations)
-ALTER TABLE remote_agent_isolation_environments
-  DROP CONSTRAINT IF EXISTS unique_workflow;
-
--- Partial unique index already created in Migration 006 above (unique_active_workflow)
-
--- ============================================================================
--- Migration 012: Workflow Events
+-- Table 6: Workflow Events
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS remote_agent_workflow_events (
@@ -224,19 +214,7 @@ COMMENT ON TABLE remote_agent_workflow_events IS
   'Lean UI-relevant workflow events for observability (step transitions, artifacts, errors)';
 
 -- ============================================================================
--- Migration 013: Conversation Titles + Soft Delete
--- ============================================================================
-
--- title and deleted_at already included in conversations CREATE TABLE above.
--- ALTER statements kept for idempotent upgrades from older schemas:
-ALTER TABLE remote_agent_conversations
-  ADD COLUMN IF NOT EXISTS title VARCHAR(255);
-
-ALTER TABLE remote_agent_conversations
-  ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
-
--- ============================================================================
--- Migration 014: Message History
+-- Table 7: Messages
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS remote_agent_messages (
@@ -252,29 +230,58 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation_id
   ON remote_agent_messages(conversation_id, created_at ASC);
 
 -- ============================================================================
--- Migration 015: Background Dispatch
+-- Cleanup: Drop legacy objects from older schemas
 -- ============================================================================
 
+-- Drop command_templates table (replaced by file-based commands in .archon/commands)
+DROP TABLE IF EXISTS remote_agent_command_templates;
+DROP INDEX IF EXISTS idx_remote_agent_command_templates_name;
+
+-- Drop legacy columns from conversations (if upgrading from older schema)
+ALTER TABLE remote_agent_conversations DROP COLUMN IF EXISTS worktree_path;
+ALTER TABLE remote_agent_conversations DROP COLUMN IF EXISTS isolation_env_id_legacy;
+ALTER TABLE remote_agent_conversations DROP COLUMN IF EXISTS isolation_provider;
+DROP INDEX IF EXISTS idx_conversations_isolation;
+
+-- Drop legacy constraint from isolation_environments (if upgrading from older schema)
+ALTER TABLE remote_agent_isolation_environments
+  DROP CONSTRAINT IF EXISTS unique_workflow;
+
+-- ============================================================================
+-- Idempotent ALTER statements for upgrading existing databases
+-- (These are no-ops on fresh installs since columns exist in CREATE TABLE above)
+-- ============================================================================
+
+-- From migration 006: isolation_env_id + last_activity_at on conversations
+ALTER TABLE remote_agent_conversations
+  ADD COLUMN IF NOT EXISTS isolation_env_id UUID
+    REFERENCES remote_agent_isolation_environments(id) ON DELETE SET NULL;
+ALTER TABLE remote_agent_conversations
+  ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+-- From migration 009: last_activity_at on workflow_runs
+ALTER TABLE remote_agent_workflow_runs
+  ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+-- From migration 010: parent_session_id + transition_reason on sessions
+ALTER TABLE remote_agent_sessions
+  ADD COLUMN IF NOT EXISTS parent_session_id UUID REFERENCES remote_agent_sessions(id);
+ALTER TABLE remote_agent_sessions
+  ADD COLUMN IF NOT EXISTS transition_reason TEXT;
+
+-- From migration 013: title + deleted_at on conversations
+ALTER TABLE remote_agent_conversations
+  ADD COLUMN IF NOT EXISTS title VARCHAR(255);
+ALTER TABLE remote_agent_conversations
+  ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
+
+-- From migration 015: parent_conversation_id + hidden
 ALTER TABLE remote_agent_workflow_runs
   ADD COLUMN IF NOT EXISTS parent_conversation_id UUID
-  REFERENCES remote_agent_conversations(id) ON DELETE SET NULL;
-
+    REFERENCES remote_agent_conversations(id) ON DELETE SET NULL;
 ALTER TABLE remote_agent_conversations
   ADD COLUMN IF NOT EXISTS hidden BOOLEAN DEFAULT FALSE;
 
-CREATE INDEX IF NOT EXISTS idx_workflow_runs_parent_conv
-  ON remote_agent_workflow_runs(parent_conversation_id);
-CREATE INDEX IF NOT EXISTS idx_conversations_hidden
-  ON remote_agent_conversations(hidden);
-CREATE INDEX IF NOT EXISTS idx_conversations_codebase
-  ON remote_agent_conversations(codebase_id) WHERE deleted_at IS NULL;
-
--- ============================================================================
--- Migration 016: Session ended_reason
--- ============================================================================
-
+-- From migration 016: ended_reason on sessions
 ALTER TABLE remote_agent_sessions
   ADD COLUMN IF NOT EXISTS ended_reason TEXT;
-
-COMMENT ON COLUMN remote_agent_sessions.ended_reason IS
-  'Why this session was deactivated: reset-requested, cwd-changed, conversation-closed, etc.';

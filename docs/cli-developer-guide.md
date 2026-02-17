@@ -299,6 +299,7 @@ Worktrees stored at: `~/.archon/worktrees/<repo>/<branch-slug>/`
 
 - Connection opened on first database call
 - Always closed in `finally` block after command completes
-- Auto-detects PostgreSQL (`DATABASE_URL`) or SQLite (`~/.archon/archon.db`)
+- **Default: SQLite** at `~/.archon/archon.db` (zero setup, auto-initialized)
+- **Optional: PostgreSQL** when `DATABASE_URL` is set (for cloud/advanced deployments)
 
 **Code:** `packages/cli/src/cli.ts:229-241`

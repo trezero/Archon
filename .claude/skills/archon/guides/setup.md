@@ -160,10 +160,12 @@ archon version
 ```
 
 Should show:
-- `Database: postgresql` or `Database: sqlite` based on selection
+- `Database: sqlite` (default, zero setup) or `Database: postgresql` (if DATABASE_URL was configured)
 - No errors about missing configuration
 
 ### 5d: Run Database Migrations (PostgreSQL only)
+
+**SQLite users: skip this step.** SQLite is auto-initialized on first run with zero setup.
 
 If the user selected PostgreSQL, run migrations:
 
