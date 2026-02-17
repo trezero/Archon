@@ -51,10 +51,23 @@ export async function getCodebaseCommands(
   id: string
 ): Promise<Record<string, { path: string; description: string }>> {
   const result = await pool.query<{
-    commands: Record<string, { path: string; description: string }>;
+    commands: Record<string, { path: string; description: string }> | string;
   }>('SELECT commands FROM remote_agent_codebases WHERE id = $1', [id]);
+  const raw = result.rows[0]?.commands;
+  // SQLite returns TEXT columns as strings; PostgreSQL JSONB returns objects
+  let parsed: Record<string, { path: string; description: string }>;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      getLog().error({ codebaseId: id, raw }, 'commands_json_parse_failed');
+      return {};
+    }
+  } else {
+    parsed = raw ?? {};
+  }
   // Spread to ensure mutable copy - Bun's SQLite driver returns frozen objects
-  return { ...(result.rows[0]?.commands ?? {}) };
+  return { ...parsed };
 }
 
 export async function registerCommand(

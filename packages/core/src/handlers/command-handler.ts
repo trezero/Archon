@@ -443,7 +443,13 @@ export async function handleCommand(
       // Validate path is within workspace to prevent path traversal
       const workspacePath = getArchonWorkspacesPath();
       if (!isPathWithinWorkspace(resolvedCwd)) {
-        return { success: false, message: `Path must be within ${workspacePath} directory` };
+        return {
+          success: false,
+          message:
+            `Path must be within the Archon workspaces directory (${workspacePath}).\n\n` +
+            'To work with a repository, use:\n' +
+            '  /clone <repo-url> — Clone and register a remote repo',
+        };
       }
 
       try {
@@ -657,8 +663,7 @@ export async function handleCommand(
         return { success: false, message: 'No codebase configured.' };
       }
 
-      const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
-      const commands = codebase?.commands ?? {};
+      const commands = await codebaseDb.getCodebaseCommands(conversation.codebase_id);
 
       if (!Object.keys(commands).length) {
         return {

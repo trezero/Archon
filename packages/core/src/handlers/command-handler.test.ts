@@ -738,18 +738,9 @@ describe('CommandHandler', () => {
 
       test('should list registered commands', async () => {
         const conversation = { ...baseConversation, codebase_id: 'cb-123' };
-        mockGetCodebase.mockResolvedValue({
-          id: 'cb-123',
-          name: 'my-repo',
-          repository_url: null,
-          default_cwd: '/workspace/my-repo',
-          ai_assistant_type: 'claude',
-          commands: {
-            plan: { path: '.claude/commands/plan.md', description: 'Plan command' },
-            execute: { path: '.claude/commands/execute.md', description: 'Execute command' },
-          },
-          created_at: new Date(),
-          updated_at: new Date(),
+        mockGetCodebaseCommands.mockResolvedValue({
+          plan: { path: '.claude/commands/plan.md', description: 'Plan command' },
+          execute: { path: '.claude/commands/execute.md', description: 'Execute command' },
         });
 
         const result = await handleCommand(conversation, '/commands');
@@ -760,20 +751,23 @@ describe('CommandHandler', () => {
 
       test('should show message when no commands registered', async () => {
         const conversation = { ...baseConversation, codebase_id: 'cb-123' };
-        mockGetCodebase.mockResolvedValue({
-          id: 'cb-123',
-          name: 'my-repo',
-          repository_url: null,
-          default_cwd: '/workspace/my-repo',
-          ai_assistant_type: 'claude',
-          commands: {},
-          created_at: new Date(),
-          updated_at: new Date(),
-        });
+        mockGetCodebaseCommands.mockResolvedValue({});
 
         const result = await handleCommand(conversation, '/commands');
         expect(result.success).toBe(true);
         expect(result.message).toContain('No commands registered');
+      });
+
+      test('should handle commands as JSON string from SQLite', async () => {
+        const conversation = { ...baseConversation, codebase_id: 'cb-123' };
+        mockGetCodebaseCommands.mockResolvedValue({
+          plan: { path: '.claude/commands/plan.md', description: 'Plan command' },
+        });
+
+        const result = await handleCommand(conversation, '/commands');
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('plan');
+        expect(result.message).not.toContain('undefined');
       });
     });
 
