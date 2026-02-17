@@ -20,7 +20,6 @@ if (dotenvResult.error) {
 
 import { Hono } from 'hono';
 import { TelegramAdapter } from './adapters/telegram';
-import { TestAdapter } from './adapters/test';
 import { WebAdapter } from './adapters/web';
 import { GitHubAdapter } from './adapters/github';
 import { DiscordAdapter } from './adapters/discord';
@@ -144,10 +143,6 @@ async function main(): Promise<void> {
   const maxConcurrent = parseInt(process.env.MAX_CONCURRENT_CONVERSATIONS ?? '10');
   const lockManager = new ConversationLockManager(maxConcurrent);
   getLog().info({ maxConcurrent }, 'lock_manager_initialized');
-
-  // Initialize test adapter
-  const testAdapter = new TestAdapter();
-  await testAdapter.start();
 
   // Initialize web adapter (always enabled)
   const webAdapter = new WebAdapter();
@@ -363,69 +358,6 @@ async function main(): Promise<void> {
   app.get('/health/concurrency', c => {
     const stats = lockManager.getStats();
     return c.json({ status: 'ok', ...stats });
-  });
-
-  // Test adapter endpoints
-  app.post('/test/message', async c => {
-    // Parse JSON with explicit error handling
-    let body: { conversationId?: unknown; message?: unknown };
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: 'Invalid JSON in request body' }, 400);
-    }
-
-    const { conversationId, message } = body;
-
-    // Validate: must be non-empty strings
-    if (typeof conversationId !== 'string' || !conversationId) {
-      return c.json({ error: 'conversationId must be a non-empty string' }, 400);
-    }
-    if (typeof message !== 'string' || !message) {
-      return c.json({ error: 'message must be a non-empty string' }, 400);
-    }
-
-    await testAdapter.receiveMessage(conversationId, message);
-
-    // Process the message through orchestrator (non-blocking)
-    lockManager
-      .acquireLock(conversationId, async () => {
-        await handleMessage(testAdapter, conversationId, message);
-      })
-      .catch(createMessageErrorHandler('Test', testAdapter, conversationId));
-
-    return c.json({ success: true, conversationId, message });
-  });
-
-  app.get('/test/messages/:conversationId', c => {
-    const conversationId = c.req.param('conversationId');
-    const messages = testAdapter.getMessages(conversationId);
-    return c.json({ conversationId, messages });
-  });
-
-  // Hono optional parameter syntax
-  app.delete('/test/messages/:conversationId?', c => {
-    const conversationId = c.req.param('conversationId');
-    testAdapter.clearMessages(conversationId);
-    return c.json({ success: true });
-  });
-
-  // Set test adapter streaming mode
-  app.put('/test/mode', async c => {
-    // Parse JSON with explicit error handling
-    let body: { mode?: unknown };
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: 'Invalid JSON in request body' }, 400);
-    }
-
-    const { mode } = body;
-    if (mode !== 'stream' && mode !== 'batch') {
-      return c.json({ error: 'mode must be "stream" or "batch"' }, 400);
-    }
-    testAdapter.setStreamingMode(mode);
-    return c.json({ success: true, mode });
   });
 
   // Serve web UI static files in production

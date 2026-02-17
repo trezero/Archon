@@ -462,13 +462,21 @@ bun dev &
 # [Hono] Worktree detected (/path/to/worktree)
 # [Hono] Auto-allocated port: 3637 (base: 3090, offset: +547)
 
-# Test via test adapter (use the auto-allocated port from logs)
-curl -X POST http://localhost:3637/test/message \
+# Test via web API (production path)
+# 1) Create a conversation
+curl -X POST http://localhost:3637/api/conversations \
   -H "Content-Type: application/json" \
-  -d '{"conversationId":"test","message":"/status"}'
+  -d '{}'
 
-# Check response
-curl http://localhost:3637/test/messages/test
+# 2) Send a message
+curl -X POST http://localhost:3637/api/conversations/<conversationId>/message \
+  -H "Content-Type: application/json" \
+  -d '{"message":"/status"}'
+
+# 3) Fetch messages (polling)
+curl http://localhost:3637/api/conversations/<conversationId>/messages
+
+# Note: SSE streaming is available at /api/stream/<conversationId>
 ```
 
 **Port Allocation:**
@@ -478,7 +486,7 @@ curl http://localhost:3637/test/messages/test
 - Same worktree always gets same port (deterministic)
 
 **Important:**
-- Only use test adapter - Telegram/Slack/Discord tokens conflict across instances
+- Use the web API routes for manual validation (avoid running multiple platform adapters)
 - Database is shared (same conversations/codebases available)
 - Kill the server when done: `pkill -f "bun.*dev"` or use the specific port
 
@@ -575,15 +583,13 @@ This ensures type compatibility with SDK updates and eliminates `as any` casts.
 - Test end-to-end flows (mock platforms/AI but use real orchestrator)
 - Clean up test data after each test
 
-**Manual Validation with Test Adapter:**
+**Manual Validation with Web API:**
 
-The application includes a built-in test adapter (`packages/server/src/adapters/test.ts`) with HTTP endpoints for programmatic testing without requiring Telegram/Slack setup.
-
-Please look into how to use the test adapter for manual validation.
+Use the production web API routes for manual validation (same flow as the web UI).
 
 You can also run all CLI commands directly for regression testing and testing new capabilities.
 
-**When to Use Test Adapter and CLI Commands:**
+**When to Use Web API and CLI Commands:**
 - ✅ Manual validation after implementing new features
 - ✅ End-to-end testing of command flows
 - ✅ Debugging orchestrator logic without Telegram setup
