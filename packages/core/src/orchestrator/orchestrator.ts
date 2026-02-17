@@ -2,11 +2,25 @@
  * Orchestrator - Main conversation handler
  * Routes slash commands and AI messages appropriately
  */
-import { readFile as fsReadFile } from 'fs/promises';
+import { readFile as fsReadFile, access as fsAccess } from 'fs/promises';
 
 // Wrapper function for reading files - allows mocking without polluting fs/promises globally
 export async function readCommandFile(path: string): Promise<string> {
   return fsReadFile(path, 'utf-8');
+}
+export async function commandFileExists(path: string): Promise<boolean> {
+  try {
+    await fsAccess(path);
+    return true;
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === 'ENOENT') {
+      return false;
+    }
+    // Unexpected errors (permissions, I/O) should not be swallowed
+    getLog().error({ err, path, code: err.code }, 'command_file_access_error');
+    throw new Error(`Cannot access command file at ${path}: ${err.message}`);
+  }
 }
 import { join } from 'path';
 import { createLogger } from '../utils/logger';
@@ -29,7 +43,6 @@ import {
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
-import * as templateDb from '../db/command-templates';
 import * as isolationEnvDb from '../db/isolation-environments';
 import * as commandHandler from '../handlers/command-handler';
 import { formatToolCall } from '../utils/tool-formatter';
@@ -45,6 +58,7 @@ import {
   parseWorkflowInvocation,
   findWorkflow,
   executeWorkflow,
+  isValidCommandName,
 } from '../workflows';
 import type { WorkflowDefinition, RouterContext } from '../workflows';
 import * as workflowDb from '../db/workflows';
@@ -718,10 +732,6 @@ export async function handleMessage(
         'command-set',
         'load-commands',
         'commands',
-        'template-add',
-        'template-list',
-        'templates',
-        'template-delete',
         'worktree',
         'workflow',
       ];
@@ -848,7 +858,23 @@ export async function handleMessage(
           return;
         }
 
-        const commandDef = codebase.commands[commandName];
+        // Read command file using the conversation's cwd
+        const commandCwd = conversation.cwd ?? codebase.default_cwd;
+        let commandDef = codebase.commands[commandName];
+        if (!commandDef && isValidCommandName(commandName)) {
+          const fallbackPath = join('.archon', 'commands', `${commandName}.md`);
+          const fallbackFilePath = join(commandCwd, fallbackPath);
+          if (await commandFileExists(fallbackFilePath)) {
+            commandDef = {
+              path: fallbackPath,
+              description: `From ${fallbackPath}`,
+            };
+            getLog().debug(
+              { commandName, path: fallbackPath },
+              'command_invoke_fallback_file_found'
+            );
+          }
+        }
         if (!commandDef) {
           await platform.sendMessage(
             conversationId,
@@ -857,8 +883,6 @@ export async function handleMessage(
           return;
         }
 
-        // Read command file using the conversation's cwd
-        const commandCwd = conversation.cwd ?? codebase.default_cwd;
         const commandFilePath = join(commandCwd, commandDef.path);
 
         try {
@@ -883,31 +907,14 @@ export async function handleMessage(
           return;
         }
       } else {
-        // Check if it's a global template command
-        const template = await templateDb.getTemplate(command);
-        if (template) {
-          getLog().debug({ command }, 'template_found');
-          commandName = command;
-          const substituted = substituteVariables(template.content, args);
-          promptToSend = wrapCommandForExecution(commandName, substituted);
-
-          if (issueContext) {
-            promptToSend = promptToSend + '\n\n---\n\n' + issueContext;
-            getLog().debug({ commandName }, 'issue_context_appended_to_template');
-          }
-
-          getLog().debug({ command, argCount: args.length }, 'template_executing');
-        } else {
-          // Unknown command
-          await platform.sendMessage(
-            conversationId,
-            `Unknown command: /${command}\n\nType /help for available commands or /templates for command templates.`
-          );
-          return;
-        }
+        await platform.sendMessage(
+          conversationId,
+          `Unknown command: /${command}\n\nType /help for available commands.`
+        );
+        return;
       }
     } else {
-      // Regular message - route through router template or workflows
+      // Regular message - route through workflows or pass through directly
       if (!conversation.codebase_id) {
         await platform.sendMessage(
           conversationId,
@@ -1027,21 +1034,8 @@ export async function handleMessage(
           'router_context_built'
         );
       } else {
-        // Fall back to router template for natural language routing
-        getLog().debug(
-          { count: availableWorkflows.length },
-          'no_workflows_checking_router_template'
-        );
-        const routerTemplate = await templateDb.getTemplate('router');
-        if (routerTemplate) {
-          getLog().debug('routing_through_router_template');
-          commandName = 'router';
-          // Pass the entire message as $ARGUMENTS for the router
-          promptToSend = substituteVariables(routerTemplate.content, [message]);
-        } else {
-          getLog().debug('no_router_template_using_raw_message');
-        }
-        // If no router template, message passes through as-is (backward compatible)
+        getLog().debug({ count: availableWorkflows.length }, 'no_workflows_using_raw_message');
+        // If no workflows, message passes through as-is (backward compatible)
       }
     }
 

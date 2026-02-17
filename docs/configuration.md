@@ -21,7 +21,7 @@ Archon supports a layered configuration system with sensible defaults, optional 
 
 ```
 .archon/
-├── commands/       # Custom command templates
+├── commands/       # Custom commands
 │   └── plan.md
 ├── workflows/      # Future: workflow definitions
 └── config.yaml     # Repo-specific configuration (optional)

@@ -245,16 +245,6 @@ export class SqliteAdapter implements IDatabase {
         ended_reason TEXT
       );
 
-      -- Command templates table
-      CREATE TABLE IF NOT EXISTS remote_agent_command_templates (
-        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-        name TEXT NOT NULL UNIQUE,
-        description TEXT,
-        content TEXT NOT NULL,
-        created_at TEXT DEFAULT (datetime('now')),
-        updated_at TEXT DEFAULT (datetime('now'))
-      );
-
       -- Isolation environments table
       CREATE TABLE IF NOT EXISTS remote_agent_isolation_environments (
         id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),

@@ -107,7 +107,7 @@ Add an `.archon/` directory to your target repo for repo-specific behavior:
 your-repo/
 └── .archon/
     ├── config.yaml         # AI assistant, worktree copy rules
-    ├── commands/            # Custom command templates (.md files)
+    ├── commands/            # Custom commands (.md files)
     └── workflows/           # Custom multi-step workflows (.yaml files)
 ```
 

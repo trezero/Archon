@@ -56,21 +56,6 @@ CREATE INDEX IF NOT EXISTS idx_remote_agent_sessions_conversation ON remote_agen
 CREATE INDEX IF NOT EXISTS idx_remote_agent_sessions_codebase ON remote_agent_sessions(codebase_id);
 
 -- ============================================================================
--- Migration 002: Command Templates
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS remote_agent_command_templates (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name VARCHAR(255) NOT NULL UNIQUE,
-  description TEXT,
-  content TEXT NOT NULL,
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_remote_agent_command_templates_name ON remote_agent_command_templates(name);
-
--- ============================================================================
 -- Migration 003: Add Worktree Support
 -- ============================================================================
 

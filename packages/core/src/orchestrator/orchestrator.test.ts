@@ -49,7 +49,6 @@ const mockTransitionSession = mock(
     });
   }
 );
-const mockGetTemplate = mock(() => Promise.resolve(null));
 const mockHandleCommand = mock(() => Promise.resolve({ message: '', modified: false }));
 const mockParseCommand = mock((message: string) => {
   const parts = message.split(/\s+/);
@@ -59,6 +58,7 @@ const mockGetAssistantClient = mock(() => null);
 
 // Mock for reading command files (replaces fs/promises mock)
 const mockReadCommandFile = mock(() => Promise.resolve(''));
+const mockCommandFileExists = mock(() => Promise.resolve(false));
 
 // Mock for workflow discovery
 const mockDiscoverWorkflows = mock(() => Promise.resolve({ workflows: [], errors: [] }));
@@ -132,10 +132,6 @@ mock.module('../db/sessions', () => ({
   transitionSession: mockTransitionSession,
 }));
 
-mock.module('../db/command-templates', () => ({
-  getTemplate: mockGetTemplate,
-}));
-
 mock.module('../handlers/command-handler', () => ({
   handleCommand: mockHandleCommand,
   parseCommand: mockParseCommand,
@@ -181,6 +177,7 @@ import * as realOrchestrator from './orchestrator';
 mock.module('./orchestrator', () => ({
   ...realOrchestrator,
   readCommandFile: mockReadCommandFile,
+  commandFileExists: mockCommandFileExists,
 }));
 
 import { handleMessage, wrapCommandForExecution } from './orchestrator';
@@ -271,11 +268,11 @@ describe('orchestrator', () => {
     mockUpdateSession.mockClear();
     mockDeactivateSession.mockClear();
     mockUpdateSessionMetadata.mockClear();
-    mockGetTemplate.mockClear();
     mockHandleCommand.mockClear();
     mockParseCommand.mockClear();
     mockGetAssistantClient.mockClear();
     mockReadCommandFile.mockClear();
+    mockCommandFileExists.mockClear();
     mockDiscoverWorkflows.mockClear();
     mockExecuteWorkflow.mockClear();
     mockClient.sendQuery.mockClear();
@@ -310,7 +307,7 @@ describe('orchestrator', () => {
     mockGetCodebase.mockResolvedValue(mockCodebase);
     mockGetActiveSession.mockResolvedValue(null);
     mockCreateSession.mockResolvedValue(mockSession);
-    mockGetTemplate.mockResolvedValue(null); // No templates by default
+    mockCommandFileExists.mockResolvedValue(false);
     mockGetAssistantClient.mockReturnValue(mockClient);
     mockParseCommand.mockImplementation((message: string) => {
       const parts = message.split(/\s+/);
@@ -458,6 +455,91 @@ describe('orchestrator', () => {
       );
     });
 
+    test('falls back to .archon/commands when command not registered', async () => {
+      mockGetCodebase.mockResolvedValue({
+        ...mockCodebase,
+        commands: {},
+      });
+      mockParseCommand.mockReturnValue({
+        command: 'command-invoke',
+        args: ['rca', 'do', 'thing'],
+      });
+      mockCommandFileExists.mockResolvedValue(true);
+      mockReadCommandFile.mockResolvedValue('Do the following: $ARGUMENTS');
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', '/command-invoke rca do thing');
+
+      const expectedPath = join('/workspace/project', '.archon/commands/rca.md');
+      expect(mockReadCommandFile).toHaveBeenCalledWith(expectedPath);
+      expect(mockClient.sendQuery).toHaveBeenCalledWith(
+        wrapCommandForExecution('rca', 'Do the following: do thing'),
+        '/workspace/project',
+        'claude-session-xyz'
+      );
+    });
+
+    test('handles file read error after fallback existence check', async () => {
+      mockGetCodebase.mockResolvedValue({
+        ...mockCodebase,
+        commands: {},
+      });
+      mockParseCommand.mockReturnValue({
+        command: 'command-invoke',
+        args: ['plan', 'arg1'],
+      });
+      mockCommandFileExists.mockResolvedValue(true);
+      mockReadCommandFile.mockRejectedValue(new Error('EACCES: permission denied'));
+
+      await handleMessage(platform, 'chat-456', '/command-invoke plan arg1');
+
+      expect(platform.sendMessage).toHaveBeenCalledWith(
+        'chat-456',
+        expect.stringContaining('Failed to read command file')
+      );
+      expect(mockClient.sendQuery).not.toHaveBeenCalled();
+    });
+
+    test('rejects fallback for invalid command names (path traversal protection)', async () => {
+      mockGetCodebase.mockResolvedValue({
+        ...mockCodebase,
+        commands: {},
+      });
+      mockParseCommand.mockReturnValue({
+        command: 'command-invoke',
+        args: ['../../../etc/passwd'],
+      });
+
+      await handleMessage(platform, 'chat-456', '/command-invoke ../../../etc/passwd');
+
+      expect(mockCommandFileExists).not.toHaveBeenCalled();
+      expect(platform.sendMessage).toHaveBeenCalledWith(
+        'chat-456',
+        expect.stringContaining('not found')
+      );
+    });
+
+    test('uses registered command path instead of fallback', async () => {
+      mockParseCommand.mockReturnValue({
+        command: 'command-invoke',
+        args: ['plan', 'arg1'],
+      });
+      mockReadCommandFile.mockResolvedValue('Plan the following: $ARGUMENTS');
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', '/command-invoke plan arg1');
+
+      // Should NOT check for fallback file since command is registered
+      expect(mockCommandFileExists).not.toHaveBeenCalled();
+      // Should use registered path
+      const expectedPath = join('/workspace/project', '.claude/commands/plan.md');
+      expect(mockReadCommandFile).toHaveBeenCalledWith(expectedPath);
+    });
+
     test('appends issueContext after command text', async () => {
       mockParseCommand.mockReturnValue({ command: 'command-invoke', args: ['plan'] });
       mockReadCommandFile.mockResolvedValue('Command text here');
@@ -491,37 +573,8 @@ describe('orchestrator', () => {
     });
   });
 
-  describe('router template', () => {
-    test('routes non-slash messages through router template when available', async () => {
-      mockGetTemplate.mockImplementation(async (name: string) => {
-        if (name === 'router') {
-          return {
-            id: 'router-id',
-            name: 'router',
-            description: 'Route requests',
-            content: 'Router prompt with $ARGUMENTS',
-            created_at: new Date(),
-            updated_at: new Date(),
-          };
-        }
-        return null;
-      });
-      mockClient.sendQuery.mockImplementation(async function* () {
-        yield { type: 'result', sessionId: 'session-id' };
-      });
-
-      await handleMessage(platform, 'chat-456', 'fix the login bug');
-
-      expect(mockGetTemplate).toHaveBeenCalledWith('router');
-      expect(mockClient.sendQuery).toHaveBeenCalledWith(
-        'Router prompt with fix the login bug',
-        '/workspace/project',
-        'claude-session-xyz'
-      );
-    });
-
-    test('passes message directly if router template not available', async () => {
-      mockGetTemplate.mockResolvedValue(null);
+  describe('no workflows', () => {
+    test('passes message directly when no workflows are available', async () => {
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
       });

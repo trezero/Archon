@@ -268,11 +268,10 @@ DATABASE_URL=postgresql://user:password@host:5432/dbname
 psql $DATABASE_URL < migrations/000_combined.sql
 ```
 
-This creates 8 tables:
+This creates 7 tables:
 - `remote_agent_codebases` - Repository metadata
 - `remote_agent_conversations` - Platform conversation tracking
 - `remote_agent_sessions` - AI session management
-- `remote_agent_command_templates` - Global command templates
 - `remote_agent_isolation_environments` - Worktree isolation tracking
 - `remote_agent_workflow_runs` - Workflow execution tracking
 - `remote_agent_workflow_events` - Step-level workflow event log
@@ -820,15 +819,6 @@ docker compose --profile with-db down      # If using Option B
 
 Once your platform adapter is running, you can use these commands. Type `/help` to see this list.
 
-#### Command Templates (Global)
-
-| Command | Description |
-|---------|-------------|
-| `/<name> [args]` | Invoke a template directly (e.g., `/plan "Add dark mode"`) |
-| `/templates` | List all available templates |
-| `/template-add <name> <path>` | Add template from file |
-| `/template-delete <name>` | Remove a template |
-
 #### Codebase Commands (Per-Project)
 
 | Command | Description |
@@ -1231,10 +1221,9 @@ prompt: |
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────┐
-│              SQLite / PostgreSQL (8 Tables)             │
+│              SQLite / PostgreSQL (7 Tables)             │
 │   Codebases • Conversations • Sessions • Workflow Runs  │
-│ Command Templates • Isolation Environments • Messages   │
-│              Workflow Events                             │
+│    Isolation Environments • Messages • Workflow Events  │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -1252,7 +1241,7 @@ prompt: |
 ### Database Schema
 
 <details>
-<summary><b>8 tables with `remote_agent_` prefix</b></summary>
+<summary><b>7 tables with `remote_agent_` prefix</b></summary>
 
 1. **`remote_agent_codebases`** - Repository metadata
    - Commands stored as JSONB: `{command_name: {path, description}}`
@@ -1269,25 +1258,21 @@ prompt: |
    - Session ID for resume capability
    - Metadata JSONB for command context
 
-4. **`remote_agent_command_templates`** - Global command templates
-   - Shared command definitions (like `/plan`, `/commit`)
-   - Available across all codebases
-
-5. **`remote_agent_isolation_environments`** - Worktree isolation
+4. **`remote_agent_isolation_environments`** - Worktree isolation
    - Tracks git worktrees per issue/PR
    - Enables worktree sharing between linked issues and PRs
 
-6. **`remote_agent_workflow_runs`** - Workflow execution tracking
+5. **`remote_agent_workflow_runs`** - Workflow execution tracking
    - Tracks active workflows per conversation
    - Prevents concurrent workflow execution
    - Stores workflow state, step progress, and parent conversation linkage
 
-7. **`remote_agent_workflow_events`** - Step-level workflow event log
+6. **`remote_agent_workflow_events`** - Step-level workflow event log
    - Records step transitions, artifacts, and errors per workflow run
    - Lean UI-relevant events (verbose logs stored in JSONL files)
    - Enables workflow run detail views and debugging
 
-8. **`remote_agent_messages`** - Conversation message history
+7. **`remote_agent_messages`** - Conversation message history
    - Persists user and assistant messages with timestamps
    - Stores tool call metadata (name, input, duration) in JSONB
    - Enables message history in Web UI across page refreshes
@@ -1359,7 +1344,8 @@ psql $DATABASE_URL -c "SELECT 1"
 docker compose exec postgres psql -U postgres -d remote_coding_agent -c "\dt"
 
 # Should show: remote_agent_codebases, remote_agent_conversations, remote_agent_sessions,
-# remote_agent_command_templates, remote_agent_isolation_environments
+# remote_agent_isolation_environments, remote_agent_workflow_runs, remote_agent_workflow_events,
+# remote_agent_messages
 ```
 
 ### Clone Command Fails

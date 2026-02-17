@@ -20,7 +20,6 @@ export {
   type IsolationEnvironmentRow,
   type Codebase,
   type Session,
-  type CommandTemplate,
   type CommandResult,
   type IPlatformAdapter,
   type IWebPlatformAdapter,
@@ -46,7 +45,6 @@ export type { IDatabase, SqlDialect } from './db/adapters/types';
 export * as conversationDb from './db/conversations';
 export * as codebaseDb from './db/codebases';
 export * as sessionDb from './db/sessions';
-export * as commandTemplateDb from './db/command-templates';
 export * as isolationEnvDb from './db/isolation-environments';
 export * as workflowDb from './db/workflows';
 export * as messageDb from './db/messages';

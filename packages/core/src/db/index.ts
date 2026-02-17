@@ -17,7 +17,6 @@ export type { IDatabase, SqlDialect, QueryResult } from './adapters/types';
 export * as conversationDb from './conversations';
 export * as codebaseDb from './codebases';
 export * as sessionDb from './sessions';
-export * as commandTemplateDb from './command-templates';
 export * as isolationEnvDb from './isolation-environments';
 export * as workflowDb from './workflows';
 
@@ -26,6 +25,5 @@ export * from './conversations';
 export * from './codebases';
 export { SessionNotFoundError } from './sessions';
 export * from './sessions';
-export * from './command-templates';
 export * from './isolation-environments';
 export * from './workflows';

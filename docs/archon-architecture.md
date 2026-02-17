@@ -34,7 +34,7 @@ Archon is the unified directory and configuration system for the remote-coding-a
 
 ```
 any-repo/.archon/
-├── commands/                 # Custom command templates
+├── commands/                 # Custom commands
 │   ├── plan.md
 │   └── execute.md
 ├── workflows/                # Future: workflow definitions
@@ -43,7 +43,7 @@ any-repo/.archon/
 ```
 
 **Purpose:**
-- `commands/` - Slash command templates (auto-loaded on clone)
+- `commands/` - Slash commands (auto-loaded on clone)
 - `workflows/` - Future workflow engine definitions
 - `config.yaml` - Project-specific settings
 

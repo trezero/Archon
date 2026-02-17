@@ -8,7 +8,7 @@
 - No multi-tenant complexity
 - Commands versioned with Git (not stored in database)
 - All credentials in environment variables only
-- 8-table database schema (see Database Schema section)
+- 7-table database schema (see Database Schema section)
 
 **User-Controlled Workflows**
 - Manual phase transitions via slash commands
@@ -342,21 +342,19 @@ import * as core from '@archon/core';  // Don't do this
 
 ### Database Schema
 
-**8 Tables (all prefixed with `remote_agent_`):**
+**7 Tables (all prefixed with `remote_agent_`):**
 1. **`codebases`** - Repository metadata and commands (JSONB)
 2. **`conversations`** - Track platform conversations with titles and soft-delete support
 3. **`sessions`** - Track AI SDK sessions with resume capability
-4. **`command_templates`** - Global command templates (manually added via `/template-add`)
-5. **`isolation_environments`** - Git worktree isolation tracking
-6. **`workflow_runs`** - Workflow execution tracking and state
-7. **`workflow_events`** - Step-level workflow event log (step transitions, artifacts, errors)
-8. **`messages`** - Conversation message history with tool call metadata (JSONB)
+4. **`isolation_environments`** - Git worktree isolation tracking
+5. **`workflow_runs`** - Workflow execution tracking and state
+6. **`workflow_events`** - Step-level workflow event log (step transitions, artifacts, errors)
+7. **`messages`** - Conversation message history with tool call metadata (JSONB)
 
 **Key Patterns:**
 - Conversation ID format: Platform-specific (`thread_ts`, `chat_id`, `user/repo#123`)
 - One active session per conversation
 - Codebase commands stored in filesystem, paths in `codebases.commands` JSONB
-- Global templates stored in database, added via `/template-add`
 
 **Session Transitions:**
 - Sessions are immutable - transitions create new linked sessions
@@ -513,7 +511,7 @@ All Archon-managed files are organized under a dedicated namespace:
 **Repo-level (`.archon/` in any repository):**
 ```
 .archon/
-├── commands/       # Custom command templates
+├── commands/       # Custom commands
 ├── workflows/      # Future: workflow definitions
 └── config.yaml     # Repo-specific configuration
 ```
@@ -658,12 +656,7 @@ log.warn({ envVar: 'MISSING_KEY' }, 'optional_config_missing');
    - Auto-detected via `/clone` or `/load-commands <folder>`
    - Invoked via `/command-invoke <name> [args]`
 
-2. **Global Templates** (database):
-   - Stored in `remote_agent_command_templates` table
-   - Added via `/template-add <name> <file-path>`
-   - Invoked directly via `/<name> [args]`
-
-3. **Workflows** (YAML-based):
+2. **Workflows** (YAML-based):
    - Stored in `.archon/workflows/` (searched recursively)
    - Multi-step AI execution chains, discovered at runtime
    - Provider inherited from `.archon/config.yaml` unless explicitly set

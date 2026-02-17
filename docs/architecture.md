@@ -1040,12 +1040,6 @@ remote_agent_sessions
 ├── transition_reason (TEXT) -- Why this session was created (TransitionTrigger)
 └── metadata (JSONB) -- {lastCommand: "plan-feature", ...}
 
-remote_agent_command_templates
-├── id (UUID)
-├── name (VARCHAR, UNIQUE)
-├── description (TEXT)
-└── content (TEXT)
-
 remote_agent_isolation_environments
 ├── id (UUID)
 ├── codebase_id (UUID → remote_agent_codebases.id)
