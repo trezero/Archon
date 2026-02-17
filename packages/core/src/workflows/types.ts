@@ -18,11 +18,13 @@ export type ArtifactType = 'pr' | 'commit' | 'file_created' | 'file_modified' | 
  */
 export interface SingleStep {
   command: string;
-  clearContext?: boolean; // For sequential: controls session. For parallel: always fresh (ignored)
+  /** Controls session continuity between steps. When true, creates a fresh session.
+   *  Only applies to sequential execution; parallel blocks always use fresh sessions. */
+  clearContext?: boolean;
 }
 
 /**
- * Step definition from YAML workflow file (alias for backward compatibility)
+ * @deprecated Use SingleStep directly. Alias kept for external consumers.
  */
 export type StepDefinition = SingleStep;
 
@@ -74,7 +76,7 @@ interface WorkflowBase {
 
 /** Step-based workflow - sequential command execution */
 interface StepWorkflow extends WorkflowBase {
-  readonly steps: readonly WorkflowStep[]; // Changed from StepDefinition[]
+  readonly steps: readonly WorkflowStep[];
   loop?: never;
   prompt?: never;
 }
@@ -140,8 +142,18 @@ export type WorkflowExecutionResult =
   | { success: false; workflowRunId?: string; error: string };
 
 /**
- * Result of workflow discovery - distinguishes "no workflows" from "error loading"
+ * Error encountered while loading a workflow file
  */
-export type DiscoverWorkflowsResult =
-  | { success: true; workflows: WorkflowDefinition[] }
-  | { success: false; error: string };
+export interface WorkflowLoadError {
+  readonly filename: string;
+  readonly error: string;
+  readonly errorType: 'read_error' | 'parse_error' | 'validation_error';
+}
+
+/**
+ * Result of workflow discovery - includes both successful loads and errors
+ */
+export interface WorkflowLoadResult {
+  readonly workflows: readonly WorkflowDefinition[];
+  readonly errors: readonly WorkflowLoadError[];
+}

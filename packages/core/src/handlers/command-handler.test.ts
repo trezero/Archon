@@ -200,7 +200,10 @@ function setupSpies(): void {
   spyFsRm = spyOn(fsPromises, 'rm').mockImplementation(() => Promise.resolve());
 
   // Workflow spies
-  spyDiscoverWorkflows = spyOn(workflows, 'discoverWorkflows').mockResolvedValue([]);
+  spyDiscoverWorkflows = spyOn(workflows, 'discoverWorkflows').mockResolvedValue({
+    workflows: [],
+    errors: [],
+  });
 }
 
 // Restore all spies
@@ -1810,6 +1813,200 @@ describe('CommandHandler', () => {
       });
     });
 
+    describe('/workflow list', () => {
+      const conversationWithCodebase: Conversation = {
+        ...baseConversation,
+        codebase_id: 'codebase-123',
+      };
+
+      beforeEach(() => {
+        mockGetCodebase.mockResolvedValue({
+          id: 'codebase-123',
+          repository_url: 'https://github.com/test/repo',
+          default_cwd: '/workspace/test-repo',
+          commands: {},
+          created_at: new Date(),
+          updated_at: new Date(),
+        });
+      });
+
+      test('should show load errors alongside workflows', async () => {
+        spyDiscoverWorkflows.mockResolvedValueOnce({
+          workflows: [
+            { name: 'assist', description: 'General assistant', steps: [{ command: 'assist' }] },
+          ],
+          errors: [
+            {
+              filename: 'broken.yaml',
+              error: 'YAML parse error: unexpected token',
+              errorType: 'parse_error' as const,
+            },
+          ],
+        });
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow list');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('assist');
+        expect(result.message).toContain('1 workflow(s) failed to load');
+        expect(result.message).toContain('broken.yaml');
+        expect(result.message).toContain('YAML parse error');
+      });
+
+      test('should show only errors when no workflows loaded', async () => {
+        spyDiscoverWorkflows.mockResolvedValueOnce({
+          workflows: [],
+          errors: [
+            {
+              filename: 'bad.yaml',
+              error: "Missing required field 'name'",
+              errorType: 'validation_error' as const,
+            },
+          ],
+        });
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow list');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('1 workflow(s) failed to load');
+        expect(result.message).toContain('bad.yaml');
+      });
+
+      test('should truncate errors at 10 and show count', async () => {
+        const errors = Array.from({ length: 15 }, (_, i) => ({
+          filename: `broken-${String(i)}.yaml`,
+          error: `Error in file ${String(i)}`,
+          errorType: 'parse_error' as const,
+        }));
+
+        spyDiscoverWorkflows.mockResolvedValueOnce({
+          workflows: [],
+          errors,
+        });
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow list');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('15 workflow(s) failed to load');
+        expect(result.message).toContain('broken-0.yaml');
+        expect(result.message).toContain('broken-9.yaml');
+        expect(result.message).not.toContain('broken-10.yaml');
+        expect(result.message).toContain('and 5 more');
+      });
+    });
+
+    describe('/workflow reload', () => {
+      const conversationWithCodebase: Conversation = {
+        ...baseConversation,
+        codebase_id: 'codebase-123',
+      };
+
+      beforeEach(() => {
+        mockGetCodebase.mockResolvedValue({
+          id: 'codebase-123',
+          repository_url: 'https://github.com/test/repo',
+          default_cwd: '/workspace/test-repo',
+          commands: {},
+          created_at: new Date(),
+          updated_at: new Date(),
+        });
+      });
+
+      test('should show error count on reload', async () => {
+        spyDiscoverWorkflows.mockResolvedValueOnce({
+          workflows: [
+            { name: 'assist', description: 'General assistant', steps: [{ command: 'assist' }] },
+          ],
+          errors: [
+            {
+              filename: 'broken.yaml',
+              error: 'YAML parse error',
+              errorType: 'parse_error' as const,
+            },
+            {
+              filename: 'invalid.yml',
+              error: "Missing 'steps'",
+              errorType: 'validation_error' as const,
+            },
+          ],
+        });
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow reload');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Discovered 1 workflow(s)');
+        expect(result.message).toContain('2 failed to load');
+        expect(result.message).toContain('broken.yaml');
+        expect(result.message).toContain('invalid.yml');
+      });
+
+      test('should show clean reload when no errors', async () => {
+        spyDiscoverWorkflows.mockResolvedValueOnce({
+          workflows: [
+            { name: 'assist', description: 'General assistant', steps: [{ command: 'assist' }] },
+          ],
+          errors: [],
+        });
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow reload');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Discovered 1 workflow(s)');
+        expect(result.message).not.toContain('failed to load');
+      });
+    });
+
+    describe('/workflow run with load errors', () => {
+      const conversationWithCodebase: Conversation = {
+        ...baseConversation,
+        codebase_id: 'codebase-123',
+      };
+
+      beforeEach(() => {
+        mockGetCodebase.mockResolvedValue({
+          id: 'codebase-123',
+          repository_url: 'https://github.com/test/repo',
+          default_cwd: '/workspace/test-repo',
+          commands: {},
+          created_at: new Date(),
+          updated_at: new Date(),
+        });
+      });
+
+      test('should show load error when workflow failed to parse', async () => {
+        spyDiscoverWorkflows.mockResolvedValueOnce({
+          workflows: [],
+          errors: [
+            {
+              filename: 'fix-issue.yaml',
+              error: 'YAML parse error near line 5',
+              errorType: 'parse_error' as const,
+            },
+          ],
+        });
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow run fix-issue');
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('failed to load');
+        expect(result.message).toContain('YAML parse error near line 5');
+      });
+
+      test('should match workflow name case-insensitively', async () => {
+        spyDiscoverWorkflows.mockResolvedValueOnce({
+          workflows: [
+            { name: 'assist', description: 'General assistant', steps: [{ command: 'assist' }] },
+          ],
+          errors: [],
+        });
+
+        const result = await handleCommand(conversationWithCodebase, '/workflow run Assist');
+
+        expect(result.success).toBe(true);
+        expect(result.workflow?.name).toBe('assist');
+      });
+    });
+
     describe('/workflow cancel', () => {
       const conversationWithCodebase: Conversation = {
         ...baseConversation,
@@ -2046,13 +2243,16 @@ describe('CommandHandler', () => {
       });
 
       test('should return error when workflow is not found', async () => {
-        spyDiscoverWorkflows.mockResolvedValueOnce([
-          {
-            name: 'existing-workflow',
-            description: 'An existing workflow',
-            steps: [{ command: 'assist', args: 'test' }],
-          },
-        ]);
+        spyDiscoverWorkflows.mockResolvedValueOnce({
+          workflows: [
+            {
+              name: 'existing-workflow',
+              description: 'An existing workflow',
+              steps: [{ command: 'assist', args: 'test' }],
+            },
+          ],
+          errors: [],
+        });
 
         const result = await handleCommand(conversationWithCodebase, '/workflow run nonexistent');
 
@@ -2062,13 +2262,16 @@ describe('CommandHandler', () => {
       });
 
       test('should return success with workflow info when workflow is found', async () => {
-        spyDiscoverWorkflows.mockResolvedValueOnce([
-          {
-            name: 'test-workflow',
-            description: 'A test workflow',
-            steps: [{ command: 'assist', args: 'do something' }],
-          },
-        ]);
+        spyDiscoverWorkflows.mockResolvedValueOnce({
+          workflows: [
+            {
+              name: 'test-workflow',
+              description: 'A test workflow',
+              steps: [{ command: 'assist', args: 'do something' }],
+            },
+          ],
+          errors: [],
+        });
 
         const result = await handleCommand(conversationWithCodebase, '/workflow run test-workflow');
 
@@ -2080,13 +2283,16 @@ describe('CommandHandler', () => {
       });
 
       test('should pass arguments to workflow', async () => {
-        spyDiscoverWorkflows.mockResolvedValueOnce([
-          {
-            name: 'fix-issue',
-            description: 'Fix a GitHub issue',
-            steps: [{ command: 'assist', args: 'fix $ARGUMENTS' }],
-          },
-        ]);
+        spyDiscoverWorkflows.mockResolvedValueOnce({
+          workflows: [
+            {
+              name: 'fix-issue',
+              description: 'Fix a GitHub issue',
+              steps: [{ command: 'assist', args: 'fix $ARGUMENTS' }],
+            },
+          ],
+          errors: [],
+        });
 
         const result = await handleCommand(
           conversationWithCodebase,

@@ -662,6 +662,8 @@ log.warn({ envVar: 'MISSING_KEY' }, 'optional_config_missing');
    - Multi-step AI execution chains, discovered at runtime
    - Provider inherited from `.archon/config.yaml` unless explicitly set
    - Commands: `/workflow list`, `/workflow reload`, `/workflow status`, `/workflow cancel`
+   - Resilient loading: One broken YAML doesn't abort discovery; errors shown in `/workflow list`
+   - Router uses case-insensitive matching and provides helpful errors for unknown workflows
 
 **Defaults:**
 - Bundled in `.archon/commands/defaults/` and `.archon/workflows/defaults/`

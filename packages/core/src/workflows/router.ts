@@ -73,7 +73,7 @@ function buildContextSection(context?: RouterContext): string {
  */
 export function buildRouterPrompt(
   userMessage: string,
-  workflows: WorkflowDefinition[],
+  workflows: readonly WorkflowDefinition[],
   context?: RouterContext
 ): string {
   if (workflows.length === 0) {
@@ -143,6 +143,8 @@ Do NOT include any other text before or after. Just the command.`;
 export interface WorkflowInvocation {
   workflowName: string | null;
   remainingMessage: string;
+  /** Error message when workflow name was detected but didn't match */
+  error?: string;
 }
 
 /**
@@ -150,7 +152,7 @@ export interface WorkflowInvocation {
  */
 export function parseWorkflowInvocation(
   message: string,
-  workflows: WorkflowDefinition[]
+  workflows: readonly WorkflowDefinition[]
 ): WorkflowInvocation {
   const trimmed = message.trim();
 
@@ -162,19 +164,34 @@ export function parseWorkflowInvocation(
   if (match) {
     const workflowName = match[1];
 
-    // Validate workflow exists
+    // Exact match
     const workflow = workflows.find(w => w.name === workflowName);
-
     if (workflow) {
       // Use match.index to handle multiline matches where command isn't at position 0
       const remainingMessage = trimmed.slice(match.index + match[0].length).trim();
-      return {
-        workflowName,
-        remainingMessage,
-      };
+      return { workflowName, remainingMessage };
     }
 
-    getLog().warn({ workflowName }, 'unknown_workflow');
+    // Case-insensitive match
+    const caseMatch = workflows.find(w => w.name.toLowerCase() === workflowName.toLowerCase());
+    if (caseMatch) {
+      getLog().info(
+        { requested: workflowName, matched: caseMatch.name },
+        'workflow_case_insensitive_match'
+      );
+      const remainingMessage = trimmed.slice(match.index + match[0].length).trim();
+      return { workflowName: caseMatch.name, remainingMessage };
+    }
+
+    // No match - build helpful error
+    const available = workflows.map(w => w.name);
+    getLog().warn({ workflowName, available }, 'unknown_workflow');
+
+    return {
+      workflowName: null,
+      remainingMessage: message,
+      error: `Unknown workflow: \`${workflowName}\`. Available: ${available.map(n => `\`${n}\``).join(', ')}`,
+    };
   }
 
   return {
@@ -188,7 +205,7 @@ export function parseWorkflowInvocation(
  */
 export function findWorkflow(
   name: string,
-  workflows: WorkflowDefinition[]
+  workflows: readonly WorkflowDefinition[]
 ): WorkflowDefinition | undefined {
   return workflows.find(w => w.name === name);
 }

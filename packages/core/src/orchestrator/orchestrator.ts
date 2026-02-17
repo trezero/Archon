@@ -422,7 +422,7 @@ interface WorkflowRoutingContext {
   originalMessage: string;
   conversationDbId: string;
   codebaseId?: string;
-  availableWorkflows: WorkflowDefinition[];
+  availableWorkflows: readonly WorkflowDefinition[];
   /**
    * GitHub issue/PR context built from webhook events.
    * Contains formatted markdown with: issue title, author, labels, and body.
@@ -443,9 +443,9 @@ interface WorkflowRoutingContext {
 
 /**
  * Attempt to route an AI response to a workflow.
- * Returns true if a workflow was successfully matched and execution was initiated,
- * false if routing was not applicable (no workflows available, no workflow invocation
- * detected, or workflow not found).
+ * Returns true if the response was handled (workflow executed or error sent to user),
+ * false if routing was not applicable (no workflows available or no workflow invocation
+ * detected in the response).
  */
 async function tryWorkflowRouting(
   ctx: WorkflowRoutingContext,
@@ -455,18 +455,32 @@ async function tryWorkflowRouting(
     return false;
   }
 
-  const { workflowName, remainingMessage } = parseWorkflowInvocation(
+  const { workflowName, remainingMessage, error } = parseWorkflowInvocation(
     aiResponse,
     ctx.availableWorkflows
   );
 
   if (!workflowName) {
+    if (error) {
+      getLog().warn({ error }, 'workflow_routing_failed');
+      await ctx.platform.sendMessage(ctx.conversationId, error);
+      return true; // Suppress raw AI output containing the invalid /invoke-workflow command
+    }
     return false;
   }
 
   const workflow = findWorkflow(workflowName, ctx.availableWorkflows);
   if (!workflow) {
-    return false;
+    // Should be unreachable since parseWorkflowInvocation validates against the same list
+    getLog().error(
+      { workflowName, available: ctx.availableWorkflows.map(w => w.name) },
+      'workflow_find_failed_after_parse'
+    );
+    await ctx.platform.sendMessage(
+      ctx.conversationId,
+      `Internal error: workflow \`${workflowName}\` was matched but could not be found. Please try again.`
+    );
+    return true; // Suppress raw AI output
   }
 
   getLog().info({ workflowName }, 'workflow_routing');
@@ -683,7 +697,7 @@ export async function handleMessage(
     // Parse command upfront if it's a slash command
     let promptToSend = message;
     let commandName: string | null = null;
-    let availableWorkflows: WorkflowDefinition[] = [];
+    let availableWorkflows: readonly WorkflowDefinition[] = [];
 
     if (message.startsWith('/')) {
       const { command, args } = commandHandler.parseCommand(message);
@@ -751,9 +765,10 @@ export async function handleMessage(
           const cwd = conversation.cwd ?? codebase.default_cwd;
 
           // Discover and find the workflow (with error handling)
-          let workflows: WorkflowDefinition[];
+          let workflows: readonly WorkflowDefinition[];
           try {
-            workflows = await discoverWorkflows(cwd);
+            const result = await discoverWorkflows(cwd);
+            workflows = result.workflows;
           } catch (error) {
             const err = error as Error;
             getLog().error({ err, workflowName, cwd }, 'workflow_discovery_failed');
@@ -901,7 +916,7 @@ export async function handleMessage(
         return;
       }
 
-      // Discover workflows (returns array, no global state)
+      // Discover workflows (stateless - returns result with workflows + errors)
       // Use conversation.cwd if set, otherwise codebase default
       const codebaseForWorkflows = await codebaseDb.getCodebase(conversation.codebase_id);
       if (codebaseForWorkflows) {
@@ -911,7 +926,15 @@ export async function handleMessage(
           // Sync .archon from canonical repo to worktree if needed
           await syncArchonToWorktree(workflowCwd);
 
-          availableWorkflows = await discoverWorkflows(workflowCwd);
+          const { workflows: discovered, errors: loadErrors } =
+            await discoverWorkflows(workflowCwd);
+          availableWorkflows = discovered;
+          if (loadErrors.length > 0) {
+            getLog().warn(
+              { errorCount: loadErrors.length, errors: loadErrors },
+              'workflow_load_errors'
+            );
+          }
           getLog().debug(
             { count: availableWorkflows.length, workflows: availableWorkflows.map(w => w.name) },
             'workflow_discovery_complete'

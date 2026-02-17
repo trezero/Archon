@@ -16,7 +16,7 @@ const mockLogger = {
 
 // Mock the @archon/core modules
 mock.module('@archon/core', () => ({
-  discoverWorkflows: mock(() => Promise.resolve([])),
+  discoverWorkflows: mock(() => Promise.resolve({ workflows: [], errors: [] })),
   executeWorkflow: mock(() => Promise.resolve({ success: true, workflowRunId: 'test-run-id' })),
   registerRepository: mock(() =>
     Promise.resolve({
@@ -61,7 +61,10 @@ describe('workflowListCommand', () => {
 
   it('should display message when no workflows found', async () => {
     const { discoverWorkflows } = await import('@archon/core');
-    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce([]);
+    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [],
+      errors: [],
+    });
 
     await workflowListCommand('/test/path');
 
@@ -71,10 +74,13 @@ describe('workflowListCommand', () => {
 
   it('should list workflows with names and descriptions', async () => {
     const { discoverWorkflows } = await import('@archon/core');
-    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce([
-      { name: 'assist', description: 'General assistance workflow', steps: [] },
-      { name: 'plan', description: 'Create implementation plan', provider: 'claude', steps: [] },
-    ]);
+    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [
+        { name: 'assist', description: 'General assistance workflow', steps: [] },
+        { name: 'plan', description: 'Create implementation plan', provider: 'claude', steps: [] },
+      ],
+      errors: [],
+    });
 
     await workflowListCommand('/test/path');
 
@@ -113,7 +119,10 @@ describe('workflowRunCommand', () => {
 
   it('should throw error when no workflows found', async () => {
     const { discoverWorkflows } = await import('@archon/core');
-    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce([]);
+    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [],
+      errors: [],
+    });
 
     await expect(workflowRunCommand('/test/path', 'assist', 'hello')).rejects.toThrow(
       'No workflows found in .archon/workflows/'
@@ -122,10 +131,13 @@ describe('workflowRunCommand', () => {
 
   it('should throw error when workflow not found', async () => {
     const { discoverWorkflows } = await import('@archon/core');
-    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce([
-      { name: 'assist', description: 'Help', steps: [] },
-      { name: 'plan', description: 'Plan', steps: [] },
-    ]);
+    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [
+        { name: 'assist', description: 'Help', steps: [] },
+        { name: 'plan', description: 'Plan', steps: [] },
+      ],
+      errors: [],
+    });
 
     await expect(workflowRunCommand('/test/path', 'nonexistent', 'hello')).rejects.toThrow(
       "Workflow 'nonexistent' not found"
@@ -134,10 +146,13 @@ describe('workflowRunCommand', () => {
 
   it('should include available workflows in error when workflow not found', async () => {
     const { discoverWorkflows } = await import('@archon/core');
-    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce([
-      { name: 'assist', description: 'Help', steps: [] },
-      { name: 'plan', description: 'Plan', steps: [] },
-    ]);
+    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [
+        { name: 'assist', description: 'Help', steps: [] },
+        { name: 'plan', description: 'Plan', steps: [] },
+      ],
+      errors: [],
+    });
 
     try {
       await workflowRunCommand('/test/path', 'nonexistent', 'hello');
@@ -153,9 +168,10 @@ describe('workflowRunCommand', () => {
     const { discoverWorkflows } = await import('@archon/core');
     const conversationDb = await import('@archon/core/db/conversations');
 
-    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce([
-      { name: 'assist', description: 'Help', steps: [] },
-    ]);
+    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [{ name: 'assist', description: 'Help', steps: [] }],
+      errors: [],
+    });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockRejectedValueOnce(
       new Error('Connection refused')
     );
@@ -170,9 +186,10 @@ describe('workflowRunCommand', () => {
     const conversationDb = await import('@archon/core/db/conversations');
     const codebaseDb = await import('@archon/core/db/codebases');
 
-    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce([
-      { name: 'assist', description: 'Help', steps: [] },
-    ]);
+    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [{ name: 'assist', description: 'Help', steps: [] }],
+      errors: [],
+    });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
       id: 'conv-123',
     });
@@ -203,9 +220,10 @@ describe('workflowRunCommand', () => {
     const conversationDb = await import('@archon/core/db/conversations');
     const codebaseDb = await import('@archon/core/db/codebases');
 
-    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce([
-      { name: 'assist', description: 'Help', steps: [] },
-    ]);
+    (discoverWorkflows as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [{ name: 'assist', description: 'Help', steps: [] }],
+      errors: [],
+    });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
       id: 'conv-123',
     });

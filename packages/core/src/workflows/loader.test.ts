@@ -63,7 +63,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'test.yaml'), validYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].name).toBe('test-workflow');
@@ -88,7 +89,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'legacy.yaml'), legacyYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].steps[0].command).toBe('plan');
@@ -105,7 +107,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'invalid.yaml'), invalidYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -120,7 +123,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'invalid.yaml'), invalidYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -135,7 +139,8 @@ steps: []
 `;
       await writeFile(join(workflowDir, 'invalid.yaml'), invalidYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -151,7 +156,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'test.yaml'), yamlNoProvider);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].provider).toBeUndefined();
@@ -169,7 +175,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'test.yaml'), yamlInvalidProvider);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       // Invalid provider treated as undefined - executor will fall back to config
       expect(workflows).toHaveLength(1);
@@ -189,14 +196,16 @@ steps:
 `;
       await writeFile(join(workflowDir, 'workflow.yaml'), validYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].name).toBe('discovered');
     });
 
     it('should return empty array when no workflow folders exist', async () => {
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
       expect(workflows).toHaveLength(0);
     });
 
@@ -217,7 +226,8 @@ steps:
       await writeFile(join(workflowDir, 'one.yaml'), yaml1);
       await writeFile(join(workflowDir, 'two.yml'), yaml2);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(2);
     });
@@ -242,7 +252,8 @@ steps:
       await writeFile(join(workflowDir, 'root.yaml'), rootWorkflow);
       await writeFile(join(defaultsDir, 'sub.yaml'), subWorkflow);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(2);
       const names = workflows.map(w => w.name).sort();
@@ -262,7 +273,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'invalid.yaml'), pathTraversalYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -278,7 +290,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'dotfile.yaml'), dotfileYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -294,7 +307,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'backslash.yaml'), backslashYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -314,7 +328,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'valid.yaml'), validYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].steps).toHaveLength(5);
@@ -333,7 +348,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'partial.yaml'), partiallyInvalidYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       // Entire workflow should be rejected
       expect(workflows).toHaveLength(0);
@@ -356,7 +372,8 @@ steps:
       await writeFile(join(workflowDir, 'config.json'), '{}');
       await writeFile(join(workflowDir, '.gitkeep'), '');
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].name).toBe('valid-workflow');
@@ -374,7 +391,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'malformed.yaml'), malformedYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       // Should not throw, just return empty array
       expect(workflows).toHaveLength(0);
@@ -396,7 +414,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'full.yaml'), fullWorkflow);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].provider).toBe('codex');
@@ -408,7 +427,8 @@ steps:
       await mkdir(workflowDir, { recursive: true });
       // Directory exists but is empty
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -422,7 +442,8 @@ description: Missing steps
 `;
       await writeFile(join(workflowDir, 'nosteps.yaml'), noSteps);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -438,7 +459,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'nulltest.yaml'), nullValues);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       // Should fail validation due to null description
       expect(workflows).toHaveLength(0);
@@ -460,7 +482,8 @@ prompt: Do work. Output <promise>COMPLETE</promise> when done.
 `;
       await writeFile(join(workflowDir, 'loop.yaml'), loopYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].name).toBe('loop-workflow');
@@ -487,7 +510,8 @@ prompt: This should fail.
 `;
       await writeFile(join(workflowDir, 'both.yaml'), bothYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -504,7 +528,8 @@ loop:
 `;
       await writeFile(join(workflowDir, 'noprompt.yaml'), noPromptYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -521,7 +546,8 @@ prompt: Do work.
 `;
       await writeFile(join(workflowDir, 'nountil.yaml'), noUntilYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -538,7 +564,8 @@ prompt: Do work.
 `;
       await writeFile(join(workflowDir, 'nomax.yaml'), noMaxYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -556,7 +583,8 @@ prompt: Do work.
 `;
       await writeFile(join(workflowDir, 'zeromax.yaml'), zeroMaxYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -574,7 +602,8 @@ prompt: Do work.
 `;
       await writeFile(join(workflowDir, 'negativemax.yaml'), negativeMaxYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -592,7 +621,8 @@ prompt: Do work.
 `;
       await writeFile(join(workflowDir, 'defaultfresh.yaml'), defaultFreshYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].loop!.fresh_context).toBe(false);
@@ -612,7 +642,8 @@ prompt: Do work.
 `;
       await writeFile(join(workflowDir, 'freshtrue.yaml'), freshTrueYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].loop!.fresh_context).toBe(true);
@@ -628,7 +659,8 @@ provider: claude
 `;
       await writeFile(join(workflowDir, 'neither.yaml'), neitherYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -646,7 +678,8 @@ prompt: Do work.
 `;
       await writeFile(join(workflowDir, 'emptyuntil.yaml'), emptyUntilYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -664,7 +697,8 @@ prompt: Do work.
 `;
       await writeFile(join(workflowDir, 'whitespaceuntil.yaml'), whitespaceUntilYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -682,7 +716,8 @@ prompt: ""
 `;
       await writeFile(join(workflowDir, 'emptyprompt.yaml'), emptyPromptYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -707,7 +742,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'parallel.yaml'), parallelYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].name).toBe('parallel-test');
@@ -748,7 +784,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'mixed.yaml'), mixedYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].steps).toHaveLength(5);
@@ -767,7 +804,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'empty-parallel.yaml'), emptyParallelYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -787,7 +825,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'nested.yaml'), nestedYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -806,7 +845,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'parallel-clear.yaml'), clearContextYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].steps).toHaveLength(1);
@@ -831,7 +871,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'invalid-command.yaml'), invalidCommandYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(0);
     });
@@ -849,7 +890,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'only-parallel.yaml'), onlyParallelYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].steps).toHaveLength(1);
@@ -868,7 +910,8 @@ steps:
 `;
       await writeFile(join(workflowDir, 'single-parallel.yaml'), singleParallelYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].steps).toHaveLength(1);
@@ -894,7 +937,8 @@ steps:
       });
 
       // Test dir has no .archon/workflows/
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       // Should load the real archon-* prefixed app defaults
       expect(workflows.length).toBeGreaterThanOrEqual(1);
@@ -926,7 +970,8 @@ steps:
       // Use exact same filename as app default to override
       await writeFile(join(repoWorkflowDir, 'archon-assist.yaml'), repoWorkflowYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       // Should have the repo version, not the app default
       const assistWorkflow = workflows.find(
@@ -954,7 +999,8 @@ steps:
         },
       });
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       // Should NOT find any archon-* workflows since app defaults are disabled
       const archonWorkflow = workflows.find(w => w.name.startsWith('archon-'));
@@ -983,7 +1029,8 @@ steps:
 `;
       await writeFile(join(repoWorkflowDir, 'my-custom.yaml'), repoWorkflowYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       // Should have both app defaults and repo workflows
       const archonAssist = workflows.find(w => w.name === 'archon-assist');
@@ -1019,7 +1066,8 @@ steps:
         defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
       });
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       // Should load bundled workflows
       expect(workflows.length).toBeGreaterThanOrEqual(1);
@@ -1043,7 +1091,8 @@ steps:
         defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: false },
       });
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       // Should not have any bundled defaults
       const archonWorkflow = workflows.find(w => w.name.startsWith('archon-'));
@@ -1075,7 +1124,8 @@ steps:
 `;
       await writeFile(join(repoWorkflowDir, 'archon-assist.yaml'), repoWorkflowYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       // Repo workflow should override bundled default
       const assistWorkflow = workflows.find(
@@ -1110,13 +1160,163 @@ steps:
 `;
       await writeFile(join(repoWorkflowDir, 'my-repo.yaml'), repoWorkflowYaml);
 
-      const workflows = await discoverWorkflows(testDir);
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
 
       // Should have both bundled and repo workflows
       const archonAssist = workflows.find(w => w.name === 'archon-assist');
       const repoWorkflow = workflows.find(w => w.name === 'my-repo-workflow');
       expect(archonAssist).toBeDefined();
       expect(repoWorkflow).toBeDefined();
+    });
+  });
+
+  describe('error accumulation', () => {
+    it('should return errors for YAML missing name', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'invalid.yaml'),
+        'description: Missing name\nsteps:\n  - command: plan\n'
+      );
+
+      const result = await discoverWorkflows(testDir);
+
+      expect(result.workflows).toHaveLength(0);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].filename).toBe('invalid.yaml');
+      expect(result.errors[0].errorType).toBe('validation_error');
+      expect(result.errors[0].error).toContain('name');
+    });
+
+    it('should load valid workflows and report errors for invalid ones', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'good.yaml'),
+        'name: good\ndescription: Works\nsteps:\n  - command: plan\n'
+      );
+      await writeFile(
+        join(workflowDir, 'bad.yaml'),
+        'description: Bad name type\nsteps:\n  - command: plan\n'
+      );
+
+      const result = await discoverWorkflows(testDir);
+
+      expect(result.workflows).toHaveLength(1);
+      expect(result.workflows[0].name).toBe('good');
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].filename).toBe('bad.yaml');
+    });
+
+    it('should return empty errors array when all workflows are valid', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'valid.yaml'),
+        'name: valid\ndescription: Valid\nsteps:\n  - command: plan\n'
+      );
+
+      const result = await discoverWorkflows(testDir);
+
+      expect(result.workflows).toHaveLength(1);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('should return empty errors when no workflows exist', async () => {
+      const result = await discoverWorkflows(testDir);
+
+      expect(result.workflows).toHaveLength(0);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('should report YAML parse errors', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(join(workflowDir, 'broken.yaml'), 'name: test\ninvalid: [');
+
+      const result = await discoverWorkflows(testDir);
+
+      expect(result.workflows).toHaveLength(0);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].filename).toBe('broken.yaml');
+      expect(result.errors[0].errorType).toBe('parse_error');
+      expect(result.errors[0].error).toContain('YAML parse error');
+    });
+
+    it('should accumulate errors from subdirectories', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      const subDir = join(workflowDir, 'sub');
+      await mkdir(subDir, { recursive: true });
+
+      // Invalid in root
+      await writeFile(
+        join(workflowDir, 'root-bad.yaml'),
+        'description: No name\nsteps:\n  - command: plan\n'
+      );
+      // Invalid in subdirectory
+      await writeFile(join(subDir, 'sub-bad.yaml'), 'name: sub\nsteps:\n  - command: plan\n');
+
+      const result = await discoverWorkflows(testDir);
+
+      expect(result.workflows).toHaveLength(0);
+      expect(result.errors).toHaveLength(2);
+      const filenames = result.errors.map(e => e.filename).sort();
+      expect(filenames).toEqual(['root-bad.yaml', 'sub-bad.yaml']);
+    });
+
+    it('should report validation error for empty YAML content', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(join(workflowDir, 'empty.yaml'), '');
+
+      const result = await discoverWorkflows(testDir);
+
+      expect(result.workflows).toHaveLength(0);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].filename).toBe('empty.yaml');
+      expect(result.errors[0].errorType).toBe('validation_error');
+      expect(result.errors[0].error).toContain('empty');
+    });
+
+    it('should report validation error for YAML that parses to non-object', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(join(workflowDir, 'scalar.yaml'), 'just a string');
+
+      const result = await discoverWorkflows(testDir);
+
+      expect(result.workflows).toHaveLength(0);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].filename).toBe('scalar.yaml');
+      expect(result.errors[0].error).toContain('empty');
+    });
+
+    it('should report directory read errors for non-ENOENT failures', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      // Create a file where a directory is expected (causes ENOTDIR on readdir)
+      await writeFile(join(workflowDir, 'not-a-dir'), 'file content');
+
+      // Create a YAML file that references the fake dir as a subdirectory
+      // The loader recurses into directories, so create a setup that triggers readdir error
+      // Simplest: create a workflow dir, then a symlink to nowhere
+      const brokenLink = join(workflowDir, 'broken-subdir');
+      const { symlink } = await import('fs/promises');
+      await symlink('/nonexistent/path', brokenLink);
+
+      const result = await discoverWorkflows(testDir);
+
+      // The symlink stat will fail, producing a read_error
+      const readErrors = result.errors.filter(e => e.errorType === 'read_error');
+      expect(readErrors.length).toBeGreaterThanOrEqual(1);
     });
   });
 });

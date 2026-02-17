@@ -61,7 +61,7 @@ const mockGetAssistantClient = mock(() => null);
 const mockReadCommandFile = mock(() => Promise.resolve(''));
 
 // Mock for workflow discovery
-const mockDiscoverWorkflows = mock(() => Promise.resolve([]));
+const mockDiscoverWorkflows = mock(() => Promise.resolve({ workflows: [], errors: [] }));
 
 // Mock for workflow execution
 const mockExecuteWorkflow = mock(() => Promise.resolve());
@@ -1062,7 +1062,7 @@ describe('orchestrator', () => {
         ...mockConversation,
         cwd: '/worktree/custom-path',
       });
-      mockDiscoverWorkflows.mockResolvedValue([]);
+      mockDiscoverWorkflows.mockResolvedValue({ workflows: [], errors: [] });
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
       });
@@ -1085,7 +1085,7 @@ describe('orchestrator', () => {
       mockIsolationEnvGetById.mockResolvedValue(null);
       mockIsolationEnvCountByCodebase.mockResolvedValue(100); // Over limit
 
-      mockDiscoverWorkflows.mockResolvedValue([]);
+      mockDiscoverWorkflows.mockResolvedValue({ workflows: [], errors: [] });
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
       });
@@ -1112,7 +1112,7 @@ describe('orchestrator', () => {
         ...mockConversation,
         cwd: '/worktree/custom-path',
       });
-      mockDiscoverWorkflows.mockResolvedValue([]);
+      mockDiscoverWorkflows.mockResolvedValue({ workflows: [], errors: [] });
       mockSyncArchonToWorktree.mockResolvedValue(false);
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
@@ -1126,7 +1126,7 @@ describe('orchestrator', () => {
       });
       mockDiscoverWorkflows.mockImplementation(async () => {
         callOrder.push('discoverWorkflows');
-        return [];
+        return { workflows: [], errors: [] };
       });
 
       await handleMessage(platform, 'chat-456', 'help me with this feature');
@@ -1155,7 +1155,7 @@ describe('orchestrator', () => {
 
     beforeEach(() => {
       // Enable workflow discovery to trigger router context code path
-      mockDiscoverWorkflows.mockResolvedValue(testWorkflows);
+      mockDiscoverWorkflows.mockResolvedValue({ workflows: testWorkflows, errors: [] });
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
       });
@@ -1535,7 +1535,7 @@ Labels: correct`;
       platform.sendMessage.mockClear();
 
       // Default: workflows available
-      mockDiscoverWorkflows.mockResolvedValue(testWorkflows);
+      mockDiscoverWorkflows.mockResolvedValue({ workflows: testWorkflows, errors: [] });
     });
 
     test('routes message to workflow when AI responds with /invoke-workflow', async () => {
@@ -1569,7 +1569,7 @@ Labels: correct`;
     });
 
     test('does not route when no workflows available', async () => {
-      mockDiscoverWorkflows.mockResolvedValue([]);
+      mockDiscoverWorkflows.mockResolvedValue({ workflows: [], errors: [] });
       mockAIResponse('/invoke-workflow fix-bug\nAttempting to route...');
 
       await handleMessage(platform, 'chat-456', 'fix the login bug');
@@ -1602,16 +1602,18 @@ Labels: correct`;
       expect(sentMessages).not.toContain('fix-bug');
     });
 
-    test('handles unknown workflow name gracefully', async () => {
+    test('handles unknown workflow name by sending error to user', async () => {
       mockAIResponse('/invoke-workflow unknown-workflow\nTrying to route...');
 
       await handleMessage(platform, 'chat-456', 'help me');
 
       expect(mockExecuteWorkflow).not.toHaveBeenCalled();
-      expect(platform.sendMessage).toHaveBeenCalledWith(
-        'chat-456',
-        '/invoke-workflow unknown-workflow\nTrying to route...'
-      );
+      // Should send error message with available workflows, not the raw AI response
+      const sentMessages = platform.sendMessage.mock.calls.map(call => call[1]);
+      expect(sentMessages).toHaveLength(1);
+      expect(sentMessages[0]).toContain('Unknown workflow');
+      expect(sentMessages[0]).toContain('unknown-workflow');
+      expect(sentMessages[0]).toContain('Available');
     });
 
     test('passes correct WorkflowRoutingContext', async () => {

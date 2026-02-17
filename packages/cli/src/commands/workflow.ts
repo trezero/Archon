@@ -7,6 +7,7 @@ import {
   getIsolationProvider,
   registerRepository,
   createLogger,
+  type WorkflowLoadResult,
 } from '@archon/core';
 import * as conversationDb from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
@@ -40,9 +41,10 @@ function generateConversationId(): string {
 }
 
 /**
- * Load workflows from cwd with standardized error handling
+ * Load workflows from cwd with standardized error handling.
+ * Returns the WorkflowLoadResult with both workflows and errors.
  */
-async function loadWorkflows(cwd: string): Promise<Awaited<ReturnType<typeof discoverWorkflows>>> {
+async function loadWorkflows(cwd: string): Promise<WorkflowLoadResult> {
   try {
     return await discoverWorkflows(cwd);
   } catch (error) {
@@ -59,21 +61,31 @@ async function loadWorkflows(cwd: string): Promise<Awaited<ReturnType<typeof dis
 export async function workflowListCommand(cwd: string): Promise<void> {
   console.log(`Discovering workflows in: ${cwd}`);
 
-  const workflows = await loadWorkflows(cwd);
+  const { workflows, errors } = await loadWorkflows(cwd);
 
-  if (workflows.length === 0) {
+  if (workflows.length === 0 && errors.length === 0) {
     console.log('\nNo workflows found.');
     console.log('Workflows should be in .archon/workflows/ directory.');
     return;
   }
 
-  console.log(`\nFound ${String(workflows.length)} workflow(s):\n`);
+  if (workflows.length > 0) {
+    console.log(`\nFound ${String(workflows.length)} workflow(s):\n`);
 
-  for (const workflow of workflows) {
-    console.log(`  ${workflow.name}`);
-    console.log(`    ${workflow.description}`);
-    if (workflow.provider) {
-      console.log(`    Provider: ${workflow.provider}`);
+    for (const workflow of workflows) {
+      console.log(`  ${workflow.name}`);
+      console.log(`    ${workflow.description}`);
+      if (workflow.provider) {
+        console.log(`    Provider: ${workflow.provider}`);
+      }
+      console.log('');
+    }
+  }
+
+  if (errors.length > 0) {
+    console.log(`\n${String(errors.length)} workflow(s) failed to load:\n`);
+    for (const e of errors) {
+      console.log(`  ${e.filename}: ${e.error}`);
     }
     console.log('');
   }
@@ -88,16 +100,38 @@ export async function workflowRunCommand(
   userMessage: string,
   options: WorkflowRunOptions = {}
 ): Promise<void> {
-  const workflows = await loadWorkflows(cwd);
+  const { workflows, errors } = await loadWorkflows(cwd);
 
-  if (workflows.length === 0) {
+  if (workflows.length === 0 && errors.length === 0) {
     throw new Error('No workflows found in .archon/workflows/');
   }
 
-  // Find the requested workflow
-  const workflow = workflows.find(w => w.name === workflowName);
+  // Find the requested workflow (exact match first, then case-insensitive)
+  let workflow = workflows.find(w => w.name === workflowName);
+  if (!workflow) {
+    const caseMatch = workflows.find(w => w.name.toLowerCase() === workflowName.toLowerCase());
+    if (caseMatch) {
+      getLog().info(
+        { requested: workflowName, matched: caseMatch.name },
+        'workflow_run_case_insensitive_match'
+      );
+      workflow = caseMatch;
+    }
+  }
 
   if (!workflow) {
+    // Check if the requested workflow had a load error
+    const loadError = errors.find(
+      e =>
+        e.filename.replace(/\.ya?ml$/, '') === workflowName ||
+        e.filename === `${workflowName}.yaml` ||
+        e.filename === `${workflowName}.yml`
+    );
+    if (loadError) {
+      throw new Error(
+        `Workflow '${workflowName}' failed to load: ${loadError.error}\n\nFix the YAML file and try again.`
+      );
+    }
     const availableWorkflows = workflows.map(w => `  - ${w.name}`).join('\n');
     throw new Error(
       `Workflow '${workflowName}' not found.\n\nAvailable workflows:\n${availableWorkflows}`

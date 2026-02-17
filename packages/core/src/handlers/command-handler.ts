@@ -22,7 +22,7 @@ import {
 } from '../services/cleanup-service';
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
 import { discoverWorkflows } from '../workflows';
-import { isSingleStep, type WorkflowDefinition } from '../workflows/types';
+import { isSingleStep, type WorkflowDefinition, type WorkflowLoadError } from '../workflows/types';
 import * as workflowDb from '../db/workflows';
 import { getTriggerForCommand, type DeactivatingCommand } from '../state/session-transitions';
 import { SessionNotFoundError } from '../db/sessions';
@@ -1387,9 +1387,9 @@ export async function handleCommand(
         case 'list':
         case 'ls': {
           // Discover and list workflows
-          const workflows = await discoverWorkflows(codebase.default_cwd);
+          const { workflows, errors } = await discoverWorkflows(codebase.default_cwd);
 
-          if (workflows.length === 0) {
+          if (workflows.length === 0 && errors.length === 0) {
             return {
               success: true,
               message:
@@ -1397,12 +1397,27 @@ export async function handleCommand(
             };
           }
 
-          let msg = 'Available Workflows:\n\n';
-          for (const w of workflows) {
-            const stepsOrLoop = w.loop
-              ? `Loop: until \`${w.loop.until}\` (max ${String(w.loop.max_iterations)} iterations)`
-              : `Steps: ${w.steps?.map(s => (isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`)).join(' -> ') ?? 'none'}`;
-            msg += `**\`${w.name}\`**\n  ${w.description}\n  ${stepsOrLoop}\n\n`;
+          let msg = '';
+
+          if (workflows.length > 0) {
+            msg += 'Available Workflows:\n\n';
+            for (const w of workflows) {
+              const stepsOrLoop = w.loop
+                ? `Loop: until \`${w.loop.until}\` (max ${String(w.loop.max_iterations)} iterations)`
+                : `Steps: ${w.steps?.map(s => (isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`)).join(' -> ') ?? 'none'}`;
+              msg += `**\`${w.name}\`**\n  ${w.description}\n  ${stepsOrLoop}\n\n`;
+            }
+          }
+
+          if (errors.length > 0) {
+            const displayErrors = errors.slice(0, 10);
+            msg += `\n---\n\n**${String(errors.length)} workflow(s) failed to load:**\n\n`;
+            for (const e of displayErrors) {
+              msg += `- \`${e.filename}\`: ${e.error}\n`;
+            }
+            if (errors.length > 10) {
+              msg += `\n...and ${String(errors.length - 10)} more\n`;
+            }
           }
 
           return { success: true, message: msg };
@@ -1410,11 +1425,15 @@ export async function handleCommand(
 
         case 'reload': {
           // Force reload workflows (discovery is stateless, just confirms they load correctly)
-          const workflows = await discoverWorkflows(codebase.default_cwd);
-          return {
-            success: true,
-            message: `Discovered ${String(workflows.length)} workflow(s).`,
-          };
+          const { workflows, errors } = await discoverWorkflows(codebase.default_cwd);
+          let msg = `Discovered ${String(workflows.length)} workflow(s).`;
+          if (errors.length > 0) {
+            msg += `\n\n**${String(errors.length)} failed to load:**\n`;
+            for (const e of errors) {
+              msg += `- \`${e.filename}\`: ${e.error}\n`;
+            }
+          }
+          return { success: true, message: msg };
         }
 
         case 'cancel': {
@@ -1503,9 +1522,12 @@ export async function handleCommand(
           );
 
           // Discover workflows with error handling
-          let workflows: WorkflowDefinition[];
+          let workflows: readonly WorkflowDefinition[];
+          let loadErrors: readonly WorkflowLoadError[];
           try {
-            workflows = await discoverWorkflows(codebase.default_cwd);
+            const result = await discoverWorkflows(codebase.default_cwd);
+            workflows = result.workflows;
+            loadErrors = result.errors;
           } catch (error) {
             const err = error as Error;
             getLog().error({ err, cwd: codebase.default_cwd }, 'workflow_discovery_failed');
@@ -1524,9 +1546,35 @@ export async function handleCommand(
             'workflows_discovered'
           );
 
-          const workflow = workflows.find(w => w.name === workflowName);
+          // Exact match first, then case-insensitive
+          let workflow = workflows.find(w => w.name === workflowName);
+          if (!workflow) {
+            const caseMatch = workflows.find(
+              w => w.name.toLowerCase() === workflowName.toLowerCase()
+            );
+            if (caseMatch) {
+              getLog().info(
+                { requested: workflowName, matched: caseMatch.name },
+                'workflow_run_case_insensitive_match'
+              );
+              workflow = caseMatch;
+            }
+          }
 
           if (!workflow) {
+            // Check if the requested workflow had a load error
+            const loadError = loadErrors.find(
+              e =>
+                e.filename.replace(/\.ya?ml$/, '') === workflowName ||
+                e.filename === `${workflowName}.yaml` ||
+                e.filename === `${workflowName}.yml`
+            );
+            if (loadError) {
+              return {
+                success: false,
+                message: `Workflow \`${workflowName}\` failed to load: ${loadError.error}\n\nFix the YAML file and try again.`,
+              };
+            }
             getLog().warn(
               { requested: workflowName, available: workflows.map(w => w.name) },
               'workflow_not_found'
@@ -1537,14 +1585,14 @@ export async function handleCommand(
             };
           }
 
-          getLog().info({ workflow: workflowName, args: workflowArgs }, 'workflow_starting');
+          getLog().info({ workflow: workflow.name, args: workflowArgs }, 'workflow_starting');
 
           // Return special result that triggers workflow execution in orchestrator
           return {
             success: true,
-            message: `Starting workflow: \`${workflowName}\``,
+            message: `Starting workflow: \`${workflow.name}\``,
             workflow: {
-              name: workflowName,
+              name: workflow.name,
               args: workflowArgs,
             },
           };

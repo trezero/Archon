@@ -114,7 +114,7 @@ The user wants to add a new authentication system.`;
       expect(result.remainingMessage).toBe(response);
     });
 
-    it('should return null workflow when workflow name not found', () => {
+    it('should return null workflow with error when workflow name not found', () => {
       const response = `/invoke-workflow non-existent-workflow
 Some intent here.`;
 
@@ -122,6 +122,8 @@ Some intent here.`;
 
       expect(result.workflowName).toBeNull();
       expect(result.remainingMessage).toBe(response);
+      expect(result.error).toContain('non-existent-workflow');
+      expect(result.error).toContain('Available');
     });
 
     it('should extract remainingMessage from text after /invoke-workflow', () => {
@@ -251,6 +253,51 @@ function broken() {
 
       // Workflow names are case-sensitive
       expect(workflow).toBeUndefined();
+    });
+  });
+
+  describe('error information', () => {
+    it('should return error message for unknown workflow', () => {
+      const response = '/invoke-workflow non-existent';
+      const result = parseWorkflowInvocation(response, testWorkflows);
+
+      expect(result.workflowName).toBeNull();
+      expect(result.error).toContain('non-existent');
+      expect(result.error).toContain('Available');
+      expect(result.error).toContain('fix-bug');
+    });
+
+    it('should match workflow names case-insensitively', () => {
+      const response = '/invoke-workflow Fix-Bug';
+      const result = parseWorkflowInvocation(response, testWorkflows);
+
+      expect(result.workflowName).toBe('fix-bug');
+      expect(result.error).toBeUndefined();
+    });
+
+    it('should not have error when no /invoke-workflow pattern found', () => {
+      const response = 'Just a normal message';
+      const result = parseWorkflowInvocation(response, testWorkflows);
+
+      expect(result.workflowName).toBeNull();
+      expect(result.error).toBeUndefined();
+    });
+
+    it('should prefer exact match over case-insensitive match', () => {
+      const response = '/invoke-workflow fix-bug';
+      const result = parseWorkflowInvocation(response, testWorkflows);
+
+      expect(result.workflowName).toBe('fix-bug');
+      expect(result.error).toBeUndefined();
+    });
+
+    it('should include all available workflow names in error', () => {
+      const response = '/invoke-workflow unknown';
+      const result = parseWorkflowInvocation(response, testWorkflows);
+
+      expect(result.error).toContain('fix-bug');
+      expect(result.error).toContain('add-feature');
+      expect(result.error).toContain('feature-development');
     });
   });
 

@@ -81,7 +81,8 @@ export {
   type StepResult,
   type LoadCommandResult,
   type WorkflowExecutionResult,
-  type DiscoverWorkflowsResult,
+  type WorkflowLoadError,
+  type WorkflowLoadResult,
 } from './workflows/types';
 
 // Loader

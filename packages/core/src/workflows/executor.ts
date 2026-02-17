@@ -341,6 +341,7 @@ export function isValidCommandName(name: string): boolean {
  * @param cwd - Working directory (repo root)
  * @param commandName - Name of the command (without .md extension)
  * @param configuredFolder - Optional additional folder from config to search
+ * @returns On success: `{ success: true, content }`. On failure: `{ success: false, reason, message }`.
  */
 async function loadCommandPrompt(
   cwd: string,

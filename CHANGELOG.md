@@ -9,9 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Workflow error visibility** - `/workflow list` and `/workflow reload` now show per-file load errors (#260, #263, #264)
+- **Case-insensitive workflow routing** - Router falls back to case-insensitive match before reporting unknown workflow (#263)
+
 ### Changed
 
+- **Resilient workflow loading** - One broken YAML no longer aborts loading all workflows; errors accumulated and reported (#260)
+
 ### Fixed
+
+- **Router error feedback** - Users now see clear error messages with available workflow names instead of raw `/invoke-workflow` output (#263)
 
 ## [0.2.2] - 2026-01-22
 
