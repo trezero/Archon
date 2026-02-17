@@ -10,7 +10,7 @@ import {
   Events,
   ThreadAutoArchiveDuration,
 } from 'discord.js';
-import type { IPlatformAdapter } from '@archon/core';
+import type { IPlatformAdapter, MessageMetadata } from '@archon/core';
 import { isDiscordUserAuthorized, createLogger } from '@archon/core';
 import { parseAllowedUserIds } from '@archon/core/utils/discord-auth';
 
@@ -59,7 +59,11 @@ export class DiscordAdapter implements IPlatformAdapter {
    * Send a message to a Discord channel
    * Automatically splits messages longer than 2000 characters
    */
-  async sendMessage(channelId: string, message: string): Promise<void> {
+  async sendMessage(
+    channelId: string,
+    message: string,
+    _metadata?: MessageMetadata
+  ): Promise<void> {
     getLog().debug({ channelId, messageLength: message.length }, 'send_message');
 
     const channel = await this.client.channels.fetch(channelId);

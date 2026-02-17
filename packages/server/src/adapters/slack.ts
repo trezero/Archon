@@ -3,7 +3,7 @@
  * Handles message sending with markdown block formatting for AI responses
  */
 import { App, LogLevel } from '@slack/bolt';
-import type { IPlatformAdapter } from '@archon/core';
+import type { IPlatformAdapter, MessageMetadata } from '@archon/core';
 import { isSlackUserAuthorized, createLogger } from '@archon/core';
 import { parseAllowedUserIds } from '@archon/core/utils/slack-auth';
 
@@ -58,7 +58,11 @@ export class SlackAdapter implements IPlatformAdapter {
    * Uses markdown block for proper formatting of AI responses
    * Automatically splits messages longer than 12000 characters
    */
-  async sendMessage(channelId: string, message: string): Promise<void> {
+  async sendMessage(
+    channelId: string,
+    message: string,
+    _metadata?: MessageMetadata
+  ): Promise<void> {
     getLog().debug({ channelId, messageLength: message.length }, 'send_message');
 
     // Parse channelId - may include thread_ts as "channel:thread_ts"

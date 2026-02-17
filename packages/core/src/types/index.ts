@@ -112,11 +112,21 @@ export interface CommandResult {
  * Generic platform adapter interface
  * Allows supporting multiple platforms (Telegram, Slack, GitHub, etc.)
  */
+export interface MessageMetadata {
+  category?:
+    | 'tool_call_formatted'
+    | 'workflow_status'
+    | 'workflow_dispatch_status'
+    | 'isolation_context';
+  segment?: 'new' | 'auto';
+  workflowDispatch?: { workerConversationId: string; workflowName: string };
+}
+
 export interface IPlatformAdapter {
   /**
    * Send a message to the platform
    */
-  sendMessage(conversationId: string, message: string): Promise<void>;
+  sendMessage(conversationId: string, message: string, metadata?: MessageMetadata): Promise<void>;
 
   /**
    * Ensure responses go to a thread, creating one if needed.

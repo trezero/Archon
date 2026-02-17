@@ -696,7 +696,8 @@ describe('orchestrator', () => {
       expect(platform.sendMessage).toHaveBeenNthCalledWith(
         1,
         'chat-456',
-        expect.stringContaining('BASH')
+        expect.stringContaining('BASH'),
+        expect.objectContaining({ category: 'tool_call_formatted' })
       );
       // After workflow check, each accumulated message is sent
       expect(platform.sendMessage).toHaveBeenNthCalledWith(2, 'chat-456', 'First chunk');
@@ -1606,6 +1607,43 @@ Labels: correct`;
       expect(platform.sendMessage).toHaveBeenCalledWith(
         'chat-456',
         'I will investigate and fix the bug.'
+      );
+    });
+
+    test('sends dispatch status with workflowDispatch metadata for web workflows', async () => {
+      platform.getPlatformType.mockReturnValue('web');
+
+      const sendStructuredEvent = mock(() => Promise.resolve());
+      const setConversationDbId = mock(() => undefined);
+      const setupEventBridge = mock(() => () => undefined);
+
+      const webPlatform = platform as MockPlatformAdapter & {
+        sendStructuredEvent: typeof sendStructuredEvent;
+        setConversationDbId: typeof setConversationDbId;
+        setupEventBridge: typeof setupEventBridge;
+      };
+
+      webPlatform.sendStructuredEvent = sendStructuredEvent;
+      webPlatform.setConversationDbId = setConversationDbId;
+      webPlatform.setupEventBridge = setupEventBridge;
+
+      mockAIResponse('/invoke-workflow fix-bug\nI will investigate and fix the bug.');
+
+      await handleMessage(platform, 'chat-456', 'fix the login bug');
+
+      const dispatchCall = platform.sendMessage.mock.calls.find(call =>
+        String(call[1]).includes('Dispatching workflow')
+      );
+      expect(dispatchCall).toBeDefined();
+      expect(dispatchCall?.[2]).toEqual(
+        expect.objectContaining({
+          category: 'workflow_dispatch_status',
+          segment: 'new',
+          workflowDispatch: {
+            workerConversationId: expect.any(String),
+            workflowName: 'fix-bug',
+          },
+        })
       );
     });
 

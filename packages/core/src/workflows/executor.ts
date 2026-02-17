@@ -3,7 +3,7 @@
  */
 import { readFile, access, mkdir } from 'fs/promises';
 import { join } from 'path';
-import type { IPlatformAdapter, TokenUsage } from '../types';
+import type { IPlatformAdapter, MessageMetadata, TokenUsage } from '../types';
 import { getAssistantClient } from '../clients/factory';
 import * as workflowDb from '../db/workflows';
 import * as codebaseDb from '../db/codebases';
@@ -274,10 +274,11 @@ async function safeSendMessage(
   conversationId: string,
   message: string,
   context?: SendMessageContext,
-  unknownErrorTracker?: UnknownErrorTracker
+  unknownErrorTracker?: UnknownErrorTracker,
+  metadata?: MessageMetadata
 ): Promise<boolean> {
   try {
-    await platform.sendMessage(conversationId, message);
+    await platform.sendMessage(conversationId, message, metadata);
     if (unknownErrorTracker) unknownErrorTracker.count = 0;
     return true;
   } catch (error) {
@@ -324,11 +325,12 @@ async function sendCriticalMessage(
   conversationId: string,
   message: string,
   context?: SendMessageContext,
-  maxRetries = 3
+  maxRetries = 3,
+  metadata?: MessageMetadata
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      await platform.sendMessage(conversationId, message);
+      await platform.sendMessage(conversationId, message, metadata);
       return true;
     } catch (error) {
       const err = error as Error;
@@ -760,7 +762,8 @@ async function executeStepInternal(
             conversationId,
             toolMessage,
             messageContext,
-            unknownErrorTracker
+            unknownErrorTracker,
+            { category: 'tool_call_formatted' }
           );
           if (!sent) droppedMessageCount++;
 
@@ -1208,7 +1211,8 @@ async function executeLoopWorkflow(
               conversationId,
               toolMessage,
               workflowContext,
-              unknownErrorTracker
+              unknownErrorTracker,
+              { category: 'tool_call_formatted' }
             );
             if (!sent) droppedMessageCount++;
           }
@@ -1278,7 +1282,9 @@ async function executeLoopWorkflow(
           platform,
           conversationId,
           `✅ **Loop complete**: \`${workflow.name}\` (${String(i)} iterations)`,
-          workflowContext
+          workflowContext,
+          undefined,
+          { category: 'workflow_status', segment: 'new' }
         );
 
         // Safety net: Commit any uncommitted artifacts before returning
@@ -1581,7 +1587,7 @@ export async function executeWorkflow(
       workflowId: workflowRun.id,
     };
 
-    // Build consolidated startup message
+    // Build startup message
     let startupMessage = '';
 
     // Add isolation context to startup message
@@ -1592,7 +1598,14 @@ export async function executeWorkflow(
         startupMessage += `Reviewing PR at commit \`${prSha.substring(0, 7)}\` (branch: \`${prBranch}\`)\n\n`;
       } else if (branchName) {
         const repoName = cwd.split(/[/\\]/).pop() || 'repository';
-        startupMessage += `📍 ${repoName} @ \`${branchName}\`\n\n`;
+        await sendCriticalMessage(
+          platform,
+          conversationId,
+          `📍 ${repoName} @ \`${branchName}\``,
+          workflowContext,
+          2,
+          { category: 'isolation_context', segment: 'new' }
+        );
       } else {
         getLog().warn(
           {
@@ -1629,7 +1642,8 @@ export async function executeWorkflow(
       conversationId,
       startupMessage,
       workflowContext,
-      2 // maxRetries=2 means 2 total attempts (1 initial + 1 retry), 1s max delay
+      2, // maxRetries=2 means 2 total attempts (1 initial + 1 retry), 1s max delay
+      { category: 'workflow_status', segment: 'new' }
     );
     if (!startupSent) {
       getLog().error(
@@ -1940,7 +1954,9 @@ export async function executeWorkflow(
         platform,
         conversationId,
         `✅ **Workflow complete**: \`${workflow.name}\``,
-        workflowContext
+        workflowContext,
+        undefined,
+        { category: 'workflow_status', segment: 'new' }
       );
     } else {
       getLog().debug(

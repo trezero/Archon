@@ -563,7 +563,12 @@ async function dispatchBackgroundWorkflow(
   // 3. Notify parent chat that workflow is dispatching
   await ctx.platform.sendMessage(
     ctx.conversationId,
-    `\u{1F680} Dispatching workflow: **${workflow.name}** (background)`
+    `🚀 Dispatching workflow: **${workflow.name}** (background)`,
+    {
+      category: 'workflow_dispatch_status',
+      segment: 'new',
+      workflowDispatch: { workerConversationId: workerPlatformId, workflowName: workflow.name },
+    }
   );
 
   // Narrow to web adapter for web-specific operations
@@ -1156,7 +1161,9 @@ export async function handleMessage(
           allMessages.push(msg.content);
         } else if (msg.type === 'tool' && msg.toolName) {
           const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
-          await platform.sendMessage(conversationId, toolMessage);
+          await platform.sendMessage(conversationId, toolMessage, {
+            category: 'tool_call_formatted',
+          });
 
           // Send structured event to adapters that support it (Web UI)
           if (platform.sendStructuredEvent) {

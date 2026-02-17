@@ -24,6 +24,7 @@ export {
   type IPlatformAdapter,
   type IWebPlatformAdapter,
   isWebAdapter,
+  type MessageMetadata,
   type MessageChunk,
   type IAssistantClient,
 } from './types';

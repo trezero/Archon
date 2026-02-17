@@ -2,7 +2,7 @@
  * CLI adapter for stdout output
  * Implements IPlatformAdapter to allow workflow execution via command line
  */
-import type { IPlatformAdapter } from '@archon/core';
+import type { IPlatformAdapter, MessageMetadata } from '@archon/core';
 
 /** Configuration options for CLIAdapter */
 export interface CLIAdapterOptions {
@@ -17,7 +17,11 @@ export class CLIAdapter implements IPlatformAdapter {
     this.streamingMode = options?.streamingMode ?? 'batch';
   }
 
-  async sendMessage(_conversationId: string, message: string): Promise<void> {
+  async sendMessage(
+    _conversationId: string,
+    message: string,
+    _metadata?: MessageMetadata
+  ): Promise<void> {
     // Output to stdout
     console.log(message);
   }

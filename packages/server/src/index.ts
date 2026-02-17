@@ -21,6 +21,9 @@ if (dotenvResult.error) {
 import { Hono } from 'hono';
 import { TelegramAdapter } from './adapters/telegram';
 import { WebAdapter } from './adapters/web';
+import { MessagePersistence } from './adapters/web/persistence';
+import { SSETransport } from './adapters/web/transport';
+import { WorkflowEventBridge } from './adapters/web/workflow-bridge';
 import { GitHubAdapter } from './adapters/github';
 import { DiscordAdapter } from './adapters/discord';
 import { SlackAdapter } from './adapters/slack';
@@ -145,7 +148,19 @@ async function main(): Promise<void> {
   getLog().info({ maxConcurrent }, 'lock_manager_initialized');
 
   // Initialize web adapter (always enabled)
-  const webAdapter = new WebAdapter();
+  // Note: Circular references between transport/persistence/workflowBridge are safe because:
+  // - transport's cleanup callback references persistence/workflowBridge (declared after, but
+  //   only invoked from a 60s timer — well after all constructors complete)
+  // - persistence's emitEvent closure references transport.emit (same lazy pattern)
+  const transport = new SSETransport(conversationId => {
+    persistence.clearConversation(conversationId);
+    workflowBridge.clearConversation(conversationId);
+  });
+  const persistence = new MessagePersistence((conversationId, event) =>
+    transport.emit(conversationId, event)
+  );
+  const workflowBridge = new WorkflowEventBridge(transport);
+  const webAdapter = new WebAdapter(transport, persistence, workflowBridge);
   await webAdapter.start();
 
   // Check that at least one platform is configured

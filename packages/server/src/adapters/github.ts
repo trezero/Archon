@@ -8,7 +8,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { readdir, access } from 'fs/promises';
 import { join } from 'path';
-import type { IPlatformAdapter, IsolationHints } from '@archon/core';
+import type { IPlatformAdapter, IsolationHints, MessageMetadata } from '@archon/core';
 import {
   ConversationNotFoundError,
   handleMessage,
@@ -130,7 +130,11 @@ export class GitHubAdapter implements IPlatformAdapter {
    * Splits long messages into paragraph-based chunks.
    * Throws on failure so caller can handle appropriately.
    */
-  async sendMessage(conversationId: string, message: string): Promise<void> {
+  async sendMessage(
+    conversationId: string,
+    message: string,
+    _metadata?: MessageMetadata
+  ): Promise<void> {
     const parsed = this.parseConversationId(conversationId);
     if (!parsed) {
       getLog().error({ conversationId }, 'invalid_conversation_id');

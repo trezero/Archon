@@ -3,7 +3,7 @@
  * Handles message sending with 4096 character limit splitting
  */
 import { Telegraf, Context } from 'telegraf';
-import type { IPlatformAdapter } from '@archon/core';
+import type { IPlatformAdapter, MessageMetadata } from '@archon/core';
 import {
   parseTelegramAllowedUserIds,
   isTelegramUserAuthorized,
@@ -67,7 +67,7 @@ export class TelegramAdapter implements IPlatformAdapter {
    * - Long messages: Split by paragraphs, format each chunk independently
    *   (paragraphs rarely have formatting that spans across them)
    */
-  async sendMessage(chatId: string, message: string): Promise<void> {
+  async sendMessage(chatId: string, message: string, _metadata?: MessageMetadata): Promise<void> {
     const id = parseInt(chatId);
     getLog().debug({ chatId, messageLength: message.length }, 'send_message');
 

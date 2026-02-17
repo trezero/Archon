@@ -1,10 +1,10 @@
-import type { IPlatformAdapter } from '../../types';
+import type { IPlatformAdapter, MessageMetadata } from '../../types';
 import { mock, type Mock } from 'bun:test';
 
 export class MockPlatformAdapter implements IPlatformAdapter {
-  public sendMessage: Mock<(conversationId: string, message: string) => Promise<void>> = mock(() =>
-    Promise.resolve()
-  );
+  public sendMessage: Mock<
+    (conversationId: string, message: string, metadata?: MessageMetadata) => Promise<void>
+  > = mock(() => Promise.resolve());
   public ensureThread: Mock<
     (originalConversationId: string, messageContext?: unknown) => Promise<string>
   > = mock((originalConversationId: string) => Promise.resolve(originalConversationId));
