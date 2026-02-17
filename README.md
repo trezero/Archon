@@ -154,8 +154,9 @@ Optional: Use PostgreSQL instead of SQLite:
 ```bash
 docker compose --profile with-db up -d postgres
 # Set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/remote_coding_agent in .env
-psql $DATABASE_URL < migrations/000_combined.sql
 ```
+
+> **Note:** The database schema is created automatically on first container startup via the mounted migration file. No manual `psql` step is needed for fresh Docker installs.
 
 ### Option 3: Self-Hosted Production
 
