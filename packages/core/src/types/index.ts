@@ -190,11 +190,13 @@ export function isWebAdapter(adapter: IPlatformAdapter): adapter is IWebPlatform
  * Message chunk from AI assistant.
  * Discriminated union with per-type required fields for type safety.
  */
+export type TokenUsage = { input: number; output: number; total?: number; cost?: number };
+
 export type MessageChunk =
   | { type: 'assistant'; content: string }
   | { type: 'system'; content: string }
   | { type: 'thinking'; content: string }
-  | { type: 'result'; sessionId?: string }
+  | { type: 'result'; sessionId?: string; tokens?: TokenUsage }
   | { type: 'tool'; toolName: string; toolInput?: Record<string, unknown> }
   | { type: 'workflow_dispatch'; workerConversationId: string; workflowName: string };
 

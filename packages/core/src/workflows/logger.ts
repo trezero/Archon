@@ -3,6 +3,7 @@
  */
 import { appendFile, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
+import type { TokenUsage } from '../types';
 import { createLogger } from '../utils/logger';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -25,6 +26,7 @@ export interface WorkflowEvent {
     | 'step_error'
     | 'assistant'
     | 'tool'
+    | 'validation'
     | 'parallel_block_start'
     | 'parallel_block_complete';
   workflow_id: string;
@@ -37,6 +39,10 @@ export interface WorkflowEvent {
   content?: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
+  duration_ms?: number;
+  tokens?: TokenUsage;
+  check?: string;
+  result?: 'pass' | 'fail' | 'warn' | 'unknown';
   error?: string;
   ts: string;
 }
@@ -124,12 +130,15 @@ export async function logStepComplete(
   logDir: string,
   workflowRunId: string,
   stepName: string,
-  stepIndex: number
+  stepIndex: number,
+  meta?: { durationMs?: number; tokens?: TokenUsage }
 ): Promise<void> {
   await logWorkflowEvent(logDir, workflowRunId, {
     type: 'step_complete',
     step: stepName,
     step_index: stepIndex,
+    ...(meta?.durationMs !== undefined ? { duration_ms: meta.durationMs } : {}),
+    ...(meta?.tokens ? { tokens: meta.tokens } : {}),
   });
 }
 
@@ -160,6 +169,30 @@ export async function logTool(
     type: 'tool',
     tool_name: toolName,
     tool_input: toolInput,
+  });
+}
+
+/**
+ * Log validation check result
+ */
+export async function logValidation(
+  logDir: string,
+  workflowRunId: string,
+  payload: {
+    check: string;
+    result: 'pass' | 'fail' | 'warn' | 'unknown';
+    error?: string;
+    step?: string;
+    stepIndex?: number;
+  }
+): Promise<void> {
+  await logWorkflowEvent(logDir, workflowRunId, {
+    type: 'validation',
+    check: payload.check,
+    result: payload.result,
+    error: payload.error,
+    step: payload.step,
+    step_index: payload.stepIndex,
   });
 }
 

@@ -6,7 +6,7 @@
  * dynamic import workaround that was needed for CommonJS/Node.js.
  */
 import { Codex } from '@openai/codex-sdk';
-import { IAssistantClient, MessageChunk } from '../types';
+import { IAssistantClient, MessageChunk, TokenUsage } from '../types';
 import { createLogger } from '../utils/logger';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -50,6 +50,47 @@ function buildThreadOptions(cwd: string): CodexThreadOptions {
     sandboxMode: 'danger-full-access', // Full filesystem access (needed for git worktree operations)
     networkAccessEnabled: true, // Allow network calls (GitHub CLI, HTTP requests)
     approvalPolicy: 'never', // Auto-approve all operations without user confirmation
+  };
+}
+
+function extractUsageFromCodexEvent(event: unknown): TokenUsage | undefined {
+  const usage =
+    (event as { usage?: unknown })?.usage ??
+    (event as { response?: { usage?: unknown } })?.response?.usage;
+  if (!usage || typeof usage !== 'object') return undefined;
+
+  const usageObj = usage as Record<string, unknown>;
+  const input =
+    typeof usageObj.input_tokens === 'number'
+      ? usageObj.input_tokens
+      : typeof usageObj.prompt_tokens === 'number'
+        ? usageObj.prompt_tokens
+        : typeof usageObj.input === 'number'
+          ? usageObj.input
+          : undefined;
+  const output =
+    typeof usageObj.output_tokens === 'number'
+      ? usageObj.output_tokens
+      : typeof usageObj.completion_tokens === 'number'
+        ? usageObj.completion_tokens
+        : typeof usageObj.output === 'number'
+          ? usageObj.output
+          : undefined;
+  const total =
+    typeof usageObj.total_tokens === 'number'
+      ? usageObj.total_tokens
+      : typeof usageObj.total === 'number'
+        ? usageObj.total
+        : undefined;
+  const cost = typeof usageObj.cost === 'number' ? usageObj.cost : undefined;
+
+  if (input === undefined || output === undefined) return undefined;
+
+  return {
+    input,
+    output,
+    ...(total !== undefined ? { total } : {}),
+    ...(cost !== undefined ? { cost } : {}),
   };
 }
 
@@ -185,7 +226,15 @@ export class CodexClient implements IAssistantClient {
         if (event.type === 'turn.completed') {
           getLog().debug('turn_completed');
           // Yield result with thread ID for persistence
-          yield { type: 'result', sessionId: thread.id ?? undefined };
+          const usage = extractUsageFromCodexEvent(event);
+          if (!usage) {
+            getLog().debug({ eventType: event.type }, 'usage_not_provided');
+          }
+          yield {
+            type: 'result',
+            sessionId: thread.id ?? undefined,
+            ...(usage ? { tokens: usage } : {}),
+          };
           // CRITICAL: Break out of event loop - turn is complete!
           // Without this, the loop waits for stream to end (causes 90s timeout)
           break;

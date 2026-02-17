@@ -3,7 +3,7 @@
  */
 import { readFile, access, mkdir } from 'fs/promises';
 import { join } from 'path';
-import type { IPlatformAdapter } from '../types';
+import type { IPlatformAdapter, TokenUsage } from '../types';
 import { getAssistantClient } from '../clients/factory';
 import * as workflowDb from '../db/workflows';
 import * as codebaseDb from '../db/codebases';
@@ -28,11 +28,13 @@ import {
   logStepComplete,
   logAssistant,
   logTool,
+  logValidation,
   logWorkflowError,
   logWorkflowComplete,
   logParallelBlockStart,
   logParallelBlockComplete,
 } from './logger';
+import { parseValidationResults } from './validation-parser';
 import { getWorkflowEventEmitter } from './event-emitter';
 import * as workflowEventDb from '../db/workflow-events';
 
@@ -88,6 +90,52 @@ const TRANSIENT_PATTERNS = [
  */
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeToolInput(
+  toolName: string,
+  toolInput?: Record<string, unknown>
+): Record<string, unknown> {
+  if (toolInput && Object.keys(toolInput).length > 0) return toolInput;
+
+  const looksLikeCommand = toolName.includes(' ') || toolName.startsWith('/');
+  if (!looksLikeCommand) return toolInput ?? {};
+
+  return { command: toolName };
+}
+
+async function emitValidationResults(
+  logDir: string,
+  workflowRunId: string,
+  artifactsDir: string,
+  stepName: string,
+  stepIndex: number
+): Promise<void> {
+  const validationPath = join(artifactsDir, 'validation.md');
+
+  try {
+    await access(validationPath);
+  } catch {
+    return;
+  }
+
+  try {
+    const content = await readFile(validationPath, 'utf-8');
+    const results = parseValidationResults(content);
+    if (results.length === 0) return;
+
+    for (const result of results) {
+      await logValidation(logDir, workflowRunId, {
+        check: result.check,
+        result: result.result,
+        error: result.error,
+        step: stepName,
+        stepIndex,
+      });
+    }
+  } catch (error) {
+    getLog().debug({ err: error as Error, validationPath }, 'validation_parse_failed');
+  }
 }
 
 /**
@@ -595,6 +643,7 @@ async function executeStepInternal(
   getLog().debug({ stepId, commandName }, 'step_executing');
   await logStepStart(logDir, workflowRun.id, commandName, Number(stepId.split('.')[0]));
   const stepStartTime = Date.now();
+  let stepTokens: TokenUsage | undefined;
 
   // Load command prompt
   const promptResult = await loadCommandPrompt(cwd, commandName, configuredCommandFolder);
@@ -720,9 +769,11 @@ async function executeStepInternal(
             await platform.sendStructuredEvent(conversationId, msg);
           }
         }
-        await logTool(logDir, workflowRun.id, msg.toolName, msg.toolInput ?? {});
-      } else if (msg.type === 'result' && msg.sessionId) {
-        newSessionId = msg.sessionId;
+        const toolInput = normalizeToolInput(msg.toolName, msg.toolInput);
+        await logTool(logDir, workflowRun.id, msg.toolName, toolInput);
+      } else if (msg.type === 'result') {
+        if (msg.sessionId) newSessionId = msg.sessionId;
+        if (msg.tokens) stepTokens = msg.tokens;
       }
     }
 
@@ -755,22 +806,26 @@ async function executeStepInternal(
       );
     }
 
-    await logStepComplete(logDir, workflowRun.id, commandName, Number(stepId.split('.')[0]));
+    const stepIndex = Number(stepId.split('.')[0]);
+    await logStepComplete(logDir, workflowRun.id, commandName, stepIndex, {
+      durationMs: Date.now() - stepStartTime,
+      tokens: stepTokens,
+    });
+    await emitValidationResults(logDir, workflowRun.id, artifactsDir, commandName, stepIndex);
 
     // Emit step_completed event (fire-and-forget)
     const emitter = getWorkflowEventEmitter();
-    const stepIdx = Number(stepId.split('.')[0]);
     emitter.emit({
       type: 'step_completed',
       runId: workflowRun.id,
-      stepIndex: stepIdx,
+      stepIndex,
       stepName: commandName,
       duration: Date.now() - stepStartTime,
     });
     void workflowEventDb.createWorkflowEvent({
       workflow_run_id: workflowRun.id,
       event_type: 'step_completed',
-      step_index: stepIdx,
+      step_index: stepIndex,
       step_name: commandName,
       data: { duration_ms: Date.now() - stepStartTime },
     });
@@ -1157,7 +1212,8 @@ async function executeLoopWorkflow(
             );
             if (!sent) droppedMessageCount++;
           }
-          await logTool(logDir, workflowRun.id, msg.toolName, msg.toolInput ?? {});
+          const toolInput = normalizeToolInput(msg.toolName, msg.toolInput);
+          await logTool(logDir, workflowRun.id, msg.toolName, toolInput);
         } else if (msg.type === 'result' && msg.sessionId) {
           currentSessionId = msg.sessionId;
         }
@@ -1237,7 +1293,9 @@ async function executeLoopWorkflow(
         return;
       }
 
-      await logStepComplete(logDir, workflowRun.id, `iteration-${String(i)}`, i - 1);
+      await logStepComplete(logDir, workflowRun.id, `iteration-${String(i)}`, i - 1, {
+        durationMs: Date.now() - iterationStart,
+      });
 
       // Emit loop_iteration_completed
       loopEmitter.emit({

@@ -109,6 +109,7 @@ export {
   logStepComplete,
   logAssistant,
   logTool,
+  logValidation,
   logWorkflowError,
   logWorkflowComplete,
   logParallelBlockStart,

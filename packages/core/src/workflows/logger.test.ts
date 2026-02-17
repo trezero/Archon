@@ -17,6 +17,7 @@ import {
   logStepComplete,
   logAssistant,
   logTool,
+  logValidation,
   logWorkflowError,
   logWorkflowComplete,
   type WorkflowEvent,
@@ -142,6 +143,17 @@ describe('Workflow Logger', () => {
       expect(events[0].step).toBe('implement');
       expect(events[0].step_index).toBe(1);
     });
+
+    it('should include duration_ms and tokens when provided', async () => {
+      await logStepComplete(testDir, 'step-complete-meta-test', 'plan', 0, {
+        durationMs: 1234,
+        tokens: { input: 10, output: 5 },
+      });
+
+      const events = await readLogFile('step-complete-meta-test');
+      expect(events[0].duration_ms).toBe(1234);
+      expect(events[0].tokens).toEqual({ input: 10, output: 5 });
+    });
   });
 
   describe('logAssistant', () => {
@@ -186,6 +198,21 @@ Line 3`;
 
       const events = await readLogFile('complex-tool-test');
       expect(events[0].tool_input).toEqual(complexInput);
+    });
+  });
+
+  describe('logValidation', () => {
+    it('should log validation event with check/result', async () => {
+      await logValidation(testDir, 'validation-test', {
+        check: 'type-check',
+        result: 'fail',
+        error: 'tsc not found',
+      });
+
+      const events = await readLogFile('validation-test');
+      expect(events[0].type).toBe('validation');
+      expect(events[0].check).toBe('type-check');
+      expect(events[0].result).toBe('fail');
     });
   });
 

@@ -14,7 +14,7 @@
  * - Not set: Auto-detect - use tokens if present in env, otherwise global auth
  */
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
-import { IAssistantClient, MessageChunk } from '../types';
+import { IAssistantClient, MessageChunk, TokenUsage } from '../types';
 import { createLogger } from '../utils/logger';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -33,6 +33,24 @@ interface ContentBlock {
   text?: string;
   name?: string;
   input?: Record<string, unknown>;
+}
+
+function normalizeClaudeUsage(usage?: {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+}): TokenUsage | undefined {
+  if (!usage) return undefined;
+  const input = usage.input_tokens;
+  const output = usage.output_tokens;
+  if (typeof input !== 'number' || typeof output !== 'number') return undefined;
+  const total = usage.total_tokens;
+
+  return {
+    input,
+    output,
+    ...(typeof total === 'number' ? { total } : {}),
+  };
 }
 
 /**
@@ -236,8 +254,16 @@ export class ClaudeClient implements IAssistantClient {
               }
             }
           } else if (msg.type === 'result') {
-            const resultMsg = msg as { session_id?: string };
-            yield { type: 'result', sessionId: resultMsg.session_id };
+            const resultMsg = msg as {
+              session_id?: string;
+              usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+            };
+            const tokens = normalizeClaudeUsage(resultMsg.usage);
+            yield {
+              type: 'result',
+              sessionId: resultMsg.session_id,
+              ...(tokens ? { tokens } : {}),
+            };
           }
         }
         return; // Success - exit retry loop
