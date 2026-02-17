@@ -62,6 +62,8 @@ const FATAL_PATTERNS = [
   'permission denied',
   '401',
   '403',
+  'credit balance',
+  'auth error',
 ];
 
 /** Transient error patterns - temporary issues that may resolve with retry */
@@ -77,6 +79,8 @@ const TRANSIENT_PATTERNS = [
   '502',
   'network error',
   'socket hang up',
+  'exited with code',
+  'claude code crash',
 ];
 
 /**

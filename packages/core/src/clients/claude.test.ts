@@ -212,7 +212,7 @@ describe('ClaudeClient', () => {
       expect(chunks[0]).toEqual({ type: 'assistant', content: 'Real response' });
     });
 
-    test('throws and logs error on SDK failure', async () => {
+    test('enriches and logs error on SDK failure', async () => {
       const error = new Error('API connection failed');
       mockQuery.mockImplementation(async function* () {
         throw error;
@@ -224,9 +224,115 @@ describe('ClaudeClient', () => {
         }
       };
 
-      await expect(consumeGenerator()).rejects.toThrow('API connection failed');
+      // Error is enriched with classification prefix
+      await expect(consumeGenerator()).rejects.toThrow(
+        /Claude Code unknown: API connection failed/
+      );
 
-      expect(mockLogger.error).toHaveBeenCalledWith({ err: error }, 'query_error');
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: error, errorClass: 'unknown' }),
+        'query_error'
+      );
+    });
+
+    test('strips NODE_OPTIONS from subprocess env', async () => {
+      const original = process.env.NODE_OPTIONS;
+      process.env.NODE_OPTIONS = '--inspect';
+
+      mockQuery.mockImplementation(async function* () {
+        // Empty generator
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of client.sendQuery('test', '/workspace')) {
+        // consume
+      }
+
+      const callArgs = mockQuery.mock.calls[0][0] as { options: { env: NodeJS.ProcessEnv } };
+      expect(callArgs.options.env.NODE_OPTIONS).toBeUndefined();
+
+      // Cleanup
+      if (original !== undefined) {
+        process.env.NODE_OPTIONS = original;
+      } else {
+        delete process.env.NODE_OPTIONS;
+      }
+    });
+
+    test('strips VSCODE_INSPECTOR_OPTIONS from subprocess env', async () => {
+      const original = process.env.VSCODE_INSPECTOR_OPTIONS;
+      process.env.VSCODE_INSPECTOR_OPTIONS = 'some-value';
+
+      mockQuery.mockImplementation(async function* () {
+        // Empty generator
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of client.sendQuery('test', '/workspace')) {
+        // consume
+      }
+
+      const callArgs = mockQuery.mock.calls[0][0] as { options: { env: NodeJS.ProcessEnv } };
+      expect(callArgs.options.env.VSCODE_INSPECTOR_OPTIONS).toBeUndefined();
+
+      // Cleanup
+      if (original !== undefined) {
+        process.env.VSCODE_INSPECTOR_OPTIONS = original;
+      } else {
+        delete process.env.VSCODE_INSPECTOR_OPTIONS;
+      }
+    });
+
+    test('classifies exit code errors as crash and retries', async () => {
+      const error = new Error('process exited with code 1');
+      mockQuery.mockImplementation(async function* () {
+        throw error;
+      });
+
+      const consumeGenerator = async () => {
+        for await (const _ of client.sendQuery('test', '/workspace')) {
+          // consume
+        }
+      };
+
+      // Crash errors get retried then enriched
+      await expect(consumeGenerator()).rejects.toThrow(/Claude Code crash/);
+      // Should have been called twice (initial + 1 retry)
+      expect(mockQuery).toHaveBeenCalledTimes(2);
+    });
+
+    test('classifies auth errors as fatal (no retry)', async () => {
+      const error = new Error('unauthorized');
+      mockQuery.mockImplementation(async function* () {
+        throw error;
+      });
+
+      const consumeGenerator = async () => {
+        for await (const _ of client.sendQuery('test', '/workspace')) {
+          // consume
+        }
+      };
+
+      await expect(consumeGenerator()).rejects.toThrow(/Claude Code auth error/);
+      // Should NOT retry - verify single call
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    });
+
+    test('does not retry unknown errors', async () => {
+      const error = new Error('something unexpected');
+      mockQuery.mockImplementation(async function* () {
+        throw error;
+      });
+
+      const consumeGenerator = async () => {
+        for await (const _ of client.sendQuery('test', '/workspace')) {
+          // consume
+        }
+      };
+
+      await expect(consumeGenerator()).rejects.toThrow(/Claude Code unknown/);
+      // Unknown errors are not retried
+      expect(mockQuery).toHaveBeenCalledTimes(1);
     });
 
     test('ignores empty text blocks', async () => {

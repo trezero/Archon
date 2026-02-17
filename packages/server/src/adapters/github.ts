@@ -37,6 +37,9 @@ function getLog(): ReturnType<typeof createLogger> {
 
 const MAX_LENGTH = 65000; // GitHub comment limit (~65,536, leave buffer for safety)
 
+/** Hidden marker added to bot comments to prevent self-triggering loops */
+const BOT_RESPONSE_MARKER = '<!-- archon-bot-response -->';
+
 interface WebhookEvent {
   action: string;
   issue?: {
@@ -174,6 +177,7 @@ export class GitHubAdapter implements IPlatformAdapter {
     parsed: { owner: string; repo: string; number: number },
     message: string
   ): Promise<void> {
+    const markedMessage = `${message}\n\n${BOT_RESPONSE_MARKER}`;
     const maxRetries = 3;
     const conversationId = `${parsed.owner}/${parsed.repo}#${String(parsed.number)}`;
 
@@ -183,7 +187,7 @@ export class GitHubAdapter implements IPlatformAdapter {
           owner: parsed.owner,
           repo: parsed.repo,
           issue_number: parsed.number,
-          body: message,
+          body: markedMessage,
         });
         getLog().debug({ conversationId }, 'comment_posted');
         return;
@@ -748,6 +752,13 @@ ${userComment}`;
     }
 
     // 4. Ignore bot's own comments to prevent self-triggering
+    // Primary: Check for hidden marker in comment body (works with user's PAT)
+    const commentBody = event.comment?.body ?? '';
+    if (commentBody.includes(BOT_RESPONSE_MARKER)) {
+      getLog().debug({ commentAuthor: event.comment?.user?.login }, 'ignoring_marked_comment');
+      return;
+    }
+    // Secondary: Check comment author (works with dedicated bot account)
     const commentAuthor = event.comment?.user?.login;
     if (commentAuthor && commentAuthor.toLowerCase() === this.botMention.toLowerCase()) {
       getLog().debug({ commentAuthor }, 'ignoring_own_comment');

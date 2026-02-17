@@ -81,6 +81,8 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
     }
   }
 
+  let baseEnv: NodeJS.ProcessEnv;
+
   if (useGlobalAuth) {
     // Filter out auth tokens - let Claude use global auth from 'claude /login'
     const { CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_API_KEY, ANTHROPIC_API_KEY, ...envWithoutAuth } =
@@ -97,11 +99,61 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
       getLog().info({ filteredVars: filtered }, 'global_auth_filtered_tokens');
     }
 
-    return envWithoutAuth;
+    baseEnv = envWithoutAuth;
+  } else {
+    // Pass through all env vars including auth tokens
+    baseEnv = { ...process.env };
   }
 
-  // Pass through all env vars including auth tokens
-  return { ...process.env };
+  // Clean debugger env vars that interfere with Claude Code subprocess
+  // See: https://github.com/anthropics/claude-code/issues/4619
+  const cleanedVars: string[] = [];
+  if (baseEnv.NODE_OPTIONS) {
+    delete baseEnv.NODE_OPTIONS;
+    cleanedVars.push('NODE_OPTIONS');
+  }
+  if (baseEnv.VSCODE_INSPECTOR_OPTIONS) {
+    delete baseEnv.VSCODE_INSPECTOR_OPTIONS;
+    cleanedVars.push('VSCODE_INSPECTOR_OPTIONS');
+  }
+  if (cleanedVars.length > 0) {
+    getLog().info({ cleanedVars }, 'subprocess_env_cleaned');
+  }
+
+  return baseEnv;
+}
+
+/** Max retries for transient subprocess failures */
+const MAX_SUBPROCESS_RETRIES = 1;
+
+/** Delay between retries in milliseconds */
+const RETRY_BASE_DELAY_MS = 2000;
+
+/** Patterns indicating rate limiting in stderr/error messages */
+const RATE_LIMIT_PATTERNS = ['rate limit', 'too many requests', '429', 'overloaded'];
+
+/** Patterns indicating auth issues in stderr/error messages */
+const AUTH_PATTERNS = [
+  'credit balance',
+  'unauthorized',
+  'authentication',
+  'invalid token',
+  '401',
+  '403',
+];
+
+/** Patterns indicating the subprocess crashed (transient, worth retrying) */
+const SUBPROCESS_CRASH_PATTERNS = ['exited with code', 'killed', 'signal'];
+
+function classifySubprocessError(
+  errorMessage: string,
+  stderrOutput: string
+): 'rate_limit' | 'auth' | 'crash' | 'unknown' {
+  const combined = `${errorMessage} ${stderrOutput}`.toLowerCase();
+  if (RATE_LIMIT_PATTERNS.some(p => combined.includes(p))) return 'rate_limit';
+  if (AUTH_PATTERNS.some(p => combined.includes(p))) return 'auth';
+  if (SUBPROCESS_CRASH_PATTERNS.some(p => combined.includes(p))) return 'crash';
+  return 'unknown';
 }
 
 /**
@@ -110,90 +162,128 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
  */
 export class ClaudeClient implements IAssistantClient {
   /**
-   * Send a query to Claude and stream responses
-   * @param prompt - User message or prompt
-   * @param cwd - Working directory for Claude
-   * @param resumeSessionId - Optional session ID to resume
+   * Send a query to Claude and stream responses.
+   * Includes retry logic for transient failures (1 retry with backoff).
+   * Enriches errors with stderr context and classification.
    */
   async *sendQuery(
     prompt: string,
     cwd: string,
     resumeSessionId?: string
   ): AsyncGenerator<MessageChunk> {
-    const options: Options = {
-      cwd,
-      env: buildSubprocessEnv(),
-      permissionMode: 'bypassPermissions', // YOLO mode - auto-approve all tools
-      allowDangerouslySkipPermissions: true, // Required when bypassing permissions
-      systemPrompt: { type: 'preset', preset: 'claude_code' }, // Use Claude Code's system prompt
-      settingSources: ['project'], // Load CLAUDE.md files from project
-      stderr: (data: string) => {
-        // Capture and log Claude Code stderr - but filter out informational messages
-        const output = data.trim();
-        if (!output) return;
+    // Note: If subprocess crashes mid-stream after yielding chunks, those chunks
+    // are already consumed by the caller. Retry starts a fresh subprocess, so the
+    // caller may receive partial output from the failed attempt followed by full
+    // output from the retry. This is a known limitation of async generator retries.
+    let lastError: Error | undefined;
 
-        // Only log actual errors, not informational messages
-        // Filter out: "Spawning Claude Code process:", debug info, etc.
-        const isError =
-          output.toLowerCase().includes('error') ||
-          output.toLowerCase().includes('fatal') ||
-          output.toLowerCase().includes('failed') ||
-          output.toLowerCase().includes('exception') ||
-          output.includes('at ') || // Stack trace lines
-          output.includes('Error:');
+    for (let attempt = 0; attempt <= MAX_SUBPROCESS_RETRIES; attempt++) {
+      const stderrLines: string[] = [];
 
-        const isInfoMessage =
-          output.includes('Spawning Claude Code') ||
-          output.includes('--output-format') ||
-          output.includes('--permission-mode');
+      const options: Options = {
+        cwd,
+        env: buildSubprocessEnv(),
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        systemPrompt: { type: 'preset', preset: 'claude_code' },
+        settingSources: ['project'],
+        stderr: (data: string) => {
+          const output = data.trim();
+          if (!output) return;
 
-        if (isError && !isInfoMessage) {
-          getLog().error({ stderr: output }, 'subprocess_error');
-        }
-      },
-    };
+          const isError =
+            output.toLowerCase().includes('error') ||
+            output.toLowerCase().includes('fatal') ||
+            output.toLowerCase().includes('failed') ||
+            output.toLowerCase().includes('exception') ||
+            output.includes('at ') ||
+            output.includes('Error:');
 
-    if (resumeSessionId) {
-      options.resume = resumeSessionId;
-      getLog().debug({ sessionId: resumeSessionId }, 'resuming_session');
-    } else {
-      getLog().debug({ cwd }, 'starting_new_session');
-    }
+          const isInfoMessage =
+            output.includes('Spawning Claude Code') ||
+            output.includes('--output-format') ||
+            output.includes('--permission-mode');
 
-    try {
-      for await (const msg of query({ prompt, options })) {
-        if (msg.type === 'assistant') {
-          // Process assistant message content blocks
-          // Type assertion needed: SDK's strict types require explicit handling
-          const message = msg as { message: { content: ContentBlock[] } };
-          const content = message.message.content;
-
-          for (const block of content) {
-            // Text blocks - assistant responses
-            if (block.type === 'text' && block.text) {
-              yield { type: 'assistant', content: block.text };
-            }
-
-            // Tool use blocks - tool calls
-            else if (block.type === 'tool_use' && block.name) {
-              yield {
-                type: 'tool',
-                toolName: block.name,
-                toolInput: block.input ?? {},
-              };
-            }
+          if (isError && !isInfoMessage) {
+            stderrLines.push(output);
+            getLog().error({ stderr: output }, 'subprocess_error');
           }
-        } else if (msg.type === 'result') {
-          // Extract session ID for persistence
-          const resultMsg = msg as { session_id?: string };
-          yield { type: 'result', sessionId: resultMsg.session_id };
-        }
-        // Ignore other message types (system, thinking, tool_result, etc.)
+        },
+      };
+
+      if (resumeSessionId) {
+        options.resume = resumeSessionId;
+        getLog().debug({ sessionId: resumeSessionId }, 'resuming_session');
+      } else {
+        getLog().debug({ cwd, attempt }, 'starting_new_session');
       }
-    } catch (error) {
-      getLog().error({ err: error }, 'query_error');
-      throw error;
+
+      try {
+        for await (const msg of query({ prompt, options })) {
+          if (msg.type === 'assistant') {
+            const message = msg as { message: { content: ContentBlock[] } };
+            const content = message.message.content;
+
+            for (const block of content) {
+              if (block.type === 'text' && block.text) {
+                yield { type: 'assistant', content: block.text };
+              } else if (block.type === 'tool_use' && block.name) {
+                yield {
+                  type: 'tool',
+                  toolName: block.name,
+                  toolInput: block.input ?? {},
+                };
+              }
+            }
+          } else if (msg.type === 'result') {
+            const resultMsg = msg as { session_id?: string };
+            yield { type: 'result', sessionId: resultMsg.session_id };
+          }
+        }
+        return; // Success - exit retry loop
+      } catch (error) {
+        const err = error as Error;
+        const stderrContext = stderrLines.join('\n');
+        const errorClass = classifySubprocessError(err.message, stderrContext);
+
+        getLog().error(
+          { err, stderrContext, errorClass, attempt, maxRetries: MAX_SUBPROCESS_RETRIES },
+          'query_error'
+        );
+
+        // Don't retry auth errors - they won't resolve
+        if (errorClass === 'auth') {
+          const enrichedError = new Error(
+            `Claude Code auth error: ${err.message}${stderrContext ? ` (${stderrContext})` : ''}`
+          );
+          enrichedError.cause = error;
+          throw enrichedError;
+        }
+
+        // Retry transient failures (rate limit, crash)
+        if (
+          attempt < MAX_SUBPROCESS_RETRIES &&
+          (errorClass === 'rate_limit' || errorClass === 'crash')
+        ) {
+          const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+          getLog().info({ attempt, delayMs, errorClass }, 'retrying_subprocess');
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          lastError = err;
+          continue;
+        }
+
+        // Final failure - enrich and throw
+        const enrichedMessage = stderrContext
+          ? `Claude Code ${errorClass}: ${err.message} (stderr: ${stderrContext})`
+          : `Claude Code ${errorClass}: ${err.message}`;
+        const enrichedError = new Error(enrichedMessage);
+        enrichedError.cause = error;
+        throw enrichedError;
+      }
     }
+
+    // Should not reach here, but handle defensively
+    throw lastError ?? new Error('Claude Code query failed after retries');
   }
 
   /**

@@ -248,6 +248,35 @@ describe('GitHubAdapter', () => {
       // (which throws because it's not mocked), rather than returning early
     });
 
+    test('should ignore comments containing bot marker (works with user PAT)', async () => {
+      const adapter = createSelfFilterAdapter();
+      // Comment has the marker but author is a real user (using PAT)
+      const payload = createCommentPayload(
+        '@archon fix this\n\n<!-- archon-bot-response -->',
+        'Wirasm'
+      );
+
+      await adapter.handleWebhook(payload, 'mock-signature');
+
+      // Marked comments should be silently dropped
+      expect(mockLockManager.acquireLock).not.toHaveBeenCalled();
+    });
+
+    test('should process comments without bot marker from same user', async () => {
+      const adapter = createSelfFilterAdapter();
+      // Comment from same user but WITHOUT marker - should be processed
+      const payload = createCommentPayload('@archon fix this', 'Wirasm');
+
+      // Will error on DB operations, but self-filtering runs first
+      try {
+        await adapter.handleWebhook(payload, 'mock-signature');
+      } catch {
+        // Expected - database not mocked
+      }
+
+      // Comment without marker should NOT be self-filtered
+    });
+
     test('should handle missing comment.user gracefully', async () => {
       const adapter = createSelfFilterAdapter();
       const payload = createCommentPayload('@archon help', undefined); // No user field
@@ -274,8 +303,20 @@ describe('GitHubAdapter', () => {
         owner: 'owner',
         repo: 'repo',
         issue_number: 123,
-        body: 'test',
+        body: 'test\n\n<!-- archon-bot-response -->',
       });
+    });
+
+    test('postComment appends bot marker to outgoing comments', async () => {
+      const mockCreateComment = mock(() => Promise.resolve({ data: {} }));
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+
+      await testAdapter.sendMessage('owner/repo#123', 'Hello world');
+
+      const body = mockCreateComment.mock.calls[0][0].body as string;
+      expect(body).toContain('Hello world');
+      expect(body).toContain('<!-- archon-bot-response -->');
+      expect(body).toBe('Hello world\n\n<!-- archon-bot-response -->');
     });
 
     test('should reject invalid conversationId format', async () => {
