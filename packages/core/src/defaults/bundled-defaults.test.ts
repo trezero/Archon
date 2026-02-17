@@ -115,6 +115,17 @@ describe('bundled-defaults', () => {
         expect(content.trim().length).toBeGreaterThan(0);
       }
     });
+
+    it('archon-pr-review-scope should read .pr-number before other discovery', () => {
+      const content = BUNDLED_COMMANDS['archon-pr-review-scope'];
+      expect(content).toContain('$ARTIFACTS_DIR/.pr-number');
+      expect(content).toContain('PR_NUMBER=$(cat $ARTIFACTS_DIR/.pr-number');
+    });
+
+    it('archon-create-pr should write .pr-number to artifacts', () => {
+      const content = BUNDLED_COMMANDS['archon-create-pr'];
+      expect(content).toContain('echo "$PR_NUMBER" > "$ARTIFACTS_DIR/.pr-number"');
+    });
   });
 
   describe('BUNDLED_WORKFLOWS', () => {

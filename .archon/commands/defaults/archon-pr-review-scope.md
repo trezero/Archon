@@ -20,14 +20,20 @@ Verify the PR is in a reviewable state, gather all context needed for the parall
 ### 1.1 Get PR Number
 
 ```bash
-# From workflow registry (if in workflow context)
 if [ -f "$ARTIFACTS_DIR/.pr-number" ]; then
-  PR_NUMBER=$(cat $ARTIFACTS_DIR/.pr-number)
+  PR_NUMBER=$(cat $ARTIFACTS_DIR/.pr-number | tr -d '\n' | tr -d ' ')
+  if ! echo "$PR_NUMBER" | grep -qE '^[0-9]+$'; then
+    PR_NUMBER=""
+  fi
+fi
+
 # From arguments (standalone review)
-elif [ -n "$ARGUMENTS" ]; then
+if [ -z "$PR_NUMBER" ] && [ -n "$ARGUMENTS" ]; then
   PR_NUMBER=$(echo "$ARGUMENTS" | grep -oE '[0-9]+' | head -1)
+fi
+
 # From current branch
-else
+if [ -z "$PR_NUMBER" ]; then
   PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null)
 fi
 

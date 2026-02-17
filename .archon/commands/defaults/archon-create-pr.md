@@ -119,6 +119,21 @@ Or if the content is simple:
 gh pr create --fill --base $BASE_BRANCH
 ```
 
+After creating the PR, capture its identifiers for downstream steps. Only write artifacts if PR creation succeeded — never persist stale data from a pre-existing PR:
+
+```bash
+# After creating the PR, capture and persist the PR number for downstream steps
+# IMPORTANT: Only write artifacts after confirmed successful PR creation
+if gh pr view --json number,url -q '.number,.url' > /dev/null 2>&1; then
+  PR_NUMBER=$(gh pr view --json number -q '.number')
+  PR_URL=$(gh pr view --json url -q '.url')
+  echo "$PR_NUMBER" > "$ARTIFACTS_DIR/.pr-number"
+  echo "$PR_URL" > "$ARTIFACTS_DIR/.pr-url"
+else
+  echo "WARNING: Could not confirm PR creation; skipping .pr-number/.pr-url artifacts"
+fi
+```
+
 ---
 
 ## Phase 4: Output
