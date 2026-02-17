@@ -15,10 +15,11 @@ Execute the implementation plan from `/investigate-issue`:
 
 1. Load and validate the artifact
 2. Ensure git state is correct
-3. Implement the changes exactly as specified
-4. Run validation
-5. Commit changes
-6. Write implementation report
+3. Discover and install dependencies in the worktree
+4. Implement the changes exactly as specified
+5. Run validation
+6. Commit changes
+7. Write implementation report
 
 **Golden Rule**: Follow the artifact. If something seems wrong, validate it first - don't silently deviate.
 
@@ -168,9 +169,38 @@ git pull --rebase origin $BASE_BRANCH 2>/dev/null || git pull origin $BASE_BRANC
 
 ---
 
-## Phase 4: IMPLEMENT - Make Changes
+## Phase 4: DEPENDENCIES - Discover and Install
 
-### 4.1 Execute Each Step
+### 4.1 Detect Install Command
+
+Inspect the worktree for lock/config files and choose the install command:
+
+- `package.json` + `bun.lock` → `bun install`
+- `package.json` + `package-lock.json` → `npm install`
+- `package.json` + `yarn.lock` → `yarn install`
+- `package.json` + `pnpm-lock.yaml` → `pnpm install`
+- `requirements.txt` → `pip install -r requirements.txt`
+- `pyproject.toml` + `poetry.lock` → `poetry install`
+- `Cargo.toml` → `cargo build`
+- `go.mod` → `go mod download`
+
+### 4.2 Run Install
+
+Run the chosen install command from the worktree root before any validation or tests.
+
+### 4.3 Failure Handling
+
+If install fails, STOP and report the error. Do not proceed to validation with missing dependencies.
+
+**PHASE_4_CHECKPOINT:**
+- [ ] Install command discovered
+- [ ] Dependencies installed successfully
+
+---
+
+## Phase 5: IMPLEMENT - Make Changes
+
+### 5.1 Execute Each Step
 
 For each step in the artifact's Implementation Plan:
 
@@ -178,7 +208,7 @@ For each step in the artifact's Implementation Plan:
 2. **Make the change** - exactly as specified
 3. **Verify types compile** - `bun run type-check`
 
-### 4.2 Implementation Rules
+### 5.2 Implementation Rules
 
 **DO:**
 - Follow artifact steps in order
@@ -192,7 +222,7 @@ For each step in the artifact's Implementation Plan:
 - Change formatting of untouched lines
 - Deviate from the artifact without noting it
 
-### 4.3 Handle Each File Type
+### 5.3 Handle Each File Type
 
 **For UPDATE files:**
 - Read current content
@@ -210,13 +240,13 @@ For each step in the artifact's Implementation Plan:
 - Follow existing test patterns
 - Ensure tests actually test the fix
 
-### 4.4 Track Deviations
+### 5.4 Track Deviations
 
 If you must deviate from the artifact:
 - Note what changed and why
 - Include in implementation report
 
-**PHASE_4_CHECKPOINT:**
+**PHASE_5_CHECKPOINT:**
 - [ ] All steps from artifact executed
 - [ ] Types compile after each change
 - [ ] Tests added as specified
@@ -224,9 +254,9 @@ If you must deviate from the artifact:
 
 ---
 
-## Phase 5: VERIFY - Run Validation
+## Phase 6: VERIFY - Run Validation
 
-### 5.1 Run Artifact Validation Commands
+### 6.1 Run Artifact Validation Commands
 
 Execute each command from the artifact's Validation section:
 
@@ -236,7 +266,7 @@ bun test {pattern-from-artifact}
 bun run lint
 ```
 
-### 5.2 Check Results
+### 6.2 Check Results
 
 **All must pass before proceeding.**
 
@@ -246,11 +276,11 @@ If failures:
 3. Re-run validation
 4. Note any fixes in implementation report
 
-### 5.3 Manual Verification (if specified)
+### 6.3 Manual Verification (if specified)
 
 Execute any manual verification steps from the artifact.
 
-**PHASE_5_CHECKPOINT:**
+**PHASE_6_CHECKPOINT:**
 - [ ] Type check passes
 - [ ] Tests pass
 - [ ] Lint passes
@@ -258,16 +288,16 @@ Execute any manual verification steps from the artifact.
 
 ---
 
-## Phase 6: COMMIT - Save Changes
+## Phase 7: COMMIT - Save Changes
 
-### 6.1 Stage Changes
+### 7.1 Stage Changes
 
 ```bash
 git add -A
 git status  # Review what's being committed
 ```
 
-### 6.2 Write Commit Message
+### 7.2 Write Commit Message
 
 **Format:**
 ```
@@ -299,15 +329,15 @@ EOF
 )"
 ```
 
-**PHASE_6_CHECKPOINT:**
+**PHASE_7_CHECKPOINT:**
 - [ ] All changes committed
 - [ ] Commit message references issue
 
 ---
 
-## Phase 7: WRITE - Implementation Report
+## Phase 8: WRITE - Implementation Report
 
-### 7.1 Write Implementation Artifact
+### 8.1 Write Implementation Artifact
 
 Write to `$ARTIFACTS_DIR/implementation.md`:
 
@@ -360,12 +390,12 @@ Write to `$ARTIFACTS_DIR/implementation.md`:
 | Lint | ✅ |
 ```
 
-**PHASE_7_CHECKPOINT:**
+**PHASE_8_CHECKPOINT:**
 - [ ] Implementation artifact written
 
 ---
 
-## Phase 8: OUTPUT - Report to User
+## Phase 9: OUTPUT - Report to User
 
 Skip archiving - artifacts remain in place for review workflow to access.
 
