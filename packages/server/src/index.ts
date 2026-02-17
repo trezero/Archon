@@ -3,9 +3,20 @@
  * Multi-platform AI coding assistant (Telegram, Discord, Slack, GitHub)
  */
 
-// Load environment variables FIRST
-// Note: packages/server/.env is a symlink to the root .env file
-import 'dotenv/config';
+// Load environment variables FIRST — resolve to monorepo root .env
+// Uses dotenv with explicit path so it works from any CWD (worktrees, packages/server/, etc.)
+import { config } from 'dotenv';
+import { resolve } from 'path';
+
+// Resolve from this file's location: packages/server/src/ → ../../.. → repo root
+const envPath = resolve(import.meta.dir, '..', '..', '..', '.env');
+const dotenvResult = config({ path: envPath });
+
+if (dotenvResult.error) {
+  // Use console.error since logger depends on env vars (LOG_LEVEL)
+  console.error(`Failed to load .env from ${envPath}: ${dotenvResult.error.message}`);
+  console.error('Hint: Copy .env.example to .env and configure your credentials.');
+}
 
 import { Hono } from 'hono';
 import { TelegramAdapter } from './adapters/telegram';
@@ -75,15 +86,36 @@ async function main(): Promise<void> {
   const hasCodexCredentials = process.env.CODEX_ID_TOKEN && process.env.CODEX_ACCESS_TOKEN;
 
   if (!hasClaudeCredentials && !hasCodexCredentials) {
-    getLog().fatal('no_ai_credentials');
+    getLog().fatal(
+      {
+        checked: {
+          claude: ['CLAUDE_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_USE_GLOBAL_AUTH'],
+          codex: ['CODEX_ID_TOKEN', 'CODEX_ACCESS_TOKEN'],
+        },
+        hints: [
+          'Set CLAUDE_USE_GLOBAL_AUTH=true in .env (requires `claude /login` first)',
+          'Or set CLAUDE_API_KEY in .env',
+          'Or set CODEX_ID_TOKEN + CODEX_ACCESS_TOKEN in .env',
+          'See .env.example for all options',
+        ],
+        envFile: envPath,
+      },
+      'no_ai_credentials'
+    );
     process.exit(1);
   }
 
   if (!hasClaudeCredentials) {
-    getLog().warn('claude_credentials_missing');
+    getLog().warn(
+      { checked: ['CLAUDE_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_USE_GLOBAL_AUTH'] },
+      'claude_credentials_missing'
+    );
   }
   if (!hasCodexCredentials) {
-    getLog().warn('codex_credentials_missing');
+    getLog().warn(
+      { checked: ['CODEX_ID_TOKEN', 'CODEX_ACCESS_TOKEN'] },
+      'codex_credentials_missing'
+    );
   }
 
   // Test database connection
