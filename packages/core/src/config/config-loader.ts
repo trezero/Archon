@@ -52,6 +52,17 @@ const DEFAULT_CONFIG_CONTENT = `# Archon Global Configuration
 # Default AI assistant (claude or codex)
 # defaultAssistant: claude
 
+# Assistant defaults
+# assistants:
+#   claude:
+#     model: sonnet
+#   codex:
+#     model: gpt-5.3-codex
+#     modelReasoningEffort: medium
+#     webSearchMode: disabled
+#     additionalDirectories:
+#       - /absolute/path/to/other/repo
+
 # Streaming mode per platform (stream or batch)
 # streaming:
 #   telegram: stream
@@ -155,6 +166,10 @@ function getDefaults(): MergedConfig {
   return {
     botName: 'Archon',
     assistant: 'claude',
+    assistants: {
+      claude: {},
+      codex: {},
+    },
     streaming: {
       telegram: 'stream',
       discord: 'batch',
@@ -237,7 +252,13 @@ function applyEnvOverrides(config: MergedConfig): MergedConfig {
  * Merge global config into defaults
  */
 function mergeGlobalConfig(defaults: MergedConfig, global: GlobalConfig): MergedConfig {
-  const result = { ...defaults };
+  const result: MergedConfig = {
+    ...defaults,
+    assistants: {
+      claude: { ...defaults.assistants.claude },
+      codex: { ...defaults.assistants.codex },
+    },
+  };
 
   // Bot name preference
   if (global.botName) {
@@ -247,6 +268,16 @@ function mergeGlobalConfig(defaults: MergedConfig, global: GlobalConfig): Merged
   // Assistant preference
   if (global.defaultAssistant) {
     result.assistant = global.defaultAssistant;
+  }
+
+  if (global.assistants?.claude?.model) {
+    result.assistants.claude.model = global.assistants.claude.model;
+  }
+  if (global.assistants?.codex) {
+    result.assistants.codex = {
+      ...result.assistants.codex,
+      ...global.assistants.codex,
+    };
   }
 
   // Streaming preferences
@@ -275,11 +306,27 @@ function mergeGlobalConfig(defaults: MergedConfig, global: GlobalConfig): Merged
  * Merge repo config into merged config
  */
 function mergeRepoConfig(merged: MergedConfig, repo: RepoConfig): MergedConfig {
-  const result = { ...merged };
+  const result: MergedConfig = {
+    ...merged,
+    assistants: {
+      claude: { ...merged.assistants.claude },
+      codex: { ...merged.assistants.codex },
+    },
+  };
 
   // Assistant override (repo-level takes precedence)
   if (repo.assistant) {
     result.assistant = repo.assistant;
+  }
+
+  if (repo.assistants?.claude?.model) {
+    result.assistants.claude.model = repo.assistants.claude.model;
+  }
+  if (repo.assistants?.codex) {
+    result.assistants.codex = {
+      ...result.assistants.codex,
+      ...repo.assistants.codex,
+    };
   }
 
   // Commands config

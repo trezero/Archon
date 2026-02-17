@@ -215,6 +215,16 @@ export type MessageChunk =
   | { type: 'tool'; toolName: string; toolInput?: Record<string, unknown> }
   | { type: 'workflow_dispatch'; workerConversationId: string; workflowName: string };
 
+export type ModelReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type WebSearchMode = 'disabled' | 'cached' | 'live';
+
+export interface AssistantRequestOptions {
+  model?: string;
+  modelReasoningEffort?: ModelReasoningEffort;
+  webSearchMode?: WebSearchMode;
+  additionalDirectories?: string[];
+}
+
 /**
  * Generic AI assistant client interface
  * Allows supporting multiple AI assistants (Claude, Codex, etc.)
@@ -225,8 +235,14 @@ export interface IAssistantClient {
    * @param prompt - User message or prompt
    * @param cwd - Working directory for the assistant
    * @param resumeSessionId - Optional session ID to resume
+   * @param options - Optional request options (model, provider-specific settings)
    */
-  sendQuery(prompt: string, cwd: string, resumeSessionId?: string): AsyncGenerator<MessageChunk>;
+  sendQuery(
+    prompt: string,
+    cwd: string,
+    resumeSessionId?: string,
+    options?: AssistantRequestOptions
+  ): AsyncGenerator<MessageChunk>;
 
   /**
    * Get the assistant type identifier

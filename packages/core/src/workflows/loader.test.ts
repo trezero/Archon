@@ -29,6 +29,7 @@ describe('Workflow Loader', () => {
     loadConfigSpy.mockResolvedValue({
       botName: 'Archon',
       assistant: 'claude',
+      assistants: { claude: {}, codex: {} },
       streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
       paths: { workspaces: '/tmp', worktrees: '/tmp' },
       concurrency: { maxConversations: 10 },
@@ -181,6 +182,54 @@ steps:
       // Invalid provider treated as undefined - executor will fall back to config
       expect(workflows).toHaveLength(1);
       expect(workflows[0].provider).toBeUndefined();
+    });
+
+    it('should reject claude model with codex provider at load time', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const invalidYaml = `name: invalid-model
+description: Invalid model/provider pairing
+provider: codex
+model: sonnet
+steps:
+  - command: test
+`;
+      await writeFile(join(workflowDir, 'invalid.yaml'), invalidYaml);
+
+      const result = await discoverWorkflows(testDir);
+
+      expect(result.workflows).toHaveLength(0);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].errorType).toBe('validation_error');
+      expect(result.errors[0].error).toContain('not compatible');
+    });
+
+    it('should parse codex options fields', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      const yaml = `name: codex-options
+description: Codex options are parsed
+provider: codex
+model: gpt-5.2-codex
+modelReasoningEffort: medium
+webSearchMode: live
+additionalDirectories:
+  - /repo/a
+  - 123
+steps:
+  - command: test
+`;
+      await writeFile(join(workflowDir, 'options.yaml'), yaml);
+
+      const result = await discoverWorkflows(testDir);
+      const workflows = result.workflows;
+
+      expect(workflows).toHaveLength(1);
+      expect(workflows[0].modelReasoningEffort).toBe('medium');
+      expect(workflows[0].webSearchMode).toBe('live');
+      expect(workflows[0].additionalDirectories).toEqual(['/repo/a']);
     });
   });
 
@@ -929,6 +978,7 @@ steps:
       loadConfigSpy.mockResolvedValue({
         botName: 'Archon',
         assistant: 'claude',
+        assistants: { claude: {}, codex: {} },
         streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
         paths: { workspaces: '/tmp', worktrees: '/tmp' },
         concurrency: { maxConversations: 10 },
@@ -952,6 +1002,7 @@ steps:
       loadConfigSpy.mockResolvedValue({
         botName: 'Archon',
         assistant: 'claude',
+        assistants: { claude: {}, codex: {} },
         streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
         paths: { workspaces: '/tmp', worktrees: '/tmp' },
         concurrency: { maxConversations: 10 },
@@ -988,6 +1039,7 @@ steps:
       loadConfigSpy.mockResolvedValue({
         botName: 'Archon',
         assistant: 'claude',
+        assistants: { claude: {}, codex: {} },
         streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
         paths: { workspaces: '/tmp', worktrees: '/tmp' },
         concurrency: { maxConversations: 10 },
@@ -1012,6 +1064,7 @@ steps:
       loadConfigSpy.mockResolvedValue({
         botName: 'Archon',
         assistant: 'claude',
+        assistants: { claude: {}, codex: {} },
         streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
         paths: { workspaces: '/tmp', worktrees: '/tmp' },
         concurrency: { maxConversations: 10 },
@@ -1059,6 +1112,7 @@ steps:
       loadConfigSpy.mockResolvedValue({
         botName: 'Archon',
         assistant: 'claude',
+        assistants: { claude: {}, codex: {} },
         streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
         paths: { workspaces: '/tmp', worktrees: '/tmp' },
         concurrency: { maxConversations: 10 },
@@ -1084,6 +1138,7 @@ steps:
       loadConfigSpy.mockResolvedValue({
         botName: 'Archon',
         assistant: 'claude',
+        assistants: { claude: {}, codex: {} },
         streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
         paths: { workspaces: '/tmp', worktrees: '/tmp' },
         concurrency: { maxConversations: 10 },
@@ -1107,6 +1162,7 @@ steps:
       loadConfigSpy.mockResolvedValue({
         botName: 'Archon',
         assistant: 'claude',
+        assistants: { claude: {}, codex: {} },
         streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
         paths: { workspaces: '/tmp', worktrees: '/tmp' },
         concurrency: { maxConversations: 10 },
@@ -1143,6 +1199,7 @@ steps:
       loadConfigSpy.mockResolvedValue({
         botName: 'Archon',
         assistant: 'claude',
+        assistants: { claude: {}, codex: {} },
         streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
         paths: { workspaces: '/tmp', worktrees: '/tmp' },
         concurrency: { maxConversations: 10 },

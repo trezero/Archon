@@ -14,7 +14,7 @@
  * - Not set: Auto-detect - use tokens if present in env, otherwise global auth
  */
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
-import { IAssistantClient, MessageChunk, TokenUsage } from '../types';
+import { type AssistantRequestOptions, IAssistantClient, MessageChunk, TokenUsage } from '../types';
 import { createLogger } from '../utils/logger';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -187,7 +187,8 @@ export class ClaudeClient implements IAssistantClient {
   async *sendQuery(
     prompt: string,
     cwd: string,
-    resumeSessionId?: string
+    resumeSessionId?: string,
+    requestOptions?: AssistantRequestOptions
   ): AsyncGenerator<MessageChunk> {
     // Note: If subprocess crashes mid-stream after yielding chunks, those chunks
     // are already consumed by the caller. Retry starts a fresh subprocess, so the
@@ -201,6 +202,7 @@ export class ClaudeClient implements IAssistantClient {
       const options: Options = {
         cwd,
         env: buildSubprocessEnv(),
+        model: requestOptions?.model,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         systemPrompt: { type: 'preset', preset: 'claude_code' },

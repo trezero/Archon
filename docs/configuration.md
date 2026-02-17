@@ -44,6 +44,17 @@ Create `~/.archon/config.yaml` for user-wide preferences:
 # Default AI assistant
 defaultAssistant: claude # or 'codex'
 
+# Assistant defaults
+assistants:
+  claude:
+    model: sonnet
+  codex:
+    model: gpt-5.3-codex
+    modelReasoningEffort: medium
+    webSearchMode: disabled
+    additionalDirectories:
+      - /absolute/path/to/other/repo
+
 # Streaming preferences per platform
 streaming:
   telegram: stream # 'stream' or 'batch'
@@ -68,6 +79,14 @@ Create `.archon/config.yaml` in any repository for project-specific settings:
 ```yaml
 # AI assistant for this project (used as default provider for workflows)
 assistant: claude
+
+# Assistant defaults (override global)
+assistants:
+  claude:
+    model: sonnet
+  codex:
+    model: gpt-5.3-codex
+    webSearchMode: live
 
 # Commands configuration
 commands:

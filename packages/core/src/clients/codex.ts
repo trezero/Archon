@@ -6,7 +6,7 @@
  * dynamic import workaround that was needed for CommonJS/Node.js.
  */
 import { Codex } from '@openai/codex-sdk';
-import { IAssistantClient, MessageChunk, TokenUsage } from '../types';
+import { type AssistantRequestOptions, IAssistantClient, MessageChunk, TokenUsage } from '../types';
 import { createLogger } from '../utils/logger';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -37,19 +37,27 @@ interface CodexThreadOptions {
   sandboxMode: 'danger-full-access';
   networkAccessEnabled: boolean;
   approvalPolicy: 'never';
+  model?: string;
+  modelReasoningEffort?: AssistantRequestOptions['modelReasoningEffort'];
+  webSearchMode?: AssistantRequestOptions['webSearchMode'];
+  additionalDirectories?: string[];
 }
 
 /**
  * Build thread options for Codex SDK
  * Extracted to avoid duplication across thread creation paths
  */
-function buildThreadOptions(cwd: string): CodexThreadOptions {
+function buildThreadOptions(cwd: string, options?: AssistantRequestOptions): CodexThreadOptions {
   return {
     workingDirectory: cwd,
     skipGitRepoCheck: true,
     sandboxMode: 'danger-full-access', // Full filesystem access (needed for git worktree operations)
     networkAccessEnabled: true, // Allow network calls (GitHub CLI, HTTP requests)
     approvalPolicy: 'never', // Auto-approve all operations without user confirmation
+    model: options?.model,
+    modelReasoningEffort: options?.modelReasoningEffort,
+    webSearchMode: options?.webSearchMode,
+    additionalDirectories: options?.additionalDirectories,
   };
 }
 
@@ -108,10 +116,11 @@ export class CodexClient implements IAssistantClient {
   async *sendQuery(
     prompt: string,
     cwd: string,
-    resumeSessionId?: string
+    resumeSessionId?: string,
+    options?: AssistantRequestOptions
   ): AsyncGenerator<MessageChunk> {
     const codex = getCodex();
-    const threadOptions = buildThreadOptions(cwd);
+    const threadOptions = buildThreadOptions(cwd, options);
 
     // Track if we fell back from a failed resume (to notify user)
     let sessionResumeFailed = false;

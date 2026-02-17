@@ -55,6 +55,18 @@ const mockParseCommand = mock((message: string) => {
   return { command: parts[0].substring(1), args: parts.slice(1) };
 });
 const mockGetAssistantClient = mock(() => null);
+const mockLoadConfig = mock(() =>
+  Promise.resolve({
+    botName: 'Archon',
+    assistant: 'claude',
+    assistants: { claude: {}, codex: {} },
+    streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+    paths: { workspaces: '/tmp', worktrees: '/tmp' },
+    concurrency: { maxConversations: 10 },
+    commands: { autoLoad: true },
+    defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+  })
+);
 
 // Mock for reading command files (replaces fs/promises mock)
 const mockReadCommandFile = mock(() => Promise.resolve(''));
@@ -117,6 +129,10 @@ mock.module('../db/isolation-environments', () => ({
 
 mock.module('../isolation', () => ({
   getIsolationProvider: mockGetIsolationProvider,
+}));
+
+mock.module('../config/config-loader', () => ({
+  loadConfig: mockLoadConfig,
 }));
 
 mock.module('../db/codebases', () => ({
@@ -275,6 +291,7 @@ describe('orchestrator', () => {
     mockCommandFileExists.mockClear();
     mockDiscoverWorkflows.mockClear();
     mockExecuteWorkflow.mockClear();
+    mockLoadConfig.mockClear();
     mockClient.sendQuery.mockClear();
     mockClient.getType.mockClear();
 
@@ -451,7 +468,8 @@ describe('orchestrator', () => {
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         wrapCommandForExecution('plan', 'Plan the following: Add dark mode'),
         '/workspace/project',
-        'claude-session-xyz'
+        'claude-session-xyz',
+        undefined
       );
     });
 
@@ -477,7 +495,8 @@ describe('orchestrator', () => {
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         wrapCommandForExecution('rca', 'Do the following: do thing'),
         '/workspace/project',
-        'claude-session-xyz'
+        'claude-session-xyz',
+        undefined
       );
     });
 
@@ -554,7 +573,8 @@ describe('orchestrator', () => {
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         wrapCommandForExecution('plan', 'Command text here') + '\n\n---\n\nIssue #42: Fix the bug',
         expect.any(String),
-        'claude-session-xyz' // Uses existing session's ID
+        'claude-session-xyz', // Uses existing session's ID
+        undefined
       );
     });
   });
@@ -586,7 +606,8 @@ describe('orchestrator', () => {
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         'fix the login bug',
         '/workspace/project',
-        'claude-session-xyz'
+        'claude-session-xyz',
+        undefined
       );
     });
   });
@@ -626,7 +647,8 @@ describe('orchestrator', () => {
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         wrapCommandForExecution('plan', 'Plan command'),
         '/workspace/project',
-        'claude-session-xyz'
+        'claude-session-xyz',
+        undefined
       );
     });
 
@@ -792,7 +814,8 @@ describe('orchestrator', () => {
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         wrapCommandForExecution('plan', 'Plan command'),
         '/workspace/project', // conversation.cwd
-        'claude-session-xyz' // Uses existing session's ID
+        'claude-session-xyz', // Uses existing session's ID
+        undefined
       );
     });
 
@@ -835,7 +858,8 @@ describe('orchestrator', () => {
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         wrapCommandForExecution('plan', 'Plan command'),
         '/workspace/test-project/worktrees/thread-chat-456', // From auto-created env
-        'claude-session-xyz'
+        'claude-session-xyz',
+        undefined
       );
     });
 
@@ -874,7 +898,8 @@ describe('orchestrator', () => {
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         wrapCommandForExecution('plan', 'Plan command'),
         '/workspace/isolation-env', // working_path from isolation env
-        'claude-session-xyz'
+        'claude-session-xyz',
+        undefined
       );
     });
   });
@@ -1168,7 +1193,8 @@ describe('orchestrator', () => {
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         wrapCommandForExecution('plan', 'Plan command'),
         '/workspace/project', // From existing env working_path
-        'claude-session-xyz'
+        'claude-session-xyz',
+        undefined
       );
     });
   });

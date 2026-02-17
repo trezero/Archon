@@ -9,6 +9,8 @@
  * types to enforce mutual exclusivity between steps and loop at compile time.
  */
 
+import type { ModelReasoningEffort, WebSearchMode } from '../types';
+
 export type WorkflowRunStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type ArtifactType = 'pr' | 'commit' | 'file_created' | 'file_modified' | 'branch';
@@ -72,6 +74,9 @@ interface WorkflowBase {
   description: string;
   provider?: 'claude' | 'codex'; // AI provider (default: claude)
   model?: string; // Model override (future)
+  modelReasoningEffort?: ModelReasoningEffort;
+  webSearchMode?: WebSearchMode;
+  additionalDirectories?: string[];
 }
 
 /** Step-based workflow - sequential command execution */

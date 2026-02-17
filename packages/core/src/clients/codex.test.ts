@@ -437,13 +437,15 @@ describe('CodexClient', () => {
         // consume
       }
 
-      expect(mockStartThread).toHaveBeenCalledWith({
-        workingDirectory: '/my/workspace',
-        skipGitRepoCheck: true,
-        sandboxMode: 'danger-full-access',
-        networkAccessEnabled: true,
-        approvalPolicy: 'never',
-      });
+      expect(mockStartThread).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workingDirectory: '/my/workspace',
+          skipGitRepoCheck: true,
+          sandboxMode: 'danger-full-access',
+          networkAccessEnabled: true,
+          approvalPolicy: 'never',
+        })
+      );
     });
 
     test('resumes existing thread with sandbox/network settings', async () => {
@@ -458,13 +460,16 @@ describe('CodexClient', () => {
         // consume
       }
 
-      expect(mockResumeThread).toHaveBeenCalledWith('existing-thread', {
-        workingDirectory: '/workspace',
-        skipGitRepoCheck: true,
-        sandboxMode: 'danger-full-access',
-        networkAccessEnabled: true,
-        approvalPolicy: 'never',
-      });
+      expect(mockResumeThread).toHaveBeenCalledWith(
+        'existing-thread',
+        expect.objectContaining({
+          workingDirectory: '/workspace',
+          skipGitRepoCheck: true,
+          sandboxMode: 'danger-full-access',
+          networkAccessEnabled: true,
+          approvalPolicy: 'never',
+        })
+      );
       expect(mockStartThread).not.toHaveBeenCalled();
     });
 
@@ -488,13 +493,15 @@ describe('CodexClient', () => {
 
       expect(mockResumeThread).toHaveBeenCalled();
       // Verify fallback startThread is called with correct config options
-      expect(mockStartThread).toHaveBeenCalledWith({
-        workingDirectory: '/workspace',
-        skipGitRepoCheck: true,
-        sandboxMode: 'danger-full-access',
-        networkAccessEnabled: true,
-        approvalPolicy: 'never',
-      });
+      expect(mockStartThread).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workingDirectory: '/workspace',
+          skipGitRepoCheck: true,
+          sandboxMode: 'danger-full-access',
+          networkAccessEnabled: true,
+          approvalPolicy: 'never',
+        })
+      );
       // Verify error was logged
       expect(mockLogger.error).toHaveBeenCalledWith(
         { err: resumeError, sessionId: 'bad-thread-id' },
@@ -506,6 +513,33 @@ describe('CodexClient', () => {
         content: expect.stringContaining('Could not resume previous session'),
       });
       expect(chunks[1]).toEqual({ type: 'result', sessionId: 'fallback-thread' });
+    });
+
+    test('passes model and codex options to thread options', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield { type: 'turn.completed' };
+        })(),
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of client.sendQuery('test prompt', '/workspace', undefined, {
+        model: 'gpt-5.2-codex',
+        modelReasoningEffort: 'medium',
+        webSearchMode: 'live',
+        additionalDirectories: ['/other/repo'],
+      })) {
+        // consume
+      }
+
+      expect(mockStartThread).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'gpt-5.2-codex',
+          modelReasoningEffort: 'medium',
+          webSearchMode: 'live',
+          additionalDirectories: ['/other/repo'],
+        })
+      );
     });
 
     test('breaks on turn.completed event', async () => {

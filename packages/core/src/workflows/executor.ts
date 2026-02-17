@@ -3,7 +3,12 @@
  */
 import { readFile, access, mkdir } from 'fs/promises';
 import { join } from 'path';
-import type { IPlatformAdapter, MessageMetadata, TokenUsage } from '../types';
+import type {
+  AssistantRequestOptions,
+  IPlatformAdapter,
+  MessageMetadata,
+  TokenUsage,
+} from '../types';
 import { getAssistantClient } from '../clients/factory';
 import * as workflowDb from '../db/workflows';
 import * as codebaseDb from '../db/codebases';
@@ -37,6 +42,7 @@ import {
 import { parseValidationResults } from './validation-parser';
 import { getWorkflowEventEmitter } from './event-emitter';
 import * as workflowEventDb from '../db/workflow-events';
+import { isModelCompatible } from './model-validation';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -633,6 +639,7 @@ async function executeStepInternal(
   stepId: string, // For logging: "0", "1", "2.0", "2.1", etc.
   resolvedProvider: string, // Provider resolved from workflow or config
   resolvedModel: string | undefined, // Model from workflow (if any)
+  resolvedOptions: AssistantRequestOptions | undefined,
   artifactsDir: string, // External artifacts directory
   logDir: string, // External log directory
   baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
@@ -713,7 +720,12 @@ async function executeStepInternal(
     let activityUpdateFailures = 0;
     let activityWarningShown = false;
 
-    for await (const msg of aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId)) {
+    for await (const msg of aiClient.sendQuery(
+      substitutedPrompt,
+      cwd,
+      resumeSessionId,
+      resolvedOptions
+    )) {
       // Update activity timestamp with failure tracking
       try {
         await workflowDb.updateWorkflowActivity(workflowRun.id);
@@ -927,6 +939,7 @@ async function executeParallelBlock(
   blockIndex: number,
   resolvedProvider: string, // Provider resolved from workflow or config
   resolvedModel: string | undefined, // Model from workflow (if any)
+  resolvedOptions: AssistantRequestOptions | undefined,
   artifactsDir: string,
   logDir: string,
   baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
@@ -976,6 +989,7 @@ async function executeParallelBlock(
         `${String(blockIndex)}.${String(i)}`, // Step identifier for logging
         resolvedProvider,
         resolvedModel,
+        resolvedOptions,
         artifactsDir,
         logDir,
         baseBranch,
@@ -1041,6 +1055,7 @@ async function executeLoopWorkflow(
   workflowRun: WorkflowRun,
   resolvedProvider: string, // Provider resolved from workflow or config
   resolvedModel: string | undefined, // Model from workflow (if any)
+  resolvedOptions: AssistantRequestOptions | undefined,
   artifactsDir: string,
   logDir: string,
   baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
@@ -1160,7 +1175,12 @@ async function executeLoopWorkflow(
       let activityUpdateFailures = 0;
       let activityWarningShown = false;
 
-      for await (const msg of aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId)) {
+      for await (const msg of aiClient.sendQuery(
+        substitutedPrompt,
+        cwd,
+        resumeSessionId,
+        resolvedOptions
+      )) {
         // Update activity timestamp with failure tracking
         try {
           await workflowDb.updateWorkflowActivity(workflowRun.id);
@@ -1436,7 +1456,27 @@ export async function executeWorkflow(
   // Resolve provider and model once (used by all steps/iterations)
   const resolvedProvider = workflow.provider ?? config.assistant;
   const providerSource = workflow.provider ? 'workflow definition' : 'config';
-  const resolvedModel = workflow.model; // TODO: Pass to client when model validation is implemented
+  const resolvedModel = workflow.model ?? config.assistants[resolvedProvider]?.model;
+  if (!isModelCompatible(resolvedProvider, resolvedModel)) {
+    throw new Error(
+      `Model "${resolvedModel}" is not compatible with provider "${resolvedProvider}". ` +
+        'Update your workflow or config.'
+    );
+  }
+
+  const resolvedOptions: AssistantRequestOptions | undefined =
+    resolvedProvider === 'codex'
+      ? {
+          model: resolvedModel,
+          modelReasoningEffort:
+            workflow.modelReasoningEffort ?? config.assistants.codex.modelReasoningEffort,
+          webSearchMode: workflow.webSearchMode ?? config.assistants.codex.webSearchMode,
+          additionalDirectories:
+            workflow.additionalDirectories ?? config.assistants.codex.additionalDirectories,
+        }
+      : resolvedModel
+        ? { model: resolvedModel }
+        : undefined;
   getLog().info(
     {
       workflowName: workflow.name,
@@ -1663,6 +1703,7 @@ export async function executeWorkflow(
         workflowRun,
         resolvedProvider,
         resolvedModel,
+        resolvedOptions,
         artifactsDir,
         logDir,
         baseBranch,
@@ -1736,6 +1777,7 @@ export async function executeWorkflow(
           i,
           resolvedProvider,
           resolvedModel,
+          resolvedOptions,
           artifactsDir,
           logDir,
           baseBranch,
@@ -1863,6 +1905,7 @@ export async function executeWorkflow(
           String(i),
           resolvedProvider,
           resolvedModel,
+          resolvedOptions,
           artifactsDir,
           logDir,
           baseBranch,

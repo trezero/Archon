@@ -418,6 +418,33 @@ import * as core from '@archon/core';  // Don't do this
 see .env.example
 see .archon/config.yaml setup as needed
 
+**Assistant Defaults:**
+
+The system supports configuring default models and options per assistant in `.archon/config.yaml`:
+
+```yaml
+assistants:
+  claude:
+    model: sonnet  # or 'opus', 'haiku', 'claude-*', 'inherit'
+  codex:
+    model: gpt-5.3-codex
+    modelReasoningEffort: medium  # 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+    webSearchMode: live  # 'disabled' | 'cached' | 'live'
+    additionalDirectories:
+      - /absolute/path/to/other/repo
+```
+
+**Configuration Priority:**
+1. Workflow-level options (in YAML `model`, `modelReasoningEffort`, etc.)
+2. Config file defaults (`.archon/config.yaml` `assistants.*`)
+3. SDK defaults
+
+**Model Validation:**
+- Workflows are validated at load time for provider/model compatibility
+- Claude models: `sonnet`, `opus`, `haiku`, `claude-*`, `inherit`
+- Codex models: Any model except Claude-specific aliases
+- Invalid combinations fail workflow loading with clear error messages
+
 ### Worktree Symbiosis (Skill + App)
 
 //TODO, This should be converted to a skill to not bload claude.md
@@ -660,6 +687,8 @@ log.warn({ envVar: 'MISSING_KEY' }, 'optional_config_missing');
    - Stored in `.archon/workflows/` (searched recursively)
    - Multi-step AI execution chains, discovered at runtime
    - Provider inherited from `.archon/config.yaml` unless explicitly set
+   - Model and options can be set per workflow or inherited from config defaults
+   - Model validation ensures provider/model compatibility at load time
    - Commands: `/workflow list`, `/workflow reload`, `/workflow status`, `/workflow cancel`
    - Resilient loading: One broken YAML doesn't abort discovery; errors shown in `/workflow list`
    - Router uses case-insensitive matching and provides helpful errors for unknown workflows

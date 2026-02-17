@@ -94,7 +94,11 @@ description: |                   # Multi-line description
 
 # Optional
 provider: claude                 # 'claude' or 'codex' (default: from config)
-model: sonnet                    # 'sonnet' or 'opus' (default: from config)
+model: sonnet                    # Model override (default: from config)
+modelReasoningEffort: medium     # Codex only: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+webSearchMode: live              # Codex only: 'disabled' | 'cached' | 'live'
+additionalDirectories:           # Codex only: Additional directories to include
+  - /absolute/path/to/other/repo
 
 # Required for step-based
 steps:
@@ -139,6 +143,14 @@ name: autonomous-loop
 description: |
   Iterate until completion signal detected.
   Good for: PRD implementation, test-fix cycles, iterative refinement.
+
+# Optional (same as step-based workflows)
+provider: claude                 # 'claude' or 'codex' (default: from config)
+model: sonnet                    # Model override (default: from config)
+modelReasoningEffort: medium     # Codex only
+webSearchMode: live              # Codex only
+additionalDirectories:           # Codex only
+  - /absolute/path/to/other/repo
 
 # Required for loop-based
 loop:
@@ -291,6 +303,105 @@ Each command must know:
 - Where to find its input
 - Where to write its output
 - What format to use
+
+---
+
+## Model Configuration
+
+Workflows can configure AI models and provider-specific options at the workflow level.
+
+### Configuration Priority
+
+Model and options are resolved in this order:
+
+1. **Workflow-level** - Explicit settings in the workflow YAML
+2. **Config defaults** - `assistants.*` in `.archon/config.yaml`
+3. **SDK defaults** - Built-in defaults from Claude/Codex SDKs
+
+### Provider and Model
+
+```yaml
+name: my-workflow
+provider: claude     # 'claude' or 'codex' (default: from config)
+model: sonnet        # Model override (default: from config assistants.claude.model)
+```
+
+**Claude models:**
+- `sonnet` - Fast, balanced (recommended)
+- `opus` - Powerful, expensive
+- `haiku` - Fast, lightweight
+- `claude-*` - Full model IDs (e.g., `claude-3-5-sonnet-20241022`)
+- `inherit` - Use model from previous session
+
+**Codex models:**
+- Any OpenAI model ID (e.g., `gpt-5.3-codex`, `o5-pro`)
+- Cannot use Claude model aliases
+
+### Codex-Specific Options
+
+```yaml
+name: my-workflow
+provider: codex
+model: gpt-5.3-codex
+modelReasoningEffort: medium    # 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+webSearchMode: live             # 'disabled' | 'cached' | 'live'
+additionalDirectories:
+  - /absolute/path/to/other/repo
+  - /path/to/shared/library
+```
+
+**Model reasoning effort:**
+- `minimal`, `low` - Fast, cheaper
+- `medium` - Balanced (default)
+- `high`, `xhigh` - More thorough, expensive
+
+**Web search mode:**
+- `disabled` - No web access (default)
+- `cached` - Use cached search results
+- `live` - Real-time web search
+
+**Additional directories:**
+- Codex can access files outside the codebase
+- Useful for shared libraries, documentation repos
+- Must be absolute paths
+
+### Model Validation
+
+Workflows are validated at load time:
+- Provider/model compatibility checked
+- Invalid combinations fail with clear error messages
+- Validation errors shown in `/workflow list`
+
+Example validation error:
+```
+Model "sonnet" is not compatible with provider "codex"
+```
+
+### Example: Config Defaults + Workflow Override
+
+**`.archon/config.yaml`:**
+```yaml
+assistants:
+  claude:
+    model: haiku  # Fast model for most tasks
+  codex:
+    model: gpt-5.3-codex
+    modelReasoningEffort: low
+    webSearchMode: disabled
+```
+
+**Workflow with override:**
+```yaml
+name: complex-analysis
+description: Deep code analysis requiring powerful model
+provider: claude
+model: opus  # Override config default (haiku) for this workflow
+steps:
+  - command: analyze-architecture
+  - command: generate-report
+```
+
+The workflow uses `opus` instead of the config default `haiku`, but other settings inherit from config.
 
 ---
 

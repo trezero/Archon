@@ -134,7 +134,9 @@ describe('ClaudeClient', () => {
 
       // Consume the generator
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for await (const _ of client.sendQuery('my prompt', '/my/workspace')) {
+      for await (const _ of client.sendQuery('my prompt', '/my/workspace', undefined, {
+        model: 'sonnet',
+      })) {
         // consume
       }
 
@@ -142,6 +144,7 @@ describe('ClaudeClient', () => {
         prompt: 'my prompt',
         options: expect.objectContaining({
           cwd: '/my/workspace',
+          model: 'sonnet',
           permissionMode: 'bypassPermissions',
         }),
       });

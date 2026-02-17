@@ -207,6 +207,7 @@ concurrency:
       const config = await loadConfig();
 
       expect(config.assistant).toBe('claude');
+      expect(config.assistants).toEqual({ claude: {}, codex: {} });
       expect(config.streaming.telegram).toBe('stream');
       expect(config.streaming.github).toBe('batch');
       expect(config.concurrency.maxConversations).toBe(10);
@@ -253,6 +254,34 @@ streaming:
 
       const config = await loadConfig('/test/repo');
       expect(config.assistant).toBe('codex');
+    });
+
+    test('merges assistant defaults from global and repo config', async () => {
+      const pathMatches = (path: string, pattern: string): boolean => {
+        const normalizedPath = path.replace(/\\/g, '/');
+        return normalizedPath.includes(pattern);
+      };
+
+      let globalConfigRead = false;
+      mockReadConfigFile.mockImplementation(async (path: string) => {
+        if (pathMatches(path, '/repo/.archon/config.yaml')) {
+          return `assistants:\n  codex:\n    webSearchMode: live\n    additionalDirectories:\n      - /repo\n`;
+        }
+        if (pathMatches(path, '.archon/config.yaml') && !globalConfigRead) {
+          globalConfigRead = true;
+          return `assistants:\n  claude:\n    model: sonnet\n  codex:\n    model: gpt-5.2-codex\n    modelReasoningEffort: medium\n`;
+        }
+        const error = new Error('ENOENT') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      });
+
+      const config = await loadConfig('/test/repo');
+      expect(config.assistants.claude.model).toBe('sonnet');
+      expect(config.assistants.codex.model).toBe('gpt-5.2-codex');
+      expect(config.assistants.codex.modelReasoningEffort).toBe('medium');
+      expect(config.assistants.codex.webSearchMode).toBe('live');
+      expect(config.assistants.codex.additionalDirectories).toEqual(['/repo']);
     });
 
     test('propagates baseBranch from repo worktree config', async () => {

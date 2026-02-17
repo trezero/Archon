@@ -32,6 +32,7 @@ function getLog(): ReturnType<typeof createLogger> {
   return cachedLog;
 }
 import {
+  type AssistantRequestOptions,
   IPlatformAdapter,
   IsolationHints,
   IsolationEnvironmentRow,
@@ -55,6 +56,7 @@ import { getAssistantClient } from '../clients/factory';
 import { getIsolationProvider } from '../isolation';
 import { worktreeExists, findWorktreeByBranch, getCanonicalRepoPath } from '../utils/git';
 import { syncArchonToWorktree } from '../utils/worktree-sync';
+import * as configLoader from '../config/config-loader';
 import {
   discoverWorkflows,
   buildRouterPrompt,
@@ -1179,6 +1181,29 @@ export async function handleMessage(
       getLog().debug({ sessionId: session.id }, 'session_resuming');
     }
 
+    let assistantOptions: AssistantRequestOptions | undefined;
+    try {
+      const config = await configLoader.loadConfig(cwd);
+      if (conversation.ai_assistant_type === 'codex') {
+        const codexOptions: AssistantRequestOptions = {
+          model: config.assistants.codex.model,
+          modelReasoningEffort: config.assistants.codex.modelReasoningEffort,
+          webSearchMode: config.assistants.codex.webSearchMode,
+          additionalDirectories: config.assistants.codex.additionalDirectories,
+        };
+        const hasCodexOptions = Object.values(codexOptions).some(value => value !== undefined);
+        assistantOptions = hasCodexOptions ? codexOptions : undefined;
+      } else if (config.assistants.claude.model) {
+        assistantOptions = { model: config.assistants.claude.model };
+      }
+    } catch (error) {
+      getLog().error({ err: error as Error, cwd }, 'assistant_defaults_load_failed');
+      await platform.sendMessage(
+        conversationId,
+        '⚠️ Could not load assistant configuration. Using defaults. Check your .archon/config.yaml for errors.'
+      );
+    }
+
     // Send to AI and stream responses
     const mode = platform.getStreamingMode();
     getLog().debug({ mode }, 'streaming_mode');
@@ -1202,11 +1227,14 @@ export async function handleMessage(
       const allMessages: string[] = [];
       let newSessionId: string | undefined;
 
-      for await (const msg of aiClient.sendQuery(
+      const stream = aiClient.sendQuery(
         promptToSend,
         cwd,
-        session.assistant_session_id ?? undefined
-      )) {
+        session.assistant_session_id ?? undefined,
+        assistantOptions
+      );
+
+      for await (const msg of stream) {
         if (msg.type === 'assistant' && msg.content) {
           allMessages.push(msg.content);
         } else if (msg.type === 'tool' && msg.toolName) {
@@ -1256,11 +1284,14 @@ export async function handleMessage(
       let assistantChunksTruncated = false;
       let totalChunksTruncated = false;
 
-      for await (const msg of aiClient.sendQuery(
+      const stream = aiClient.sendQuery(
         promptToSend,
         cwd,
-        session.assistant_session_id ?? undefined
-      )) {
+        session.assistant_session_id ?? undefined,
+        assistantOptions
+      );
+
+      for await (const msg of stream) {
         if (msg.type === 'assistant' && msg.content) {
           assistantMessages.push(msg.content);
           allChunks.push({ type: 'assistant', content: msg.content });

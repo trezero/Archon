@@ -10,6 +10,15 @@
  * Global configuration (non-secret user preferences)
  * Located at ~/.archon/config.yaml
  */
+import type { ModelReasoningEffort, WebSearchMode } from '../types';
+
+export interface AssistantDefaults {
+  model?: string;
+  modelReasoningEffort?: ModelReasoningEffort;
+  webSearchMode?: WebSearchMode;
+  additionalDirectories?: string[];
+}
+
 export interface GlobalConfig {
   /**
    * Bot display name (shown in messages)
@@ -22,6 +31,14 @@ export interface GlobalConfig {
    * @default 'claude'
    */
   defaultAssistant?: 'claude' | 'codex';
+
+  /**
+   * Assistant-specific defaults (model, reasoning effort, etc.)
+   */
+  assistants?: {
+    claude?: Pick<AssistantDefaults, 'model'>;
+    codex?: AssistantDefaults;
+  };
 
   /**
    * Platform streaming preferences (can be overridden per conversation)
@@ -72,6 +89,14 @@ export interface RepoConfig {
    * Overrides global default
    */
   assistant?: 'claude' | 'codex';
+
+  /**
+   * Assistant-specific defaults for this repository
+   */
+  assistants?: {
+    claude?: Pick<AssistantDefaults, 'model'>;
+    codex?: AssistantDefaults;
+  };
 
   /**
    * Commands configuration
@@ -144,6 +169,10 @@ export interface RepoConfig {
 export interface MergedConfig {
   botName: string;
   assistant: 'claude' | 'codex';
+  assistants: {
+    claude: Pick<AssistantDefaults, 'model'>;
+    codex: AssistantDefaults;
+  };
   streaming: {
     telegram: 'stream' | 'batch';
     discord: 'stream' | 'batch';

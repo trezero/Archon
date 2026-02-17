@@ -11,11 +11,13 @@ import type {
   SingleStep,
   WorkflowStep,
 } from './types';
+import type { ModelReasoningEffort, WebSearchMode } from '../types';
 import * as archonPaths from '../utils/archon-paths';
 import * as configLoader from '../config/config-loader';
 import { isValidCommandName } from './executor';
 import { BUNDLED_WORKFLOWS, isBinaryBuild } from '../defaults/bundled-defaults';
 import { createLogger } from '../utils/logger';
+import { isModelCompatible } from './model-validation';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -29,6 +31,25 @@ function getLog(): ReturnType<typeof createLogger> {
  */
 function parseYaml(content: string): unknown {
   return Bun.YAML.parse(content);
+}
+
+const MODEL_REASONING_EFFORTS: readonly ModelReasoningEffort[] = [
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+];
+const WEB_SEARCH_MODES: readonly WebSearchMode[] = ['disabled', 'cached', 'live'];
+
+function isModelReasoningEffort(value: unknown): value is ModelReasoningEffort {
+  return (
+    typeof value === 'string' && MODEL_REASONING_EFFORTS.includes(value as ModelReasoningEffort)
+  );
+}
+
+function isWebSearchMode(value: unknown): value is WebSearchMode {
+  return typeof value === 'string' && WEB_SEARCH_MODES.includes(value as WebSearchMode);
 }
 
 /**
@@ -240,6 +261,42 @@ function parseWorkflow(content: string, filename: string): ParseResult {
     const provider =
       raw.provider === 'claude' || raw.provider === 'codex' ? raw.provider : undefined;
     const model = typeof raw.model === 'string' ? raw.model : undefined;
+    const modelReasoningEffort = isModelReasoningEffort(raw.modelReasoningEffort)
+      ? raw.modelReasoningEffort
+      : undefined;
+    if (raw.modelReasoningEffort !== undefined && !modelReasoningEffort) {
+      getLog().warn(
+        { filename, value: raw.modelReasoningEffort, valid: MODEL_REASONING_EFFORTS },
+        'invalid_model_reasoning_effort'
+      );
+    }
+    const webSearchMode = isWebSearchMode(raw.webSearchMode) ? raw.webSearchMode : undefined;
+    if (raw.webSearchMode !== undefined && !webSearchMode) {
+      getLog().warn(
+        { filename, value: raw.webSearchMode, valid: WEB_SEARCH_MODES },
+        'invalid_web_search_mode'
+      );
+    }
+    const additionalDirectories = Array.isArray(raw.additionalDirectories)
+      ? raw.additionalDirectories.filter((d: unknown) => {
+          if (typeof d !== 'string') {
+            getLog().warn({ filename, value: d }, 'non_string_additional_directory_filtered');
+            return false;
+          }
+          return true;
+        })
+      : undefined;
+
+    if (provider && model && !isModelCompatible(provider, model)) {
+      return {
+        workflow: null,
+        error: {
+          filename,
+          error: `Model "${model}" is not compatible with provider "${provider}"`,
+          errorType: 'validation_error',
+        },
+      };
+    }
 
     // Return appropriate workflow type based on discriminated union
     if (hasLoop && loopConfig) {
@@ -249,6 +306,9 @@ function parseWorkflow(content: string, filename: string): ParseResult {
           description: raw.description,
           provider,
           model,
+          modelReasoningEffort,
+          webSearchMode,
+          additionalDirectories,
           loop: loopConfig,
           prompt: raw.prompt as string,
         },
@@ -276,6 +336,9 @@ function parseWorkflow(content: string, filename: string): ParseResult {
         description: raw.description,
         provider,
         model,
+        modelReasoningEffort,
+        webSearchMode,
+        additionalDirectories,
         steps,
       },
       error: null,
