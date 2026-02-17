@@ -31,6 +31,9 @@ export class SqliteAdapter implements IDatabase {
     // Enable WAL mode for better concurrent performance
     this.db.run('PRAGMA journal_mode = WAL');
 
+    // Retry busy locks up to 5s to avoid SQLITE_BUSY during parallel workflows
+    this.db.run('PRAGMA busy_timeout = 5000');
+
     // Enable foreign keys
     this.db.run('PRAGMA foreign_keys = ON');
 
