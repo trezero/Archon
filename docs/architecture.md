@@ -1348,17 +1348,23 @@ try {
 ### Context Injection
 
 ```typescript
-// GitHub: Inject issue/PR context for first message
-let finalMessage = command;
-if (isFirstCommandInvoke && issue) {
-  const context = `GitHub Issue #${issue.number}: "${issue.title}"`;
-  finalMessage = finalMessage + '\n\n---\n\n' + context;
+// GitHub: Pass issue/PR context as separate parameter
+let contextToAppend: string | undefined;
+
+if (eventType === 'issue' && issue) {
+  contextToAppend = `GitHub Issue #${String(issue.number)}: "${issue.title}"
+Use 'gh issue view ${String(issue.number)}' for full details if needed.`;
+} else if (eventType === 'pull_request' && pullRequest) {
+  contextToAppend = `GitHub Pull Request #${String(pullRequest.number)}: "${pullRequest.title}"
+Use 'gh pr view ${String(pullRequest.number)}' for full details if needed.`;
 }
 
-await handleMessage(adapter, conversationId, finalMessage);
+await handleMessage(adapter, conversationId, finalMessage, contextToAppend);
 ```
 
-**Reference:** `src/adapters/github.ts:441-479`
+Context is passed as a dedicated `issueContext` parameter to `handleMessage()`, keeping it separate from the user's message. For workflows, context is injected via `$CONTEXT` / `$ISSUE_CONTEXT` variable substitution in `buildPromptWithContext()`.
+
+**Reference:** `packages/server/src/adapters/github.ts:879-933`, `packages/core/src/orchestrator/orchestrator.ts:636-644`
 
 ---
 

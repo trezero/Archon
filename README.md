@@ -156,7 +156,7 @@ docker compose --profile with-db up -d postgres
 # Set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/remote_coding_agent in .env
 ```
 
-> **Note:** The database schema is created automatically on first container startup via the mounted migration file. No manual `psql` step is needed for fresh Docker installs.
+> **Note:** The database schema is created automatically on first container startup via the mounted migration file. No manual `psql` step is needed for fresh installs.
 
 ### Option 3: Self-Hosted Production
 

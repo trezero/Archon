@@ -566,9 +566,6 @@ function buildPromptWithContext(
 }
 
 /**
- * Execute a single workflow step
- */
-/**
  * Internal function that executes a single step
  * (extracted to allow parallel execution)
  */

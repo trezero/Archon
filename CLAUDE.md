@@ -712,7 +712,20 @@ try {
 }
 ```
 
-**Git Operation Errors (Graceful Handling but dont fail silently):**
+**Git Operation Errors (Graceful Handling but don't fail silently):**
+```typescript
+// When isolation environment creation fails:
+try {
+  // ... isolation creation logic ...
+} catch (error) {
+  const err = error as Error;
+  const userMessage = classifyIsolationError(err);
+  log.error({ err, codebaseId, codebaseName }, 'isolation_creation_failed');
+  await platform.sendMessage(conversationId, userMessage);
+}
+```
+
+Pattern: Use `classifyIsolationError()` (in `orchestrator.ts`) to map git errors (permission denied, timeout, no space, not a git repo) to user-friendly messages. Always log the raw error for debugging and send a classified message to the user.
 
 ### API Endpoints
 
