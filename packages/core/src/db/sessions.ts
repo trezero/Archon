@@ -1,7 +1,7 @@
 /**
  * Database operations for sessions
  */
-import { pool, getDialect } from './connection';
+import { pool, getDialect, getDatabase } from './connection';
 import type { Session } from '../types';
 import type { TransitionTrigger } from '../state/session-transitions';
 import { createLogger } from '../utils/logger';
@@ -109,24 +109,51 @@ export async function transitionSession(
     ai_assistant_type: string;
   }
 ): Promise<Session> {
-  const current = await getActiveSession(conversationId);
+  const db = getDatabase();
+  const dialect = getDialect();
 
-  if (current) {
-    await deactivateSession(current.id, reason);
-  }
+  return db.withTransaction(async query => {
+    // 1. Read current active session
+    const currentResult = await query<Session>(
+      'SELECT * FROM remote_agent_sessions WHERE conversation_id = $1 AND active = true LIMIT 1',
+      [conversationId]
+    );
+    const current = currentResult.rows[0] || null;
 
-  const newSession = await createSession({
-    conversation_id: conversationId,
-    codebase_id: data.codebase_id,
-    ai_assistant_type: data.ai_assistant_type,
-    parent_session_id: current?.id,
-    transition_reason: reason,
+    // 2. Deactivate current session if exists
+    if (current) {
+      const deactivateResult = await query(
+        `UPDATE remote_agent_sessions SET active = false, ended_at = ${dialect.now()}, ended_reason = $2 WHERE id = $1`,
+        [current.id, reason]
+      );
+      if (deactivateResult.rowCount === 0) {
+        throw new SessionNotFoundError(current.id);
+      }
+    }
+
+    // 3. Create new session linked to previous
+    const newResult = await query<Session>(
+      `INSERT INTO remote_agent_sessions
+     (conversation_id, codebase_id, ai_assistant_type, assistant_session_id, parent_session_id, transition_reason)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING *`,
+      [
+        conversationId,
+        data.codebase_id ?? null,
+        data.ai_assistant_type,
+        null,
+        current?.id ?? null,
+        reason,
+      ]
+    );
+
+    const newSession = newResult.rows[0];
+    getLog().debug(
+      { conversationId, reason, parentSessionId: current?.id, newSessionId: newSession.id },
+      'session_transitioned'
+    );
+    return newSession;
   });
-  getLog().debug(
-    { conversationId, reason, parentSessionId: current?.id, newSessionId: newSession.id },
-    'session_transitioned'
-  );
-  return newSession;
 }
 
 /**

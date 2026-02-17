@@ -3,12 +3,20 @@ import { createQueryResult, mockPostgresDialect } from '../test/mocks/database';
 import { Session } from '../types';
 
 const mockQuery = mock(() => Promise.resolve(createQueryResult([])));
+const mockWithTransaction = mock(
+  async <T>(fn: (query: typeof mockQuery) => Promise<T>): Promise<T> => {
+    return fn(mockQuery);
+  }
+);
 
 // Mock the connection module before importing the module under test
 mock.module('./connection', () => ({
   pool: {
     query: mockQuery,
   },
+  getDatabase: () => ({
+    withTransaction: mockWithTransaction,
+  }),
   getDialect: () => mockPostgresDialect,
 }));
 
@@ -27,6 +35,7 @@ import {
 describe('sessions', () => {
   beforeEach(() => {
     mockQuery.mockClear();
+    mockWithTransaction.mockClear();
   });
 
   const mockSession: Session = {
@@ -293,6 +302,7 @@ describe('sessions', () => {
       });
 
       expect(result).toEqual(newSession);
+      expect(mockWithTransaction).toHaveBeenCalledTimes(1);
       expect(mockQuery).toHaveBeenCalledTimes(3);
 
       // Verify deactivateSession was called with reason
@@ -340,6 +350,7 @@ describe('sessions', () => {
       });
 
       expect(result).toEqual(newSession);
+      expect(mockWithTransaction).toHaveBeenCalledTimes(1);
       expect(mockQuery).toHaveBeenCalledTimes(2);
 
       // Verify createSession was called without parent_session_id (null when no current session)
@@ -353,7 +364,7 @@ describe('sessions', () => {
       );
     });
 
-    test('propagates error when createSession fails after deactivateSession', async () => {
+    test('rolls back transaction when createSession fails after deactivateSession', async () => {
       const currentSession: Session = {
         id: 'session-123',
         conversation_id: 'conv-456',
@@ -382,7 +393,9 @@ describe('sessions', () => {
         })
       ).rejects.toThrow('Database connection lost');
 
-      // Verify all three calls were made (deactivate happened before failure)
+      // Transaction was used (rollback happens in the adapter, not visible in unit test)
+      expect(mockWithTransaction).toHaveBeenCalledTimes(1);
+      // All three queries were attempted within the transaction
       expect(mockQuery).toHaveBeenCalledTimes(3);
     });
   });

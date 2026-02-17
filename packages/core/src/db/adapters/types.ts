@@ -23,6 +23,18 @@ export interface IDatabase {
   query<T>(sql: string, params?: unknown[]): Promise<QueryResult<T>>;
 
   /**
+   * Execute a callback within a database transaction.
+   * All queries using the provided function are atomic -
+   * they either all commit or all roll back on error.
+   *
+   * @param fn - Callback receiving a transaction-scoped query function
+   * @returns The callback's return value
+   */
+  withTransaction<T>(
+    fn: (query: <U>(sql: string, params?: unknown[]) => Promise<QueryResult<U>>) => Promise<T>
+  ): Promise<T>;
+
+  /**
    * Close the database connection
    */
   close(): Promise<void>;

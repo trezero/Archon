@@ -42,6 +42,34 @@ export class PostgresAdapter implements IDatabase {
     };
   }
 
+  async withTransaction<T>(
+    fn: (query: <U>(sql: string, params?: unknown[]) => Promise<QueryResult<U>>) => Promise<T>
+  ): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const txQuery = async <U>(sql: string, params?: unknown[]): Promise<QueryResult<U>> => {
+        const result = await client.query(sql, params);
+        return {
+          rows: result.rows as U[],
+          rowCount: result.rowCount ?? 0,
+        };
+      };
+      const result = await fn(txQuery);
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        getLog().error({ err: rollbackError as Error }, 'transaction_rollback_failed');
+      }
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
   async close(): Promise<void> {
     await this.pool.end();
   }

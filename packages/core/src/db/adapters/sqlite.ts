@@ -88,6 +88,24 @@ export class SqliteAdapter implements IDatabase {
     }
   }
 
+  async withTransaction<T>(
+    fn: (query: <U>(sql: string, params?: unknown[]) => Promise<QueryResult<U>>) => Promise<T>
+  ): Promise<T> {
+    await this.query('BEGIN');
+    try {
+      const result = await fn(this.query.bind(this));
+      await this.query('COMMIT');
+      return result;
+    } catch (e) {
+      try {
+        await this.query('ROLLBACK');
+      } catch (rollbackError) {
+        getLog().error({ err: rollbackError as Error }, 'transaction_rollback_failed');
+      }
+      throw e;
+    }
+  }
+
   async close(): Promise<void> {
     this.db.close();
   }
