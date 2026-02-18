@@ -123,6 +123,37 @@ interface WorkflowArtifactEvent {
   path?: string;
 }
 
+interface NodeStartedEvent {
+  type: 'node_started';
+  runId: string;
+  nodeId: string;
+  nodeName: string; // command name or node.id for inline prompts
+}
+
+interface NodeCompletedEvent {
+  type: 'node_completed';
+  runId: string;
+  nodeId: string;
+  nodeName: string;
+  duration: number;
+}
+
+interface NodeFailedEvent {
+  type: 'node_failed';
+  runId: string;
+  nodeId: string;
+  nodeName: string;
+  error: string;
+}
+
+interface NodeSkippedEvent {
+  type: 'node_skipped';
+  runId: string;
+  nodeId: string;
+  nodeName: string;
+  reason: 'when_condition' | 'trigger_rule';
+}
+
 export type WorkflowEmitterEvent =
   | WorkflowStartedEvent
   | WorkflowCompletedEvent
@@ -135,6 +166,10 @@ export type WorkflowEmitterEvent =
   | ParallelAgentFailedEvent
   | LoopIterationStartedEvent
   | LoopIterationCompletedEvent
+  | NodeStartedEvent
+  | NodeCompletedEvent
+  | NodeFailedEvent
+  | NodeSkippedEvent
   | WorkflowArtifactEvent;
 
 // ---------------------------------------------------------------------------

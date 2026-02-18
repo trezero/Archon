@@ -41,7 +41,7 @@ Archon discovers workflows recursively - subdirectories are fine. If a workflow 
 
 ---
 
-## Two Workflow Types
+## Three Workflow Types
 
 ### 1. Step-Based Workflows
 
@@ -79,6 +79,43 @@ prompt: |
   When ALL items pass validation, output:
   <promise>COMPLETE</promise>
 ```
+
+### 3. DAG-Based Workflows (nodes:)
+
+Execute nodes in dependency order with parallel layers and conditional branching:
+
+```yaml
+name: classify-and-fix
+description: Classify issue type, then run the appropriate fix path
+
+nodes:
+  - id: classify
+    command: classify-issue
+    output_format:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [BUG, FEATURE]
+      required: [type]
+
+  - id: investigate
+    command: investigate-bug
+    depends_on: [classify]
+    when: "$classify.output.type == 'BUG'"
+
+  - id: plan
+    command: plan-feature
+    depends_on: [classify]
+    when: "$classify.output.type == 'FEATURE'"
+
+  - id: implement
+    command: implement-changes
+    depends_on: [investigate, plan]
+    trigger_rule: none_failed_min_one_success
+```
+
+Nodes without `depends_on` run immediately. Nodes in the same topological layer run concurrently via `Promise.allSettled`. Skipped nodes (failed `when:` condition or `trigger_rule`) propagate their skipped state to dependants.
 
 ---
 
@@ -219,6 +256,139 @@ prompt: |
   Update progress file.
   When all complete: <promise>COMPLETE</promise>
 ```
+
+---
+
+## DAG-Based Workflow Schema
+
+```yaml
+# Required
+name: workflow-name
+description: |
+  What this workflow does.
+
+# Optional (same as step/loop workflows)
+provider: claude
+model: sonnet
+modelReasoningEffort: medium     # Codex only
+webSearchMode: live              # Codex only
+
+# Required for DAG-based
+nodes:
+  - id: classify                 # Unique node ID (used for dependency refs and $id.output)
+    command: classify-issue      # Loads from .archon/commands/classify-issue.md
+    output_format:               # Optional: enforce structured JSON output (Claude only)
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [BUG, FEATURE]
+      required: [type]
+
+  - id: investigate
+    command: investigate-bug
+    depends_on: [classify]       # Wait for classify to complete
+    when: "$classify.output.type == 'BUG'"  # Skip if condition is false
+
+  - id: plan
+    command: plan-feature
+    depends_on: [classify]
+    when: "$classify.output.type == 'FEATURE'"
+
+  - id: implement
+    command: implement-changes
+    depends_on: [investigate, plan]
+    trigger_rule: none_failed_min_one_success  # Run if at least one dep succeeded
+
+  - id: inline-node
+    prompt: "Summarize the changes made in $implement.output"  # Inline prompt (no command file)
+    depends_on: [implement]
+    context: fresh               # Force fresh session for this node
+    provider: claude             # Per-node provider override
+    model: haiku                 # Per-node model override
+```
+
+### Node Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | string | required | Unique node identifier. Used in `depends_on`, `when:`, and `$id.output` substitution |
+| `command` | string | — | Command name to load from `.archon/commands/`. Mutually exclusive with `prompt` |
+| `prompt` | string | — | Inline prompt string. Mutually exclusive with `command` |
+| `depends_on` | string[] | `[]` | Node IDs that must complete before this node runs |
+| `when` | string | — | Condition expression. Node is skipped if false |
+| `trigger_rule` | string | `all_success` | Join semantics when multiple upstreams exist |
+| `output_format` | object | — | JSON Schema for structured output. Claude only — Codex nodes ignore this |
+| `context` | `'fresh'` | — | Force a fresh AI session for this node |
+| `provider` | `'claude'` \| `'codex'` | inherited | Per-node provider override |
+| `model` | string | inherited | Per-node model override |
+
+### `trigger_rule` Values
+
+| Value | Behavior |
+|-------|----------|
+| `all_success` | Run only if all upstream deps completed successfully (default) |
+| `one_success` | Run if at least one upstream dep completed successfully |
+| `none_failed_min_one_success` | Run if no deps failed AND at least one succeeded (skipped deps are ok) |
+| `all_done` | Run when all deps are in a terminal state (completed, failed, or skipped) |
+
+### `when:` Condition Syntax
+
+Conditions use string equality against upstream node outputs:
+
+```yaml
+when: "$nodeId.output == 'VALUE'"
+when: "$nodeId.output != 'VALUE'"
+when: "$nodeId.output.field == 'VALUE'"    # JSON dot notation for output_format nodes
+```
+
+- Uses `$nodeId.output` to reference the full output string of a completed node
+- Use `$nodeId.output.field` to access a JSON field (for `output_format` nodes)
+- Invalid expressions default to `true` (fail open — node runs rather than silently skipping)
+- Skipped nodes propagate their skipped state to dependants
+
+### `$node_id.output` Substitution
+
+In node prompts and commands, reference the output of any upstream node:
+
+```yaml
+nodes:
+  - id: classify
+    command: classify-issue
+
+  - id: fix
+    command: implement-fix
+    depends_on: [classify]
+    # The command file can use $classify.output or $classify.output.field
+```
+
+Variable substitution order:
+1. Standard variables (`$WORKFLOW_ID`, `$USER_MESSAGE`, `$ARTIFACTS_DIR`, etc.)
+2. Node output references (`$nodeId.output`, `$nodeId.output.field`)
+
+### `output_format` for Structured JSON
+
+Use `output_format` to enforce JSON output from a Claude node. This uses the Claude Agent SDK's `outputFormat` option with a JSON Schema:
+
+```yaml
+nodes:
+  - id: classify
+    command: classify-issue
+    output_format:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [BUG, FEATURE]
+        severity:
+          type: string
+          enum: [low, medium, high]
+      required: [type]
+```
+
+- Only supported for Claude nodes. Codex nodes log a warning and ignore `output_format`
+- The output is captured as a JSON string and available via `$classify.output` (full JSON) or `$classify.output.type` (field access)
+- Use `output_format` when downstream nodes need to branch on specific values via `when:`
 
 ---
 
@@ -435,19 +605,22 @@ Good descriptions include:
 
 ---
 
-## Variable Substitution in Loops
+## Variable Substitution
 
-Loop prompts support these variables:
+All workflow types (steps, loop, nodes) support these variables in prompts and commands:
 
 | Variable | Description |
 |----------|-------------|
 | `$WORKFLOW_ID` | Unique ID for this workflow run |
 | `$USER_MESSAGE` | Original message that triggered workflow |
 | `$ARGUMENTS` | Same as `$USER_MESSAGE` |
+| `$ARTIFACTS_DIR` | Pre-created artifacts directory for this workflow run |
 | `$BASE_BRANCH` | Base branch from config or auto-detected from repo |
 | `$CONTEXT` | GitHub issue/PR context (if available) |
 | `$EXTERNAL_CONTEXT` | Same as `$CONTEXT` |
 | `$ISSUE_CONTEXT` | Same as `$CONTEXT` |
+| `$nodeId.output` | Output of a completed upstream DAG node (DAG workflows only) |
+| `$nodeId.output.field` | JSON field from a structured upstream node output (DAG workflows only) |
 
 Example:
 ```yaml
@@ -566,6 +739,48 @@ prompt: |
   - Implement ONE story per iteration
   - Always run validation after changes
   - Update progress file before ending iteration
+```
+
+### DAG: Classify and Route
+
+```yaml
+name: classify-and-fix
+description: |
+  Classify issue type and run the appropriate path in parallel.
+
+  Use when: User reports a bug or requests a feature
+  Produces: Code fix (bug path) or feature plan (feature path), then PR
+
+nodes:
+  - id: classify
+    command: classify-issue
+    output_format:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [BUG, FEATURE]
+      required: [type]
+
+  - id: investigate
+    command: investigate-bug
+    depends_on: [classify]
+    when: "$classify.output.type == 'BUG'"
+
+  - id: plan
+    command: plan-feature
+    depends_on: [classify]
+    when: "$classify.output.type == 'FEATURE'"
+
+  - id: implement
+    command: implement-changes
+    depends_on: [investigate, plan]
+    trigger_rule: none_failed_min_one_success
+
+  - id: create-pr
+    command: create-pr
+    depends_on: [implement]
+    context: fresh
 ```
 
 ### Test-Fix Loop
@@ -729,9 +944,11 @@ Before deploying a workflow:
 ## Summary
 
 1. **Workflows orchestrate commands** - YAML files that define execution order
-2. **Two types**: Step-based (sequential) and loop-based (iterative)
+2. **Three types**: Step-based (sequential), loop-based (iterative), and DAG-based (dependency graph)
 3. **Artifacts are the glue** - Commands communicate via files, not memory
-4. **`clearContext: true`** - Fresh session, works from artifacts
-5. **Parallel execution** - Multiple agents, fresh sessions, shared artifacts
+4. **`clearContext: true`** - Fresh session for a step, works from artifacts
+5. **Parallel execution** - Step `parallel:` blocks and DAG nodes in the same layer both run concurrently
 6. **Loops need signals** - Use `<promise>COMPLETE</promise>` to exit
-7. **Test thoroughly** - Each command, the artifact flow, and edge cases
+7. **DAG branching** - `when:` conditions and `trigger_rule` control which nodes run
+8. **`output_format`** - Enforce structured JSON output from Claude nodes for reliable branching
+9. **Test thoroughly** - Each command, the artifact flow, and edge cases

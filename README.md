@@ -1139,11 +1139,11 @@ Commands are version-controlled with your codebase, not stored in the database.
 <details>
 <summary><b>Workflows (Multi-Step Automation)</b></summary>
 
-Workflows are YAML files that define multi-step AI processes. They can be step-based (sequential commands) or loop-based (autonomous iteration).
+Workflows are YAML files that define multi-step AI processes. Three execution modes are available (mutually exclusive):
 
 **Location:** `.archon/workflows/`
 
-**Example step-based workflow** (`.archon/workflows/fix-github-issue.yaml`):
+**`steps:` — sequential commands:**
 ```yaml
 name: fix-github-issue
 description: |
@@ -1159,7 +1159,7 @@ steps:
     clearContext: true
 ```
 
-**Example loop-based workflow** (autonomous iteration):
+**`loop:` — autonomous iteration:**
 ```yaml
 name: ralph-loop
 description: Execute plan until all validations pass
@@ -1175,6 +1175,38 @@ prompt: |
   Continue implementing the plan. Run validation after each change.
   Signal completion with: "All validations pass"
 ```
+
+**`nodes:` — DAG with parallel execution and conditional branching:**
+```yaml
+name: classify-and-fix
+description: Classify issue type, then run the appropriate fix path
+
+nodes:
+  - id: classify
+    command: classify-issue
+    output_format:                          # Enforce structured JSON output (Claude only)
+      type: object
+      properties:
+        type: { type: string, enum: [BUG, FEATURE] }
+      required: [type]
+
+  - id: investigate
+    command: investigate-bug
+    depends_on: [classify]
+    when: "$classify.output.type == 'BUG'"  # Skip if condition is false
+
+  - id: plan
+    command: plan-feature
+    depends_on: [classify]
+    when: "$classify.output.type == 'FEATURE'"
+
+  - id: implement
+    command: implement-changes
+    depends_on: [investigate, plan]
+    trigger_rule: none_failed_min_one_success  # Run if at least one dep succeeded
+```
+
+Nodes without `depends_on` are in the first layer and run concurrently with each other. See [Authoring Workflows](docs/authoring-workflows.md) for full DAG documentation.
 
 **How workflows are invoked:**
 - AI routes to workflows automatically based on user intent
@@ -1235,7 +1267,7 @@ prompt: |
 - **Strategy Pattern**: Swappable AI assistants via `IAssistantClient` interface
 - **Session Persistence**: AI context survives restarts via database storage
 - **Generic Commands**: User-defined markdown commands versioned with Git
-- **Workflow Engine**: YAML-based multi-step automation with step and loop modes
+- **Workflow Engine**: YAML-based multi-step automation with step, loop, and DAG (nodes) modes
 - **Worktree Isolation**: Git worktrees enable parallel work per conversation, auto-synced with origin before creation
 - **Concurrency Control**: Lock manager prevents race conditions
 

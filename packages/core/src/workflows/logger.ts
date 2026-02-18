@@ -28,7 +28,11 @@ export interface WorkflowEvent {
     | 'tool'
     | 'validation'
     | 'parallel_block_start'
-    | 'parallel_block_complete';
+    | 'parallel_block_complete'
+    | 'node_start'
+    | 'node_complete'
+    | 'node_skipped'
+    | 'node_error';
   workflow_id: string;
   workflow_name?: string;
   step?: string;
@@ -248,5 +252,64 @@ export async function logParallelBlockComplete(
     type: 'parallel_block_complete',
     block_index: blockIndex,
     results,
+  });
+}
+
+/** Log DAG node start */
+export async function logNodeStart(
+  logDir: string,
+  workflowRunId: string,
+  nodeId: string,
+  commandName: string
+): Promise<void> {
+  await logWorkflowEvent(logDir, workflowRunId, {
+    type: 'node_start',
+    step: nodeId,
+    content: commandName,
+  });
+}
+
+/** Log DAG node completion */
+export async function logNodeComplete(
+  logDir: string,
+  workflowRunId: string,
+  nodeId: string,
+  commandName: string,
+  meta?: { durationMs?: number; tokens?: TokenUsage }
+): Promise<void> {
+  await logWorkflowEvent(logDir, workflowRunId, {
+    type: 'node_complete',
+    step: nodeId,
+    content: commandName,
+    ...(meta?.durationMs !== undefined ? { duration_ms: meta.durationMs } : {}),
+    ...(meta?.tokens ? { tokens: meta.tokens } : {}),
+  });
+}
+
+/** Log DAG node skipped (when: false or trigger_rule not met) */
+export async function logNodeSkip(
+  logDir: string,
+  workflowRunId: string,
+  nodeId: string,
+  reason: string
+): Promise<void> {
+  await logWorkflowEvent(logDir, workflowRunId, {
+    type: 'node_skipped',
+    step: nodeId,
+    content: reason,
+  });
+}
+
+/** Log DAG node error */
+export async function logNodeError(
+  logDir: string,
+  workflowRunId: string,
+  nodeId: string,
+  error: string
+): Promise<void> {
+  await logWorkflowEvent(logDir, workflowRunId, {
+    type: 'node_error',
+    step: nodeId,
+    error,
   });
 }

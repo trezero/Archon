@@ -516,7 +516,9 @@ async function createSession(conversationId: string, codebaseId: string) {
 2. **Workflows** (YAML-based):
    - Stored in `.archon/workflows/` (searched recursively)
    - Multi-step AI execution chains, discovered at runtime
-   - Provider inherited from `.archon/config.yaml` unless explicitly set
+   - Three execution modes (mutually exclusive): `steps:` (sequential), `loop:` (iterative), `nodes:` (DAG)
+   - **`nodes:` (DAG mode)**: Nodes with explicit `depends_on` edges; independent nodes in the same topological layer run concurrently. Supports `when:` conditions, `trigger_rule` join semantics, `$nodeId.output` substitution, and `output_format` for structured JSON output (Claude only)
+   - Provider inherited from `.archon/config.yaml` unless explicitly set; per-node `provider` and `model` overrides supported in DAG mode
    - Model and options can be set per workflow or inherited from config defaults
    - Model validation ensures provider/model compatibility at load time
    - Commands: `/workflow list`, `/workflow reload`, `/workflow status`, `/workflow cancel`

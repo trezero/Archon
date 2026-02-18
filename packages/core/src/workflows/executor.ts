@@ -26,7 +26,8 @@ import type {
   SingleStep,
   WorkflowExecutionResult,
 } from './types';
-import { isParallelBlock } from './types';
+import { isParallelBlock, isDagWorkflow } from './types';
+import { executeDagWorkflow } from './dag-executor';
 import {
   logWorkflowStart,
   logStepStart,
@@ -43,6 +44,7 @@ import { parseValidationResults } from './validation-parser';
 import { getWorkflowEventEmitter } from './event-emitter';
 import * as workflowEventDb from '../db/workflow-events';
 import { isClaudeModel, isModelCompatible } from './model-validation';
+import { isValidCommandName } from './command-validation';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -376,20 +378,8 @@ async function sendCriticalMessage(
   return false;
 }
 
-/**
- * Validate command name to prevent path traversal
- */
-export function isValidCommandName(name: string): boolean {
-  // Reject names with path separators or parent directory references
-  if (name.includes('/') || name.includes('\\') || name.includes('..')) {
-    return false;
-  }
-  // Reject empty names or names starting with .
-  if (!name || name.startsWith('.')) {
-    return false;
-  }
-  return true;
-}
+// Re-exported to keep existing consumers working (isValidCommandName moved to command-validation.ts)
+export { isValidCommandName };
 
 /**
  * Load command prompt from file
@@ -1697,7 +1687,11 @@ export async function executeWorkflow(
     const workflowStartTime = Date.now();
     emitter.registerRun(workflowRun.id, conversationId);
 
-    const totalSteps = workflow.steps ? workflow.steps.length : 0;
+    const totalSteps = isDagWorkflow(workflow)
+      ? workflow.nodes.length
+      : workflow.steps
+        ? workflow.steps.length
+        : 0;
     const isLoop = !!workflow.loop;
     emitter.emit({
       type: 'workflow_started',
@@ -1803,6 +1797,37 @@ export async function executeWorkflow(
     }
 
     // Dispatch to appropriate execution mode
+
+    // Route DAG workflows to dag-executor
+    if (isDagWorkflow(workflow)) {
+      await executeDagWorkflow(
+        platform,
+        conversationId,
+        cwd,
+        workflow,
+        workflowRun,
+        resolvedProvider,
+        resolvedModel,
+        artifactsDir,
+        logDir,
+        baseBranch,
+        config,
+        configuredCommandFolder,
+        issueContext
+      );
+      // executeDagWorkflow throws on fatal errors; check DB status for result
+      const finalStatus = await workflowDb.getWorkflowRun(workflowRun.id);
+      if (finalStatus?.status === 'completed') {
+        return { success: true, workflowRunId: workflowRun.id };
+      } else {
+        return {
+          success: false,
+          workflowRunId: workflowRun.id,
+          error: 'DAG workflow did not complete successfully',
+        };
+      }
+    }
+
     if (workflow.loop) {
       await executeLoopWorkflow(
         platform,
@@ -1837,8 +1862,12 @@ export async function executeWorkflow(
     let stepNumber = resumeFromStepIndex ?? 0;
 
     // Execute steps sequentially (for step-based workflows)
-    // After the loop check above, TypeScript knows workflow.steps exists
+    // After the isDagWorkflow and loop checks above, TypeScript narrows to StepWorkflow
     const steps = workflow.steps;
+    if (!steps) {
+      // Should never happen — discriminated union guarantees steps after DAG/loop dispatch
+      throw new Error('[executeWorkflow] Unexpected: no steps after DAG/loop dispatch');
+    }
     for (let i = 0; i < steps.length; i++) {
       // Resume: skip steps that completed in a prior run
       if (resumeFromStepIndex !== undefined && i < resumeFromStepIndex) {

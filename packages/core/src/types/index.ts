@@ -231,6 +231,12 @@ export interface AssistantRequestOptions {
    * Note: `undefined` (omitted) and `[]` have different semantics — do not confuse them.
    */
   tools?: string[];
+  /**
+   * Structured output schema. Claude Agent SDK enforces this via outputFormat option.
+   * Only supported by Claude — ignored by Codex (caller must not set for Codex nodes).
+   * Shape: { type: 'json_schema', schema: <JSON Schema object> }
+   */
+  outputFormat?: { type: 'json_schema'; schema: Record<string, unknown> };
 }
 
 /**

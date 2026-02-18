@@ -204,6 +204,10 @@ export class ClaudeClient implements IAssistantClient {
         env: buildSubprocessEnv(),
         model: requestOptions?.model,
         ...(requestOptions?.tools !== undefined ? { tools: requestOptions.tools } : {}),
+        // Pass outputFormat for json_schema structured output (Claude Agent SDK v0.2.45+)
+        ...(requestOptions?.outputFormat !== undefined
+          ? { outputFormat: requestOptions.outputFormat }
+          : {}),
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         systemPrompt: { type: 'preset', preset: 'claude_code' },

@@ -1,12 +1,13 @@
 /**
  * Workflow Engine Type Definitions
  *
- * Core types for the workflow engine supporting two execution modes:
+ * Core types for the workflow engine supporting three execution modes:
  * 1. Step-based: Sequential prompt chains with session continuity
  * 2. Loop-based: Autonomous iteration until completion signal (Ralph pattern)
+ * 3. DAG-based: Nodes with explicit dependency edges, parallel layers, conditional branching
  *
  * The WorkflowDefinition type uses a discriminated union pattern with `never`
- * types to enforce mutual exclusivity between steps and loop at compile time.
+ * types to enforce mutual exclusivity between steps, loop, and nodes at compile time.
  */
 
 import type { ModelReasoningEffort, WebSearchMode } from '../types';
@@ -84,6 +85,7 @@ interface StepWorkflow extends WorkflowBase {
   readonly steps: readonly WorkflowStep[];
   loop?: never;
   prompt?: never;
+  nodes?: never;
 }
 
 /** Loop-based workflow - autonomous iteration until completion */
@@ -91,15 +93,110 @@ interface LoopWorkflow extends WorkflowBase {
   steps?: never;
   loop: LoopConfig;
   prompt: string;
+  nodes?: never;
+}
+
+export type TriggerRule =
+  | 'all_success'
+  | 'one_success'
+  | 'none_failed_min_one_success'
+  | 'all_done';
+
+/** Canonical list of trigger rules — derive from this, do not duplicate. */
+export const TRIGGER_RULES: readonly TriggerRule[] = [
+  'all_success',
+  'one_success',
+  'none_failed_min_one_success',
+  'all_done',
+];
+
+export function isTriggerRule(value: unknown): value is TriggerRule {
+  return typeof value === 'string' && (TRIGGER_RULES as readonly string[]).includes(value);
+}
+
+export type NodeState = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+
+/**
+ * Captured output from a completed DAG node.
+ * `output` is the concatenated assistant text (or JSON-encoded string from the SDK
+ * when output_format is set). Empty string for failed/skipped nodes.
+ * `error` is required when state is 'failed', absent on all other states.
+ */
+export type NodeOutput =
+  | { state: 'completed' | 'running'; output: string; sessionId?: string; error?: never }
+  | { state: 'failed'; output: string; sessionId?: string; error: string }
+  | { state: 'pending' | 'skipped'; output: string; sessionId?: never; error?: never };
+
+// Compile-time assertion: NodeOutput must cover all NodeState values.
+// If NodeState gains a new value, this line becomes a type error as a reminder to update NodeOutput.
+type AssertNodeOutputCoversNodeState = NodeOutput['state'] extends NodeState
+  ? NodeState extends NodeOutput['state']
+    ? true
+    : never
+  : never;
+const nodeOutputStateCoverage: AssertNodeOutputCoversNodeState = true;
+void nodeOutputStateCoverage; // suppress unused-variable lint warning
+
+/** Shared fields for all DAG node types */
+interface DagNodeBase {
+  id: string;
+  /** Node IDs that must complete before this node runs. */
+  depends_on?: string[];
+  /** Condition expression — node is skipped if false. e.g. "$classify.output.type == 'BUG'" */
+  when?: string;
+  /** Join semantics when multiple upstreams exist. Defaults to 'all_success'. */
+  trigger_rule?: TriggerRule;
+  /** Per-node model override. */
+  model?: string;
+  /** Per-node provider override. */
+  provider?: 'claude' | 'codex';
+  /** Force fresh session for this node (ignores any prior session). */
+  context?: 'fresh';
+  /**
+   * JSON Schema for structured output. Claude SDK enforces this via outputFormat.
+   * Only supported for Claude nodes. Codex nodes log a warning and ignore this field.
+   */
+  output_format?: Record<string, unknown>;
+}
+
+/** DAG node that runs a named command from .archon/commands/ */
+export interface CommandNode extends DagNodeBase {
+  command: string;
+  prompt?: never;
+}
+
+/** DAG node with an inline prompt (no command file) */
+export interface PromptNode extends DagNodeBase {
+  prompt: string;
+  command?: never;
+}
+
+/** A single node in a DAG workflow. command and prompt are mutually exclusive. */
+export type DagNode = CommandNode | PromptNode;
+
+/** DAG-based workflow — nodes with explicit dependency edges */
+interface DagWorkflow extends WorkflowBase {
+  readonly nodes: readonly DagNode[];
+  steps?: never;
+  loop?: never;
+  prompt?: never;
 }
 
 /**
  * Workflow definition parsed from YAML - discriminated union
  *
- * Either step-based (with `steps`) or loop-based (with `loop` + `prompt`).
+ * Either step-based (with `steps`), loop-based (with `loop` + `prompt`),
+ * or DAG-based (with `nodes`).
  * The `never` types ensure TypeScript enforces mutual exclusivity at compile time.
  */
-export type WorkflowDefinition = StepWorkflow | LoopWorkflow;
+export type WorkflowDefinition = StepWorkflow | LoopWorkflow | DagWorkflow;
+
+/**
+ * Type guard: check if workflow is a DAG workflow
+ */
+export function isDagWorkflow(workflow: WorkflowDefinition): workflow is DagWorkflow {
+  return Array.isArray(workflow.nodes);
+}
 
 /**
  * Runtime workflow run state stored in database

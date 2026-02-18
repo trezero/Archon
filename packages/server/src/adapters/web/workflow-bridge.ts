@@ -118,6 +118,29 @@ export function mapWorkflowEvent(event: WorkflowEmitterEvent): string | null {
         timestamp: Date.now(),
       });
 
+    case 'node_started':
+    case 'node_completed':
+    case 'node_failed':
+    case 'node_skipped':
+      return JSON.stringify({
+        type: 'dag_node',
+        runId: event.runId,
+        nodeId: event.nodeId,
+        name: event.nodeName,
+        status:
+          event.type === 'node_started'
+            ? 'running'
+            : event.type === 'node_completed'
+              ? 'completed'
+              : event.type === 'node_failed'
+                ? 'failed'
+                : 'skipped',
+        duration: event.type === 'node_completed' ? event.duration : undefined,
+        error: event.type === 'node_failed' ? event.error : undefined,
+        reason: event.type === 'node_skipped' ? event.reason : undefined,
+        timestamp: Date.now(),
+      });
+
     default: {
       const exhaustiveCheck: never = event;
       getLog().warn(

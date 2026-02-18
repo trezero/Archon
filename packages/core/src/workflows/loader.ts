@@ -10,11 +10,13 @@ import type {
   LoopConfig,
   SingleStep,
   WorkflowStep,
+  DagNode,
 } from './types';
+import { TRIGGER_RULES, isTriggerRule } from './types';
 import type { ModelReasoningEffort, WebSearchMode } from '../types';
 import * as archonPaths from '../utils/archon-paths';
 import * as configLoader from '../config/config-loader';
-import { isValidCommandName } from './executor';
+import { isValidCommandName } from './command-validation';
 import { BUNDLED_WORKFLOWS, isBinaryBuild } from '../defaults/bundled-defaults';
 import { createLogger } from '../utils/logger';
 import { isModelCompatible } from './model-validation';
@@ -116,6 +118,139 @@ function parseStep(s: unknown, index: number, errors: string[]): WorkflowStep | 
   return parseSingleStep(step, String(index + 1), errors);
 }
 
+/** Validate and parse a single DagNode from raw YAML data */
+function parseDagNode(
+  raw: Record<string, unknown>,
+  index: number,
+  errors: string[]
+): DagNode | null {
+  const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+  if (!id) {
+    errors.push(`Node ${String(index + 1)}: missing required field 'id'`);
+    return null;
+  }
+
+  const hasCommand = typeof raw.command === 'string' && raw.command.trim().length > 0;
+  const hasPrompt = typeof raw.prompt === 'string' && raw.prompt.trim().length > 0;
+
+  if (hasCommand && hasPrompt) {
+    errors.push(`Node '${id}': 'command' and 'prompt' are mutually exclusive`);
+    return null;
+  }
+  if (!hasCommand && !hasPrompt) {
+    errors.push(`Node '${id}': must have either 'command' or 'prompt'`);
+    return null;
+  }
+
+  const command = hasCommand ? String(raw.command).trim() : undefined;
+  if (command && !isValidCommandName(command)) {
+    errors.push(`Node '${id}': invalid command name "${command}"`);
+    return null;
+  }
+
+  const dependsOn = Array.isArray(raw.depends_on)
+    ? (raw.depends_on as unknown[]).map(d => String(d))
+    : [];
+
+  const triggerRule = isTriggerRule(raw.trigger_rule) ? raw.trigger_rule : undefined;
+  if (raw.trigger_rule !== undefined && !triggerRule) {
+    const triggerRuleStr = typeof raw.trigger_rule === 'string' ? raw.trigger_rule : '<invalid>';
+    errors.push(
+      `Node '${id}': unknown trigger_rule "${triggerRuleStr}". ` +
+        `Valid: ${TRIGGER_RULES.join(', ')}`
+    );
+    return null;
+  }
+
+  const provider: 'claude' | 'codex' | undefined =
+    raw.provider === 'claude' || raw.provider === 'codex' ? raw.provider : undefined;
+  const model = typeof raw.model === 'string' ? raw.model : undefined;
+
+  if (provider && model && !isModelCompatible(provider, model)) {
+    errors.push(`Node '${id}': model "${model}" is not compatible with provider "${provider}"`);
+    return null;
+  }
+
+  const whenStr = raw.when !== undefined && typeof raw.when === 'string' ? raw.when : undefined;
+
+  const baseFields = {
+    ...(dependsOn.length > 0 ? { depends_on: dependsOn } : {}),
+    ...(whenStr !== undefined ? { when: whenStr } : {}),
+    ...(triggerRule ? { trigger_rule: triggerRule } : {}),
+    ...(model ? { model } : {}),
+    ...(provider ? { provider } : {}),
+    ...(raw.context === 'fresh' ? { context: 'fresh' as const } : {}),
+    ...(raw.output_format !== undefined &&
+    typeof raw.output_format === 'object' &&
+    !Array.isArray(raw.output_format) &&
+    raw.output_format !== null
+      ? { output_format: raw.output_format as Record<string, unknown> }
+      : {}),
+  };
+
+  if (hasCommand) {
+    return { id, command: String(raw.command).trim(), ...baseFields };
+  }
+  return { id, prompt: String(raw.prompt).trim(), ...baseFields };
+}
+
+/**
+ * Validate DAG structure: unique IDs, depends_on references exist, no cycles.
+ * Returns error message or null if valid.
+ */
+function validateDagStructure(nodes: DagNode[]): string | null {
+  // Check ID uniqueness
+  const ids = new Set<string>();
+  for (const node of nodes) {
+    if (ids.has(node.id)) {
+      return `Duplicate node id: '${node.id}'`;
+    }
+    ids.add(node.id);
+  }
+
+  // Check depends_on references
+  for (const node of nodes) {
+    for (const dep of node.depends_on ?? []) {
+      if (!ids.has(dep)) {
+        return `Node '${node.id}' depends_on unknown node '${dep}'`;
+      }
+    }
+  }
+
+  // Cycle detection via Kahn's algorithm
+  const inDegree = new Map<string, number>();
+  const dependents = new Map<string, string[]>();
+  for (const node of nodes) {
+    inDegree.set(node.id, node.depends_on?.length ?? 0);
+    for (const dep of node.depends_on ?? []) {
+      const existing = dependents.get(dep) ?? [];
+      existing.push(node.id);
+      dependents.set(dep, existing);
+    }
+  }
+
+  const queue = nodes.filter(n => (inDegree.get(n.id) ?? 0) === 0).map(n => n.id);
+  let visited = 0;
+
+  while (queue.length > 0) {
+    const nodeId = queue.shift();
+    if (nodeId === undefined) break;
+    visited++;
+    for (const dep of dependents.get(nodeId) ?? []) {
+      const newDegree = (inDegree.get(dep) ?? 0) - 1;
+      inDegree.set(dep, newDegree);
+      if (newDegree === 0) queue.push(dep);
+    }
+  }
+
+  if (visited < nodes.length) {
+    const cycleNodes = nodes.filter(n => (inDegree.get(n.id) ?? 0) > 0).map(n => n.id);
+    return `Cycle detected among nodes: ${cycleNodes.join(', ')}`;
+  }
+
+  return null; // valid
+}
+
 type ParseResult =
   | { workflow: WorkflowDefinition; error: null }
   | { workflow: null; error: WorkflowLoadError };
@@ -157,12 +292,13 @@ function parseWorkflow(content: string, filename: string): ParseResult {
       };
     }
 
-    // Validate mutual exclusivity: steps XOR (loop + prompt)
+    // Validate mutual exclusivity: steps XOR (loop + prompt) XOR nodes
     // This prevents ambiguous execution modes - a workflow is either
-    // step-based (sequential commands) or loop-based (autonomous iteration)
+    // step-based (sequential commands), loop-based (autonomous iteration), or DAG-based (nodes)
     const hasSteps = Array.isArray(raw.steps) && raw.steps.length > 0;
     const hasLoop = raw.loop && typeof raw.loop === 'object';
     const hasPrompt = typeof raw.prompt === 'string' && raw.prompt.trim().length > 0;
+    const hasNodes = Array.isArray(raw.nodes) && (raw.nodes as unknown[]).length > 0;
 
     if (hasSteps && hasLoop) {
       getLog().warn({ filename }, 'workflow_steps_and_loop_conflict');
@@ -171,6 +307,30 @@ function parseWorkflow(content: string, filename: string): ParseResult {
         error: {
           filename,
           error: "Cannot have both 'steps' and 'loop' (mutually exclusive)",
+          errorType: 'validation_error',
+        },
+      };
+    }
+
+    if (hasNodes && hasSteps) {
+      getLog().warn({ filename }, 'workflow_nodes_and_steps_conflict');
+      return {
+        workflow: null,
+        error: {
+          filename,
+          error: "Cannot have both 'nodes' and 'steps' (mutually exclusive)",
+          errorType: 'validation_error',
+        },
+      };
+    }
+
+    if (hasNodes && hasLoop) {
+      getLog().warn({ filename }, 'workflow_nodes_and_loop_conflict');
+      return {
+        workflow: null,
+        error: {
+          filename,
+          error: "Cannot have both 'nodes' and 'loop' (mutually exclusive)",
           errorType: 'validation_error',
         },
       };
@@ -188,13 +348,13 @@ function parseWorkflow(content: string, filename: string): ParseResult {
       };
     }
 
-    if (!hasSteps && !hasLoop) {
+    if (!hasSteps && !hasLoop && !hasNodes) {
       getLog().warn({ filename }, 'workflow_missing_steps_or_loop');
       return {
         workflow: null,
         error: {
           filename,
-          error: "Missing 'steps' or 'loop' configuration",
+          error: "Missing 'steps', 'loop', or 'nodes' configuration",
           errorType: 'validation_error',
         },
       };
@@ -231,6 +391,38 @@ function parseWorkflow(content: string, filename: string): ParseResult {
         max_iterations: loop.max_iterations,
         fresh_context: Boolean(loop.fresh_context),
       };
+    }
+
+    // Parse DAG nodes if present
+    let dagNodes: DagNode[] | undefined;
+    if (hasNodes) {
+      const validationErrors: string[] = [];
+      dagNodes = (raw.nodes as unknown[])
+        .map((n: unknown, i: number) =>
+          parseDagNode(n as Record<string, unknown>, i, validationErrors)
+        )
+        .filter((n): n is DagNode => n !== null);
+
+      if (dagNodes.length !== (raw.nodes as unknown[]).length) {
+        getLog().warn({ filename, validationErrors }, 'dag_node_validation_failed');
+        return {
+          workflow: null,
+          error: {
+            filename,
+            error: `DAG node validation failed: ${validationErrors.join('; ')}`,
+            errorType: 'validation_error',
+          },
+        };
+      }
+
+      const structureError = validateDagStructure(dagNodes);
+      if (structureError) {
+        getLog().warn({ filename, structureError }, 'dag_structure_invalid');
+        return {
+          workflow: null,
+          error: { filename, error: structureError, errorType: 'validation_error' },
+        };
+      }
     }
 
     // Parse steps if present (for step-based workflows)
@@ -299,6 +491,22 @@ function parseWorkflow(content: string, filename: string): ParseResult {
     }
 
     // Return appropriate workflow type based on discriminated union
+    if (hasNodes && dagNodes) {
+      return {
+        workflow: {
+          name: raw.name,
+          description: raw.description,
+          provider,
+          model,
+          modelReasoningEffort,
+          webSearchMode,
+          additionalDirectories,
+          nodes: dagNodes,
+        },
+        error: null,
+      };
+    }
+
     if (hasLoop && loopConfig) {
       return {
         workflow: {
@@ -317,7 +525,8 @@ function parseWorkflow(content: string, filename: string): ParseResult {
     }
 
     // Guard for TypeScript type narrowing - if we reach here without steps,
-    // it means step validation failed (see workflow_step_validation_failed log above)
+    // it means step validation failed (see workflow_step_validation_failed log above).
+    // DAG and loop workflows return early above, so only StepWorkflow reaches here.
     if (!steps) {
       getLog().error({ filename }, 'workflow_step_validation_unexpected_failure');
       return {
