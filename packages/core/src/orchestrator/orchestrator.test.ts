@@ -1255,8 +1255,8 @@ describe('orchestrator', () => {
 
       const updateError = new Error('Link failed');
       const cleanupError = new Error('Cleanup failed');
-      mockUpdateConversation.mockRejectedValue(updateError);
-      mockIsolationEnvUpdateStatus.mockRejectedValue(cleanupError);
+      mockUpdateConversation.mockRejectedValueOnce(updateError);
+      mockIsolationEnvUpdateStatus.mockRejectedValueOnce(cleanupError);
 
       mockClient.sendQuery.mockImplementation(async function* () {
         yield { type: 'result', sessionId: 'session-id' };
