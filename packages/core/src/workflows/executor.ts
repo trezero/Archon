@@ -743,6 +743,7 @@ async function executeStepInternal(
       }
 
       if (msg.type === 'assistant' && msg.content) {
+        assistantMessages.push(msg.content);
         if (streamingMode === 'stream') {
           const sent = await safeSendMessage(
             platform,
@@ -752,8 +753,6 @@ async function executeStepInternal(
             unknownErrorTracker
           );
           if (!sent) droppedMessageCount++;
-        } else {
-          assistantMessages.push(msg.content);
         }
         await logAssistant(logDir, workflowRun.id, msg.content);
       } else if (msg.type === 'tool' && msg.toolName) {
@@ -839,6 +838,7 @@ async function executeStepInternal(
       commandName,
       success: true,
       sessionId: newSessionId,
+      output: assistantMessages.join(''),
     };
   } catch (error) {
     const err = error as Error;
@@ -1373,6 +1373,28 @@ async function executeLoopWorkflow(
     } catch (error) {
       const err = error as Error;
       getLog().error({ err, iteration: i }, 'loop_iteration_failed');
+
+      // Emit loop iteration failure event for UI progress tracking
+      loopEmitter.emit({
+        type: 'loop_iteration_failed',
+        runId: workflowRun.id,
+        iteration: i,
+        error: err.message,
+      });
+
+      // Persist failure event to DB for page-reload hydration
+      void workflowEventDb.createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'loop_iteration_failed',
+        step_index: i - 1,
+        step_name: `iteration-${String(i)}`,
+        data: {
+          iteration: i,
+          error: err.message,
+          duration_ms: Date.now() - iterationStart,
+        },
+      });
+
       await workflowDb.failWorkflowRun(workflowRun.id, `Iteration ${String(i)}: ${err.message}`);
       await logWorkflowError(logDir, workflowRun.id, err.message);
       await sendCriticalMessage(
@@ -1860,6 +1882,7 @@ export async function executeWorkflow(
     let currentSessionId: string | undefined;
     // Start at the resume index so user-facing "Step X/N" reflects actual position
     let stepNumber = resumeFromStepIndex ?? 0;
+    let lastStepOutput: string | undefined;
 
     // Execute steps sequentially (for step-based workflows)
     // After the isDagWorkflow and loop checks above, TypeScript narrows to StepWorkflow
@@ -2025,6 +2048,13 @@ export async function executeWorkflow(
 
         // All parallel steps succeeded - no session to carry forward
         currentSessionId = undefined;
+        // Capture parallel outputs for summary
+        const parallelOutputs = results
+          .filter(r => r.result.success && 'output' in r.result && r.result.output)
+          .map(r => (r.result as { output: string }).output);
+        if (parallelOutputs.length > 0) {
+          lastStepOutput = parallelOutputs.join('\n\n---\n\n');
+        }
       } else {
         // Single step execution (existing logic)
         stepNumber++;
@@ -2122,6 +2152,7 @@ export async function executeWorkflow(
         if (result.sessionId) {
           currentSessionId = result.sessionId;
         }
+        lastStepOutput = result.output;
       }
 
       // Update progress (non-critical - log but don't fail workflow on db error)
@@ -2195,7 +2226,7 @@ export async function executeWorkflow(
       workflowContext
     );
 
-    return { success: true, workflowRunId: workflowRun.id };
+    return { success: true, workflowRunId: workflowRun.id, summary: lastStepOutput };
   } catch (error) {
     // Top-level error handler: ensure workflow is marked as failed
     const err = error as Error;

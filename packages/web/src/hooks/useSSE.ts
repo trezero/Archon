@@ -29,7 +29,7 @@ function parseSSEEvent(raw: string): SSEEvent | null {
 }
 
 interface SSEHandlers {
-  onText: (content: string) => void;
+  onText: (content: string, workflowResult?: { workflowName: string; runId: string }) => void;
   onToolCall: (name: string, input: Record<string, unknown>) => void;
   onToolResult: (name: string, output: string, duration: number) => void;
   onError: (error: ErrorDisplay) => void;
@@ -42,6 +42,7 @@ interface SSEHandlers {
   onWorkflowDispatch?: (event: WorkflowDispatchEvent) => void;
   onWorkflowOutputPreview?: (event: WorkflowOutputPreviewEvent) => void;
   onWarning?: (message: string) => void;
+  onRetract?: () => void;
 }
 
 export function useSSE(
@@ -55,11 +56,15 @@ export function useSSE(
   // Text batching: accumulate text for 50ms before dispatching
   const textBufferRef = useRef('');
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingWorkflowResultRef = useRef<{ workflowName: string; runId: string } | undefined>(
+    undefined
+  );
 
   const flushText = useCallback((): void => {
     if (textBufferRef.current) {
-      handlersRef.current.onText(textBufferRef.current);
+      handlersRef.current.onText(textBufferRef.current, pendingWorkflowResultRef.current);
       textBufferRef.current = '';
+      pendingWorkflowResultRef.current = undefined;
     }
     flushTimerRef.current = null;
   }, []);
@@ -105,14 +110,41 @@ export function useSSE(
         switch (data.type) {
           case 'text':
             textBufferRef.current += data.content;
+            if (
+              'workflowResult' in data &&
+              data.workflowResult &&
+              typeof data.workflowResult === 'object'
+            ) {
+              pendingWorkflowResultRef.current = data.workflowResult as {
+                workflowName: string;
+                runId: string;
+              };
+            }
             if (!flushTimerRef.current) {
               flushTimerRef.current = setTimeout(flushText, 50);
             }
             break;
           case 'tool_call':
+            // Flush buffered text before tool events to ensure text
+            // attaches to the correct message (not the previous one)
+            if (textBufferRef.current) {
+              if (flushTimerRef.current) {
+                clearTimeout(flushTimerRef.current);
+                flushTimerRef.current = null;
+              }
+              flushText();
+            }
             h.onToolCall(data.name, data.input);
             break;
           case 'tool_result':
+            // Flush buffered text before tool result too
+            if (textBufferRef.current) {
+              if (flushTimerRef.current) {
+                clearTimeout(flushTimerRef.current);
+                flushTimerRef.current = null;
+              }
+              flushText();
+            }
             h.onToolResult(data.name, data.output, data.duration);
             break;
           case 'error':
@@ -158,6 +190,16 @@ export function useSSE(
             break;
           case 'warning':
             h.onWarning?.(data.message);
+            break;
+          case 'retract':
+            // Discard any buffered text (don't flush to UI)
+            if (flushTimerRef.current) {
+              clearTimeout(flushTimerRef.current);
+              flushTimerRef.current = null;
+            }
+            textBufferRef.current = '';
+            pendingWorkflowResultRef.current = undefined;
+            h.onRetract?.();
             break;
           case 'heartbeat':
             break;

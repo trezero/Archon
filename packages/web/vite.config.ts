@@ -18,6 +18,12 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.resolve(__dirname, './src'),
       },
+      dedupe: [
+        'mdast-util-find-and-replace',
+        'mdast-util-gfm-autolink-literal',
+        'mdast-util-gfm',
+        'remark-gfm',
+      ],
     },
     server: {
       port: 5173,

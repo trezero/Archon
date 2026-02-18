@@ -126,9 +126,11 @@ export interface MessageMetadata {
     | 'tool_call_formatted'
     | 'workflow_status'
     | 'workflow_dispatch_status'
-    | 'isolation_context';
+    | 'isolation_context'
+    | 'workflow_result';
   segment?: 'new' | 'auto';
   workflowDispatch?: { workerConversationId: string; workflowName: string };
+  workflowResult?: { workflowName: string; runId: string };
 }
 
 export interface IPlatformAdapter {
@@ -173,6 +175,9 @@ export interface IPlatformAdapter {
    * Other adapters (Telegram, Slack) continue using sendMessage() for formatted text.
    */
   sendStructuredEvent?(conversationId: string, event: MessageChunk): Promise<void>;
+
+  /** Retract previously streamed text (used when workflow routing intercepts) */
+  emitRetract?(conversationId: string): Promise<void>;
 }
 
 /**

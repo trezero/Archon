@@ -22,7 +22,6 @@ export async function commandFileExists(path: string): Promise<boolean> {
     throw new Error(`Cannot access command file at ${path}: ${err.message}`);
   }
 }
-import { join } from 'path';
 import { createLogger } from '../utils/logger';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -32,40 +31,22 @@ function getLog(): ReturnType<typeof createLogger> {
   return cachedLog;
 }
 import {
-  type AssistantRequestOptions,
   IPlatformAdapter,
   IsolationHints,
   IsolationEnvironmentRow,
   IsolationBlockReason,
-  HandleMessageContext,
   Conversation,
   Codebase,
   ConversationNotFoundError,
   isWebAdapter,
 } from '../types';
 import * as db from '../db/conversations';
-import * as codebaseDb from '../db/codebases';
-import * as sessionDb from '../db/sessions';
 import * as isolationEnvDb from '../db/isolation-environments';
-import * as commandHandler from '../handlers/command-handler';
-import { formatToolCall } from '../utils/tool-formatter';
-import { substituteVariables } from '../utils/variable-substitution';
-import { classifyAndFormatError } from '../utils/error-formatter';
 import { toError } from '../utils/error';
-import { getAssistantClient } from '../clients/factory';
 import { getIsolationProvider } from '../isolation';
 import { worktreeExists, findWorktreeByBranch, getCanonicalRepoPath } from '../utils/git';
-import { syncArchonToWorktree } from '../utils/worktree-sync';
-import * as configLoader from '../config/config-loader';
-import {
-  discoverWorkflows,
-  buildRouterPrompt,
-  parseWorkflowInvocation,
-  findWorkflow,
-  executeWorkflow,
-  isValidCommandName,
-} from '../workflows';
-import type { WorkflowDefinition, RouterContext } from '../workflows';
+import { executeWorkflow } from '../workflows';
+import type { WorkflowDefinition } from '../workflows';
 import * as workflowDb from '../db/workflows';
 import {
   cleanupToMakeRoom,
@@ -74,7 +55,6 @@ import {
   STALE_THRESHOLD_DAYS,
   WorktreeStatusBreakdown,
 } from '../services/cleanup-service';
-import { detectPlanToExecuteTransition } from '../state/session-transitions';
 
 /**
  * Error thrown when isolation is required but cannot be provided.
@@ -82,7 +62,7 @@ import { detectPlanToExecuteTransition } from '../state/session-transitions';
  * The user has already been notified of the specific reason (worktree limit reached,
  * isolation creation failure, etc.) before this error is thrown.
  */
-class IsolationBlockedError extends Error {
+export class IsolationBlockedError extends Error {
   readonly reason: IsolationBlockReason;
 
   constructor(message: string, reason: IsolationBlockReason) {
@@ -100,38 +80,6 @@ type IsolationResolution =
 type IsolationCreationResult =
   | { status: 'ready'; env: IsolationEnvironmentRow }
   | { status: 'blocked'; reason: IsolationBlockReason };
-
-/**
- * Attempt to persist session ID to database. Non-critical operation - if it fails,
- * the conversation continues but the session may not be resumable on next message.
- */
-async function tryPersistSessionId(sessionId: string, assistantSessionId: string): Promise<void> {
-  try {
-    await sessionDb.updateSession(sessionId, assistantSessionId);
-  } catch (error) {
-    const err = toError(error);
-    getLog().error(
-      { err, sessionId, newSessionId: assistantSessionId },
-      'session_id_persist_failed'
-    );
-  }
-}
-
-/**
- * Attempt to update session metadata. Non-critical operation - if it fails,
- * plan→execute detection may not work in subsequent messages.
- */
-async function tryUpdateSessionMetadata(
-  sessionId: string,
-  metadata: Record<string, unknown>
-): Promise<void> {
-  try {
-    await sessionDb.updateSessionMetadata(sessionId, metadata);
-  } catch (error) {
-    const err = toError(error);
-    getLog().error({ err, sessionId, metadata }, 'session_metadata_update_failed');
-  }
-}
 
 /**
  * Format the worktree limit reached message
@@ -157,9 +105,6 @@ function formatWorktreeLimitMessage(
   return msg;
 }
 
-const MAX_BATCH_ASSISTANT_CHUNKS = 20;
-const MAX_BATCH_TOTAL_CHUNKS = 200;
-
 /**
  * Validate existing isolation reference and coordinate creation of new isolation if needed.
  * Orchestrates the isolation lifecycle but delegates creation decisions (reuse, sharing,
@@ -167,7 +112,7 @@ const MAX_BATCH_TOTAL_CHUNKS = 200;
  *
  * @throws {IsolationBlockedError} When isolation is required but blocked (user already notified)
  */
-async function validateAndResolveIsolation(
+export async function validateAndResolveIsolation(
   conversation: Conversation,
   codebase: Codebase | null,
   platform: IPlatformAdapter,
@@ -473,19 +418,9 @@ function classifyIsolationError(err: Error): string {
 }
 
 /**
- * Check if a workflow discovery error is expected (missing directory) vs unexpected (config error).
- * Expected errors result in silent fallback; unexpected errors warn the user.
- */
-function isExpectedWorkflowDiscoveryError(err: Error): boolean {
-  const errorLower = err.message.toLowerCase();
-  const expectedPatterns = ['enoent', 'no such file', 'not found', 'does not exist'];
-  return expectedPatterns.some(pattern => errorLower.includes(pattern));
-}
-
-/**
  * Context for workflow routing - avoids passing many parameters
  */
-interface WorkflowRoutingContext {
+export interface WorkflowRoutingContext {
   readonly platform: IPlatformAdapter;
   readonly conversationId: string;
   readonly cwd: string;
@@ -512,133 +447,11 @@ interface WorkflowRoutingContext {
 }
 
 /**
- * Attempt to route an AI response to a workflow.
- * Returns true if the response was handled (workflow executed or error sent to user),
- * false if routing was not applicable (no workflows available or no workflow invocation
- * detected in the response).
- */
-async function tryWorkflowRouting(
-  ctx: WorkflowRoutingContext,
-  aiResponse: string,
-  hadTool = false
-): Promise<boolean> {
-  if (ctx.availableWorkflows.length === 0) {
-    return false;
-  }
-
-  const { workflowName, remainingMessage, error } = parseWorkflowInvocation(
-    aiResponse,
-    ctx.availableWorkflows
-  );
-
-  if (!workflowName) {
-    if (error) {
-      getLog().warn({ error }, 'workflow_routing_failed');
-      await ctx.platform.sendMessage(ctx.conversationId, error);
-      return true; // Suppress raw AI output containing the invalid /invoke-workflow command
-    }
-
-    // No /invoke-workflow found — fall back to archon-assist if available
-    const assistWorkflow = ctx.availableWorkflows.find(w => w.name === 'archon-assist');
-    if (assistWorkflow) {
-      if (hadTool) {
-        getLog().warn({ conversationId: ctx.conversationId }, 'router.codex_tool_bypass_fallback');
-      } else {
-        getLog().warn({ conversationId: ctx.conversationId }, 'router.fallback_to_assist');
-      }
-      await ctx.platform.sendMessage(
-        ctx.conversationId,
-        'Routing unclear, falling back to general assist...'
-      );
-
-      // Build isolation context (same as normal routing path)
-      const { workflowType, prSha, prBranch } = ctx.isolationHints ?? {};
-      const isPrReview =
-        workflowType === 'review' || workflowType === 'pr' || Boolean(prSha && prBranch);
-      const isolationContext = ctx.isolationEnv
-        ? { branchName: ctx.isolationEnv.branch_name, isPrReview, prSha, prBranch }
-        : undefined;
-
-      if (ctx.platform.getPlatformType() === 'web') {
-        await dispatchBackgroundWorkflow(ctx, assistWorkflow, isolationContext);
-      } else {
-        await executeWorkflow(
-          ctx.platform,
-          ctx.conversationId,
-          ctx.cwd,
-          assistWorkflow,
-          ctx.originalMessage,
-          ctx.conversationDbId,
-          ctx.codebaseId,
-          ctx.issueContext,
-          isolationContext
-        );
-      }
-      return true;
-    }
-
-    // archon-assist not available — return false, caller sends raw AI response
-    getLog().debug({ conversationId: ctx.conversationId }, 'router.assist_workflow_not_found');
-    return false;
-  }
-
-  const workflow = findWorkflow(workflowName, ctx.availableWorkflows);
-  if (!workflow) {
-    // Should be unreachable since parseWorkflowInvocation validates against the same list
-    getLog().error(
-      { workflowName, available: ctx.availableWorkflows.map(w => w.name) },
-      'workflow_find_failed_after_parse'
-    );
-    await ctx.platform.sendMessage(
-      ctx.conversationId,
-      `Internal error: workflow \`${workflowName}\` was matched but could not be found. Please try again.`
-    );
-    return true; // Suppress raw AI output
-  }
-
-  getLog().info({ workflowName }, 'workflow_routing');
-
-  if (remainingMessage) {
-    await ctx.platform.sendMessage(ctx.conversationId, remainingMessage);
-  }
-
-  // Build isolation context for workflow executor
-  const { workflowType, prSha, prBranch } = ctx.isolationHints ?? {};
-  const isPrReview =
-    workflowType === 'review' || workflowType === 'pr' || Boolean(prSha && prBranch);
-
-  const isolationContext = ctx.isolationEnv
-    ? { branchName: ctx.isolationEnv.branch_name, isPrReview, prSha, prBranch }
-    : undefined;
-
-  // Background dispatch for web platform — workflow runs in a worker conversation
-  if (ctx.platform.getPlatformType() === 'web') {
-    await dispatchBackgroundWorkflow(ctx, workflow, isolationContext);
-    return true;
-  }
-
-  // Inline execution for all other platforms
-  await executeWorkflow(
-    ctx.platform,
-    ctx.conversationId,
-    ctx.cwd,
-    workflow,
-    ctx.originalMessage,
-    ctx.conversationDbId,
-    ctx.codebaseId,
-    ctx.issueContext,
-    isolationContext
-  );
-
-  return true;
-}
-
-/**
  * Dispatch a workflow to run in a background worker conversation (web platform only).
  * Creates a hidden worker conversation, sets up event bridging from worker to parent,
  * and fires-and-forgets the workflow execution.
  */
-async function dispatchBackgroundWorkflow(
+export async function dispatchBackgroundWorkflow(
   ctx: WorkflowRoutingContext,
   workflow: WorkflowDefinition,
   isolationContext?: {
@@ -712,6 +525,24 @@ async function dispatchBackgroundWorkflow(
         if (result.workflowRunId) {
           await workflowDb.updateWorkflowRunParent(result.workflowRunId, ctx.conversationDbId);
         }
+        // Surface workflow output to parent conversation as a result card
+        if (result.success && result.summary) {
+          try {
+            await ctx.platform.sendMessage(ctx.conversationId, result.summary, {
+              category: 'workflow_result',
+              segment: 'new',
+              workflowResult: {
+                workflowName: workflow.name,
+                runId: result.workflowRunId,
+              },
+            });
+          } catch (surfaceError) {
+            getLog().warn(
+              { err: toError(surfaceError), conversationId: ctx.conversationId },
+              'workflow_output_surface_failed'
+            );
+          }
+        }
       } catch (error) {
         const err = toError(error);
         getLog().error(
@@ -761,723 +592,4 @@ ${content}
 ---
 
 Remember: The user already decided to run this command. Take action now.`;
-}
-
-export async function handleMessage(
-  platform: IPlatformAdapter,
-  conversationId: string,
-  message: string,
-  context?: HandleMessageContext
-): Promise<void> {
-  const { issueContext, threadContext, parentConversationId, isolationHints } = context ?? {};
-  try {
-    getLog().debug({ conversationId }, 'message_handling_started');
-
-    // Get or create conversation (with optional parent context for thread inheritance)
-    let conversation = await db.getOrCreateConversation(
-      platform.getPlatformType(),
-      conversationId,
-      undefined,
-      parentConversationId
-    );
-
-    // If new thread conversation, inherit context from parent (best-effort)
-    if (parentConversationId && !conversation.codebase_id) {
-      const parentConversation = await db.getConversationByPlatformId(
-        platform.getPlatformType(),
-        parentConversationId
-      );
-      if (parentConversation?.codebase_id) {
-        try {
-          await db.updateConversation(conversation.id, {
-            codebase_id: parentConversation.codebase_id,
-            cwd: parentConversation.cwd,
-          });
-          conversation = await db.getOrCreateConversation(
-            platform.getPlatformType(),
-            conversationId
-          );
-          getLog().debug({ conversationId, parentConversationId }, 'thread_context_inherited');
-        } catch (err) {
-          if (err instanceof ConversationNotFoundError) {
-            getLog().warn({ conversationId: conversation.id }, 'thread_inheritance_failed');
-          } else {
-            throw err;
-          }
-        }
-      }
-    }
-
-    // Parse command upfront if it's a slash command
-    let promptToSend = message;
-    let commandName: string | null = null;
-    let availableWorkflows: readonly WorkflowDefinition[] = [];
-
-    if (message.startsWith('/')) {
-      const { command, args } = commandHandler.parseCommand(message);
-
-      // List of deterministic commands (handled by command-handler, no AI)
-      // IMPORTANT: Keep synchronized with switch cases in command-handler.ts handleCommand()
-      const deterministicCommands = [
-        'help',
-        'status',
-        'getcwd',
-        'setcwd',
-        'clone',
-        'repos',
-        'repo',
-        'repo-remove',
-        'reset',
-        'reset-context',
-        'command-set',
-        'load-commands',
-        'commands',
-        'worktree',
-        'workflow',
-      ];
-
-      if (deterministicCommands.includes(command)) {
-        getLog().debug({ command, conversationId }, 'slash_command_processing');
-        const result = await commandHandler.handleCommand(conversation, message);
-        await platform.sendMessage(conversationId, result.message);
-
-        // Reload conversation if modified
-        if (result.modified) {
-          conversation = await db.getOrCreateConversation(
-            platform.getPlatformType(),
-            conversationId
-          );
-        }
-
-        // Handle workflow execution trigger from /workflow run
-        if (result.workflow) {
-          const { name: workflowName, args: workflowArgs } = result.workflow;
-          getLog().info({ workflowName }, 'workflow_run_triggered');
-
-          // Get codebase to determine cwd
-          if (!conversation.codebase_id) {
-            await platform.sendMessage(
-              conversationId,
-              'Workflow execution failed: No codebase configured.'
-            );
-            return;
-          }
-
-          const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
-          if (!codebase) {
-            await platform.sendMessage(
-              conversationId,
-              'Workflow execution failed: Codebase not found.'
-            );
-            return;
-          }
-
-          const cwd = conversation.cwd ?? codebase.default_cwd;
-
-          // Discover and find the workflow (with error handling)
-          let workflows: readonly WorkflowDefinition[];
-          try {
-            const result = await discoverWorkflows(cwd);
-            workflows = result.workflows;
-          } catch (error) {
-            const err = toError(error);
-            getLog().error({ err, workflowName, cwd }, 'workflow_discovery_failed');
-            await platform.sendMessage(
-              conversationId,
-              `Workflow execution failed: Could not load workflows (${err.message}). ` +
-                'Check .archon/workflows/ for YAML syntax issues.'
-            );
-            return;
-          }
-
-          const workflow = workflows.find(w => w.name === workflowName);
-
-          if (!workflow) {
-            await platform.sendMessage(
-              conversationId,
-              `Workflow \`${workflowName}\` not found during execution. It may have been removed.`
-            );
-            return;
-          }
-
-          // Build the user message with workflow args
-          const userMessage = workflowArgs || message;
-
-          // Background dispatch for web platform
-          if (platform.getPlatformType() === 'web') {
-            const routingContext: WorkflowRoutingContext = {
-              platform,
-              conversationId,
-              cwd,
-              originalMessage: userMessage,
-              conversationDbId: conversation.id,
-              codebaseId: conversation.codebase_id ?? undefined,
-              availableWorkflows: workflows,
-              issueContext,
-            };
-            await dispatchBackgroundWorkflow(routingContext, workflow);
-          } else {
-            // Inline execution for all other platforms
-            await executeWorkflow(
-              platform,
-              conversationId,
-              cwd,
-              workflow,
-              userMessage,
-              conversation.id,
-              conversation.codebase_id,
-              issueContext
-            );
-          }
-        }
-        return;
-      }
-
-      // Handle /command-invoke (codebase-specific commands)
-      if (command === 'command-invoke') {
-        if (args.length < 1) {
-          await platform.sendMessage(conversationId, 'Usage: /command-invoke <name> [args...]');
-          return;
-        }
-
-        commandName = args[0];
-        const commandArgs = args.slice(1);
-
-        if (!conversation.codebase_id) {
-          await platform.sendMessage(
-            conversationId,
-            'No codebase configured. Use /clone for a new repo or /repos to list your current repos you can switch to.'
-          );
-          return;
-        }
-
-        // Look up command definition
-        const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
-        if (!codebase) {
-          await platform.sendMessage(conversationId, 'Codebase not found.');
-          return;
-        }
-
-        // Read command file using the conversation's cwd
-        const commandCwd = conversation.cwd ?? codebase.default_cwd;
-        let commandDef = codebase.commands[commandName];
-        if (!commandDef && isValidCommandName(commandName)) {
-          const fallbackPath = join('.archon', 'commands', `${commandName}.md`);
-          const fallbackFilePath = join(commandCwd, fallbackPath);
-          if (await commandFileExists(fallbackFilePath)) {
-            commandDef = {
-              path: fallbackPath,
-              description: `From ${fallbackPath}`,
-            };
-            getLog().debug(
-              { commandName, path: fallbackPath },
-              'command_invoke_fallback_file_found'
-            );
-          }
-        }
-        if (!commandDef) {
-          await platform.sendMessage(
-            conversationId,
-            `Command '${commandName}' not found. Use /commands to see available.`
-          );
-          return;
-        }
-
-        const commandFilePath = join(commandCwd, commandDef.path);
-
-        try {
-          const commandText = await readCommandFile(commandFilePath);
-
-          // Substitute variables from command arguments
-          // Note: Metadata (for $PLAN, $IMPLEMENTATION_SUMMARY) not passed here -
-          // command-invoke uses fresh context per invocation
-          const substituted = substituteVariables(commandText, commandArgs);
-          promptToSend = wrapCommandForExecution(commandName, substituted);
-
-          // Append issue/PR context AFTER command loading (if provided)
-          if (issueContext) {
-            promptToSend = promptToSend + '\n\n---\n\n' + issueContext;
-            getLog().debug({ commandName }, 'issue_context_appended');
-          }
-
-          getLog().debug({ commandName, argCount: commandArgs.length }, 'command_executing');
-        } catch (error) {
-          const err = toError(error);
-          await platform.sendMessage(conversationId, `Failed to read command file: ${err.message}`);
-          return;
-        }
-      } else {
-        await platform.sendMessage(
-          conversationId,
-          `Unknown command: /${command}\n\nType /help for available commands.`
-        );
-        return;
-      }
-    } else {
-      // Regular message - route through workflows or pass through directly
-      if (!conversation.codebase_id) {
-        await platform.sendMessage(
-          conversationId,
-          'No codebase configured. Use /clone for a new repo or /repos to list your current repos you can switch to.'
-        );
-        return;
-      }
-
-      // Discover workflows (stateless - returns result with workflows + errors)
-      // Use conversation.cwd if set, otherwise codebase default
-      const codebaseForWorkflows = await codebaseDb.getCodebase(conversation.codebase_id);
-      if (codebaseForWorkflows) {
-        const workflowCwd = conversation.cwd ?? codebaseForWorkflows.default_cwd;
-        getLog().debug({ workflowCwd }, 'workflow_discovery_started');
-        try {
-          // Sync .archon from canonical repo to worktree if needed
-          await syncArchonToWorktree(workflowCwd);
-
-          const { workflows: discovered, errors: loadErrors } =
-            await discoverWorkflows(workflowCwd);
-          availableWorkflows = discovered;
-          if (loadErrors.length > 0) {
-            getLog().warn(
-              { errorCount: loadErrors.length, errors: loadErrors },
-              'workflow_load_errors'
-            );
-          }
-          getLog().debug(
-            { count: availableWorkflows.length, workflows: availableWorkflows.map(w => w.name) },
-            'workflow_discovery_complete'
-          );
-        } catch (error) {
-          const err = toError(error);
-          if (isExpectedWorkflowDiscoveryError(err)) {
-            getLog().debug('workflow_directory_not_found');
-          } else {
-            getLog().error({ err }, 'workflow_discovery_failed');
-            await platform.sendMessage(
-              conversationId,
-              `Note: Could not load workflows (${err.message}). This may be a configuration error. ` +
-                'Check .archon/workflows/ for YAML syntax issues. Continuing without workflows.'
-            );
-          }
-        }
-      } else {
-        getLog().warn({ codebaseId: conversation.codebase_id }, 'codebase_not_found');
-      }
-
-      // If workflows are available, use workflow-aware router prompt
-      if (availableWorkflows.length > 0) {
-        getLog().debug('using_workflow_router_prompt');
-        commandName = 'workflow-router';
-
-        // Build router context from available data
-        const routerContext: RouterContext = {
-          platformType: platform.getPlatformType(),
-          threadHistory: threadContext,
-        };
-
-        // Extract GitHub-specific context from issueContext OR message
-        // Priority: issueContext (slash commands) > message with markers (non-slash commands)
-        const hasGitHubMarkersInMessage =
-          message.includes('[GitHub Issue Context]') ||
-          message.includes('[GitHub Pull Request Context]');
-
-        // Determine context source:
-        // - issueContext: always use when provided (slash command mode)
-        // - message: only use when it has GitHub markers (non-slash command mode)
-        const contextSource = issueContext || (hasGitHubMarkersInMessage ? message : null);
-
-        if (contextSource) {
-          // Parse title from context (format: "Issue #N: "Title"" or "PR #N: "Title"")
-          const titlePattern = /(?:Issue|PR) #\d+: "([^"]+)"/;
-          const titleMatch = titlePattern.exec(contextSource);
-          if (titleMatch?.[1]) {
-            routerContext.title = titleMatch[1];
-          } else {
-            getLog().debug('github_context_title_extraction_failed');
-          }
-
-          // Detect if it's a PR vs issue (only when markers are present)
-          const hasGitHubMarkers =
-            contextSource.includes('[GitHub Issue Context]') ||
-            contextSource.includes('[GitHub Pull Request Context]');
-          if (hasGitHubMarkers) {
-            routerContext.isPullRequest = contextSource.includes('[GitHub Pull Request Context]');
-          }
-
-          // Extract labels if present
-          const labelsPattern = /Labels: ([^\n]+)/;
-          const labelsMatch = labelsPattern.exec(contextSource);
-          if (labelsMatch?.[1]?.trim()) {
-            routerContext.labels = labelsMatch[1].split(',').map(l => l.trim());
-          }
-          // Note: No warning if labels missing - many issues/PRs don't have labels
-        }
-
-        // Add workflow type from isolation hints
-        if (isolationHints?.workflowType) {
-          routerContext.workflowType = isolationHints.workflowType;
-        }
-
-        promptToSend = buildRouterPrompt(message, availableWorkflows, routerContext);
-        getLog().debug(
-          {
-            platformType: routerContext.platformType,
-            isPullRequest: routerContext.isPullRequest,
-            hasTitle: !!routerContext.title,
-            hasLabels: !!(routerContext.labels && routerContext.labels.length > 0),
-            hasThreadHistory: !!routerContext.threadHistory,
-            contextSource: issueContext
-              ? 'issueContext'
-              : hasGitHubMarkersInMessage
-                ? 'message'
-                : 'none',
-          },
-          'router_context_built'
-        );
-      } else {
-        getLog().debug({ count: availableWorkflows.length }, 'no_workflows_using_raw_message');
-        // If no workflows, message passes through as-is (backward compatible)
-      }
-    }
-
-    // Prepend thread context if provided
-    if (threadContext) {
-      promptToSend = `## Thread Context (previous messages)\n\n${threadContext}\n\n---\n\n## Current Request\n\n${promptToSend}`;
-      getLog().debug({ conversationId }, 'thread_context_prepended');
-    }
-
-    getLog().debug({ conversationId }, 'ai_conversation_starting');
-
-    // Dynamically get the appropriate AI client based on conversation's assistant type
-    const aiClient = getAssistantClient(conversation.ai_assistant_type);
-    getLog().debug({ assistantType: conversation.ai_assistant_type }, 'assistant_client_selected');
-
-    // Get codebase for isolation and session management
-    const codebase = conversation.codebase_id
-      ? await codebaseDb.getCodebase(conversation.codebase_id)
-      : null;
-
-    // Validate and resolve isolation - this is the single source of truth
-    let cwd: string;
-    let env: IsolationEnvironmentRow | null;
-    let isNewIsolation: boolean;
-    try {
-      const result = await validateAndResolveIsolation(
-        conversation,
-        codebase,
-        platform,
-        conversationId,
-        isolationHints
-      );
-      cwd = result.cwd;
-      env = result.env;
-      isNewIsolation = result.status === 'new';
-    } catch (error) {
-      if (error instanceof IsolationBlockedError) {
-        // Isolation was blocked (e.g., worktree limit reached)
-        // User has already been informed by validateAndResolveIsolation
-        // Stop execution by returning early
-        getLog().info({ reason: error.reason }, 'isolation_blocked');
-        return;
-      }
-      // Re-throw other errors
-      throw error;
-    }
-
-    // Get existing active session (may be null if first message or after isolation change)
-    let session = await sessionDb.getActiveSession(conversation.id);
-
-    // If cwd changed (new isolation), transition to new session with audit trail
-    if (isNewIsolation && session) {
-      getLog().info(
-        { conversationId, sessionId: session.id },
-        'session_transition_isolation_changed'
-      );
-      session = await sessionDb.transitionSession(conversation.id, 'isolation-changed', {
-        codebase_id: conversation.codebase_id ?? undefined,
-        ai_assistant_type: conversation.ai_assistant_type,
-      });
-    }
-
-    // Update last_activity_at for staleness tracking
-    await db.touchConversation(conversation.id);
-
-    // Check for plan→execute transition (new session ensures fresh context without prior planning biases)
-    // Uses session-transitions module as single source of truth for transition detection
-    const planToExecuteTrigger = detectPlanToExecuteTransition(
-      commandName,
-      (session?.metadata?.lastCommand as string | null | undefined) ?? null
-    );
-
-    if (planToExecuteTrigger) {
-      getLog().info({ conversationId, trigger: planToExecuteTrigger }, 'session_transition');
-      session = await sessionDb.transitionSession(conversation.id, planToExecuteTrigger, {
-        codebase_id: conversation.codebase_id ?? undefined,
-        ai_assistant_type: conversation.ai_assistant_type,
-      });
-    } else if (!session) {
-      getLog().info({ conversationId }, 'session_created_first_message');
-      session = await sessionDb.transitionSession(conversation.id, 'first-message', {
-        codebase_id: conversation.codebase_id ?? undefined,
-        ai_assistant_type: conversation.ai_assistant_type,
-      });
-    } else {
-      getLog().debug({ sessionId: session.id }, 'session_resuming');
-    }
-
-    let assistantOptions: AssistantRequestOptions | undefined;
-    try {
-      const config = await configLoader.loadConfig(cwd);
-      if (conversation.ai_assistant_type === 'codex') {
-        const codexOptions: AssistantRequestOptions = {
-          model: config.assistants.codex.model,
-          modelReasoningEffort: config.assistants.codex.modelReasoningEffort,
-          webSearchMode: config.assistants.codex.webSearchMode,
-          additionalDirectories: config.assistants.codex.additionalDirectories,
-        };
-        const hasCodexOptions = Object.values(codexOptions).some(value => value !== undefined);
-        assistantOptions = hasCodexOptions ? codexOptions : undefined;
-      } else if (config.assistants.claude.model) {
-        assistantOptions = { model: config.assistants.claude.model };
-      }
-    } catch (error) {
-      getLog().error({ err: error as Error, cwd }, 'assistant_defaults_load_failed');
-      await platform.sendMessage(
-        conversationId,
-        '⚠️ Could not load assistant configuration. Using defaults. Check your .archon/config.yaml for errors.'
-      );
-    }
-
-    // For routing queries, disable tools at the SDK level (Claude only hard constraint).
-    // Codex does not support per-call tool restrictions — fallback handles it instead.
-    if (commandName === 'workflow-router' && conversation.ai_assistant_type !== 'codex') {
-      assistantOptions = { ...assistantOptions, tools: [] };
-    }
-
-    // Send to AI and stream responses
-    const mode = platform.getStreamingMode();
-    getLog().debug({ mode }, 'streaming_mode');
-
-    // Build workflow routing context once
-    const routingCtx: WorkflowRoutingContext = {
-      platform,
-      conversationId,
-      cwd,
-      originalMessage: message,
-      conversationDbId: conversation.id,
-      codebaseId: conversation.codebase_id ?? undefined,
-      availableWorkflows,
-      issueContext,
-      isolationEnv: env ? { branch_name: env.branch_name } : undefined,
-      isolationHints,
-    };
-
-    if (mode === 'stream') {
-      // Stream mode: accumulate to check for workflow invocation, then send
-      const allMessages: string[] = [];
-      let newSessionId: string | undefined;
-      let hadTool = false;
-
-      const stream = aiClient.sendQuery(
-        promptToSend,
-        cwd,
-        session.assistant_session_id ?? undefined,
-        assistantOptions
-      );
-
-      for await (const msg of stream) {
-        if (msg.type === 'assistant' && msg.content) {
-          allMessages.push(msg.content);
-        } else if (msg.type === 'tool' && msg.toolName) {
-          if (commandName === 'workflow-router') {
-            // Codex bypassed routing by using tools — track and suppress from platform
-            hadTool = true;
-            getLog().warn(
-              { toolName: msg.toolName, conversationId },
-              'router.tool_bypass_detected'
-            );
-          } else {
-            const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
-            await platform.sendMessage(conversationId, toolMessage, {
-              category: 'tool_call_formatted',
-            });
-
-            // Send structured event to adapters that support it (Web UI)
-            if (platform.sendStructuredEvent) {
-              await platform.sendStructuredEvent(conversationId, msg);
-            }
-          }
-        } else if (msg.type === 'result' && msg.sessionId) {
-          newSessionId = msg.sessionId;
-
-          // Send session info to adapters that support structured events
-          if (platform.sendStructuredEvent) {
-            await platform.sendStructuredEvent(conversationId, msg);
-          }
-        }
-      }
-
-      if (newSessionId) {
-        await tryPersistSessionId(session.id, newSessionId);
-      }
-
-      // Attempt routing: either AI produced text, or Codex bypassed with tools and no text
-      if (allMessages.length > 0 || (commandName === 'workflow-router' && hadTool)) {
-        const fullResponse = allMessages.join('');
-        const routed = await tryWorkflowRouting(routingCtx, fullResponse, hadTool);
-        if (routed) {
-          if (commandName) {
-            await tryUpdateSessionMetadata(session.id, { lastCommand: commandName });
-          }
-          return;
-        }
-
-        // No workflow - send all accumulated messages
-        // If Codex bypassed via tools and produced no text, there's nothing to send
-        if (allMessages.length === 0) {
-          getLog().warn({ conversationId }, 'router.tool_bypass_no_fallback');
-          await platform.sendMessage(
-            conversationId,
-            'Could not determine a workflow for your request. Please try rephrasing.'
-          );
-        } else {
-          for (const content of allMessages) {
-            await platform.sendMessage(conversationId, content);
-          }
-        }
-      }
-    } else {
-      // Batch mode: Accumulate all chunks for logging, send only final clean summary
-      const allChunks: { type: string; content: string }[] = [];
-      const assistantMessages: string[] = [];
-      let assistantChunksTruncated = false;
-      let totalChunksTruncated = false;
-      let hadToolBatch = false;
-
-      const stream = aiClient.sendQuery(
-        promptToSend,
-        cwd,
-        session.assistant_session_id ?? undefined,
-        assistantOptions
-      );
-
-      for await (const msg of stream) {
-        if (msg.type === 'assistant' && msg.content) {
-          assistantMessages.push(msg.content);
-          allChunks.push({ type: 'assistant', content: msg.content });
-
-          if (assistantMessages.length > MAX_BATCH_ASSISTANT_CHUNKS) {
-            assistantMessages.shift();
-            assistantChunksTruncated = true;
-          }
-        } else if (msg.type === 'tool' && msg.toolName) {
-          // Format and log tool call for observability
-          const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
-          allChunks.push({ type: 'tool', content: toolMessage });
-          getLog().debug({ toolName: msg.toolName }, 'tool_call');
-          if (commandName === 'workflow-router') {
-            hadToolBatch = true;
-            getLog().warn(
-              { toolName: msg.toolName, conversationId },
-              'router.tool_bypass_detected'
-            );
-          }
-        } else if (msg.type === 'result' && msg.sessionId) {
-          await tryPersistSessionId(session.id, msg.sessionId);
-        }
-
-        if (allChunks.length > MAX_BATCH_TOTAL_CHUNKS) {
-          allChunks.shift();
-          totalChunksTruncated = true;
-        }
-      }
-
-      if (assistantChunksTruncated || totalChunksTruncated) {
-        getLog().warn(
-          {
-            assistantChunksTruncated,
-            totalChunksTruncated,
-            maxAssistantChunks: MAX_BATCH_ASSISTANT_CHUNKS,
-            maxTotalChunks: MAX_BATCH_TOTAL_CHUNKS,
-          },
-          'batch_mode_chunks_truncated'
-        );
-      }
-
-      // Log all chunks for observability
-      getLog().debug(
-        { totalChunks: allChunks.length, assistantMessages: assistantMessages.length },
-        'batch_mode_chunks_received'
-      );
-
-      // Join all assistant messages and filter tool indicators
-      // Tool indicators from Claude Code SDK responses:
-      // 🔧 (U+1F527) - tool usage, 💭 (U+1F4AD) - thinking, 📝 (U+1F4DD) - writing,
-      // ✏️ (U+270F+FE0F) - editing, 🗑️ (U+1F5D1+FE0F) - deleting,
-      // 📂 (U+1F4C2) - folder, 🔍 (U+1F50D) - search
-      let finalMessage = '';
-
-      if (assistantMessages.length > 0) {
-        // Join all messages with separator (preserves context from all responses)
-        const allMessages = assistantMessages.join('\n\n---\n\n');
-
-        // Split by double newlines to separate tool sections from content
-        const sections = allMessages.split('\n\n');
-
-        // Filter out sections that start with tool indicators
-        const toolIndicatorRegex =
-          /^(?:\u{1F527}|\u{1F4AD}|\u{1F4DD}|\u{270F}\u{FE0F}|\u{1F5D1}\u{FE0F}|\u{1F4C2}|\u{1F50D})/u;
-        const cleanSections = sections.filter(section => {
-          const trimmed = section.trim();
-          return !toolIndicatorRegex.exec(trimmed);
-        });
-
-        // Join remaining sections
-        finalMessage = cleanSections.join('\n\n').trim();
-
-        // If we filtered everything out, fall back to all messages joined
-        if (!finalMessage) {
-          finalMessage = allMessages;
-        }
-      }
-
-      // Attempt routing: either AI produced text, or Codex bypassed with tools and no text
-      if (finalMessage || (commandName === 'workflow-router' && hadToolBatch)) {
-        // Try workflow routing first
-        const routed = await tryWorkflowRouting(routingCtx, finalMessage, hadToolBatch);
-        if (routed) {
-          return;
-        }
-
-        // No workflow routing
-        if (!finalMessage) {
-          // Codex used tools during routing but produced no text and no fallback exists
-          getLog().warn({ conversationId }, 'router.tool_bypass_no_fallback');
-          await platform.sendMessage(
-            conversationId,
-            'Could not determine a workflow for your request. Please try rephrasing.'
-          );
-        } else {
-          getLog().debug({ messageLength: finalMessage.length }, 'sending_final_message');
-          await platform.sendMessage(conversationId, finalMessage);
-        }
-      }
-    }
-
-    // Track last command in metadata (for plan→execute detection)
-    // Non-critical: if this fails, response was already sent successfully
-    if (commandName) {
-      await tryUpdateSessionMetadata(session.id, { lastCommand: commandName });
-    }
-
-    getLog().debug({ conversationId }, 'message_handling_complete');
-  } catch (error) {
-    const err = toError(error);
-    getLog().error({ err, conversationId }, 'message_handling_failed');
-    const userMessage = classifyAndFormatError(err);
-    try {
-      await platform.sendMessage(conversationId, userMessage);
-    } catch (sendError) {
-      getLog().error({ err: toError(sendError), conversationId }, 'error_notification_failed');
-    }
-  }
 }

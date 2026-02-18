@@ -136,6 +136,11 @@ export interface WorkflowOutputPreviewEvent extends BaseSSEEvent {
   lines: string[];
 }
 
+// Retract previously streamed text (workflow routing detected)
+export interface RetractEvent extends BaseSSEEvent {
+  type: 'retract';
+}
+
 /**
  * Discriminated union of all SSE event types emitted by the Web adapter.
  * Parsed from JSON with no runtime validation — the server is trusted.
@@ -154,7 +159,8 @@ export type SSEEvent =
   | ParallelAgentEvent
   | WorkflowArtifactEvent
   | WorkflowDispatchEvent
-  | WorkflowOutputPreviewEvent;
+  | WorkflowOutputPreviewEvent
+  | RetractEvent;
 
 // UI State types
 
@@ -174,6 +180,10 @@ export interface ChatMessage {
   workflowDispatch?: {
     workerConversationId: string;
     workflowName: string;
+  };
+  workflowResult?: {
+    workflowName: string;
+    runId: string;
   };
 }
 

@@ -107,6 +107,18 @@ export function mapWorkflowEvent(event: WorkflowEmitterEvent): string | null {
         timestamp: Date.now(),
       });
 
+    case 'loop_iteration_failed':
+      return JSON.stringify({
+        type: 'workflow_step',
+        runId: event.runId,
+        step: event.iteration - 1,
+        total: 0,
+        name: `iteration-${String(event.iteration)}`,
+        status: 'failed',
+        iteration: event.iteration,
+        timestamp: Date.now(),
+      });
+
     case 'workflow_artifact':
       return JSON.stringify({
         type: 'workflow_artifact',

@@ -126,6 +126,7 @@ export function registerApiRoutes(
         conversationId,
         codebaseId
       );
+      webAdapter.setConversationDbId(conversation.platform_conversation_id, conversation.id);
       return c.json({ conversationId: conversation.platform_conversation_id, id: conversation.id });
     } catch (error) {
       getLog().error({ err: error }, 'create_conversation_failed');
@@ -268,7 +269,7 @@ export function registerApiRoutes(
 
       stream.onAbort(() => {
         getLog().debug({ conversationId }, 'sse_client_disconnected');
-        webAdapter.removeStream(conversationId);
+        webAdapter.removeStream(conversationId, stream);
       });
 
       try {
@@ -288,7 +289,7 @@ export function registerApiRoutes(
           getLog().warn({ err: e as Error, conversationId }, 'sse_heartbeat_error');
         }
       } finally {
-        webAdapter.removeStream(conversationId);
+        webAdapter.removeStream(conversationId, stream);
         getLog().debug({ conversationId }, 'sse_stream_closed');
       }
     });

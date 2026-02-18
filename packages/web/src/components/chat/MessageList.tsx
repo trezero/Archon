@@ -1,5 +1,7 @@
-import { useRef } from 'react';
+import { memo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { ArrowDown, MessageSquare } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -60,12 +62,67 @@ function WorkflowDispatchInline({
   );
 }
 
+function WorkflowResultCard({
+  workflowName,
+  runId,
+  content,
+}: {
+  workflowName: string;
+  runId: string;
+  content: string;
+}): React.ReactElement {
+  const navigate = useNavigate();
+  const [expanded, setExpanded] = useState(false);
+
+  const lines = content.split('\n');
+  const isTruncatable = content.length > 500 || lines.length > 8;
+  const preview = isTruncatable
+    ? lines.slice(0, 8).join('\n').slice(0, 500) + (content.length > 500 ? '...' : '')
+    : content;
+
+  const displayContent = expanded || !isTruncatable ? content : preview;
+
+  return (
+    <div className="rounded-lg border border-border bg-surface overflow-hidden max-w-3xl">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-surface-elevated">
+        <span className="text-success text-xs shrink-0">&#x2713;</span>
+        <span className="text-xs font-medium text-text-primary truncate flex-1">
+          Workflow complete: {workflowName}
+        </span>
+        <button
+          onClick={(): void => {
+            navigate(`/workflows/runs/${runId}`);
+          }}
+          className="text-[10px] text-primary hover:text-accent-bright transition-colors shrink-0"
+        >
+          View full logs &rarr;
+        </button>
+      </div>
+      <div className="px-3 py-2">
+        <div className="chat-markdown text-xs text-text-secondary">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+        </div>
+        {isTruncatable && (
+          <button
+            onClick={(): void => {
+              setExpanded(!expanded);
+            }}
+            className="mt-1 text-[10px] text-primary hover:text-accent-bright transition-colors"
+          >
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface MessageListProps {
   messages: ChatMessage[];
   isStreaming: boolean;
 }
 
-export function MessageList({ messages, isStreaming }: MessageListProps): React.ReactElement {
+function MessageListRaw({ messages, isStreaming }: MessageListProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
   const { isAtBottom, scrollToBottom } = useAutoScroll(containerRef, [messages, isStreaming]);
 
@@ -82,20 +139,30 @@ export function MessageList({ messages, isStreaming }: MessageListProps): React.
 
   return (
     <div className="relative flex-1 overflow-hidden">
-      <div ref={containerRef} className="h-full overflow-y-auto px-3 py-2">
-        <div className="mx-auto flex max-w-3xl flex-col gap-1.5 pb-6">
+      <div ref={containerRef} className="h-full overflow-y-auto px-4 py-4">
+        <div className="mx-auto flex max-w-3xl flex-col gap-3 pb-6">
           {messages.map(msg => (
-            <div key={msg.id} className="flex flex-col gap-1">
-              <MessageBubble message={msg} />
-              {msg.toolCalls?.map(tool => (
-                <ToolCallCard key={tool.id} tool={tool} />
-              ))}
-              {msg.error && <ErrorCard error={msg.error} />}
-              {msg.workflowDispatch && (
-                <WorkflowDispatchInline
-                  workflowName={msg.workflowDispatch.workflowName}
-                  workerConversationId={msg.workflowDispatch.workerConversationId}
+            <div key={msg.id} className="flex flex-col gap-1.5">
+              {msg.workflowResult ? (
+                <WorkflowResultCard
+                  workflowName={msg.workflowResult.workflowName}
+                  runId={msg.workflowResult.runId}
+                  content={msg.content}
                 />
+              ) : (
+                <>
+                  <MessageBubble message={msg} />
+                  {msg.toolCalls?.map(tool => (
+                    <ToolCallCard key={tool.id} tool={tool} />
+                  ))}
+                  {msg.error && <ErrorCard error={msg.error} />}
+                  {msg.workflowDispatch && (
+                    <WorkflowDispatchInline
+                      workflowName={msg.workflowDispatch.workflowName}
+                      workerConversationId={msg.workflowDispatch.workerConversationId}
+                    />
+                  )}
+                </>
               )}
             </div>
           ))}
@@ -119,3 +186,6 @@ export function MessageList({ messages, isStreaming }: MessageListProps): React.
     </div>
   );
 }
+
+const messageList = memo(MessageListRaw);
+export { messageList as MessageList };

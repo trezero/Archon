@@ -682,7 +682,10 @@ function loadBundledWorkflows(): Map<string, WorkflowDefinition> {
  * content embedded at compile time. When running with Bun, defaults are
  * loaded from the filesystem.
  */
-export async function discoverWorkflows(cwd: string): Promise<WorkflowLoadResult> {
+export async function discoverWorkflows(
+  cwd: string,
+  globalSearchPath?: string
+): Promise<WorkflowLoadResult> {
   // Map of filename -> workflow for deduplication
   const workflowsByFile = new Map<string, WorkflowDefinition>();
   const allErrors: WorkflowLoadError[] = [];
@@ -744,7 +747,33 @@ export async function discoverWorkflows(cwd: string): Promise<WorkflowLoadResult
     }
   }
 
-  // 2. Load from repo's workflow folder (overrides app defaults by exact filename)
+  // 2. Load from global search path (e.g., ~/.archon/.archon/workflows/ for orchestrator)
+  if (globalSearchPath) {
+    const [globalWorkflowFolder] = archonPaths.getWorkflowFolderSearchPaths();
+    const globalWorkflowPath = join(globalSearchPath, globalWorkflowFolder);
+    getLog().debug({ globalWorkflowPath }, 'searching_global_workflows');
+    try {
+      await access(globalWorkflowPath);
+      const globalResult = await loadWorkflowsFromDir(globalWorkflowPath);
+      for (const [filename, workflow] of globalResult.workflows) {
+        if (workflowsByFile.has(filename)) {
+          getLog().debug({ filename }, 'global_workflow_overrides_default');
+        }
+        workflowsByFile.set(filename, workflow);
+      }
+      allErrors.push(...globalResult.errors);
+      getLog().info({ count: globalResult.workflows.size }, 'global_workflows_loaded');
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') {
+        getLog().warn({ err, globalWorkflowPath }, 'global_workflows_access_error');
+      } else {
+        getLog().debug({ globalWorkflowPath }, 'global_workflows_not_found');
+      }
+    }
+  }
+
+  // 3. Load from repo's workflow folder (overrides app defaults by exact filename)
   const [workflowFolder] = archonPaths.getWorkflowFolderSearchPaths();
   const workflowPath = join(cwd, workflowFolder);
 

@@ -19,6 +19,7 @@ interface BufferedSegment {
   toolCalls: BufferedToolCall[];
   category?: MessageMetadata['category'];
   workflowDispatch?: MessageMetadata['workflowDispatch'];
+  workflowResult?: MessageMetadata['workflowResult'];
 }
 
 interface AssistantBuffer {
@@ -77,6 +78,7 @@ export class MessagePersistence {
         toolCalls: [],
         category: metadata?.category,
         workflowDispatch: metadata?.workflowDispatch,
+        workflowResult: metadata?.workflowResult,
       });
     } else {
       lastSeg.content += message;
@@ -161,6 +163,7 @@ export class MessagePersistence {
         const metadata = {
           ...(toolCalls.length > 0 ? { toolCalls } : {}),
           ...(seg.workflowDispatch ? { workflowDispatch: seg.workflowDispatch } : {}),
+          ...(seg.workflowResult ? { workflowResult: seg.workflowResult } : {}),
         };
         await addMessage(dbId, 'assistant', seg.content, metadata);
       }
@@ -174,6 +177,19 @@ export class MessagePersistence {
           timestamp: Date.now(),
         })
       );
+    }
+  }
+
+  /**
+   * Remove the last segment from the persistence buffer.
+   * Called when emitRetract fires so retracted text doesn't get written to DB.
+   */
+  retractLastSegment(conversationId: string): void {
+    const buf = this.assistantBuffer.get(conversationId);
+    if (!buf || buf.segments.length === 0) return;
+    buf.segments.pop();
+    if (buf.segments.length === 0) {
+      this.assistantBuffer.delete(conversationId);
     }
   }
 

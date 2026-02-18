@@ -1,6 +1,15 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
-import { NavLink } from 'react-router';
-import { Plus, Settings, Loader2, Workflow, Hammer, ChevronDown, FolderGit2 } from 'lucide-react';
+import { NavLink, useNavigate, Link } from 'react-router';
+import {
+  Plus,
+  Settings,
+  Loader2,
+  Workflow,
+  Hammer,
+  ChevronDown,
+  FolderGit2,
+  MessageSquarePlus,
+} from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
@@ -8,6 +17,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/component
 import { SearchBar } from '@/components/sidebar/SearchBar';
 import { ProjectSelector } from '@/components/sidebar/ProjectSelector';
 import { ProjectDetail } from '@/components/sidebar/ProjectDetail';
+import { AllConversationsView } from '@/components/sidebar/AllConversationsView';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useProject } from '@/contexts/ProjectContext';
 import { addCodebase } from '@/lib/api';
@@ -42,6 +52,7 @@ export function Sidebar(): React.ReactElement {
   const isResizing = useRef(false);
   const [projectsExpanded, setProjectsExpanded] = useState(false);
 
+  const navigate = useNavigate();
   const { selectedProjectId, setSelectedProjectId, codebases, isLoadingCodebases } = useProject();
 
   const selectedProject = codebases?.find(cb => cb.id === selectedProjectId) ?? null;
@@ -98,7 +109,7 @@ export function Sidebar(): React.ReactElement {
   );
 
   const handleSelectProject = useCallback(
-    (id: string): void => {
+    (id: string | null): void => {
       setSelectedProjectId(id);
       setProjectsExpanded(false);
     },
@@ -156,6 +167,11 @@ export function Sidebar(): React.ReactElement {
     []
   );
 
+  const handleNewOrchestratorChat = useCallback((): void => {
+    setSelectedProjectId(null);
+    navigate('/chat');
+  }, [navigate, setSelectedProjectId]);
+
   useKeyboardShortcuts(shortcuts);
 
   return (
@@ -165,12 +181,12 @@ export function Sidebar(): React.ReactElement {
     >
       {/* Logo */}
       <div className="flex flex-col gap-3 p-4">
-        <div className="flex items-center gap-2">
+        <Link to="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
             <span className="text-sm font-semibold text-primary-foreground">A</span>
           </div>
           <span className="text-base font-semibold text-text-primary">Archon</span>
-        </div>
+        </Link>
       </div>
 
       <Separator className="bg-border" />
@@ -183,6 +199,17 @@ export function Sidebar(): React.ReactElement {
           placeholder="Search..."
           inputRef={searchInputRef}
         />
+      </div>
+
+      {/* Orchestrator (unscoped) new chat */}
+      <div className="px-3 pb-2">
+        <button
+          onClick={handleNewOrchestratorChat}
+          className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-text-secondary hover:bg-surface-elevated hover:text-text-primary transition-colors"
+        >
+          <MessageSquarePlus className="h-4 w-4 shrink-0" />
+          New Chat
+        </button>
       </div>
 
       <Separator className="bg-border" />
@@ -199,10 +226,10 @@ export function Sidebar(): React.ReactElement {
               setAddError(null);
               setAddValue('');
             }}
-            className="p-0.5 rounded hover:bg-surface-elevated transition-colors"
+            className="p-1 rounded hover:bg-surface-elevated transition-colors"
             title="Add project"
           >
-            <Plus className="h-3.5 w-3.5 text-text-tertiary hover:text-primary" />
+            <Plus className="h-4 w-4 text-text-tertiary hover:text-primary" />
           </button>
         </div>
 
@@ -270,10 +297,10 @@ export function Sidebar(): React.ReactElement {
 
       <Separator className="bg-border" />
 
-      {/* Project-scoped content */}
+      {/* Project-scoped or all-conversations content */}
       {selectedProjectId ? (
-        <div className="flex-1 overflow-hidden">
-          <ScrollArea className="h-full px-2 pb-2">
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <ScrollArea className="h-full px-2 py-2">
             <ProjectDetail
               codebaseId={selectedProjectId}
               projectName={selectedProject?.name ?? ''}
@@ -283,10 +310,10 @@ export function Sidebar(): React.ReactElement {
           </ScrollArea>
         </div>
       ) : (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4">
-          <span className="text-xs text-text-tertiary text-center">
-            {codebases && codebases.length > 0 ? 'Select a project' : 'Click + to add a repository'}
-          </span>
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <ScrollArea className="h-full px-2 py-2">
+            <AllConversationsView searchQuery={searchQuery} />
+          </ScrollArea>
         </div>
       )}
 

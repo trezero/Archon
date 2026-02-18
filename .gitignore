@@ -71,6 +71,7 @@ Thumbs.db
 coverage
 
 worktrees
+screenshots/
 .claude/worktree-registry.json
 
 .agents/PRDs

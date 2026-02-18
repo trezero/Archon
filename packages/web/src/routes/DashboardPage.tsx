@@ -1,10 +1,11 @@
+import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { MessageSquare, PlayCircle, Plus } from 'lucide-react';
+import { MessageSquare, PlayCircle, Plus, Workflow, Activity } from 'lucide-react';
 import {
   listConversations,
   listWorkflowRuns,
-  createConversation,
+  getHealth,
   type ConversationResponse,
   type WorkflowRunResponse,
 } from '@/lib/api';
@@ -27,6 +28,28 @@ const STATUS_COLORS: Record<string, string> = {
   failed: 'bg-destructive',
   pending: 'bg-text-tertiary',
 };
+
+function StatsCard({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string | number;
+  icon: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <div className="rounded-lg border border-border bg-surface p-4">
+      <div className="flex items-center gap-3">
+        {icon}
+        <div>
+          <p className="text-2xl font-semibold text-text-primary">{value}</p>
+          <p className="text-xs text-text-secondary">{label}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ConversationRow({ conv }: { conv: ConversationResponse }): React.ReactElement {
   const title = conv.title ?? 'Untitled conversation';
@@ -66,32 +89,56 @@ export function DashboardPage(): React.ReactElement {
   const { selectedProjectId: savedProjectId } = useProject();
 
   const { data: conversations, isLoading: loadingConvs } = useQuery({
-    queryKey: ['conversations', { codebaseId: savedProjectId }],
+    queryKey: ['conversations', { codebaseId: savedProjectId ?? 'all' }],
     queryFn: () => listConversations(savedProjectId ?? undefined),
   });
 
   const { data: workflowRuns, isLoading: loadingRuns } = useQuery({
-    queryKey: ['workflowRuns', { codebaseId: savedProjectId }],
+    queryKey: ['workflowRuns', { codebaseId: savedProjectId ?? 'all' }],
     queryFn: () => listWorkflowRuns({ codebaseId: savedProjectId ?? undefined, limit: 10 }),
   });
+
+  const { data: health } = useQuery({
+    queryKey: ['health'],
+    queryFn: () => getHealth(),
+    refetchInterval: 30_000,
+  });
+
+  const runningCount = useMemo(
+    () => workflowRuns?.filter(r => r.status === 'running').length ?? 0,
+    [workflowRuns]
+  );
 
   const recentConversations = (conversations ?? []).slice(0, 10);
   const recentRuns = (workflowRuns ?? []).slice(0, 10);
   const isLoading = loadingConvs || loadingRuns;
 
-  const handleNewChat = async (): Promise<void> => {
-    if (!savedProjectId) return;
-    try {
-      const { conversationId } = await createConversation(savedProjectId);
-      navigate(`/chat/${conversationId}`);
-    } catch (error) {
-      console.error('[Dashboard] Failed to create conversation', { error });
-    }
+  const handleNewChat = (): void => {
+    navigate('/chat');
   };
 
   return (
     <div className="flex flex-1 flex-col">
       <div className="flex-1 overflow-auto p-6">
+        {/* Stats Cards */}
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <StatsCard
+            label="Running Workflows"
+            value={runningCount}
+            icon={<Workflow className="h-5 w-5 text-primary" />}
+          />
+          <StatsCard
+            label="Conversations"
+            value={conversations?.length ?? 0}
+            icon={<MessageSquare className="h-5 w-5 text-primary" />}
+          />
+          <StatsCard
+            label="System Status"
+            value={health?.status === 'ok' ? 'Healthy' : 'Unknown'}
+            icon={<Activity className="h-5 w-5 text-success" />}
+          />
+        </div>
+
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <span className="text-sm text-text-tertiary">Loading...</span>
@@ -102,8 +149,7 @@ export function DashboardPage(): React.ReactElement {
             <p className="text-sm text-text-tertiary">No conversations yet</p>
             <button
               onClick={handleNewChat}
-              disabled={!savedProjectId}
-              className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
             >
               <Plus className="h-4 w-4" />
               New Chat
@@ -117,8 +163,7 @@ export function DashboardPage(): React.ReactElement {
                 <h2 className="text-sm font-semibold text-text-secondary">Recent Conversations</h2>
                 <button
                   onClick={handleNewChat}
-                  disabled={!savedProjectId}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-secondary hover:bg-surface-elevated hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-secondary hover:bg-surface-elevated hover:text-text-primary transition-colors"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   New

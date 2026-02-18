@@ -52,6 +52,7 @@ import {
   isolationCleanupCommand,
   isolationCleanupMergedCommand,
 } from './commands/isolation';
+import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
 import { closeDatabase, setLogLevel, createLogger } from '@archon/core';
 import * as git from '@archon/core/utils/git';
@@ -74,6 +75,7 @@ Usage:
   archon <command> [subcommand] [options] [arguments]
 
 Commands:
+  chat <message>             Send a message to the orchestrator
   setup                      Interactive setup wizard for credentials and config
   workflow list              List available workflows in current directory
   workflow run <name> [msg]  Run a workflow with optional message
@@ -93,6 +95,7 @@ Options:
   --verbose, -v              Show debug-level output
 
 Examples:
+  archon chat "What does the orchestrator do?"
   archon workflow list
   archon workflow run investigate-issue "Fix the login bug"
   archon workflow run plan --cwd /path/to/repo "Add dark mode"
@@ -170,7 +173,7 @@ async function main(): Promise<number> {
   const subcommand = positionals[1];
 
   // Commands that don't require git repo validation
-  const noGitCommands = ['version', 'help', 'setup'];
+  const noGitCommands = ['version', 'help', 'setup', 'chat'];
   const requiresGitRepo = !noGitCommands.includes(command ?? '');
 
   try {
@@ -209,6 +212,16 @@ async function main(): Promise<number> {
       case 'help':
         printUsage();
         break;
+
+      case 'chat': {
+        const chatMessage = positionals.slice(1).join(' ');
+        if (!chatMessage) {
+          console.error('Usage: archon chat <message>');
+          return 1;
+        }
+        await chatCommand(chatMessage);
+        break;
+      }
 
       case 'setup':
         await setupCommand({ spawn: spawnFlag, repoPath: cwd });

@@ -36,7 +36,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   const hasTriggeredTitleRefresh = useRef(false);
   const isNewChat = conversationId === 'new';
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
-    isNewChat ? [] : getCachedMessages(conversationId).map(m => ({ ...m, isStreaming: false }))
+    isNewChat ? [] : getCachedMessages(conversationId)
   );
   const [locked, setLocked] = useState(false);
   const [queuePosition, setQueuePosition] = useState<number | undefined>();
@@ -52,12 +52,15 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     }
   }, [conversationId, messages, isNewChat]);
 
-  // Load message history from server on mount (survives hard refresh)
+  // Load message history from server on mount (survives hard refresh).
+  // Uses a cancelled flag so StrictMode's unmount/remount cycle discards
+  // the stale first fetch, preventing duplicate messages.
   useEffect(() => {
     if (isNewChat) return;
+    let cancelled = false;
     void getMessages(conversationId)
       .then((rows: MessageResponse[]) => {
-        if (rows.length === 0) return;
+        if (cancelled || rows.length === 0) return;
         const hydrated: ChatMessage[] = rows.map(row => {
           let meta: {
             toolCalls?: {
@@ -67,6 +70,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             }[];
             error?: ErrorDisplay;
             workflowDispatch?: { workerConversationId: string; workflowName: string };
+            workflowResult?: { workflowName: string; runId: string };
           } = {};
           try {
             meta = JSON.parse(row.metadata) as typeof meta;
@@ -96,15 +100,37 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             })),
             error: meta.error,
             workflowDispatch: meta.workflowDispatch,
+            workflowResult: meta.workflowResult,
             timestamp: new Date(row.created_at).getTime(),
             isStreaming: false,
           };
         });
-        // Only set if no messages arrived via SSE while loading
-        setMessages(prev => (prev.length > 0 ? prev : hydrated));
+        // Merge history with any SSE messages that arrived during fetch
+        setMessages(prev => {
+          if (prev.length === 0) {
+            // No SSE messages arrived yet — use full history
+            return hydrated;
+          }
+          // Build a set of hydrated message signatures for dedup.
+          // This prevents the optimistic user message (added in handleSend)
+          // from duplicating the DB-persisted copy returned by getMessages.
+          const hydratedSigs = new Set(hydrated.map(m => `${m.role}:${m.content}`));
+          // Keep prev messages that are either:
+          // 1. Newer than the latest history message (SSE messages during fetch), OR
+          // 2. Streaming/thinking indicators (no DB equivalent yet)
+          // But exclude any that match a hydrated message by role+content (dedup).
+          const latestHistoryTs = Math.max(...hydrated.map(m => m.timestamp));
+          const sseOnly = prev.filter(
+            m =>
+              (m.timestamp > latestHistoryTs || m.isStreaming) &&
+              !hydratedSigs.has(`${m.role}:${m.content}`)
+          );
+          return [...hydrated, ...sseOnly];
+        });
         setHasSentMessage(true);
       })
       .catch((e: unknown) => {
+        if (cancelled) return;
         console.error('[Chat] Failed to load message history', {
           conversationId,
           error: e instanceof Error ? e.message : e,
@@ -124,6 +150,9 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           },
         ]);
       });
+    return (): void => {
+      cancelled = true;
+    };
   }, [conversationId, isNewChat]);
 
   // Share conversations cache with sidebar for title/context display
@@ -137,6 +166,11 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   });
   const currentConv = conversations?.find(c => c.platform_conversation_id === conversationId);
   const currentCodebase = codebases?.find(cb => cb.id === currentConv?.codebase_id);
+  // Fall back to selectedProjectId codebase for header before conversation exists in DB
+  const contextCodebase =
+    !currentCodebase && selectedProjectId
+      ? codebases?.find(cb => cb.id === selectedProjectId)
+      : undefined;
   const headerTitle = currentConv?.title ?? 'Chat';
   const headerSubtitle = currentConv?.cwd ?? undefined;
 
@@ -145,49 +179,72 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     return `msg-${String(messageIdCounter.current)}`;
   };
 
-  const onText = useCallback((content: string): void => {
-    setMessages(prev => {
-      const last = prev[prev.length - 1];
-      // Workflow status messages (🚀 start, ✅ complete) should always be their own message
-      const isWorkflowStatus = /^[\u{1F680}\u{2705}]/u.test(content);
+  const onText = useCallback(
+    (content: string, workflowResult?: { workflowName: string; runId: string }): void => {
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        // Workflow status messages (🚀 start, ✅ complete) should always be their own message
+        const isWorkflowStatus = /^[\u{1F680}\u{2705}]/u.test(content);
 
-      if (last?.role === 'assistant' && last.isStreaming) {
-        const lastIsWorkflowStatus = /^[\u{1F680}\u{2705}]/u.test(last.content);
-
-        if ((isWorkflowStatus && last.content) || (lastIsWorkflowStatus && !isWorkflowStatus)) {
-          // Close the current streaming message and start a new one when:
-          // 1. Incoming is a workflow status and current has content
-          // 2. Current is a workflow status and incoming is regular text
+        // Workflow result messages always start as a new message
+        if (workflowResult) {
+          const updated =
+            last?.role === 'assistant' && last.isStreaming
+              ? [...prev.slice(0, -1), { ...last, isStreaming: false }]
+              : [...prev];
           return [
-            ...prev.slice(0, -1),
-            { ...last, isStreaming: false },
+            ...updated,
             {
               id: `msg-${String(Date.now())}`,
               role: 'assistant' as const,
               content,
               timestamp: Date.now(),
-              isStreaming: true,
+              isStreaming: false,
               toolCalls: [],
+              workflowResult,
             },
           ];
         }
-        // Append to existing streaming message (replace thinking placeholder if empty)
-        return [...prev.slice(0, -1), { ...last, content: last.content + content }];
-      }
-      // New assistant message
-      return [
-        ...prev,
-        {
-          id: `msg-${String(Date.now())}`,
-          role: 'assistant' as const,
-          content,
-          timestamp: Date.now(),
-          isStreaming: true,
-          toolCalls: [],
-        },
-      ];
-    });
-  }, []);
+
+        if (last?.role === 'assistant' && last.isStreaming) {
+          const lastIsWorkflowStatus = /^[\u{1F680}\u{2705}]/u.test(last.content);
+
+          if ((isWorkflowStatus && last.content) || (lastIsWorkflowStatus && !isWorkflowStatus)) {
+            // Close the current streaming message and start a new one when:
+            // 1. Incoming is a workflow status and current has content
+            // 2. Current is a workflow status and incoming is regular text
+            return [
+              ...prev.slice(0, -1),
+              { ...last, isStreaming: false },
+              {
+                id: `msg-${String(Date.now())}`,
+                role: 'assistant' as const,
+                content,
+                timestamp: Date.now(),
+                isStreaming: true,
+                toolCalls: [],
+              },
+            ];
+          }
+          // Append to existing streaming message (replace thinking placeholder if empty)
+          return [...prev.slice(0, -1), { ...last, content: last.content + content }];
+        }
+        // New assistant message
+        return [
+          ...prev,
+          {
+            id: `msg-${String(Date.now())}`,
+            role: 'assistant' as const,
+            content,
+            timestamp: Date.now(),
+            isStreaming: true,
+            toolCalls: [],
+          },
+        ];
+      });
+    },
+    []
+  );
 
   const onToolCall = useCallback((name: string, input: Record<string, unknown>): void => {
     setMessages(prev => {
@@ -306,6 +363,17 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     });
   }, []);
 
+  const onRetract = useCallback((): void => {
+    setMessages(prev => {
+      // Remove the last assistant message (the retracted router text)
+      const lastIdx = prev.length - 1;
+      if (lastIdx >= 0 && prev[lastIdx].role === 'assistant') {
+        return prev.slice(0, lastIdx);
+      }
+      return prev;
+    });
+  }, []);
+
   const onWarning = useCallback(
     (message: string): void => {
       console.warn('[SSE] Warning from server:', message);
@@ -327,6 +395,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     onSessionInfo,
     onWorkflowDispatch,
     onWarning,
+    onRetract,
     ...workflowHandlers,
   });
 
@@ -359,6 +428,9 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             selectedProjectId ?? undefined
           );
           targetConversationId = newId;
+          // Cache messages under the new ID so the remounted ChatInterface picks them up
+          // (navigate changes the key prop, causing unmount/remount — state is lost otherwise)
+          setCachedMessages(newId, [userMsg, thinkingMsg]);
           navigate(`/chat/${newId}`, { replace: true });
         } catch (error) {
           console.error('[Chat] Failed to create conversation', { error });
@@ -407,7 +479,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       <Header
         title={headerTitle}
         subtitle={headerSubtitle}
-        projectName={currentCodebase?.name}
+        projectName={currentCodebase?.name ?? contextCodebase?.name}
         connected={connected}
       />
       {(conversationsError || codebasesError) && (

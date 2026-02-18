@@ -18,7 +18,7 @@ import {
 interface ProjectSelectorProps {
   projects: CodebaseResponse[];
   selectedProjectId: string | null;
-  onSelectProject: (id: string) => void;
+  onSelectProject: (id: string | null) => void;
   isLoading: boolean;
   searchQuery?: string;
 }
@@ -83,6 +83,21 @@ export function ProjectSelector({
   return (
     <>
       <div className="flex flex-col gap-0.5 mt-1">
+        {/* All Projects option */}
+        <button
+          onClick={(): void => {
+            onSelectProject(null);
+          }}
+          className={cn(
+            'flex items-center gap-2 rounded-md px-3 py-1.5 text-left transition-colors w-full',
+            selectedProjectId === null
+              ? 'border-l-2 border-primary bg-accent-muted text-primary'
+              : 'text-text-secondary hover:bg-surface-elevated hover:text-text-primary'
+          )}
+        >
+          <FolderGit2 className="h-4 w-4 shrink-0" />
+          <span className="text-sm">All Projects</span>
+        </button>
         {filteredProjects.map(project => (
           <div key={project.id} className="group relative">
             <button

@@ -221,7 +221,13 @@ export interface WorkflowRun {
  * Step execution result - discriminated union for type safety
  */
 export type StepResult =
-  | { success: true; commandName: string; sessionId?: string; artifacts?: string[] }
+  | {
+      success: true;
+      commandName: string;
+      sessionId?: string;
+      artifacts?: string[];
+      output?: string;
+    }
   | { success: false; commandName: string; error: string };
 
 /**
@@ -241,7 +247,7 @@ export type LoadCommandResult =
  * Result of workflow execution - allows callers to detect success/failure
  */
 export type WorkflowExecutionResult =
-  | { success: true; workflowRunId: string }
+  | { success: true; workflowRunId: string; summary?: string }
   | { success: false; workflowRunId?: string; error: string };
 
 /**

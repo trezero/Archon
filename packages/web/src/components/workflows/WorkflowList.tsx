@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -10,7 +10,9 @@ import {
   type WorkflowRunResponse,
 } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useProject } from '@/contexts/ProjectContext';
+import { cn } from '@/lib/utils';
 
 export function WorkflowList(): React.ReactElement {
   const navigate = useNavigate();
@@ -26,11 +28,11 @@ export function WorkflowList(): React.ReactElement {
   } = useProject();
 
   const handleRun = async (workflowName: string): Promise<void> => {
-    if (!runMessage.trim() || running || !projectId) return;
+    if (!runMessage.trim() || running) return;
     setRunning(true);
     setRunError(null);
     try {
-      const { conversationId } = await createConversation(projectId);
+      const { conversationId } = await createConversation(projectId ?? undefined);
       await runWorkflow(workflowName, conversationId, runMessage.trim());
       setRunMessage('');
       setSelectedWorkflow(null);
@@ -58,6 +60,11 @@ export function WorkflowList(): React.ReactElement {
     refetchInterval: 5000,
   });
 
+  const hasActiveRuns = useMemo(
+    () => runs?.some((r: WorkflowRunResponse) => r.status === 'running') ?? false,
+    [runs]
+  );
+
   if (loadingWorkflows) {
     return (
       <div className="flex items-center justify-center h-32 text-text-secondary text-sm">
@@ -67,10 +74,23 @@ export function WorkflowList(): React.ReactElement {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Available Workflows */}
-      <section>
-        <h3 className="text-sm font-semibold text-text-primary mb-3">Available Workflows</h3>
+    <Tabs defaultValue="available" className="gap-0">
+      <TabsList className="w-full">
+        <TabsTrigger value="available" className="flex-1">
+          Available Workflows
+        </TabsTrigger>
+        <TabsTrigger value="runs" className="flex-1 gap-1.5">
+          Recent Runs
+          {hasActiveRuns && (
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+            </span>
+          )}
+        </TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="available" className="mt-4">
         {!workflows || workflows.length === 0 ? (
           <div className="text-sm text-text-secondary">
             No workflows found. Add workflow definitions to{' '}
@@ -96,7 +116,9 @@ export function WorkflowList(): React.ReactElement {
                     <span className="font-medium text-sm text-text-primary">{wf.name}</span>
                   </div>
                   {wf.description && (
-                    <p className="text-xs text-text-secondary mt-1">{wf.description}</p>
+                    <p className="text-xs text-text-secondary mt-1 line-clamp-2">
+                      {wf.description}
+                    </p>
                   )}
                 </button>
                 {selectedWorkflow === wf.name && (
@@ -110,9 +132,7 @@ export function WorkflowList(): React.ReactElement {
                         }}
                         className="flex-1 min-w-0 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
                       >
-                        <option value="" disabled>
-                          Select a project...
-                        </option>
+                        <option value="">No project (orchestrator decides)</option>
                         {codebases?.map(cb => (
                           <option key={cb.id} value={cb.id}>
                             {cb.name}
@@ -134,7 +154,7 @@ export function WorkflowList(): React.ReactElement {
                           void handleRun(wf.name);
                         }
                       }}
-                      disabled={running || !projectId}
+                      disabled={running}
                     />
                     <div className="flex justify-end mt-2">
                       <Button
@@ -142,7 +162,7 @@ export function WorkflowList(): React.ReactElement {
                         onClick={(): void => {
                           void handleRun(wf.name);
                         }}
-                        disabled={running || !runMessage.trim() || !projectId}
+                        disabled={running || !runMessage.trim()}
                       >
                         {running ? 'Starting...' : `Run ${wf.name}`}
                       </Button>
@@ -154,11 +174,9 @@ export function WorkflowList(): React.ReactElement {
             ))}
           </div>
         )}
-      </section>
+      </TabsContent>
 
-      {/* Recent Runs */}
-      <section>
-        <h3 className="text-sm font-semibold text-text-primary mb-3">Recent Runs</h3>
+      <TabsContent value="runs" className="mt-4">
         {loadingRuns ? (
           <div className="text-sm text-text-secondary">Loading...</div>
         ) : !runs || runs.length === 0 ? (
@@ -185,8 +203,8 @@ export function WorkflowList(): React.ReactElement {
             ))}
           </div>
         )}
-      </section>
-    </div>
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -197,6 +215,6 @@ function RunStatusDot({ status }: { status: string }): React.ReactElement {
     failed: 'bg-error',
   };
   return (
-    <span className={`h-2 w-2 rounded-full shrink-0 ${colors[status] ?? 'bg-text-secondary'}`} />
+    <span className={cn('h-2 w-2 rounded-full shrink-0', colors[status] ?? 'bg-text-secondary')} />
   );
 }

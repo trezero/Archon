@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
-import { listConversations, listWorkflowRuns, createConversation } from '@/lib/api';
+import { listConversations, listWorkflowRuns } from '@/lib/api';
 import type { WorkflowRunResponse } from '@/lib/api';
 import { ConversationItem } from '@/components/conversations/ConversationItem';
 import { WorkflowInvoker } from '@/components/sidebar/WorkflowInvoker';
@@ -75,13 +75,8 @@ export function ProjectDetail({
     return map;
   }, [runs]);
 
-  const handleNewChat = async (): Promise<void> => {
-    try {
-      const { conversationId } = await createConversation(codebaseId);
-      navigate(`/chat/${conversationId}`);
-    } catch (error) {
-      console.error('[ProjectDetail] Failed to create conversation', { error });
-    }
+  const handleNewChat = (): void => {
+    navigate('/chat');
   };
 
   const handleRunClick = (run: WorkflowRunResponse): void => {
@@ -107,7 +102,7 @@ export function ProjectDetail({
     });
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="min-w-0 flex flex-col gap-3">
       <div className="px-1">
         <h3 className="text-sm font-semibold text-text-primary truncate">{projectName}</h3>
         {repositoryUrl && (

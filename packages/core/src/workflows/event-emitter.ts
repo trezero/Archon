@@ -114,6 +114,13 @@ interface LoopIterationCompletedEvent {
   completionDetected: boolean;
 }
 
+interface LoopIterationFailedEvent {
+  type: 'loop_iteration_failed';
+  runId: string;
+  iteration: number;
+  error: string;
+}
+
 interface WorkflowArtifactEvent {
   type: 'workflow_artifact';
   runId: string;
@@ -170,6 +177,7 @@ export type WorkflowEmitterEvent =
   | NodeCompletedEvent
   | NodeFailedEvent
   | NodeSkippedEvent
+  | LoopIterationFailedEvent
   | WorkflowArtifactEvent;
 
 // ---------------------------------------------------------------------------

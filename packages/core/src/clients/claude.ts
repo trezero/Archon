@@ -123,9 +123,20 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
     baseEnv = { ...process.env };
   }
 
-  // Clean debugger env vars that interfere with Claude Code subprocess
-  // See: https://github.com/anthropics/claude-code/issues/4619
+  // Clean env vars that interfere with Claude Code subprocess
   const cleanedVars: string[] = [];
+
+  // Strip nested-session guard marker (claude-code v2.1.41+).
+  // When the server is started from inside a Claude Code terminal, CLAUDECODE=1
+  // is inherited and causes the subprocess to refuse to launch.
+  // See: https://github.com/anthropics/claude-code/issues/25434
+  if (baseEnv.CLAUDECODE) {
+    delete baseEnv.CLAUDECODE;
+    cleanedVars.push('CLAUDECODE');
+  }
+
+  // Strip debugger env vars
+  // See: https://github.com/anthropics/claude-code/issues/4619
   if (baseEnv.NODE_OPTIONS) {
     delete baseEnv.NODE_OPTIONS;
     cleanedVars.push('NODE_OPTIONS');

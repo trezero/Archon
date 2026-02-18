@@ -34,13 +34,11 @@ export function ProjectProvider({ children }: { children: React.ReactNode }): Re
     }
   };
 
-  // Auto-select: clear stale selection or auto-select first project
+  // Clear stale selection if the project no longer exists
   useEffect(() => {
     if (!codebases) return;
     if (selectedProjectId && !codebases.some(cb => cb.id === selectedProjectId)) {
       setSelectedProjectId(null);
-    } else if (!selectedProjectId && codebases.length > 0) {
-      setSelectedProjectId(codebases[0].id);
     }
   }, [codebases, selectedProjectId]);
 

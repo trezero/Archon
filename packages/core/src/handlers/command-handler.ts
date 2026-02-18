@@ -278,83 +278,64 @@ export async function handleCommand(
     case 'help':
       return {
         success: true,
-        message: `## Available Commands
+        message: `## Archon Orchestrator
 
-### Codebase Commands (per-project)
-- \`/command-set <name> <path> [text]\` - Register command
-- \`/load-commands <folder>\` - Bulk load (recursive)
-- \`/command-invoke <name> [args]\` - Execute
-- \`/commands\` - List registered
-- *Commands use relative paths (e.g., .archon/commands)*
+Talk naturally — the orchestrator routes your requests to the right workflow and project automatically.
 
-### Codebase
-- \`/clone <repo-url>\` - Clone repository
-- \`/repos\` - List repositories (numbered)
-- \`/repo <#|name> [pull]\` - Switch repo (auto-loads commands)
-- \`/repo-remove <#|name>\` - Remove repo and codebase record
-- \`/getcwd\` - Show working directory
-- \`/setcwd <path>\` - Set directory
-- *Use /repo for quick switching, /setcwd for manual paths*
+### Commands
 
-### Worktrees
-- \`/worktree create <branch>\` - Create isolated worktree
-- \`/worktree list\` - Show worktrees for this repo
-- \`/worktree remove [--force]\` - Remove current worktree
-- \`/worktree cleanup merged|stale\` - Clean up worktrees
-- \`/worktree orphans\` - Show all worktrees from git
+**Chat**
+- Just type your message — the orchestrator handles routing
+- Mention a project by name and the orchestrator will use it
+- Ask to "run [workflow] on [project]" for explicit invocation
 
-### Workflows
-- \`/workflow list\` - Show available workflows
-- \`/workflow reload\` - Reload workflow definitions
-- \`/workflow status\` - Show running workflow details
-- \`/workflow cancel\` - Cancel running workflow
-- *Workflows are YAML files in .archon/workflows/*
+**Workflows**
+- \`/workflow list\` — List available workflows
+- \`/workflow run <name> [message]\` — Run a workflow explicitly
+- \`/workflow status\` — Show running workflow progress
+- \`/workflow cancel\` — Cancel the active workflow
 
-### Session
-- \`/status\` - Show state
-- \`/reset\` - Clear session
-- \`/reset-context\` - Reset AI context, keep worktree
-- \`/help\` - Show help
+**Session**
+- \`/status\` — Show current session and project info
+- \`/reset\` — Clear conversation and start fresh
+- \`/help\` — Show this help message
 
-### Setup
-- \`/init\` - Create .archon structure in current repo`,
+### Tips
+- You don't need to select a project first — just describe what you want
+- The orchestrator knows all your registered projects and available workflows
+- For project setup, ask the orchestrator: "How do I add a new project?"`,
       };
 
     case 'status': {
-      let msg = `Platform: ${conversation.platform_type}\nAI Assistant: ${conversation.ai_assistant_type}`;
+      let msg = `## Orchestrator Status\n\n**Platform**: ${conversation.platform_type}\n**AI Assistant**: ${conversation.ai_assistant_type}`;
 
-      let codebase = conversation.codebase_id
+      // Show all registered projects
+      const allCodebases = await codebaseDb.listCodebases();
+      if (allCodebases.length > 0) {
+        msg += `\n\n## Registered Projects (${String(allCodebases.length)})\n`;
+        for (const cb of allCodebases) {
+          const urlSuffix = cb.repository_url
+            ? ` (${cb.repository_url.replace(/.*github\.com\//, '')})`
+            : '';
+          msg += `- ${cb.name}${urlSuffix}\n`;
+        }
+      } else {
+        msg += '\n\n## Registered Projects\nNone — ask the orchestrator to add a project.';
+      }
+
+      // Show conversation context
+      const codebase = conversation.codebase_id
         ? await codebaseDb.getCodebase(conversation.codebase_id)
         : null;
 
-      // Auto-detect codebase from cwd if not explicitly linked
-      if (!codebase && conversation.cwd) {
-        codebase = await codebaseDb.findCodebaseByDefaultCwd(conversation.cwd);
-        if (codebase) {
-          // Auto-link the detected codebase (best-effort - don't fail status on link error)
-          const detectedCodebase = codebase;
-          await db
-            .updateConversation(conversation.id, { codebase_id: detectedCodebase.id })
-            .then(() => {
-              getLog().debug(
-                { conversationId: conversation.id, codebaseName: detectedCodebase.name },
-                'codebase_auto_linked'
-              );
-            })
-            .catch(err => {
-              if (!(err instanceof ConversationNotFoundError)) throw err;
-            });
-        }
-      }
-
       if (codebase?.name) {
         const repoContext = await formatRepoContext(codebase, conversation.isolation_env_id);
-        msg += `\n\nRepository: ${repoContext}`;
-        if (codebase.repository_url) {
-          msg += `\nURL: ${codebase.repository_url}`;
+        msg += `\n\n## Conversation Context\n- Project: ${repoContext}`;
+        if (conversation.cwd) {
+          msg += `\n- Working Directory: ${conversation.cwd}`;
         }
       } else {
-        msg += '\n\nNo codebase configured. Use /clone <repo-url> to get started.';
+        msg += '\n\n## Conversation Context\n- Project: None — orchestrator will route as needed';
       }
 
       const session = await sessionDb.getActiveSession(conversation.id);
@@ -1289,20 +1270,19 @@ export async function handleCommand(
     case 'workflow': {
       const subcommand = args[0];
 
-      if (!conversation.codebase_id) {
-        return { success: false, message: 'No codebase configured. Use /clone first.' };
-      }
-
-      const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
-      if (!codebase) {
-        return { success: false, message: 'Codebase not found.' };
-      }
+      // Workflow commands work with or without a project context
+      const codebase = conversation.codebase_id
+        ? await codebaseDb.getCodebase(conversation.codebase_id)
+        : null;
 
       switch (subcommand) {
         case 'list':
         case 'ls': {
-          // Discover and list workflows
-          const { workflows, errors } = await discoverWorkflows(codebase.default_cwd);
+          // Discover workflows: use project CWD if available, otherwise global discovery
+          const workflowCwd = codebase
+            ? (conversation.cwd ?? codebase.default_cwd)
+            : getArchonWorkspacesPath();
+          const { workflows, errors } = await discoverWorkflows(workflowCwd);
 
           if (workflows.length === 0 && errors.length === 0) {
             return {
@@ -1340,11 +1320,15 @@ export async function handleCommand(
 
         case 'reload': {
           // Force reload workflows (discovery is stateless, just confirms they load correctly)
-          const { workflows, errors } = await discoverWorkflows(codebase.default_cwd);
-          let msg = `Discovered ${String(workflows.length)} workflow(s).`;
-          if (errors.length > 0) {
-            msg += `\n\n**${String(errors.length)} failed to load:**\n`;
-            for (const e of errors) {
+          const reloadCwd = codebase
+            ? (conversation.cwd ?? codebase.default_cwd)
+            : getArchonWorkspacesPath();
+          const { workflows: reloadedWorkflows, errors: reloadErrors } =
+            await discoverWorkflows(reloadCwd);
+          let msg = `Discovered ${String(reloadedWorkflows.length)} workflow(s).`;
+          if (reloadErrors.length > 0) {
+            msg += `\n\n**${String(reloadErrors.length)} failed to load:**\n`;
+            for (const e of reloadErrors) {
               msg += `- \`${e.filename}\`: ${e.error}\n`;
             }
           }
@@ -1431,8 +1415,12 @@ export async function handleCommand(
             };
           }
 
+          const workflowCwd = codebase
+            ? (conversation.cwd ?? codebase.default_cwd)
+            : getArchonWorkspacesPath();
+
           getLog().debug(
-            { workflowName, args: workflowArgs, cwd: codebase.default_cwd },
+            { workflowName, args: workflowArgs, cwd: workflowCwd },
             'workflow_run_invoked'
           );
 
@@ -1440,12 +1428,12 @@ export async function handleCommand(
           let workflows: readonly WorkflowDefinition[];
           let loadErrors: readonly WorkflowLoadError[];
           try {
-            const result = await discoverWorkflows(codebase.default_cwd);
+            const result = await discoverWorkflows(workflowCwd);
             workflows = result.workflows;
             loadErrors = result.errors;
           } catch (error) {
             const err = error as Error;
-            getLog().error({ err, cwd: codebase.default_cwd }, 'workflow_discovery_failed');
+            getLog().error({ err, cwd: workflowCwd }, 'workflow_discovery_failed');
             return {
               success: false,
               message: `Failed to load workflows: ${err.message}\n\nCheck .archon/workflows/ for YAML syntax issues.`,
@@ -1598,10 +1586,38 @@ Use /load-commands .archon/commands to register commands.`,
       }
     }
 
-    default:
+    default: {
+      // Check for deprecated commands and give helpful guidance
+      const deprecatedCommands = [
+        'clone',
+        'repos',
+        'repo',
+        'repo-remove',
+        'codebase-switch',
+        'setcwd',
+        'getcwd',
+        'command-set',
+        'command-invoke',
+        'load-commands',
+        'commands',
+        'template-add',
+        'template-list',
+        'templates',
+        'template-delete',
+        'worktree',
+        'init',
+        'reset-context',
+      ];
+      if (deprecatedCommands.includes(command)) {
+        return {
+          success: false,
+          message: `The \`/${command}\` command has been replaced by the orchestrator.\n\nJust describe what you need in natural language — the orchestrator handles project management, workflows, and routing automatically.\n\nType /help for available commands.`,
+        };
+      }
       return {
         success: false,
         message: `Unknown command: /${command}\n\nType /help to see available commands.`,
       };
+    }
   }
 }

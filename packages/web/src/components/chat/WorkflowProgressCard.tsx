@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { LoopIterationView } from '@/components/workflows/LoopIterationView';
 import type { WorkflowState } from '@/lib/types';
@@ -37,6 +38,18 @@ export function WorkflowProgressCard({
   onViewFullScreen,
 }: WorkflowProgressCardProps): React.ReactElement {
   const navigate = useNavigate();
+
+  // Force re-render every second while running so elapsed time counts up
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (workflow.status !== 'running') return;
+    const interval = setInterval(() => {
+      setTick(t => t + 1);
+    }, 1000);
+    return (): void => {
+      clearInterval(interval);
+    };
+  }, [workflow.status]);
 
   const completedSteps = workflow.steps.filter(s => s.status === 'completed').length;
   const totalSteps = workflow.steps.length;

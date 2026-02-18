@@ -141,7 +141,8 @@ export {
 // =============================================================================
 // Orchestrator
 // =============================================================================
-export { handleMessage } from './orchestrator/orchestrator';
+export { handleMessage } from './orchestrator/orchestrator-agent';
+export { buildOrchestratorPrompt, buildProjectScopedPrompt } from './orchestrator/prompt-builder';
 
 // =============================================================================
 // Handlers

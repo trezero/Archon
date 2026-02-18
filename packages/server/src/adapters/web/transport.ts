@@ -49,7 +49,16 @@ export class SSETransport {
     }
   }
 
-  removeStream(conversationId: string): void {
+  removeStream(conversationId: string, expectedStream?: SSEWriter): void {
+    // If a specific stream reference is provided, only remove if it matches
+    // the currently registered stream. This prevents a race condition where
+    // a stale onAbort callback (from a replaced stream) removes a newer stream.
+    // Critical in React StrictMode which double-mounts components, causing
+    // rapid connect → disconnect → reconnect cycles.
+    if (expectedStream) {
+      const current = this.streams.get(conversationId);
+      if (current !== expectedStream) return;
+    }
     this.streams.delete(conversationId);
     // Schedule buffer cleanup after delay (allows reconnection without data loss)
     this.scheduleCleanup(conversationId, 60_000);

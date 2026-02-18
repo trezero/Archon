@@ -944,7 +944,7 @@ ${userComment}`;
       try {
         await handleMessage(this, conversationId, finalMessage, {
           issueContext: contextToAppend,
-          threadContext, // Pass comment history as thread context
+          threadContext,
           isolationHints,
         });
       } catch (error) {

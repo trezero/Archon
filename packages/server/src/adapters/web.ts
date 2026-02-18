@@ -22,8 +22,8 @@ export class WebAdapter implements IWebPlatformAdapter {
     this.transport.registerStream(conversationId, stream);
   }
 
-  removeStream(conversationId: string): void {
-    this.transport.removeStream(conversationId);
+  removeStream(conversationId: string, expectedStream?: SSEWriter): void {
+    this.transport.removeStream(conversationId, expectedStream);
   }
 
   /**
@@ -53,12 +53,19 @@ export class WebAdapter implements IWebPlatformAdapter {
       content: message,
       isComplete: true,
       timestamp: Date.now(),
+      ...(metadata?.workflowResult ? { workflowResult: metadata.workflowResult } : {}),
     });
 
     // Forward output to registered callback (for event bridge preview)
     this.workflowBridge.emitOutput(conversationId, message);
 
     await this.transport.emit(conversationId, event);
+
+    // Workflow result arrives after the parent lock is released (background dispatch),
+    // so it would never be flushed. Force persistence flush for these messages.
+    if (metadata?.category === 'workflow_result') {
+      void this.persistence.flush(conversationId);
+    }
   }
 
   async sendStructuredEvent(conversationId: string, chunk: MessageChunk): Promise<void> {
@@ -148,6 +155,16 @@ export class WebAdapter implements IWebPlatformAdapter {
 
   removeOutputCallback(conversationId: string): void {
     this.workflowBridge.removeOutputCallback(conversationId);
+  }
+
+  async emitRetract(conversationId: string): Promise<void> {
+    // Remove retracted text from persistence buffer so it doesn't get written to DB
+    this.persistence.retractLastSegment(conversationId);
+    const event = JSON.stringify({
+      type: 'retract',
+      timestamp: Date.now(),
+    });
+    await this.transport.emit(conversationId, event);
   }
 
   async emitSSE(conversationId: string, event: string): Promise<void> {
