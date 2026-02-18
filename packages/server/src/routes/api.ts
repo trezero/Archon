@@ -469,15 +469,13 @@ export function registerApiRoutes(
         return c.json({ workflows: [] });
       }
 
-      const workflows = await discoverWorkflows(workingDir);
-      return c.json({ workflows });
+      const result = await discoverWorkflows(workingDir);
+      return c.json({ workflows: result.workflows, errors: result.errors });
     } catch (error) {
       // Workflow discovery can fail if cwd is stale or deleted — return empty with warning
-      getLog().warn({ err: error }, 'workflow_discovery_failed');
-      return c.json({
-        workflows: [],
-        warning: `Workflow discovery failed: ${(error as Error).message}`,
-      });
+      const err = error instanceof Error ? error : new Error(String(error));
+      getLog().error({ err }, 'workflow_discovery_failed');
+      return c.json({ workflows: [], warning: `Workflow discovery failed: ${err.message}` }, 500);
     }
   });
 
