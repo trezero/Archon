@@ -174,6 +174,10 @@ export class SqliteAdapter implements IDatabase {
           'ALTER TABLE remote_agent_workflow_runs ADD COLUMN parent_conversation_id TEXT'
         );
       }
+
+      if (!wfColNames.has('working_path')) {
+        this.db.run('ALTER TABLE remote_agent_workflow_runs ADD COLUMN working_path TEXT');
+      }
     } catch (e: unknown) {
       getLog().warn({ err: e as Error }, 'migration_workflow_runs_columns_failed');
     }
@@ -280,7 +284,8 @@ export class SqliteAdapter implements IDatabase {
         parent_conversation_id TEXT REFERENCES remote_agent_conversations(id) ON DELETE SET NULL,
         started_at TEXT DEFAULT (datetime('now')),
         completed_at TEXT,
-        last_activity_at TEXT DEFAULT (datetime('now'))
+        last_activity_at TEXT DEFAULT (datetime('now')),
+        working_path TEXT
       );
 
       -- Workflow events table

@@ -17,8 +17,16 @@ import type { WorkflowDefinition } from './types';
 import { createQueryResult } from '../test/mocks/database';
 import { createMockLogger } from '../test/mocks/logger';
 
-// Mock at the connection level to avoid polluting db/workflows module
-const mockQuery = mock((query: string) => {
+// Default mock implementation — extracted so tests can restore it after overriding
+function defaultMockQuery(query: string): Promise<ReturnType<typeof createQueryResult>> {
+  // For findResumableRun query (status='failed' + working_path): no resumable run by default
+  if (query.includes("status = 'failed'") && query.includes('working_path')) {
+    return Promise.resolve(createQueryResult([]));
+  }
+  // For resumeWorkflowRun UPDATE (status='running' + completed_at = NULL): empty by default
+  if (query.includes("status = 'running'") && query.includes('completed_at = NULL')) {
+    return Promise.resolve(createQueryResult([]));
+  }
   // For getActiveWorkflowRun query, return no active workflow by default
   if (query.includes("status = 'running'")) {
     return Promise.resolve(createQueryResult([]));
@@ -38,6 +46,9 @@ const mockQuery = mock((query: string) => {
           metadata: {},
           started_at: new Date(),
           completed_at: null,
+          last_activity_at: null,
+          working_path: null,
+          parent_conversation_id: null,
         },
       ])
     );
@@ -52,7 +63,10 @@ const mockQuery = mock((query: string) => {
   }
   // Default: empty result for UPDATE queries and other operations
   return Promise.resolve(createQueryResult([]));
-});
+}
+
+// Mock at the connection level to avoid polluting db/workflows module
+const mockQuery = mock(defaultMockQuery);
 
 mock.module('../db/connection', () => ({
   pool: {
@@ -156,11 +170,11 @@ describe('Workflow Executor', () => {
     mock.restore();
   });
 
-  // Helper: Get count of workflow status updates in database
+  // Helper: Get count of workflow status UPDATE operations in database
   function getWorkflowStatusUpdates(status: 'failed' | 'completed'): unknown[][] {
     return mockQuery.mock.calls.filter(
       (call: unknown[]) =>
-        (call[0] as string).includes('remote_agent_workflow_runs') &&
+        (call[0] as string).includes('UPDATE remote_agent_workflow_runs') &&
         (call[0] as string).includes(`status = '${status}'`)
     );
   }
@@ -4206,6 +4220,317 @@ describe('app defaults command loading', () => {
           typeof call[1] === 'string' && (call[1] as string).includes('Command prompt not found')
       );
       expect(notFoundMessages.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('workflow resume', () => {
+    const twoStepWorkflow: WorkflowDefinition = {
+      name: 'test-workflow',
+      description: 'Two-step workflow for resume testing',
+      provider: 'claude',
+      steps: [{ command: 'command-one' }, { command: 'command-two' }],
+    };
+
+    it('creates a fresh run when no prior failed run exists', async () => {
+      // mockQuery already returns [] for status='failed' queries by default
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        twoStepWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
+        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
+      );
+      expect(insertCalls.length).toBe(1);
+    });
+
+    it('resumes a prior failed run when found with completed steps', async () => {
+      const priorRunId = 'prior-run-id';
+      const priorRun = {
+        id: priorRunId,
+        workflow_name: 'test-workflow',
+        conversation_id: 'conv-123',
+        parent_conversation_id: null,
+        codebase_id: null,
+        current_step_index: 1, // step 0 completed
+        status: 'failed' as const,
+        user_message: 'original message',
+        metadata: {},
+        started_at: new Date(),
+        completed_at: new Date(),
+        last_activity_at: new Date(),
+        working_path: testDir,
+      };
+      const resumedRun = { ...priorRun, status: 'running' as const, completed_at: null };
+
+      mockQuery.mockImplementation((query: string) => {
+        if (
+          (query as string).includes("status = 'failed'") &&
+          (query as string).includes('working_path')
+        ) {
+          return Promise.resolve(createQueryResult([priorRun]));
+        }
+        if (
+          (query as string).includes("status = 'running'") &&
+          (query as string).includes('completed_at = NULL')
+        ) {
+          return Promise.resolve(createQueryResult([resumedRun]));
+        }
+        if ((query as string).includes("status = 'running'")) {
+          return Promise.resolve(createQueryResult([]));
+        }
+        if ((query as string).includes('INSERT INTO remote_agent_workflow_runs')) {
+          return Promise.resolve(createQueryResult([resumedRun]));
+        }
+        if (
+          (query as string).includes('remote_agent_codebases') &&
+          (query as string).includes('WHERE id')
+        ) {
+          return Promise.resolve(createQueryResult([]));
+        }
+        if ((query as string).includes('INSERT INTO remote_agent_workflow_events')) {
+          return Promise.resolve(createQueryResult([]));
+        }
+        return Promise.resolve(createQueryResult([]));
+      });
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        twoStepWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // No INSERT — resume used existing run
+      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
+        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
+      );
+      expect(insertCalls.length).toBe(0);
+
+      // UPDATE status='running' was called (resumeWorkflowRun)
+      const resumeCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes("status = 'running'") &&
+          (call[0] as string).includes('completed_at = NULL')
+      );
+      expect(resumeCalls.length).toBe(1);
+
+      // Resume message was sent to user with correct step numbers
+      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const resumeMessages = sendMessageCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' && (call[1] as string).includes('▶️ **Resuming**')
+      );
+      expect(resumeMessages.length).toBe(1);
+      const resumeMsg = resumeMessages[0][1] as string;
+      expect(resumeMsg).toContain('from step 2'); // resumeFromStepIndex=1 → step 2
+      expect(resumeMsg).toContain('skipping 1 already-completed step(s)');
+      expect(resumeMsg).toContain('session context from prior steps is not restored');
+
+      // step_skipped_prior_success event was emitted for step 0
+      const skipEventCalls = mockQuery.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[0] as string).includes('INSERT INTO remote_agent_workflow_events') &&
+          JSON.stringify(call[1]).includes('step_skipped_prior_success')
+      );
+      expect(skipEventCalls.length).toBe(1);
+
+      // Restore default mock after test
+      mockQuery.mockImplementation(defaultMockQuery);
+    });
+
+    it('creates a fresh run when prior failed run has current_step_index=0', async () => {
+      // A run that failed on step 0 (nothing completed) — not worth resuming
+      const priorRun = {
+        id: 'prior-run-id',
+        workflow_name: 'test-workflow',
+        conversation_id: 'conv-123',
+        parent_conversation_id: null,
+        codebase_id: null,
+        current_step_index: 0, // no steps completed
+        status: 'failed' as const,
+        user_message: 'original message',
+        metadata: {},
+        started_at: new Date(),
+        completed_at: new Date(),
+        last_activity_at: new Date(),
+        working_path: testDir,
+      };
+
+      mockQuery.mockImplementation((query: string) => {
+        if (
+          (query as string).includes("status = 'failed'") &&
+          (query as string).includes('working_path')
+        ) {
+          return Promise.resolve(createQueryResult([priorRun]));
+        }
+        if ((query as string).includes("status = 'running'")) {
+          return Promise.resolve(createQueryResult([]));
+        }
+        if ((query as string).includes('INSERT INTO remote_agent_workflow_runs')) {
+          return Promise.resolve(
+            createQueryResult([
+              {
+                id: 'new-run-id',
+                workflow_name: 'test-workflow',
+                conversation_id: 'conv-123',
+                parent_conversation_id: null,
+                codebase_id: null,
+                current_step_index: 0,
+                status: 'running' as const,
+                user_message: 'User message',
+                metadata: {},
+                started_at: new Date(),
+                completed_at: null,
+                last_activity_at: null,
+                working_path: testDir,
+              },
+            ])
+          );
+        }
+        if (
+          (query as string).includes('remote_agent_codebases') &&
+          (query as string).includes('WHERE id')
+        ) {
+          return Promise.resolve(createQueryResult([]));
+        }
+        if ((query as string).includes('INSERT INTO remote_agent_workflow_events')) {
+          return Promise.resolve(createQueryResult([]));
+        }
+        return Promise.resolve(createQueryResult([]));
+      });
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        twoStepWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Fresh INSERT was called (current_step_index=0 → no steps to skip → fresh run)
+      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
+        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
+      );
+      expect(insertCalls.length).toBe(1);
+
+      // Restore default mock after test
+      mockQuery.mockImplementation(defaultMockQuery);
+    });
+
+    it('fails workflow when resume activation (resumeWorkflowRun) throws', async () => {
+      const priorRun = {
+        id: 'prior-run-id',
+        workflow_name: 'test-workflow',
+        conversation_id: 'conv-123',
+        parent_conversation_id: null,
+        codebase_id: null,
+        current_step_index: 1, // step 0 completed — activation will be attempted
+        status: 'failed' as const,
+        user_message: 'original message',
+        metadata: {},
+        started_at: new Date(),
+        completed_at: new Date(),
+        last_activity_at: new Date(),
+        working_path: testDir,
+      };
+
+      mockQuery.mockImplementation((query: string) => {
+        if (
+          (query as string).includes("status = 'failed'") &&
+          (query as string).includes('working_path')
+        ) {
+          return Promise.resolve(createQueryResult([priorRun]));
+        }
+        if (
+          (query as string).includes("status = 'running'") &&
+          (query as string).includes('completed_at = NULL')
+        ) {
+          return Promise.reject(new Error('Database connection lost'));
+        }
+        if ((query as string).includes("status = 'running'")) {
+          return Promise.resolve(createQueryResult([]));
+        }
+        if ((query as string).includes('INSERT INTO remote_agent_workflow_events')) {
+          return Promise.resolve(createQueryResult([]));
+        }
+        return Promise.resolve(createQueryResult([]));
+      });
+
+      const result = await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        twoStepWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Database error resuming workflow run');
+
+      // Error message sent to user
+      const sendCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const errorMessages = sendCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' && (call[1] as string).includes('could not activate it')
+      );
+      expect(errorMessages.length).toBeGreaterThan(0);
+
+      // No new run was created
+      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
+        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
+      );
+      expect(insertCalls.length).toBe(0);
+
+      // Restore default mock after test
+      mockQuery.mockImplementation(defaultMockQuery);
+    });
+
+    it('falls through to fresh run when findResumableRun throws (non-critical)', async () => {
+      mockQuery.mockImplementation((query: string) => {
+        if (
+          (query as string).includes("status = 'failed'") &&
+          (query as string).includes('working_path')
+        ) {
+          return Promise.reject(new Error('DB timeout'));
+        }
+        return defaultMockQuery(query);
+      });
+
+      await executeWorkflow(
+        mockPlatform,
+        'conv-123',
+        testDir,
+        twoStepWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Fresh run was created (not blocked by resume check failure)
+      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
+        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
+      );
+      expect(insertCalls.length).toBe(1);
+
+      // Warning message was sent so the user knows resume was skipped
+      const sendCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const warnMessages = sendCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' &&
+          (call[1] as string).includes('Could not check for a prior run to resume')
+      );
+      expect(warnMessages.length).toBeGreaterThan(0);
+
+      // Restore default mock after test
+      mockQuery.mockImplementation(defaultMockQuery);
     });
   });
 });

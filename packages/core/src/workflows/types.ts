@@ -117,6 +117,7 @@ export interface WorkflowRun {
   started_at: Date;
   completed_at: Date | null;
   last_activity_at: Date | null; // For staleness detection
+  working_path: string | null; // cwd at run creation time; used for resume detection
 }
 
 /**

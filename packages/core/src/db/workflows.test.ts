@@ -20,6 +20,8 @@ import {
   completeWorkflowRun,
   failWorkflowRun,
   updateWorkflowActivity,
+  findResumableRun,
+  resumeWorkflowRun,
 } from './workflows';
 
 describe('workflows database', () => {
@@ -31,6 +33,7 @@ describe('workflows database', () => {
     id: 'workflow-run-123',
     workflow_name: 'feature-development',
     conversation_id: 'conv-456',
+    parent_conversation_id: null,
     codebase_id: 'codebase-789',
     current_step_index: 0,
     status: 'running',
@@ -39,6 +42,7 @@ describe('workflows database', () => {
     started_at: new Date('2025-01-01T00:00:00Z'),
     completed_at: null,
     last_activity_at: new Date('2025-01-01T00:00:00Z'),
+    working_path: null,
   };
 
   describe('createWorkflowRun', () => {
@@ -55,7 +59,7 @@ describe('workflows database', () => {
       expect(result).toEqual(mockWorkflowRun);
       expect(mockQuery).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO remote_agent_workflow_runs'),
-        ['feature-development', 'conv-456', 'codebase-789', 'Add dark mode support', '{}']
+        ['feature-development', 'conv-456', 'codebase-789', 'Add dark mode support', '{}', null]
       );
     });
 
@@ -83,6 +87,7 @@ describe('workflows database', () => {
           'codebase-789',
           'Add dark mode support',
           JSON.stringify({ github_context: 'Issue #42 context' }),
+          null,
         ]
       );
     });
@@ -100,7 +105,7 @@ describe('workflows database', () => {
       expect(result.codebase_id).toBeNull();
       expect(mockQuery).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO remote_agent_workflow_runs'),
-        ['feature-development', 'conv-456', null, 'Add dark mode support', '{}']
+        ['feature-development', 'conv-456', null, 'Add dark mode support', '{}', null]
       );
     });
   });
@@ -382,6 +387,76 @@ describe('workflows database', () => {
 
       // Verify the query was attempted
       expect(mockQuery).toHaveBeenCalled();
+    });
+  });
+
+  describe('findResumableRun', () => {
+    test('returns the most recent failed run matching workflow name, path, and conversation', async () => {
+      const failedRun = {
+        ...mockWorkflowRun,
+        status: 'failed' as const,
+        working_path: '/repo/path',
+      };
+      mockQuery.mockResolvedValueOnce(createQueryResult([failedRun]));
+
+      const result = await findResumableRun('feature-development', '/repo/path', 'conv-456');
+
+      expect(result).toEqual(failedRun);
+      const [query, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(query).toContain("status = 'failed'");
+      expect(query).toContain('working_path = $2');
+      expect(query).toContain('conversation_id = $3');
+      expect(query).toContain('ORDER BY started_at DESC');
+      expect(params).toEqual(['feature-development', '/repo/path', 'conv-456']);
+    });
+
+    test('returns null when no failed run exists', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      const result = await findResumableRun('feature-development', '/repo/path', 'conv-456');
+
+      expect(result).toBeNull();
+    });
+
+    test('throws on database error', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('Connection refused'));
+
+      await expect(findResumableRun('test', '/path', 'conv-456')).rejects.toThrow(
+        'Failed to find resumable run: Connection refused'
+      );
+    });
+  });
+
+  describe('resumeWorkflowRun', () => {
+    test('updates run to running, clears completed_at, and returns updated row', async () => {
+      const updatedRun = { ...mockWorkflowRun, status: 'running' as const, completed_at: null };
+      mockQuery.mockResolvedValueOnce(createQueryResult([updatedRun]));
+
+      const result = await resumeWorkflowRun('workflow-run-123');
+
+      expect(result.status).toBe('running');
+      expect(result.completed_at).toBeNull();
+      const [query, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(query).toContain("status = 'running'");
+      expect(query).toContain('completed_at = NULL');
+      expect(query).toContain('RETURNING *');
+      expect(params).toEqual(['workflow-run-123']);
+    });
+
+    test('throws when no row matched (run not found)', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await expect(resumeWorkflowRun('nonexistent-id')).rejects.toThrow(
+        'Workflow run not found (id: nonexistent-id)'
+      );
+    });
+
+    test('throws on database error', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('Lock timeout'));
+
+      await expect(resumeWorkflowRun('workflow-run-123')).rejects.toThrow(
+        'Failed to resume workflow run: Lock timeout'
+      );
     });
   });
 });

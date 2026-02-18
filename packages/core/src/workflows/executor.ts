@@ -1078,7 +1078,44 @@ async function executeLoopWorkflow(
   let currentSessionId: string | undefined;
   let metadataTrackingFailed = false;
 
-  for (let i = 1; i <= loop.max_iterations; i++) {
+  // Resume: current_step_index is written at the START of each iteration, so resuming from it
+  // re-runs the last recorded iteration (which may have failed mid-way).
+  const startIteration = workflowRun.current_step_index > 0 ? workflowRun.current_step_index : 1;
+  const isResume = workflowRun.current_step_index > 0;
+
+  // Guard: stored iteration exceeds current max (e.g. YAML max_iterations reduced between runs)
+  if (startIteration > loop.max_iterations) {
+    getLog().warn(
+      { workflowRunId: workflowRun.id, startIteration, maxIterations: loop.max_iterations },
+      'loop_resume_index_exceeds_max_iterations'
+    );
+    await sendCriticalMessage(
+      platform,
+      conversationId,
+      `❌ **Cannot resume** \`${workflow.name}\`: prior run reached iteration ${String(startIteration)} but current \`max_iterations\` is ${String(loop.max_iterations)}. Increase \`max_iterations\` or start a fresh run.`,
+      workflowContext
+    );
+    await workflowDb.failWorkflowRun(
+      workflowRun.id,
+      `Resume aborted: prior iteration ${String(startIteration)} exceeds current max_iterations ${String(loop.max_iterations)}`
+    );
+    return;
+  }
+
+  if (isResume) {
+    getLog().info(
+      { workflowRunId: workflowRun.id, startIteration, maxIterations: loop.max_iterations },
+      'loop_workflow_resuming'
+    );
+    await safeSendMessage(
+      platform,
+      conversationId,
+      `▶️ **Resuming** \`${workflow.name}\` from iteration ${String(startIteration)} — skipping ${String(startIteration - 1)} already-completed iteration(s).\n\nNote: AI session context from prior iterations is not restored.`,
+      workflowContext
+    );
+  }
+
+  for (let i = startIteration; i <= loop.max_iterations; i++) {
     // Update metadata with current iteration (non-critical - log but don't fail on db error)
     try {
       await workflowDb.updateWorkflowRun(workflowRun.id, {
@@ -1126,8 +1163,9 @@ async function executeLoopWorkflow(
       data: { iteration: i, maxIterations: loop.max_iterations },
     });
 
-    // Determine session handling
-    const needsFreshSession = loop.fresh_context === true || i === 1;
+    // Determine session handling — treat the first executed iteration as a session start,
+    // whether that is iteration 1 (fresh run) or a later iteration (resume).
+    const needsFreshSession = loop.fresh_context === true || i === startIteration;
     const resumeSessionId = needsFreshSession ? undefined : currentSessionId;
 
     if (needsFreshSession && i > 1) {
@@ -1561,28 +1599,82 @@ export async function executeWorkflow(
     }
   }
 
-  // Create workflow run record
-  let workflowRun;
+  // Resume detection: check for prior failed run on same workflow + worktree
+  let resumeFromStepIndex: number | undefined;
+  let workflowRun: WorkflowRun | undefined;
+
+  // Step 1: Find prior failed run — non-critical, fall through on DB error
+  let resumableRun: Awaited<ReturnType<typeof workflowDb.findResumableRun>> = null;
   try {
-    workflowRun = await workflowDb.createWorkflowRun({
-      workflow_name: workflow.name,
-      conversation_id: conversationDbId,
-      codebase_id: codebaseId,
-      user_message: userMessage,
-      metadata: issueContext ? { github_context: issueContext } : {},
-    });
+    resumableRun = await workflowDb.findResumableRun(workflow.name, cwd, conversationDbId);
   } catch (error) {
     const err = error as Error;
-    getLog().error(
-      { err, workflowName: workflow.name, conversationId },
-      'db_create_workflow_run_failed'
-    );
-    await sendCriticalMessage(
+    getLog().warn({ err, workflowName: workflow.name, cwd }, 'workflow_resume_check_failed');
+    // Non-critical: fall through to create a new run; notify user so they know resume was skipped
+    // (workflowName is already captured in the warn log above for correlation)
+    await safeSendMessage(
       platform,
       conversationId,
-      '❌ **Workflow failed**: Unable to start workflow (database error). Please try again later.'
+      '⚠️ Could not check for a prior run to resume (database error). Starting a fresh run instead.'
     );
-    return { success: false, error: 'Database error creating workflow run' };
+  }
+
+  // Step 2: Activate the resume — propagate as error if this fails (resume detected but couldn't activate)
+  if (resumableRun && resumableRun.current_step_index > 0) {
+    try {
+      workflowRun = await workflowDb.resumeWorkflowRun(resumableRun.id);
+      resumeFromStepIndex = resumableRun.current_step_index;
+      getLog().info({ workflowRunId: workflowRun.id, resumeFromStepIndex }, 'workflow_resuming');
+      await safeSendMessage(
+        platform,
+        conversationId,
+        `▶️ **Resuming** \`${workflow.name}\` from step ${String(resumeFromStepIndex + 1)} — skipping ${String(resumeFromStepIndex)} already-completed step(s).\n\nNote: AI session context from prior steps is not restored. Steps that depend on prior context may need to re-read artifacts.`
+      );
+    } catch (error) {
+      const err = error as Error;
+      getLog().error(
+        { err, workflowName: workflow.name, resumableRunId: resumableRun.id },
+        'workflow_resume_activate_failed'
+      );
+      await sendCriticalMessage(
+        platform,
+        conversationId,
+        '❌ **Workflow failed**: Found a prior run to resume but could not activate it (database error). Please try again later.'
+      );
+      return { success: false, error: 'Database error resuming workflow run' };
+    }
+  } else if (resumableRun) {
+    // Found a prior failed run but no steps completed (current_step_index=0) — not worth resuming
+    getLog().info(
+      { workflowRunId: resumableRun.id, currentStepIndex: resumableRun.current_step_index },
+      'workflow_resume_skipped_no_completed_steps'
+    );
+  }
+
+  if (!workflowRun) {
+    // Create workflow run record
+    try {
+      workflowRun = await workflowDb.createWorkflowRun({
+        workflow_name: workflow.name,
+        conversation_id: conversationDbId,
+        codebase_id: codebaseId,
+        user_message: userMessage,
+        working_path: cwd,
+        metadata: issueContext ? { github_context: issueContext } : {},
+      });
+    } catch (error) {
+      const err = error as Error;
+      getLog().error(
+        { err, workflowName: workflow.name, conversationId },
+        'db_create_workflow_run_failed'
+      );
+      await sendCriticalMessage(
+        platform,
+        conversationId,
+        '❌ **Workflow failed**: Unable to start workflow (database error). Please try again later.'
+      );
+      return { success: false, error: 'Database error creating workflow run' };
+    }
   }
 
   // Resolve external artifact and log directories
@@ -1621,20 +1713,22 @@ export async function executeWorkflow(
       data: { workflowName: workflow.name, totalSteps, isLoop },
     });
 
-    // Set status to running now that execution has started
-    try {
-      await workflowDb.updateWorkflowRun(workflowRun.id, { status: 'running' });
-    } catch (dbError) {
-      getLog().error(
-        { err: dbError as Error, workflowRunId: workflowRun.id },
-        'db_workflow_status_update_failed'
-      );
-      await sendCriticalMessage(
-        platform,
-        conversationId,
-        'Workflow blocked: Unable to update status. Please try again.'
-      );
-      return { success: false, error: 'Database error setting workflow to running' };
+    // Set status to running now that execution has started (skip for resumed runs — already running)
+    if (!resumeFromStepIndex) {
+      try {
+        await workflowDb.updateWorkflowRun(workflowRun.id, { status: 'running' });
+      } catch (dbError) {
+        getLog().error(
+          { err: dbError as Error, workflowRunId: workflowRun.id },
+          'db_workflow_status_update_failed'
+        );
+        await sendCriticalMessage(
+          platform,
+          conversationId,
+          'Workflow blocked: Unable to update status. Please try again.'
+        );
+        return { success: false, error: 'Database error setting workflow to running' };
+      }
     }
 
     // Context for error logging
@@ -1739,12 +1833,35 @@ export async function executeWorkflow(
     }
 
     let currentSessionId: string | undefined;
-    let stepNumber = 0; // For user-facing step count
+    // Start at the resume index so user-facing "Step X/N" reflects actual position
+    let stepNumber = resumeFromStepIndex ?? 0;
 
     // Execute steps sequentially (for step-based workflows)
     // After the loop check above, TypeScript knows workflow.steps exists
     const steps = workflow.steps;
     for (let i = 0; i < steps.length; i++) {
+      // Resume: skip steps that completed in a prior run
+      if (resumeFromStepIndex !== undefined && i < resumeFromStepIndex) {
+        const skippedStep = steps[i];
+        const skippedName = isParallelBlock(skippedStep)
+          ? `parallel(${skippedStep.parallel.map(s => s.command).join(', ')})`
+          : skippedStep.command;
+        getLog().info(
+          { workflowRunId: workflowRun.id, stepIndex: i, stepName: skippedName },
+          'workflow.step_skipped_prior_success'
+        );
+        // No emitter.emit here — skip events during resume have no in-process subscribers;
+        // the workflow progress card uses DB events for historical display only
+        void workflowEventDb.createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'step_skipped_prior_success',
+          step_index: i,
+          step_name: skippedName,
+          data: { resumedFrom: resumeFromStepIndex },
+        });
+        continue;
+      }
+
       const step = steps[i];
 
       if (isParallelBlock(step)) {

@@ -173,7 +173,8 @@ CREATE TABLE IF NOT EXISTS remote_agent_workflow_runs (
   parent_conversation_id UUID REFERENCES remote_agent_conversations(id) ON DELETE SET NULL,
   started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   completed_at TIMESTAMP WITH TIME ZONE,
-  last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  working_path TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_conversation

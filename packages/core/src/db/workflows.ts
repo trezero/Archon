@@ -18,6 +18,7 @@ export async function createWorkflowRun(data: {
   codebase_id?: string;
   user_message: string;
   metadata?: Record<string, unknown>;
+  working_path?: string;
 }): Promise<WorkflowRun> {
   // Serialize metadata with validation to catch circular references early
   let metadataJson: string;
@@ -52,8 +53,8 @@ export async function createWorkflowRun(data: {
   try {
     const result = await pool.query<WorkflowRun>(
       `INSERT INTO remote_agent_workflow_runs
-       (workflow_name, conversation_id, codebase_id, user_message, metadata)
-       VALUES ($1, $2, $3, $4, $5)
+       (workflow_name, conversation_id, codebase_id, user_message, metadata, working_path)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
       [
         data.workflow_name,
@@ -61,6 +62,7 @@ export async function createWorkflowRun(data: {
         data.codebase_id ?? null,
         data.user_message,
         metadataJson,
+        data.working_path ?? null,
       ]
     );
     const row = result.rows[0];
@@ -105,6 +107,54 @@ export async function getActiveWorkflowRun(conversationId: string): Promise<Work
     getLog().error({ err }, 'get_active_workflow_run_failed');
     throw new Error(`Failed to get active workflow run: ${err.message}`);
   }
+}
+
+export async function findResumableRun(
+  workflowName: string,
+  workingPath: string,
+  conversationId: string
+): Promise<WorkflowRun | null> {
+  try {
+    const result = await pool.query<WorkflowRun>(
+      `SELECT * FROM remote_agent_workflow_runs
+       WHERE workflow_name = $1
+         AND working_path = $2
+         AND conversation_id = $3
+         AND status = 'failed'
+       ORDER BY started_at DESC
+       LIMIT 1`,
+      [workflowName, workingPath, conversationId]
+    );
+    return result.rows[0] ?? null;
+  } catch (error) {
+    const err = error as Error;
+    getLog().warn({ err, workflowName, workingPath }, 'find_resumable_run_failed');
+    throw new Error(`Failed to find resumable run: ${err.message}`);
+  }
+}
+
+export async function resumeWorkflowRun(id: string): Promise<WorkflowRun> {
+  let result;
+  try {
+    result = await pool.query<WorkflowRun>(
+      `UPDATE remote_agent_workflow_runs
+       SET status = 'running', completed_at = NULL, last_activity_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err, workflowRunId: id }, 'resume_workflow_run_failed');
+    throw new Error(`Failed to resume workflow run: ${err.message}`);
+  }
+  const row = result.rows[0];
+  if (!row) {
+    // Logical race: run was deleted or already activated between find and resume
+    getLog().warn({ workflowRunId: id }, 'resume_workflow_run_not_found');
+    throw new Error(`Workflow run not found (id: ${id})`);
+  }
+  return row;
 }
 
 /**
