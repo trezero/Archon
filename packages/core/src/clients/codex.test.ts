@@ -695,6 +695,42 @@ describe('CodexClient', () => {
       expect(mockLogger.error).toHaveBeenCalledWith({ err: networkError }, 'query_error');
     });
 
+    test('throws actionable model-access message for unavailable configured model', async () => {
+      mockRunStreamed.mockRejectedValue(new Error('403 Forbidden: model not available'));
+
+      const consumeGenerator = async () => {
+        for await (const _ of client.sendQuery('test', '/workspace', undefined, {
+          model: 'gpt-5.3-codex',
+        })) {
+          // consume
+        }
+      };
+
+      await expect(consumeGenerator()).rejects.toThrow(
+        'Model "gpt-5.3-codex" is not available for your account'
+      );
+      await expect(consumeGenerator()).rejects.toThrow('model: gpt-5.2-codex');
+    });
+
+    test('uses generic dashboard guidance when fallback mapping is unknown', async () => {
+      mockRunStreamed.mockRejectedValue(new Error('model not available'));
+
+      const consumeGenerator = async () => {
+        for await (const _ of client.sendQuery('test', '/workspace', undefined, {
+          model: 'o5-pro',
+        })) {
+          // consume
+        }
+      };
+
+      await expect(consumeGenerator()).rejects.toThrow(
+        'Model "o5-pro" is not available for your account'
+      );
+      await expect(consumeGenerator()).rejects.toThrow(
+        'update your model in ~/.archon/config.yaml'
+      );
+    });
+
     test('ignores items without text or command', async () => {
       mockRunStreamed.mockResolvedValue({
         events: (async function* () {

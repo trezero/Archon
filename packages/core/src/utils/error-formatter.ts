@@ -43,6 +43,10 @@ export function classifyAndFormatError(error: Error): string {
     return '⚠️ Session error. Use /reset to start a fresh session.';
   }
 
+  if (message.startsWith('❌ Model "') && message.includes('not available for your account')) {
+    return message;
+  }
+
   // Codex-specific errors (thrown as "Codex query failed: ...")
   if (message.includes('Codex query failed:')) {
     const innerMessage = message.replace('Codex query failed: ', '');

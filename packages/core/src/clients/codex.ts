@@ -61,6 +61,34 @@ function buildThreadOptions(cwd: string, options?: AssistantRequestOptions): Cod
   };
 }
 
+const CODEX_MODEL_FALLBACKS: Record<string, string> = {
+  'gpt-5.3-codex': 'gpt-5.2-codex',
+};
+
+function isModelAccessError(errorMessage: string): boolean {
+  const m = errorMessage.toLowerCase();
+  const hasModel = m.includes('model');
+  const hasAvailabilitySignal =
+    m.includes('not available') || m.includes('not found') || m.includes('access denied');
+  return hasModel && hasAvailabilitySignal;
+}
+
+function buildModelAccessMessage(model?: string): string {
+  const normalizedModel = model?.trim();
+  const selectedModel = normalizedModel || 'the configured model';
+  const suggested = normalizedModel ? CODEX_MODEL_FALLBACKS[normalizedModel] : undefined;
+
+  const fixLine = suggested
+    ? `To fix: update your model in ~/.archon/config.yaml:\n  assistants:\n    codex:\n      model: ${suggested}`
+    : 'To fix: update your model in ~/.archon/config.yaml to one your account can access.';
+
+  const workflowLine = suggested
+    ? `Or set it per-workflow with \`model: ${suggested}\` in workflow YAML.`
+    : 'Or set it per-workflow with a valid `model:` in workflow YAML.';
+
+  return `❌ Model "${selectedModel}" is not available for your account.\n\n${fixLine}\n\n${workflowLine}`;
+}
+
 function extractUsageFromCodexEvent(event: unknown): TokenUsage | undefined {
   const usage =
     (event as { usage?: unknown })?.usage ??
@@ -136,13 +164,29 @@ export class CodexClient implements IAssistantClient {
       } catch (error) {
         getLog().error({ err: error, sessionId: resumeSessionId }, 'resume_thread_failed');
         // Fall back to creating new thread
-        thread = codex.startThread(threadOptions);
+        try {
+          thread = codex.startThread(threadOptions);
+        } catch (startError) {
+          const err = startError as Error;
+          if (isModelAccessError(err.message)) {
+            throw new Error(buildModelAccessMessage(options?.model));
+          }
+          throw new Error(`Codex query failed: ${err.message}`);
+        }
         sessionResumeFailed = true;
       }
     } else {
       getLog().debug({ cwd }, 'starting_new_thread');
       // NOTE: startThread is synchronous, not async
-      thread = codex.startThread(threadOptions);
+      try {
+        thread = codex.startThread(threadOptions);
+      } catch (error) {
+        const err = error as Error;
+        if (isModelAccessError(err.message)) {
+          throw new Error(buildModelAccessMessage(options?.model));
+        }
+        throw new Error(`Codex query failed: ${err.message}`);
+      }
     }
 
     // Notify user if session resume failed (don't silently lose context)
@@ -338,8 +382,14 @@ export class CodexClient implements IAssistantClient {
         }
       }
     } catch (error) {
-      getLog().error({ err: error }, 'query_error');
-      throw new Error(`Codex query failed: ${(error as Error).message}`);
+      const err = error as Error;
+      getLog().error({ err }, 'query_error');
+
+      if (isModelAccessError(err.message)) {
+        throw new Error(buildModelAccessMessage(options?.model));
+      }
+
+      throw new Error(`Codex query failed: ${err.message}`);
     }
   }
 

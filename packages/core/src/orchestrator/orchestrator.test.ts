@@ -765,6 +765,25 @@ describe('orchestrator', () => {
   });
 
   describe('error handling', () => {
+    test('surfaces codex model access message without /reset rewrite', async () => {
+      mockGetOrCreateConversation.mockRejectedValue(
+        new Error(
+          '❌ Model "gpt-5.3-codex" is not available for your account.\n\nTo fix: update your model in ~/.archon/config.yaml:\n  assistants:\n    codex:\n      model: gpt-5.2-codex'
+        )
+      );
+
+      await handleMessage(platform, 'chat-456', '/status');
+
+      expect(platform.sendMessage).toHaveBeenCalledWith(
+        'chat-456',
+        expect.stringContaining('Model "gpt-5.3-codex" is not available for your account')
+      );
+      expect(platform.sendMessage).not.toHaveBeenCalledWith(
+        'chat-456',
+        expect.stringContaining('Try /reset')
+      );
+    });
+
     test('sends contextual error message on unexpected error', async () => {
       mockGetOrCreateConversation.mockRejectedValue(new Error('Database error'));
 
