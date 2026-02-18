@@ -12,8 +12,6 @@ description: |
   4. Fix review issues → address CRITICAL/HIGH findings
   5. Final summary → decision matrix, follow-up recommendations
 
-model: sonnet
-
 steps:
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 1: INVESTIGATE

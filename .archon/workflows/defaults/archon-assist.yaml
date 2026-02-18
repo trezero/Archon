@@ -5,7 +5,5 @@ description: |
   Capability: Full Claude Code agent with all tools available.
   Note: Will inform user when assist mode is used for tracking.
 
-model: sonnet
-
 steps:
   - command: archon-assist

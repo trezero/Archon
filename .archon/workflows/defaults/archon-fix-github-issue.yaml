@@ -11,8 +11,6 @@ description: |
   3. Create PR → push and create pull request
   4. Code review → single agent review with PR comment
 
-model: sonnet
-
 steps:
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 1: INVESTIGATE

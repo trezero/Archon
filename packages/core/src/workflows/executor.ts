@@ -42,7 +42,7 @@ import {
 import { parseValidationResults } from './validation-parser';
 import { getWorkflowEventEmitter } from './event-emitter';
 import * as workflowEventDb from '../db/workflow-events';
-import { isModelCompatible } from './model-validation';
+import { isClaudeModel, isModelCompatible } from './model-validation';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -1454,8 +1454,23 @@ export async function executeWorkflow(
   getLog().info({ baseBranch, source: baseBranchSource }, 'base_branch_resolved');
 
   // Resolve provider and model once (used by all steps/iterations)
-  const resolvedProvider = workflow.provider ?? config.assistant;
-  const providerSource = workflow.provider ? 'workflow definition' : 'config';
+  // When workflow sets a model but not a provider, infer provider from the model.
+  // e.g. model: sonnet → provider: claude, even if config.assistant is codex.
+  let resolvedProvider: 'claude' | 'codex';
+  let providerSource: string;
+  if (workflow.provider) {
+    resolvedProvider = workflow.provider;
+    providerSource = 'workflow definition';
+  } else if (workflow.model && isClaudeModel(workflow.model)) {
+    resolvedProvider = 'claude';
+    providerSource = 'inferred from workflow model';
+  } else if (workflow.model) {
+    resolvedProvider = 'codex';
+    providerSource = 'inferred from workflow model';
+  } else {
+    resolvedProvider = config.assistant;
+    providerSource = 'config';
+  }
   const resolvedModel = workflow.model ?? config.assistants[resolvedProvider]?.model;
   if (!isModelCompatible(resolvedProvider, resolvedModel)) {
     throw new Error(

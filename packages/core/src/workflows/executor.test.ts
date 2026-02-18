@@ -969,7 +969,7 @@ describe('Workflow Executor', () => {
       expect(mockGetAssistantClient).toHaveBeenCalledWith('codex');
     });
 
-    it('should reject mismatched model when provider defaults from config', async () => {
+    it('should infer claude provider when workflow sets a claude model alias', async () => {
       const loadConfigSpy = spyOn(configLoader, 'loadConfig');
       loadConfigSpy.mockResolvedValue({
         botName: 'Archon',
@@ -983,8 +983,25 @@ describe('Workflow Executor', () => {
       });
 
       const workflow: WorkflowDefinition = {
-        name: 'mismatch-model',
-        description: 'Model/provider mismatch',
+        name: 'infer-provider',
+        description: 'Model implies provider',
+        model: 'sonnet',
+        steps: [{ command: 'command-one' }],
+      };
+
+      // Should NOT throw - provider inferred as claude from model: sonnet
+      await expect(
+        executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User message', 'db-conv-id')
+      ).resolves.toBeDefined();
+
+      loadConfigSpy.mockRestore();
+    });
+
+    it('should reject mismatched model when provider is explicitly set', async () => {
+      const workflow: WorkflowDefinition = {
+        name: 'explicit-mismatch',
+        description: 'Explicit provider/model mismatch',
+        provider: 'codex',
         model: 'sonnet',
         steps: [{ command: 'command-one' }],
       };
@@ -992,8 +1009,6 @@ describe('Workflow Executor', () => {
       await expect(
         executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User message', 'db-conv-id')
       ).rejects.toThrow(/not compatible/);
-
-      loadConfigSpy.mockRestore();
     });
 
     it('should pass resolved options to client for codex', async () => {

@@ -17,8 +17,6 @@ description: |
 
   NOT for: Executing existing plans (use archon-plan-to-pr), quick fixes, standalone reviews.
 
-model: sonnet
-
 steps:
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 0: CREATE PLAN
@@ -62,7 +60,6 @@ steps:
 
   - command: archon-validate
     clearContext: true
-    model: haiku
     # Runs full validation: type-check, lint, tests, build
     # Artifact: validation.md
 

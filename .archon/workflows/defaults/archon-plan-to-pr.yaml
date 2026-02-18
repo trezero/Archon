@@ -16,8 +16,6 @@ description: |
 
   NOT for: Creating plans from scratch (use archon-idea-to-pr), quick fixes, standalone reviews.
 
-model: sonnet
-
 steps:
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 1: SETUP
@@ -52,7 +50,6 @@ steps:
 
   - command: archon-validate
     clearContext: true
-    model: haiku
     # Runs full validation: type-check, lint, tests, build
     # Artifact: validation.md
 
