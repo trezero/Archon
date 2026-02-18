@@ -6,20 +6,11 @@
 
 **Single-Developer Tool**
 - No multi-tenant complexity
-- Commands versioned with Git (not stored in database)
-- All credentials in environment variables only
-- 7-table database schema (see Database Schema section)
-
-**User-Controlled Workflows**
-- Manual phase transitions via slash commands
-- Generic command system - users define their own commands
-- Working directory + codebase context determine behavior
-- Session persistence across restarts
 
 **Platform Agnostic**
-- Unified conversation interface across Slack/Telegram/GitHub
+- Unified conversation interface across Slack/Telegram/GitHub/cli/web
 - Platform adapters implement `IPlatformAdapter`
-- Stream AI responses in real-time to all platforms
+- Stream/batch AI responses in real-time to all platforms
 
 **Type Safety (CRITICAL)**
 - Strict TypeScript configuration enforced
@@ -37,11 +28,49 @@
 - Workspaces automatically sync with origin before worktree creation (ensures latest code)
 - **NEVER run `git clean -fd`** - it permanently deletes untracked files (use `git checkout .` instead)
 
+## Engineering Principles
+
+These are implementation constraints, not slogans. Apply them by default.
+
+**KISS — Keep It Simple, Stupid**
+- Prefer straightforward control flow over clever meta-programming
+- Prefer explicit branches and typed interfaces over hidden dynamic behavior
+- Keep error paths obvious and localized
+
+**YAGNI — You Aren't Gonna Need It**
+- Do not add config keys, interface methods, feature flags, or workflow branches without a concrete accepted use case
+- Do not introduce speculative abstractions without at least one current caller
+- Keep unsupported paths explicit (error out) rather than adding partial fake support
+
+**DRY + Rule of Three**
+- Duplicate small, local logic when it preserves clarity
+- Extract shared utilities only after the same pattern appears at least three times and has stabilized
+- When extracting, preserve module boundaries and avoid hidden coupling
+
+**SRP + ISP — Single Responsibility + Interface Segregation**
+- Keep each module and package focused on one concern
+- Extend behavior by implementing existing narrow interfaces (`IPlatformAdapter`, `IAssistantClient`, `IDatabase`) whenever possible
+- Avoid fat interfaces and "god modules" that mix policy, transport, and storage
+- Do not add unrelated methods to an existing interface — define a new one
+
+**Fail Fast + Explicit Errors** — Silent fallback in agent runtimes can create unsafe or costly behavior
+- Prefer throwing early with a clear error for unsupported or unsafe states — never silently swallow errors
+- Never silently broaden permissions or capabilities
+- Document fallback behavior with a comment when a fallback is intentional and safe; otherwise throw
+
+**Determinism + Reproducibility**
+- Prefer reproducible commands and locked dependency behavior in CI-sensitive paths
+- Keep tests deterministic — no flaky timing or network dependence without guardrails
+- Ensure local validation commands (`bun run validate`) map directly to CI expectations
+
+**Reversibility + Rollback-First Thinking**
+- Keep changes easy to revert: small scope, clear blast radius
+- For risky changes, define the rollback path before merging
+- Avoid mixed mega-patches that block safe rollback
+
 ## Essential Commands
 
-### Development (Recommended)
-
-Run app locally for hot reload (SQLite auto-detected if no `DATABASE_URL`):
+### Development
 
 ```bash
 # Start server + Web UI together (hot reload for both)
@@ -59,80 +88,33 @@ docker-compose --profile with-db up -d postgres
 # Set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/remote_coding_agent in .env
 ```
 
-Code changes auto-reload instantly. Web UI available at `http://localhost:5173`. Telegram/Slack work from any device (polling-based, no port forwarding needed).
-
-### Build Commands
-
-```bash
-# Install dependencies
-bun install
-
-# Build TypeScript (optional - Bun runs TS directly)
-bun run build
-
-# Start production server (no hot reload)
-bun run start
-```
-
 ### Testing
 
 ```bash
-# Run all tests
 bun test
-
-# Run tests in watch mode
 bun test --watch
-
-# Run specific test file
 bun test packages/core/src/handlers/command-handler.test.ts
 ```
 
-### Type Checking
+### Type Checking & Linting
 
 ```bash
-# TypeScript compiler check
 bun run type-check
-
-# Or use tsc directly
-bun x tsc --noEmit
-```
-
-### Linting & Formatting
-
-```bash
-# Check linting
 bun run lint
-
-# Auto-fix linting issues
 bun run lint:fix
-
-# Format code
 bun run format
-
-# Check formatting (CI-safe)
 bun run format:check
 ```
 
-**Code Quality Setup:**
-- **ESLint**: Flat config with TypeScript-ESLint (strict rules, 0 warnings enforced via `--max-warnings 0`)
-- **Prettier**: Opinionated formatter (single quotes, semicolons, 2-space indent)
-- **Integration**: ESLint + Prettier configured to work together (no conflicts)
-- **Validation**: All PRs must pass `type-check`, `lint`, `format:check`, and `test` before merge
-
 ### Pre-PR Validation
 
-**Before creating a pull request, always run:**
+**Always run before creating a pull request:**
 
 ```bash
 bun run validate
 ```
 
 This runs type-check, lint, format check, and tests. All four must pass for CI to succeed.
-
-**If validation fails:**
-1. **Type errors**: Fix the type annotations
-2. **Lint errors**: Fix the code (do not use inline disables without justification)
-3. **Format errors**: Run `bun run format` to auto-fix
 
 ### ESLint Guidelines
 
@@ -144,40 +126,10 @@ This runs type-check, lint, format check, and tests. All four must pass for CI t
   1. External SDK types are incorrect (document which SDK and why)
   2. Intentional type assertion after validation (must include comment explaining the validation)
 
-**Preferred approach - use guard clauses instead of disables:**
-```typescript
-// Instead of: const steps = validatedSteps!;
-// Use a guard clause that satisfies TypeScript and provides runtime safety:
-if (!steps) {
-  throw new Error('Steps validation failed unexpectedly');
-}
-// Now TypeScript knows steps is defined, no assertion needed
-```
-
 **Never acceptable:**
 - Disabling `no-explicit-any` without justification
 - Disabling rules to "make CI pass"
 - Bulk disabling at file level (`/* eslint-disable */`)
-
-**Disabled rules** (turned off globally, no need to suppress):
-
-*Template/expression rules:*
-- `restrict-template-expressions` - Numbers in templates are valid JS
-- `restrict-plus-operands` - Similar to above, mixed operands are often intentional
-
-*Defensive coding patterns:*
-- `no-unnecessary-condition` - Defensive coding (switch defaults, null checks) is encouraged
-- `prefer-nullish-coalescing` - Truthy checks with `||` are intentional for env vars
-
-*External SDK interop (types are often `any` or incomplete):*
-- `no-unsafe-assignment`, `no-unsafe-member-access`, `no-unsafe-argument` - SDK responses
-- `no-misused-promises`, `no-floating-promises` - Event handler patterns in SDKs
-
-*Style preferences (not critical for type safety):*
-- `require-await` - Empty async functions valid for interface compliance
-- `consistent-generic-constructors` - Style preference
-- `no-deprecated` - Allow using deprecated APIs during migration
-- `use-unknown-in-catch-callback-variable` - Catch variable typing preference
 
 ### Database
 
@@ -189,26 +141,6 @@ if (!steps) {
 # PostgreSQL only: Run SQL migrations (manual)
 psql $DATABASE_URL < migrations/000_combined.sql
 ```
-
-### Docker (Production)
-
-For production deployment (no hot reload):
-
-```bash
-# Build and start all services (app + postgres)
-docker-compose --profile with-db up -d --build
-
-# Start app only (external database like Supabase/Neon)
-docker-compose --profile external-db up -d
-
-# View logs
-docker-compose logs -f app-with-db
-
-# Stop all services
-docker-compose --profile with-db down
-```
-
-**Note:** For development, use the hybrid approach above instead (postgres in Docker, app locally).
 
 ### CLI (Command Line)
 
@@ -244,19 +176,6 @@ bun run cli isolation cleanup --merged
 bun run cli version
 ```
 
-**How it works:**
-- Discovers workflows from `.archon/workflows/` in working directory
-- Creates a new conversation for each invocation (ID: `cli-{timestamp}-{random}`)
-- Streams AI responses to stdout in real-time
-
-**Isolation flags:**
-- `--branch/-b <name>`: Creates or reuses a worktree for the specified branch (auto-registers codebase if in a git repo)
-- `--no-worktree`: Checks out branch directly in current directory without creating a worktree
-
-### Cloud Deployment
-
-See [Cloud Deployment Guide](docs/cloud-deployment.md) for complete setup instructions. (only if the user asks about this)
-
 ## Architecture
 
 ### Directory Structure
@@ -269,18 +188,12 @@ packages/
 │   └── src/
 │       ├── adapters/         # CLI adapter (stdout output)
 │       ├── commands/         # CLI command implementations
-│       │   ├── version.ts
-│       │   └── workflow.ts
 │       └── cli.ts            # CLI entry point
 ├── core/                     # @archon/core - Shared business logic
 │   └── src/
 │       ├── clients/          # AI SDK clients (Claude, Codex)
 │       ├── config/           # YAML config loading
 │       ├── db/               # Database connection, queries
-│       │   ├── connection.ts
-│       │   ├── conversations.ts
-│       │   ├── codebases.ts
-│       │   └── sessions.ts
 │       ├── handlers/         # Command handler (slash commands)
 │       ├── isolation/        # Git worktree management
 │       ├── orchestrator/     # AI conversation management
@@ -288,23 +201,12 @@ packages/
 │       ├── state/            # Session state machine
 │       ├── types/            # TypeScript types and interfaces
 │       ├── utils/            # Shared utilities
-│       │   ├── variable-substitution.ts
-│       │   ├── git.ts
-│       │   └── archon-paths.ts
 │       ├── workflows/        # YAML workflow engine
 │       └── index.ts          # Package exports
 ├── server/                   # @archon/server - HTTP server + adapters
 │   └── src/
 │       ├── adapters/         # Platform adapters (Slack, Telegram, GitHub, Discord, Web, Test)
-│       │   ├── slack.ts
-│       │   ├── telegram.ts
-│       │   ├── github.ts
-│       │   ├── discord.ts
-│       │   ├── web.ts        # Web UI adapter (SSE streaming)
-│       │   └── test.ts
-│       ├── routes/           # API routes
-│       │   └── api.ts        # REST + SSE endpoints for Web UI
-│       ├── scripts/          # Setup utilities
+│       ├── routes/           # API routes (REST + SSE)
 │       └── index.ts          # Hono server entry point
 └── web/                      # @archon/web - React frontend (Web UI)
     └── src/
@@ -333,12 +235,6 @@ import * as git from '@archon/core/utils/git';
 // ❌ WRONG: Never use generic import for main package
 import * as core from '@archon/core';  // Don't do this
 ```
-
-**Rules:**
-1. Always use `import type { ... }` for types (interfaces, type aliases)
-2. Use specific named imports `{ foo, bar }` for values from the main package
-3. Namespace imports (`import * as`) are acceptable for submodules (`/db/*`, `/utils/*`)
-4. Combine type and value imports when needed: `import { handleMessage, type IPlatformAdapter } from '@archon/core'`
 
 ### Database Schema
 
@@ -386,12 +282,7 @@ import * as core from '@archon/core';  // Don't do this
 - Check authorization in message handler (before calling `onMessage` callback)
 - Silent rejection for unauthorized users (no error response)
 - Log unauthorized attempts with masked user IDs for privacy
-
-**Adapter Message Handler Pattern:**
-- Adapters expose `onMessage(handler)` callback registration
-- Auth check happens internally before invoking callback
-- Server entry point (`packages/server/src/index.ts`) registers callback and routes to orchestrator
-- Errors handled by caller (callback returns Promise)
+- Adapters expose `onMessage(handler)` callback; errors handled by caller
 
 **2. Command Handler** (`packages/core/src/handlers/`)
 - Process slash commands (deterministic, no AI)
@@ -445,38 +336,6 @@ assistants:
 - Codex models: Any model except Claude-specific aliases
 - Invalid combinations fail workflow loading with clear error messages
 
-### Worktree Symbiosis (Skill + App)
-
-//TODO, This should be converted to a skill to not bload claude.md
-
-The app can work alongside the worktree-manager Claude Code skill. Both use git worktrees for isolated development, and can share the same base directory.
-
-**To enable symbiosis:**
-
-1. Configure the worktree-manager skill to use Archon's worktrees directory:
-   ```json
-   // In ~/.claude/settings.json or worktree-manager config
-   {
-     "worktreeBase": "~/.archon/worktrees"
-   }
-   ```
-
-2. Both systems will use the same directory:
-   - Skill creates: `~/.archon/worktrees/<project>/<branch-slug>/`
-   - App creates: `~/.archon/worktrees/<project>/<issue|pr>-<number>/`
-
-3. The app will **adopt** skill-created worktrees when:
-   - A PR is opened for a branch that already has a worktree
-   - The worktree path matches what the app would create
-
-4. Use `/worktree orphans` to see all worktrees from git's perspective
-
-**Note**: Each system maintains its own metadata:
-- Skill: `~/.claude/worktree-registry.json`
-- App: Database (`conversations.worktree_path`)
-
-Git (`git worktree list`) is the source of truth for what actually exists on disk.
-
 ### Running the App in Worktrees
 
 Agents working in worktrees can run the app for self-testing (make changes → run app → test via curl → fix). Ports are automatically allocated to avoid conflicts:
@@ -517,20 +376,14 @@ curl http://localhost:3637/api/conversations/<conversationId>/messages
 
 ### Archon Directory Structure
 
-All Archon-managed files are organized under a dedicated namespace:
-
 **User-level (`~/.archon/`):**
 ```
 ~/.archon/
 ├── workspaces/owner/repo/        # Project-centric layout
 │   ├── source/                   # Clone (from /clone) or symlink → local path
 │   ├── worktrees/                # Git worktrees for this project
-│   │   └── feature-auth/
 │   ├── artifacts/                # Workflow artifacts (NEVER in git)
-│   │   └── runs/{workflow-id}/
 │   └── logs/                     # Workflow execution logs
-│       └── {workflow-id}.jsonl
-├── worktrees/                    # Legacy global worktrees (deprecated)
 ├── archon.db                     # SQLite database (when DATABASE_URL not set)
 └── config.yaml                   # Global configuration (non-secrets)
 ```
@@ -539,21 +392,12 @@ All Archon-managed files are organized under a dedicated namespace:
 ```
 .archon/
 ├── commands/       # Custom commands
-├── workflows/      # Future: workflow definitions
+├── workflows/      # Workflow definitions (YAML files)
 └── config.yaml     # Repo-specific configuration
 ```
 
-**For Docker:** Paths are automatically set to `/.archon/`.
-
-**Configuration:**
 - `ARCHON_HOME` - Override the base directory (default: `~/.archon`)
-
-**Command folder detection:**
-- `.archon/commands/` - Primary location for repo commands
-- Additional folder can be configured in `.archon/config.yaml`
-
-**Workflow folder location:**
-- `.archon/workflows/` - Workflow definitions (YAML files)
+- Docker: Paths automatically set to `/.archon/`
 
 ## Development Guidelines
 
@@ -600,26 +444,13 @@ This ensures type compatibility with SDK updates and eliminates `as any` casts.
 **Unit Tests:**
 - Test pure functions (variable substitution, command parsing)
 - Mock external dependencies (database, AI SDKs, platform APIs)
-- Fast execution (<1s total)
-- Bun Test is the Framework
 
 **Integration Tests:**
 - Test database operations with test database
 - Test end-to-end flows (mock platforms/AI but use real orchestrator)
 - Clean up test data after each test
 
-**Manual Validation with Web API:**
-
-Use the production web API routes for manual validation (same flow as the web UI).
-
-You can also run all CLI commands directly for regression testing and testing new capabilities.
-
-**When to Use Web API and CLI Commands:**
-- ✅ Manual validation after implementing new features
-- ✅ End-to-end testing of command flows
-- ✅ Debugging orchestrator logic without Telegram setup
-- ✅ Automated integration tests (future CI/CD)
-- ❌ NOT for unit tests (use Jest mocks instead)
+**Manual Validation:** Use the web API (`curl`) or CLI commands directly for end-to-end testing of new features.
 
 ### Logging
 
@@ -630,40 +461,39 @@ import { createLogger } from '@archon/core';
 
 const log = createLogger('orchestrator');
 
-// Object first, message second (Pino convention)
-log.info({ conversationId, codebaseId }, 'session_started');
-log.error({ err, conversationId }, 'session_failed');
-log.debug({ step, provider }, 'step_config_loaded');
-log.warn({ envVar: 'MISSING_KEY' }, 'optional_config_missing');
+// Event naming: {domain}.{action}_{state}
+// Standard states: _started, _completed, _failed, _validated, _rejected
+async function createSession(conversationId: string, codebaseId: string) {
+  log.info({ conversationId, codebaseId }, 'session.create_started');
+
+  try {
+    const session = await doCreate();
+    log.info({ conversationId, codebaseId, sessionId: session.id }, 'session.create_completed');
+    return session;
+  } catch (e) {
+    const err = e as Error;
+    log.error(
+      { conversationId, error: err.message, errorType: err.constructor.name, err },
+      'session.create_failed',
+    );
+    throw err;
+  }
+}
 ```
 
-**Log Levels:**
-- `fatal` (60) - Process cannot continue
-- `error` (50) - Failures needing immediate attention
-- `warn` (40) - Degraded behavior, fallbacks
-- `info` (30) - Key user-visible events (DEFAULT)
-- `debug` (20) - Internal details, tool calls, state transitions
-- `trace` (10) - Fine-grained diagnostic output
+**Event naming rules:**
+- Format: `{domain}.{action}_{state}` — e.g. `workflow.step_started`, `isolation.create_failed`
+- Avoid generic events like `processing` or `handling`
+- Always pair `_started` with `_completed` or `_failed`
+- Include context: IDs, durations, error details
 
-**Controlling Verbosity:**
-- CLI: `archon --quiet ...` (errors only) or `archon --verbose ...` (debug)
+**Log Levels:** `fatal` > `error` > `warn` > `info` (default) > `debug` > `trace`
+
+**Verbosity:**
+- CLI: `archon --quiet` (errors only) or `archon --verbose` (debug)
 - Server: `LOG_LEVEL=debug bun run start`
-- TTY output is pretty-printed; piped output is newline-delimited JSON
 
-**Migration Note:** Existing `console.log` calls are being migrated to Pino in phases. New code should use `createLogger()`. Existing console calls will be replaced in Phase 2-3.
-
-**What to Log:**
-- Session start/end with IDs
-- Command invocations with arguments
-- AI streaming events (start, chunks received, completion)
-- Database operations (queries, errors)
-- Platform adapter events (message received, sent)
-- Errors with full stack traces
-
-**What NOT to Log:**
-- API keys, tokens, secrets (mask: `token.slice(0, 8) + '...'`)
-- User message content in production (privacy)
-- Personal identifiable information
+**Never log:** API keys or tokens (mask: `token.slice(0, 8) + '...'`), user message content, PII.
 
 ### Command System
 
@@ -722,27 +552,7 @@ try {
 }
 ```
 
-**Platform Errors:**
-```typescript
-try {
-  await telegram.sendMessage(chatId, message);
-} catch (error) {
-  log.error({ err: error, chatId }, 'telegram_send_failed');
-  // Don't retry - let user know manually
-}
-```
-
-**AI SDK Errors:**
-```typescript
-try {
-  await claudeClient.sendMessage(session, prompt);
-} catch (error) {
-  log.error({ err: error, sessionId }, 'claude_session_error');
-  await platform.sendMessage(conversationId, '❌ AI error. Try /reset');
-}
-```
-
-**Git Operation Errors (Graceful Handling but don't fail silently):**
+**Git Operation Errors (don't fail silently):**
 ```typescript
 // When isolation environment creation fails:
 try {
@@ -760,29 +570,11 @@ Pattern: Use `classifyIsolationError()` (in `orchestrator.ts`) to map git errors
 ### API Endpoints
 
 **Web UI REST API** (`packages/server/src/routes/api.ts`):
-- `GET /api/conversations` - List all conversations
-- `POST /api/conversations` - Create new conversation
-- `GET /api/conversations/:id` - Get conversation details
-- `DELETE /api/conversations/:id` - Soft-delete conversation
-- `POST /api/conversations/:id/messages` - Send message to conversation
-- `GET /api/conversations/:id/messages` - Get message history
-- `GET /api/conversations/:id/stream` - SSE stream for real-time updates
-- `POST /api/conversations/:id/workflow` - Invoke workflow
-- `GET /api/codebases` - List registered codebases
-- `POST /api/codebases` - Clone or register repository
-- `DELETE /api/codebases/:id` - Remove codebase
-- `GET /api/workflows` - List available workflows
-- `GET /api/workflow-runs/:id` - Get workflow run details
-- `GET /api/workflow-runs/:id/events` - Get workflow event log
 
 **Webhooks:**
 - `POST /webhooks/github` - GitHub webhook events
 - Signature verification required (HMAC SHA-256)
 - Return 200 immediately, process async
-
-**Health Checks:**
-- `GET /health` - Basic health check
-- `GET /health/db` - Database connectivity check
 
 **Security:**
 - Verify webhook signatures (GitHub: `X-Hub-Signature-256`)
