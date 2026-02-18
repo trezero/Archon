@@ -189,16 +189,21 @@ git push origin HEAD
 **If no PR exists**, create one:
 
 ```bash
+# Write prepared body to file to avoid shell escaping
+cat > $ARTIFACTS_DIR/pr-body.md <<'EOF'
+{prepared-body}
+EOF
+
 gh pr create \
   --title "{plan-title}" \
-  --body "{prepared-body}" \
+  --body-file $ARTIFACTS_DIR/pr-body.md \
   --base $BASE_BRANCH
 ```
 
 **If PR already exists**, update it:
 
 ```bash
-gh pr edit {pr-number} --body "{prepared-body}"
+gh pr edit {pr-number} --body-file $ARTIFACTS_DIR/pr-body.md
 ```
 
 ### 3.3 Ensure Ready for Review

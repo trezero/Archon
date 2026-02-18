@@ -107,9 +107,14 @@ git push -u origin HEAD
 ### 3.2 Create the PR
 
 ```bash
+# Write body to file to avoid shell escaping
+cat > $ARTIFACTS_DIR/pr-body.md <<'EOF'
+[body from above]
+EOF
+
 gh pr create \
   --title "[title]" \
-  --body "[body from above]" \
+  --body-file $ARTIFACTS_DIR/pr-body.md \
   --base $BASE_BRANCH
 ```
 

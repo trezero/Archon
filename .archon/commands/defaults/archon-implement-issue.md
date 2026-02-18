@@ -354,7 +354,8 @@ git push -u origin HEAD --force-with-lease
 ### 8.2 Create PR
 
 ```bash
-gh pr create --title "Fix: {title} (#{number})" --body "$(cat <<'EOF'
+# Write PR body to file to avoid shell escaping
+cat > $ARTIFACTS_DIR/pr-body.md <<'EOF'
 ## Summary
 
 {Problem statement from artifact}
@@ -403,7 +404,9 @@ Fixes #{number}
 ---
 *Automated implementation from investigation artifact*
 EOF
-)"
+
+gh pr create --title "Fix: {title} (#{number})" \
+  --body-file $ARTIFACTS_DIR/pr-body.md
 ```
 
 ### 8.3 Get PR Number
