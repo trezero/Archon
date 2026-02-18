@@ -10,7 +10,7 @@ description: |
   2. Fix code → implement changes, validate, commit
   3. Create PR → push and create pull request
   4. Code review → single agent review with PR comment
-  5. Auto-fix → apply CRITICAL/HIGH findings, skip YAGNI, post fix report
+  5. Auto-fix → fix all surfaced findings, skip YAGNI, post fix report
 
 steps:
   # ═══════════════════════════════════════════════════════════════════
@@ -60,5 +60,5 @@ steps:
 
   - command: archon-auto-fix-review
     clearContext: true
-    # Reads all review artifacts, fixes CRITICAL/HIGH issues (skipping YAGNI),
+    # Reads all review artifacts, fixes all surfaced issues (skipping YAGNI),
     # commits and pushes to PR branch, posts fix report as GitHub comment
