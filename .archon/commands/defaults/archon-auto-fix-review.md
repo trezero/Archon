@@ -1,5 +1,5 @@
 ---
-description: Auto-fix CRITICAL and HIGH review findings, skip YAGNI violations, post fix report
+description: Auto-fix all review findings unless clear YAGNI violations, post fix report
 argument-hint: (none - reads all review artifacts from $ARTIFACTS_DIR/review/)
 ---
 
@@ -19,7 +19,7 @@ argument-hint: (none - reads all review artifacts from $ARTIFACTS_DIR/review/)
 
 ## Your Mission
 
-Read all review artifacts produced in this workflow run, implement all CRITICAL and HIGH fixes — unless a finding is a clear YAGNI violation or speculative over-engineering beyond the scope of the original fix. Validate, commit, push, write an artifact, and post a GitHub comment explaining what was fixed and why anything was skipped.
+Read all review artifacts produced in this workflow run and fix everything surfaced — unless a finding is a clear YAGNI violation or speculative over-engineering beyond the scope of the original fix. Validate, commit, push, write an artifact, and post a GitHub comment explaining what was fixed and why anything was skipped.
 
 **Output artifact**: `$ARTIFACTS_DIR/review/fix-report.md`
 **Git action**: Commit AND push fixes to the PR branch
@@ -72,26 +72,22 @@ done
 
 ### 1.4 Extract Findings
 
-From all loaded artifacts, compile a unified list of:
-- CRITICAL findings with locations and suggested fixes
-- HIGH findings with locations and suggested fixes
-- MEDIUM and LOW findings (for the report, not auto-fixed)
+From all loaded artifacts, compile a unified list of all findings with their severity, location, and suggested fix.
 
 **PHASE_1_CHECKPOINT:**
 - [ ] PR number and branch identified
 - [ ] On correct PR branch
 - [ ] All review artifacts read
-- [ ] CRITICAL/HIGH findings extracted
+- [ ] All findings extracted
 
 ---
 
 ## Phase 2: TRIAGE — Decide What to Fix
 
-For each CRITICAL and HIGH finding, decide: **FIX** or **SKIP**.
+For each finding, decide: **FIX** or **SKIP**.
 
 ### Fix if:
 - It is a real bug, type error, silent failure, or clear code quality issue
-- The fix is within the scope of what was already changed in this PR
 - The fix is concrete and low-risk
 
 ### Skip (YAGNI / out-of-scope) if the finding recommends:
@@ -106,7 +102,7 @@ Use judgment — don't be overly restrictive. If it's a legitimate bug the revie
 For each skipped finding, write down **the specific reason** — this goes in the report.
 
 **PHASE_2_CHECKPOINT:**
-- [ ] Each CRITICAL/HIGH finding marked FIX or SKIP
+- [ ] Every finding marked FIX or SKIP
 - [ ] Skip reasons documented
 
 ---
@@ -332,7 +328,7 @@ Output only this:
 **Branch**: {HEAD_BRANCH}
 **Status**: COMPLETE | PARTIAL
 
-Fixed: {n} CRITICAL, {n} HIGH
+Fixed: {n}
 Skipped: {n} (YAGNI/out-of-scope)
 Blocked: {n}
 
@@ -372,7 +368,7 @@ Cannot proceed without findings.
 ## Success Criteria
 
 - **ON_CORRECT_BRANCH**: Working on PR's head branch
-- **ALL_CRITICAL_HIGH_ADDRESSED**: Every CRITICAL/HIGH finding is either fixed, skipped (with reason), or blocked (with reason)
+- **ALL_FINDINGS_ADDRESSED**: Every finding is either fixed, skipped (with reason), or blocked (with reason)
 - **VALIDATION_PASSED**: Type check, lint, and tests all pass
 - **COMMITTED_AND_PUSHED**: Changes committed and pushed to PR branch
 - **REPORTED**: Fix report artifact written and GitHub comment posted
