@@ -131,7 +131,8 @@ ${workflowList}
 Your ENTIRE response must be ONLY this single line - no analysis, no explanation, no context:
 /invoke-workflow {workflow-name}
 
-Do NOT include any other text before or after. Just the command.`;
+Do NOT include any other text before or after. Just the command.
+Do NOT use any tools (Read, Write, Bash, etc.) — this is a routing decision only.`;
   // NOTE: We emphasize "ONLY this single line" because AI models sometimes add analysis
   // before the command. The parseWorkflowInvocation regex uses multiline mode as a fallback,
   // but cleaner output is preferred for GitHub comments where the full response is posted.

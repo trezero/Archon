@@ -1178,6 +1178,7 @@ prompt: |
 
 **How workflows are invoked:**
 - AI routes to workflows automatically based on user intent
+- If no workflow matches, falls back to `archon-assist` with a "Routing unclear" notice; if `archon-assist` is not available, the raw routing response is returned instead
 - Workflows use commands defined in `.archon/commands/`
 - Only one workflow can run per conversation at a time
 

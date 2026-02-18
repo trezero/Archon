@@ -203,6 +203,7 @@ export class ClaudeClient implements IAssistantClient {
         cwd,
         env: buildSubprocessEnv(),
         model: requestOptions?.model,
+        ...(requestOptions?.tools !== undefined ? { tools: requestOptions.tools } : {}),
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         systemPrompt: { type: 'preset', preset: 'claude_code' },

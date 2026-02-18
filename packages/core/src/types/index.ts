@@ -223,6 +223,14 @@ export interface AssistantRequestOptions {
   modelReasoningEffort?: ModelReasoningEffort;
   webSearchMode?: WebSearchMode;
   additionalDirectories?: string[];
+  /**
+   * Restrict the set of built-in tools available to the assistant.
+   * - `[]` — disable all built-in tools (Claude SDK only; Codex ignores this field)
+   * - `string[]` — restrict to the named tools
+   * Omit entirely to use the assistant's default tool set.
+   * Note: `undefined` (omitted) and `[]` have different semantics — do not confuse them.
+   */
+  tools?: string[];
 }
 
 /**

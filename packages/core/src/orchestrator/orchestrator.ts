@@ -519,7 +519,8 @@ interface WorkflowRoutingContext {
  */
 async function tryWorkflowRouting(
   ctx: WorkflowRoutingContext,
-  aiResponse: string
+  aiResponse: string,
+  hadTool = false
 ): Promise<boolean> {
   if (ctx.availableWorkflows.length === 0) {
     return false;
@@ -536,6 +537,48 @@ async function tryWorkflowRouting(
       await ctx.platform.sendMessage(ctx.conversationId, error);
       return true; // Suppress raw AI output containing the invalid /invoke-workflow command
     }
+
+    // No /invoke-workflow found — fall back to archon-assist if available
+    const assistWorkflow = ctx.availableWorkflows.find(w => w.name === 'archon-assist');
+    if (assistWorkflow) {
+      if (hadTool) {
+        getLog().warn({ conversationId: ctx.conversationId }, 'router.codex_tool_bypass_fallback');
+      } else {
+        getLog().warn({ conversationId: ctx.conversationId }, 'router.fallback_to_assist');
+      }
+      await ctx.platform.sendMessage(
+        ctx.conversationId,
+        'Routing unclear, falling back to general assist...'
+      );
+
+      // Build isolation context (same as normal routing path)
+      const { workflowType, prSha, prBranch } = ctx.isolationHints ?? {};
+      const isPrReview =
+        workflowType === 'review' || workflowType === 'pr' || Boolean(prSha && prBranch);
+      const isolationContext = ctx.isolationEnv
+        ? { branchName: ctx.isolationEnv.branch_name, isPrReview, prSha, prBranch }
+        : undefined;
+
+      if (ctx.platform.getPlatformType() === 'web') {
+        await dispatchBackgroundWorkflow(ctx, assistWorkflow, isolationContext);
+      } else {
+        await executeWorkflow(
+          ctx.platform,
+          ctx.conversationId,
+          ctx.cwd,
+          assistWorkflow,
+          ctx.originalMessage,
+          ctx.conversationDbId,
+          ctx.codebaseId,
+          ctx.issueContext,
+          isolationContext
+        );
+      }
+      return true;
+    }
+
+    // archon-assist not available — return false, caller sends raw AI response
+    getLog().debug({ conversationId: ctx.conversationId }, 'router.assist_workflow_not_found');
     return false;
   }
 
@@ -1204,6 +1247,12 @@ export async function handleMessage(
       );
     }
 
+    // For routing queries, disable tools at the SDK level (Claude only hard constraint).
+    // Codex does not support per-call tool restrictions — fallback handles it instead.
+    if (commandName === 'workflow-router' && conversation.ai_assistant_type !== 'codex') {
+      assistantOptions = { ...assistantOptions, tools: [] };
+    }
+
     // Send to AI and stream responses
     const mode = platform.getStreamingMode();
     getLog().debug({ mode }, 'streaming_mode');
@@ -1226,6 +1275,7 @@ export async function handleMessage(
       // Stream mode: accumulate to check for workflow invocation, then send
       const allMessages: string[] = [];
       let newSessionId: string | undefined;
+      let hadTool = false;
 
       const stream = aiClient.sendQuery(
         promptToSend,
@@ -1238,14 +1288,23 @@ export async function handleMessage(
         if (msg.type === 'assistant' && msg.content) {
           allMessages.push(msg.content);
         } else if (msg.type === 'tool' && msg.toolName) {
-          const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
-          await platform.sendMessage(conversationId, toolMessage, {
-            category: 'tool_call_formatted',
-          });
+          if (commandName === 'workflow-router') {
+            // Codex bypassed routing by using tools — track and suppress from platform
+            hadTool = true;
+            getLog().warn(
+              { toolName: msg.toolName, conversationId },
+              'router.tool_bypass_detected'
+            );
+          } else {
+            const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
+            await platform.sendMessage(conversationId, toolMessage, {
+              category: 'tool_call_formatted',
+            });
 
-          // Send structured event to adapters that support it (Web UI)
-          if (platform.sendStructuredEvent) {
-            await platform.sendStructuredEvent(conversationId, msg);
+            // Send structured event to adapters that support it (Web UI)
+            if (platform.sendStructuredEvent) {
+              await platform.sendStructuredEvent(conversationId, msg);
+            }
           }
         } else if (msg.type === 'result' && msg.sessionId) {
           newSessionId = msg.sessionId;
@@ -1261,10 +1320,10 @@ export async function handleMessage(
         await tryPersistSessionId(session.id, newSessionId);
       }
 
-      // Try workflow routing first
-      if (allMessages.length > 0) {
+      // Attempt routing: either AI produced text, or Codex bypassed with tools and no text
+      if (allMessages.length > 0 || (commandName === 'workflow-router' && hadTool)) {
         const fullResponse = allMessages.join('');
-        const routed = await tryWorkflowRouting(routingCtx, fullResponse);
+        const routed = await tryWorkflowRouting(routingCtx, fullResponse, hadTool);
         if (routed) {
           if (commandName) {
             await tryUpdateSessionMetadata(session.id, { lastCommand: commandName });
@@ -1273,8 +1332,17 @@ export async function handleMessage(
         }
 
         // No workflow - send all accumulated messages
-        for (const content of allMessages) {
-          await platform.sendMessage(conversationId, content);
+        // If Codex bypassed via tools and produced no text, there's nothing to send
+        if (allMessages.length === 0) {
+          getLog().warn({ conversationId }, 'router.tool_bypass_no_fallback');
+          await platform.sendMessage(
+            conversationId,
+            'Could not determine a workflow for your request. Please try rephrasing.'
+          );
+        } else {
+          for (const content of allMessages) {
+            await platform.sendMessage(conversationId, content);
+          }
         }
       }
     } else {
@@ -1283,6 +1351,7 @@ export async function handleMessage(
       const assistantMessages: string[] = [];
       let assistantChunksTruncated = false;
       let totalChunksTruncated = false;
+      let hadToolBatch = false;
 
       const stream = aiClient.sendQuery(
         promptToSend,
@@ -1305,6 +1374,13 @@ export async function handleMessage(
           const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
           allChunks.push({ type: 'tool', content: toolMessage });
           getLog().debug({ toolName: msg.toolName }, 'tool_call');
+          if (commandName === 'workflow-router') {
+            hadToolBatch = true;
+            getLog().warn(
+              { toolName: msg.toolName, conversationId },
+              'router.tool_bypass_detected'
+            );
+          }
         } else if (msg.type === 'result' && msg.sessionId) {
           await tryPersistSessionId(session.id, msg.sessionId);
         }
@@ -1364,16 +1440,26 @@ export async function handleMessage(
         }
       }
 
-      if (finalMessage) {
+      // Attempt routing: either AI produced text, or Codex bypassed with tools and no text
+      if (finalMessage || (commandName === 'workflow-router' && hadToolBatch)) {
         // Try workflow routing first
-        const routed = await tryWorkflowRouting(routingCtx, finalMessage);
+        const routed = await tryWorkflowRouting(routingCtx, finalMessage, hadToolBatch);
         if (routed) {
           return;
         }
 
-        // No workflow routing - send the final message
-        getLog().debug({ messageLength: finalMessage.length }, 'sending_final_message');
-        await platform.sendMessage(conversationId, finalMessage);
+        // No workflow routing
+        if (!finalMessage) {
+          // Codex used tools during routing but produced no text and no fallback exists
+          getLog().warn({ conversationId }, 'router.tool_bypass_no_fallback');
+          await platform.sendMessage(
+            conversationId,
+            'Could not determine a workflow for your request. Please try rephrasing.'
+          );
+        } else {
+          getLog().debug({ messageLength: finalMessage.length }, 'sending_final_message');
+          await platform.sendMessage(conversationId, finalMessage);
+        }
       }
     }
 

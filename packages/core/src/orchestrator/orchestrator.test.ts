@@ -1950,6 +1950,123 @@ Labels: correct`;
       );
       expect(mockExecuteWorkflow).not.toHaveBeenCalled();
     });
+
+    describe('router bypass fix (#291)', () => {
+      const workflowsWithAssist: WorkflowDefinition[] = [
+        ...testWorkflows,
+        {
+          name: 'archon-assist',
+          description: 'General assist fallback',
+          steps: [{ command: 'assist' }],
+        },
+      ];
+
+      test('passes tools: [] to Claude for routing queries', async () => {
+        mockAIResponse('/invoke-workflow fix-bug\nI will fix it.');
+
+        await handleMessage(platform, 'chat-456', 'fix the login bug');
+
+        expect(mockClient.sendQuery).toHaveBeenCalledTimes(1);
+        const [, , , options] = mockClient.sendQuery.mock.calls[0];
+        expect(options).toEqual(expect.objectContaining({ tools: [] }));
+      });
+
+      test('falls back to archon-assist when routing produces no /invoke-workflow', async () => {
+        mockDiscoverWorkflows.mockResolvedValue({ workflows: workflowsWithAssist, errors: [] });
+        mockAIResponse('I can help directly with that.');
+
+        await handleMessage(platform, 'chat-456', 'investigate this issue');
+
+        expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+        expect(mockExecuteWorkflow.mock.calls[0][3].name).toBe('archon-assist');
+        expect(platform.sendMessage).toHaveBeenCalledWith(
+          'chat-456',
+          expect.stringContaining('Routing unclear')
+        );
+      });
+
+      test('sends raw response when archon-assist not available', async () => {
+        // testWorkflows has fix-bug and add-feature but no archon-assist
+        mockAIResponse('some text without invoke');
+
+        await handleMessage(platform, 'chat-456', 'investigate this issue');
+
+        expect(mockExecuteWorkflow).not.toHaveBeenCalled();
+        expect(platform.sendMessage).toHaveBeenCalledWith('chat-456', 'some text without invoke');
+      });
+
+      test('falls back to archon-assist when Codex uses tools during routing (no text)', async () => {
+        mockGetOrCreateConversation.mockResolvedValue({
+          ...mockConversation,
+          ai_assistant_type: 'codex',
+        });
+        mockDiscoverWorkflows.mockResolvedValue({ workflows: workflowsWithAssist, errors: [] });
+        mockClient.sendQuery.mockImplementation(async function* () {
+          yield { type: 'tool', toolName: 'Bash', toolInput: { command: 'ls' } };
+          yield { type: 'result', sessionId: 'session-123' };
+        });
+
+        await handleMessage(platform, 'chat-456', 'investigate this issue');
+
+        expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+        expect(mockExecuteWorkflow.mock.calls[0][3].name).toBe('archon-assist');
+      });
+
+      test('falls back to archon-assist when Codex uses tools in batch mode (no text)', async () => {
+        platform.getStreamingMode.mockReturnValue('batch');
+        mockGetOrCreateConversation.mockResolvedValue({
+          ...mockConversation,
+          ai_assistant_type: 'codex',
+        });
+        mockDiscoverWorkflows.mockResolvedValue({ workflows: workflowsWithAssist, errors: [] });
+        mockClient.sendQuery.mockImplementation(async function* () {
+          yield { type: 'tool', toolName: 'Bash', toolInput: { command: 'ls' } };
+          yield { type: 'result', sessionId: 'session-123' };
+        });
+
+        await handleMessage(platform, 'chat-456', 'investigate this issue');
+
+        expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+        expect(mockExecuteWorkflow.mock.calls[0][3].name).toBe('archon-assist');
+      });
+
+      test('sends error message when Codex uses tools during routing and no archon-assist', async () => {
+        mockGetOrCreateConversation.mockResolvedValue({
+          ...mockConversation,
+          ai_assistant_type: 'codex',
+        });
+        // testWorkflows has no archon-assist
+        mockClient.sendQuery.mockImplementation(async function* () {
+          yield { type: 'tool', toolName: 'Bash', toolInput: { command: 'ls' } };
+          yield { type: 'result', sessionId: 'session-123' };
+        });
+
+        await handleMessage(platform, 'chat-456', 'investigate this issue');
+
+        expect(mockExecuteWorkflow).not.toHaveBeenCalled();
+        expect(platform.sendMessage).toHaveBeenCalledWith(
+          'chat-456',
+          expect.stringContaining('Could not determine a workflow')
+        );
+      });
+
+      test('does not pass tools: [] to Codex for routing queries', async () => {
+        mockGetOrCreateConversation.mockResolvedValue({
+          ...mockConversation,
+          ai_assistant_type: 'codex',
+        });
+        mockDiscoverWorkflows.mockResolvedValue({ workflows: workflowsWithAssist, errors: [] });
+        mockClient.sendQuery.mockImplementation(async function* () {
+          yield { type: 'assistant', content: '/invoke-workflow fix-bug' };
+          yield { type: 'result', sessionId: 'session-123' };
+        });
+
+        await handleMessage(platform, 'chat-456', 'fix the login bug');
+
+        const [, , , options] = mockClient.sendQuery.mock.calls[0];
+        expect(options?.tools).toBeUndefined();
+      });
+    });
   });
 
   describe('thread context inheritance', () => {

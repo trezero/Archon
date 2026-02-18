@@ -522,6 +522,8 @@ async function createSession(conversationId: string, codebaseId: string) {
    - Commands: `/workflow list`, `/workflow reload`, `/workflow status`, `/workflow cancel`
    - Resilient loading: One broken YAML doesn't abort discovery; errors shown in `/workflow list`
    - Router uses case-insensitive matching and provides helpful errors for unknown workflows
+   - Router fallback: if no `/invoke-workflow` is produced, falls back to `archon-assist` (with "Routing unclear" notice); raw AI response returned only when `archon-assist` is unavailable
+   - Claude routing calls use `tools: []` to prevent tool use at the API level; Codex tool bypass is detected and triggers the same fallback
 
 **Defaults:**
 - Bundled in `.archon/commands/defaults/` and `.archon/workflows/defaults/`

@@ -74,6 +74,12 @@ describe('Workflow Router', () => {
       expect(result).toContain('Fix the "bug" in `code` with $variables');
     });
 
+    it('should include tool-avoidance instruction', () => {
+      const result = buildRouterPrompt('Help me fix this bug', testWorkflows);
+
+      expect(result).toContain('Do NOT use any tools');
+    });
+
     it('should format multi-line descriptions correctly', () => {
       const multiLineWorkflows: WorkflowDefinition[] = [
         {
