@@ -72,11 +72,19 @@ ${rule4}
 
 ## Workflow Invocation Format
 
-When invoking a workflow, end your message with EXACTLY this line:
-/invoke-workflow {workflow-name} --project {project-name}
+When invoking a workflow, end your message with EXACTLY this format:
+/invoke-workflow {workflow-name} --project {project-name} --prompt "{task description}"
 
-Use the project NAME (e.g., "remote-coding-agent"), not an ID or path.
-Include a brief explanation before the command of what you're about to do.
+Rules:
+- Use the project NAME (e.g., "remote-coding-agent"), not an ID or path.
+- The --prompt MUST be a complete, self-contained task description that fully captures the user's intent.
+- Synthesize the prompt from conversation context — do NOT use vague references like "do what we discussed" or "yes, go ahead."
+- The prompt should make sense to someone with NO knowledge of the conversation history.
+- Include a brief explanation before the command of what you're about to do.
+
+Example:
+I'll run the assist workflow to analyze the orchestrator module for you.
+/invoke-workflow archon-assist --project remote-coding-agent --prompt "Analyze the orchestrator module architecture: explain how it routes messages, manages sessions, and dispatches workflows to AI clients"
 
 ## Project Setup
 

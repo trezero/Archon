@@ -49,6 +49,7 @@ export interface WorkflowInvocation {
   workflowName: string;
   projectName: string;
   remainingMessage: string;
+  synthesizedPrompt?: string;
 }
 
 export interface ProjectRegistration {
@@ -89,18 +90,31 @@ export function parseOrchestratorCommands(
     // Validate workflow exists
     const workflow = findWorkflow(workflowName, [...workflows]);
     if (workflow) {
-      // Validate project exists (case-insensitive)
-      const matchedCodebase = codebases.find(
-        c => c.name.toLowerCase() === projectName.toLowerCase()
-      );
+      // Validate project exists (case-insensitive, supports partial name matching)
+      // e.g., "remote-coding-agent" matches "dynamous-community/remote-coding-agent"
+      const projectLower = projectName.toLowerCase();
+      const matchedCodebase = codebases.find(c => {
+        const nameLower = c.name.toLowerCase();
+        return nameLower === projectLower || nameLower.endsWith(`/${projectLower}`);
+      });
       if (matchedCodebase) {
         // Extract message before the command
         const commandIndex = response.indexOf(invokeMatch[0]);
         const remainingMessage = response.slice(0, commandIndex).trim();
+
+        // Extract optional --prompt "..." parameter (double or single quotes)
+        const commandText = response.slice(commandIndex);
+        const promptPattern = /--prompt\s+(?:"([^"]+)"|'([^']+)')/;
+        const promptMatch = promptPattern.exec(commandText);
+        const synthesizedPrompt = promptMatch
+          ? (promptMatch[1] ?? promptMatch[2])?.trim() || undefined
+          : undefined;
+
         result.workflowInvocation = {
           workflowName: workflow.name,
           projectName: matchedCodebase.name,
           remainingMessage,
+          synthesizedPrompt,
         };
       }
     }
@@ -683,18 +697,31 @@ async function handleWorkflowInvocationResult(
     await platform.sendMessage(conversationId, remainingMessage);
   }
 
-  // Find the codebase and workflow
-  const codebase = codebases.find(c => c.name.toLowerCase() === projectName.toLowerCase());
+  // Find the codebase and workflow (supports partial name matching)
+  const projectLower = projectName.toLowerCase();
+  const codebase = codebases.find(c => {
+    const nameLower = c.name.toLowerCase();
+    return nameLower === projectLower || nameLower.endsWith(`/${projectLower}`);
+  });
   const workflow = findWorkflow(workflowName, [...workflows]);
 
   if (codebase && workflow) {
+    const workflowPrompt = invocation.synthesizedPrompt ?? originalMessage;
+    getLog().debug(
+      {
+        source: invocation.synthesizedPrompt ? 'synthesized' : 'original',
+        promptLength: workflowPrompt.length,
+        workflowName,
+      },
+      'workflow_prompt_resolved'
+    );
     await dispatchOrchestratorWorkflow(
       platform,
       conversationId,
       conversation,
       codebase,
       workflow,
-      originalMessage,
+      workflowPrompt,
       isolationHints
     );
     return;

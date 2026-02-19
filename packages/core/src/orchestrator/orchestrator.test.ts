@@ -356,6 +356,80 @@ describe('parseOrchestratorCommands', () => {
     expect(result.workflowInvocation).not.toBeNull();
     expect(result.workflowInvocation?.projectName).toBe('test-project');
   });
+
+  test('parses --prompt with double quotes', () => {
+    const response =
+      'I will analyze this.\n/invoke-workflow archon-assist --project test-project --prompt "Analyze the orchestrator module architecture"';
+    const result = parseOrchestratorCommands(response, codebases, workflows);
+
+    expect(result.workflowInvocation).not.toBeNull();
+    expect(result.workflowInvocation?.workflowName).toBe('archon-assist');
+    expect(result.workflowInvocation?.projectName).toBe('test-project');
+    expect(result.workflowInvocation?.synthesizedPrompt).toBe(
+      'Analyze the orchestrator module architecture'
+    );
+    expect(result.workflowInvocation?.remainingMessage).toBe('I will analyze this.');
+  });
+
+  test('parses --prompt with single quotes', () => {
+    const response =
+      "/invoke-workflow fix-bug --project test-project --prompt 'Fix the null pointer in data processor'";
+    const result = parseOrchestratorCommands(response, codebases, workflows);
+
+    expect(result.workflowInvocation?.synthesizedPrompt).toBe(
+      'Fix the null pointer in data processor'
+    );
+  });
+
+  test('returns undefined synthesizedPrompt when --prompt not provided', () => {
+    const response = '/invoke-workflow fix-bug --project test-project';
+    const result = parseOrchestratorCommands(response, codebases, workflows);
+
+    expect(result.workflowInvocation).not.toBeNull();
+    expect(result.workflowInvocation?.synthesizedPrompt).toBeUndefined();
+  });
+
+  test('parses --prompt with spaces in the quoted value', () => {
+    const response =
+      '/invoke-workflow archon-assist --project test-project --prompt "Analyze the database schema and migration patterns in the project, focusing on table structure and relationships"';
+    const result = parseOrchestratorCommands(response, codebases, workflows);
+
+    expect(result.workflowInvocation?.synthesizedPrompt).toBe(
+      'Analyze the database schema and migration patterns in the project, focusing on table structure and relationships'
+    );
+  });
+
+  test('backwards compatibility: existing format without --prompt still works', () => {
+    const response = 'I will fix this.\n/invoke-workflow fix-bug --project test-project';
+    const result = parseOrchestratorCommands(response, codebases, workflows);
+
+    expect(result.workflowInvocation).not.toBeNull();
+    expect(result.workflowInvocation?.workflowName).toBe('fix-bug');
+    expect(result.workflowInvocation?.projectName).toBe('test-project');
+    expect(result.workflowInvocation?.remainingMessage).toBe('I will fix this.');
+    expect(result.workflowInvocation?.synthesizedPrompt).toBeUndefined();
+  });
+
+  test('parses --prompt with --project= equals syntax', () => {
+    const response =
+      '/invoke-workflow archon-assist --project=test-project --prompt "Summarize the README"';
+    const result = parseOrchestratorCommands(response, codebases, workflows);
+
+    expect(result.workflowInvocation?.projectName).toBe('test-project');
+    expect(result.workflowInvocation?.synthesizedPrompt).toBe('Summarize the README');
+  });
+
+  test('matches partial project name (last path segment)', () => {
+    const namespacedCodebases: Codebase[] = [
+      { ...mockCodebase, name: 'dynamous-community/test-project' },
+    ];
+    const response = '/invoke-workflow fix-bug --project test-project --prompt "Fix the bug"';
+    const result = parseOrchestratorCommands(response, namespacedCodebases, workflows);
+
+    expect(result.workflowInvocation).not.toBeNull();
+    expect(result.workflowInvocation?.projectName).toBe('dynamous-community/test-project');
+    expect(result.workflowInvocation?.synthesizedPrompt).toBe('Fix the bug');
+  });
 });
 
 describe('wrapCommandForExecution', () => {
