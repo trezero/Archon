@@ -205,7 +205,7 @@ export class SqliteAdapter implements IDatabase {
       -- Codebases table
       CREATE TABLE IF NOT EXISTS remote_agent_codebases (
         id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-        name TEXT,
+        name TEXT NOT NULL,
         repository_url TEXT,
         default_cwd TEXT NOT NULL,
         default_branch TEXT DEFAULT 'main',
@@ -257,7 +257,7 @@ export class SqliteAdapter implements IDatabase {
         workflow_id TEXT NOT NULL,
         provider TEXT NOT NULL DEFAULT 'worktree',
         working_path TEXT NOT NULL,
-        branch_name TEXT,
+        branch_name TEXT NOT NULL,
         created_by_platform TEXT,
         metadata TEXT DEFAULT '{}',
         status TEXT NOT NULL DEFAULT 'active',
@@ -277,7 +277,7 @@ export class SqliteAdapter implements IDatabase {
         conversation_id TEXT NOT NULL REFERENCES remote_agent_conversations(id) ON DELETE CASCADE,
         codebase_id TEXT REFERENCES remote_agent_codebases(id) ON DELETE SET NULL,
         workflow_name TEXT NOT NULL,
-        user_message TEXT,
+        user_message TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
         current_step_index INTEGER,
         metadata TEXT DEFAULT '{}',
@@ -323,6 +323,9 @@ export class SqliteAdapter implements IDatabase {
       CREATE INDEX IF NOT EXISTS idx_workflow_runs_parent_conv ON remote_agent_workflow_runs(parent_conversation_id);
       CREATE INDEX IF NOT EXISTS idx_conversations_hidden ON remote_agent_conversations(hidden);
       CREATE INDEX IF NOT EXISTS idx_conversations_codebase ON remote_agent_conversations(codebase_id);
+      CREATE INDEX IF NOT EXISTS idx_conversations_isolation_env_id ON remote_agent_conversations(isolation_env_id);
+      CREATE INDEX IF NOT EXISTS idx_sessions_codebase ON remote_agent_sessions(codebase_id);
+      CREATE INDEX IF NOT EXISTS idx_isolation_env_status ON remote_agent_isolation_environments(status);
 
       -- From PG migration 009: staleness detection for running workflows
       CREATE INDEX IF NOT EXISTS idx_workflow_runs_last_activity

@@ -134,27 +134,38 @@ export async function findResumableRun(
 }
 
 export async function resumeWorkflowRun(id: string): Promise<WorkflowRun> {
-  let result;
+  const dialect = getDialect();
   try {
-    result = await pool.query<WorkflowRun>(
+    // Split into UPDATE + SELECT to support both PostgreSQL and SQLite
+    // (SQLite does not support RETURNING on UPDATE statements)
+    const updateResult = await pool.query(
       `UPDATE remote_agent_workflow_runs
-       SET status = 'running', completed_at = NULL, last_activity_at = NOW()
-       WHERE id = $1
-       RETURNING *`,
+       SET status = 'running', completed_at = NULL, last_activity_at = ${dialect.now()}
+       WHERE id = $1`,
       [id]
     );
+
+    if (updateResult.rowCount === 0) {
+      // Logical race: run was deleted or already activated between find and resume
+      getLog().warn({ workflowRunId: id }, 'resume_workflow_run_not_found');
+      throw new Error(`Workflow run not found (id: ${id})`);
+    }
+
+    const selectResult = await pool.query<WorkflowRun>(
+      'SELECT * FROM remote_agent_workflow_runs WHERE id = $1',
+      [id]
+    );
+    const row = selectResult.rows[0];
+    if (!row) {
+      throw new Error(`Workflow run vanished after update (id: ${id})`);
+    }
+    return row;
   } catch (error) {
     const err = error as Error;
+    if (err.message.includes('Workflow run')) throw error; // Re-throw our own errors
     getLog().error({ err, workflowRunId: id }, 'resume_workflow_run_failed');
     throw new Error(`Failed to resume workflow run: ${err.message}`);
   }
-  const row = result.rows[0];
-  if (!row) {
-    // Logical race: run was deleted or already activated between find and resume
-    getLog().warn({ workflowRunId: id }, 'resume_workflow_run_not_found');
-    throw new Error(`Workflow run not found (id: ${id})`);
-  }
-  return row;
 }
 
 /**

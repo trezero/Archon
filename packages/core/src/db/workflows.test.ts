@@ -430,21 +430,29 @@ describe('workflows database', () => {
   describe('resumeWorkflowRun', () => {
     test('updates run to running, clears completed_at, and returns updated row', async () => {
       const updatedRun = { ...mockWorkflowRun, status: 'running' as const, completed_at: null };
+      // UPDATE query returns rowCount 1
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
+      // SELECT query returns the updated row
       mockQuery.mockResolvedValueOnce(createQueryResult([updatedRun]));
 
       const result = await resumeWorkflowRun('workflow-run-123');
 
       expect(result.status).toBe('running');
       expect(result.completed_at).toBeNull();
-      const [query, params] = mockQuery.mock.calls[0] as [string, unknown[]];
-      expect(query).toContain("status = 'running'");
-      expect(query).toContain('completed_at = NULL');
-      expect(query).toContain('RETURNING *');
-      expect(params).toEqual(['workflow-run-123']);
+      // First call: UPDATE
+      const [updateQuery, updateParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(updateQuery).toContain("status = 'running'");
+      expect(updateQuery).toContain('completed_at = NULL');
+      expect(updateParams).toEqual(['workflow-run-123']);
+      // Second call: SELECT
+      const [selectQuery, selectParams] = mockQuery.mock.calls[1] as [string, unknown[]];
+      expect(selectQuery).toContain('SELECT *');
+      expect(selectParams).toEqual(['workflow-run-123']);
     });
 
     test('throws when no row matched (run not found)', async () => {
-      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+      // UPDATE returns rowCount 0
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 0));
 
       await expect(resumeWorkflowRun('nonexistent-id')).rejects.toThrow(
         'Workflow run not found (id: nonexistent-id)'
