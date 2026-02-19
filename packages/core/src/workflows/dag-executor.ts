@@ -375,13 +375,36 @@ async function resolveNodeProviderAndModel(
 
   // Warn if Codex node has output_format (unsupported)
   if (provider === 'codex' && node.output_format) {
-    getLog().warn({ nodeId: node.id }, 'dag_node_output_format_ignored_codex');
-    await safeSendMessage(
+    getLog().error({ nodeId: node.id }, 'dag_node_output_format_ignored_codex');
+    const outputFormatDelivered = await safeSendMessage(
       platform,
       conversationId,
       `Warning: Node '${node.id}' has output_format set but uses Codex — output_format is ignored. Use a Claude node for structured output.`,
       { workflowId: workflowRunId, nodeName: node.id }
     );
+    if (!outputFormatDelivered) {
+      getLog().error(
+        { nodeId: node.id, workflowRunId },
+        'dag_node_output_format_warning_delivery_failed'
+      );
+    }
+  }
+
+  // Warn if Codex node has allowed_tools or denied_tools (unsupported per-call)
+  if (
+    provider === 'codex' &&
+    (node.allowed_tools !== undefined || node.denied_tools !== undefined)
+  ) {
+    getLog().error({ nodeId: node.id }, 'dag_node_tool_restrictions_ignored_codex');
+    const delivered = await safeSendMessage(
+      platform,
+      conversationId,
+      `Warning: Node '${node.id}' has allowed_tools/denied_tools set but uses Codex — per-node tool restrictions are not supported for Codex. Configure MCP servers globally in the Codex CLI config instead.`,
+      { workflowId: workflowRunId, nodeName: node.id }
+    );
+    if (!delivered) {
+      getLog().error({ nodeId: node.id, workflowRunId }, 'dag_node_codex_warning_delivery_failed');
+    }
   }
 
   let options: AssistantRequestOptions | undefined;
@@ -401,6 +424,8 @@ async function resolveNodeProviderAndModel(
         schema: node.output_format,
       };
     }
+    if (node.allowed_tools !== undefined) claudeOptions.tools = node.allowed_tools;
+    if (node.denied_tools !== undefined) claudeOptions.disallowedTools = node.denied_tools;
     options = Object.keys(claudeOptions).length > 0 ? claudeOptions : undefined;
   }
 

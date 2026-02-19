@@ -1077,6 +1077,148 @@ describe('Workflow Executor', () => {
       loadConfigSpy.mockRestore();
     });
 
+    it('should pass allowed_tools to sendQuery options for Claude step', async () => {
+      const workflow: WorkflowDefinition = {
+        name: 'tool-whitelist',
+        description: 'Whitelist tools',
+        provider: 'claude',
+        steps: [{ command: 'command-one', allowed_tools: ['Read', 'Grep'] }],
+      };
+
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+
+      const optionsArg = mockSendQuery.mock.calls[0][3] as Record<string, unknown>;
+      expect(optionsArg?.tools).toEqual(['Read', 'Grep']);
+    });
+
+    it('should pass denied_tools as disallowedTools to sendQuery options for Claude step', async () => {
+      const workflow: WorkflowDefinition = {
+        name: 'tool-blacklist',
+        description: 'Blacklist tools',
+        provider: 'claude',
+        steps: [{ command: 'command-one', denied_tools: ['WebSearch', 'WebFetch'] }],
+      };
+
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+
+      const optionsArg = mockSendQuery.mock.calls[0][3] as Record<string, unknown>;
+      expect(optionsArg?.disallowedTools).toEqual(['WebSearch', 'WebFetch']);
+    });
+
+    it('should preserve empty allowed_tools: [] (disable all tools)', async () => {
+      const workflow: WorkflowDefinition = {
+        name: 'tool-disable-all',
+        description: 'Disable all tools',
+        provider: 'claude',
+        steps: [{ command: 'command-one', allowed_tools: [] }],
+      };
+
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+
+      const optionsArg = mockSendQuery.mock.calls[0][3] as Record<string, unknown>;
+      expect(optionsArg?.tools).toEqual([]); // not undefined
+    });
+
+    it('should warn user when Codex step has allowed_tools', async () => {
+      const loadConfigSpy = spyOn(configLoader, 'loadConfig');
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'codex',
+        assistants: { claude: {}, codex: {} },
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+      });
+      mockGetAssistantClient.mockReturnValue({ sendQuery: mockSendQuery, getType: () => 'codex' });
+
+      const workflow: WorkflowDefinition = {
+        name: 'codex-tool-restriction',
+        description: 'Codex step with tool restrictions',
+        provider: 'codex',
+        steps: [{ command: 'command-one', allowed_tools: ['Read'] }],
+      };
+
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+
+      const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+      const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
+      const warning = messages.find(m => m.includes('allowed_tools') && m.includes('Codex'));
+      expect(warning).toBeDefined();
+
+      loadConfigSpy.mockRestore();
+      mockGetAssistantClient.mockImplementation(() => ({
+        sendQuery: mockSendQuery,
+        getType: () => 'claude',
+      }));
+    });
+
+    it('should warn user when Codex step has denied_tools only', async () => {
+      const loadConfigSpy = spyOn(configLoader, 'loadConfig');
+      loadConfigSpy.mockResolvedValue({
+        botName: 'Archon',
+        assistant: 'codex',
+        assistants: { claude: {}, codex: {} },
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+      });
+      mockGetAssistantClient.mockReturnValue({ sendQuery: mockSendQuery, getType: () => 'codex' });
+
+      const workflow: WorkflowDefinition = {
+        name: 'codex-denied-tools-only',
+        description: 'Codex step with denied_tools only',
+        provider: 'codex',
+        steps: [{ command: 'command-one', denied_tools: ['WebSearch'] }],
+      };
+
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+
+      const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+      const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
+      const warning = messages.find(m => m.includes('denied_tools') && m.includes('Codex'));
+      expect(warning).toBeDefined();
+
+      loadConfigSpy.mockRestore();
+      mockGetAssistantClient.mockImplementation(() => ({
+        sendQuery: mockSendQuery,
+        getType: () => 'claude',
+      }));
+    });
+
+    it('should pass both allowed_tools and denied_tools to sendQuery options', async () => {
+      const workflow: WorkflowDefinition = {
+        name: 'tool-both',
+        description: 'Both allowed and denied tools on same step',
+        provider: 'claude',
+        steps: [{ command: 'command-one', allowed_tools: ['Read'], denied_tools: ['WebSearch'] }],
+      };
+
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+
+      const optionsArg = mockSendQuery.mock.calls[0][3] as Record<string, unknown>;
+      expect(optionsArg?.tools).toEqual(['Read']);
+      expect(optionsArg?.disallowedTools).toEqual(['WebSearch']);
+    });
+
+    it('should merge step tool restrictions with workflow-level resolved options (model preserved)', async () => {
+      const workflow: WorkflowDefinition = {
+        name: 'merge-options',
+        description: 'Step restrictions merged with workflow model',
+        model: 'opus',
+        steps: [{ command: 'command-one', allowed_tools: ['Read'] }],
+      };
+
+      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+
+      const optionsArg = mockSendQuery.mock.calls[0][3] as Record<string, unknown>;
+      expect(optionsArg?.model).toBe('opus');
+      expect(optionsArg?.tools).toEqual(['Read']);
+    });
+
     it('should handle streaming mode', async () => {
       // Switch platform to streaming mode
       (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');

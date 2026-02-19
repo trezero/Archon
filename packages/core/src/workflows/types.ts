@@ -24,6 +24,16 @@ export interface SingleStep {
   /** Controls session continuity between steps. When true, creates a fresh session.
    *  Only applies to sequential execution; parallel blocks always use fresh sessions. */
   clearContext?: boolean;
+  /**
+   * Whitelist of built-in tools available to this step. Same semantics as DAG node allowed_tools.
+   * Claude only — Codex steps emit a warning and ignore this field.
+   */
+  allowed_tools?: string[];
+  /**
+   * Blacklist of built-in tools to remove from this step. Same semantics as DAG node denied_tools.
+   * Claude only — Codex steps emit a warning and ignore this field.
+   */
+  denied_tools?: string[];
 }
 
 /**
@@ -157,6 +167,21 @@ interface DagNodeBase {
    * Only supported for Claude nodes. Codex nodes log a warning and ignore this field.
    */
   output_format?: Record<string, unknown>;
+  /**
+   * Whitelist of built-in tools available to this node.
+   * - `[]` — disable all built-in tools (MCP-only mode)
+   * - `string[]` — restrict to named tools
+   * Omit to use the default tool set.
+   * Note: `undefined` and `[]` have different semantics — absent means default, [] means none.
+   * Claude only — Codex nodes emit a warning and ignore this field.
+   */
+  allowed_tools?: string[];
+  /**
+   * Blacklist of built-in tools to remove from this node's context.
+   * Applied after `allowed_tools` if both are set.
+   * Claude only — Codex nodes emit a warning and ignore this field.
+   */
+  denied_tools?: string[];
 }
 
 /** DAG node that runs a named command from .archon/commands/ */

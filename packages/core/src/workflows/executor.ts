@@ -703,6 +703,26 @@ async function executeStepInternal(
 
   let newSessionId: string | undefined;
 
+  // Merge per-step tool restrictions into options for this call
+  let stepOptions: AssistantRequestOptions | undefined = resolvedOptions;
+  if (stepDef.allowed_tools !== undefined || stepDef.denied_tools !== undefined) {
+    if (resolvedProvider === 'codex') {
+      // Warn: restrictions are not supported — user must know
+      getLog().error({ command: stepDef.command }, 'step_tool_restrictions_ignored_codex');
+      await sendCriticalMessage(
+        platform,
+        conversationId,
+        `Warning: Step '${stepDef.command}' has allowed_tools/denied_tools set but uses Codex — per-step tool restrictions are not supported for Codex. Configure MCP servers globally in the Codex CLI config instead.`,
+        { workflowId: workflowRun.id, stepName: stepDef.command }
+      );
+      // stepOptions stays as resolvedOptions — no dead tool fields built for Codex
+    } else {
+      stepOptions = { ...resolvedOptions };
+      if (stepDef.allowed_tools !== undefined) stepOptions.tools = stepDef.allowed_tools;
+      if (stepDef.denied_tools !== undefined) stepOptions.disallowedTools = stepDef.denied_tools;
+    }
+  }
+
   try {
     const assistantMessages: string[] = [];
     let droppedMessageCount = 0;
@@ -714,7 +734,7 @@ async function executeStepInternal(
       substitutedPrompt,
       cwd,
       resumeSessionId,
-      resolvedOptions
+      stepOptions
     )) {
       // Update activity timestamp with failure tracking
       try {

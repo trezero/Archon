@@ -1206,7 +1206,24 @@ nodes:
     trigger_rule: none_failed_min_one_success  # Run if at least one dep succeeded
 ```
 
-Nodes without `depends_on` are in the first layer and run concurrently with each other. See [Authoring Workflows](docs/authoring-workflows.md) for full DAG documentation.
+Nodes without `depends_on` are in the first layer and run concurrently with each other.
+
+**Tool restrictions** (`allowed_tools` / `denied_tools`) can be added to any node or sequential step to restrict which built-in tools the AI can use. Enforced at the Claude SDK level — Codex nodes/steps emit a warning and ignore these fields.
+
+```yaml
+nodes:
+  - id: review
+    command: code-review
+    allowed_tools: [Read, Grep, Glob]   # whitelist
+  - id: implement
+    command: implement-feature
+    denied_tools: [WebSearch, WebFetch] # blacklist
+  - id: mcp-only
+    command: mcp-command
+    allowed_tools: []                   # disable all built-in tools
+```
+
+See [Authoring Workflows](docs/authoring-workflows.md) for full DAG documentation.
 
 **How workflows are invoked:**
 - AI routes to workflows automatically based on user intent

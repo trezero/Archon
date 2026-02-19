@@ -237,6 +237,12 @@ export interface AssistantRequestOptions {
    */
   tools?: string[];
   /**
+   * Remove specific tools from the assistant's available set.
+   * Applied after `tools` whitelist (if both are set, denied tools are removed from the whitelist result).
+   * Claude SDK only — Codex ignores this field.
+   */
+  disallowedTools?: string[];
+  /**
    * Structured output schema. Claude Agent SDK enforces this via outputFormat option.
    * Only supported by Claude — ignored by Codex (caller must not set for Codex nodes).
    * Shape: { type: 'json_schema', schema: <JSON Schema object> }

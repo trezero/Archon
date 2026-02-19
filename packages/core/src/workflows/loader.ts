@@ -55,6 +55,33 @@ function isWebSearchMode(value: unknown): value is WebSearchMode {
 }
 
 /**
+ * Parse a tool restriction array (allowed_tools or denied_tools) from raw YAML input.
+ * Returns undefined when the field is absent, or a filtered string[] when present.
+ * Logs warnings for non-string entries and pushes errors for non-array values when id is provided.
+ */
+function parseToolList(
+  raw: unknown,
+  context: { id?: string; fieldName: string; errors?: string[] }
+): string[] | undefined {
+  if (raw === undefined) return undefined;
+
+  if (!Array.isArray(raw)) {
+    if (context.errors && context.id) {
+      context.errors.push(`'${context.id}': '${context.fieldName}' must be an array`);
+    }
+    return undefined;
+  }
+
+  return (raw as unknown[]).filter((t): t is string => {
+    if (typeof t === 'string') return true;
+    if (context.id) {
+      getLog().warn({ id: context.id, value: t }, `${context.fieldName}_invalid_entry_ignored`);
+    }
+    return false;
+  });
+}
+
+/**
  * Parse a single step (helper for parseStep)
  * @param errors - Array to collect validation errors for aggregated reporting
  */
@@ -67,10 +94,37 @@ function parseSingleStep(s: unknown, indexPath: string, errors: string[]): Singl
     return null;
   }
 
-  return {
+  const result: SingleStep = {
     command,
     clearContext: Boolean(step.clearContext),
   };
+
+  const errorsBefore = errors.length;
+  const allowedTools = parseToolList(step.allowed_tools, {
+    id: `Step ${indexPath}`,
+    fieldName: 'allowed_tools',
+    errors,
+  });
+  if (errors.length > errorsBefore) return null;
+  if (allowedTools !== undefined) result.allowed_tools = allowedTools;
+
+  const deniedBefore = errors.length;
+  const deniedTools = parseToolList(step.denied_tools, {
+    id: `Step ${indexPath}`,
+    fieldName: 'denied_tools',
+    errors,
+  });
+  if (errors.length > deniedBefore) return null;
+  if (deniedTools !== undefined) result.denied_tools = deniedTools;
+
+  if (result.allowed_tools?.length === 0 && result.denied_tools !== undefined) {
+    getLog().warn(
+      { id: `Step ${indexPath}` },
+      'tool_restrictions_denied_tools_on_empty_allowed_tools_ignored'
+    );
+  }
+
+  return result;
 }
 
 /**
@@ -173,6 +227,7 @@ function parseDagNode(
 
   const whenStr = raw.when !== undefined && typeof raw.when === 'string' ? raw.when : undefined;
 
+  const errorsBeforeToolFields = errors.length;
   const baseFields = {
     ...(dependsOn.length > 0 ? { depends_on: dependsOn } : {}),
     ...(whenStr !== undefined ? { when: whenStr } : {}),
@@ -186,7 +241,33 @@ function parseDagNode(
     raw.output_format !== null
       ? { output_format: raw.output_format as Record<string, unknown> }
       : {}),
+    ...(raw.allowed_tools !== undefined
+      ? {
+          allowed_tools: parseToolList(raw.allowed_tools, {
+            id: `Node '${id}'`,
+            fieldName: 'allowed_tools',
+            errors,
+          }),
+        }
+      : {}),
+    ...(raw.denied_tools !== undefined
+      ? {
+          denied_tools: parseToolList(raw.denied_tools, {
+            id: `Node '${id}'`,
+            fieldName: 'denied_tools',
+            errors,
+          }),
+        }
+      : {}),
   };
+  if (errors.length > errorsBeforeToolFields) return null;
+
+  if (baseFields.allowed_tools?.length === 0 && baseFields.denied_tools !== undefined) {
+    getLog().warn(
+      { id: `Node '${id}'` },
+      'tool_restrictions_denied_tools_on_empty_allowed_tools_ignored'
+    );
+  }
 
   if (hasCommand) {
     return { id, command: String(raw.command).trim(), ...baseFields };

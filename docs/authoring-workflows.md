@@ -156,6 +156,8 @@ steps:
 |-------|------|---------|-------------|
 | `command` | string | required | Command name (without `.md`) |
 | `clearContext` | boolean | `false` | Start fresh session for this step |
+| `allowed_tools` | string[] | — | Whitelist of built-in tools available to this step. `[]` disables all built-in tools. Claude only — Codex steps emit a warning and ignore this field |
+| `denied_tools` | string[] | — | Blacklist of built-in tools to remove from this step. Claude only — Codex steps emit a warning and ignore this field |
 
 ### When to Use `clearContext: true`
 
@@ -322,6 +324,8 @@ nodes:
 | `context` | `'fresh'` | — | Force a fresh AI session for this node |
 | `provider` | `'claude'` \| `'codex'` | inherited | Per-node provider override |
 | `model` | string | inherited | Per-node model override |
+| `allowed_tools` | string[] | — | Whitelist of built-in tools for this node. `[]` disables all built-in tools (MCP-only mode). Claude only — Codex nodes emit a warning and ignore this field |
+| `denied_tools` | string[] | — | Blacklist of built-in tools to remove from this node. Applied after `allowed_tools` if both are set. Claude only — Codex nodes emit a warning and ignore this field |
 
 ### `trigger_rule` Values
 
@@ -389,6 +393,40 @@ nodes:
 - Only supported for Claude nodes. Codex nodes log a warning and ignore `output_format`
 - The output is captured as a JSON string and available via `$classify.output` (full JSON) or `$classify.output.type` (field access)
 - Use `output_format` when downstream nodes need to branch on specific values via `when:`
+
+### `allowed_tools` and `denied_tools` for Tool Restrictions
+
+Restrict which built-in tools a node or step can use without relying on prompt instructions. Restrictions are enforced at the Claude SDK level.
+
+```yaml
+nodes:
+  - id: review
+    command: code-review
+    allowed_tools: [Read, Grep, Glob]   # whitelist — only these tools available
+
+  - id: implement
+    command: implement-feature
+    denied_tools: [WebSearch, WebFetch] # blacklist — remove these tools
+
+  - id: mcp-only
+    command: mcp-command
+    allowed_tools: []                   # empty list = disable all built-in tools
+```
+
+The same fields work on sequential steps:
+
+```yaml
+steps:
+  - command: read-only-analysis
+    allowed_tools: [Read, Grep, Glob]
+  - command: implement
+    denied_tools: [WebSearch]
+```
+
+- `allowed_tools: []` disables all built-in tools (useful for MCP-only nodes)
+- If both are set, `denied_tools` is applied after `allowed_tools`
+- `undefined` (field absent) and `[]` have different semantics — absent means use default tool set, `[]` means no tools
+- Claude only — Codex nodes/steps emit a warning and continue (Codex doesn't support per-call tool restrictions)
 
 ---
 
@@ -951,4 +989,5 @@ Before deploying a workflow:
 6. **Loops need signals** - Use `<promise>COMPLETE</promise>` to exit
 7. **DAG branching** - `when:` conditions and `trigger_rule` control which nodes run
 8. **`output_format`** - Enforce structured JSON output from Claude nodes for reliable branching
-9. **Test thoroughly** - Each command, the artifact flow, and edge cases
+9. **`allowed_tools` / `denied_tools`** - Restrict which tools a node or step can use (Claude only, enforced at SDK level)
+10. **Test thoroughly** - Each command, the artifact flow, and edge cases

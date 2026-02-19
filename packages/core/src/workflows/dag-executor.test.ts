@@ -3,18 +3,53 @@ import { mkdir, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createMockLogger } from '../test/mocks/logger';
+import { createQueryResult } from '../test/mocks/database';
 
 // --- Mocks (MUST come before imports of modules under test) ---
 
 const mockLogger = createMockLogger();
 mock.module('../utils/logger', () => ({ createLogger: mock(() => mockLogger) }));
 
+// Mock AI client for executeDagWorkflow tests
+const mockSendQueryDag = mock(function* () {
+  yield { type: 'assistant', content: 'DAG AI response' };
+  yield { type: 'result', sessionId: 'dag-session-id' };
+});
+
+const mockGetAssistantClientDag = mock(() => ({
+  sendQuery: mockSendQueryDag,
+  getType: () => 'claude',
+}));
+
+mock.module('../clients/factory', () => ({
+  getAssistantClient: mockGetAssistantClientDag,
+}));
+
+// Mock database for executeDagWorkflow tests
+const mockQueryDag = mock((query: string) => {
+  if (query.includes('INSERT INTO remote_agent_workflow_events')) {
+    return Promise.resolve(createQueryResult([]));
+  }
+  return Promise.resolve(createQueryResult([]));
+});
+
+mock.module('../db/connection', () => ({
+  pool: { query: mockQueryDag },
+}));
+
 // --- Imports (after mocks) ---
-import { buildTopologicalLayers, checkTriggerRule, substituteNodeOutputRefs } from './dag-executor';
-import type { DagNode, NodeOutput } from './types';
+import {
+  buildTopologicalLayers,
+  checkTriggerRule,
+  substituteNodeOutputRefs,
+  executeDagWorkflow,
+} from './dag-executor';
+import type { DagNode, NodeOutput, WorkflowRun } from './types';
 import { discoverWorkflows } from './loader';
 import { isDagWorkflow } from './types';
 import * as configLoader from '../config/config-loader';
+import type { IPlatformAdapter } from '../types';
+import type { MergedConfig } from '../config/config-types';
 
 // --- Helpers ---
 
@@ -488,6 +523,44 @@ nodes:
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0].error).toMatch(/trigger_rule/i);
   });
+
+  it('parses allowed_tools and denied_tools on DAG nodes', async () => {
+    const wfDir = join(testDir, '.archon', 'workflows');
+    await mkdir(wfDir, { recursive: true });
+
+    await writeFile(
+      join(wfDir, 'tool-restrictions.yaml'),
+      `
+name: tool-restriction-test
+description: Test tool restrictions
+nodes:
+  - id: review
+    command: code-review
+    allowed_tools: [Read, Grep, Glob]
+  - id: implement
+    command: implement-feature
+    denied_tools: [WebSearch, WebFetch]
+  - id: mcp-only
+    command: mcp-command
+    allowed_tools: []
+`
+    );
+
+    const result = await discoverWorkflows(testDir);
+    expect(result.errors).toHaveLength(0);
+    const wf = result.workflows.find(w => w.name === 'tool-restriction-test');
+    expect(wf).toBeDefined();
+    if (!wf || !isDagWorkflow(wf)) return;
+
+    expect(wf.nodes[0].allowed_tools).toEqual(['Read', 'Grep', 'Glob']);
+    expect(wf.nodes[0].denied_tools).toBeUndefined();
+
+    expect(wf.nodes[1].denied_tools).toEqual(['WebSearch', 'WebFetch']);
+    expect(wf.nodes[1].allowed_tools).toBeUndefined();
+
+    // Empty array must be preserved (distinct from absent)
+    expect(wf.nodes[2].allowed_tools).toEqual([]);
+  });
 });
 
 describe('substituteNodeOutputRefs', () => {
@@ -529,5 +602,166 @@ describe('checkTriggerRule — missing upstream treated as failed', () => {
     // Demonstrates the mechanism behind the all-nodes-skipped error:
     // if every node skips, nodeOutputs has no 'completed' entries
     // and executeDagWorkflow throws.
+  });
+});
+
+describe('executeDagWorkflow — tool restrictions', () => {
+  let testDir: string;
+  let loadConfigSpy: Mock<typeof configLoader.loadConfig>;
+
+  const minimalConfig: MergedConfig = {
+    botName: 'Archon',
+    assistant: 'claude',
+    assistants: { claude: {}, codex: {} },
+    streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+    paths: { workspaces: '/tmp', worktrees: '/tmp' },
+    concurrency: { maxConversations: 10 },
+    commands: { autoLoad: true },
+    defaults: { copyDefaults: true, loadDefaultCommands: false, loadDefaultWorkflows: false },
+  };
+
+  function createMockPlatformDag(): IPlatformAdapter {
+    return {
+      sendMessage: mock(() => Promise.resolve()),
+      ensureThread: mock((id: string) => Promise.resolve(id)),
+      getStreamingMode: mock(() => 'batch' as const),
+      getPlatformType: mock(() => 'test'),
+      start: mock(() => Promise.resolve()),
+      stop: mock(() => {}),
+    };
+  }
+
+  function makeWorkflowRun(id = 'dag-test-run-id'): WorkflowRun {
+    return {
+      id,
+      workflow_name: 'dag-test',
+      conversation_id: 'conv-dag',
+      parent_conversation_id: null,
+      codebase_id: null,
+      current_step_index: 0,
+      status: 'running',
+      user_message: 'dag test message',
+      metadata: {},
+      started_at: new Date(),
+      completed_at: null,
+      last_activity_at: null,
+      working_path: null,
+    };
+  }
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-exec-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'My command prompt for $USER_MESSAGE');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+    mockQueryDag.mockClear();
+
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'DAG AI response' };
+      yield { type: 'result', sessionId: 'dag-session-id' };
+    });
+
+    loadConfigSpy = spyOn(configLoader, 'loadConfig');
+    loadConfigSpy.mockResolvedValue(minimalConfig);
+  });
+
+  afterEach(async () => {
+    loadConfigSpy.mockRestore();
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('passes allowed_tools to sendQuery options for Claude node', async () => {
+    const platform = createMockPlatformDag();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-tool-restriction',
+        nodes: [{ id: 'review', command: 'my-cmd', allowed_tools: ['Read', 'Grep'] }],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    expect(mockSendQueryDag.mock.calls.length).toBeGreaterThan(0);
+    const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+    expect(optionsArg?.tools).toEqual(['Read', 'Grep']);
+  });
+
+  it('warns user when Codex DAG node has denied_tools only', async () => {
+    mockGetAssistantClientDag.mockReturnValue({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'codex',
+    });
+
+    const platform = createMockPlatformDag();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-codex-denied',
+        nodes: [
+          { id: 'review', command: 'my-cmd', provider: 'codex', denied_tools: ['WebSearch'] },
+        ],
+      },
+      workflowRun,
+      'codex',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      { ...minimalConfig, assistant: 'codex' }
+    );
+
+    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
+    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
+    const warning = messages.find(m => m.includes('denied_tools') && m.includes('Codex'));
+    expect(warning).toBeDefined();
+
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+  });
+
+  it('passes empty allowed_tools: [] (disable all tools) to sendQuery', async () => {
+    const platform = createMockPlatformDag();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      platform,
+      'conv-dag',
+      testDir,
+      { name: 'dag-empty-tools', nodes: [{ id: 'review', command: 'my-cmd', allowed_tools: [] }] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    expect(mockSendQueryDag.mock.calls.length).toBeGreaterThan(0);
+    const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+    expect(optionsArg?.tools).toEqual([]);
   });
 });
