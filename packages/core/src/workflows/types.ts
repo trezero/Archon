@@ -12,7 +12,7 @@
 
 import type { ModelReasoningEffort, WebSearchMode } from '../types';
 
-export type WorkflowRunStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type WorkflowRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type ArtifactType = 'pr' | 'commit' | 'file_created' | 'file_modified' | 'branch';
 

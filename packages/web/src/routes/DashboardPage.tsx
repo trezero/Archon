@@ -27,6 +27,7 @@ const STATUS_COLORS: Record<string, string> = {
   completed: 'bg-success',
   failed: 'bg-destructive',
   pending: 'bg-text-tertiary',
+  cancelled: 'bg-text-tertiary',
 };
 
 function StatsCard({

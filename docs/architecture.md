@@ -1055,7 +1055,7 @@ remote_agent_workflow_runs
 ├── conversation_id (UUID → remote_agent_conversations.id)
 ├── codebase_id (UUID → remote_agent_codebases.id)
 ├── workflow_name (VARCHAR)
-├── status (VARCHAR) -- 'pending' | 'running' | 'completed' | 'failed'
+├── status (VARCHAR) -- 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 ├── current_step_index (INTEGER)
 ├── parent_conversation_id (UUID) -- Parent chat that dispatched this run
 └── metadata (JSONB)

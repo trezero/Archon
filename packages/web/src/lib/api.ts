@@ -3,6 +3,7 @@
  * Uses relative URLs - Vite proxy handles routing in dev.
  * SSE streams bypass the proxy in dev mode (Vite proxy buffers SSE responses).
  */
+import type { WorkflowRunStatus } from '@/lib/types';
 
 /**
  * Base URL for SSE streams. In dev, bypasses Vite proxy by connecting directly
@@ -157,7 +158,7 @@ export interface WorkflowRunResponse {
   conversation_id: string;
   codebase_id: string | null;
   current_step_index: number;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: WorkflowRunStatus;
   user_message: string;
   metadata: Record<string, unknown>;
   started_at: string;
@@ -199,7 +200,7 @@ export async function runWorkflow(
 
 export async function listWorkflowRuns(options?: {
   conversationId?: string;
-  status?: string;
+  status?: WorkflowRunStatus;
   limit?: number;
   codebaseId?: string;
 }): Promise<WorkflowRunResponse[]> {

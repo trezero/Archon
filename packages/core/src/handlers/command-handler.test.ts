@@ -30,7 +30,7 @@ const mockDeactivateSession = mock(() => Promise.resolve());
 
 // Workflow database mocks
 const mockGetActiveWorkflowRun = mock(() => Promise.resolve(null));
-const mockFailWorkflowRun = mock(() => Promise.resolve());
+const mockCancelWorkflowRun = mock(() => Promise.resolve());
 
 // Spies for internal modules (use spyOn instead of mock.module to avoid global pollution)
 let spyIsPathWithinWorkspace: ReturnType<typeof spyOn>;
@@ -74,7 +74,7 @@ mock.module('../db/sessions', () => ({
 
 mock.module('../db/workflows', () => ({
   getActiveWorkflowRun: mockGetActiveWorkflowRun,
-  failWorkflowRun: mockFailWorkflowRun,
+  cancelWorkflowRun: mockCancelWorkflowRun,
 }));
 
 // Mock isolation-environments database
@@ -159,7 +159,7 @@ function clearAllMocks(): void {
   mockDeactivateSession.mockClear();
   // Workflow db mocks
   mockGetActiveWorkflowRun.mockClear();
-  mockFailWorkflowRun.mockClear();
+  mockCancelWorkflowRun.mockClear();
   // Isolation mocks
   mockIsolationCreate.mockClear();
   mockIsolationDestroy.mockClear();
@@ -408,9 +408,9 @@ describe('CommandHandler', () => {
       test('should return help message', async () => {
         const result = await handleCommand(baseConversation, '/help');
         expect(result.success).toBe(true);
-        expect(result.message).toContain('Available Commands');
-        expect(result.message).toContain('/clone');
-        expect(result.message).toContain('/setcwd');
+        expect(result.message).toContain('Archon Orchestrator');
+        expect(result.message).toContain('/workflow list');
+        expect(result.message).toContain('/status');
       });
     });
 
@@ -499,33 +499,19 @@ describe('CommandHandler', () => {
         expect(result.message).toContain('my-repo');
       });
 
-      test('should auto-detect and link codebase from cwd', async () => {
+      test('should show project-less status when no codebase attached', async () => {
         const conversation = {
           ...baseConversation,
-          cwd: '/workspace/detected-repo',
           codebase_id: null,
         };
 
-        mockFindCodebaseByDefaultCwd.mockResolvedValue({
-          id: 'cb-auto',
-          name: 'detected-repo',
-          repository_url: 'https://github.com/user/detected-repo',
-          default_cwd: '/workspace/detected-repo',
-          ai_assistant_type: 'claude',
-          commands: {},
-          created_at: new Date(),
-          updated_at: new Date(),
-        });
-        mockUpdateConversation.mockResolvedValue(undefined);
         mockGetActiveSession.mockResolvedValue(null);
 
         const result = await handleCommand(conversation, '/status');
 
         expect(result.success).toBe(true);
-        expect(result.message).toContain('detected-repo');
-        expect(mockUpdateConversation).toHaveBeenCalledWith('conv-123', {
-          codebase_id: 'cb-auto',
-        });
+        expect(result.message).toContain('Orchestrator Status');
+        expect(result.message).toContain('None — orchestrator will route as needed');
       });
 
       test('should show no codebase when cwd does not match any codebase', async () => {
@@ -541,7 +527,7 @@ describe('CommandHandler', () => {
         const result = await handleCommand(conversation, '/status');
 
         expect(result.success).toBe(true);
-        expect(result.message).toContain('No codebase configured');
+        expect(result.message).toContain('None — orchestrator will route as needed');
       });
 
       test('should display worktree from isolation_env_id when set', async () => {
@@ -579,7 +565,6 @@ describe('CommandHandler', () => {
         const result = await handleCommand(conversation, '/status');
 
         expect(result.success).toBe(true);
-        expect(result.message).toContain('Repository:');
         expect(result.message).toContain('owner/repo @ issue-42 (worktree)');
       });
 
@@ -2044,7 +2029,7 @@ describe('CommandHandler', () => {
         expect(result.success).toBe(true);
         expect(result.message).toContain('Cancelled workflow');
         expect(result.message).toContain('test-workflow');
-        expect(mockFailWorkflowRun).toHaveBeenCalledWith('wf-123', 'Cancelled by user');
+        expect(mockCancelWorkflowRun).toHaveBeenCalledWith('wf-123');
       });
 
       test('should return message when no active workflow exists', async () => {
@@ -2054,14 +2039,14 @@ describe('CommandHandler', () => {
 
         expect(result.success).toBe(true);
         expect(result.message).toBe('No active workflow to cancel.');
-        expect(mockFailWorkflowRun).not.toHaveBeenCalled();
+        expect(mockCancelWorkflowRun).not.toHaveBeenCalled();
       });
 
-      test('should fail when no codebase is configured', async () => {
+      test('should return no-active-workflow when no codebase is configured', async () => {
         const result = await handleCommand(baseConversation, '/workflow cancel');
 
-        expect(result.success).toBe(false);
-        expect(result.message).toContain('No codebase configured');
+        expect(result.success).toBe(true);
+        expect(result.message).toBe('No active workflow to cancel.');
       });
     });
 
@@ -2305,11 +2290,11 @@ describe('CommandHandler', () => {
         expect(result.workflow?.args).toBe('#42 add dark mode');
       });
 
-      test('should fail when no codebase is configured', async () => {
+      test('should return not-found when no codebase is configured', async () => {
         const result = await handleCommand(baseConversation, '/workflow run test-workflow');
 
         expect(result.success).toBe(false);
-        expect(result.message).toContain('No codebase configured');
+        expect(result.message).toContain('Workflow `test-workflow` not found');
       });
     });
 

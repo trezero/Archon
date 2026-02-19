@@ -7,10 +7,16 @@ import { WorkflowLogs } from './WorkflowLogs';
 import { ArtifactSummary } from './ArtifactSummary';
 import { useWorkflowStatus } from '@/hooks/useWorkflowStatus';
 import { getWorkflowRun, getWorkflowRunByWorker, getCodebase } from '@/lib/api';
-import type { WorkflowState, ArtifactType } from '@/lib/types';
+import type { WorkflowState, ArtifactType, WorkflowRunStatus } from '@/lib/types';
 
 function ensureUtc(timestamp: string): string {
   return timestamp.endsWith('Z') ? timestamp : timestamp + 'Z';
+}
+
+const TERMINAL_STATUSES: readonly WorkflowRunStatus[] = ['completed', 'failed', 'cancelled'];
+
+function isTerminal(status: WorkflowRunStatus): boolean {
+  return TERMINAL_STATUSES.includes(status);
 }
 
 interface WorkflowExecutionProps {
@@ -23,6 +29,7 @@ function StatusBadge({ status }: { status: string }): React.ReactElement {
     running: 'bg-accent/20 text-accent',
     completed: 'bg-success/20 text-success',
     failed: 'bg-error/20 text-error',
+    cancelled: 'bg-surface text-text-secondary',
   };
   return (
     <span
@@ -133,7 +140,9 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
         }
       })
       .catch((err: unknown) => {
-        setError((err as Error).message);
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('[WorkflowExecution] Failed to load workflow run', { runId, error: message });
+        setError(message);
       });
   }, [runId]);
 
@@ -155,8 +164,22 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       });
   }, [workerPlatformId]);
 
-  // Prefer live state over initial data
-  const workflow = workflows.get(runId) ?? initialData;
+  // SSE leads by default; REST overrides only when it reports a terminal state
+  // that SSE has not yet reflected (prevents stale 'running' from lingering).
+  const liveWorkflow = workflows.get(runId);
+  const workflow = ((): WorkflowState | null => {
+    if (!liveWorkflow) return initialData;
+    if (!initialData) return liveWorkflow;
+    if (isTerminal(initialData.status) && !isTerminal(liveWorkflow.status)) {
+      console.warn('[WorkflowExecution] REST overrides stale SSE status', {
+        runId,
+        restStatus: initialData.status,
+        sseStatus: liveWorkflow.status,
+      });
+      return initialData;
+    }
+    return liveWorkflow;
+  })();
 
   // Force re-render every second while workflow is running (for live timer)
   const [, setTick] = useState(0);

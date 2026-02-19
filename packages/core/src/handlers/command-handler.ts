@@ -1345,7 +1345,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
             };
           }
 
-          await workflowDb.failWorkflowRun(activeWorkflow.id, 'Cancelled by user');
+          await workflowDb.cancelWorkflowRun(activeWorkflow.id);
           return {
             success: true,
             message: `Cancelled workflow: \`${activeWorkflow.workflow_name}\``,

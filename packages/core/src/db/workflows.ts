@@ -2,7 +2,7 @@
  * Database operations for workflow runs
  */
 import { pool, getDialect } from './connection';
-import type { WorkflowRun } from '../workflows/types';
+import type { WorkflowRun, WorkflowRunStatus } from '../workflows/types';
 import { createLogger } from '../utils/logger';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -206,7 +206,11 @@ export async function updateWorkflowRun(
   }
   if (updates.status !== undefined) {
     addParam('status = ?', updates.status);
-    if (updates.status === 'completed' || updates.status === 'failed') {
+    if (
+      updates.status === 'completed' ||
+      updates.status === 'failed' ||
+      updates.status === 'cancelled'
+    ) {
       setClauses.push(`completed_at = ${dialect.now()}`);
     }
   }
@@ -266,12 +270,28 @@ export async function failWorkflowRun(id: string, error: string): Promise<void> 
   }
 }
 
+export async function cancelWorkflowRun(id: string): Promise<void> {
+  const dialect = getDialect();
+  try {
+    await pool.query(
+      `UPDATE remote_agent_workflow_runs
+       SET status = 'cancelled', completed_at = ${dialect.now()}
+       WHERE id = $1`,
+      [id]
+    );
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err }, 'cancel_workflow_run_failed');
+    throw new Error(`Failed to cancel workflow run: ${err.message}`);
+  }
+}
+
 /**
  * List workflow runs with optional filters.
  */
 export async function listWorkflowRuns(options?: {
   conversationId?: string;
-  status?: 'pending' | 'running' | 'completed' | 'failed';
+  status?: WorkflowRunStatus;
   limit?: number;
   codebaseId?: string;
 }): Promise<WorkflowRun[]> {

@@ -154,13 +154,17 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
       pollingRef.current = setInterval(() => {
         for (const wf of workflows.values()) {
           if (wf.status !== 'running') continue;
-          // Only poll workflows running for >30s (safety net, not primary mechanism)
+          // Only poll workflows running for >30s (safety net for stuck SSE; interval is 15s — max latency ~45s)
           if (Date.now() - wf.startedAt < 30_000) continue;
 
           void getWorkflowRun(wf.runId)
             .then(data => {
               const serverStatus = data.run.status;
-              if (serverStatus === 'completed' || serverStatus === 'failed') {
+              if (
+                serverStatus === 'completed' ||
+                serverStatus === 'failed' ||
+                serverStatus === 'cancelled'
+              ) {
                 setWorkflows(prev => {
                   const next = new Map(prev);
                   const existing = next.get(wf.runId);

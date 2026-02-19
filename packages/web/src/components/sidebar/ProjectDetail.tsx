@@ -21,7 +21,8 @@ function RunStatusBadge({ status }: { status: string }): React.ReactElement {
         'inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium',
         status === 'running' && 'bg-primary/10 text-primary',
         status === 'completed' && 'bg-success/10 text-success',
-        status === 'failed' && 'bg-error/10 text-error'
+        status === 'failed' && 'bg-error/10 text-error',
+        status === 'cancelled' && 'bg-surface-elevated text-text-secondary'
       )}
     >
       {status}
