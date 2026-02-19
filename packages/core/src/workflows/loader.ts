@@ -332,14 +332,14 @@ function validateDagStructure(nodes: DagNode[]): string | null {
   return null; // valid
 }
 
-type ParseResult =
+export type ParseResult =
   | { workflow: WorkflowDefinition; error: null }
   | { workflow: null; error: WorkflowLoadError };
 
 /**
  * Parse and validate a workflow YAML file
  */
-function parseWorkflow(content: string, filename: string): ParseResult {
+export function parseWorkflow(content: string, filename: string): ParseResult {
   try {
     const raw = parseYaml(content) as Record<string, unknown>;
 

@@ -575,6 +575,15 @@ Pattern: Use `classifyIsolationError()` (in `orchestrator.ts`) to map git errors
 
 **Web UI REST API** (`packages/server/src/routes/api.ts`):
 
+**Workflow Management:**
+- `POST /api/workflows/validate` - Validate a workflow definition in-memory (no save); body: `{ definition: object }`; returns `{ valid: boolean, errors?: string[] }`
+- `GET /api/workflows/:name` - Fetch a single workflow by name; optional `?cwd=` query param; returns `{ workflow, filename, source: 'project' | 'bundled' }`
+- `PUT /api/workflows/:name` - Save (create or update) a workflow YAML; body: `{ definition: object }`; validates before writing; requires `?cwd=` or registered codebase
+- `DELETE /api/workflows/:name` - Delete a user-defined workflow; bundled defaults cannot be deleted
+
+**Command Listing:**
+- `GET /api/commands` - List available command names (bundled + project-defined); optional `?cwd=`; returns `{ commands: [{ name, source: 'bundled' | 'project' }] }`
+
 **Webhooks:**
 - `POST /webhooks/github` - GitHub webhook events
 - Signature verification required (HMAC SHA-256)

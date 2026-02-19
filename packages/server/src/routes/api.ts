@@ -6,8 +6,8 @@ import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { cors } from 'hono/cors';
 import type { WebAdapter } from '../adapters/web';
-import { rm } from 'fs/promises';
-import { normalize } from 'path';
+import { rm, readFile, writeFile, unlink, mkdir } from 'fs/promises';
+import { normalize, join } from 'path';
 import type { Context } from 'hono';
 import type { ConversationLockManager } from '@archon/core';
 import {
@@ -15,6 +15,12 @@ import {
   getDatabaseType,
   loadConfig,
   discoverWorkflows,
+  parseWorkflow,
+  isValidCommandName,
+  getWorkflowFolderSearchPaths,
+  getCommandFolderSearchPaths,
+  getDefaultCommandsPath,
+  getDefaultWorkflowsPath,
   cloneRepository,
   registerRepository,
   removeWorktree,
@@ -22,6 +28,12 @@ import {
   getArchonWorkspacesPath,
   createLogger,
 } from '@archon/core';
+import {
+  BUNDLED_WORKFLOWS,
+  BUNDLED_COMMANDS,
+  isBinaryBuild,
+} from '@archon/core/defaults/bundled-defaults';
+import { findMarkdownFilesRecursive } from '@archon/core/utils/commands';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -35,6 +47,8 @@ import * as isolationEnvDb from '@archon/core/db/isolation-environments';
 import * as workflowDb from '@archon/core/db/workflows';
 import * as workflowEventDb from '@archon/core/db/workflow-events';
 import * as messageDb from '@archon/core/db/messages';
+
+type WorkflowSource = 'project' | 'bundled';
 
 /**
  * Register all /api/* routes on the Hono app.
@@ -585,6 +599,273 @@ export function registerApiRoutes(
     } catch (error) {
       getLog().error({ err: error }, 'get_workflow_run_failed');
       return c.json({ error: 'Failed to get workflow run' }, 500);
+    }
+  });
+
+  // POST /api/workflows/validate - Validate a workflow definition without saving
+  // MUST be registered before GET /api/workflows/:name so "validate" is not treated as :name
+  app.post('/api/workflows/validate', async c => {
+    let body: { definition?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return apiError(c, 400, 'Invalid JSON in request body');
+    }
+
+    if (!body.definition || typeof body.definition !== 'object') {
+      return apiError(c, 400, 'definition object is required');
+    }
+
+    try {
+      const yamlContent = Bun.YAML.stringify(body.definition);
+      const result = parseWorkflow(yamlContent, 'validate-input.yaml');
+
+      if (result.error) {
+        return c.json({ valid: false, errors: [result.error.error] });
+      }
+      return c.json({ valid: true });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      getLog().error({ err }, 'workflow.validate_failed');
+      return apiError(c, 500, 'Failed to validate workflow');
+    }
+  });
+
+  // GET /api/workflows/:name - Fetch a single workflow definition
+  app.get('/api/workflows/:name', async c => {
+    const name = c.req.param('name');
+    if (!isValidCommandName(name)) {
+      return apiError(c, 400, 'Invalid workflow name');
+    }
+
+    try {
+      const cwd = c.req.query('cwd');
+      let workingDir = cwd;
+      if (!workingDir) {
+        const codebases = await codebaseDb.listCodebases();
+        if (codebases.length > 0) workingDir = codebases[0].default_cwd;
+      }
+
+      const filename = `${name}.yaml`;
+
+      // 1. Try user-defined workflow in cwd
+      if (workingDir) {
+        const [workflowFolder] = getWorkflowFolderSearchPaths();
+        const filePath = join(workingDir, workflowFolder, filename);
+        try {
+          const content = await readFile(filePath, 'utf-8');
+          const result = parseWorkflow(content, filename);
+          if (result.error) {
+            return apiError(c, 500, `Workflow file is invalid: ${result.error.error}`);
+          }
+          return c.json({
+            workflow: result.workflow,
+            filename,
+            source: 'project' as WorkflowSource,
+          });
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            getLog().error({ err, name }, 'workflow.fetch_failed');
+            return apiError(c, 500, 'Failed to read workflow');
+          }
+        }
+      }
+
+      // 2. Fall back to bundled defaults (binary: embedded map; dev: also check filesystem)
+      if (Object.hasOwn(BUNDLED_WORKFLOWS, name)) {
+        const bundledContent = BUNDLED_WORKFLOWS[name];
+        const result = parseWorkflow(bundledContent, filename);
+        if (result.error) {
+          return apiError(c, 500, `Bundled workflow is invalid: ${result.error.error}`);
+        }
+        return c.json({ workflow: result.workflow, filename, source: 'bundled' as WorkflowSource });
+      }
+
+      if (!isBinaryBuild()) {
+        const defaultFilePath = join(getDefaultWorkflowsPath(), filename);
+        try {
+          const content = await readFile(defaultFilePath, 'utf-8');
+          const result = parseWorkflow(content, filename);
+          if (result.error) {
+            return apiError(c, 500, `Default workflow is invalid: ${result.error.error}`);
+          }
+          return c.json({
+            workflow: result.workflow,
+            filename,
+            source: 'bundled' as WorkflowSource,
+          });
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            getLog().error({ err, name }, 'workflow.fetch_default_failed');
+            return apiError(c, 500, 'Failed to read default workflow');
+          }
+        }
+      }
+
+      return apiError(c, 404, `Workflow not found: ${name}`);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      getLog().error({ err, name }, 'workflow.get_failed');
+      return apiError(c, 500, 'Failed to get workflow');
+    }
+  });
+
+  // PUT /api/workflows/:name - Save (create or update) a workflow
+  app.put('/api/workflows/:name', async c => {
+    const name = c.req.param('name');
+    if (!isValidCommandName(name)) {
+      return apiError(c, 400, 'Invalid workflow name');
+    }
+
+    const cwd = c.req.query('cwd');
+    let workingDir = cwd;
+    if (!workingDir) {
+      const codebases = await codebaseDb.listCodebases();
+      if (codebases.length > 0) workingDir = codebases[0].default_cwd;
+    }
+    if (!workingDir) {
+      return apiError(c, 400, 'cwd is required');
+    }
+
+    let body: { definition?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return apiError(c, 400, 'Invalid JSON in request body');
+    }
+    if (!body.definition || typeof body.definition !== 'object') {
+      return apiError(c, 400, 'definition object is required');
+    }
+
+    // Serialize and validate before writing
+    let yamlContent: string;
+    try {
+      yamlContent = Bun.YAML.stringify(body.definition);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      getLog().error({ err, name }, 'workflow.serialize_failed');
+      return apiError(c, 400, 'Failed to serialize workflow definition');
+    }
+
+    const parsed = parseWorkflow(yamlContent, `${name}.yaml`);
+    if (parsed.error) {
+      return c.json({ error: 'Workflow definition is invalid', detail: parsed.error.error }, 400);
+    }
+
+    try {
+      const [workflowFolder] = getWorkflowFolderSearchPaths();
+      const dirPath = join(workingDir, workflowFolder);
+      await mkdir(dirPath, { recursive: true });
+      const filePath = join(dirPath, `${name}.yaml`);
+      await writeFile(filePath, yamlContent, 'utf-8');
+      return c.json({
+        workflow: parsed.workflow,
+        filename: `${name}.yaml`,
+        source: 'project' as WorkflowSource,
+      });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      getLog().error({ err, name }, 'workflow.save_failed');
+      return c.json({ error: 'Failed to save workflow' }, 500);
+    }
+  });
+
+  // DELETE /api/workflows/:name - Delete a user-defined workflow
+  app.delete('/api/workflows/:name', async c => {
+    const name = c.req.param('name');
+    if (!isValidCommandName(name)) {
+      return apiError(c, 400, 'Invalid workflow name');
+    }
+
+    // Refuse to delete bundled defaults
+    if (Object.hasOwn(BUNDLED_WORKFLOWS, name)) {
+      return apiError(c, 400, `Cannot delete bundled default workflow: ${name}`);
+    }
+
+    const cwd = c.req.query('cwd');
+    let workingDir = cwd;
+    if (!workingDir) {
+      const codebases = await codebaseDb.listCodebases();
+      if (codebases.length > 0) workingDir = codebases[0].default_cwd;
+    }
+    if (!workingDir) {
+      return apiError(c, 400, 'cwd is required');
+    }
+
+    const [workflowFolder] = getWorkflowFolderSearchPaths();
+    const filePath = join(workingDir, workflowFolder, `${name}.yaml`);
+
+    try {
+      await unlink(filePath);
+      return c.json({ deleted: true, name });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return apiError(c, 404, `Workflow not found: ${name}`);
+      }
+      getLog().error({ err, name }, 'workflow.delete_failed');
+      return c.json({ error: 'Failed to delete workflow' }, 500);
+    }
+  });
+
+  // GET /api/commands - List available command names for the workflow node palette
+  app.get('/api/commands', async c => {
+    try {
+      const cwd = c.req.query('cwd');
+      let workingDir = cwd;
+      if (!workingDir) {
+        const codebases = await codebaseDb.listCodebases();
+        if (codebases.length > 0) workingDir = codebases[0].default_cwd;
+      }
+
+      // Collect commands: project-defined override bundled (same name wins)
+      const commandMap = new Map<string, WorkflowSource>();
+
+      // 1. Seed with bundled defaults
+      for (const name of Object.keys(BUNDLED_COMMANDS)) {
+        commandMap.set(name, 'bundled');
+      }
+
+      // 2. If not binary build, also check filesystem defaults
+      if (!isBinaryBuild()) {
+        try {
+          const defaultsPath = getDefaultCommandsPath();
+          const files = await findMarkdownFilesRecursive(defaultsPath);
+          for (const { commandName } of files) {
+            commandMap.set(commandName, 'bundled');
+          }
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            getLog().error({ err }, 'commands.list_defaults_failed');
+          }
+          // ENOENT: defaults path missing — not an error
+        }
+      }
+
+      // 3. Project-defined commands override bundled
+      if (workingDir) {
+        const searchPaths = getCommandFolderSearchPaths();
+        for (const folder of searchPaths) {
+          const dirPath = join(workingDir, folder);
+          try {
+            const files = await findMarkdownFilesRecursive(dirPath);
+            for (const { commandName } of files) {
+              commandMap.set(commandName, 'project');
+            }
+          } catch (err) {
+            if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+              getLog().error({ err, dirPath }, 'commands.list_project_failed');
+            }
+            // ENOENT: folder doesn't exist — skip
+          }
+        }
+      }
+
+      const commands = Array.from(commandMap.entries()).map(([name, source]) => ({ name, source }));
+      return c.json({ commands });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      getLog().error({ err }, 'commands.list_failed');
+      return apiError(c, 500, 'Failed to list commands');
     }
   });
 

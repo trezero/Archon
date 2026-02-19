@@ -87,7 +87,8 @@ export {
 } from './workflows/types';
 
 // Loader
-export { discoverWorkflows } from './workflows/loader';
+export { discoverWorkflows, parseWorkflow } from './workflows/loader';
+export type { ParseResult } from './workflows/loader';
 
 // Router
 export {
