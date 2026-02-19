@@ -9,7 +9,7 @@
 import { existsSync } from 'fs';
 import { createLogger } from '../utils/logger';
 import type { IPlatformAdapter, HandleMessageContext, Conversation, Codebase } from '../types';
-import { ConversationNotFoundError, isWebAdapter } from '../types';
+import { ConversationNotFoundError } from '../types';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
@@ -180,17 +180,17 @@ async function dispatchOrchestratorWorkflow(
       isolationHints
     );
     cwd = result.cwd;
-
-    // Update conversation CWD if isolation changed it
-    if (result.status === 'new' && result.env) {
-      await db.updateConversation(conversation.id, {
-        isolation_env_id: result.env.id,
-        cwd: result.cwd,
-      });
-    }
   } catch (error) {
     if (error instanceof IsolationBlockedError) {
-      getLog().info({ reason: (error as Error).message }, 'isolation_blocked');
+      getLog().warn(
+        {
+          reason: error.reason,
+          conversationId,
+          codebaseId: codebase.id,
+          workflowName: workflow.name,
+        },
+        'isolation_blocked'
+      );
       return;
     }
     throw error;
@@ -800,38 +800,48 @@ async function handleWorkflowRunCommand(
       return;
     }
 
-    const cwd = conversation.cwd ?? codebase.default_cwd;
-    const { workflows } = await discoverWorkflows(cwd);
+    // Discover workflows from default_cwd for lookup only (pre-isolation)
+    let discoveryResult: Awaited<ReturnType<typeof discoverWorkflows>>;
+    try {
+      discoveryResult = await discoverWorkflows(codebase.default_cwd);
+    } catch (err) {
+      const error = toError(err);
+      getLog().error(
+        { err: error, cwd: codebase.default_cwd, codebaseId: codebase.id },
+        'workflow_discovery_failed'
+      );
+      await platform.sendMessage(
+        conversationId,
+        `Could not read workflow definitions from \`${codebase.default_cwd}\`: ${error.message}`
+      );
+      return;
+    }
+    const { workflows, errors: discoveryErrors } = discoveryResult;
     const workflow = workflows.find(w => w.name === workflowName);
     if (!workflow) {
-      await platform.sendMessage(conversationId, `Workflow \`${workflowName}\` not found.`);
+      const brokenEntry = discoveryErrors.find(
+        e => e.filename.replace(/\.(yaml|yml)$/, '') === workflowName
+      );
+      const detail = brokenEntry ? ` (found but invalid: ${brokenEntry.error})` : '';
+      await platform.sendMessage(
+        conversationId,
+        `Workflow \`${workflowName}\` not found${detail}.`
+      );
       return;
     }
 
-    if (isWebAdapter(platform)) {
-      await dispatchBackgroundWorkflow(
-        {
-          platform,
-          conversationId,
-          cwd,
-          originalMessage: userMessage,
-          conversationDbId: conversation.id,
-          codebaseId: codebase.id,
-          availableWorkflows: workflows,
-        },
-        workflow
-      );
-    } else {
-      await executeWorkflow(
-        platform,
-        conversationId,
-        cwd,
-        workflow,
-        userMessage,
-        conversation.id,
-        codebase.id
-      );
-    }
+    // Route through dispatchOrchestratorWorkflow so validateAndResolveIsolation
+    // always runs — ensures a worktree is created regardless of how the codebase
+    // was registered (local path or GitHub URL clone).
+    await dispatchOrchestratorWorkflow(
+      platform,
+      conversationId,
+      conversation,
+      codebase,
+      workflow,
+      userMessage,
+      isolationHints
+    );
     return;
   }
 
@@ -852,10 +862,29 @@ async function handleWorkflowRunCommand(
     await db.updateConversation(conversation.id, { codebase_id: codebase.id });
 
     const cwd = codebase.default_cwd;
-    const { workflows } = await discoverWorkflows(cwd);
-    const workflow = workflows.find(w => w.name === workflowName);
+    let autoDiscoveryResult: Awaited<ReturnType<typeof discoverWorkflows>>;
+    try {
+      autoDiscoveryResult = await discoverWorkflows(cwd);
+    } catch (err) {
+      const error = toError(err);
+      getLog().error({ err: error, cwd, codebaseId: codebase.id }, 'workflow_discovery_failed');
+      await platform.sendMessage(
+        conversationId,
+        `Could not read workflow definitions from \`${cwd}\`: ${error.message}`
+      );
+      return;
+    }
+    const { workflows: autoWorkflows, errors: autoDiscoveryErrors } = autoDiscoveryResult;
+    const workflow = autoWorkflows.find(w => w.name === workflowName);
     if (!workflow) {
-      await platform.sendMessage(conversationId, `Workflow \`${workflowName}\` not found.`);
+      const brokenEntry = autoDiscoveryErrors.find(
+        e => e.filename.replace(/\.(yaml|yml)$/, '') === workflowName
+      );
+      const detail = brokenEntry ? ` (found but invalid: ${brokenEntry.error})` : '';
+      await platform.sendMessage(
+        conversationId,
+        `Workflow \`${workflowName}\` not found${detail}.`
+      );
       return;
     }
 
