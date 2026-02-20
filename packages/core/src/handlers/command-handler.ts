@@ -1495,7 +1495,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
             success: true,
             message: `Starting workflow: \`${workflow.name}\``,
             workflow: {
-              name: workflow.name,
+              definition: workflow,
               args: workflowArgs,
             },
           };

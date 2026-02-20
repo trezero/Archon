@@ -2,6 +2,7 @@
  * Core type definitions for the Remote Coding Agent platform
  */
 import type { TransitionTrigger } from '../state/session-transitions';
+import type { WorkflowDefinition } from '../workflows/types';
 
 /**
  * Custom error for when a conversation is not found during update operations
@@ -112,7 +113,7 @@ export interface CommandResult {
   modified?: boolean; // Indicates if conversation state was modified
   workflow?: {
     // If set, orchestrator should execute this workflow
-    name: string;
+    definition: WorkflowDefinition;
     args: string;
   };
 }

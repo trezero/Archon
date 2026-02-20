@@ -1988,7 +1988,7 @@ describe('CommandHandler', () => {
         const result = await handleCommand(conversationWithCodebase, '/workflow run Assist');
 
         expect(result.success).toBe(true);
-        expect(result.workflow?.name).toBe('assist');
+        expect(result.workflow?.definition.name).toBe('assist');
       });
     });
 
@@ -2263,7 +2263,7 @@ describe('CommandHandler', () => {
         expect(result.success).toBe(true);
         expect(result.message).toContain('Starting workflow: `test-workflow`');
         expect(result.workflow).toBeDefined();
-        expect(result.workflow?.name).toBe('test-workflow');
+        expect(result.workflow?.definition.name).toBe('test-workflow');
         expect(result.workflow?.args).toBe('');
       });
 
@@ -2286,7 +2286,7 @@ describe('CommandHandler', () => {
 
         expect(result.success).toBe(true);
         expect(result.workflow).toBeDefined();
-        expect(result.workflow?.name).toBe('fix-issue');
+        expect(result.workflow?.definition.name).toBe('fix-issue');
         expect(result.workflow?.args).toBe('#42 add dark mode');
       });
 

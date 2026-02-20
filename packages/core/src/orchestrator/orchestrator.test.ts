@@ -504,6 +504,58 @@ describe('orchestrator-agent handleMessage', () => {
       expect(platform.sendMessage).toHaveBeenCalledWith('chat-456', 'Session cleared');
     });
 
+    test('uses CommandResult workflow definition without rediscovery for /workflow run', async () => {
+      const workflowDefinition: WorkflowDefinition = {
+        name: 'test-workflow',
+        description: 'A test workflow',
+        steps: [{ command: 'assist' }],
+      };
+      mockGetOrCreateConversation.mockResolvedValue(mockConversationWithProject);
+      mockGetCodebase.mockResolvedValue(mockCodebase);
+      mockHandleCommand.mockResolvedValue({
+        success: true,
+        message: 'Starting workflow: `test-workflow`',
+        workflow: { definition: workflowDefinition, args: 'payload' },
+      });
+
+      await handleMessage(platform, 'chat-456', '/workflow run test-workflow payload');
+
+      expect(platform.sendMessage).toHaveBeenCalledWith(
+        'chat-456',
+        'Starting workflow: `test-workflow`'
+      );
+      expect(mockDiscoverWorkflows).not.toHaveBeenCalled();
+      expect(mockExecuteWorkflow).toHaveBeenCalled();
+    });
+
+    test('validates workflow exists in auto-selected project before dispatch', async () => {
+      const workflowDefinition: WorkflowDefinition = {
+        name: 'test-workflow',
+        description: 'A test workflow',
+        steps: [{ command: 'assist' }],
+      };
+      mockListCodebases.mockResolvedValue([mockCodebase]);
+      mockHandleCommand.mockResolvedValue({
+        success: true,
+        message: 'Starting workflow: `test-workflow`',
+        workflow: { definition: workflowDefinition, args: 'payload' },
+      });
+      mockDiscoverWorkflows.mockResolvedValue({
+        workflows: [{ ...workflowDefinition, name: 'other-workflow' }],
+        errors: [],
+      });
+
+      await handleMessage(platform, 'chat-456', '/workflow run test-workflow payload');
+
+      expect(mockDiscoverWorkflows).toHaveBeenCalledWith('/workspace/test-project');
+      expect(platform.sendMessage).toHaveBeenCalledWith(
+        'chat-456',
+        'Workflow `test-workflow` not found.\n\nUse /workflow list to see available workflows.'
+      );
+      expect(mockUpdateConversation).not.toHaveBeenCalled();
+      expect(mockExecuteWorkflow).not.toHaveBeenCalled();
+    });
+
     test('non-deterministic commands go to AI orchestrator', async () => {
       // /unknown-command should NOT be routed to command handler
       mockClient.sendQuery.mockImplementation(async function* () {
