@@ -1,8 +1,8 @@
 /**
  * Unit tests for GitHub adapter
  *
- * Note: These tests focus on adapter-specific functionality without mocking
- * database modules to avoid test pollution issues with Bun's mock.module.
+ * Note: Database modules are mocked to prevent self-filtering tests from
+ * writing phantom records (e.g., testuser/testrepo) to the real SQLite DB.
  */
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 
@@ -39,6 +39,38 @@ const mockExecFile = mock(
 
 mock.module('child_process', () => ({
   execFile: mockExecFile,
+}));
+
+// Mock database modules to prevent self-filtering tests from writing
+// phantom records (testuser/testrepo) to the real SQLite database.
+// handleWebhook() calls getOrCreateConversation + getOrCreateCodebaseForRepo
+// before hitting unmocked Octokit calls - those DB writes persisted silently.
+const mockGetOrCreateConversation = mock(async () => ({
+  id: 'conv-test',
+  codebase_id: null,
+  cwd: null,
+  isolation_env_id: null,
+}));
+const mockUpdateConversation = mock(async () => {});
+
+mock.module('@archon/core/db/conversations', () => ({
+  getOrCreateConversation: mockGetOrCreateConversation,
+  updateConversation: mockUpdateConversation,
+}));
+
+const mockFindCodebaseByRepoUrl = mock(async () => null);
+const mockCreateCodebase = mock(async () => ({
+  id: 'codebase-test',
+  name: 'testuser/testrepo',
+  default_cwd: '/tmp/test',
+}));
+
+mock.module('@archon/core/db/codebases', () => ({
+  findCodebaseByRepoUrl: mockFindCodebaseByRepoUrl,
+  createCodebase: mockCreateCodebase,
+  updateCodebase: mock(async () => {}),
+  getCodebaseCommands: mock(async () => ({})),
+  updateCodebaseCommands: mock(async () => {}),
 }));
 
 import { GitHubAdapter } from './github';
@@ -204,6 +236,9 @@ describe('GitHubAdapter', () => {
       originalAllowedUsers = process.env.GITHUB_ALLOWED_USERS;
       delete process.env.GITHUB_ALLOWED_USERS;
       mockLockManager.acquireLock.mockClear();
+      mockGetOrCreateConversation.mockClear();
+      mockFindCodebaseByRepoUrl.mockClear();
+      mockCreateCodebase.mockClear();
     });
 
     afterEach(() => {
@@ -236,16 +271,15 @@ describe('GitHubAdapter', () => {
       const adapter = createSelfFilterAdapter();
       const payload = createCommentPayload('@archon please help', 'user123');
 
-      // handleWebhook will error on DB operations, but self-filtering runs first
+      // handleWebhook progresses past self-filtering into DB/Octokit operations
       try {
         await adapter.handleWebhook(payload, 'mock-signature');
       } catch {
-        // Expected - database not mocked
+        // Expected - Octokit API not mocked for this test
       }
 
-      // Real user comments should NOT be self-filtered (they proceed to DB/processing)
-      // The absence of self-filtering is verified by the fact that we reach the DB call
-      // (which throws because it's not mocked), rather than returning early
+      // Real user comments proceed to conversation creation (not self-filtered)
+      expect(mockGetOrCreateConversation).toHaveBeenCalled();
     });
 
     test('should ignore comments containing bot marker (works with user PAT)', async () => {
@@ -267,14 +301,15 @@ describe('GitHubAdapter', () => {
       // Comment from same user but WITHOUT marker - should be processed
       const payload = createCommentPayload('@archon fix this', 'Wirasm');
 
-      // Will error on DB operations, but self-filtering runs first
+      // handleWebhook progresses past self-filtering into DB/Octokit operations
       try {
         await adapter.handleWebhook(payload, 'mock-signature');
       } catch {
-        // Expected - database not mocked
+        // Expected - Octokit API not mocked for this test
       }
 
-      // Comment without marker should NOT be self-filtered
+      // Comment without marker proceeds to conversation creation (not self-filtered)
+      expect(mockGetOrCreateConversation).toHaveBeenCalled();
     });
 
     test('should handle missing comment.user gracefully', async () => {
@@ -285,10 +320,11 @@ describe('GitHubAdapter', () => {
       try {
         await adapter.handleWebhook(payload, 'mock-signature');
       } catch {
-        // Expected - database not mocked, but no TypeError from undefined user
+        // Expected - Octokit API not mocked for this test
       }
 
-      // Missing user should not trigger self-filtering (comment.user is undefined, not bot)
+      // Missing user should not trigger self-filtering (proceeds to conversation creation)
+      expect(mockGetOrCreateConversation).toHaveBeenCalled();
     });
   });
 
