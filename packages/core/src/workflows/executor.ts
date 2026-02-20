@@ -639,7 +639,7 @@ async function executeStepInternal(
 ): Promise<StepResult> {
   const commandName = stepDef.command;
 
-  getLog().debug({ stepId, commandName }, 'step_executing');
+  getLog().info({ stepId, commandName }, 'step_executing');
   await logStepStart(logDir, workflowRun.id, commandName, Number(stepId.split('.')[0]));
   const stepStartTime = Date.now();
   let stepTokens: TokenUsage | undefined;
@@ -831,8 +831,10 @@ async function executeStepInternal(
     }
 
     const stepIndex = Number(stepId.split('.')[0]);
+    const stepDurationMs = Date.now() - stepStartTime;
+    getLog().info({ stepId, commandName, durationMs: stepDurationMs }, 'step_completed');
     await logStepComplete(logDir, workflowRun.id, commandName, stepIndex, {
-      durationMs: Date.now() - stepStartTime,
+      durationMs: stepDurationMs,
       tokens: stepTokens,
     });
     await emitValidationResults(logDir, workflowRun.id, artifactsDir, commandName, stepIndex);
@@ -964,7 +966,7 @@ async function executeParallelBlock(
   // Spawn all agents concurrently - each gets its own fresh session
   const results = await Promise.all(
     parallelSteps.map(async (step, i) => {
-      getLog().debug(
+      getLog().info(
         { blockIndex, agentIndex: i, command: step.command },
         'parallel_agent_spawning'
       );
@@ -1148,6 +1150,8 @@ async function executeLoopWorkflow(
         );
       }
     }
+
+    getLog().info({ iteration: i, maxIterations: loop.max_iterations }, 'loop_iteration_started');
 
     await safeSendMessage(
       platform,
@@ -1367,8 +1371,10 @@ async function executeLoopWorkflow(
         return;
       }
 
+      const iterationDurationMs = Date.now() - iterationStart;
+      getLog().info({ iteration: i, durationMs: iterationDurationMs }, 'loop_iteration_completed');
       await logStepComplete(logDir, workflowRun.id, `iteration-${String(i)}`, i - 1, {
-        durationMs: Date.now() - iterationStart,
+        durationMs: iterationDurationMs,
       });
 
       // Emit loop_iteration_completed
