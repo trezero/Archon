@@ -65,6 +65,21 @@ export interface OrchestratorCommands {
 // ─── Command Parsing ────────────────────────────────────────────────────────
 
 /**
+ * Find a codebase by exact name or by last path segment (e.g., "repo" matches "owner/repo").
+ * Case-insensitive. Used in both the parse phase and the dispatch phase.
+ */
+function findCodebaseByName(
+  codebases: readonly Codebase[],
+  projectName: string
+): Codebase | undefined {
+  const projectLower = projectName.toLowerCase();
+  return codebases.find(c => {
+    const nameLower = c.name.toLowerCase();
+    return nameLower === projectLower || nameLower.endsWith(`/${projectLower}`);
+  });
+}
+
+/**
  * Parse orchestrator commands from AI response text.
  * Scans for /invoke-workflow and /register-project patterns.
  */
@@ -80,7 +95,9 @@ export function parseOrchestratorCommands(
 
   // Parse /invoke-workflow {name} --project {project-name}
   // Use (\S+) for project name to avoid capturing trailing text on the same line
-  // (e.g., when AI appends tool call indicators or continues text after the command)
+  // (e.g., when AI appends tool call indicators or continues text after the command).
+  // --project MUST appear before --prompt; this order is specified in the system prompt
+  // template. Commands with --prompt before --project will not match.
   const invokePattern = /^\/invoke-workflow\s+(\S+)\s+--project[\s=]+(\S+)/m;
   const invokeMatch = invokePattern.exec(response);
   if (invokeMatch) {
@@ -92,11 +109,7 @@ export function parseOrchestratorCommands(
     if (workflow) {
       // Validate project exists (case-insensitive, supports partial name matching)
       // e.g., "remote-coding-agent" matches "dynamous-community/remote-coding-agent"
-      const projectLower = projectName.toLowerCase();
-      const matchedCodebase = codebases.find(c => {
-        const nameLower = c.name.toLowerCase();
-        return nameLower === projectLower || nameLower.endsWith(`/${projectLower}`);
-      });
+      const matchedCodebase = findCodebaseByName(codebases, projectName);
       if (matchedCodebase) {
         // Extract message before the command
         const commandIndex = response.indexOf(invokeMatch[0]);
@@ -106,9 +119,12 @@ export function parseOrchestratorCommands(
         const commandText = response.slice(commandIndex);
         const promptPattern = /--prompt\s+(?:"([^"]+)"|'([^']+)')/;
         const promptMatch = promptPattern.exec(commandText);
-        const synthesizedPrompt = promptMatch
-          ? (promptMatch[1] ?? promptMatch[2])?.trim() || undefined
-          : undefined;
+        const rawPrompt = (promptMatch?.[1] ?? promptMatch?.[2])?.trim();
+        const synthesizedPrompt = rawPrompt || undefined;
+
+        if (promptMatch && !synthesizedPrompt) {
+          getLog().warn({ workflowName, projectName }, 'synthesized_prompt_empty_discarded');
+        }
 
         result.workflowInvocation = {
           workflowName: workflow.name,
@@ -698,11 +714,7 @@ async function handleWorkflowInvocationResult(
   }
 
   // Find the codebase and workflow (supports partial name matching)
-  const projectLower = projectName.toLowerCase();
-  const codebase = codebases.find(c => {
-    const nameLower = c.name.toLowerCase();
-    return nameLower === projectLower || nameLower.endsWith(`/${projectLower}`);
-  });
+  const codebase = findCodebaseByName(codebases, projectName);
   const workflow = findWorkflow(workflowName, [...workflows]);
 
   if (codebase && workflow) {
@@ -727,12 +739,18 @@ async function handleWorkflowInvocationResult(
     return;
   }
 
-  // Fallback: send error about missing project/workflow
+  // Fallback: send error about missing project or workflow
   if (!codebase) {
     const projectList = codebases.map(c => `- ${c.name}`).join('\n');
     await platform.sendMessage(
       conversationId,
       `I couldn't find a project matching "${projectName}". Here are your registered projects:\n${projectList || '(none)'}\n\nPlease specify which project you'd like to use.`
+    );
+  } else if (!workflow) {
+    getLog().warn({ workflowName, projectName }, 'workflow_not_found_in_dispatch');
+    await platform.sendMessage(
+      conversationId,
+      `Workflow \`${workflowName}\` is not available. Use \`/workflow list\` to see available workflows.`
     );
   }
 }

@@ -825,6 +825,86 @@ describe('orchestrator-agent handleMessage', () => {
 
       expect(mockValidateAndResolveIsolation).toHaveBeenCalled();
     });
+
+    test('passes synthesizedPrompt to workflow dispatch instead of original message', async () => {
+      platform.getStreamingMode.mockReturnValue('batch');
+      const synthesized = 'Analyze the orchestrator module architecture in detail';
+
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield {
+          type: 'assistant',
+          content: `Running analysis.\n/invoke-workflow archon-assist --project test-project --prompt "${synthesized}"`,
+        };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'do that analysis thing');
+
+      expect(mockExecuteWorkflow).toHaveBeenCalledWith(
+        expect.anything(), // platform
+        expect.anything(), // conversationId
+        expect.anything(), // cwd
+        expect.anything(), // workflow
+        synthesized, // synthesizedPrompt, not original message
+        expect.anything(), // conversation.id
+        expect.anything() // codebase.id
+      );
+    });
+
+    test('falls back to original message when --prompt not provided', async () => {
+      platform.getStreamingMode.mockReturnValue('batch');
+
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield {
+          type: 'assistant',
+          content: 'On it.\n/invoke-workflow fix-bug --project test-project',
+        };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'fix the login bug');
+
+      expect(mockExecuteWorkflow).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        'fix the login bug', // original message used as fallback
+        expect.anything(),
+        expect.anything()
+      );
+    });
+
+    test('sends error when workflow found in parsing but not in dispatch', async () => {
+      platform.getStreamingMode.mockReturnValue('batch');
+
+      let callCount = 0;
+      mockFindWorkflow.mockImplementation(
+        (name: string, workflows: readonly WorkflowDefinition[]) => {
+          callCount++;
+          // First call (parseOrchestratorCommands) finds the workflow
+          // Second call (handleWorkflowInvocationResult) does not
+          if (callCount === 1) return workflows.find(w => w.name === name);
+          return undefined;
+        }
+      );
+
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield {
+          type: 'assistant',
+          content: '/invoke-workflow archon-assist --project test-project',
+        };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'help me');
+
+      expect(mockValidateAndResolveIsolation).not.toHaveBeenCalled();
+      expect(platform.sendMessage).toHaveBeenCalledWith(
+        'chat-456',
+        expect.stringContaining('archon-assist')
+      );
+    });
   });
 
   // ─── Workflow Discovery ────────────────────────────────────────────────

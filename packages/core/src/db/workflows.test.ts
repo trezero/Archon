@@ -459,11 +459,33 @@ describe('workflows database', () => {
       );
     });
 
-    test('throws on database error', async () => {
+    test('throws on database error during UPDATE', async () => {
       mockQuery.mockRejectedValueOnce(new Error('Lock timeout'));
 
       await expect(resumeWorkflowRun('workflow-run-123')).rejects.toThrow(
         'Failed to resume workflow run: Lock timeout'
+      );
+    });
+
+    test('throws on database error during SELECT after UPDATE', async () => {
+      // UPDATE succeeds
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
+      // SELECT fails
+      mockQuery.mockRejectedValueOnce(new Error('Connection lost'));
+
+      await expect(resumeWorkflowRun('workflow-run-123')).rejects.toThrow(
+        'Failed to read workflow run after update: Connection lost'
+      );
+    });
+
+    test('throws when row vanishes between UPDATE and SELECT', async () => {
+      // UPDATE succeeds (rowCount 1)
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
+      // SELECT returns nothing (row deleted between statements)
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await expect(resumeWorkflowRun('workflow-run-123')).rejects.toThrow(
+        'Workflow run vanished after update (id: workflow-run-123)'
       );
     });
   });

@@ -135,37 +135,48 @@ export async function findResumableRun(
 
 export async function resumeWorkflowRun(id: string): Promise<WorkflowRun> {
   const dialect = getDialect();
+
+  // Split into UPDATE + SELECT to support both PostgreSQL and SQLite
+  // (SQLite does not support RETURNING on UPDATE statements)
+  // Each phase has its own try/catch to avoid string-sniffing own errors in a shared catch.
+  let updateResult: Awaited<ReturnType<typeof pool.query>>;
   try {
-    // Split into UPDATE + SELECT to support both PostgreSQL and SQLite
-    // (SQLite does not support RETURNING on UPDATE statements)
-    const updateResult = await pool.query(
+    updateResult = await pool.query(
       `UPDATE remote_agent_workflow_runs
        SET status = 'running', completed_at = NULL, last_activity_at = ${dialect.now()}
        WHERE id = $1`,
       [id]
     );
-
-    if (updateResult.rowCount === 0) {
-      // Logical race: run was deleted or already activated between find and resume
-      getLog().warn({ workflowRunId: id }, 'resume_workflow_run_not_found');
-      throw new Error(`Workflow run not found (id: ${id})`);
-    }
-
-    const selectResult = await pool.query<WorkflowRun>(
-      'SELECT * FROM remote_agent_workflow_runs WHERE id = $1',
-      [id]
-    );
-    const row = selectResult.rows[0];
-    if (!row) {
-      throw new Error(`Workflow run vanished after update (id: ${id})`);
-    }
-    return row;
   } catch (error) {
     const err = error as Error;
-    if (err.message.includes('Workflow run')) throw error; // Re-throw our own errors
     getLog().error({ err, workflowRunId: id }, 'resume_workflow_run_failed');
     throw new Error(`Failed to resume workflow run: ${err.message}`);
   }
+
+  if (updateResult.rowCount === 0) {
+    // Logical race: run was deleted or already activated between find and resume
+    getLog().warn({ workflowRunId: id }, 'resume_workflow_run_not_found');
+    throw new Error(`Workflow run not found (id: ${id})`);
+  }
+
+  let selectResult: Awaited<ReturnType<typeof pool.query<WorkflowRun>>>;
+  try {
+    selectResult = await pool.query<WorkflowRun>(
+      'SELECT * FROM remote_agent_workflow_runs WHERE id = $1',
+      [id]
+    );
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err, workflowRunId: id }, 'resume_workflow_run_select_failed');
+    throw new Error(`Failed to read workflow run after update: ${err.message}`);
+  }
+
+  const row = selectResult.rows[0];
+  if (!row) {
+    getLog().error({ workflowRunId: id }, 'resume_workflow_run_vanished');
+    throw new Error(`Workflow run vanished after update (id: ${id})`);
+  }
+  return row;
 }
 
 /**

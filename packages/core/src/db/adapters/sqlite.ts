@@ -198,7 +198,13 @@ export class SqliteAdapter implements IDatabase {
   }
 
   /**
-   * Create all tables
+   * Create all tables.
+   *
+   * NOTE: NOT NULL constraint changes on existing columns (e.g., branch_name in
+   * isolation_environments, user_message in workflow_runs, name in codebases) are only
+   * enforced for new databases. For existing databases, CREATE TABLE IF NOT EXISTS is a
+   * no-op so the old schema remains. SQLite lacks ALTER COLUMN support; enforcing new
+   * constraints on existing tables would require a table rebuild via migrateColumns().
    */
   private createSchema(): void {
     this.db.run(`
