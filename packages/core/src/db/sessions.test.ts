@@ -29,6 +29,7 @@ import {
   transitionSession,
   getSessionHistory,
   getSessionChain,
+  deleteOldSessions,
   SessionNotFoundError,
 } from './sessions';
 
@@ -562,6 +563,42 @@ describe('sessions', () => {
       const result = await getSessionChain('non-existent-session');
 
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('deleteOldSessions', () => {
+    test('deletes inactive sessions older than retention period', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 5));
+
+      const count = await deleteOldSessions(30);
+
+      expect(count).toBe(5);
+      expect(mockQuery).toHaveBeenCalledWith(
+        `DELETE FROM remote_agent_sessions
+     WHERE active = false
+       AND ended_at IS NOT NULL
+       AND ended_at < NOW() - ($1 || ' days')::INTERVAL`,
+        [30]
+      );
+    });
+
+    test('returns zero when no sessions match', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 0));
+
+      const count = await deleteOldSessions(30);
+
+      expect(count).toBe(0);
+    });
+
+    test('uses provided retention days parameter', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 10));
+
+      await deleteOldSessions(90);
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('DELETE FROM remote_agent_sessions'),
+        [90]
+      );
     });
   });
 });

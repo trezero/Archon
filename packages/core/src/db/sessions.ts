@@ -187,3 +187,26 @@ export async function getSessionChain(sessionId: string): Promise<readonly Sessi
   );
   return result.rows;
 }
+
+/**
+ * Delete inactive sessions older than the specified number of days.
+ * Only deletes sessions where active = false (never touches active sessions).
+ *
+ * @param retentionDays - Delete sessions ended more than this many days ago
+ * @returns Number of deleted sessions
+ */
+export async function deleteOldSessions(retentionDays: number): Promise<number> {
+  const dialect = getDialect();
+  const result = await pool.query(
+    `DELETE FROM remote_agent_sessions
+     WHERE active = false
+       AND ended_at IS NOT NULL
+       AND ended_at < ${dialect.nowMinusDays(1)}`,
+    [retentionDays]
+  );
+  const count = result.rowCount;
+  if (count > 0) {
+    getLog().info({ deletedCount: count, retentionDays }, 'sessions.cleanup_completed');
+  }
+  return count;
+}
