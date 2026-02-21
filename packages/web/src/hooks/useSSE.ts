@@ -79,17 +79,17 @@ export function useSSE(
     };
 
     eventSource.onerror = (): void => {
-      setConnected(false);
-      console.warn('[SSE] Connection error', {
-        conversationId,
-        readyState: eventSource.readyState,
-      });
+      // Only mark disconnected when the connection is permanently closed,
+      // not during transient CONNECTING reconnection attempts (prevents flicker)
       if (eventSource.readyState === EventSource.CLOSED) {
+        setConnected(false);
         handlersRef.current.onError({
           message: 'Lost connection to server. Please refresh the page.',
           classification: 'transient',
           suggestedActions: ['Refresh the page', 'Check that the server is running'],
         });
+      } else if (eventSource.readyState === EventSource.CONNECTING) {
+        console.warn('[SSE] Connection error, reconnecting...', { conversationId });
       }
     };
 

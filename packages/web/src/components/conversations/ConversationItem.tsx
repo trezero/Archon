@@ -80,9 +80,13 @@ export function ConversationItem({
   const handleRenameSubmit = useCallback((): void => {
     const trimmed = editValue.trim();
     if (trimmed && trimmed !== conversation.title) {
-      void updateConversation(conversation.id, { title: trimmed }).then(() => {
-        void queryClient.invalidateQueries({ queryKey: ['conversations'] });
-      });
+      void updateConversation(conversation.id, { title: trimmed })
+        .then(() => {
+          void queryClient.invalidateQueries({ queryKey: ['conversations'] });
+        })
+        .catch((err: Error) => {
+          console.error('[ConversationItem] Rename failed', { error: err.message });
+        });
     }
     setIsEditing(false);
   }, [editValue, conversation.id, conversation.title, queryClient]);
@@ -90,8 +94,11 @@ export function ConversationItem({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent): void => {
       if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
         handleRenameSubmit();
       } else if (e.key === 'Escape') {
+        e.preventDefault();
         setIsEditing(false);
       }
     },

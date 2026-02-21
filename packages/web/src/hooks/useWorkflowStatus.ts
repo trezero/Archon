@@ -145,14 +145,17 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
     });
   }, []);
 
-  // Poll for stuck workflows: if any workflow is "running" for >30s, check REST API
+  // Poll for stuck workflows: if any workflow is "running" for >30s, check REST API.
+  // Use a ref to read current workflows inside the interval to avoid recreating
+  // the interval on every state change (which caused interval thrash + stale closures).
+  const workflowsRef = useRef(workflows);
+  workflowsRef.current = workflows;
+  const hasRunning = Array.from(workflows.values()).some(wf => wf.status === 'running');
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
-    const hasRunning = Array.from(workflows.values()).some(wf => wf.status === 'running');
-
     if (hasRunning && !pollingRef.current) {
       pollingRef.current = setInterval(() => {
-        for (const wf of workflows.values()) {
+        for (const wf of workflowsRef.current.values()) {
           if (wf.status !== 'running') continue;
           // Only poll workflows running for >30s (safety net for stuck SSE; interval is 15s — max latency ~45s)
           if (Date.now() - wf.startedAt < 30_000) continue;
@@ -212,7 +215,7 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
         pollingRef.current = null;
       }
     };
-  }, [workflows]);
+  }, [hasRunning]);
 
   // Find the most recent running workflow
   let activeWorkflow: WorkflowState | null = null;

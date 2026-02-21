@@ -10,7 +10,7 @@ interface ToolCallCardProps {
 export function ToolCallCard({ tool }: ToolCallCardProps): React.ReactElement {
   const [expanded, setExpanded] = useState(tool.isExpanded);
   const [showAllOutput, setShowAllOutput] = useState(false);
-  const isRunning = !tool.output && tool.duration === undefined;
+  const isRunning = tool.output === undefined && tool.duration === undefined;
 
   // Get a brief summary from the input
   const summary = Object.values(tool.input)[0];
@@ -19,7 +19,7 @@ export function ToolCallCard({ tool }: ToolCallCardProps): React.ReactElement {
 
   // Limit output display
   const outputLines = tool.output?.split('\n') ?? [];
-  const isLongOutput = outputLines.length > 50;
+  const isLongOutput = outputLines.length > 20;
   const displayOutput = showAllOutput ? tool.output : outputLines.slice(0, 20).join('\n');
 
   return (
@@ -73,13 +73,13 @@ export function ToolCallCard({ tool }: ToolCallCardProps): React.ReactElement {
               </pre>
             </div>
           )}
-          {tool.output && (
+          {tool.output !== undefined && (
             <div>
               <span className="text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
                 Output
               </span>
               <pre className="mt-1 max-h-80 overflow-auto rounded-md bg-background p-2 font-mono text-xs text-text-secondary">
-                {displayOutput}
+                {displayOutput || '(no output)'}
               </pre>
               {isLongOutput && !showAllOutput && (
                 <button
