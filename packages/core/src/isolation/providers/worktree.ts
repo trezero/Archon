@@ -436,9 +436,14 @@ export class WorktreeProvider implements IIsolationProvider {
   /**
    * Get worktree path for request.
    *
+   * Path format depends on the worktree base layout:
+   * - Project-scoped: `~/.archon/workspaces/{owner}/{repo}/worktrees/{branch}`
+   * - Legacy global:  `~/.archon/worktrees/{owner}/{repo}/{branch}`
+   *
    * When the worktree base is project-scoped (under workspaces/owner/repo/worktrees/),
-   * only append the branch name. When using the legacy global worktrees path,
-   * append owner/repo/branch to avoid collisions.
+   * only append the branch name since the base already includes owner/repo.
+   * When using the legacy global worktrees path, append owner/repo/branch to
+   * avoid collisions between repos.
    */
   getWorktreePath(request: IsolationRequest, branchName: string): string {
     const worktreeBase = getWorktreeBase(request.canonicalRepoPath);

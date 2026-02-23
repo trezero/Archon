@@ -34,10 +34,15 @@ interface IsolationRequestBase {
   codebaseId: string;
 
   /**
-   * Absolute path to the main repository checkout (not a worktree).
-   * Must be canonical because worktree operations are executed from the main repo.
-   * Use getCanonicalRepoPath() to resolve a worktree path to its canonical repo.
-   * Format: /home/user/.archon/workspaces/owner/repo (expanded from ~/.archon/...)
+   * Absolute, resolved filesystem path to the main repository checkout.
+   *
+   * "Canonical" means the real path with symlinks resolved and `~` expanded
+   * (e.g., `/home/user/.archon/workspaces/owner/repo/source`). This must
+   * point to the primary git checkout, not a worktree, because git worktree
+   * operations (add, remove, list) must be executed from the main repo.
+   *
+   * Use `getCanonicalRepoPath()` to resolve any path (including worktree
+   * paths) back to the canonical repo path.
    */
   canonicalRepoPath: string;
 
@@ -227,15 +232,22 @@ export interface DestroyResult {
 }
 
 /**
- * Provider interface for isolation strategies
+ * Provider interface for isolation strategies.
  *
- * Git worktrees are the default implementation. The abstraction enables
- * future strategies like containers, VMs, or remote development environments.
+ * Manages the lifecycle of isolated development environments:
+ * create → use → destroy. Git worktrees are the default (and currently
+ * only) implementation. The abstraction enables future strategies like
+ * containers, VMs, or remote development environments.
  *
- * Required methods: create, destroy, get, list, healthCheck
- * Optional methods:
- *   - adopt: Allow taking ownership of externally-created environments
- *            (enables skill-app symbiosis for worktree provider)
+ * Error contract:
+ * - `create` throws on failure (caller should surface to user)
+ * - `destroy` returns a `DestroyResult` with partial-failure details
+ * - `get` returns null if not found, throws on unexpected I/O errors
+ * - `healthCheck` returns false if missing, throws on permission errors
+ *
+ * Optional method:
+ * - `adopt`: Take ownership of externally-created environments
+ *   (enables skill-app symbiosis for the worktree provider)
  */
 export interface IIsolationProvider {
   /** Provider type identifier */
