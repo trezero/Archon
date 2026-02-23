@@ -647,6 +647,22 @@ describe('WorktreeProvider', () => {
         'Failed to create worktree for PR #42'
       );
     });
+
+    test('propagates permission error when workspace sync fails during creation', async () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
+        workflowType: 'issue',
+        identifier: '99',
+      };
+
+      worktreeExistsSpy.mockResolvedValue(false);
+      syncWorkspaceSpy.mockRejectedValue(
+        Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+      );
+
+      await expect(provider.create(request)).rejects.toThrow('Permission denied');
+    });
   });
 
   describe('destroy', () => {
@@ -1019,6 +1035,27 @@ describe('WorktreeProvider', () => {
       );
       expect(result.remoteBranchDeleted).toBeNull(); // Not requested
     });
+
+    test('partial cleanup: worktree removed but branch deletion fails with unexpected error', async () => {
+      const worktreePath = '/workspace/worktrees/repo/pr-42-review';
+      const branchName = 'pr-42-review';
+
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('branch') && args.includes('-D')) {
+          throw new Error('unexpected git internal error');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      const result = await provider.destroy(worktreePath, { branchName });
+
+      expect(result.worktreeRemoved).toBe(true);
+      expect(result.branchDeleted).toBe(false);
+      expect(result.warnings.length).toBeGreaterThanOrEqual(1);
+      expect(result.warnings.some(w => w.includes('Unexpected error deleting branch'))).toBe(true);
+    });
   });
 
   describe('get', () => {
@@ -1061,6 +1098,19 @@ describe('WorktreeProvider', () => {
       await expect(provider.get('/workspace/worktrees/repo/issue-42')).rejects.toThrow(
         'git timeout'
       );
+    });
+
+    test('returns null when worktree exists on disk but not in git list (corrupted state)', async () => {
+      worktreeExistsSpy.mockResolvedValue(true);
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+      // Worktree list does NOT include the queried path
+      listWorktreesSpy.mockResolvedValue([
+        { path: '/workspace/repo', branch: 'main' },
+        { path: '/workspace/worktrees/repo/other-branch', branch: 'other-branch' },
+      ]);
+
+      const result = await provider.get('/workspace/worktrees/repo/issue-42');
+      expect(result).toBeNull();
     });
   });
 
@@ -1136,6 +1186,19 @@ describe('WorktreeProvider', () => {
       worktreeExistsSpy.mockResolvedValue(true);
       getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
       listWorktreesSpy.mockRejectedValue(new Error('git timeout'));
+
+      const result = await provider.adopt('/workspace/worktrees/repo/feature-auth');
+      expect(result).toBeNull();
+    });
+
+    test('returns null when worktree exists on disk but not in git list (corrupted state)', async () => {
+      worktreeExistsSpy.mockResolvedValue(true);
+      getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
+      // Worktree list does NOT include the queried path
+      listWorktreesSpy.mockResolvedValue([
+        { path: '/workspace/repo', branch: 'main' },
+        { path: '/workspace/worktrees/repo/other-branch', branch: 'other-branch' },
+      ]);
 
       const result = await provider.adopt('/workspace/worktrees/repo/feature-auth');
       expect(result).toBeNull();
