@@ -129,6 +129,10 @@ Environment variables override all other configuration:
 | `SLACK_STREAMING_MODE`         | Slack streaming            | `batch`       |
 | `GITHUB_STREAMING_MODE`        | GitHub streaming           | `batch`       |
 | `MAX_CONCURRENT_CONVERSATIONS` | Concurrency limit          | `10`          |
+| `STALE_THRESHOLD_DAYS`         | Days before an inactive worktree is considered stale | `14` |
+| `MAX_WORKTREES_PER_CODEBASE`   | Max worktrees per codebase before auto-cleanup | `25` |
+| `CLEANUP_INTERVAL_HOURS`       | How often the background cleanup runs | `6` |
+| `SESSION_RETENTION_DAYS`       | Delete inactive sessions older than N days | `30` |
 
 ### `.env` File Locations
 
