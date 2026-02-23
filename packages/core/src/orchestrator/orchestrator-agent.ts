@@ -498,6 +498,7 @@ async function handleStreamMode(
 ): Promise<void> {
   const allMessages: string[] = [];
   let newSessionId: string | undefined;
+  let commandDetected = false;
 
   for await (const msg of aiClient.sendQuery(
     fullPrompt,
@@ -505,22 +506,30 @@ async function handleStreamMode(
     session.assistant_session_id ?? undefined
   )) {
     if (msg.type === 'assistant' && msg.content) {
-      allMessages.push(msg.content);
-      await platform.sendMessage(conversationId, msg.content);
-      // Break early before tool calls execute if an orchestrator command is detected
-      const accumulated = allMessages.join('');
-      if (/^\/invoke-workflow\s/m.test(accumulated) || /^\/register-project\s/m.test(accumulated)) {
-        break;
+      if (!commandDetected) {
+        allMessages.push(msg.content);
+        await platform.sendMessage(conversationId, msg.content);
+        const accumulated = allMessages.join('');
+        if (
+          /^\/invoke-workflow\s/m.test(accumulated) ||
+          /^\/register-project\s/m.test(accumulated)
+        ) {
+          commandDetected = true;
+        }
       }
     } else if (msg.type === 'tool' && msg.toolName) {
-      const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
-      await platform.sendMessage(conversationId, toolMessage);
-      if (platform.sendStructuredEvent) {
-        await platform.sendStructuredEvent(conversationId, msg);
+      if (!commandDetected) {
+        const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
+        await platform.sendMessage(conversationId, toolMessage, {
+          category: 'tool_call_formatted',
+        });
+        if (platform.sendStructuredEvent) {
+          await platform.sendStructuredEvent(conversationId, msg);
+        }
       }
     } else if (msg.type === 'result' && msg.sessionId) {
       newSessionId = msg.sessionId;
-      if (platform.sendStructuredEvent) {
+      if (!commandDetected && platform.sendStructuredEvent) {
         await platform.sendStructuredEvent(conversationId, msg);
       }
     }
@@ -596,6 +605,7 @@ async function handleBatchMode(
   let assistantChunksTruncated = false;
   let totalChunksTruncated = false;
   let newSessionId: string | undefined;
+  let commandDetected = false;
 
   for await (const msg of aiClient.sendQuery(
     fullPrompt,
@@ -603,28 +613,33 @@ async function handleBatchMode(
     session.assistant_session_id ?? undefined
   )) {
     if (msg.type === 'assistant' && msg.content) {
-      assistantMessages.push(msg.content);
-      allChunks.push({ type: 'assistant', content: msg.content });
+      if (!commandDetected) {
+        assistantMessages.push(msg.content);
+        allChunks.push({ type: 'assistant', content: msg.content });
 
-      if (assistantMessages.length > MAX_BATCH_ASSISTANT_CHUNKS) {
-        assistantMessages.shift();
-        assistantChunksTruncated = true;
-      }
-
-      // Break early on orchestrator command detection
-      const accumulated = assistantMessages.join('');
-      if (/^\/invoke-workflow\s/m.test(accumulated) || /^\/register-project\s/m.test(accumulated)) {
-        break;
+        if (assistantMessages.length > MAX_BATCH_ASSISTANT_CHUNKS) {
+          assistantMessages.shift();
+          assistantChunksTruncated = true;
+        }
+        const accumulated = assistantMessages.join('');
+        if (
+          /^\/invoke-workflow\s/m.test(accumulated) ||
+          /^\/register-project\s/m.test(accumulated)
+        ) {
+          commandDetected = true;
+        }
       }
     } else if (msg.type === 'tool' && msg.toolName) {
-      const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
-      allChunks.push({ type: 'tool', content: toolMessage });
-      getLog().debug({ toolName: msg.toolName }, 'tool_call');
+      if (!commandDetected) {
+        const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
+        allChunks.push({ type: 'tool', content: toolMessage });
+        getLog().debug({ toolName: msg.toolName }, 'tool_call');
+      }
     } else if (msg.type === 'result' && msg.sessionId) {
       newSessionId = msg.sessionId;
     }
 
-    if (allChunks.length > MAX_BATCH_TOTAL_CHUNKS) {
+    if (!commandDetected && allChunks.length > MAX_BATCH_TOTAL_CHUNKS) {
       allChunks.shift();
       totalChunksTruncated = true;
     }

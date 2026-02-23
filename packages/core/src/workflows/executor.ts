@@ -635,7 +635,8 @@ async function executeStepInternal(
   baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
   currentSessionId?: string,
   configuredCommandFolder?: string,
-  issueContext?: string
+  issueContext?: string,
+  abortSignal?: AbortSignal
 ): Promise<StepResult> {
   const commandName = stepDef.command;
 
@@ -721,6 +722,11 @@ async function executeStepInternal(
       if (stepDef.allowed_tools !== undefined) stepOptions.tools = stepDef.allowed_tools;
       if (stepDef.denied_tools !== undefined) stepOptions.disallowedTools = stepDef.denied_tools;
     }
+  }
+
+  // Merge abort signal into options
+  if (abortSignal) {
+    stepOptions = { ...stepOptions, abortSignal };
   }
 
   try {
@@ -956,7 +962,8 @@ async function executeParallelBlock(
   logDir: string,
   baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
   configuredCommandFolder?: string,
-  issueContext?: string
+  issueContext?: string,
+  abortSignal?: AbortSignal
 ): Promise<ParallelStepResult[]> {
   getLog().info({ agentCount: parallelSteps.length, cwd }, 'parallel_block_starting');
 
@@ -1007,7 +1014,8 @@ async function executeParallelBlock(
         baseBranch,
         undefined, // Always fresh session for parallel (no resume)
         configuredCommandFolder,
-        issueContext
+        issueContext,
+        abortSignal
       );
 
       // Emit parallel_agent_completed or parallel_agent_failed
@@ -1071,7 +1079,8 @@ async function executeLoopWorkflow(
   artifactsDir: string,
   logDir: string,
   baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
-  issueContext?: string
+  issueContext?: string,
+  abortSignal?: AbortSignal
 ): Promise<void> {
   // Guard for TypeScript type narrowing and runtime safety - caller checks workflow.loop
   // exists but doesn't verify workflow.prompt, so this guard is meaningful for both
@@ -1128,6 +1137,21 @@ async function executeLoopWorkflow(
   }
 
   for (let i = startIteration; i <= loop.max_iterations; i++) {
+    // Between-iteration cancellation check
+    const currentStatus = await workflowDb.getWorkflowRunStatus(workflowRun.id);
+    if (currentStatus === 'cancelled') {
+      getLog().info({ workflowRunId: workflowRun.id, iteration: i }, 'workflow.cancel_detected');
+      await sendCriticalMessage(
+        platform,
+        conversationId,
+        `⚠️ **Workflow cancelled**: \`${workflow.name}\` (at iteration ${String(i)})`,
+        workflowContext,
+        undefined,
+        { category: 'workflow_status', segment: 'new' }
+      );
+      return;
+    }
+
     // Update metadata with current iteration (non-critical - log but don't fail on db error)
     try {
       await workflowDb.updateWorkflowRun(workflowRun.id, {
@@ -1227,11 +1251,14 @@ async function executeLoopWorkflow(
       let activityUpdateFailures = 0;
       let activityWarningShown = false;
 
+      // Merge abort signal into options for this iteration
+      const iterationOptions = abortSignal ? { ...resolvedOptions, abortSignal } : resolvedOptions;
+
       for await (const msg of aiClient.sendQuery(
         substitutedPrompt,
         cwd,
         resumeSessionId,
-        resolvedOptions
+        iterationOptions
       )) {
         // Update activity timestamp with failure tracking
         try {
@@ -1504,7 +1531,8 @@ export async function executeWorkflow(
     isPrReview?: boolean;
     prSha?: string;
     prBranch?: string;
-  }
+  },
+  parentConversationId?: string
 ): Promise<WorkflowExecutionResult> {
   // Load config once for the entire workflow execution
   const config = await configLoader.loadConfig(cwd);
@@ -1699,6 +1727,7 @@ export async function executeWorkflow(
         user_message: userMessage,
         working_path: cwd,
         metadata: issueContext ? { github_context: issueContext } : {},
+        parent_conversation_id: parentConversationId,
       });
     } catch (error) {
       const err = error as Error;
@@ -1721,6 +1750,9 @@ export async function executeWorkflow(
   // Pre-create the artifacts directory so commands can write to it immediately
   await mkdir(artifactsDir, { recursive: true });
   getLog().debug({ artifactsDir, logDir }, 'workflow_paths_resolved');
+
+  // AbortController for cancelling in-flight AI calls when workflow is cancelled
+  const workflowAbortController = new AbortController();
 
   // Wrap execution in try-catch to ensure workflow is marked as failed on any error
   try {
@@ -1889,7 +1921,8 @@ export async function executeWorkflow(
         artifactsDir,
         logDir,
         baseBranch,
-        issueContext
+        issueContext,
+        workflowAbortController.signal
       );
       // Loop workflow handles its own success/failure internally
       // Check the database status to determine result
@@ -1938,6 +1971,22 @@ export async function executeWorkflow(
           data: { resumedFrom: resumeFromStepIndex },
         });
         continue;
+      }
+
+      // Between-step cancellation check
+      const stepStatus = await workflowDb.getWorkflowRunStatus(workflowRun.id);
+      if (stepStatus === 'cancelled') {
+        getLog().info({ workflowRunId: workflowRun.id, stepIndex: i }, 'workflow.cancel_detected');
+        workflowAbortController.abort();
+        await sendCriticalMessage(
+          platform,
+          conversationId,
+          `⚠️ **Workflow cancelled**: \`${workflow.name}\``,
+          workflowContext,
+          undefined,
+          { category: 'workflow_status', segment: 'new' }
+        );
+        return { success: false, workflowRunId: workflowRun.id, error: 'Workflow cancelled' };
       }
 
       const step = steps[i];
@@ -1992,7 +2041,8 @@ export async function executeWorkflow(
           logDir,
           baseBranch,
           configuredCommandFolder,
-          issueContext
+          issueContext,
+          workflowAbortController.signal
         );
 
         // Check for failures - report ALL failures, not just the first one
@@ -2128,7 +2178,8 @@ export async function executeWorkflow(
           baseBranch,
           resumeSessionId,
           configuredCommandFolder,
-          issueContext
+          issueContext,
+          workflowAbortController.signal
         );
 
         if (!result.success) {

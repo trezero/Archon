@@ -15,6 +15,7 @@ mock.module('./connection', () => ({
 import {
   createWorkflowRun,
   getWorkflowRun,
+  getWorkflowRunStatus,
   getActiveWorkflowRun,
   updateWorkflowRun,
   completeWorkflowRun,
@@ -59,7 +60,15 @@ describe('workflows database', () => {
       expect(result).toEqual(mockWorkflowRun);
       expect(mockQuery).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO remote_agent_workflow_runs'),
-        ['feature-development', 'conv-456', 'codebase-789', 'Add dark mode support', '{}', null]
+        [
+          'feature-development',
+          'conv-456',
+          'codebase-789',
+          'Add dark mode support',
+          '{}',
+          null,
+          null,
+        ]
       );
     });
 
@@ -88,6 +97,7 @@ describe('workflows database', () => {
           'Add dark mode support',
           JSON.stringify({ github_context: 'Issue #42 context' }),
           null,
+          null,
         ]
       );
     });
@@ -105,7 +115,7 @@ describe('workflows database', () => {
       expect(result.codebase_id).toBeNull();
       expect(mockQuery).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO remote_agent_workflow_runs'),
-        ['feature-development', 'conv-456', null, 'Add dark mode support', '{}', null]
+        ['feature-development', 'conv-456', null, 'Add dark mode support', '{}', null, null]
       );
     });
   });
@@ -132,6 +142,36 @@ describe('workflows database', () => {
     });
   });
 
+  describe('getWorkflowRunStatus', () => {
+    test('returns status for existing workflow run', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([{ status: 'running' }]));
+
+      const result = await getWorkflowRunStatus('workflow-run-123');
+
+      expect(result).toBe('running');
+      expect(mockQuery).toHaveBeenCalledWith(
+        'SELECT status FROM remote_agent_workflow_runs WHERE id = $1',
+        ['workflow-run-123']
+      );
+    });
+
+    test('returns null for non-existent workflow run', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      const result = await getWorkflowRunStatus('non-existent');
+
+      expect(result).toBeNull();
+    });
+
+    test('throws on database error', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('Connection refused'));
+
+      await expect(getWorkflowRunStatus('test-id')).rejects.toThrow(
+        'Failed to get workflow run status: Connection refused'
+      );
+    });
+  });
+
   describe('getActiveWorkflowRun', () => {
     test('returns active workflow run for conversation', async () => {
       mockQuery.mockResolvedValueOnce(createQueryResult([mockWorkflowRun]));
@@ -140,8 +180,10 @@ describe('workflows database', () => {
 
       expect(result).toEqual(mockWorkflowRun);
       expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining("WHERE conversation_id = $1 AND status = 'running'"),
-        ['conv-456']
+        expect.stringContaining(
+          "(conversation_id = $1 OR parent_conversation_id = $2) AND status = 'running'"
+        ),
+        ['conv-456', 'conv-456']
       );
     });
 

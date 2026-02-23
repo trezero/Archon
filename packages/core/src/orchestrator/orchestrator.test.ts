@@ -716,11 +716,13 @@ describe('orchestrator-agent handleMessage', () => {
       await handleMessage(platform, 'chat-456', 'list files');
 
       // formatToolCall mock returns '🔧 BASH'
-      expect(platform.sendMessage).toHaveBeenCalledWith('chat-456', '🔧 BASH');
+      expect(platform.sendMessage).toHaveBeenCalledWith('chat-456', '🔧 BASH', {
+        category: 'tool_call_formatted',
+      });
       expect(platform.sendMessage).toHaveBeenCalledWith('chat-456', 'Done');
     });
 
-    test('breaks early when /invoke-workflow detected', async () => {
+    test('silences further output after /invoke-workflow detected but captures sessionId', async () => {
       mockListCodebases.mockResolvedValue([mockCodebase]);
       mockDiscoverWorkflows.mockResolvedValue({ workflows: testWorkflows, errors: [] });
       mockFindWorkflow.mockImplementation(
@@ -733,7 +735,7 @@ describe('orchestrator-agent handleMessage', () => {
           type: 'assistant',
           content: '/invoke-workflow fix-bug --project test-project',
         };
-        // These should NOT be reached due to early break
+        // These are silenced (not sent to platform) but loop continues to capture result
         yield { type: 'assistant', content: 'This should not appear' };
         yield { type: 'result', sessionId: 'session-id' };
       });
@@ -742,6 +744,8 @@ describe('orchestrator-agent handleMessage', () => {
 
       // Should dispatch the workflow
       expect(mockValidateAndResolveIsolation).toHaveBeenCalled();
+      // Extra assistant message should NOT have been sent to platform
+      expect(platform.sendMessage).not.toHaveBeenCalledWith('chat-456', 'This should not appear');
     });
   });
 

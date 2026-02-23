@@ -208,12 +208,30 @@ export class ClaudeClient implements IAssistantClient {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= MAX_SUBPROCESS_RETRIES; attempt++) {
+      // Check if already aborted before starting attempt
+      if (requestOptions?.abortSignal?.aborted) {
+        throw new Error('Query aborted');
+      }
+
       const stderrLines: string[] = [];
+
+      // Create per-attempt abort controller and wire to caller's signal
+      const controller = new AbortController();
+      if (requestOptions?.abortSignal) {
+        requestOptions.abortSignal.addEventListener(
+          'abort',
+          () => {
+            controller.abort();
+          },
+          { once: true }
+        );
+      }
 
       const options: Options = {
         cwd,
         env: buildSubprocessEnv(),
         model: requestOptions?.model,
+        abortController: controller,
         ...(requestOptions?.tools !== undefined ? { tools: requestOptions.tools } : {}),
         ...(requestOptions?.disallowedTools !== undefined
           ? { disallowedTools: requestOptions.disallowedTools }
@@ -290,6 +308,12 @@ export class ClaudeClient implements IAssistantClient {
         return; // Success - exit retry loop
       } catch (error) {
         const err = error as Error;
+
+        // Don't retry aborted queries
+        if (controller.signal.aborted) {
+          throw new Error('Query aborted');
+        }
+
         const stderrContext = stderrLines.join('\n');
         const errorClass = classifySubprocessError(err.message, stderrContext);
 

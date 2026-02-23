@@ -19,6 +19,7 @@ export async function createWorkflowRun(data: {
   user_message: string;
   metadata?: Record<string, unknown>;
   working_path?: string;
+  parent_conversation_id?: string;
 }): Promise<WorkflowRun> {
   // Serialize metadata with validation to catch circular references early
   let metadataJson: string;
@@ -53,8 +54,8 @@ export async function createWorkflowRun(data: {
   try {
     const result = await pool.query<WorkflowRun>(
       `INSERT INTO remote_agent_workflow_runs
-       (workflow_name, conversation_id, codebase_id, user_message, metadata, working_path)
-       VALUES ($1, $2, $3, $4, $5, $6)
+       (workflow_name, conversation_id, codebase_id, user_message, metadata, working_path, parent_conversation_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
       [
         data.workflow_name,
@@ -63,6 +64,7 @@ export async function createWorkflowRun(data: {
         data.user_message,
         metadataJson,
         data.working_path ?? null,
+        data.parent_conversation_id ?? null,
       ]
     );
     const row = result.rows[0];
@@ -93,13 +95,27 @@ export async function getWorkflowRun(id: string): Promise<WorkflowRun | null> {
   }
 }
 
+export async function getWorkflowRunStatus(id: string): Promise<string | null> {
+  try {
+    const result = await pool.query<{ status: string }>(
+      'SELECT status FROM remote_agent_workflow_runs WHERE id = $1',
+      [id]
+    );
+    return result.rows[0]?.status ?? null;
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err }, 'get_workflow_run_status_failed');
+    throw new Error(`Failed to get workflow run status: ${err.message}`);
+  }
+}
+
 export async function getActiveWorkflowRun(conversationId: string): Promise<WorkflowRun | null> {
   try {
     const result = await pool.query<WorkflowRun>(
       `SELECT * FROM remote_agent_workflow_runs
-       WHERE conversation_id = $1 AND status = 'running'
+       WHERE (conversation_id = $1 OR parent_conversation_id = $2) AND status = 'running'
        ORDER BY started_at DESC LIMIT 1`,
-      [conversationId]
+      [conversationId, conversationId]
     );
     return result.rows[0] || null;
   } catch (error) {

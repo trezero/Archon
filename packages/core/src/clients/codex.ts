@@ -150,6 +150,11 @@ export class CodexClient implements IAssistantClient {
     const codex = getCodex();
     const threadOptions = buildThreadOptions(cwd, options);
 
+    // Check if already aborted before starting
+    if (options?.abortSignal?.aborted) {
+      throw new Error('Query aborted');
+    }
+
     // Track if we fell back from a failed resume (to notify user)
     let sessionResumeFailed = false;
 
@@ -205,6 +210,12 @@ export class CodexClient implements IAssistantClient {
 
       // Process streaming events
       for await (const event of result.events) {
+        // Check abort signal between events
+        if (options?.abortSignal?.aborted) {
+          getLog().info('query_aborted_between_events');
+          break;
+        }
+
         // Log progress for item.started (visibility fix for Codex appearing to hang)
         if (event.type === 'item.started') {
           const item = event.item;

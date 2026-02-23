@@ -249,6 +249,11 @@ export interface AssistantRequestOptions {
    * Shape: { type: 'json_schema', schema: <JSON Schema object> }
    */
   outputFormat?: { type: 'json_schema'; schema: Record<string, unknown> };
+  /**
+   * Abort signal for cancelling in-flight AI requests.
+   * When aborted, the AI client should terminate the subprocess/query gracefully.
+   */
+  abortSignal?: AbortSignal;
 }
 
 /**

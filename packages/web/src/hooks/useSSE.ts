@@ -175,6 +175,13 @@ export function useSSE(
             break;
           case 'workflow_status':
             h.onWorkflowStatus?.(data);
+            if (
+              data.status === 'completed' ||
+              data.status === 'failed' ||
+              data.status === 'cancelled'
+            ) {
+              h.onLockChange(false);
+            }
             break;
           case 'parallel_agent':
             h.onParallelAgent?.(data);

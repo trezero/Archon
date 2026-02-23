@@ -47,7 +47,6 @@ import { getIsolationProvider } from '../isolation';
 import { worktreeExists, findWorktreeByBranch, getCanonicalRepoPath } from '../utils/git';
 import { executeWorkflow } from '../workflows';
 import type { WorkflowDefinition } from '../workflows';
-import * as workflowDb from '../db/workflows';
 import {
   cleanupToMakeRoom,
   getWorktreeStatusBreakdown,
@@ -519,12 +518,9 @@ export async function dispatchBackgroundWorkflow(
           workerConv.id,
           ctx.codebaseId,
           ctx.issueContext,
-          isolationContext
+          isolationContext,
+          ctx.conversationDbId
         );
-        // Store parent link on the workflow run (regardless of success/failure)
-        if (result.workflowRunId) {
-          await workflowDb.updateWorkflowRunParent(result.workflowRunId, ctx.conversationDbId);
-        }
         // Surface workflow output to parent conversation as a result card
         if (result.success && result.summary) {
           try {

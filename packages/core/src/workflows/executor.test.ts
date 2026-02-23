@@ -1067,7 +1067,7 @@ describe('Workflow Executor', () => {
       );
 
       const optionsArg = mockSendQuery.mock.calls[0][3] as Record<string, unknown>;
-      expect(optionsArg).toEqual({
+      expect(optionsArg).toMatchObject({
         model: 'gpt-5.2-codex',
         modelReasoningEffort: 'high',
         webSearchMode: 'live',
@@ -3632,6 +3632,10 @@ describe('Workflow Executor', () => {
           query.includes('last_activity_at')
         ) {
           return Promise.resolve(createQueryResult([]));
+        }
+        // Between-step cancellation check (getWorkflowRunStatus)
+        if (query.includes('SELECT status FROM remote_agent_workflow_runs')) {
+          return Promise.resolve(createQueryResult([{ status: 'running' }]));
         }
         throw new Error(`Unexpected query: ${query.slice(0, 100)}`);
       };
