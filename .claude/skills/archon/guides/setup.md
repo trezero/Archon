@@ -198,24 +198,14 @@ For advanced platform configuration (webhook URLs, bot permissions, etc.), refer
 - `guides/slack.md` — Slack app configuration
 - `guides/discord.md` — Discord bot permissions
 
-## Step 6: Copy Defaults to Target Repo
+## Step 6: Defaults (No Copy Needed)
 
-Copy the bundled default commands and workflows to the target repo so the user can read, inspect, and modify them:
-
-```bash
-mkdir -p <target-repo>/.archon/commands
-mkdir -p <target-repo>/.archon/workflows
-cp -r <archon-repo>/.archon/commands/defaults/* <target-repo>/.archon/commands/
-cp -r <archon-repo>/.archon/workflows/defaults/* <target-repo>/.archon/workflows/
-```
+Bundled default commands and workflows are loaded automatically at runtime from the Archon installation — nothing needs to be copied into the target repo.
 
 Tell the user:
-- "Copied **{N} commands** and **{M} workflows** to your repo's `.archon/` folder."
-- "You can read, modify, or delete any of these. Your repo versions take priority over bundled defaults."
-- "Commands are in `.archon/commands/` — these are prompt templates for AI steps."
-- "Workflows are in `.archon/workflows/` — these are YAML files defining multi-step AI pipelines."
-
-Count the files copied to fill in {N} and {M}.
+- "Default commands and workflows are loaded automatically at runtime — no files are added to your repo."
+- "To browse defaults, look in `<archon-repo>/.archon/commands/defaults/` and `<archon-repo>/.archon/workflows/defaults/`."
+- "To customize a default, copy the specific file into your repo's `.archon/commands/` or `.archon/workflows/` directory with the same filename. Your repo version takes priority over the bundled default."
 
 ## Step 7: Start the Server (non-CLI platforms only)
 
@@ -250,14 +240,26 @@ If verification fails:
 | `relation "remote_agent_*" does not exist` | DATABASE_URL missing or tables not created | Ensure `~/.archon/.env` has DATABASE_URL and run migrations |
 | `Database: sqlite` but expected PostgreSQL | `~/.archon/.env` missing DATABASE_URL | Add DATABASE_URL to `~/.archon/.env` |
 
-## Step 9: Copy Skill to Target Repo
+## Step 9: Copy Skill to Target Repo (Optional)
 
-Copy the archon skill so it's available when the user opens Claude Code in their target repo:
+Use **AskUserQuestion** to ask:
+
+```
+Header: "Archon skill"
+Question: "Would you like to copy the Archon skill into your target repo so Claude Code can invoke Archon workflows from there?"
+Options:
+  1. "Yes, copy the skill" — Copies .claude/skills/archon/ into the target repo. This will appear in git unless you gitignore it.
+  2. "No, skip" — You can always run Archon workflows from the Archon repo instead.
+```
+
+If "Yes, copy the skill":
 
 ```bash
 mkdir -p <target-repo>/.claude/skills
 cp -r <archon-repo>/.claude/skills/archon <target-repo>/.claude/skills/archon
 ```
+
+Note: Do NOT modify the user's `.gitignore` — let them decide how to handle it.
 
 ## Step 10: Final Summary
 
@@ -273,16 +275,16 @@ Example first command in the target repo:
 "Use archon to fix issue #1"
 ```
 
-Summarize what was copied to their repo:
-- `.archon/commands/` — {N} command templates (editable prompts)
-- `.archon/workflows/` — {M} workflow definitions (editable YAML pipelines)
+Tell the user:
+- Default commands and workflows load automatically at runtime — nothing was added to your repo
 - `.claude/skills/archon/` — skill for Claude Code integration
+- To customize a default, copy the specific file from `<archon-repo>/.archon/commands/defaults/` or `<archon-repo>/.archon/workflows/defaults/` into your repo's `.archon/commands/` or `.archon/workflows/` with the same filename
 
 **Important**: End the summary with this message:
 
 > "If you want to configure advanced options later — like changing the default AI assistant, customizing worktree behavior, or adjusting which files get copied into isolated environments — just ask me to help you with 'archon config' and I'll walk you through it."
 
-The end state: user is in their target repo with the Archon skill available, default commands and workflows copied locally for inspection and customization, using Claude Code as the interface.
+The end state: user is in their target repo with the Archon skill available, defaults loaded at runtime without polluting the repo, using Claude Code as the interface.
 
 ## Configuration Reference
 
