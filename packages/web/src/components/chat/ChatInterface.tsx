@@ -111,19 +111,25 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             // No SSE messages arrived yet — use full history
             return hydrated;
           }
-          // Build a set of hydrated message signatures for dedup.
-          // This prevents the optimistic user message (added in handleSend)
-          // from duplicating the DB-persisted copy returned by getMessages.
+          // Build dedup sets for hydrated messages.
+          // Use role+content as the primary key, and workflowResult.runId as a
+          // secondary key for workflow result messages (avoids duplicates when
+          // the SSE-received message and DB-persisted message have any content
+          // difference, e.g. trailing whitespace from text batching).
           const hydratedSigs = new Set(hydrated.map(m => `${m.role}:${m.content}`));
+          const hydratedWorkflowRunIds = new Set(
+            hydrated.flatMap(m => (m.workflowResult?.runId ? [m.workflowResult.runId] : []))
+          );
           // Keep prev messages that are either:
           // 1. Newer than the latest history message (SSE messages during fetch), OR
           // 2. Streaming/thinking indicators (no DB equivalent yet)
-          // But exclude any that match a hydrated message by role+content (dedup).
+          // But exclude any that match a hydrated message by role+content or workflowResult.runId (dedup).
           const latestHistoryTs = Math.max(...hydrated.map(m => m.timestamp));
           const sseOnly = prev.filter(
             m =>
               (m.timestamp > latestHistoryTs || m.isStreaming) &&
-              !hydratedSigs.has(`${m.role}:${m.content}`)
+              !hydratedSigs.has(`${m.role}:${m.content}`) &&
+              !(m.workflowResult?.runId && hydratedWorkflowRunIds.has(m.workflowResult.runId))
           );
           return [...hydrated, ...sseOnly];
         });
@@ -186,8 +192,14 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         // Workflow status messages (🚀 start, ✅ complete) should always be their own message
         const isWorkflowStatus = /^[\u{1F680}\u{2705}]/u.test(content);
 
-        // Workflow result messages always start as a new message
+        // Workflow result messages always start as a new message.
+        // Dedup: SSETransport replays buffered events on reconnect, which can
+        // arrive after the DB-fetch merge has already run — skip if a message
+        // with the same runId is already in state.
         if (workflowResult) {
+          if (prev.some(m => m.workflowResult?.runId === workflowResult.runId)) {
+            return prev;
+          }
           const updated =
             last?.role === 'assistant' && last.isStreaming
               ? [...prev.slice(0, -1), { ...last, isStreaming: false }]
