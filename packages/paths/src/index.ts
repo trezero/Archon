@@ -1,9 +1,4 @@
-/**
- * Re-export shim — actual implementation in @archon/paths
- * This file maintains backward compatibility for:
- * - Relative imports within @archon/core (e.g., import * as archonPaths from '../utils/archon-paths')
- * - Sub-path imports (e.g., import { getArchonHome } from '@archon/core/utils/archon-paths')
- */
+// Archon path resolution utilities
 export {
   expandTilde,
   isDocker,
@@ -29,4 +24,8 @@ export {
   resolveProjectRootFromCwd,
   ensureProjectStructure,
   createProjectSourceSymlink,
-} from '@archon/paths';
+} from './archon-paths';
+
+// Logger
+export { createLogger, setLogLevel, getLogLevel, rootLogger } from './logger';
+export type { Logger } from './logger';

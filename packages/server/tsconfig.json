@@ -4,7 +4,8 @@
     "noEmit": true,
     "paths": {
       "@archon/core": ["../core/src"],
-      "@archon/core/*": ["../core/src/*"]
+      "@archon/core/*": ["../core/src/*"],
+      "@archon/paths": ["../paths/src"]
     }
   },
   "include": ["src/**/*", "../core/src/**/*.ts"],

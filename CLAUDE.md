@@ -203,6 +203,11 @@ packages/
 │       ├── utils/            # Shared utilities
 │       ├── workflows/        # YAML workflow engine
 │       └── index.ts          # Package exports
+├── paths/                    # @archon/paths - Path resolution and logger (zero @archon/* deps)
+│   └── src/
+│       ├── archon-paths.ts   # Archon directory path utilities
+│       ├── logger.ts         # Pino logger factory
+│       └── index.ts          # Package exports
 ├── server/                   # @archon/server - HTTP server + adapters
 │   └── src/
 │       ├── adapters/         # Platform adapters (Slack, Telegram, GitHub, Discord, Web, Test)
@@ -261,8 +266,9 @@ import * as core from '@archon/core';  // Don't do this
 ### Architecture Layers
 
 **Package Split:**
+- **@archon/paths**: Path resolution utilities and Pino logger factory (no @archon/* deps)
 - **@archon/cli**: Command-line interface for running workflows
-- **@archon/core**: Business logic, database, orchestration, workflows
+- **@archon/core**: Business logic, database, orchestration, workflows (re-exports @archon/paths for backward compat)
 - **@archon/server**: Platform adapters, Hono server, HTTP endpoints, Web UI static serving
 - **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui), SSE streaming to server
 
@@ -454,7 +460,7 @@ This ensures type compatibility with SDK updates and eliminates `as any` casts.
 
 ### Logging
 
-**Structured logging with Pino** (`packages/core/src/utils/logger.ts`):
+**Structured logging with Pino** (`packages/paths/src/logger.ts`, re-exported from `@archon/core`):
 
 ```typescript
 import { createLogger } from '@archon/core';

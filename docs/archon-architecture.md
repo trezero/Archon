@@ -55,7 +55,7 @@ In Docker containers, the Archon home is fixed at `/.archon/` (root level). This
 
 ## Path Resolution
 
-All path resolution is centralized in `src/utils/archon-paths.ts`.
+All path resolution is centralized in `packages/paths/src/archon-paths.ts` (`@archon/paths`). Re-export shims in `packages/core/src/utils/archon-paths.ts` maintain backward compatibility.
 
 ### Core Functions
 
@@ -159,7 +159,7 @@ commands:
 
 To add a new managed directory:
 
-1. Add function to `src/utils/archon-paths.ts`:
+1. Add function to `packages/paths/src/archon-paths.ts`:
 ```typescript
 export function getArchonNewPath(): string {
   return join(getArchonHome(), 'new-directory');
@@ -168,7 +168,7 @@ export function getArchonNewPath(): string {
 
 2. Update Docker setup in `Dockerfile`
 3. Update volume mounts in `docker-compose.yml`
-4. Add tests in `src/utils/archon-paths.test.ts`
+4. Add tests in `packages/paths/src/archon-paths.test.ts`
 
 ### Adding Config Options
 

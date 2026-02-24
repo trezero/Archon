@@ -1,8 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import { mkdir, rm, writeFile, lstat, readlink } from 'fs/promises';
-import { tmpdir } from 'os';
 
 import {
   isDocker,
@@ -11,10 +10,13 @@ import {
   getArchonWorktreesPath,
   getArchonConfigPath,
   getCommandFolderSearchPaths,
+  getWorkflowFolderSearchPaths,
   expandTilde,
   getAppArchonBasePath,
   getDefaultCommandsPath,
   getDefaultWorkflowsPath,
+  logArchonPaths,
+  validateAppDefaultsPaths,
   parseOwnerRepo,
   getProjectRoot,
   getProjectSourcePath,
@@ -28,25 +30,35 @@ import {
   createProjectSourceSymlink,
 } from './archon-paths';
 
-describe('archon-paths', () => {
-  const originalEnv: Record<string, string | undefined> = {};
-  const envVars = ['WORKSPACE_PATH', 'WORKTREE_BASE', 'ARCHON_HOME', 'ARCHON_DOCKER', 'HOME'];
+/** All env vars that path functions depend on */
+const ENV_VARS = ['WORKSPACE_PATH', 'WORKTREE_BASE', 'ARCHON_HOME', 'ARCHON_DOCKER', 'HOME'];
+
+/**
+ * Save and restore environment variables around each test.
+ * Call at the top of a describe block to register beforeEach/afterEach hooks.
+ */
+function useEnvSnapshot(): void {
+  const snapshot: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    envVars.forEach(key => {
-      originalEnv[key] = process.env[key];
-    });
+    for (const key of ENV_VARS) {
+      snapshot[key] = process.env[key];
+    }
   });
 
   afterEach(() => {
-    envVars.forEach(key => {
-      if (originalEnv[key] === undefined) {
+    for (const key of ENV_VARS) {
+      if (snapshot[key] === undefined) {
         delete process.env[key];
       } else {
-        process.env[key] = originalEnv[key];
+        process.env[key] = snapshot[key];
       }
-    });
+    }
   });
+}
+
+describe('archon-paths', () => {
+  useEnvSnapshot();
 
   describe('expandTilde', () => {
     test('expands ~ to home directory', () => {
@@ -192,6 +204,13 @@ describe('archon-paths', () => {
     });
   });
 
+  describe('getWorkflowFolderSearchPaths', () => {
+    test('returns .archon/workflows', () => {
+      const paths = getWorkflowFolderSearchPaths();
+      expect(paths).toEqual(['.archon/workflows']);
+    });
+  });
+
   describe('getArchonConfigPath', () => {
     test('returns path to config.yaml', () => {
       delete process.env.WORKSPACE_PATH;
@@ -206,9 +225,10 @@ describe('archon-paths', () => {
       delete process.env.ARCHON_DOCKER;
       delete process.env.WORKSPACE_PATH;
       const path = getAppArchonBasePath();
-      // Should end with .archon and NOT contain packages/core
+      // Should end with .archon and NOT contain packages/core or packages/paths
       expect(path).toMatch(/\.archon$/);
       expect(path).not.toContain('packages/core');
+      expect(path).not.toContain('packages/paths');
     });
 
     test('path exists and contains defaults directories', () => {
@@ -440,19 +460,71 @@ describe('archon-paths', () => {
   });
 });
 
+describe('logArchonPaths', () => {
+  useEnvSnapshot();
+
+  test('does not throw', () => {
+    delete process.env.WORKSPACE_PATH;
+    delete process.env.ARCHON_HOME;
+    delete process.env.ARCHON_DOCKER;
+    expect(() => logArchonPaths()).not.toThrow();
+  });
+});
+
+describe('validateAppDefaultsPaths', () => {
+  test('does not throw for valid paths', async () => {
+    await expect(validateAppDefaultsPaths()).resolves.toBeUndefined();
+  });
+
+  test('handles missing paths gracefully', async () => {
+    const originalEnv = process.env.ARCHON_DOCKER;
+    process.env.ARCHON_DOCKER = 'true';
+    try {
+      // In Docker mode, paths won't exist — should still not throw
+      await expect(validateAppDefaultsPaths()).resolves.toBeUndefined();
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.ARCHON_DOCKER;
+      } else {
+        process.env.ARCHON_DOCKER = originalEnv;
+      }
+    }
+  });
+});
+
+describe('re-export shim integration', () => {
+  test('core shim re-exports match @archon/paths exports', async () => {
+    const pathsModule = await import('./archon-paths');
+    const coreShim = await import('@archon/core/utils/archon-paths');
+
+    // Every export from the core shim should be the same function from @archon/paths
+    for (const key of Object.keys(coreShim)) {
+      expect((pathsModule as Record<string, unknown>)[key]).toBe(
+        (coreShim as Record<string, unknown>)[key]
+      );
+    }
+  });
+
+  test('core logger shim re-exports match @archon/paths logger', async () => {
+    const pathsLogger = await import('./logger');
+    const coreLogger = await import('@archon/core/utils/logger');
+
+    expect(coreLogger.createLogger).toBe(pathsLogger.createLogger);
+    expect(coreLogger.setLogLevel).toBe(pathsLogger.setLogLevel);
+    expect(coreLogger.getLogLevel).toBe(pathsLogger.getLogLevel);
+    expect(coreLogger.rootLogger).toBe(pathsLogger.rootLogger);
+  });
+});
+
 // =========================================================================
 // Async filesystem tests (use temp directories for isolation)
 // =========================================================================
 
 describe('ensureProjectStructure', () => {
   let tempArchonHome: string;
-  const envVars = ['WORKSPACE_PATH', 'ARCHON_HOME', 'ARCHON_DOCKER', 'HOME'];
-  const originalEnv: Record<string, string | undefined> = {};
+  useEnvSnapshot();
 
   beforeEach(async () => {
-    envVars.forEach(key => {
-      originalEnv[key] = process.env[key];
-    });
     delete process.env.WORKSPACE_PATH;
     delete process.env.ARCHON_DOCKER;
     tempArchonHome = join(
@@ -463,18 +535,7 @@ describe('ensureProjectStructure', () => {
   });
 
   afterEach(async () => {
-    envVars.forEach(key => {
-      if (originalEnv[key] === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = originalEnv[key];
-      }
-    });
-    try {
-      await rm(tempArchonHome, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup errors
-    }
+    await rm(tempArchonHome, { recursive: true, force: true });
   });
 
   test('creates all four project subdirectories', async () => {
@@ -504,13 +565,9 @@ describe('ensureProjectStructure', () => {
 describe('createProjectSourceSymlink', () => {
   let tempArchonHome: string;
   let tempTarget: string;
-  const envVars = ['WORKSPACE_PATH', 'ARCHON_HOME', 'ARCHON_DOCKER', 'HOME'];
-  const originalEnv: Record<string, string | undefined> = {};
+  useEnvSnapshot();
 
   beforeEach(async () => {
-    envVars.forEach(key => {
-      originalEnv[key] = process.env[key];
-    });
     delete process.env.WORKSPACE_PATH;
     delete process.env.ARCHON_DOCKER;
     tempArchonHome = join(
@@ -519,7 +576,6 @@ describe('createProjectSourceSymlink', () => {
     );
     process.env.ARCHON_HOME = tempArchonHome;
 
-    // Create a target directory to symlink to
     tempTarget = join(
       tmpdir(),
       `archon-target-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -528,23 +584,8 @@ describe('createProjectSourceSymlink', () => {
   });
 
   afterEach(async () => {
-    envVars.forEach(key => {
-      if (originalEnv[key] === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = originalEnv[key];
-      }
-    });
-    try {
-      await rm(tempArchonHome, { recursive: true, force: true });
-    } catch {
-      // Ignore
-    }
-    try {
-      await rm(tempTarget, { recursive: true, force: true });
-    } catch {
-      // Ignore
-    }
+    await rm(tempArchonHome, { recursive: true, force: true });
+    await rm(tempTarget, { recursive: true, force: true });
   });
 
   test('creates a symlink pointing to the target', async () => {

@@ -776,7 +776,7 @@ for (const folder of searchPaths) {
 
 This registers repo-specific commands. Default commands are loaded at runtime from the app's bundled defaults, not copied to repos.
 
-**Reference:** `packages/core/src/utils/archon-paths.ts`
+**Reference:** `packages/paths/src/archon-paths.ts` (`@archon/paths`)
 
 ### Variable Substitution
 
