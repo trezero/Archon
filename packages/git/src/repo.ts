@@ -1,7 +1,6 @@
 import { createLogger } from '@archon/paths';
 import { execFileAsync } from './exec';
-import { hasUncommittedChanges } from './branch';
-import { getDefaultBranch } from './branch';
+import { hasUncommittedChanges, getDefaultBranch } from './branch';
 import type { RepoPath, BranchName, GitResult, WorkspaceSyncResult } from './types';
 import { toRepoPath } from './types';
 

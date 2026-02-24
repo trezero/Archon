@@ -394,6 +394,7 @@ export async function getWorktreeStatusBreakdown(
 ): Promise<WorktreeStatusBreakdown> {
   const environments = await isolationEnvDb.listByCodebaseWithAge(codebaseId);
 
+  const repoPath = toRepoPath(mainRepoPath);
   const breakdown: WorktreeStatusBreakdown = {
     total: environments.length,
     merged: 0,
@@ -405,7 +406,7 @@ export async function getWorktreeStatusBreakdown(
     activeEnvs: [],
   };
 
-  const mainBranch = await getDefaultBranch(toRepoPath(mainRepoPath));
+  const mainBranch = await getDefaultBranch(repoPath);
 
   for (const env of environments) {
     // Skip Telegram (never shown as stale)
@@ -414,11 +415,7 @@ export async function getWorktreeStatusBreakdown(
     // Check if merged (treat as not-merged on unexpected errors)
     let merged = false;
     try {
-      merged = await isBranchMerged(
-        toRepoPath(mainRepoPath),
-        toBranchName(env.branch_name),
-        mainBranch
-      );
+      merged = await isBranchMerged(repoPath, toBranchName(env.branch_name), mainBranch);
     } catch (error) {
       getLog().warn(
         { err: error, envId: env.id, branchName: env.branch_name },
@@ -509,17 +506,14 @@ export async function cleanupMergedWorktrees(
 ): Promise<CleanupOperationResult> {
   const result: CleanupOperationResult = { removed: [], skipped: [] };
   const environments = await isolationEnvDb.listByCodebase(codebaseId);
-  const mainBranch = await getDefaultBranch(toRepoPath(mainRepoPath));
+  const repoPath = toRepoPath(mainRepoPath);
+  const mainBranch = await getDefaultBranch(repoPath);
 
   for (const env of environments) {
     // Check if merged (skip env on unexpected errors)
     let merged = false;
     try {
-      merged = await isBranchMerged(
-        toRepoPath(mainRepoPath),
-        toBranchName(env.branch_name),
-        mainBranch
-      );
+      merged = await isBranchMerged(repoPath, toBranchName(env.branch_name), mainBranch);
     } catch (error) {
       const err = error as Error;
       result.skipped.push({

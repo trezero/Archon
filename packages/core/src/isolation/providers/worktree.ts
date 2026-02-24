@@ -25,7 +25,7 @@ import {
   toWorktreePath,
   toBranchName,
 } from '@archon/git';
-import type { RepoPath } from '@archon/git';
+import type { RepoPath, WorktreeInfo } from '@archon/git';
 import { copyWorktreeFiles } from '../../utils/worktree-copy';
 import type {
   DestroyResult,
@@ -291,7 +291,7 @@ export class WorktreeProvider implements IIsolationProvider {
 
     // Get branch name from worktree
     let repoPath: RepoPath;
-    let worktrees: { path: string; branch: string }[];
+    let worktrees: WorktreeInfo[];
     try {
       repoPath = await getCanonicalRepoPath(worktreePath);
       worktrees = await listWorktrees(repoPath);
@@ -329,7 +329,7 @@ export class WorktreeProvider implements IIsolationProvider {
 
     // Filter out main repo (first worktree is typically the main checkout)
     return worktrees
-      .filter(wt => String(wt.path) !== String(repoPath))
+      .filter(wt => wt.path !== (repoPath as string))
       .map(wt => ({
         id: wt.path,
         provider: 'worktree' as const,
@@ -354,7 +354,7 @@ export class WorktreeProvider implements IIsolationProvider {
     }
 
     let repoPath: RepoPath;
-    let worktrees: { path: string; branch: string }[];
+    let worktrees: WorktreeInfo[];
     try {
       repoPath = await getCanonicalRepoPath(path);
       worktrees = await listWorktrees(repoPath);

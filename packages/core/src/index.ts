@@ -235,10 +235,11 @@ export {
 } from './utils/archon-paths';
 
 // Git utilities (re-exported from @archon/git for backward compatibility)
-// Includes: exec wrappers, worktree ops, branch ops, repo ops, branded types
 export {
+  // Exec wrappers
   execFileAsync,
   mkdirAsync,
+  // Worktree operations
   getWorktreeBase,
   isProjectScopedWorktreeBase,
   worktreeExists,
@@ -248,18 +249,21 @@ export {
   createWorktreeForIssue,
   removeWorktree,
   getCanonicalRepoPath,
+  // Branch operations
   commitAllChanges,
   hasUncommittedChanges,
-  syncWorkspace,
   getDefaultBranch,
+  checkout,
+  // Repository operations
+  syncWorkspace,
   findRepoRoot,
   getRemoteUrl,
-  checkout,
+  // Branded type conversions
+  toRepoPath,
+  toBranchName,
+  toWorktreePath,
 } from '@archon/git';
-
-// Branded types and conversion functions (re-exported from @archon/git)
-export type { RepoPath, BranchName, WorktreePath } from '@archon/git';
-export { toRepoPath, toBranchName, toWorktreePath } from '@archon/git';
+export type { RepoPath, BranchName, WorktreePath, WorktreeInfo } from '@archon/git';
 
 // GitHub GraphQL
 export { getLinkedIssueNumbers } from './utils/github-graphql';
