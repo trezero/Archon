@@ -1,19 +1,25 @@
 import { mock, describe, test, expect, beforeEach, afterAll } from 'bun:test';
 import { createMockLogger } from '../test/mocks/logger';
-import * as gitUtils from '../utils/git';
-
 // Mock logger to suppress noisy output during tests
 const mockLogger = createMockLogger();
 mock.module('../utils/logger', () => ({
   createLogger: mock(() => mockLogger),
 }));
 
-// Mock git utility - note: cleanup-service.ts has its own internal worktreeExists function
-// that uses execFileAsync, so we only need to mock execFileAsync
+// Mock @archon/git - the cleanup service imports git functions from @archon/git
 const mockExecFileAsync = mock(() => Promise.resolve({ stdout: '', stderr: '' }));
-mock.module('../utils/git', () => ({
-  ...gitUtils,
+const mockHasUncommittedChanges = mock(() => Promise.resolve(false));
+const mockWorktreeExists = mock(() => Promise.resolve(false));
+const mockGetDefaultBranch = mock(() => Promise.resolve('main'));
+const mockIsBranchMerged = mock(() => Promise.resolve(false));
+const mockGetLastCommitDate = mock(() => Promise.resolve(null as Date | null));
+mock.module('@archon/git', () => ({
   execFileAsync: mockExecFileAsync,
+  hasUncommittedChanges: mockHasUncommittedChanges,
+  worktreeExists: mockWorktreeExists,
+  getDefaultBranch: mockGetDefaultBranch,
+  isBranchMerged: mockIsBranchMerged,
+  getLastCommitDate: mockGetLastCommitDate,
 }));
 
 // Mock isolation provider
@@ -73,8 +79,6 @@ mock.module('../db/codebases', () => ({
 }));
 
 import {
-  isBranchMerged,
-  getLastCommitDate,
   runScheduledCleanup,
   startCleanupScheduler,
   stopCleanupScheduler,
@@ -86,172 +90,25 @@ import {
   onConversationClosed,
   MAX_WORKTREES_PER_CODEBASE,
 } from './cleanup-service';
-import { hasUncommittedChanges } from '../utils/git';
 
 describe('cleanup-service', () => {
   beforeEach(() => {
     mockExecFileAsync.mockClear();
+    mockHasUncommittedChanges.mockClear();
+    mockWorktreeExists.mockClear();
+    mockGetDefaultBranch.mockClear();
+    mockIsBranchMerged.mockClear();
+    mockGetLastCommitDate.mockClear();
     mockDestroy.mockClear();
     mockUpdateStatus.mockClear();
     mockGetById.mockClear();
     mockGetCodebase.mockClear();
-  });
-
-  describe('hasUncommittedChanges', () => {
-    test('returns true when git status shows changes', async () => {
-      mockExecFileAsync.mockResolvedValueOnce({
-        stdout: ' M file.ts\n',
-        stderr: '',
-      });
-
-      const result = await hasUncommittedChanges('/workspace/test');
-
-      expect(result).toBe(true);
-      expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
-        '-C',
-        '/workspace/test',
-        'status',
-        '--porcelain',
-      ]);
-    });
-
-    test('returns false when git status is clean', async () => {
-      mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
-
-      const result = await hasUncommittedChanges('/workspace/test');
-
-      expect(result).toBe(false);
-    });
-
-    test('returns false when path does not exist (ENOENT)', async () => {
-      const error = new Error('No such file or directory') as Error & { code: string };
-      error.code = 'ENOENT';
-      mockExecFileAsync.mockRejectedValueOnce(error);
-
-      const result = await hasUncommittedChanges('/nonexistent');
-
-      expect(result).toBe(false);
-    });
-
-    test('returns true (fail-safe) when git fails with unexpected error', async () => {
-      // Unexpected errors like git corruption should return true to prevent data loss
-      mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repository'));
-
-      const result = await hasUncommittedChanges('/workspace/corrupted');
-
-      expect(result).toBe(true);
-    });
-
-    test('returns false when git status is only whitespace', async () => {
-      mockExecFileAsync.mockResolvedValueOnce({ stdout: '   \n', stderr: '' });
-
-      const result = await hasUncommittedChanges('/workspace/test');
-
-      expect(result).toBe(false);
-    });
-  });
-
-  describe('isBranchMerged', () => {
-    test('returns true when branch is in merged list', async () => {
-      mockExecFileAsync.mockResolvedValueOnce({
-        stdout: '  feature-a\n  issue-42\n* main\n',
-        stderr: '',
-      });
-
-      const result = await isBranchMerged('/workspace/repo', 'issue-42');
-
-      expect(result).toBe(true);
-      expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
-        '-C',
-        '/workspace/repo',
-        'branch',
-        '--merged',
-        'main',
-      ]);
-    });
-
-    test('returns false when branch is not merged', async () => {
-      mockExecFileAsync.mockResolvedValueOnce({
-        stdout: '  feature-a\n* main\n',
-        stderr: '',
-      });
-
-      const result = await isBranchMerged('/workspace/repo', 'issue-42');
-
-      expect(result).toBe(false);
-    });
-
-    test('returns false when git command fails', async () => {
-      mockExecFileAsync.mockRejectedValueOnce(new Error('git error'));
-
-      const result = await isBranchMerged('/workspace/repo', 'issue-42');
-
-      expect(result).toBe(false);
-    });
-
-    test('handles current branch marker (*)', async () => {
-      mockExecFileAsync.mockResolvedValueOnce({
-        stdout: '* issue-42\n  main\n',
-        stderr: '',
-      });
-
-      const result = await isBranchMerged('/workspace/repo', 'issue-42');
-
-      expect(result).toBe(true);
-    });
-
-    test('uses custom main branch', async () => {
-      mockExecFileAsync.mockResolvedValueOnce({
-        stdout: '  issue-42\n  master\n',
-        stderr: '',
-      });
-
-      await isBranchMerged('/workspace/repo', 'issue-42', 'master');
-
-      expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
-        '-C',
-        '/workspace/repo',
-        'branch',
-        '--merged',
-        'master',
-      ]);
-    });
-  });
-
-  describe('getLastCommitDate', () => {
-    test('returns date from git log', async () => {
-      mockExecFileAsync.mockResolvedValueOnce({
-        stdout: '2025-01-15 10:30:00 +0000\n',
-        stderr: '',
-      });
-
-      const result = await getLastCommitDate('/workspace/test');
-
-      expect(result).toBeInstanceOf(Date);
-      expect(result?.getFullYear()).toBe(2025);
-      expect(result?.getMonth()).toBe(0); // January is 0
-      expect(result?.getDate()).toBe(15);
-    });
-
-    test('returns null when git fails', async () => {
-      mockExecFileAsync.mockRejectedValueOnce(new Error('no commits'));
-
-      const result = await getLastCommitDate('/workspace/test');
-
-      expect(result).toBeNull();
-    });
-
-    test('handles different date formats', async () => {
-      mockExecFileAsync.mockResolvedValueOnce({
-        stdout: '2024-12-25 23:59:59 -0500\n',
-        stderr: '',
-      });
-
-      const result = await getLastCommitDate('/workspace/test');
-
-      expect(result).toBeInstanceOf(Date);
-      expect(result?.getFullYear()).toBe(2024);
-    });
+    // Reset defaults
+    mockHasUncommittedChanges.mockResolvedValue(false);
+    mockWorktreeExists.mockResolvedValue(false);
+    mockGetDefaultBranch.mockResolvedValue('main');
+    mockIsBranchMerged.mockResolvedValue(false);
+    mockGetLastCommitDate.mockResolvedValue(null);
   });
 
   describe('removeEnvironment', () => {
@@ -279,8 +136,7 @@ describe('cleanup-service', () => {
         default_cwd: '/workspace/repo',
       });
 
-      // Internal worktreeExists returns false (git rev-parse fails)
-      mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+      // worktreeExists returns false (default)
 
       await removeEnvironment(envId);
 
@@ -318,11 +174,10 @@ describe('cleanup-service', () => {
         default_cwd: '/workspace/repo',
       });
 
-      // Internal worktreeExists succeeds (path exists)
-      mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
+      // worktreeExists returns true (path exists)
+      mockWorktreeExists.mockResolvedValueOnce(true);
 
-      // hasUncommittedChanges returns false
-      mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+      // hasUncommittedChanges returns false (default)
 
       // provider.destroy fails with "No such file or directory"
       mockDestroy.mockRejectedValueOnce(
@@ -358,8 +213,7 @@ describe('cleanup-service', () => {
         default_cwd: '/workspace/repo',
       });
 
-      // Internal worktreeExists returns false (path gone)
-      mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+      // worktreeExists returns false (default)
 
       // destroy returns with warnings (branch couldn't be deleted)
       mockDestroy.mockResolvedValueOnce({
@@ -399,8 +253,7 @@ describe('cleanup-service', () => {
         default_cwd: '/workspace/repo',
       });
 
-      // Internal worktreeExists returns false (path gone)
-      mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+      // worktreeExists returns false (default)
 
       await removeEnvironment(envId, { deleteRemoteBranch: true });
 
@@ -436,8 +289,7 @@ describe('cleanup-service', () => {
         default_cwd: '/workspace/repo',
       });
 
-      // Internal worktreeExists returns false (path gone)
-      mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+      // worktreeExists returns false (default)
 
       await removeEnvironment(envId);
 
@@ -473,11 +325,10 @@ describe('cleanup-service', () => {
         default_cwd: '/workspace/repo',
       });
 
-      // Internal worktreeExists succeeds (path exists)
-      mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
+      // worktreeExists returns true (path exists)
+      mockWorktreeExists.mockResolvedValueOnce(true);
 
-      // hasUncommittedChanges returns false
-      mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+      // hasUncommittedChanges returns false (default)
 
       // provider.destroy fails with a different error (uncommitted changes)
       mockDestroy.mockRejectedValueOnce(
@@ -496,10 +347,23 @@ describe('cleanup-service', () => {
 describe('runScheduledCleanup', () => {
   beforeEach(() => {
     mockExecFileAsync.mockClear();
+    mockHasUncommittedChanges.mockClear();
+    mockWorktreeExists.mockClear();
+    mockGetDefaultBranch.mockClear();
+    mockIsBranchMerged.mockClear();
+    mockGetLastCommitDate.mockClear();
     mockDestroy.mockClear();
     mockListAllActiveWithCodebase.mockClear();
     mockUpdateStatus.mockClear();
     mockGetConversationsUsingEnv.mockClear();
+    mockGetById.mockClear();
+    mockGetCodebase.mockClear();
+    // Reset defaults
+    mockHasUncommittedChanges.mockResolvedValue(false);
+    mockWorktreeExists.mockResolvedValue(false);
+    mockGetDefaultBranch.mockResolvedValue('main');
+    mockIsBranchMerged.mockResolvedValue(false);
+    mockGetLastCommitDate.mockResolvedValue(null);
   });
 
   test('returns empty report when no environments exist', async () => {
@@ -529,8 +393,8 @@ describe('runScheduledCleanup', () => {
         metadata: {},
       },
     ]);
-    // runScheduledCleanup: Internal worktreeExists returns false (git rev-parse fails)
-    mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+    // worktreeExists returns false for both calls (runScheduledCleanup + removeEnvironment)
+    // (already default)
     // removeEnvironment: getById returns the env
     mockGetById.mockResolvedValueOnce({
       id: 'env-123',
@@ -545,8 +409,6 @@ describe('runScheduledCleanup', () => {
       name: 'test-repo',
       default_cwd: '/workspace/repo',
     });
-    // removeEnvironment: internal worktreeExists returns false
-    mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
 
     const report = await runScheduledCleanup();
 
@@ -577,14 +439,12 @@ describe('runScheduledCleanup', () => {
         metadata: {},
       },
     ]);
-    // Internal worktreeExists returns true (path exists)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
-    // Get main branch (getMainBranch)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
-    // Branch is merged (isBranchMerged)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  pr-99\n  main\n', stderr: '' });
-    // No uncommitted changes (hasUncommittedChanges in runScheduledCleanup)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    // worktreeExists returns true (path exists)
+    mockWorktreeExists.mockResolvedValue(true);
+    // getDefaultBranch returns 'main' (default)
+    // isBranchMerged returns true
+    mockIsBranchMerged.mockResolvedValueOnce(true);
+    // hasUncommittedChanges returns false (default)
     // No conversations using it
     mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
     // For removeEnvironment: getById returns the env
@@ -600,10 +460,6 @@ describe('runScheduledCleanup', () => {
       name: 'test-repo',
       default_cwd: '/workspace/repo',
     });
-    // removeEnvironment: internal worktreeExists check
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
-    // removeEnvironment: hasUncommittedChanges
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
 
     const report = await runScheduledCleanup();
 
@@ -627,14 +483,12 @@ describe('runScheduledCleanup', () => {
         metadata: {},
       },
     ]);
-    // Internal worktreeExists returns true
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
-    // Get main branch
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
-    // Branch is merged
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  pr-50\n  main\n', stderr: '' });
-    // No uncommitted changes (runScheduledCleanup)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    // worktreeExists returns true
+    mockWorktreeExists.mockResolvedValue(true);
+    // getDefaultBranch returns 'main' (default)
+    // isBranchMerged returns true
+    mockIsBranchMerged.mockResolvedValueOnce(true);
+    // hasUncommittedChanges returns false (default)
     // No conversations
     mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
     // For removeEnvironment: getById
@@ -651,10 +505,6 @@ describe('runScheduledCleanup', () => {
       name: 'test-repo',
       default_cwd: '/workspace/repo',
     });
-    // removeEnvironment: internal worktreeExists
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
-    // removeEnvironment: hasUncommittedChanges
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
 
     await runScheduledCleanup();
 
@@ -684,14 +534,13 @@ describe('runScheduledCleanup', () => {
         metadata: {},
       },
     ]);
-    // Internal worktreeExists returns true (path exists)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
-    // Get main branch
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
-    // Branch is merged
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  issue-10\n  main\n', stderr: '' });
-    // Has uncommitted changes (in runScheduledCleanup, before attempting removeEnvironment)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: ' M file.ts', stderr: '' });
+    // worktreeExists returns true (path exists)
+    mockWorktreeExists.mockResolvedValueOnce(true);
+    // getDefaultBranch returns 'main' (default)
+    // isBranchMerged returns true
+    mockIsBranchMerged.mockResolvedValueOnce(true);
+    // Has uncommitted changes
+    mockHasUncommittedChanges.mockResolvedValueOnce(true);
 
     const report = await runScheduledCleanup();
 
@@ -719,12 +568,10 @@ describe('runScheduledCleanup', () => {
         metadata: {},
       },
     ]);
-    // Internal worktreeExists returns true (path exists)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
-    // Get main branch
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
-    // Not merged
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  main\n', stderr: '' });
+    // Path exists for this env
+    mockWorktreeExists.mockResolvedValueOnce(true);
+    // getDefaultBranch returns 'main' (default from beforeEach)
+    // isBranchMerged returns false (default from beforeEach)
 
     const report = await runScheduledCleanup();
 
@@ -815,7 +662,12 @@ describe('scheduler lifecycle', () => {
 describe('getWorktreeStatusBreakdown', () => {
   beforeEach(() => {
     mockExecFileAsync.mockClear();
+    mockGetDefaultBranch.mockClear();
+    mockIsBranchMerged.mockClear();
     mockListByCodebaseWithAge.mockClear();
+    // Reset defaults
+    mockGetDefaultBranch.mockResolvedValue('main');
+    mockIsBranchMerged.mockResolvedValue(false);
   });
 
   test('returns correct breakdown with mixed environments', async () => {
@@ -854,16 +706,10 @@ describe('getWorktreeStatusBreakdown', () => {
       },
     ]);
 
-    // Get main branch
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
+    // getDefaultBranch returns 'main' (default from beforeEach)
     // Check merged for env-1 (merged)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  merged-branch\n  main\n', stderr: '' });
-    // Check merged for env-2 (not merged)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  main\n', stderr: '' });
-    // Check merged for env-3 (not merged)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  main\n', stderr: '' });
-    // Check merged for env-4 (not merged)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  main\n', stderr: '' });
+    mockIsBranchMerged.mockResolvedValueOnce(true);
+    // env-2, env-3, env-4 use default (false)
 
     const breakdown = await getWorktreeStatusBreakdown('codebase-1', '/workspace/repo');
 
@@ -886,10 +732,8 @@ describe('getWorktreeStatusBreakdown', () => {
       },
     ]);
 
-    // Get main branch
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
-    // Not merged
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  main\n', stderr: '' });
+    // getDefaultBranch returns 'main' (default from beforeEach)
+    // isBranchMerged returns false (default from beforeEach)
 
     const breakdown = await getWorktreeStatusBreakdown('codebase-1', '/workspace/repo');
 
@@ -899,8 +743,7 @@ describe('getWorktreeStatusBreakdown', () => {
 
   test('returns empty breakdown for empty codebase', async () => {
     mockListByCodebaseWithAge.mockResolvedValueOnce([]);
-    // Get main branch
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
+    // getDefaultBranch returns 'main' (default from beforeEach)
 
     const breakdown = await getWorktreeStatusBreakdown('codebase-1', '/workspace/repo');
 
@@ -918,6 +761,17 @@ describe('cleanupMergedWorktrees', () => {
     mockGetConversationsUsingEnv.mockClear();
     mockGetById.mockClear();
     mockListByCodebase.mockClear();
+    mockGetDefaultBranch.mockClear();
+    mockIsBranchMerged.mockClear();
+    mockHasUncommittedChanges.mockClear();
+    mockWorktreeExists.mockClear();
+    mockGetCodebase.mockClear();
+    mockUpdateStatus.mockClear();
+    // Reset defaults
+    mockGetDefaultBranch.mockResolvedValue('main');
+    mockIsBranchMerged.mockResolvedValue(false);
+    mockHasUncommittedChanges.mockResolvedValue(false);
+    mockWorktreeExists.mockResolvedValue(false);
   });
 
   test('removes merged branches without uncommitted changes', async () => {
@@ -930,24 +784,21 @@ describe('cleanupMergedWorktrees', () => {
       },
     ]);
 
-    // Get main branch
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
-    // Is merged
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  merged-branch\n  main\n', stderr: '' });
-    // No uncommitted changes (cleanupMergedWorktrees check)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    // getDefaultBranch returns 'main' (default from beforeEach)
+    // isBranchMerged returns true for this branch
+    mockIsBranchMerged.mockResolvedValueOnce(true);
+    // hasUncommittedChanges returns false (default from beforeEach)
     // No conversations
     mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
-    // For removeEnvironment
+    // For removeEnvironment: getById
     mockGetById.mockResolvedValueOnce({
       id: 'env-merged',
       working_path: '/workspace/repo/worktrees/merged-branch',
       status: 'active',
     });
-    // removeEnvironment: internal worktreeExists check (path exists)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
-    // removeEnvironment: hasUncommittedChanges
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    // removeEnvironment: worktreeExists returns true (path exists)
+    mockWorktreeExists.mockResolvedValueOnce(true);
+    // removeEnvironment: hasUncommittedChanges returns false (default)
 
     const result = await cleanupMergedWorktrees('codebase-1', '/workspace/repo');
 
@@ -970,12 +821,11 @@ describe('cleanupMergedWorktrees', () => {
       },
     ]);
 
-    // Get main branch
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
-    // Is merged
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  dirty-branch\n  main\n', stderr: '' });
+    // getDefaultBranch returns 'main' (default from beforeEach)
+    // isBranchMerged returns true
+    mockIsBranchMerged.mockResolvedValueOnce(true);
     // Has uncommitted changes
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: ' M file.ts', stderr: '' });
+    mockHasUncommittedChanges.mockResolvedValueOnce(true);
 
     const result = await cleanupMergedWorktrees('codebase-1', '/workspace/repo');
 
@@ -996,12 +846,10 @@ describe('cleanupMergedWorktrees', () => {
       },
     ]);
 
-    // Get main branch
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: 'refs/remotes/origin/main', stderr: '' });
-    // Is merged
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '  in-use-branch\n  main\n', stderr: '' });
-    // No uncommitted changes
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    // getDefaultBranch returns 'main' (default from beforeEach)
+    // isBranchMerged returns true
+    mockIsBranchMerged.mockResolvedValueOnce(true);
+    // hasUncommittedChanges returns false (default from beforeEach)
     // Has conversation references
     mockGetConversationsUsingEnv.mockResolvedValueOnce(['conv-1', 'conv-2']);
 
@@ -1026,6 +874,11 @@ describe('onConversationClosed', () => {
     mockGetConversationByPlatformId.mockClear();
     mockGetActiveSession.mockClear();
     mockUpdateConversation.mockClear();
+    mockWorktreeExists.mockClear();
+    mockHasUncommittedChanges.mockClear();
+    // Reset defaults
+    mockWorktreeExists.mockResolvedValue(false);
+    mockHasUncommittedChanges.mockResolvedValue(false);
   });
 
   test('deactivates session with conversation-closed reason', async () => {
@@ -1065,7 +918,7 @@ describe('onConversationClosed', () => {
       default_cwd: '/workspace/repo',
     });
 
-    mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+    // removeEnvironment: worktreeExists returns false (default from beforeEach)
 
     await onConversationClosed('github', 'owner/repo#200');
 
@@ -1110,8 +963,7 @@ describe('onConversationClosed', () => {
       default_cwd: '/workspace/repo',
     });
 
-    // removeEnvironment: worktreeExists returns false
-    mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+    // removeEnvironment: worktreeExists returns false (default from beforeEach)
 
     await onConversationClosed('github', 'owner/repo#100', { merged: true });
 
@@ -1161,8 +1013,7 @@ describe('onConversationClosed', () => {
       default_cwd: '/workspace/repo',
     });
 
-    // removeEnvironment: worktreeExists returns false
-    mockExecFileAsync.mockRejectedValueOnce(new Error('not a git repo'));
+    // removeEnvironment: worktreeExists returns false (default from beforeEach)
 
     await onConversationClosed('github', 'owner/repo#101');
 
@@ -1182,6 +1033,13 @@ describe('cleanupStaleWorktrees', () => {
     mockGetConversationsUsingEnv.mockClear();
     mockGetById.mockClear();
     mockListByCodebaseWithAge.mockClear();
+    mockHasUncommittedChanges.mockClear();
+    mockWorktreeExists.mockClear();
+    mockGetCodebase.mockClear();
+    mockUpdateStatus.mockClear();
+    // Reset defaults
+    mockHasUncommittedChanges.mockResolvedValue(false);
+    mockWorktreeExists.mockResolvedValue(false);
   });
 
   test('removes stale worktrees without uncommitted changes', async () => {
@@ -1196,20 +1054,18 @@ describe('cleanupStaleWorktrees', () => {
       },
     ]);
 
-    // No uncommitted changes (cleanupStaleWorktrees check)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    // hasUncommittedChanges returns false (default from beforeEach)
     // No conversations
     mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
-    // For removeEnvironment
+    // For removeEnvironment: getById
     mockGetById.mockResolvedValueOnce({
       id: 'env-stale',
       working_path: '/workspace/repo/worktrees/stale-branch',
       status: 'active',
     });
-    // removeEnvironment: internal worktreeExists check (path exists)
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '.git', stderr: '' });
-    // removeEnvironment: hasUncommittedChanges
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    // removeEnvironment: worktreeExists returns true (path exists)
+    mockWorktreeExists.mockResolvedValueOnce(true);
+    // removeEnvironment: hasUncommittedChanges returns false (default)
 
     const result = await cleanupStaleWorktrees('codebase-1', '/workspace/repo');
 
@@ -1265,7 +1121,7 @@ describe('cleanupStaleWorktrees', () => {
     ]);
 
     // Has uncommitted changes
-    mockExecFileAsync.mockResolvedValueOnce({ stdout: ' M file.ts', stderr: '' });
+    mockHasUncommittedChanges.mockResolvedValueOnce(true);
 
     const result = await cleanupStaleWorktrees('codebase-1', '/workspace/repo');
 

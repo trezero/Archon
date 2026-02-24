@@ -5,7 +5,8 @@
     "paths": {
       "@archon/core": ["../core/src"],
       "@archon/core/*": ["../core/src/*"],
-      "@archon/paths": ["../paths/src"]
+      "@archon/paths": ["../paths/src"],
+      "@archon/git": ["../git/src"]
     }
   },
   "include": ["src/**/*", "../core/src/**/*.ts"],

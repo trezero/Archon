@@ -8,7 +8,13 @@ import * as sessionDb from '../db/sessions';
 import { SessionNotFoundError } from '../db/sessions';
 import * as codebaseDb from '../db/codebases';
 import { getIsolationProvider } from '../isolation';
-import { execFileAsync, hasUncommittedChanges } from '../utils/git';
+import {
+  hasUncommittedChanges,
+  worktreeExists,
+  getDefaultBranch,
+  isBranchMerged,
+  getLastCommitDate,
+} from '@archon/git';
 import { createLogger } from '../utils/logger';
 import { IsolationEnvironmentRow, ConversationNotFoundError } from '../types';
 
@@ -197,70 +203,6 @@ export async function removeEnvironment(
 }
 
 /**
- * Check if a branch has been merged into main.
- * Returns false for any error (logs unexpected errors for debugging).
- */
-export async function isBranchMerged(
-  repoPath: string,
-  branchName: string,
-  mainBranch = 'main'
-): Promise<boolean> {
-  try {
-    const { stdout } = await execFileAsync('git', [
-      '-C',
-      repoPath,
-      'branch',
-      '--merged',
-      mainBranch,
-    ]);
-    const mergedBranches = stdout.split('\n').map(b => b.trim().replace(/^\* /, ''));
-    return mergedBranches.includes(branchName);
-  } catch (error) {
-    const err = error as Error & { code?: string; stderr?: string };
-    const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
-
-    // Expected errors: branch doesn't exist, not a git repo, etc.
-    const isExpectedError =
-      errorText.includes('not a git repository') ||
-      errorText.includes('unknown revision') ||
-      errorText.includes('no such file') ||
-      err.code === 'ENOENT';
-
-    if (!isExpectedError) {
-      // Log unexpected errors for debugging (permission issues, corruption, etc.)
-      getLog().warn({ err: error, repoPath, branchName, mainBranch }, 'branch_merge_check_failed');
-    }
-    return false;
-  }
-}
-
-/**
- * Get the last commit date for a worktree.
- * Returns null for any error (logs unexpected errors for debugging).
- */
-export async function getLastCommitDate(workingPath: string): Promise<Date | null> {
-  try {
-    const { stdout } = await execFileAsync('git', ['-C', workingPath, 'log', '-1', '--format=%ci']);
-    return new Date(stdout.trim());
-  } catch (error) {
-    const err = error as Error & { code?: string; stderr?: string };
-    const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
-
-    // Expected errors: not a git repo, no commits, path doesn't exist
-    const isExpectedError =
-      errorText.includes('not a git repository') ||
-      errorText.includes('does not have any commits') ||
-      errorText.includes('no such file') ||
-      err.code === 'ENOENT';
-
-    if (!isExpectedError) {
-      getLog().warn({ err: error, workingPath }, 'last_commit_date_check_failed');
-    }
-    return null;
-  }
-}
-
-/**
  * Clean up to make room when limit reached (Phase 3D)
  * Attempts to remove merged branches first
  * Returns detailed results for user feedback
@@ -302,7 +244,7 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
         }
 
         // Check if branch is merged
-        const mainBranch = await getMainBranch(env.codebase_default_cwd);
+        const mainBranch = await getDefaultBranch(env.codebase_default_cwd);
         const merged = await isBranchMerged(env.codebase_default_cwd, env.branch_name, mainBranch);
 
         if (merged) {
@@ -408,68 +350,6 @@ async function isEnvironmentStale(
   return daysSinceCreation >= staleDays;
 }
 
-/**
- * Get the main branch name for a repository
- */
-async function getMainBranch(repoPath: string): Promise<string> {
-  try {
-    // Try to get the default branch from remote
-    const { stdout } = await execFileAsync('git', [
-      '-C',
-      repoPath,
-      'symbolic-ref',
-      'refs/remotes/origin/HEAD',
-    ]);
-    // Output is like "refs/remotes/origin/main"
-    const match = /refs\/remotes\/origin\/(.+)/.exec(stdout.trim());
-    return match?.[1] ?? 'main';
-  } catch (error) {
-    const err = error as Error & { stderr?: string };
-    const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
-
-    // Expected: origin/HEAD not configured (common for fresh clones)
-    const isExpected =
-      errorText.includes('ref refs/remotes/origin/head is not a symbolic ref') ||
-      errorText.includes('no such file');
-
-    if (!isExpected) {
-      getLog().warn({ err: error, repoPath }, 'main_branch_detect_failed');
-    }
-    return 'main';
-  }
-}
-
-/**
- * Check if a worktree path exists and is functional
- * Returns false for: path not found, not a git repo, or git directory missing
- * Only throws on truly unexpected errors (e.g., EACCES permission denied)
- */
-async function worktreeExists(path: string): Promise<boolean> {
-  try {
-    const { stdout } = await execFileAsync('git', ['-C', path, 'rev-parse', '--git-dir']);
-    return stdout.trim().length > 0;
-  } catch (error) {
-    const err = error as Error & { code?: string };
-    const errorText = err.message.toLowerCase();
-
-    // Return false for expected "not found" scenarios:
-    // - ENOENT: path doesn't exist
-    // - "No such file or directory": path or .git missing
-    // - "not a git repo/repository": path exists but .git is missing/corrupted
-    if (
-      err.code === 'ENOENT' ||
-      errorText.includes('no such file or directory') ||
-      errorText.includes('not a git repo')
-    ) {
-      return false;
-    }
-
-    // Log and re-throw unexpected errors (EACCES, timeout, etc.)
-    getLog().error({ err: error, path }, 'worktree_existence_check_failed');
-    throw err;
-  }
-}
-
 // =============================================================================
 // Phase 3D: Worktree Limits and User Feedback
 // =============================================================================
@@ -517,7 +397,7 @@ export async function getWorktreeStatusBreakdown(
     activeEnvs: [],
   };
 
-  const mainBranch = await getMainBranch(mainRepoPath);
+  const mainBranch = await getDefaultBranch(mainRepoPath);
 
   for (const env of environments) {
     // Skip Telegram (never shown as stale)
@@ -609,7 +489,7 @@ export async function cleanupMergedWorktrees(
 ): Promise<CleanupOperationResult> {
   const result: CleanupOperationResult = { removed: [], skipped: [] };
   const environments = await isolationEnvDb.listByCodebase(codebaseId);
-  const mainBranch = await getMainBranch(mainRepoPath);
+  const mainBranch = await getDefaultBranch(mainRepoPath);
 
   for (const env of environments) {
     // Check if merged

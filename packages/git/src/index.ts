@@ -1,0 +1,47 @@
+// Types
+export type {
+  RepoPath,
+  BranchName,
+  WorktreePath,
+  GitResult,
+  GitError,
+  WorkspaceSyncResult,
+  WorktreeInfo,
+} from './types';
+export { toRepoPath, toBranchName, toWorktreePath } from './types';
+
+// Process and filesystem wrappers
+export { execFileAsync, mkdirAsync } from './exec';
+
+// Worktree operations
+export {
+  getWorktreeBase,
+  isProjectScopedWorktreeBase,
+  worktreeExists,
+  listWorktrees,
+  findWorktreeByBranch,
+  isWorktreePath,
+  removeWorktree,
+  getCanonicalRepoPath,
+  createWorktreeForIssue,
+} from './worktree';
+
+// Branch operations
+export {
+  getDefaultBranch,
+  checkout,
+  hasUncommittedChanges,
+  commitAllChanges,
+  isBranchMerged,
+  getLastCommitDate,
+} from './branch';
+
+// Repository operations
+export {
+  findRepoRoot,
+  getRemoteUrl,
+  syncWorkspace,
+  cloneRepository,
+  syncRepository,
+  addSafeDirectory,
+} from './repo';

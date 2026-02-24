@@ -8,7 +8,7 @@ mock.module('../../utils/logger', () => ({
 }));
 
 import * as configLoader from '../../config/config-loader';
-import * as git from '../../utils/git';
+import * as git from '@archon/git';
 import * as worktreeCopy from '../../utils/worktree-copy';
 import type { IsolationRequest, PRIsolationRequest } from '../types';
 

@@ -234,7 +234,7 @@ export {
   createProjectSourceSymlink,
 } from './utils/archon-paths';
 
-// Git utilities
+// Git utilities (re-exported from @archon/git for backward compatibility)
 export {
   execFileAsync,
   mkdirAsync,
@@ -254,7 +254,7 @@ export {
   findRepoRoot,
   getRemoteUrl,
   checkout,
-} from './utils/git';
+} from '@archon/git';
 
 // GitHub GraphQL
 export { getLinkedIssueNumbers } from './utils/github-graphql';

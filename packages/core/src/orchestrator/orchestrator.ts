@@ -44,7 +44,7 @@ import * as db from '../db/conversations';
 import * as isolationEnvDb from '../db/isolation-environments';
 import { toError } from '../utils/error';
 import { getIsolationProvider } from '../isolation';
-import { worktreeExists, findWorktreeByBranch, getCanonicalRepoPath } from '../utils/git';
+import { worktreeExists, findWorktreeByBranch, getCanonicalRepoPath } from '@archon/git';
 import { executeWorkflow } from '../workflows';
 import type { WorkflowDefinition } from '../workflows';
 import {

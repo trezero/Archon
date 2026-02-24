@@ -109,7 +109,7 @@ function createMockPlatform(): IPlatformAdapter {
 
 // Import after mocks are set up
 import { executeWorkflow, isValidCommandName } from './executor';
-import * as gitUtils from '../utils/git';
+import * as gitUtils from '@archon/git';
 import * as configLoader from '../config/config-loader';
 import * as bundledDefaults from '../defaults/bundled-defaults';
 
@@ -4423,6 +4423,13 @@ describe('app defaults command loading', () => {
         if (
           (query as string).includes("status = 'running'") &&
           (query as string).includes('completed_at = NULL')
+        ) {
+          return Promise.resolve(createQueryResult([resumedRun]));
+        }
+        // resumeWorkflowRun: SELECT after UPDATE (split for SQLite compatibility)
+        if (
+          (query as string).includes('SELECT') &&
+          (query as string).includes('remote_agent_workflow_runs WHERE id')
         ) {
           return Promise.resolve(createQueryResult([resumedRun]));
         }

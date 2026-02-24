@@ -12,7 +12,7 @@ import {
 import * as conversationDb from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
 import * as isolationDb from '@archon/core/db/isolation-environments';
-import * as git from '@archon/core/utils/git';
+import * as git from '@archon/git';
 import { CLIAdapter } from '../adapters/cli-adapter';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */

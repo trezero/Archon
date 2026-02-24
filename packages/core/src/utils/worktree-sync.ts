@@ -1,5 +1,5 @@
 import { copyWorktreeFiles } from './worktree-copy';
-import { getCanonicalRepoPath, isWorktreePath } from './git';
+import { getCanonicalRepoPath, isWorktreePath } from '@archon/git';
 import { stat } from 'fs/promises';
 import type { Stats } from 'fs';
 import { join } from 'path';

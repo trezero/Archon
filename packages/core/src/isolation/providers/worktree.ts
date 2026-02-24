@@ -22,7 +22,7 @@ import {
   mkdirAsync,
   syncWorkspace,
   worktreeExists,
-} from '../../utils/git';
+} from '@archon/git';
 import { copyWorktreeFiles } from '../../utils/worktree-copy';
 import type {
   DestroyResult,

@@ -3,7 +3,7 @@
  * Separated from index.ts to allow testing without triggering app startup
  */
 import { createHash } from 'crypto';
-import { isWorktreePath } from './git';
+import { isWorktreePath } from '@archon/git';
 import { createLogger } from './logger';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */

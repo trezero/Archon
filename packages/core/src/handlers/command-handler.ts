@@ -10,7 +10,7 @@ import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
 import { isPathWithinWorkspace } from '../utils/path-validation';
 import { sanitizeError } from '../utils/credential-sanitizer';
-import { listWorktrees, execFileAsync } from '../utils/git';
+import { listWorktrees, execFileAsync } from '@archon/git';
 import { getIsolationProvider } from '../isolation';
 import * as isolationEnvDb from '../db/isolation-environments';
 import {

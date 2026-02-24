@@ -16,7 +16,7 @@ import { formatToolCall } from '../utils/tool-formatter';
 import * as archonPaths from '../utils/archon-paths';
 import * as configLoader from '../config/config-loader';
 import { BUNDLED_COMMANDS, isBinaryBuild } from '../defaults/bundled-defaults';
-import { commitAllChanges, execFileAsync, getDefaultBranch } from '../utils/git';
+import { commitAllChanges, execFileAsync, getDefaultBranch } from '@archon/git';
 import { createLogger } from '../utils/logger';
 import type {
   WorkflowDefinition,
