@@ -23,7 +23,7 @@
 - Surface git errors to users for actionable issues (conflicts, uncommitted changes)
 - Handle expected failure cases gracefully (missing directories during cleanup)
 - Trust git's natural guardrails (e.g., refuse to remove worktree with uncommitted changes)
-- Use `execFileAsync` for git commands (not `exec`) to prevent command injection
+- Use `@archon/git` functions for git operations; use `execFileAsync` (not `exec`) when calling git directly
 - Worktrees enable parallel development per conversation without branch conflicts
 - Workspaces automatically sync with origin before worktree creation (ensures latest code)
 - **NEVER run `git clean -fd`** - it permanently deletes untracked files (use `git checkout .` instead)
