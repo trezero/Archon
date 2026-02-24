@@ -8,7 +8,7 @@
  * │   ├── worktrees/                     # Git worktrees for this project
  * │   ├── artifacts/runs/{workflow-id}/  # Workflow artifacts (NEVER in git)
  * │   └── logs/{workflow-id}.jsonl       # Workflow execution logs
- * ├── worktrees/                         # Legacy global worktrees (deprecated)
+ * ├── worktrees/                         # Legacy global worktrees (for repos not in workspaces/)
  * └── config.yaml                        # Global config
  *
  * For Docker: /.archon/
@@ -74,8 +74,9 @@ export function getArchonWorkspacesPath(): string {
 }
 
 /**
- * Get the worktrees directory (where git worktrees are created)
- * @deprecated Use getProjectWorktreesPath(owner, repo) for new registrations
+ * Get the global worktrees directory (~/.archon/worktrees/).
+ * Used as the legacy fallback for repos not registered under workspaces/.
+ * New project registrations use getProjectWorktreesPath(owner, repo) instead.
  */
 export function getArchonWorktreesPath(): string {
   return join(getArchonHome(), 'worktrees');

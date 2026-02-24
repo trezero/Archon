@@ -23,7 +23,7 @@
 - Surface git errors to users for actionable issues (conflicts, uncommitted changes)
 - Handle expected failure cases gracefully (missing directories during cleanup)
 - Trust git's natural guardrails (e.g., refuse to remove worktree with uncommitted changes)
-- Use `execFileAsync` for git commands (not `exec`) to prevent command injection
+- Use `@archon/git` functions for git operations; use `execFileAsync` (not `exec`) when calling git directly
 - Worktrees enable parallel development per conversation without branch conflicts
 - Workspaces automatically sync with origin before worktree creation (ensures latest code)
 - **NEVER run `git clean -fd`** - it permanently deletes untracked files (use `git checkout .` instead)
@@ -203,6 +203,14 @@ packages/
 │       ├── utils/            # Shared utilities
 │       ├── workflows/        # YAML workflow engine
 │       └── index.ts          # Package exports
+├── git/                      # @archon/git - Git operations (no @archon/core dep)
+│   └── src/
+│       ├── branch.ts         # Branch operations (checkout, merge detection, etc.)
+│       ├── exec.ts           # execFileAsync and mkdirAsync wrappers
+│       ├── repo.ts           # Repository operations (clone, sync, remote URL)
+│       ├── types.ts          # Branded types (RepoPath, BranchName, etc.)
+│       ├── worktree.ts       # Worktree operations (create, remove, list)
+│       └── index.ts          # Package exports
 ├── paths/                    # @archon/paths - Path resolution and logger (zero @archon/* deps)
 │   └── src/
 │       ├── archon-paths.ts   # Archon directory path utilities
@@ -235,7 +243,7 @@ import { handleMessage, ConversationLockManager, pool } from '@archon/core';
 
 // ✅ CORRECT: Namespace imports for submodules with many exports
 import * as conversationDb from '@archon/core/db/conversations';
-import * as git from '@archon/core/utils/git';
+import * as git from '@archon/git';
 
 // ❌ WRONG: Never use generic import for main package
 import * as core from '@archon/core';  // Don't do this
@@ -267,8 +275,9 @@ import * as core from '@archon/core';  // Don't do this
 
 **Package Split:**
 - **@archon/paths**: Path resolution utilities and Pino logger factory (no @archon/* deps)
+- **@archon/git**: Git operations - worktrees, branches, repos, exec wrappers (depends only on @archon/paths)
 - **@archon/cli**: Command-line interface for running workflows
-- **@archon/core**: Business logic, database, orchestration, workflows (re-exports @archon/paths for backward compat)
+- **@archon/core**: Business logic, database, orchestration, workflows (re-exports @archon/git and @archon/paths for backward compat)
 - **@archon/server**: Platform adapters, Hono server, HTTP endpoints, Web UI static serving
 - **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui), SSE streaming to server
 

@@ -4,7 +4,7 @@
  * This package contains:
  * - Workflow engine (YAML-based multi-step workflows)
  * - AI client adapters (Claude, Codex)
- * - Database operations (PostgreSQL)
+ * - Database operations (SQLite/PostgreSQL)
  * - Isolation providers (git worktrees, extensible for containers/VMs)
  * - Orchestration logic
  * - Utility functions
@@ -234,10 +234,12 @@ export {
   createProjectSourceSymlink,
 } from './utils/archon-paths';
 
-// Git utilities
+// Git utilities (re-exported from @archon/git for backward compatibility)
 export {
+  // Exec wrappers
   execFileAsync,
   mkdirAsync,
+  // Worktree operations
   getWorktreeBase,
   isProjectScopedWorktreeBase,
   worktreeExists,
@@ -247,14 +249,21 @@ export {
   createWorktreeForIssue,
   removeWorktree,
   getCanonicalRepoPath,
+  // Branch operations
   commitAllChanges,
   hasUncommittedChanges,
-  syncWorkspace,
   getDefaultBranch,
+  checkout,
+  // Repository operations
+  syncWorkspace,
   findRepoRoot,
   getRemoteUrl,
-  checkout,
-} from './utils/git';
+  // Branded type conversions
+  toRepoPath,
+  toBranchName,
+  toWorktreePath,
+} from '@archon/git';
+export type { RepoPath, BranchName, WorktreePath, WorktreeInfo } from '@archon/git';
 
 // GitHub GraphQL
 export { getLinkedIssueNumbers } from './utils/github-graphql';

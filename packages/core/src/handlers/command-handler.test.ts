@@ -13,7 +13,7 @@ import { createMockLogger } from '../test/mocks/logger';
 import { Conversation } from '../types';
 import { resolve, join } from 'path';
 import * as fsPromises from 'fs/promises';
-import * as gitUtils from '../utils/git';
+import * as gitUtils from '@archon/git';
 import * as pathValidation from '../utils/path-validation';
 import * as workflows from '../workflows';
 

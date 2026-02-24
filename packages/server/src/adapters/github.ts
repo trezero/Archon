@@ -4,8 +4,6 @@
  */
 import { Octokit } from '@octokit/rest';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { readdir, access } from 'fs/promises';
 import { join } from 'path';
 import type { IPlatformAdapter, IsolationHints, MessageMetadata } from '@archon/core';
@@ -18,16 +16,21 @@ import {
   isGitHubUserAuthorized,
   getLinkedIssueNumbers,
   onConversationClosed,
-  isWorktreePath,
   getArchonWorkspacesPath,
   getCommandFolderSearchPaths,
   ConversationLockManager,
 } from '@archon/core';
+import {
+  isWorktreePath,
+  cloneRepository,
+  syncRepository,
+  addSafeDirectory,
+  toRepoPath,
+  toBranchName,
+} from '@archon/git';
 import * as db from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
 import { createLogger } from '@archon/core';
-
-const execAsync = promisify(exec);
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -509,16 +512,12 @@ export class GitHubAdapter implements IPlatformAdapter {
     if (directoryExists) {
       if (shouldSync) {
         getLog().info({ repoPath, defaultBranch }, 'repo_syncing');
-        try {
-          await execAsync(
-            `cd ${repoPath} && git fetch origin && git reset --hard origin/${defaultBranch}`
-          );
-        } catch (syncError) {
-          const err = syncError as Error;
-          getLog().error({ err, repoPath, defaultBranch }, 'repo_sync_failed');
+        const syncResult = await syncRepository(toRepoPath(repoPath), toBranchName(defaultBranch));
+        if (!syncResult.ok) {
+          getLog().error({ error: syncResult.error, repoPath, defaultBranch }, 'repo_sync_failed');
           throw new Error(
             `Failed to sync repository to ${defaultBranch}. ` +
-              `Try /reset or check if the branch exists. Details: ${err.message}`
+              `Try /reset or check if the branch exists. Details: ${syncResult.error.code === 'branch_not_found' ? `Branch '${defaultBranch}' not found` : 'message' in syncResult.error ? syncResult.error.message : syncResult.error.code}`
           );
         }
       }
@@ -529,32 +528,31 @@ export class GitHubAdapter implements IPlatformAdapter {
     getLog().info({ owner, repo, repoPath }, 'repo_cloning');
     const ghToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
     const repoUrl = `https://github.com/${owner}/${repo}.git`;
-    let cloneCommand = `git clone ${repoUrl} ${repoPath}`;
 
-    if (ghToken) {
-      const authenticatedUrl = `https://${ghToken}@github.com/${owner}/${repo}.git`;
-      cloneCommand = `git clone ${authenticatedUrl} ${repoPath}`;
-    }
+    const cloneResult = await cloneRepository(
+      repoUrl,
+      toRepoPath(repoPath),
+      ghToken ? { token: ghToken } : undefined
+    );
 
-    try {
-      await execAsync(cloneCommand);
-      await execAsync(`git config --global --add safe.directory '${repoPath}'`);
-    } catch (cloneError) {
-      const err = cloneError as Error;
-      getLog().error({ err, owner, repo, repoPath }, 'repo_clone_failed');
+    if (!cloneResult.ok) {
+      getLog().error({ error: cloneResult.error, owner, repo, repoPath }, 'repo_clone_failed');
 
-      // Throw user-friendly error
-      if (err.message.includes('not found') || err.message.includes('404')) {
+      if (cloneResult.error.code === 'not_a_repo') {
         throw new Error(
           `Repository ${owner}/${repo} not found or is private. Check repository access.`
         );
-      } else if (err.message.includes('Authentication failed')) {
+      } else if (cloneResult.error.code === 'permission_denied') {
         throw new Error(
           `Authentication failed for ${owner}/${repo}. Check GITHUB_TOKEN permissions.`
         );
       }
-      throw new Error(`Failed to clone ${owner}/${repo}: ${err.message}`);
+      throw new Error(
+        `Failed to clone ${owner}/${repo}: ${'message' in cloneResult.error ? cloneResult.error.message : cloneResult.error.code}`
+      );
     }
+
+    await addSafeDirectory(toRepoPath(repoPath));
   }
 
   /**

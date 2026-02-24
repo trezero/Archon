@@ -256,7 +256,7 @@ Implements `IPlatformAdapter` for terminal output.
 | `conversationDb.*` | `core/src/db/conversations.ts` | Conversation CRUD |
 | `codebaseDb.*` | `core/src/db/codebases.ts` | Codebase CRUD |
 | `isolationDb.*` | `core/src/db/isolation-environments.ts` | Worktree tracking |
-| `git.*` | `core/src/utils/git.ts` | Git operations |
+| `git.*` | `@archon/git` (`packages/git/src/`) | Git operations |
 | `closeDatabase()` | `core/src/db/connection.ts` | Clean shutdown |
 
 ---

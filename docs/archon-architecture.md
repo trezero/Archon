@@ -16,18 +16,19 @@ Archon is the unified directory and configuration system for the remote-coding-a
 
 ```
 ~/.archon/                    # ARCHON_HOME
-├── workspaces/               # Cloned repositories
+├── workspaces/               # Cloned repositories (project-centric layout)
 │   └── owner/
 │       └── repo/
-├── worktrees/                # Git worktrees for isolation
-│   └── repo-name/
-│       └── branch-name/
+│           ├── source/       # Clone or symlink → local path
+│           └── worktrees/    # Git worktrees for this project
+├── worktrees/                # Legacy global worktrees (for repos not in workspaces/)
 └── config.yaml               # Global user configuration
 ```
 
 **Purpose:**
 - `workspaces/` - Repositories cloned via `/clone` command or GitHub adapter
-- `worktrees/` - Isolated git worktrees created per conversation/issue/PR
+- `workspaces/owner/repo/worktrees/` - Git worktrees for this project (new registrations)
+- `worktrees/` - Legacy fallback for repos not registered under `workspaces/`
 - `config.yaml` - Non-secret user preferences
 
 ### Repo-Level: `.archon/`
@@ -68,7 +69,7 @@ getArchonHome(): string
 getArchonWorkspacesPath(): string
 // Returns: ${ARCHON_HOME}/workspaces
 
-// Get worktrees directory
+// Get global worktrees directory (legacy fallback)
 getArchonWorktreesPath(): string
 // Returns: ${ARCHON_HOME}/worktrees
 

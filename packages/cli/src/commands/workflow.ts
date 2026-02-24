@@ -12,7 +12,7 @@ import {
 import * as conversationDb from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
 import * as isolationDb from '@archon/core/db/isolation-environments';
-import * as git from '@archon/core/utils/git';
+import * as git from '@archon/git';
 import { CLIAdapter } from '../adapters/cli-adapter';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -220,7 +220,7 @@ export async function workflowRunCommand(
     if (options.noWorktree) {
       // Checkout branch in cwd, no worktree
       getLog().info({ branch: options.branchName }, 'branch_checkout');
-      await git.checkout(cwd, options.branchName);
+      await git.checkout(git.toRepoPath(cwd), git.toBranchName(options.branchName));
       workingCwd = cwd;
     } else {
       // Create or reuse worktree

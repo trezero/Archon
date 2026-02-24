@@ -31,7 +31,7 @@ mock.module('@archon/core', () => ({
   createLogger: mock(() => mockLogger),
 }));
 
-mock.module('@archon/core/utils/git', () => ({
+mock.module('@archon/git', () => ({
   findRepoRoot: mock(() => Promise.resolve(null)),
   getRemoteUrl: mock(() => Promise.resolve(null)),
   checkout: mock(() => Promise.resolve()),

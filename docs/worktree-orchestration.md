@@ -283,7 +283,7 @@ App checks: findWorktreeByBranch("feature/auth")
 | `src/isolation/types.ts`              | `IIsolationProvider`, `IsolationRequest`, `IsolatedEnvironment`, `DestroyResult` |
 | `src/isolation/providers/worktree.ts` | `WorktreeProvider` implementation                               |
 | `src/isolation/index.ts`              | `getIsolationProvider()` factory                                |
-| `src/utils/git.ts`                    | `getWorktreeBase()`, `listWorktrees()`, `syncWorkspace()`, `getDefaultBranch()`, low-level git ops |
+| `@archon/git` (`packages/git/src/`)   | `getWorktreeBase()`, `listWorktrees()`, `syncWorkspace()`, `getDefaultBranch()`, low-level git ops |
 | `src/adapters/github.ts`              | Webhook handling, `cleanupPRWorktree()`                         |
 | `src/handlers/command-handler.ts`     | `/worktree` command handling                                    |
 

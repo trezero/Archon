@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn, mock, type Mock } from 'bun:test';
-import * as git from './git';
+import * as git from '@archon/git';
 import * as worktreeCopy from './worktree-copy';
 import * as configLoader from '../config/config-loader';
 import * as fs from 'fs/promises';

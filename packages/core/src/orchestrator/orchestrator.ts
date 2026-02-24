@@ -44,7 +44,13 @@ import * as db from '../db/conversations';
 import * as isolationEnvDb from '../db/isolation-environments';
 import { toError } from '../utils/error';
 import { getIsolationProvider } from '../isolation';
-import { worktreeExists, findWorktreeByBranch, getCanonicalRepoPath } from '../utils/git';
+import {
+  worktreeExists,
+  findWorktreeByBranch,
+  getCanonicalRepoPath,
+  toWorktreePath,
+  toBranchName,
+} from '@archon/git';
 import { executeWorkflow } from '../workflows';
 import type { WorkflowDefinition } from '../workflows';
 import {
@@ -123,7 +129,7 @@ export async function validateAndResolveIsolation(
     const staleIsolationEnvId = conversation.isolation_env_id;
     const env = await isolationEnvDb.getById(conversation.isolation_env_id);
 
-    if (env && (await worktreeExists(env.working_path))) {
+    if (env && (await worktreeExists(toWorktreePath(env.working_path)))) {
       // Valid - use it
       return { status: 'existing', cwd: env.working_path, env };
     }
@@ -230,7 +236,7 @@ async function resolveIsolation(
 
   // 1. Check for existing environment with same workflow
   const existing = await isolationEnvDb.findByWorkflow(codebase.id, workflowType, workflowId);
-  if (existing && (await worktreeExists(existing.working_path))) {
+  if (existing && (await worktreeExists(toWorktreePath(existing.working_path)))) {
     getLog().debug({ workflowType, workflowId }, 'isolation_reuse_existing');
     return { status: 'ready', env: existing };
   }
@@ -239,7 +245,7 @@ async function resolveIsolation(
   if (hints?.linkedIssues?.length) {
     for (const issueNum of hints.linkedIssues) {
       const linkedEnv = await isolationEnvDb.findByWorkflow(codebase.id, 'issue', String(issueNum));
-      if (linkedEnv && (await worktreeExists(linkedEnv.working_path))) {
+      if (linkedEnv && (await worktreeExists(toWorktreePath(linkedEnv.working_path)))) {
         getLog().debug({ issueNum, codebaseId: codebase.id }, 'isolation_share_linked_issue');
         // Send UX message
         await platform.sendMessage(
@@ -254,7 +260,7 @@ async function resolveIsolation(
   // 3. Try PR branch adoption (skill symbiosis)
   if (hints?.prBranch) {
     const canonicalPath = await getCanonicalRepoPath(codebase.default_cwd);
-    const adoptedPath = await findWorktreeByBranch(canonicalPath, hints.prBranch);
+    const adoptedPath = await findWorktreeByBranch(canonicalPath, toBranchName(hints.prBranch));
     if (adoptedPath && (await worktreeExists(adoptedPath))) {
       getLog().info({ adoptedPath, prBranch: hints.prBranch }, 'isolation_worktree_adopted');
       const env = await isolationEnvDb.create({

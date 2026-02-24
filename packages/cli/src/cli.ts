@@ -55,7 +55,7 @@ import {
 import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
 import { closeDatabase, setLogLevel, createLogger } from '@archon/core';
-import * as git from '@archon/core/utils/git';
+import * as git from '@archon/git';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

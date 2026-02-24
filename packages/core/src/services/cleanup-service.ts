@@ -8,7 +8,16 @@ import * as sessionDb from '../db/sessions';
 import { SessionNotFoundError } from '../db/sessions';
 import * as codebaseDb from '../db/codebases';
 import { getIsolationProvider } from '../isolation';
-import { execFileAsync, hasUncommittedChanges } from '../utils/git';
+import {
+  hasUncommittedChanges,
+  worktreeExists,
+  getDefaultBranch,
+  isBranchMerged,
+  getLastCommitDate,
+  toRepoPath,
+  toWorktreePath,
+  toBranchName,
+} from '@archon/git';
 import { createLogger } from '../utils/logger';
 import { IsolationEnvironmentRow, ConversationNotFoundError } from '../types';
 
@@ -140,14 +149,14 @@ export async function removeEnvironment(
   }
 
   // Check if directory exists before attempting removal
-  const pathExists = await worktreeExists(env.working_path);
+  const pathExists = await worktreeExists(toWorktreePath(env.working_path));
 
   const provider = getIsolationProvider();
 
   try {
     // If path exists, check for uncommitted changes (unless force)
     if (pathExists && !options?.force) {
-      const hasChanges = await hasUncommittedChanges(env.working_path);
+      const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
       if (hasChanges) {
         getLog().warn({ envId, workingPath: env.working_path }, 'env_has_uncommitted_changes');
         return;
@@ -197,70 +206,6 @@ export async function removeEnvironment(
 }
 
 /**
- * Check if a branch has been merged into main.
- * Returns false for any error (logs unexpected errors for debugging).
- */
-export async function isBranchMerged(
-  repoPath: string,
-  branchName: string,
-  mainBranch = 'main'
-): Promise<boolean> {
-  try {
-    const { stdout } = await execFileAsync('git', [
-      '-C',
-      repoPath,
-      'branch',
-      '--merged',
-      mainBranch,
-    ]);
-    const mergedBranches = stdout.split('\n').map(b => b.trim().replace(/^\* /, ''));
-    return mergedBranches.includes(branchName);
-  } catch (error) {
-    const err = error as Error & { code?: string; stderr?: string };
-    const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
-
-    // Expected errors: branch doesn't exist, not a git repo, etc.
-    const isExpectedError =
-      errorText.includes('not a git repository') ||
-      errorText.includes('unknown revision') ||
-      errorText.includes('no such file') ||
-      err.code === 'ENOENT';
-
-    if (!isExpectedError) {
-      // Log unexpected errors for debugging (permission issues, corruption, etc.)
-      getLog().warn({ err: error, repoPath, branchName, mainBranch }, 'branch_merge_check_failed');
-    }
-    return false;
-  }
-}
-
-/**
- * Get the last commit date for a worktree.
- * Returns null for any error (logs unexpected errors for debugging).
- */
-export async function getLastCommitDate(workingPath: string): Promise<Date | null> {
-  try {
-    const { stdout } = await execFileAsync('git', ['-C', workingPath, 'log', '-1', '--format=%ci']);
-    return new Date(stdout.trim());
-  } catch (error) {
-    const err = error as Error & { code?: string; stderr?: string };
-    const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
-
-    // Expected errors: not a git repo, no commits, path doesn't exist
-    const isExpectedError =
-      errorText.includes('not a git repository') ||
-      errorText.includes('does not have any commits') ||
-      errorText.includes('no such file') ||
-      err.code === 'ENOENT';
-
-    if (!isExpectedError) {
-      getLog().warn({ err: error, workingPath }, 'last_commit_date_check_failed');
-    }
-    return null;
-  }
-}
-
-/**
  * Clean up to make room when limit reached (Phase 3D)
  * Attempts to remove merged branches first
  * Returns detailed results for user feedback
@@ -293,7 +238,7 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
         if (env.status !== 'active') continue;
 
         // Check if path still exists
-        const pathExists = await worktreeExists(env.working_path);
+        const pathExists = await worktreeExists(toWorktreePath(env.working_path));
         if (!pathExists) {
           // Path doesn't exist - call removeEnvironment to clean up branch and mark as destroyed
           await removeEnvironment(env.id, { force: false });
@@ -302,12 +247,17 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
         }
 
         // Check if branch is merged
-        const mainBranch = await getMainBranch(env.codebase_default_cwd);
-        const merged = await isBranchMerged(env.codebase_default_cwd, env.branch_name, mainBranch);
+        const mainRepoPath = toRepoPath(env.codebase_default_cwd);
+        const mainBranch = await getDefaultBranch(mainRepoPath);
+        const merged = await isBranchMerged(
+          mainRepoPath,
+          toBranchName(env.branch_name),
+          mainBranch
+        );
 
         if (merged) {
           // Check for uncommitted changes before removing
-          const hasChanges = await hasUncommittedChanges(env.working_path);
+          const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
           if (hasChanges) {
             report.skipped.push({ id: env.id, reason: 'merged but has uncommitted changes' });
             getLog().warn({ envId: env.id }, 'skip_merged_uncommitted_changes');
@@ -342,7 +292,7 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
         // Check if environment is stale
         const isStale = await isEnvironmentStale(env, STALE_THRESHOLD_DAYS);
         if (isStale) {
-          const hasChanges = await hasUncommittedChanges(env.working_path);
+          const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
           if (hasChanges) {
             report.skipped.push({ id: env.id, reason: 'stale but has uncommitted changes' });
             getLog().warn({ envId: env.id }, 'skip_stale_uncommitted_changes');
@@ -394,7 +344,7 @@ async function isEnvironmentStale(
   staleDays: number
 ): Promise<boolean> {
   // Check last commit date in the worktree
-  const lastCommit = await getLastCommitDate(env.working_path);
+  const lastCommit = await getLastCommitDate(toWorktreePath(env.working_path));
   if (lastCommit) {
     const daysSinceCommit = (Date.now() - lastCommit.getTime()) / (1000 * 60 * 60 * 24);
     if (daysSinceCommit < staleDays) {
@@ -406,68 +356,6 @@ async function isEnvironmentStale(
   const daysSinceCreation =
     (Date.now() - new Date(env.created_at).getTime()) / (1000 * 60 * 60 * 24);
   return daysSinceCreation >= staleDays;
-}
-
-/**
- * Get the main branch name for a repository
- */
-async function getMainBranch(repoPath: string): Promise<string> {
-  try {
-    // Try to get the default branch from remote
-    const { stdout } = await execFileAsync('git', [
-      '-C',
-      repoPath,
-      'symbolic-ref',
-      'refs/remotes/origin/HEAD',
-    ]);
-    // Output is like "refs/remotes/origin/main"
-    const match = /refs\/remotes\/origin\/(.+)/.exec(stdout.trim());
-    return match?.[1] ?? 'main';
-  } catch (error) {
-    const err = error as Error & { stderr?: string };
-    const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
-
-    // Expected: origin/HEAD not configured (common for fresh clones)
-    const isExpected =
-      errorText.includes('ref refs/remotes/origin/head is not a symbolic ref') ||
-      errorText.includes('no such file');
-
-    if (!isExpected) {
-      getLog().warn({ err: error, repoPath }, 'main_branch_detect_failed');
-    }
-    return 'main';
-  }
-}
-
-/**
- * Check if a worktree path exists and is functional
- * Returns false for: path not found, not a git repo, or git directory missing
- * Only throws on truly unexpected errors (e.g., EACCES permission denied)
- */
-async function worktreeExists(path: string): Promise<boolean> {
-  try {
-    const { stdout } = await execFileAsync('git', ['-C', path, 'rev-parse', '--git-dir']);
-    return stdout.trim().length > 0;
-  } catch (error) {
-    const err = error as Error & { code?: string };
-    const errorText = err.message.toLowerCase();
-
-    // Return false for expected "not found" scenarios:
-    // - ENOENT: path doesn't exist
-    // - "No such file or directory": path or .git missing
-    // - "not a git repo/repository": path exists but .git is missing/corrupted
-    if (
-      err.code === 'ENOENT' ||
-      errorText.includes('no such file or directory') ||
-      errorText.includes('not a git repo')
-    ) {
-      return false;
-    }
-
-    // Log and re-throw unexpected errors (EACCES, timeout, etc.)
-    getLog().error({ err: error, path }, 'worktree_existence_check_failed');
-    throw err;
-  }
 }
 
 // =============================================================================
@@ -506,6 +394,7 @@ export async function getWorktreeStatusBreakdown(
 ): Promise<WorktreeStatusBreakdown> {
   const environments = await isolationEnvDb.listByCodebaseWithAge(codebaseId);
 
+  const repoPath = toRepoPath(mainRepoPath);
   const breakdown: WorktreeStatusBreakdown = {
     total: environments.length,
     merged: 0,
@@ -517,14 +406,22 @@ export async function getWorktreeStatusBreakdown(
     activeEnvs: [],
   };
 
-  const mainBranch = await getMainBranch(mainRepoPath);
+  const mainBranch = await getDefaultBranch(repoPath);
 
   for (const env of environments) {
     // Skip Telegram (never shown as stale)
     const isTelegram = env.created_by_platform === 'telegram';
 
-    // Check if merged
-    const merged = await isBranchMerged(mainRepoPath, env.branch_name, mainBranch);
+    // Check if merged (treat as not-merged on unexpected errors)
+    let merged = false;
+    try {
+      merged = await isBranchMerged(repoPath, toBranchName(env.branch_name), mainBranch);
+    } catch (error) {
+      getLog().warn(
+        { err: error, envId: env.id, branchName: env.branch_name },
+        'merge_check_error_in_breakdown'
+      );
+    }
     if (merged) {
       breakdown.merged++;
       breakdown.mergedEnvs.push({ id: env.id, branchName: env.branch_name });
@@ -570,7 +467,7 @@ export async function cleanupStaleWorktrees(
     if (env.days_since_activity < STALE_THRESHOLD_DAYS) continue;
 
     // Check for uncommitted changes
-    const hasChanges = await hasUncommittedChanges(env.working_path);
+    const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
     if (hasChanges) {
       result.skipped.push({ branchName: env.branch_name, reason: 'has uncommitted changes' });
       continue;
@@ -609,15 +506,26 @@ export async function cleanupMergedWorktrees(
 ): Promise<CleanupOperationResult> {
   const result: CleanupOperationResult = { removed: [], skipped: [] };
   const environments = await isolationEnvDb.listByCodebase(codebaseId);
-  const mainBranch = await getMainBranch(mainRepoPath);
+  const repoPath = toRepoPath(mainRepoPath);
+  const mainBranch = await getDefaultBranch(repoPath);
 
   for (const env of environments) {
-    // Check if merged
-    const merged = await isBranchMerged(mainRepoPath, env.branch_name, mainBranch);
+    // Check if merged (skip env on unexpected errors)
+    let merged = false;
+    try {
+      merged = await isBranchMerged(repoPath, toBranchName(env.branch_name), mainBranch);
+    } catch (error) {
+      const err = error as Error;
+      result.skipped.push({
+        branchName: env.branch_name,
+        reason: `merge check failed: ${err.message}`,
+      });
+      continue;
+    }
     if (!merged) continue;
 
     // Check for uncommitted changes
-    const hasChanges = await hasUncommittedChanges(env.working_path);
+    const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
     if (hasChanges) {
       result.skipped.push({ branchName: env.branch_name, reason: 'has uncommitted changes' });
       continue;

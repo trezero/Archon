@@ -2,7 +2,6 @@
  * Worktree Provider - Git worktree-based isolation
  *
  * Default isolation provider using git worktrees.
- * Migrated from src/utils/git.ts with consistent semantics.
  */
 
 import { createHash } from 'crypto';
@@ -22,7 +21,11 @@ import {
   mkdirAsync,
   syncWorkspace,
   worktreeExists,
-} from '../../utils/git';
+  toRepoPath,
+  toWorktreePath,
+  toBranchName,
+} from '@archon/git';
+import type { RepoPath, WorktreeInfo } from '@archon/git';
 import { copyWorktreeFiles } from '../../utils/worktree-copy';
 import type {
   DestroyResult,
@@ -282,13 +285,13 @@ export class WorktreeProvider implements IIsolationProvider {
   async get(envId: string): Promise<IsolatedEnvironment | null> {
     const worktreePath = envId;
 
-    if (!(await worktreeExists(worktreePath))) {
+    if (!(await worktreeExists(toWorktreePath(worktreePath)))) {
       return null;
     }
 
     // Get branch name from worktree
-    let repoPath: string;
-    let worktrees: { path: string; branch: string }[];
+    let repoPath: RepoPath;
+    let worktrees: WorktreeInfo[];
     try {
       repoPath = await getCanonicalRepoPath(worktreePath);
       worktrees = await listWorktrees(repoPath);
@@ -321,12 +324,12 @@ export class WorktreeProvider implements IIsolationProvider {
    */
   async list(codebaseId: string): Promise<IsolatedEnvironment[]> {
     // codebaseId is the canonical repo path for worktrees
-    const repoPath = codebaseId;
+    const repoPath = toRepoPath(codebaseId);
     const worktrees = await listWorktrees(repoPath);
 
     // Filter out main repo (first worktree is typically the main checkout)
     return worktrees
-      .filter(wt => wt.path !== repoPath)
+      .filter(wt => wt.path !== (repoPath as string))
       .map(wt => ({
         id: wt.path,
         provider: 'worktree' as const,
@@ -346,12 +349,12 @@ export class WorktreeProvider implements IIsolationProvider {
    * - Worktree exists on disk but isn't registered with git (corrupted state)
    */
   async adopt(path: string): Promise<IsolatedEnvironment | null> {
-    if (!(await worktreeExists(path))) {
+    if (!(await worktreeExists(toWorktreePath(path)))) {
       return null;
     }
 
-    let repoPath: string;
-    let worktrees: { path: string; branch: string }[];
+    let repoPath: RepoPath;
+    let worktrees: WorktreeInfo[];
     try {
       repoPath = await getCanonicalRepoPath(path);
       worktrees = await listWorktrees(repoPath);
@@ -392,7 +395,7 @@ export class WorktreeProvider implements IIsolationProvider {
    *                 Only returns false for missing paths (ENOENT).
    */
   async healthCheck(envId: string): Promise<boolean> {
-    return worktreeExists(envId);
+    return worktreeExists(toWorktreePath(envId));
   }
 
   /**
@@ -446,15 +449,16 @@ export class WorktreeProvider implements IIsolationProvider {
    * avoid collisions between repos.
    */
   getWorktreePath(request: IsolationRequest, branchName: string): string {
-    const worktreeBase = getWorktreeBase(request.canonicalRepoPath);
+    const repoPath = toRepoPath(request.canonicalRepoPath);
+    const worktreeBase = getWorktreeBase(repoPath);
 
-    if (isProjectScopedWorktreeBase(request.canonicalRepoPath)) {
+    if (isProjectScopedWorktreeBase(repoPath)) {
       // Project-scoped: worktreeBase is already .../workspaces/owner/repo/worktrees/
       return join(worktreeBase, branchName);
     }
 
     // Legacy global: need to include owner/repo to avoid collisions
-    const pathParts = request.canonicalRepoPath.split(/[/\\]/).filter(p => p.length > 0);
+    const pathParts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
     const repoName = pathParts[pathParts.length - 1];
     const ownerName = pathParts[pathParts.length - 2];
     return join(worktreeBase, ownerName, repoName, branchName);
@@ -469,7 +473,7 @@ export class WorktreeProvider implements IIsolationProvider {
     worktreePath: string
   ): Promise<WorktreeEnvironment | null> {
     // Check if worktree already exists at expected path
-    if (await worktreeExists(worktreePath)) {
+    if (await worktreeExists(toWorktreePath(worktreePath))) {
       getLog().info({ worktreePath, branchName }, 'worktree_adopted');
       return {
         id: worktreePath,
@@ -486,8 +490,8 @@ export class WorktreeProvider implements IIsolationProvider {
     // Type narrowing: when workflowType === 'pr', request is PRIsolationRequest with prBranch required
     if (request.workflowType === 'pr') {
       const existingByBranch = await findWorktreeByBranch(
-        request.canonicalRepoPath,
-        request.prBranch
+        toRepoPath(request.canonicalRepoPath),
+        toBranchName(request.prBranch)
       );
       if (existingByBranch) {
         getLog().info(
@@ -517,7 +521,7 @@ export class WorktreeProvider implements IIsolationProvider {
     worktreePath: string,
     branchName: string
   ): Promise<void> {
-    const repoPath = request.canonicalRepoPath;
+    const repoPath = toRepoPath(request.canonicalRepoPath);
 
     let repoConfig: RepoConfig | null = null;
     try {
@@ -573,7 +577,7 @@ export class WorktreeProvider implements IIsolationProvider {
    * - Not a git repository
    */
   private async syncWorkspaceBeforeCreate(
-    repoPath: string,
+    repoPath: RepoPath,
     configuredBaseBranch?: string
   ): Promise<void> {
     try {
@@ -581,7 +585,10 @@ export class WorktreeProvider implements IIsolationProvider {
         { repoPath, branch: configuredBaseBranch ?? 'auto-detect' },
         'workspace_sync_starting'
       );
-      const { branch, synced } = await syncWorkspace(repoPath, configuredBaseBranch);
+      const { branch, synced } = await syncWorkspace(
+        repoPath,
+        configuredBaseBranch ? toBranchName(configuredBaseBranch) : undefined
+      );
       if (synced) {
         getLog().debug({ repoPath, branch }, 'workspace_synced');
       } else {
@@ -883,7 +890,7 @@ export class WorktreeProvider implements IIsolationProvider {
       return;
     }
 
-    const isValidWorktree = await worktreeExists(worktreePath);
+    const isValidWorktree = await worktreeExists(toWorktreePath(worktreePath));
     if (isValidWorktree) {
       return; // Not an orphan - it's a valid worktree
     }

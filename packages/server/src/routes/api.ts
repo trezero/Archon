@@ -24,6 +24,8 @@ import {
   cloneRepository,
   registerRepository,
   removeWorktree,
+  toRepoPath,
+  toWorktreePath,
   ConversationNotFoundError,
   getArchonWorkspacesPath,
   createLogger,
@@ -425,7 +427,7 @@ export function registerApiRoutes(
       const environments = await isolationEnvDb.listByCodebase(id);
       for (const env of environments) {
         try {
-          await removeWorktree(codebase.default_cwd, env.working_path);
+          await removeWorktree(toRepoPath(codebase.default_cwd), toWorktreePath(env.working_path));
           getLog().info({ path: env.working_path }, 'worktree_removed');
         } catch (wtErr) {
           // Worktree may already be gone — log but continue

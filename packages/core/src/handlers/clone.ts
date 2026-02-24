@@ -6,7 +6,7 @@ import { access, rm } from 'fs/promises';
 import { join, basename, resolve } from 'path';
 import * as codebaseDb from '../db/codebases';
 import { sanitizeError } from '../utils/credential-sanitizer';
-import { execFileAsync } from '../utils/git';
+import { execFileAsync } from '@archon/git';
 import {
   expandTilde,
   getCommandFolderSearchPaths,

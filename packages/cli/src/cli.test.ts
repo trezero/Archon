@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'bun:test';
 import { parseArgs } from 'util';
-import * as git from '@archon/core/utils/git';
+import * as git from '@archon/git';
 
 // Test the argument parsing logic used in cli.ts
 describe('CLI argument parsing', () => {
