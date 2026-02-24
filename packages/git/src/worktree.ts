@@ -7,7 +7,8 @@ import {
   getProjectWorktreesPath,
 } from '@archon/paths';
 import { execFileAsync, mkdirAsync } from './exec';
-import type { WorktreeInfo } from './types';
+import type { RepoPath, BranchName, WorktreePath, WorktreeInfo } from './types';
+import { toRepoPath, toWorktreePath } from './types';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -25,7 +26,7 @@ function getLog(): ReturnType<typeof createLogger> {
  * For paths outside the workspaces directory, returns the legacy global path:
  * ~/.archon/worktrees/
  */
-export function getWorktreeBase(repoPath: string): string {
+export function getWorktreeBase(repoPath: RepoPath): string {
   const workspacesPath = getArchonWorkspacesPath();
   if (repoPath.startsWith(workspacesPath)) {
     // Extract owner/repo from the path
@@ -46,7 +47,7 @@ export function getWorktreeBase(repoPath: string): string {
  * When project-scoped, the worktree base already includes the owner/repo context,
  * so callers should NOT append owner/repo again.
  */
-export function isProjectScopedWorktreeBase(repoPath: string): boolean {
+export function isProjectScopedWorktreeBase(repoPath: RepoPath): boolean {
   const workspacesPath = getArchonWorkspacesPath();
   if (!repoPath.startsWith(workspacesPath)) return false;
   const relative = repoPath.substring(workspacesPath.length + 1);
@@ -61,7 +62,7 @@ export function isProjectScopedWorktreeBase(repoPath: string): boolean {
  * Only returns false for ENOENT (path doesn't exist).
  * Throws for unexpected errors (permission denied, I/O errors, etc.)
  */
-export async function worktreeExists(worktreePath: string): Promise<boolean> {
+export async function worktreeExists(worktreePath: WorktreePath): Promise<boolean> {
   try {
     await access(worktreePath);
     const gitPath = join(worktreePath, '.git');
@@ -85,7 +86,7 @@ export async function worktreeExists(worktreePath: string): Promise<boolean> {
  * Only returns [] for expected "not a git repository" errors.
  * Throws for unexpected errors (permission denied, git not found, etc.)
  */
-export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
+export async function listWorktrees(repoPath: RepoPath): Promise<WorktreeInfo[]> {
   try {
     const { stdout } = await execFileAsync(
       'git',
@@ -131,8 +132,8 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
  * Useful for discovering skill-created worktrees when app receives GitHub event
  */
 export async function findWorktreeByBranch(
-  repoPath: string,
-  branchPattern: string
+  repoPath: RepoPath,
+  branchPattern: BranchName
 ): Promise<string | null> {
   const worktrees = await listWorktrees(repoPath);
 
@@ -179,7 +180,10 @@ export async function isWorktreePath(path: string): Promise<boolean> {
  * Remove a git worktree
  * Throws if uncommitted changes exist (git's natural guardrail)
  */
-export async function removeWorktree(repoPath: string, worktreePath: string): Promise<void> {
+export async function removeWorktree(
+  repoPath: RepoPath,
+  worktreePath: WorktreePath
+): Promise<void> {
   await execFileAsync('git', ['-C', repoPath, 'worktree', 'remove', worktreePath], {
     timeout: 30000,
   });
@@ -189,7 +193,7 @@ export async function removeWorktree(repoPath: string, worktreePath: string): Pr
  * Get canonical repo path from a worktree path
  * If already canonical, returns the same path
  */
-export async function getCanonicalRepoPath(path: string): Promise<string> {
+export async function getCanonicalRepoPath(path: string): Promise<RepoPath> {
   if (await isWorktreePath(path)) {
     // Read .git file to find main repo
     const gitPath = join(path, '.git');
@@ -197,10 +201,15 @@ export async function getCanonicalRepoPath(path: string): Promise<string> {
     // gitdir: /path/to/repo/.git/worktrees/branch-name
     const match = /gitdir: (.+)\/\.git\/worktrees\//.exec(content);
     if (match) {
-      return match[1];
+      return toRepoPath(match[1]);
     }
+    // Worktree detected but regex didn't match - unexpected .git content format
+    getLog().warn(
+      { path, gitContentPrefix: content.substring(0, 120) },
+      'canonical_path_regex_fallthrough'
+    );
   }
-  return path;
+  return toRepoPath(path);
 }
 
 /**
@@ -213,12 +222,12 @@ export async function getCanonicalRepoPath(path: string): Promise<string> {
  * Will adopt existing worktrees if found (enables skill-app symbiosis)
  */
 export async function createWorktreeForIssue(
-  repoPath: string,
+  repoPath: RepoPath,
   issueNumber: number,
   isPR: boolean,
-  prHeadBranch?: string,
+  prHeadBranch?: BranchName,
   prHeadSha?: string
-): Promise<string> {
+): Promise<WorktreePath> {
   const branchName = isPR ? `pr-${String(issueNumber)}` : `issue-${String(issueNumber)}`;
 
   // Extract owner and repo name from repoPath to avoid collisions
@@ -228,7 +237,7 @@ export async function createWorktreeForIssue(
   const ownerName = pathParts[pathParts.length - 2]; // Second to last: "owner"
 
   const worktreeBase = getWorktreeBase(repoPath);
-  const worktreePath = join(worktreeBase, ownerName, repoName, branchName);
+  const worktreePath = toWorktreePath(join(worktreeBase, ownerName, repoName, branchName));
 
   // Check if worktree already exists at expected path (possibly created by skill)
   if (await worktreeExists(worktreePath)) {
@@ -241,7 +250,7 @@ export async function createWorktreeForIssue(
     const existingByBranch = await findWorktreeByBranch(repoPath, prHeadBranch);
     if (existingByBranch) {
       getLog().info({ prHeadBranch, worktreePath: existingByBranch }, 'worktree_adopted_by_branch');
-      return existingByBranch;
+      return toWorktreePath(existingByBranch);
     }
   }
 
@@ -305,7 +314,8 @@ export async function createWorktreeForIssue(
       }
     } catch (error) {
       const err = error as Error & { stderr?: string };
-      throw new Error(`Failed to create worktree for PR #${String(issueNumber)}: ${err.message}`);
+      const detail = err.stderr?.trim() || err.message;
+      throw new Error(`Failed to create worktree for PR #${String(issueNumber)}: ${detail}`);
     }
   } else {
     // For issues (or PRs without branch info): create new branch

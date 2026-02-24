@@ -16,7 +16,13 @@ import { formatToolCall } from '../utils/tool-formatter';
 import * as archonPaths from '../utils/archon-paths';
 import * as configLoader from '../config/config-loader';
 import { BUNDLED_COMMANDS, isBinaryBuild } from '../defaults/bundled-defaults';
-import { commitAllChanges, execFileAsync, getDefaultBranch } from '@archon/git';
+import {
+  commitAllChanges,
+  execFileAsync,
+  getDefaultBranch,
+  toRepoPath,
+  toWorktreePath,
+} from '@archon/git';
 import { createLogger } from '../utils/logger';
 import type {
   WorkflowDefinition,
@@ -1541,7 +1547,7 @@ export async function executeWorkflow(
   // Resolve base branch once (used for $BASE_BRANCH substitution in all steps)
   let baseBranch: string;
   try {
-    baseBranch = config.baseBranch ?? (await getDefaultBranch(cwd));
+    baseBranch = config.baseBranch ?? (await getDefaultBranch(toRepoPath(cwd)));
   } catch (error) {
     const err = error as Error;
     getLog().error({ err, cwd, configBaseBranch: config.baseBranch }, 'base_branch_resolve_failed');
@@ -2380,7 +2386,7 @@ async function commitWorkflowArtifacts(
 
   try {
     const committed = await commitAllChanges(
-      cwd,
+      toWorktreePath(cwd),
       `chore: Auto-commit workflow artifacts (${workflowName})`
     );
     if (committed) {

@@ -14,6 +14,9 @@ import {
   getDefaultBranch,
   isBranchMerged,
   getLastCommitDate,
+  toRepoPath,
+  toWorktreePath,
+  toBranchName,
 } from '@archon/git';
 import { createLogger } from '../utils/logger';
 import { IsolationEnvironmentRow, ConversationNotFoundError } from '../types';
@@ -146,14 +149,14 @@ export async function removeEnvironment(
   }
 
   // Check if directory exists before attempting removal
-  const pathExists = await worktreeExists(env.working_path);
+  const pathExists = await worktreeExists(toWorktreePath(env.working_path));
 
   const provider = getIsolationProvider();
 
   try {
     // If path exists, check for uncommitted changes (unless force)
     if (pathExists && !options?.force) {
-      const hasChanges = await hasUncommittedChanges(env.working_path);
+      const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
       if (hasChanges) {
         getLog().warn({ envId, workingPath: env.working_path }, 'env_has_uncommitted_changes');
         return;
@@ -235,7 +238,7 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
         if (env.status !== 'active') continue;
 
         // Check if path still exists
-        const pathExists = await worktreeExists(env.working_path);
+        const pathExists = await worktreeExists(toWorktreePath(env.working_path));
         if (!pathExists) {
           // Path doesn't exist - call removeEnvironment to clean up branch and mark as destroyed
           await removeEnvironment(env.id, { force: false });
@@ -244,12 +247,17 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
         }
 
         // Check if branch is merged
-        const mainBranch = await getDefaultBranch(env.codebase_default_cwd);
-        const merged = await isBranchMerged(env.codebase_default_cwd, env.branch_name, mainBranch);
+        const mainRepoPath = toRepoPath(env.codebase_default_cwd);
+        const mainBranch = await getDefaultBranch(mainRepoPath);
+        const merged = await isBranchMerged(
+          mainRepoPath,
+          toBranchName(env.branch_name),
+          mainBranch
+        );
 
         if (merged) {
           // Check for uncommitted changes before removing
-          const hasChanges = await hasUncommittedChanges(env.working_path);
+          const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
           if (hasChanges) {
             report.skipped.push({ id: env.id, reason: 'merged but has uncommitted changes' });
             getLog().warn({ envId: env.id }, 'skip_merged_uncommitted_changes');
@@ -284,7 +292,7 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
         // Check if environment is stale
         const isStale = await isEnvironmentStale(env, STALE_THRESHOLD_DAYS);
         if (isStale) {
-          const hasChanges = await hasUncommittedChanges(env.working_path);
+          const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
           if (hasChanges) {
             report.skipped.push({ id: env.id, reason: 'stale but has uncommitted changes' });
             getLog().warn({ envId: env.id }, 'skip_stale_uncommitted_changes');
@@ -336,7 +344,7 @@ async function isEnvironmentStale(
   staleDays: number
 ): Promise<boolean> {
   // Check last commit date in the worktree
-  const lastCommit = await getLastCommitDate(env.working_path);
+  const lastCommit = await getLastCommitDate(toWorktreePath(env.working_path));
   if (lastCommit) {
     const daysSinceCommit = (Date.now() - lastCommit.getTime()) / (1000 * 60 * 60 * 24);
     if (daysSinceCommit < staleDays) {
@@ -397,14 +405,18 @@ export async function getWorktreeStatusBreakdown(
     activeEnvs: [],
   };
 
-  const mainBranch = await getDefaultBranch(mainRepoPath);
+  const mainBranch = await getDefaultBranch(toRepoPath(mainRepoPath));
 
   for (const env of environments) {
     // Skip Telegram (never shown as stale)
     const isTelegram = env.created_by_platform === 'telegram';
 
     // Check if merged
-    const merged = await isBranchMerged(mainRepoPath, env.branch_name, mainBranch);
+    const merged = await isBranchMerged(
+      toRepoPath(mainRepoPath),
+      toBranchName(env.branch_name),
+      mainBranch
+    );
     if (merged) {
       breakdown.merged++;
       breakdown.mergedEnvs.push({ id: env.id, branchName: env.branch_name });
@@ -450,7 +462,7 @@ export async function cleanupStaleWorktrees(
     if (env.days_since_activity < STALE_THRESHOLD_DAYS) continue;
 
     // Check for uncommitted changes
-    const hasChanges = await hasUncommittedChanges(env.working_path);
+    const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
     if (hasChanges) {
       result.skipped.push({ branchName: env.branch_name, reason: 'has uncommitted changes' });
       continue;
@@ -489,15 +501,19 @@ export async function cleanupMergedWorktrees(
 ): Promise<CleanupOperationResult> {
   const result: CleanupOperationResult = { removed: [], skipped: [] };
   const environments = await isolationEnvDb.listByCodebase(codebaseId);
-  const mainBranch = await getDefaultBranch(mainRepoPath);
+  const mainBranch = await getDefaultBranch(toRepoPath(mainRepoPath));
 
   for (const env of environments) {
     // Check if merged
-    const merged = await isBranchMerged(mainRepoPath, env.branch_name, mainBranch);
+    const merged = await isBranchMerged(
+      toRepoPath(mainRepoPath),
+      toBranchName(env.branch_name),
+      mainBranch
+    );
     if (!merged) continue;
 
     // Check for uncommitted changes
-    const hasChanges = await hasUncommittedChanges(env.working_path);
+    const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
     if (hasChanges) {
       result.skipped.push({ branchName: env.branch_name, reason: 'has uncommitted changes' });
       continue;

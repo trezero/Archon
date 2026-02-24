@@ -1,5 +1,7 @@
 import { createLogger } from '@archon/paths';
 import { execFileAsync } from './exec';
+import type { RepoPath, BranchName, WorktreePath } from './types';
+import { toBranchName } from './types';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -18,7 +20,7 @@ function getLog(): ReturnType<typeof createLogger> {
  * Only falls back for expected git errors (ref not found, branch not found).
  * Throws for unexpected errors (permission denied, git corruption, etc.)
  */
-export async function getDefaultBranch(repoPath: string): Promise<string> {
+export async function getDefaultBranch(repoPath: RepoPath): Promise<BranchName> {
   // Try to get from remote HEAD
   try {
     const { stdout } = await execFileAsync(
@@ -27,7 +29,7 @@ export async function getDefaultBranch(repoPath: string): Promise<string> {
       { timeout: 10000 }
     );
     // stdout is like "origin/main" - extract just the branch name
-    return stdout.trim().replace('origin/', '');
+    return toBranchName(stdout.trim().replace('origin/', ''));
   } catch (error) {
     const err = error as Error & { stderr?: string };
     const errorText = `${err.message} ${err.stderr ?? ''}`;
@@ -50,7 +52,7 @@ export async function getDefaultBranch(repoPath: string): Promise<string> {
     await execFileAsync('git', ['-C', repoPath, 'rev-parse', '--verify', 'origin/main'], {
       timeout: 10000,
     });
-    return 'main';
+    return toBranchName('main');
   } catch (error) {
     const err = error as Error & { stderr?: string };
     const errorText = `${err.message} ${err.stderr ?? ''}`;
@@ -62,7 +64,7 @@ export async function getDefaultBranch(repoPath: string): Promise<string> {
       errorText.includes('unknown revision')
     ) {
       getLog().debug({ repoPath, err }, 'origin_main_not_found_defaulting_to_master');
-      return 'master';
+      return toBranchName('master');
     }
 
     // Unexpected error - surface it
@@ -74,7 +76,7 @@ export async function getDefaultBranch(repoPath: string): Promise<string> {
 /**
  * Checkout a branch (creating it if it doesn't exist)
  */
-export async function checkout(repoPath: string, branchName: string): Promise<void> {
+export async function checkout(repoPath: RepoPath, branchName: BranchName): Promise<void> {
   try {
     // Try to checkout existing branch first
     await execFileAsync('git', ['-C', repoPath, 'checkout', branchName], {
@@ -103,14 +105,15 @@ export async function checkout(repoPath: string, branchName: string): Promise<vo
 }
 
 /**
- * Check if a worktree has uncommitted changes
- * Exported for use by cleanup service and workflow executor
+ * Check if a git working directory has uncommitted changes
  *
  * FAIL-SAFE: Returns true (assume changes exist) on unexpected errors
  * to prevent data loss during worktree cleanup. Only returns false for
  * expected "path doesn't exist" scenarios.
  */
-export async function hasUncommittedChanges(workingPath: string): Promise<boolean> {
+export async function hasUncommittedChanges(
+  workingPath: RepoPath | WorktreePath
+): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', workingPath, 'status', '--porcelain']);
     return stdout.trim().length > 0;
@@ -138,14 +141,25 @@ export async function hasUncommittedChanges(workingPath: string): Promise<boolea
  * Only commits if there are actually changes to commit
  * Returns true if commit was made, false if nothing to commit
  */
-export async function commitAllChanges(workingPath: string, message: string): Promise<boolean> {
+export async function commitAllChanges(
+  workingPath: RepoPath | WorktreePath,
+  message: string
+): Promise<boolean> {
   const hasChanges = await hasUncommittedChanges(workingPath);
   if (!hasChanges) {
     return false;
   }
 
-  await execFileAsync('git', ['-C', workingPath, 'add', '-A'], { timeout: 10000 });
-  await execFileAsync('git', ['-C', workingPath, 'commit', '-m', message], { timeout: 10000 });
+  try {
+    await execFileAsync('git', ['-C', workingPath, 'add', '-A'], { timeout: 10000 });
+    await execFileAsync('git', ['-C', workingPath, 'commit', '-m', message], { timeout: 10000 });
+  } catch (error) {
+    const err = error as Error & { stderr?: string };
+    getLog().error({ workingPath, err, stderr: err.stderr }, 'commit_all_changes_failed');
+    throw new Error(
+      `Failed to commit changes in ${workingPath}: ${err.stderr?.trim() || err.message}`
+    );
+  }
 
   return true;
 }
@@ -155,9 +169,9 @@ export async function commitAllChanges(workingPath: string, message: string): Pr
  * Returns false for any error (logs unexpected errors for debugging).
  */
 export async function isBranchMerged(
-  repoPath: string,
-  branchName: string,
-  mainBranch = 'main'
+  repoPath: RepoPath,
+  branchName: BranchName,
+  mainBranch: BranchName
 ): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync('git', [
@@ -192,7 +206,9 @@ export async function isBranchMerged(
  * Get the last commit date for a worktree.
  * Returns null for any error (logs unexpected errors for debugging).
  */
-export async function getLastCommitDate(workingPath: string): Promise<Date | null> {
+export async function getLastCommitDate(
+  workingPath: RepoPath | WorktreePath
+): Promise<Date | null> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', workingPath, 'log', '-1', '--format=%ci']);
     return new Date(stdout.trim());

@@ -25,19 +25,17 @@ export function toWorktreePath(path: string): WorktreePath {
 /** Discriminated union for git operation results at package boundaries */
 export type GitResult<T> = { ok: true; value: T } | { ok: false; error: GitError };
 
-/** Discriminated union of git error codes */
+/** Discriminated union of git error codes used by cloneRepository, syncRepository */
 export type GitError =
   | { code: 'not_a_repo'; path: string }
   | { code: 'permission_denied'; path: string }
   | { code: 'branch_not_found'; branch: string }
-  | { code: 'uncommitted_changes'; path: string }
-  | { code: 'timeout'; command: string }
   | { code: 'no_space'; path: string }
   | { code: 'unknown'; message: string };
 
 /** Result of a workspace sync operation */
 export interface WorkspaceSyncResult {
-  branch: string;
+  branch: BranchName;
   synced: boolean;
 }
 

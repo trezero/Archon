@@ -10,7 +10,7 @@ import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
 import { isPathWithinWorkspace } from '../utils/path-validation';
 import { sanitizeError } from '../utils/credential-sanitizer';
-import { listWorktrees, execFileAsync } from '@archon/git';
+import { listWorktrees, execFileAsync, toRepoPath } from '@archon/git';
 import { getIsolationProvider } from '../isolation';
 import * as isolationEnvDb from '../db/isolation-environments';
 import {
@@ -1181,7 +1181,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
         case 'orphans': {
           // Show all worktrees from git perspective (source of truth)
           // Useful for discovering skill-created worktrees or stale entries
-          const gitWorktrees = await listWorktrees(mainPath);
+          const gitWorktrees = await listWorktrees(toRepoPath(mainPath));
 
           if (gitWorktrees.length <= 1) {
             return {

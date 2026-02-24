@@ -746,6 +746,91 @@ branch refs/heads/feature/auth
   // branch.ts
   // ==========================================================================
 
+  describe('checkout', () => {
+    let execSpy: Mock<typeof git.execFileAsync>;
+
+    beforeEach(() => {
+      execSpy = spyOn(git, 'execFileAsync');
+    });
+
+    afterEach(() => {
+      execSpy.mockRestore();
+    });
+
+    test('checks out existing branch successfully', async () => {
+      execSpy.mockResolvedValue({ stdout: '', stderr: '' });
+
+      await git.checkout('/workspace/repo', 'feature-branch');
+
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'checkout', 'feature-branch'],
+        {
+          timeout: 30000,
+        }
+      );
+    });
+
+    test('creates branch on "pathspec" error', async () => {
+      execSpy.mockRejectedValueOnce(
+        Object.assign(new Error('pathspec did not match'), {
+          stderr: "error: pathspec 'new-branch' did not match any file(s) known to git",
+        })
+      );
+      execSpy.mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+      await git.checkout('/workspace/repo', 'new-branch');
+
+      expect(execSpy).toHaveBeenCalledTimes(2);
+      expect(execSpy).toHaveBeenLastCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'checkout', '-b', 'new-branch'],
+        {
+          timeout: 30000,
+        }
+      );
+    });
+
+    test('creates branch on "doesn\'t exist" error', async () => {
+      execSpy.mockRejectedValueOnce(
+        Object.assign(new Error("branch doesn't exist"), {
+          stderr: "error: branch 'new-branch' doesn't exist",
+        })
+      );
+      execSpy.mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+      await git.checkout('/workspace/repo', 'new-branch');
+
+      expect(execSpy).toHaveBeenCalledTimes(2);
+      expect(execSpy).toHaveBeenLastCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'checkout', '-b', 'new-branch'],
+        {
+          timeout: 30000,
+        }
+      );
+    });
+
+    test('throws and logs on unexpected error', async () => {
+      mockLogger.error.mockClear();
+      execSpy.mockRejectedValue(
+        Object.assign(new Error('Permission denied'), { stderr: 'fatal: Permission denied' })
+      );
+
+      await expect(git.checkout('/workspace/repo', 'some-branch')).rejects.toThrow(
+        'Failed to checkout branch some-branch: Permission denied'
+      );
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repoPath: '/workspace/repo',
+          branchName: 'some-branch',
+        }),
+        'checkout_failed'
+      );
+    });
+  });
+
   describe('hasUncommittedChanges', () => {
     let execSpy: Mock<typeof git.execFileAsync>;
 
@@ -1090,18 +1175,19 @@ branch refs/heads/feature/auth
       );
     });
 
-    test('defaults mainBranch to "main"', async () => {
-      execSpy.mockResolvedValue({ stdout: '* main\n', stderr: '' });
+    test('uses provided mainBranch parameter', async () => {
+      execSpy.mockResolvedValue({ stdout: '* develop\n  feature\n', stderr: '' });
 
-      await git.isBranchMerged('/workspace/repo', 'feature');
+      const result = await git.isBranchMerged('/workspace/repo', 'feature', 'develop');
 
       expect(execSpy).toHaveBeenCalledWith('git', [
         '-C',
         '/workspace/repo',
         'branch',
         '--merged',
-        'main',
+        'develop',
       ]);
+      expect(result).toBe(true);
     });
 
     test('strips current-branch marker (*) from output', async () => {

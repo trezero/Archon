@@ -4,7 +4,7 @@
  * This package contains:
  * - Workflow engine (YAML-based multi-step workflows)
  * - AI client adapters (Claude, Codex)
- * - Database operations (PostgreSQL)
+ * - Database operations (SQLite/PostgreSQL)
  * - Isolation providers (git worktrees, extensible for containers/VMs)
  * - Orchestration logic
  * - Utility functions
@@ -235,6 +235,7 @@ export {
 } from './utils/archon-paths';
 
 // Git utilities (re-exported from @archon/git for backward compatibility)
+// Includes: exec wrappers, worktree ops, branch ops, repo ops, branded types
 export {
   execFileAsync,
   mkdirAsync,
@@ -255,6 +256,10 @@ export {
   getRemoteUrl,
   checkout,
 } from '@archon/git';
+
+// Branded types and conversion functions (re-exported from @archon/git)
+export type { RepoPath, BranchName, WorktreePath } from '@archon/git';
+export { toRepoPath, toBranchName, toWorktreePath } from '@archon/git';
 
 // GitHub GraphQL
 export { getLinkedIssueNumbers } from './utils/github-graphql';

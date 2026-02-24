@@ -220,7 +220,7 @@ export async function workflowRunCommand(
     if (options.noWorktree) {
       // Checkout branch in cwd, no worktree
       getLog().info({ branch: options.branchName }, 'branch_checkout');
-      await git.checkout(cwd, options.branchName);
+      await git.checkout(git.toRepoPath(cwd), git.toBranchName(options.branchName));
       workingCwd = cwd;
     } else {
       // Create or reuse worktree

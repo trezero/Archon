@@ -2,7 +2,8 @@ import { createLogger } from '@archon/paths';
 import { execFileAsync } from './exec';
 import { hasUncommittedChanges } from './branch';
 import { getDefaultBranch } from './branch';
-import type { GitResult, WorkspaceSyncResult } from './types';
+import type { RepoPath, BranchName, GitResult, WorkspaceSyncResult } from './types';
+import { toRepoPath } from './types';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -15,14 +16,14 @@ function getLog(): ReturnType<typeof createLogger> {
  * Find the root of the git repository containing the given path
  * Returns null if not in a git repository
  */
-export async function findRepoRoot(startPath: string): Promise<string | null> {
+export async function findRepoRoot(startPath: string): Promise<RepoPath | null> {
   try {
     const { stdout } = await execFileAsync(
       'git',
       ['-C', startPath, 'rev-parse', '--show-toplevel'],
       { timeout: 10000 }
     );
-    return stdout.trim();
+    return toRepoPath(stdout.trim());
   } catch (error) {
     const err = error as Error & { stderr?: string };
     const errorText = `${err.message} ${err.stderr ?? ''}`;
@@ -42,7 +43,7 @@ export async function findRepoRoot(startPath: string): Promise<string | null> {
  * Get the remote URL for origin (if it exists)
  * Returns null if no remote is configured
  */
-export async function getRemoteUrl(repoPath: string): Promise<string | null> {
+export async function getRemoteUrl(repoPath: RepoPath): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', repoPath, 'remote', 'get-url', 'origin'], {
       timeout: 10000,
@@ -88,8 +89,8 @@ export async function getRemoteUrl(repoPath: string): Promise<string | null> {
  * @throws Error with actionable message if configured branch doesn't exist
  */
 export async function syncWorkspace(
-  workspacePath: string,
-  baseBranch?: string
+  workspacePath: RepoPath,
+  baseBranch?: BranchName
 ): Promise<WorkspaceSyncResult> {
   const branchToSync = baseBranch ?? (await getDefaultBranch(workspacePath));
 
@@ -139,8 +140,27 @@ export async function syncWorkspace(
       await execFileAsync('git', ['-C', workspacePath, 'checkout', branchToSync], {
         timeout: 30000,
       });
-    } catch {
-      // Branch might only exist on remote - create local tracking branch
+    } catch (checkoutError) {
+      const checkoutErr = checkoutError as Error & { stderr?: string };
+      const checkoutText = `${checkoutErr.message} ${checkoutErr.stderr ?? ''}`;
+
+      // Expected: branch not found locally (try remote tracking)
+      if (
+        checkoutText.includes('pathspec') ||
+        checkoutText.includes('did not match') ||
+        checkoutText.includes("doesn't exist")
+      ) {
+        getLog().debug(
+          { workspacePath, branch: branchToSync },
+          'checkout_local_not_found_trying_remote'
+        );
+      } else {
+        // Unexpected error (permissions, corruption) - log before retry
+        getLog().warn(
+          { workspacePath, branch: branchToSync, err: checkoutErr, stderr: checkoutErr.stderr },
+          'checkout_unexpected_error_trying_remote'
+        );
+      }
       try {
         await execFileAsync(
           'git',
@@ -186,7 +206,7 @@ export async function syncWorkspace(
  */
 export async function cloneRepository(
   url: string,
-  targetPath: string,
+  targetPath: RepoPath,
   options?: { token?: string }
 ): Promise<GitResult<void>> {
   try {
@@ -224,11 +244,18 @@ export async function cloneRepository(
  * Runs sequential fetch + reset --hard. If fetch fails, reset is skipped.
  * Uses execFileAsync (no shell interpolation) for safety.
  *
+ * Note: Uses `cwd` option instead of `-C` flag because the fetch+reset
+ * sequence operates on the repo's working directory state, not just the
+ * git index. Using `cwd` ensures the process runs in the right directory.
+ *
  * @param repoPath - Path to the local repository
  * @param branch - Branch to sync to (e.g., 'main')
  * @returns GitResult<void>
  */
-export async function syncRepository(repoPath: string, branch: string): Promise<GitResult<void>> {
+export async function syncRepository(
+  repoPath: RepoPath,
+  branch: BranchName
+): Promise<GitResult<void>> {
   try {
     await execFileAsync('git', ['fetch', 'origin'], { cwd: repoPath, timeout: 60000 });
   } catch (error) {
@@ -261,8 +288,14 @@ export async function syncRepository(repoPath: string, branch: string): Promise<
  * Add a directory to git's global safe.directory config.
  * Uses execFileAsync (no shell interpolation) for safety.
  */
-export async function addSafeDirectory(path: string): Promise<void> {
-  await execFileAsync('git', ['config', '--global', '--add', 'safe.directory', path], {
-    timeout: 10000,
-  });
+export async function addSafeDirectory(path: RepoPath): Promise<void> {
+  try {
+    await execFileAsync('git', ['config', '--global', '--add', 'safe.directory', path], {
+      timeout: 10000,
+    });
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err, path }, 'add_safe_directory_failed');
+    throw new Error(`Failed to add safe directory '${path}': ${err.message}`);
+  }
 }
