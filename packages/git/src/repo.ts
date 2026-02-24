@@ -128,13 +128,20 @@ export async function syncWorkspace(
   }
 
   // Check if we're on the target branch
-  const { stdout: currentBranch } = await execFileAsync(
-    'git',
-    ['-C', workspacePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
-    { timeout: 10000 }
-  );
+  let currentBranch: string;
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', workspacePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+      { timeout: 10000 }
+    );
+    currentBranch = stdout.trim();
+  } catch (error) {
+    const err = error as Error;
+    throw new Error(`Failed to determine current branch in ${workspacePath}: ${err.message}`);
+  }
 
-  if (currentBranch.trim() !== branchToSync) {
+  if (currentBranch !== branchToSync) {
     // Checkout target branch (may be local or need to track remote)
     try {
       await execFileAsync('git', ['-C', workspacePath, 'checkout', branchToSync], {
@@ -144,23 +151,21 @@ export async function syncWorkspace(
       const checkoutErr = checkoutError as Error & { stderr?: string };
       const checkoutText = `${checkoutErr.message} ${checkoutErr.stderr ?? ''}`;
 
-      // Expected: branch not found locally (try remote tracking)
-      if (
+      const isBranchNotFound =
         checkoutText.includes('pathspec') ||
         checkoutText.includes('did not match') ||
-        checkoutText.includes("doesn't exist")
-      ) {
-        getLog().debug(
-          { workspacePath, branch: branchToSync },
-          'checkout_local_not_found_trying_remote'
-        );
-      } else {
-        // Unexpected error (permissions, corruption) - log before retry
-        getLog().warn(
-          { workspacePath, branch: branchToSync, err: checkoutErr, stderr: checkoutErr.stderr },
-          'checkout_unexpected_error_trying_remote'
-        );
+        checkoutText.includes("doesn't exist");
+
+      if (!isBranchNotFound) {
+        // Unexpected error (permissions, corruption) - don't retry
+        throw new Error(`Sync checkout to ${branchToSync} failed: ${checkoutErr.message}`);
       }
+
+      // Branch not found locally - try remote tracking
+      getLog().debug(
+        { workspacePath, branch: branchToSync },
+        'checkout_local_not_found_trying_remote'
+      );
       try {
         await execFileAsync(
           'git',
@@ -222,7 +227,11 @@ export async function cloneRepository(
     return { ok: true, value: undefined };
   } catch (error) {
     const err = error as Error;
-    const message = err.message.toLowerCase();
+    // Sanitize any token from error messages to prevent credential leakage
+    const sanitizedMessage = options?.token
+      ? err.message.replaceAll(options.token, '***')
+      : err.message;
+    const message = sanitizedMessage.toLowerCase();
 
     if (message.includes('not found') || message.includes('404')) {
       return { ok: false, error: { code: 'not_a_repo', path: url } };
@@ -234,8 +243,8 @@ export async function cloneRepository(
       return { ok: false, error: { code: 'no_space', path: targetPath } };
     }
 
-    getLog().error({ err, url, targetPath }, 'clone_repository_failed');
-    return { ok: false, error: { code: 'unknown', message: err.message } };
+    getLog().error({ url, targetPath, errorMessage: sanitizedMessage }, 'clone_repository_failed');
+    return { ok: false, error: { code: 'unknown', message: sanitizedMessage } };
   }
 }
 
@@ -244,9 +253,8 @@ export async function cloneRepository(
  * Runs sequential fetch + reset --hard. If fetch fails, reset is skipped.
  * Uses execFileAsync (no shell interpolation) for safety.
  *
- * Note: Uses `cwd` option instead of `-C` flag because the fetch+reset
- * sequence operates on the repo's working directory state, not just the
- * git index. Using `cwd` ensures the process runs in the right directory.
+ * Note: Uses `cwd` option instead of `-C` flag. Both are functionally
+ * equivalent; this style was chosen for readability with multi-arg commands.
  *
  * @param repoPath - Path to the local repository
  * @param branch - Branch to sync to (e.g., 'main')

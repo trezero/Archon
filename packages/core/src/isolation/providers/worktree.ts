@@ -329,7 +329,7 @@ export class WorktreeProvider implements IIsolationProvider {
 
     // Filter out main repo (first worktree is typically the main checkout)
     return worktrees
-      .filter(wt => wt.path !== repoPath)
+      .filter(wt => String(wt.path) !== String(repoPath))
       .map(wt => ({
         id: wt.path,
         provider: 'worktree' as const,

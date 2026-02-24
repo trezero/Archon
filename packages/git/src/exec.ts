@@ -4,8 +4,7 @@ import { promisify } from 'util';
 
 const promisifiedExecFile = promisify(execFile);
 
-// Wrapper functions to allow mocking in tests
-// Don't use const here - use function declaration for proper mockability
+/** Wrapper around child_process.execFile for test mockability */
 export async function execFileAsync(
   cmd: string,
   args: string[],
@@ -13,12 +12,12 @@ export async function execFileAsync(
 ): Promise<{ stdout: string; stderr: string }> {
   const result = await promisifiedExecFile(cmd, args, options);
   return {
-    stdout: result.stdout.toString(),
-    stderr: result.stderr.toString(),
+    stdout: (result.stdout ?? '').toString(),
+    stderr: (result.stderr ?? '').toString(),
   };
 }
 
-// Mockable mkdir wrapper
+/** Wrapper around fs.mkdir for test mockability */
 export async function mkdirAsync(path: string, options?: { recursive?: boolean }): Promise<void> {
   await fsMkdir(path, options);
 }

@@ -1,5 +1,5 @@
 import { readFile, access } from 'fs/promises';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import {
   createLogger,
   getArchonWorktreesPath,
@@ -8,7 +8,7 @@ import {
 } from '@archon/paths';
 import { execFileAsync, mkdirAsync } from './exec';
 import type { RepoPath, BranchName, WorktreePath, WorktreeInfo } from './types';
-import { toRepoPath, toWorktreePath } from './types';
+import { toRepoPath, toBranchName, toWorktreePath } from './types';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -56,8 +56,9 @@ export function isProjectScopedWorktreeBase(repoPath: RepoPath): boolean {
 }
 
 /**
- * Check if a worktree already exists at the given path
- * A valid worktree has both the directory and a .git file/directory
+ * Check if a worktree already exists at the given path.
+ * A worktree is considered to exist if the directory and a .git entry
+ * (file or directory) are both present. Does not validate .git contents.
  *
  * Only returns false for ENOENT (path doesn't exist).
  * Throws for unexpected errors (permission denied, I/O errors, etc.)
@@ -103,7 +104,7 @@ export async function listWorktrees(repoPath: RepoPath): Promise<WorktreeInfo[]>
       } else if (line.startsWith('branch ')) {
         const branch = line.substring(7).replace('refs/heads/', '');
         if (currentPath) {
-          worktrees.push({ path: currentPath, branch });
+          worktrees.push({ path: toWorktreePath(currentPath), branch: toBranchName(branch) });
         }
       }
     }
@@ -128,13 +129,17 @@ export async function listWorktrees(repoPath: RepoPath): Promise<WorktreeInfo[]>
 }
 
 /**
- * Find an existing worktree by branch name pattern
- * Useful for discovering skill-created worktrees when app receives GitHub event
+ * Find an existing worktree by branch name pattern.
+ * Useful for discovering skill-created worktrees when app receives GitHub event.
+ *
+ * Matches by exact name first, then by slash-to-dash slugification
+ * (e.g., "feature/auth" matches a worktree on branch "feature-auth")
+ * since some tools slugify branch names when creating worktree directories.
  */
 export async function findWorktreeByBranch(
   repoPath: RepoPath,
   branchPattern: BranchName
-): Promise<string | null> {
+): Promise<WorktreePath | null> {
   const worktrees = await listWorktrees(repoPath);
 
   // Exact match first
@@ -203,23 +208,29 @@ export async function getCanonicalRepoPath(path: string): Promise<RepoPath> {
     if (match) {
       return toRepoPath(match[1]);
     }
-    // Worktree detected but regex didn't match - unexpected .git content format
-    getLog().warn(
+    // Worktree detected but regex didn't match - this is a real problem
+    getLog().error(
       { path, gitContentPrefix: content.substring(0, 120) },
-      'canonical_path_regex_fallthrough'
+      'canonical_path_regex_failed'
+    );
+    throw new Error(
+      `Cannot determine canonical repo path from worktree at ${path}. ` +
+        `Unexpected .git file format: ${content.substring(0, 80)}`
     );
   }
   return toRepoPath(path);
 }
 
 /**
- * Create a git worktree for an issue or PR
- * Returns the worktree path
+ * Create a git worktree for an issue or PR.
+ * Returns the worktree path.
  *
- * For PRs: provide prHeadBranch and optionally prHeadSha for reproducible reviews
- * For issues: creates a new branch (issue-XX)
+ * For PRs: provide prHeadBranch and optionally prHeadSha for reproducible reviews.
+ * For PRs without prHeadBranch: falls back to creating a new branch (pr-XX),
+ * same as the issue path.
+ * For issues: creates a new branch (issue-XX).
  *
- * Will adopt existing worktrees if found (enables skill-app symbiosis)
+ * Will adopt existing worktrees if found (enables skill-app symbiosis).
  */
 export async function createWorktreeForIssue(
   repoPath: RepoPath,
@@ -230,14 +241,19 @@ export async function createWorktreeForIssue(
 ): Promise<WorktreePath> {
   const branchName = isPR ? `pr-${String(issueNumber)}` : `issue-${String(issueNumber)}`;
 
-  // Extract owner and repo name from repoPath to avoid collisions
-  // repoPath format: /.archon/workspaces/owner/repo (or C:\...\ on Windows)
-  const pathParts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
-  const repoName = pathParts[pathParts.length - 1]; // Last part: "repo"
-  const ownerName = pathParts[pathParts.length - 2]; // Second to last: "owner"
-
   const worktreeBase = getWorktreeBase(repoPath);
-  const worktreePath = toWorktreePath(join(worktreeBase, ownerName, repoName, branchName));
+  let worktreePath: WorktreePath;
+
+  if (isProjectScopedWorktreeBase(repoPath)) {
+    // Project-scoped: worktreeBase already includes owner/repo context
+    worktreePath = toWorktreePath(join(worktreeBase, branchName));
+  } else {
+    // Legacy global: extract owner/repo from the last two path segments to avoid collisions
+    const pathParts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
+    const repoName = pathParts[pathParts.length - 1];
+    const ownerName = pathParts[pathParts.length - 2];
+    worktreePath = toWorktreePath(join(worktreeBase, ownerName, repoName, branchName));
+  }
 
   // Check if worktree already exists at expected path (possibly created by skill)
   if (await worktreeExists(worktreePath)) {
@@ -250,13 +266,12 @@ export async function createWorktreeForIssue(
     const existingByBranch = await findWorktreeByBranch(repoPath, prHeadBranch);
     if (existingByBranch) {
       getLog().info({ prHeadBranch, worktreePath: existingByBranch }, 'worktree_adopted_by_branch');
-      return toWorktreePath(existingByBranch);
+      return existingByBranch;
     }
   }
 
-  // Ensure worktree base directory exists
-  const projectWorktreeDir = join(worktreeBase, ownerName, repoName);
-  await mkdirAsync(projectWorktreeDir, { recursive: true });
+  // Ensure worktree parent directory exists
+  await mkdirAsync(dirname(worktreePath), { recursive: true });
 
   if (isPR && prHeadBranch) {
     // For PRs: fetch and checkout the PR's head branch

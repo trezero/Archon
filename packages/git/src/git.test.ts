@@ -1159,13 +1159,14 @@ branch refs/heads/feature/auth
       expect(result).toBe(false);
     });
 
-    test('returns false and logs on unexpected errors', async () => {
-      mockLogger.warn.mockClear();
+    test('throws and logs on unexpected errors', async () => {
+      mockLogger.error.mockClear();
       execSpy.mockRejectedValue(new Error('fatal: permission denied'));
 
-      const result = await git.isBranchMerged('/workspace/repo', 'feature', 'main');
-      expect(result).toBe(false);
-      expect(mockLogger.warn).toHaveBeenCalledWith(
+      await expect(git.isBranchMerged('/workspace/repo', 'feature', 'main')).rejects.toThrow(
+        'Failed to check if feature is merged into main'
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
         expect.objectContaining({
           repoPath: '/workspace/repo',
           branchName: 'feature',
@@ -1243,15 +1244,35 @@ branch refs/heads/feature/auth
       expect(result).toBeNull();
     });
 
-    test('returns null and logs on unexpected errors', async () => {
-      mockLogger.warn.mockClear();
+    test('throws and logs on unexpected errors', async () => {
+      mockLogger.error.mockClear();
       execSpy.mockRejectedValue(new Error('fatal: permission denied'));
+
+      await expect(git.getLastCommitDate('/workspace/repo')).rejects.toThrow(
+        'Failed to get last commit date for /workspace/repo'
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ workingPath: '/workspace/repo' }),
+        'last_commit_date_check_failed'
+      );
+    });
+
+    test('returns null for empty git log output', async () => {
+      execSpy.mockResolvedValue({ stdout: '', stderr: '' });
+
+      const result = await git.getLastCommitDate('/workspace/repo');
+      expect(result).toBeNull();
+    });
+
+    test('returns null and warns for invalid date format', async () => {
+      mockLogger.warn.mockClear();
+      execSpy.mockResolvedValue({ stdout: 'not-a-date\n', stderr: '' });
 
       const result = await git.getLastCommitDate('/workspace/repo');
       expect(result).toBeNull();
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.objectContaining({ workingPath: '/workspace/repo' }),
-        'last_commit_date_check_failed'
+        expect.objectContaining({ workingPath: '/workspace/repo', rawDate: 'not-a-date' }),
+        'invalid_commit_date_format'
       );
     });
   });
@@ -1879,6 +1900,97 @@ branch refs/heads/feature/auth
     test('toWorktreePath returns the same string value', () => {
       const path = git.toWorktreePath('/workspace/worktrees/feature');
       expect(path).toBe('/workspace/worktrees/feature');
+    });
+
+    test('toRepoPath rejects empty string', () => {
+      expect(() => git.toRepoPath('')).toThrow('RepoPath cannot be empty');
+    });
+
+    test('toBranchName rejects empty string', () => {
+      expect(() => git.toBranchName('')).toThrow('BranchName cannot be empty');
+    });
+
+    test('toWorktreePath rejects empty string', () => {
+      expect(() => git.toWorktreePath('')).toThrow('WorktreePath cannot be empty');
+    });
+  });
+
+  // ==========================================================================
+  // Additional coverage for review findings
+  // ==========================================================================
+
+  describe('removeWorktree', () => {
+    let execSpy: Mock<typeof git.execFileAsync>;
+
+    beforeEach(() => {
+      execSpy = spyOn(git, 'execFileAsync');
+    });
+
+    afterEach(() => {
+      execSpy.mockRestore();
+    });
+
+    test('calls git worktree remove with correct arguments', async () => {
+      execSpy.mockResolvedValue({ stdout: '', stderr: '' });
+
+      await git.removeWorktree('/workspace/repo', '/workspace/worktrees/issue-42');
+
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'worktree', 'remove', '/workspace/worktrees/issue-42'],
+        { timeout: 30000 }
+      );
+    });
+
+    test('propagates error when worktree has uncommitted changes', async () => {
+      execSpy.mockRejectedValue(new Error('fatal: cannot remove: has changes'));
+
+      await expect(
+        git.removeWorktree('/workspace/repo', '/workspace/worktrees/dirty')
+      ).rejects.toThrow('has changes');
+    });
+  });
+
+  describe('addSafeDirectory error handling', () => {
+    let execSpy: Mock<typeof git.execFileAsync>;
+
+    beforeEach(() => {
+      execSpy = spyOn(git, 'execFileAsync');
+    });
+
+    afterEach(() => {
+      execSpy.mockRestore();
+    });
+
+    test('throws and logs when git config fails', async () => {
+      mockLogger.error.mockClear();
+      execSpy.mockRejectedValue(new Error('fatal: could not lock config file'));
+
+      await expect(git.addSafeDirectory('/workspace/repo')).rejects.toThrow(
+        "Failed to add safe directory '/workspace/repo': fatal: could not lock config file"
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ path: '/workspace/repo' }),
+        'add_safe_directory_failed'
+      );
+    });
+  });
+
+  describe('getCanonicalRepoPath error handling', () => {
+    test('throws on non-standard gitdir format', async () => {
+      await writeFile(
+        join(testDir, '.git'),
+        'gitdir: /some/unusual/path/without/expected/structure'
+      );
+      mockLogger.error.mockClear();
+
+      await expect(git.getCanonicalRepoPath(testDir)).rejects.toThrow(
+        'Cannot determine canonical repo path from worktree'
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ path: testDir }),
+        'canonical_path_regex_failed'
+      );
     });
   });
 });

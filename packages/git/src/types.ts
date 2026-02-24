@@ -7,18 +7,21 @@ export type RepoPath = string & { readonly [REPO_PATH_BRAND]: true };
 export type BranchName = string & { readonly [BRANCH_NAME_BRAND]: true };
 export type WorktreePath = string & { readonly [WORKTREE_PATH_BRAND]: true };
 
-/** Cast a plain string to RepoPath (no runtime validation) */
+/** Cast a plain string to RepoPath. Rejects empty strings. */
 export function toRepoPath(path: string): RepoPath {
+  if (!path) throw new Error('RepoPath cannot be empty');
   return path as RepoPath;
 }
 
-/** Cast a plain string to BranchName (no runtime validation) */
+/** Cast a plain string to BranchName. Rejects empty strings. */
 export function toBranchName(name: string): BranchName {
+  if (!name) throw new Error('BranchName cannot be empty');
   return name as BranchName;
 }
 
-/** Cast a plain string to WorktreePath (no runtime validation) */
+/** Cast a plain string to WorktreePath. Rejects empty strings. */
 export function toWorktreePath(path: string): WorktreePath {
+  if (!path) throw new Error('WorktreePath cannot be empty');
   return path as WorktreePath;
 }
 
@@ -41,6 +44,6 @@ export interface WorkspaceSyncResult {
 
 /** Info about a single worktree entry */
 export interface WorktreeInfo {
-  path: string;
-  branch: string;
+  path: WorktreePath;
+  branch: BranchName;
 }

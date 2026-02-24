@@ -166,7 +166,10 @@ export async function commitAllChanges(
 
 /**
  * Check if a branch has been merged into main.
- * Returns false for any error (logs unexpected errors for debugging).
+ *
+ * Returns false for expected errors (branch/repo not found).
+ * Throws for unexpected errors (permission denied, corruption) so callers
+ * can report them rather than silently skipping cleanup.
  */
 export async function isBranchMerged(
   repoPath: RepoPath,
@@ -187,45 +190,59 @@ export async function isBranchMerged(
     const err = error as Error & { code?: string; stderr?: string };
     const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
 
-    // Expected errors: branch doesn't exist, not a git repo, etc.
     const isExpectedError =
       errorText.includes('not a git repository') ||
       errorText.includes('unknown revision') ||
       errorText.includes('no such file') ||
       err.code === 'ENOENT';
 
-    if (!isExpectedError) {
-      // Log unexpected errors for debugging (permission issues, corruption, etc.)
-      getLog().warn({ err: error, repoPath, branchName, mainBranch }, 'branch_merge_check_failed');
+    if (isExpectedError) {
+      return false;
     }
-    return false;
+
+    // Unexpected errors (permission denied, corruption) - propagate so callers can report
+    getLog().error({ err: error, repoPath, branchName, mainBranch }, 'branch_merge_check_failed');
+    throw new Error(
+      `Failed to check if ${branchName} is merged into ${mainBranch}: ${err.message}`
+    );
   }
 }
 
 /**
- * Get the last commit date for a worktree.
- * Returns null for any error (logs unexpected errors for debugging).
+ * Get the last commit date for a repository or worktree.
+ *
+ * Returns null for expected errors (no commits, path not found).
+ * Throws for unexpected errors (permission denied, corruption).
  */
 export async function getLastCommitDate(
   workingPath: RepoPath | WorktreePath
 ): Promise<Date | null> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', workingPath, 'log', '-1', '--format=%ci']);
-    return new Date(stdout.trim());
+    const trimmed = stdout.trim();
+    if (!trimmed) return null;
+    const date = new Date(trimmed);
+    if (isNaN(date.getTime())) {
+      getLog().warn({ workingPath, rawDate: trimmed }, 'invalid_commit_date_format');
+      return null;
+    }
+    return date;
   } catch (error) {
     const err = error as Error & { code?: string; stderr?: string };
     const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
 
-    // Expected errors: not a git repo, no commits, path doesn't exist
     const isExpectedError =
       errorText.includes('not a git repository') ||
       errorText.includes('does not have any commits') ||
       errorText.includes('no such file') ||
       err.code === 'ENOENT';
 
-    if (!isExpectedError) {
-      getLog().warn({ err: error, workingPath }, 'last_commit_date_check_failed');
+    if (isExpectedError) {
+      return null;
     }
-    return null;
+
+    // Unexpected errors (permission denied, corruption) - propagate
+    getLog().error({ err: error, workingPath }, 'last_commit_date_check_failed');
+    throw new Error(`Failed to get last commit date for ${workingPath}: ${err.message}`);
   }
 }

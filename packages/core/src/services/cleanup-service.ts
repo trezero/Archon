@@ -411,12 +411,20 @@ export async function getWorktreeStatusBreakdown(
     // Skip Telegram (never shown as stale)
     const isTelegram = env.created_by_platform === 'telegram';
 
-    // Check if merged
-    const merged = await isBranchMerged(
-      toRepoPath(mainRepoPath),
-      toBranchName(env.branch_name),
-      mainBranch
-    );
+    // Check if merged (treat as not-merged on unexpected errors)
+    let merged = false;
+    try {
+      merged = await isBranchMerged(
+        toRepoPath(mainRepoPath),
+        toBranchName(env.branch_name),
+        mainBranch
+      );
+    } catch (error) {
+      getLog().warn(
+        { err: error, envId: env.id, branchName: env.branch_name },
+        'merge_check_error_in_breakdown'
+      );
+    }
     if (merged) {
       breakdown.merged++;
       breakdown.mergedEnvs.push({ id: env.id, branchName: env.branch_name });
@@ -504,12 +512,22 @@ export async function cleanupMergedWorktrees(
   const mainBranch = await getDefaultBranch(toRepoPath(mainRepoPath));
 
   for (const env of environments) {
-    // Check if merged
-    const merged = await isBranchMerged(
-      toRepoPath(mainRepoPath),
-      toBranchName(env.branch_name),
-      mainBranch
-    );
+    // Check if merged (skip env on unexpected errors)
+    let merged = false;
+    try {
+      merged = await isBranchMerged(
+        toRepoPath(mainRepoPath),
+        toBranchName(env.branch_name),
+        mainBranch
+      );
+    } catch (error) {
+      const err = error as Error;
+      result.skipped.push({
+        branchName: env.branch_name,
+        reason: `merge check failed: ${err.message}`,
+      });
+      continue;
+    }
     if (!merged) continue;
 
     // Check for uncommitted changes

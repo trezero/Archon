@@ -261,7 +261,7 @@ async function resolveIsolation(
   if (hints?.prBranch) {
     const canonicalPath = await getCanonicalRepoPath(codebase.default_cwd);
     const adoptedPath = await findWorktreeByBranch(canonicalPath, toBranchName(hints.prBranch));
-    if (adoptedPath && (await worktreeExists(toWorktreePath(adoptedPath)))) {
+    if (adoptedPath && (await worktreeExists(adoptedPath))) {
       getLog().info({ adoptedPath, prBranch: hints.prBranch }, 'isolation_worktree_adopted');
       const env = await isolationEnvDb.create({
         codebase_id: codebase.id,
