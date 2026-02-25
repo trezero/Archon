@@ -110,7 +110,7 @@ export function WorkflowLogs({
           !tc.output && tc.duration === undefined ? { ...tc, duration: now - tc.startedAt } : tc
         );
         const newTool: ToolCallDisplay = {
-          id: `tool-${String(now)}`,
+          id: `${last.id}-tool-${String(updatedExistingTools.length)}`,
           name,
           input,
           startedAt: now,
