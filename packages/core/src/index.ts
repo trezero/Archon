@@ -16,9 +16,6 @@
 export {
   ConversationNotFoundError,
   type Conversation,
-  type IsolationHints,
-  type IsolationEnvironmentRow,
-  type IsolationBlockReason,
   type HandleMessageContext,
   type Codebase,
   type Session,
@@ -129,15 +126,26 @@ export {
 export * as workflowEventDb from './db/workflow-events';
 
 // =============================================================================
-// Isolation
+// Isolation (re-exported from @archon/isolation for backward compatibility)
 // =============================================================================
 export {
   type IIsolationProvider,
   type IsolatedEnvironment,
   type IsolationRequest,
+  type IsolationHints,
+  type IsolationBlockReason,
+  type IsolationEnvironmentRow,
+  type IsolationWorkflowType,
+  type WorktreeStatusBreakdown,
+  type IsolationResolution,
+  type IIsolationStore,
+  type IsolationResolverDeps,
   getIsolationProvider,
+  configureIsolation,
   resetIsolationProvider,
-} from './isolation';
+  IsolationBlockedError,
+  IsolationResolver,
+} from '@archon/isolation';
 
 // =============================================================================
 // Orchestrator
@@ -274,13 +282,13 @@ export { isPathWithinWorkspace, validateAndResolvePath } from './utils/path-vali
 // Port allocation
 export { getPort } from './utils/port-allocation';
 
-// Worktree copy
+// Worktree copy (re-exported from @archon/isolation for backward compatibility)
 export {
   parseCopyFileEntry,
   isPathWithinRoot,
   copyWorktreeFile,
   copyWorktreeFiles,
-} from './utils/worktree-copy';
+} from '@archon/isolation';
 
 // Worktree sync
 export { syncArchonToWorktree } from './utils/worktree-sync';

@@ -1,11 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn, mock, type Mock } from 'bun:test';
 import * as git from '@archon/git';
-import * as worktreeCopy from './worktree-copy';
+import * as worktreeCopy from '@archon/isolation';
 import * as configLoader from '../config/config-loader';
 import * as fs from 'fs/promises';
 import type { Stats } from 'fs';
 import type { RepoConfig } from '../config/config-types';
-import type { CopyFileEntry } from './worktree-copy';
+import type { CopyFileEntry } from '@archon/isolation';
 import { createMockLogger } from '../test/mocks/logger';
 
 const mockLogger = createMockLogger();

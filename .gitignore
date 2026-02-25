@@ -51,6 +51,7 @@ workspace
 
 # IDE
 .vscode/
+.zed/
 .idea/
 *.swp
 *.swo

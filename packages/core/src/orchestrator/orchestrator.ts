@@ -32,25 +32,21 @@ function getLog(): ReturnType<typeof createLogger> {
 }
 import {
   IPlatformAdapter,
-  IsolationHints,
-  IsolationEnvironmentRow,
-  IsolationBlockReason,
   Conversation,
   Codebase,
   ConversationNotFoundError,
   isWebAdapter,
 } from '../types';
-import * as db from '../db/conversations';
-import * as isolationEnvDb from '../db/isolation-environments';
-import { toError } from '../utils/error';
-import { getIsolationProvider } from '../isolation';
+import type { IsolationHints, IsolationEnvironmentRow } from '@archon/isolation';
 import {
-  worktreeExists,
-  findWorktreeByBranch,
-  getCanonicalRepoPath,
-  toWorktreePath,
-  toBranchName,
-} from '@archon/git';
+  IsolationBlockedError,
+  IsolationResolver,
+  configureIsolation,
+  getIsolationProvider,
+} from '@archon/isolation';
+import * as db from '../db/conversations';
+import { createIsolationStore } from '../db/isolation-environments';
+import { toError } from '../utils/error';
 import { executeWorkflow } from '../workflows';
 import type { WorkflowDefinition } from '../workflows';
 import {
@@ -58,62 +54,54 @@ import {
   getWorktreeStatusBreakdown,
   MAX_WORKTREES_PER_CODEBASE,
   STALE_THRESHOLD_DAYS,
-  WorktreeStatusBreakdown,
 } from '../services/cleanup-service';
-
-/**
- * Error thrown when isolation is required but cannot be provided.
- * This error signals that ALL message handling should stop - not just workflows.
- * The user has already been notified of the specific reason (worktree limit reached,
- * isolation creation failure, etc.) before this error is thrown.
- */
-export class IsolationBlockedError extends Error {
-  readonly reason: IsolationBlockReason;
-
-  constructor(message: string, reason: IsolationBlockReason) {
-    super(message);
-    this.name = 'IsolationBlockedError';
-    this.reason = reason;
-  }
-}
+import { loadRepoConfig } from '../config/config-loader';
 
 type IsolationResolution =
   | { status: 'existing'; cwd: string; env: IsolationEnvironmentRow }
   | { status: 'new'; cwd: string; env: IsolationEnvironmentRow }
   | { status: 'none'; cwd: string; env: null };
 
-type IsolationCreationResult =
-  | { status: 'ready'; env: IsolationEnvironmentRow }
-  | { status: 'blocked'; reason: IsolationBlockReason };
+// Lazy resolver singleton
+let resolver: IsolationResolver | null = null;
+let isolationConfigured = false;
 
-/**
- * Format the worktree limit reached message
- */
-function formatWorktreeLimitMessage(
-  codebaseName: string,
-  breakdown: WorktreeStatusBreakdown
-): string {
-  let msg = `Worktree limit reached (${String(breakdown.total)}/${String(breakdown.limit)}) for **${codebaseName}**.\n\n`;
-
-  msg += '**Status:**\n';
-  msg += `• ${String(breakdown.merged)} merged (can auto-remove)\n`;
-  msg += `• ${String(breakdown.stale)} stale (no activity in ${String(STALE_THRESHOLD_DAYS)}+ days)\n`;
-  msg += `• ${String(breakdown.active)} active\n\n`;
-
-  msg += '**Options:**\n';
-  if (breakdown.stale > 0) {
-    msg += '• `/worktree cleanup stale` - Remove stale worktrees\n';
+function ensureIsolationConfigured(): void {
+  if (!isolationConfigured) {
+    configureIsolation(async (repoPath: string) => {
+      const config = await loadRepoConfig(repoPath);
+      return config?.worktree ?? null;
+    });
+    isolationConfigured = true;
   }
-  msg += '• `/worktree list` - See all worktrees\n';
-  msg += '• `/worktree remove <name>` - Remove specific worktree';
-
-  return msg;
 }
+
+function getResolver(): IsolationResolver {
+  ensureIsolationConfigured();
+  if (!resolver) {
+    resolver = new IsolationResolver({
+      store: createIsolationStore(),
+      provider: getIsolationProvider(),
+      cleanup: {
+        makeRoom: async (codebaseId, repoPath): Promise<{ removedCount: number }> => {
+          const result = await cleanupToMakeRoom(codebaseId, repoPath);
+          return { removedCount: result.removed.length };
+        },
+        getBreakdown: getWorktreeStatusBreakdown,
+      },
+      maxWorktreesPerCodebase: MAX_WORKTREES_PER_CODEBASE,
+      staleThresholdDays: STALE_THRESHOLD_DAYS,
+    });
+  }
+  return resolver;
+}
+
+/** Export for use by CLI and other consumers that need config initialized */
+export { ensureIsolationConfigured };
 
 /**
  * Validate existing isolation reference and coordinate creation of new isolation if needed.
- * Orchestrates the isolation lifecycle but delegates creation decisions (reuse, sharing,
- * adoption, limit checks) to resolveIsolation.
+ * Delegates resolution logic to IsolationResolver; handles messaging and conversation updates.
  *
  * @throws {IsolationBlockedError} When isolation is required but blocked (user already notified)
  */
@@ -122,304 +110,105 @@ export async function validateAndResolveIsolation(
   codebase: Codebase | null,
   platform: IPlatformAdapter,
   conversationId: string,
-  hints?: IsolationHints
+  hints?: IsolationHints,
+  _isRetry = false
 ): Promise<IsolationResolution> {
-  // 1. Check existing isolation reference (new UUID model)
-  if (conversation.isolation_env_id) {
-    const staleIsolationEnvId = conversation.isolation_env_id;
-    const env = await isolationEnvDb.getById(conversation.isolation_env_id);
+  const result = await getResolver().resolve({
+    existingEnvId: conversation.isolation_env_id,
+    codebase: codebase
+      ? { id: codebase.id, defaultCwd: codebase.default_cwd, name: codebase.name }
+      : null,
+    hints,
+    platformType: platform.getPlatformType(),
+  });
 
-    if (env && (await worktreeExists(toWorktreePath(env.working_path)))) {
-      // Valid - use it
-      return { status: 'existing', cwd: env.working_path, env };
-    }
-
-    // Stale reference - clean up (best-effort, don't fail the request)
-    getLog().warn({ isolationEnvId: staleIsolationEnvId }, 'stale_isolation_reference');
-    await db.updateConversation(conversation.id, { isolation_env_id: null }).catch(updateErr => {
-      if (!(updateErr instanceof ConversationNotFoundError)) {
-        getLog().error(
-          { err: toError(updateErr), conversationId: conversation.id },
-          'stale_isolation_clear_failed'
-        );
-      }
-    });
-
-    if (env) {
+  switch (result.status) {
+    case 'resolved': {
+      // Link env to conversation
       try {
-        await isolationEnvDb.updateStatus(env.id, 'destroyed');
-      } catch (cleanupError) {
-        const err = toError(cleanupError);
-        getLog().error({ err, isolationEnvId: env.id, conversationId }, 'isolation_cleanup_failed');
-      }
-    }
-
-    const staleMessage = codebase
-      ? 'Detected a stale isolated workspace reference and cleared it. Creating a new isolated workspace now.'
-      : 'Detected a stale isolated workspace reference and cleared it. Continuing without an isolated workspace.';
-
-    try {
-      await platform.sendMessage(conversationId, staleMessage);
-    } catch (notifyError) {
-      const err = toError(notifyError);
-      getLog().error(
-        { err, conversationId, isolationEnvId: staleIsolationEnvId },
-        'stale_isolation_notice_failed'
-      );
-    }
-  }
-
-  // 2. No valid isolation - check if we should create
-  if (!codebase) {
-    return { status: 'none', cwd: conversation.cwd ?? '/workspace', env: null };
-  }
-
-  // 3. Create new isolation (auto-isolation for all platforms!)
-  const isolationResult = await resolveIsolation(codebase, platform, conversationId, hints);
-  if (isolationResult.status === 'ready') {
-    const env = isolationResult.env;
-    try {
-      await db.updateConversation(conversation.id, {
-        isolation_env_id: env.id,
-        cwd: env.working_path,
-      });
-    } catch (updateError) {
-      // If we can't link the isolation to the conversation, clean up and rethrow
-      const err = toError(updateError);
-      getLog().error(
-        { err, conversationId: conversation.id, isolationEnvId: env.id },
-        'isolation_link_failed'
-      );
-      // Mark isolation as destroyed since we can't use it
-      try {
-        await isolationEnvDb.updateStatus(env.id, 'destroyed');
-      } catch (cleanupError) {
-        const cleanupErr = toError(cleanupError);
+        await db.updateConversation(conversation.id, {
+          isolation_env_id: result.env.id,
+          cwd: result.cwd,
+        });
+      } catch (updateError) {
+        const err = toError(updateError);
         getLog().error(
-          { err: cleanupErr, conversationId: conversation.id, isolationEnvId: env.id },
-          'isolation_cleanup_failed'
+          { err, conversationId: conversation.id, isolationEnvId: result.env.id },
+          'isolation_link_failed'
         );
+        try {
+          await createIsolationStore().updateStatus(result.env.id, 'destroyed');
+        } catch (rollbackError) {
+          getLog().error(
+            { err: toError(rollbackError), isolationEnvId: result.env.id },
+            'isolation_rollback_failed'
+          );
+        }
+        throw err;
       }
-      throw err;
-    }
-    return { status: 'new', cwd: env.working_path, env };
-  }
-
-  // When resolveIsolation reports blocked, it means isolation was required but could not be created
-  // The limit message has already been sent to the user by resolveIsolation
-  // We must block execution by throwing an error
-  throw new IsolationBlockedError(
-    'Isolation environment required but could not be created (limit reached or other blocking condition)',
-    isolationResult.reason
-  );
-}
-
-/**
- * Resolve which isolation environment to use.
- * Handles: (1) reuse of existing environment, (2) sharing via linked issues,
- * (3) adoption of skill-created worktrees, (4) limit enforcement with auto-cleanup,
- * and (5) creation of new worktrees.
- *
- * @returns The isolation environment to use, or blocked reason:
- *   - Worktree limit reached and auto-cleanup failed (user shown limit message)
- *   - Worktree creation failed (user shown specific error message)
- */
-async function resolveIsolation(
-  codebase: Codebase,
-  platform: IPlatformAdapter,
-  conversationId: string,
-  hints?: IsolationHints
-): Promise<IsolationCreationResult> {
-  // Determine workflow identity
-  const workflowType = hints?.workflowType ?? 'thread';
-  const workflowId = hints?.workflowId ?? conversationId;
-
-  // 1. Check for existing environment with same workflow
-  const existing = await isolationEnvDb.findByWorkflow(codebase.id, workflowType, workflowId);
-  if (existing && (await worktreeExists(toWorktreePath(existing.working_path)))) {
-    getLog().debug({ workflowType, workflowId }, 'isolation_reuse_existing');
-    return { status: 'ready', env: existing };
-  }
-
-  // 2. Check linked issues for sharing (cross-conversation)
-  if (hints?.linkedIssues?.length) {
-    for (const issueNum of hints.linkedIssues) {
-      const linkedEnv = await isolationEnvDb.findByWorkflow(codebase.id, 'issue', String(issueNum));
-      if (linkedEnv && (await worktreeExists(toWorktreePath(linkedEnv.working_path)))) {
-        getLog().debug({ issueNum, codebaseId: codebase.id }, 'isolation_share_linked_issue');
-        // Send UX message
+      // Send contextual messages
+      if (result.method.type === 'linked_issue_reuse') {
         await platform.sendMessage(
           conversationId,
-          `Reusing worktree from issue #${String(issueNum)}`
+          `Reusing worktree from issue #${String(result.method.issueNumber)}`
         );
-        return { status: 'ready', env: linkedEnv };
       }
+      if (result.method.type === 'created' && result.method.autoCleanedCount) {
+        await platform.sendMessage(
+          conversationId,
+          `Cleaned up ${String(result.method.autoCleanedCount)} merged worktree(s) to make room.`
+        );
+      }
+      return {
+        status: result.method.type === 'existing' ? 'existing' : 'new',
+        cwd: result.cwd,
+        env: result.env,
+      };
     }
-  }
 
-  // 3. Try PR branch adoption (skill symbiosis)
-  if (hints?.prBranch) {
-    const canonicalPath = await getCanonicalRepoPath(codebase.default_cwd);
-    const adoptedPath = await findWorktreeByBranch(canonicalPath, toBranchName(hints.prBranch));
-    if (adoptedPath && (await worktreeExists(adoptedPath))) {
-      getLog().info({ adoptedPath, prBranch: hints.prBranch }, 'isolation_worktree_adopted');
-      const env = await isolationEnvDb.create({
-        codebase_id: codebase.id,
-        workflow_type: workflowType,
-        workflow_id: workflowId,
-        working_path: adoptedPath,
-        branch_name: hints.prBranch,
-        created_by_platform: platform.getPlatformType(),
-        metadata: { adopted: true, adopted_from: 'skill' },
+    case 'stale_cleaned': {
+      // Clear stale reference
+      await db.updateConversation(conversation.id, { isolation_env_id: null }).catch(e => {
+        if (!(toError(e) instanceof ConversationNotFoundError)) {
+          getLog().error(
+            { err: toError(e), conversationId: conversation.id },
+            'stale_isolation_clear_failed'
+          );
+        }
       });
-      return { status: 'ready', env };
-    }
-  }
-
-  // 4. Check worktree limit and attempt auto-cleanup before creating new
-  const canonicalPath = await getCanonicalRepoPath(codebase.default_cwd);
-  const count = await isolationEnvDb.countByCodebase(codebase.id);
-  if (count >= MAX_WORKTREES_PER_CODEBASE) {
-    getLog().warn(
-      { count, limit: MAX_WORKTREES_PER_CODEBASE, codebaseId: codebase.id },
-      'worktree_limit_reached'
-    );
-
-    const cleanupResult = await cleanupToMakeRoom(codebase.id, canonicalPath);
-
-    if (cleanupResult.removed.length > 0) {
-      // Cleaned up some worktrees - send feedback and continue
-      await platform.sendMessage(
+      const staleMsg = codebase
+        ? 'Detected a stale isolated workspace reference and cleared it. Creating a new isolated workspace now.'
+        : 'Detected a stale isolated workspace reference and cleared it. Continuing without an isolated workspace.';
+      await platform.sendMessage(conversationId, staleMsg).catch(e => {
+        getLog().error({ err: toError(e), conversationId }, 'stale_isolation_notice_failed');
+      });
+      // Retry without existing env (guard against infinite recursion)
+      if (!codebase) return { status: 'none', cwd: conversation.cwd ?? '/workspace', env: null };
+      if (_isRetry) {
+        throw new Error(
+          `Isolation resolution stuck in stale_cleaned loop for conversation ${conversation.id}`
+        );
+      }
+      return validateAndResolveIsolation(
+        { ...conversation, isolation_env_id: null },
+        codebase,
+        platform,
         conversationId,
-        `Cleaned up ${String(cleanupResult.removed.length)} merged worktree(s) to make room.`
+        hints,
+        true
       );
-    } else {
-      // Could not auto-cleanup - show limit message with options
-      const breakdown = await getWorktreeStatusBreakdown(codebase.id, canonicalPath);
-      const limitMessage = formatWorktreeLimitMessage(codebase.name, breakdown);
-      await platform.sendMessage(conversationId, limitMessage);
-      return { status: 'blocked', reason: 'limit_reached' }; // Don't create new isolation
     }
 
-    // Re-check count after cleanup
-    const newCount = await isolationEnvDb.countByCodebase(codebase.id);
-    if (newCount >= MAX_WORKTREES_PER_CODEBASE) {
-      // Still at limit - show options
-      const breakdown = await getWorktreeStatusBreakdown(codebase.id, canonicalPath);
-      const limitMessage = formatWorktreeLimitMessage(codebase.name, breakdown);
-      await platform.sendMessage(conversationId, limitMessage);
-      return { status: 'blocked', reason: 'limit_reached' };
-    }
+    case 'none':
+      return { status: 'none', cwd: result.cwd, env: null };
+
+    case 'blocked':
+      await platform.sendMessage(conversationId, result.userMessage);
+      throw new IsolationBlockedError(
+        'Isolation environment required but could not be created',
+        result.reason
+      );
   }
-
-  // 5. Create new worktree
-  const provider = getIsolationProvider();
-
-  try {
-    // Construct request based on workflow type (discriminated union)
-    const baseRequest = {
-      codebaseId: codebase.id,
-      canonicalRepoPath: canonicalPath,
-      identifier: workflowId,
-    };
-
-    const isolatedEnv = await provider.create(
-      workflowType === 'pr'
-        ? {
-            ...baseRequest,
-            workflowType: 'pr' as const,
-            prBranch: hints?.prBranch ?? `pr-${workflowId}`,
-            prSha: hints?.prSha,
-            isForkPR: hints?.isForkPR ?? false,
-          }
-        : {
-            ...baseRequest,
-            workflowType,
-          }
-    );
-
-    // Create database record
-    const env = await isolationEnvDb.create({
-      codebase_id: codebase.id,
-      workflow_type: workflowType,
-      workflow_id: workflowId,
-      working_path: isolatedEnv.workingPath,
-      branch_name: isolatedEnv.branchName ?? `${workflowType}-${workflowId}`,
-      created_by_platform: platform.getPlatformType(),
-      metadata: {
-        related_issues: hints?.linkedIssues ?? [],
-        related_prs: hints?.linkedPRs ?? [],
-      },
-    });
-
-    return { status: 'ready', env };
-  } catch (error) {
-    const err = toError(error);
-    const userMessage = classifyIsolationError(err);
-
-    getLog().error(
-      {
-        err,
-        codebaseId: codebase.id,
-        codebaseName: codebase.name,
-        defaultCwd: codebase.default_cwd,
-      },
-      'isolation_creation_failed'
-    );
-
-    await platform.sendMessage(
-      conversationId,
-      userMessage +
-        ' Execution blocked to prevent changes to shared codebase. Please resolve the issue and try again.'
-    );
-    return { status: 'blocked', reason: 'creation_failed' };
-  }
-}
-
-/**
- * Classify isolation creation errors into user-friendly messages.
- */
-function classifyIsolationError(err: Error): string {
-  const errorLower = err.message.toLowerCase();
-
-  // Map error patterns to user-friendly messages
-  const errorPatterns: { pattern: string; message: string }[] = [
-    {
-      pattern: 'permission denied',
-      message:
-        '**Error:** Permission denied while creating workspace. Check file system permissions.',
-    },
-    {
-      pattern: 'eacces',
-      message:
-        '**Error:** Permission denied while creating workspace. Check file system permissions.',
-    },
-    {
-      pattern: 'timeout',
-      message:
-        '**Error:** Timed out creating workspace. Git repository may be slow or unavailable.',
-    },
-    {
-      pattern: 'no space left',
-      message: '**Error:** No disk space available for new workspace.',
-    },
-    {
-      pattern: 'enospc',
-      message: '**Error:** No disk space available for new workspace.',
-    },
-    {
-      pattern: 'not a git repository',
-      message: '**Error:** Target path is not a valid git repository.',
-    },
-  ];
-
-  for (const { pattern, message } of errorPatterns) {
-    if (errorLower.includes(pattern)) {
-      return message;
-    }
-  }
-
-  return `**Error:** Could not create isolated workspace (${err.message}).`;
 }
 
 /**

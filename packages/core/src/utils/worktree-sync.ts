@@ -1,4 +1,4 @@
-import { copyWorktreeFiles } from './worktree-copy';
+import { copyWorktreeFiles } from '@archon/isolation';
 import { getCanonicalRepoPath, isWorktreePath } from '@archon/git';
 import { stat } from 'fs/promises';
 import type { Stats } from 'fs';

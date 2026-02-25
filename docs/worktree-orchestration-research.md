@@ -306,7 +306,7 @@ async function resolveIsolation(
   const workflowId = hints?.workflowId ?? conversationId;
 
   // 2. Check for existing environment (reuse)
-  const existing = await isolationEnvDb.findByWorkflow(codebase.id, workflowType, workflowId);
+  const existing = await isolationEnvDb.findActiveByWorkflow(codebase.id, workflowType, workflowId);
   if (existing && (await validatePath(existing.working_path))) {
     return existing;
   }
@@ -314,7 +314,7 @@ async function resolveIsolation(
   // 3. Check linked issues for sharing (cross-conversation)
   if (hints?.linkedIssues?.length) {
     for (const issueNum of hints.linkedIssues) {
-      const linkedEnv = await isolationEnvDb.findByWorkflow(codebase.id, 'issue', String(issueNum));
+      const linkedEnv = await isolationEnvDb.findActiveByWorkflow(codebase.id, 'issue', String(issueNum));
       if (linkedEnv && (await validatePath(linkedEnv.working_path))) {
         return linkedEnv; // Share with linked issue
       }
@@ -660,7 +660,7 @@ Options:
 // In orchestrator, when resolving isolation:
 if (hints?.linkedIssues?.length) {
   for (const issueNum of hints.linkedIssues) {
-    const linkedEnv = await isolationEnvDb.findByWorkflow(codebase.id, 'issue', String(issueNum));
+    const linkedEnv = await isolationEnvDb.findActiveByWorkflow(codebase.id, 'issue', String(issueNum));
     if (linkedEnv) {
       // Found! Share this environment
       log.info({ issueNum, envId: linkedEnv.id }, 'worktree_shared_with_linked_issue');

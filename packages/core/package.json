@@ -12,6 +12,7 @@
     "./clients": "./src/clients/index.ts",
     "./workflows": "./src/workflows/index.ts",
     "./isolation": "./src/isolation/index.ts",
+    "./isolation-store": "./src/db/isolation-environments.ts",
     "./orchestrator": "./src/orchestrator/orchestrator.ts",
     "./handlers": "./src/handlers/command-handler.ts",
     "./config": "./src/config/index.ts",
@@ -28,6 +29,7 @@
   },
   "dependencies": {
     "@archon/git": "workspace:*",
+    "@archon/isolation": "workspace:*",
     "@archon/paths": "workspace:*",
     "@anthropic-ai/claude-agent-sdk": "^0.2.45",
     "@openai/codex-sdk": "^0.104.0",

@@ -2,7 +2,12 @@
  * Database operations for isolation environments
  */
 import { pool, getDialect } from './connection';
-import type { IsolationEnvironmentRow } from '../types';
+import type {
+  IsolationEnvironmentRow,
+  IsolationWorkflowType,
+  IIsolationStore,
+  CreateEnvironmentParams,
+} from '@archon/isolation';
 import { createLogger } from '../utils/logger';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -24,11 +29,11 @@ export async function getById(id: string): Promise<IsolationEnvironmentRow | nul
 }
 
 /**
- * Find an isolation environment by workflow identity
+ * Find an active isolation environment by workflow identity
  */
-export async function findByWorkflow(
+export async function findActiveByWorkflow(
   codebaseId: string,
-  workflowType: string,
+  workflowType: IsolationWorkflowType,
   workflowId: string
 ): Promise<IsolationEnvironmentRow | null> {
   const result = await pool.query<IsolationEnvironmentRow>(
@@ -59,16 +64,7 @@ export async function listByCodebase(
  * If an active environment with the same (codebase_id, workflow_type, workflow_id) exists,
  * it updates the existing row instead of inserting a duplicate.
  */
-export async function create(env: {
-  codebase_id: string;
-  workflow_type: string;
-  workflow_id: string;
-  provider?: string;
-  working_path: string;
-  branch_name: string;
-  created_by_platform?: string;
-  metadata?: Record<string, unknown>;
-}): Promise<IsolationEnvironmentRow> {
+export async function create(env: CreateEnvironmentParams): Promise<IsolationEnvironmentRow> {
   const dialect = getDialect();
   const result = await pool.query<IsolationEnvironmentRow>(
     `INSERT INTO remote_agent_isolation_environments
@@ -165,7 +161,7 @@ export async function findByRelatedIssue(
 /**
  * Count active environments for a codebase (for limit checks)
  */
-export async function countByCodebase(codebaseId: string): Promise<number> {
+export async function countActiveByCodebase(codebaseId: string): Promise<number> {
   const result = await pool.query<{ count: string }>(
     `SELECT COUNT(*) as count FROM remote_agent_isolation_environments
      WHERE codebase_id = $1 AND status = 'active'`,
@@ -263,4 +259,18 @@ export async function listByCodebaseWithAge(
     [codebaseId]
   );
   return result.rows;
+}
+
+/**
+ * Create an IIsolationStore adapter from the DB query functions.
+ * Used by IsolationResolver for dependency injection.
+ */
+export function createIsolationStore(): IIsolationStore {
+  return {
+    getById,
+    findActiveByWorkflow,
+    create: (env: CreateEnvironmentParams) => create(env),
+    updateStatus,
+    countActiveByCodebase,
+  };
 }

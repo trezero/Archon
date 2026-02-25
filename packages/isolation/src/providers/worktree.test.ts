@@ -1,16 +1,21 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn, mock, type Mock } from 'bun:test';
-import { createMockLogger } from '../../test/mocks/logger';
 
 // Mock logger to suppress noisy output during tests
-const mockLogger = createMockLogger();
-mock.module('../../utils/logger', () => ({
-  createLogger: mock(() => mockLogger),
+mock.module('@archon/paths', () => ({
+  createLogger: () => ({
+    fatal: () => undefined,
+    error: () => undefined,
+    warn: () => undefined,
+    info: () => undefined,
+    debug: () => undefined,
+    trace: () => undefined,
+    child: () => undefined,
+  }),
 }));
 
-import * as configLoader from '../../config/config-loader';
 import * as git from '@archon/git';
-import * as worktreeCopy from '../../utils/worktree-copy';
-import type { IsolationRequest, PRIsolationRequest } from '../types';
+import * as worktreeCopy from '../worktree-copy';
+import type { IsolationRequest, PRIsolationRequest, RepoConfigLoader } from '../types';
 
 // Track sync function calls for testing
 let getDefaultBranchSpy: Mock<typeof git.getDefaultBranch>;
@@ -26,16 +31,17 @@ import { WorktreeProvider } from './worktree';
 
 describe('WorktreeProvider', () => {
   let provider: WorktreeProvider;
+  let mockConfigLoader: RepoConfigLoader;
   let execSpy: Mock<typeof git.execFileAsync>;
   let mkdirSpy: Mock<typeof git.mkdirAsync>;
   let worktreeExistsSpy: Mock<typeof git.worktreeExists>;
   let listWorktreesSpy: Mock<typeof git.listWorktrees>;
   let findWorktreeByBranchSpy: Mock<typeof git.findWorktreeByBranch>;
   let getCanonicalRepoPathSpy: Mock<typeof git.getCanonicalRepoPath>;
-  let loadRepoConfigSpy: Mock<typeof configLoader.loadRepoConfig>;
 
   beforeEach(() => {
-    provider = new WorktreeProvider();
+    mockConfigLoader = async () => ({});
+    provider = new WorktreeProvider(mockConfigLoader);
     execSpy = spyOn(git, 'execFileAsync');
     mkdirSpy = spyOn(git, 'mkdirAsync');
     worktreeExistsSpy = spyOn(git, 'worktreeExists');
@@ -44,7 +50,6 @@ describe('WorktreeProvider', () => {
     getCanonicalRepoPathSpy = spyOn(git, 'getCanonicalRepoPath');
     getDefaultBranchSpy = spyOn(git, 'getDefaultBranch');
     syncWorkspaceSpy = spyOn(git, 'syncWorkspace');
-    loadRepoConfigSpy = spyOn(configLoader, 'loadRepoConfig');
 
     // Default mocks
     execSpy.mockResolvedValue({ stdout: '', stderr: '' });
@@ -58,7 +63,6 @@ describe('WorktreeProvider', () => {
     // Default mocks for workspace sync
     getDefaultBranchSpy.mockResolvedValue('main');
     syncWorkspaceSpy.mockResolvedValue({ branch: 'main', synced: true });
-    loadRepoConfigSpy.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -70,7 +74,6 @@ describe('WorktreeProvider', () => {
     getCanonicalRepoPathSpy.mockRestore();
     getDefaultBranchSpy.mockRestore();
     syncWorkspaceSpy.mockRestore();
-    loadRepoConfigSpy.mockRestore();
     mockAccess.mockClear();
   });
 
@@ -1174,21 +1177,31 @@ describe('WorktreeProvider', () => {
       expect(result).toBeNull();
     });
 
-    test('returns null and logs error when getCanonicalRepoPath fails', async () => {
+    test('returns null when path is not a git repository', async () => {
       worktreeExistsSpy.mockResolvedValue(true);
-      getCanonicalRepoPathSpy.mockRejectedValue(new Error('Permission denied'));
+      getCanonicalRepoPathSpy.mockRejectedValue(new Error('fatal: not a git repository'));
 
       const result = await provider.adopt('/workspace/worktrees/repo/feature-auth');
       expect(result).toBeNull();
     });
 
-    test('returns null and logs error when listWorktrees fails', async () => {
+    test('throws when git query fails with unexpected error', async () => {
+      worktreeExistsSpy.mockResolvedValue(true);
+      getCanonicalRepoPathSpy.mockRejectedValue(new Error('permission denied'));
+
+      await expect(provider.adopt('/workspace/worktrees/repo/feature-auth')).rejects.toThrow(
+        'permission denied'
+      );
+    });
+
+    test('throws when listWorktrees fails with unexpected error', async () => {
       worktreeExistsSpy.mockResolvedValue(true);
       getCanonicalRepoPathSpy.mockResolvedValue('/workspace/repo');
       listWorktreesSpy.mockRejectedValue(new Error('git timeout'));
 
-      const result = await provider.adopt('/workspace/worktrees/repo/feature-auth');
-      expect(result).toBeNull();
+      await expect(provider.adopt('/workspace/worktrees/repo/feature-auth')).rejects.toThrow(
+        'git timeout'
+      );
     });
 
     test('returns null when worktree exists on disk but not in git list (corrupted state)', async () => {
@@ -1219,7 +1232,6 @@ describe('WorktreeProvider', () => {
       copyWorktreeFilesSpy = spyOn(worktreeCopy, 'copyWorktreeFiles');
 
       // Default: no config, no copies
-      loadRepoConfigSpy.mockResolvedValue({});
       copyWorktreeFilesSpy.mockResolvedValue([]);
     });
 
@@ -1228,11 +1240,11 @@ describe('WorktreeProvider', () => {
     });
 
     test('copies configured files after worktree creation', async () => {
-      loadRepoConfigSpy.mockResolvedValue({
-        worktree: {
-          copyFiles: ['.env.example -> .env', '.vscode/settings.json'],
-        },
+      const configLoader: RepoConfigLoader = async () => ({
+        copyFiles: ['.env.example -> .env', '.vscode/settings.json'],
       });
+      provider = new WorktreeProvider(configLoader);
+
       copyWorktreeFilesSpy.mockResolvedValue([
         { source: '.archon', destination: '.archon' },
         { source: '.env.example', destination: '.env' },
@@ -1250,7 +1262,6 @@ describe('WorktreeProvider', () => {
     });
 
     test('calls copyWorktreeFiles with default .archon when no copyFiles configured', async () => {
-      loadRepoConfigSpy.mockResolvedValue({});
       copyWorktreeFilesSpy.mockResolvedValue([]);
 
       await provider.create(baseRequest);
@@ -1264,11 +1275,11 @@ describe('WorktreeProvider', () => {
     });
 
     test('calls copyWorktreeFiles with default .archon when copyFiles is empty', async () => {
-      loadRepoConfigSpy.mockResolvedValue({
-        worktree: {
-          copyFiles: [],
-        },
+      const configLoader: RepoConfigLoader = async () => ({
+        copyFiles: [],
       });
+      provider = new WorktreeProvider(configLoader);
+
       copyWorktreeFilesSpy.mockResolvedValue([]);
 
       await provider.create(baseRequest);
@@ -1282,7 +1293,11 @@ describe('WorktreeProvider', () => {
     });
 
     test('does not fail worktree creation if config load fails', async () => {
-      loadRepoConfigSpy.mockRejectedValue(new Error('Config load failed'));
+      const configLoader: RepoConfigLoader = async () => {
+        throw new Error('Config load failed');
+      };
+      provider = new WorktreeProvider(configLoader);
+
       copyWorktreeFilesSpy.mockResolvedValue([]);
 
       // Should not throw
@@ -1298,11 +1313,11 @@ describe('WorktreeProvider', () => {
     });
 
     test('does not fail worktree creation if file copying fails', async () => {
-      loadRepoConfigSpy.mockResolvedValue({
-        worktree: {
-          copyFiles: ['.env'],
-        },
+      const configLoader: RepoConfigLoader = async () => ({
+        copyFiles: ['.env'],
       });
+      provider = new WorktreeProvider(configLoader);
+
       copyWorktreeFilesSpy.mockRejectedValue(new Error('Copy failed'));
 
       // Should not throw
@@ -1312,11 +1327,10 @@ describe('WorktreeProvider', () => {
 
     test('does not copy files when adopting existing worktree', async () => {
       worktreeExistsSpy.mockResolvedValue(true);
-      loadRepoConfigSpy.mockResolvedValue({
-        worktree: {
-          copyFiles: ['.env.example -> .env'],
-        },
+      const configLoader: RepoConfigLoader = async () => ({
+        copyFiles: ['.env.example -> .env'],
       });
+      provider = new WorktreeProvider(configLoader);
 
       await provider.create(baseRequest);
 
@@ -1325,9 +1339,6 @@ describe('WorktreeProvider', () => {
     });
 
     test('should copy .archon directory by default (without config)', async () => {
-      // Mock: No config file exists
-      loadRepoConfigSpy.mockResolvedValue({});
-
       // Mock: copyWorktreeFiles succeeds
       copyWorktreeFilesSpy.mockResolvedValue([{ source: '.archon', destination: '.archon' }]);
 
@@ -1346,11 +1357,10 @@ describe('WorktreeProvider', () => {
 
     test('should merge .archon default with user copyFiles config', async () => {
       // Mock: User config with additional files
-      loadRepoConfigSpy.mockResolvedValue({
-        worktree: {
-          copyFiles: ['.env', '.vscode'],
-        },
+      const configLoader: RepoConfigLoader = async () => ({
+        copyFiles: ['.env', '.vscode'],
       });
+      provider = new WorktreeProvider(configLoader);
 
       // Mock: copyWorktreeFiles succeeds
       copyWorktreeFilesSpy.mockResolvedValue([
@@ -1372,11 +1382,10 @@ describe('WorktreeProvider', () => {
 
     test('should deduplicate .archon if user explicitly includes it', async () => {
       // Mock: User config explicitly includes .archon
-      loadRepoConfigSpy.mockResolvedValue({
-        worktree: {
-          copyFiles: ['.archon', '.env'],
-        },
+      const configLoader: RepoConfigLoader = async () => ({
+        copyFiles: ['.archon', '.env'],
       });
+      provider = new WorktreeProvider(configLoader);
 
       copyWorktreeFilesSpy.mockResolvedValue([
         { source: '.archon', destination: '.archon' },
@@ -1393,7 +1402,10 @@ describe('WorktreeProvider', () => {
 
     test('should copy default .archon even if config loading fails', async () => {
       // Mock: Config loading throws error
-      loadRepoConfigSpy.mockRejectedValue(new Error('Config parse error'));
+      const configLoader: RepoConfigLoader = async () => {
+        throw new Error('Config parse error');
+      };
+      provider = new WorktreeProvider(configLoader);
 
       copyWorktreeFilesSpy.mockResolvedValue([{ source: '.archon', destination: '.archon' }]);
 
@@ -1672,7 +1684,6 @@ describe('WorktreeProvider', () => {
       // Verify sync was NOT called (adoption skips createWorktree entirely)
       expect(syncWorkspaceSpy).not.toHaveBeenCalled();
       expect(getDefaultBranchSpy).not.toHaveBeenCalled();
-      expect(loadRepoConfigSpy).not.toHaveBeenCalled();
     });
 
     test('syncs workspace before creating worktree using repo default', async () => {
@@ -1691,9 +1702,10 @@ describe('WorktreeProvider', () => {
 
     test('passes configured base branch to workspace sync when provided', async () => {
       worktreeExistsSpy.mockResolvedValue(false);
-      loadRepoConfigSpy.mockResolvedValue({
-        worktree: { baseBranch: 'develop' },
+      const configLoader: RepoConfigLoader = async () => ({
+        baseBranch: 'develop',
       });
+      provider = new WorktreeProvider(configLoader);
 
       await provider.create(baseRequest);
 
@@ -1730,7 +1742,11 @@ describe('WorktreeProvider', () => {
     });
 
     test('continues worktree creation when repo config fails to load', async () => {
-      loadRepoConfigSpy.mockRejectedValue(new Error('Config error'));
+      const configLoader: RepoConfigLoader = async () => {
+        throw new Error('Config error');
+      };
+      provider = new WorktreeProvider(configLoader);
+
       worktreeExistsSpy.mockResolvedValue(false);
 
       const env = await provider.create(baseRequest);
@@ -1740,9 +1756,11 @@ describe('WorktreeProvider', () => {
     });
 
     test('throws error when configured base branch does not exist', async () => {
-      loadRepoConfigSpy.mockResolvedValue({
-        worktree: { baseBranch: 'does-not-exist' },
+      const configLoader: RepoConfigLoader = async () => ({
+        baseBranch: 'does-not-exist',
       });
+      provider = new WorktreeProvider(configLoader);
+
       worktreeExistsSpy.mockResolvedValue(false);
       syncWorkspaceSpy.mockRejectedValue(
         new Error(

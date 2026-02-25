@@ -845,7 +845,7 @@ ${userComment}`;
           repo,
           pull_number: number,
         });
-        isolationHints.prBranch = prData.head.ref;
+        isolationHints.prBranch = toBranchName(prData.head.ref);
         isolationHints.prSha = prData.head.sha;
 
         // Detect if PR is from a fork (different repo than base)

@@ -11,7 +11,7 @@ import * as sessionDb from '../db/sessions';
 import { isPathWithinWorkspace } from '../utils/path-validation';
 import { sanitizeError } from '../utils/credential-sanitizer';
 import { listWorktrees, execFileAsync, toRepoPath } from '@archon/git';
-import { getIsolationProvider } from '../isolation';
+import { getIsolationProvider } from '@archon/isolation';
 import * as isolationEnvDb from '../db/isolation-environments';
 import {
   cleanupMergedWorktrees,
@@ -1022,7 +1022,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
             const provider = getIsolationProvider();
             const env = await provider.create({
               codebaseId: conversation.codebase_id,
-              canonicalRepoPath: mainPath,
+              canonicalRepoPath: toRepoPath(mainPath),
               workflowType: 'task',
               identifier: branchName,
               description: `Manual worktree: ${branchName}`,
@@ -1248,7 +1248,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
             }
 
             // Show updated count
-            const count = await isolationEnvDb.countByCodebase(conversation.codebase_id);
+            const count = await isolationEnvDb.countActiveByCodebase(conversation.codebase_id);
             msg += `\nWorktrees: ${String(count)}/${String(MAX_WORKTREES_PER_CODEBASE)}`;
 
             return { success: true, message: msg.trim() };

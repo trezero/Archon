@@ -8,7 +8,7 @@ import {
   copyWorktreeFiles,
   isPathWithinRoot,
   type CopyFileEntry,
-} from './worktree-copy';
+} from '@archon/isolation';
 
 describe('worktree-copy', () => {
   describe('parseCopyFileEntry', () => {

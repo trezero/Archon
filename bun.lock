@@ -27,6 +27,7 @@
       "dependencies": {
         "@archon/core": "workspace:*",
         "@archon/git": "workspace:*",
+        "@archon/isolation": "workspace:*",
         "@clack/prompts": "^1.0.0",
         "dotenv": "^17.2.3",
       },
@@ -40,6 +41,7 @@
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.2.45",
         "@archon/git": "workspace:*",
+        "@archon/isolation": "workspace:*",
         "@archon/paths": "workspace:*",
         "@openai/codex-sdk": "^0.104.0",
         "pg": "^8.11.0",
@@ -56,6 +58,17 @@
       "name": "@archon/git",
       "version": "0.1.0",
       "dependencies": {
+        "@archon/paths": "workspace:*",
+      },
+      "peerDependencies": {
+        "typescript": "^5.0.0",
+      },
+    },
+    "packages/isolation": {
+      "name": "@archon/isolation",
+      "version": "0.1.0",
+      "dependencies": {
+        "@archon/git": "workspace:*",
         "@archon/paths": "workspace:*",
       },
       "peerDependencies": {
@@ -141,6 +154,8 @@
     "@archon/core": ["@archon/core@workspace:packages/core"],
 
     "@archon/git": ["@archon/git@workspace:packages/git"],
+
+    "@archon/isolation": ["@archon/isolation@workspace:packages/isolation"],
 
     "@archon/paths": ["@archon/paths@workspace:packages/paths"],
 

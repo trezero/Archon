@@ -13,12 +13,12 @@ mock.module('./connection', () => ({
 
 import {
   getById,
-  findByWorkflow,
+  findActiveByWorkflow,
   listByCodebase,
   create,
   updateStatus,
   updateMetadata,
-  countByCodebase,
+  countActiveByCodebase,
   getConversationsUsingEnv,
   findStaleEnvironments,
   listAllActiveWithCodebase,
@@ -65,11 +65,11 @@ describe('isolation-environments', () => {
     });
   });
 
-  describe('findByWorkflow', () => {
+  describe('findActiveByWorkflow', () => {
     test('finds active environment by workflow identity', async () => {
       mockQuery.mockResolvedValueOnce(createQueryResult([sampleEnv]));
 
-      const result = await findByWorkflow('codebase-456', 'issue', '42');
+      const result = await findActiveByWorkflow('codebase-456', 'issue', '42');
 
       expect(result).toEqual(sampleEnv);
       expect(mockQuery).toHaveBeenCalledWith(
@@ -81,7 +81,7 @@ describe('isolation-environments', () => {
     test('returns null when no matching active environment', async () => {
       mockQuery.mockResolvedValueOnce(createQueryResult([]));
 
-      const result = await findByWorkflow('codebase-456', 'issue', '99');
+      const result = await findActiveByWorkflow('codebase-456', 'issue', '99');
 
       expect(result).toBeNull();
     });
@@ -232,11 +232,11 @@ describe('isolation-environments', () => {
     });
   });
 
-  describe('countByCodebase', () => {
+  describe('countActiveByCodebase', () => {
     test('returns count of active environments', async () => {
       mockQuery.mockResolvedValueOnce(createQueryResult([{ count: '5' }]));
 
-      const result = await countByCodebase('codebase-456');
+      const result = await countActiveByCodebase('codebase-456');
 
       expect(result).toBe(5);
       expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('COUNT(*)'), ['codebase-456']);
@@ -245,7 +245,7 @@ describe('isolation-environments', () => {
     test('returns 0 when no environments', async () => {
       mockQuery.mockResolvedValueOnce(createQueryResult([{ count: '0' }]));
 
-      const result = await countByCodebase('empty-codebase');
+      const result = await countActiveByCodebase('empty-codebase');
 
       expect(result).toBe(0);
     });

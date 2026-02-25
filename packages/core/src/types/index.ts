@@ -31,53 +31,19 @@ export interface Conversation {
   updated_at: Date;
 }
 
-/**
- * Isolation hints provided by adapters to orchestrator
- * Allows platform-specific context without orchestrator knowing platform internals
- */
-export interface IsolationHints {
-  // Workflow identification (adapter knows this)
-  workflowType?: 'issue' | 'pr' | 'review' | 'thread' | 'task';
-  workflowId?: string;
-
-  // PR-specific (for reproducible reviews)
-  prBranch?: string;
-  prSha?: string;
-  isForkPR?: boolean; // True if PR is from a fork (different repo)
-  prFetchFailed?: boolean; // True if GitHub API fetch failed (degraded mode)
-
-  // Cross-reference hints (for linking)
-  linkedIssues?: number[];
-  linkedPRs?: number[];
-
-  // Adoption hints
-  suggestedBranch?: string;
-}
-
-export type IsolationBlockReason = 'limit_reached' | 'creation_failed';
+// Re-exported from @archon/isolation for backward compatibility
+export type {
+  IsolationHints,
+  IsolationBlockReason,
+  IsolationEnvironmentRow,
+} from '@archon/isolation';
+import type { IsolationHints } from '@archon/isolation';
 
 export interface HandleMessageContext {
   readonly issueContext?: string;
   readonly threadContext?: string;
   readonly parentConversationId?: string;
   readonly isolationHints?: IsolationHints;
-}
-
-/**
- * Database row for isolation_environments table
- */
-export interface IsolationEnvironmentRow {
-  id: string;
-  codebase_id: string;
-  workflow_type: string;
-  workflow_id: string;
-  provider: string;
-  working_path: string;
-  branch_name: string;
-  status: string;
-  created_at: Date;
-  created_by_platform: string | null;
-  metadata: Record<string, unknown>;
 }
 
 export interface Codebase {

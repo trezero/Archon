@@ -20,6 +20,9 @@ mock.module('@archon/git', () => ({
   getDefaultBranch: mockGetDefaultBranch,
   isBranchMerged: mockIsBranchMerged,
   getLastCommitDate: mockGetLastCommitDate,
+  toRepoPath: (p: string) => p,
+  toBranchName: (b: string) => b,
+  toWorktreePath: (p: string) => p,
 }));
 
 // Mock isolation provider
@@ -37,6 +40,11 @@ mock.module('../isolation', () => ({
     destroy: mockDestroy,
   }),
 }));
+mock.module('@archon/isolation', () => ({
+  getIsolationProvider: () => ({
+    destroy: mockDestroy,
+  }),
+}));
 
 // Mock isolation-environments DB
 const mockListAllActiveWithCodebase = mock(() => Promise.resolve([]));
@@ -45,7 +53,7 @@ const mockGetConversationsUsingEnv = mock(() => Promise.resolve([]));
 const mockGetById = mock(() => Promise.resolve(null));
 const mockListByCodebase = mock(() => Promise.resolve([]));
 const mockListByCodebaseWithAge = mock(() => Promise.resolve([]));
-const mockCountByCodebase = mock(() => Promise.resolve(0));
+const mockCountActiveByCodebase = mock(() => Promise.resolve(0));
 mock.module('../db/isolation-environments', () => ({
   listAllActiveWithCodebase: mockListAllActiveWithCodebase,
   updateStatus: mockUpdateStatus,
@@ -53,7 +61,7 @@ mock.module('../db/isolation-environments', () => ({
   getById: mockGetById,
   listByCodebase: mockListByCodebase,
   listByCodebaseWithAge: mockListByCodebaseWithAge,
-  countByCodebase: mockCountByCodebase,
+  countActiveByCodebase: mockCountActiveByCodebase,
 }));
 
 // Mock conversations DB

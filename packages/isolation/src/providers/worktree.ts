@@ -8,9 +8,7 @@ import { createHash } from 'crypto';
 import { access, rm } from 'fs/promises';
 import { join } from 'path';
 
-import { loadRepoConfig } from '../../config/config-loader';
-import { createLogger } from '../../utils/logger';
-import type { RepoConfig } from '../../config/config-types';
+import { createLogger } from '@archon/paths';
 import {
   execFileAsync,
   findWorktreeByBranch,
@@ -26,16 +24,18 @@ import {
   toBranchName,
 } from '@archon/git';
 import type { RepoPath, WorktreeInfo } from '@archon/git';
-import { copyWorktreeFiles } from '../../utils/worktree-copy';
+import { copyWorktreeFiles } from '../worktree-copy';
 import type {
   DestroyResult,
   IIsolationProvider,
   IsolatedEnvironment,
   IsolationRequest,
   PRIsolationRequest,
+  RepoConfigLoader,
   WorktreeDestroyOptions,
   WorktreeEnvironment,
 } from '../types';
+import { isPRIsolationRequest } from '../types';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -47,11 +47,13 @@ function getLog(): ReturnType<typeof createLogger> {
 export class WorktreeProvider implements IIsolationProvider {
   readonly providerType = 'worktree';
 
+  constructor(private loadConfig: RepoConfigLoader = () => Promise.resolve(null)) {}
+
   /**
    * Create an isolated environment using git worktrees
    */
   async create(request: IsolationRequest): Promise<IsolatedEnvironment> {
-    const branchName = this.generateBranchName(request);
+    const branchName = toBranchName(this.generateBranchName(request));
     const worktreePath = this.getWorktreePath(request, branchName);
     const envId = this.generateEnvId(request);
 
@@ -312,7 +314,7 @@ export class WorktreeProvider implements IIsolationProvider {
       id: envId,
       provider: 'worktree',
       workingPath: worktreePath,
-      branchName: wt.branch,
+      branchName: toBranchName(wt.branch),
       status: 'active',
       createdAt: new Date(), // Cannot determine actual creation time
       metadata: { adopted: false },
@@ -334,7 +336,7 @@ export class WorktreeProvider implements IIsolationProvider {
         id: wt.path,
         provider: 'worktree' as const,
         workingPath: wt.path,
-        branchName: wt.branch,
+        branchName: toBranchName(wt.branch),
         status: 'active' as const,
         createdAt: new Date(),
         metadata: { adopted: false },
@@ -346,7 +348,10 @@ export class WorktreeProvider implements IIsolationProvider {
    *
    * Returns null if:
    * - Path doesn't exist or isn't a valid worktree
+   * - Path is not a git repository
    * - Worktree exists on disk but isn't registered with git (corrupted state)
+   *
+   * Throws for unexpected errors (permission denied, I/O failures).
    */
   async adopt(path: string): Promise<IsolatedEnvironment | null> {
     if (!(await worktreeExists(toWorktreePath(path)))) {
@@ -359,8 +364,14 @@ export class WorktreeProvider implements IIsolationProvider {
       repoPath = await getCanonicalRepoPath(path);
       worktrees = await listWorktrees(repoPath);
     } catch (error) {
-      getLog().error({ err: error, path }, 'worktree_adopt_query_failed');
-      return null;
+      const err = error as Error;
+      // "not a git repository" is an expected case — return null
+      if (err.message.toLowerCase().includes('not a git repository')) {
+        getLog().debug({ path }, 'worktree_adopt_not_git_repo');
+        return null;
+      }
+      // Unexpected errors (permission denied, I/O) should propagate
+      throw error;
     }
 
     const wt = worktrees.find(w => w.path === path);
@@ -379,7 +390,7 @@ export class WorktreeProvider implements IIsolationProvider {
       id: path,
       provider: 'worktree',
       workingPath: path,
-      branchName: wt.branch,
+      branchName: toBranchName(wt.branch),
       status: 'active',
       createdAt: new Date(),
       metadata: { adopted: true },
@@ -404,8 +415,8 @@ export class WorktreeProvider implements IIsolationProvider {
    * For same-repo PRs: Use the actual PR branch name
    * For fork PRs: Use synthetic pr-N-review branch
    *
-   * Branch names are sanitized via slugify() for thread/task types.
-   * Maximum length: 50 characters (task type only).
+   * Thread identifiers are hashed via shortHash() (8 hex chars).
+   * Task identifiers are slugified via slugify() (lowercase, max 50 chars).
    */
   generateBranchName(request: IsolationRequest): string {
     switch (request.workflowType) {
@@ -449,19 +460,14 @@ export class WorktreeProvider implements IIsolationProvider {
    * avoid collisions between repos.
    */
   getWorktreePath(request: IsolationRequest, branchName: string): string {
-    const repoPath = toRepoPath(request.canonicalRepoPath);
-    const worktreeBase = getWorktreeBase(repoPath);
+    const worktreeBase = getWorktreeBase(request.canonicalRepoPath);
 
-    if (isProjectScopedWorktreeBase(repoPath)) {
-      // Project-scoped: worktreeBase is already .../workspaces/owner/repo/worktrees/
+    if (isProjectScopedWorktreeBase(request.canonicalRepoPath)) {
       return join(worktreeBase, branchName);
     }
 
-    // Legacy global: need to include owner/repo to avoid collisions
-    const pathParts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
-    const repoName = pathParts[pathParts.length - 1];
-    const ownerName = pathParts[pathParts.length - 2];
-    return join(worktreeBase, ownerName, repoName, branchName);
+    const { owner, repo } = this.extractOwnerRepo(request.canonicalRepoPath);
+    return join(worktreeBase, owner, repo, branchName);
   }
 
   /**
@@ -475,42 +481,42 @@ export class WorktreeProvider implements IIsolationProvider {
     // Check if worktree already exists at expected path
     if (await worktreeExists(toWorktreePath(worktreePath))) {
       getLog().info({ worktreePath, branchName }, 'worktree_adopted');
-      return {
-        id: worktreePath,
-        provider: 'worktree',
-        workingPath: worktreePath,
-        branchName,
-        status: 'active',
-        createdAt: new Date(),
-        metadata: { adopted: true, request },
-      };
+      return this.buildAdoptedEnvironment(worktreePath, branchName, request);
     }
 
     // For PRs: also check if skill created a worktree with the PR's branch name
-    // Type narrowing: when workflowType === 'pr', request is PRIsolationRequest with prBranch required
-    if (request.workflowType === 'pr') {
+    if (isPRIsolationRequest(request)) {
       const existingByBranch = await findWorktreeByBranch(
-        toRepoPath(request.canonicalRepoPath),
-        toBranchName(request.prBranch)
+        request.canonicalRepoPath,
+        request.prBranch
       );
       if (existingByBranch) {
         getLog().info(
           { worktreePath: existingByBranch, branchName: request.prBranch },
           'worktree_adopted'
         );
-        return {
-          id: existingByBranch,
-          provider: 'worktree',
-          workingPath: existingByBranch,
-          branchName: request.prBranch,
-          status: 'active',
-          createdAt: new Date(),
-          metadata: { adopted: true, adoptedFrom: 'branch', request },
-        };
+        return this.buildAdoptedEnvironment(existingByBranch, request.prBranch, request, 'branch');
       }
     }
 
     return null;
+  }
+
+  private buildAdoptedEnvironment(
+    path: string,
+    branchName: string,
+    request: IsolationRequest,
+    adoptedFrom?: 'branch'
+  ): WorktreeEnvironment {
+    return {
+      id: path,
+      provider: 'worktree',
+      workingPath: path,
+      branchName: toBranchName(branchName),
+      status: 'active',
+      createdAt: new Date(),
+      metadata: { adopted: true, ...(adoptedFrom ? { adoptedFrom } : {}), request },
+    };
   }
 
   /**
@@ -521,32 +527,25 @@ export class WorktreeProvider implements IIsolationProvider {
     worktreePath: string,
     branchName: string
   ): Promise<void> {
-    const repoPath = toRepoPath(request.canonicalRepoPath);
+    const repoPath = request.canonicalRepoPath;
 
-    let repoConfig: RepoConfig | null = null;
-    try {
-      repoConfig = await loadRepoConfig(repoPath);
-    } catch (error) {
+    const worktreeConfig = await this.loadConfig(repoPath).catch(error => {
       getLog().error({ err: error, repoPath }, 'repo_config_load_failed');
-    }
+      return null;
+    });
 
-    await this.syncWorkspaceBeforeCreate(repoPath, repoConfig?.worktree?.baseBranch);
+    await this.syncWorkspaceBeforeCreate(repoPath, worktreeConfig?.baseBranch);
 
     const worktreeBase = getWorktreeBase(repoPath);
 
     if (isProjectScopedWorktreeBase(repoPath)) {
-      // Project-scoped: worktreeBase is the directory we need
       await mkdirAsync(worktreeBase, { recursive: true });
     } else {
-      // Legacy global: need to create owner/repo subdirectory
-      const pathParts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
-      const repoName = pathParts[pathParts.length - 1];
-      const ownerName = pathParts[pathParts.length - 2];
-      const projectWorktreeDir = join(worktreeBase, ownerName, repoName);
-      await mkdirAsync(projectWorktreeDir, { recursive: true });
+      const { owner, repo } = this.extractOwnerRepo(repoPath);
+      await mkdirAsync(join(worktreeBase, owner, repo), { recursive: true });
     }
 
-    if (request.workflowType === 'pr') {
+    if (isPRIsolationRequest(request)) {
       // For PRs: fetch and checkout the PR branch (actual or synthetic)
       await this.createFromPR(request, worktreePath);
     } else {
@@ -555,7 +554,7 @@ export class WorktreeProvider implements IIsolationProvider {
     }
 
     // Copy git-ignored files based on repo config
-    await this.copyConfiguredFiles(repoPath, worktreePath, repoConfig);
+    await this.copyConfiguredFiles(repoPath, worktreePath, worktreeConfig);
   }
 
   /**
@@ -625,19 +624,20 @@ export class WorktreeProvider implements IIsolationProvider {
   private async copyConfiguredFiles(
     canonicalRepoPath: string,
     worktreePath: string,
-    repoConfig?: RepoConfig | null
+    worktreeConfig?: { baseBranch?: string; copyFiles?: string[] } | null
   ): Promise<void> {
     // Default files to always copy
     const defaultCopyFiles = ['.archon'];
 
     // Load user config - log errors but don't fail worktree creation
     let userCopyFiles: string[] = [];
-    if (repoConfig) {
-      userCopyFiles = repoConfig.worktree?.copyFiles ?? [];
+    if (worktreeConfig) {
+      userCopyFiles = worktreeConfig.copyFiles ?? [];
     } else {
+      // Config not provided - try loading it
       try {
-        const loadedConfig = await loadRepoConfig(canonicalRepoPath);
-        userCopyFiles = loadedConfig.worktree?.copyFiles ?? [];
+        const loadedConfig = await this.loadConfig(canonicalRepoPath);
+        userCopyFiles = loadedConfig?.copyFiles ?? [];
       } catch (error) {
         // Config errors are more serious - log as error, not warning
         getLog().error({ err: error, canonicalRepoPath }, 'repo_config_load_failed');
@@ -664,7 +664,7 @@ export class WorktreeProvider implements IIsolationProvider {
       const attemptedCount = copyFiles.length;
       const copiedCount = copied.length;
       if (copiedCount < attemptedCount) {
-        getLog().debug({ worktreePath, copiedCount, attemptedCount }, 'worktree_file_copy_partial');
+        getLog().warn({ worktreePath, copiedCount, attemptedCount }, 'worktree_file_copy_partial');
       }
     } catch (error) {
       // Should not happen as copyWorktreeFiles handles errors internally,
@@ -905,6 +905,15 @@ export class WorktreeProvider implements IIsolationProvider {
       // Provide context for the error - orphan cleanup is critical for worktree creation
       throw new Error(`Failed to clean orphan directory at ${worktreePath}: ${err.message}`);
     }
+  }
+
+  /**
+   * Extract owner and repo name from a repository path.
+   * Used for legacy global worktree base layout where owner/repo must be appended.
+   */
+  private extractOwnerRepo(repoPath: string): { owner: string; repo: string } {
+    const parts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
+    return { owner: parts[parts.length - 2], repo: parts[parts.length - 1] };
   }
 
   /**

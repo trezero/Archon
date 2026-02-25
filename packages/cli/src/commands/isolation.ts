@@ -2,7 +2,9 @@
  * Isolation commands - list and cleanup worktrees
  */
 import * as isolationDb from '@archon/core/db/isolation-environments';
-import { createLogger, getIsolationProvider } from '@archon/core';
+import { createLogger } from '@archon/core';
+import { toRepoPath, toBranchName } from '@archon/git';
+import { getIsolationProvider } from '@archon/isolation';
 import { cleanupMergedWorktrees } from '@archon/core/services/cleanup-service';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -89,8 +91,8 @@ export async function isolationCleanupCommand(daysStale = 7): Promise<void> {
 
     try {
       await provider.destroy(env.working_path, {
-        branchName: env.branch_name ?? undefined,
-        canonicalRepoPath: env.codebase_default_cwd,
+        branchName: env.branch_name ? toBranchName(env.branch_name) : undefined,
+        canonicalRepoPath: toRepoPath(env.codebase_default_cwd),
       });
 
       await isolationDb.updateStatus(env.id, 'destroyed');

@@ -275,7 +275,7 @@ Generated at: `packages/cli/src/commands/workflow.ts:26`
 
 When `--branch` is provided:
 
-1. **Lookup:** `isolationDb.findByWorkflow(codebaseId, 'task', branchName)`
+1. **Lookup:** `isolationDb.findActiveByWorkflow(codebaseId, 'task', branchName)`
 2. **Health check:** `provider.healthCheck(path)` on existing
 3. **Reuse:** If found and healthy
 4. **Create:** If not found or unhealthy

@@ -22,11 +22,8 @@ import { getArchonHome, getArchonWorkspacesPath } from '../utils/archon-paths';
 import { syncArchonToWorktree } from '../utils/worktree-sync';
 import { discoverWorkflows, findWorkflow, executeWorkflow } from '../workflows';
 import type { WorkflowDefinition } from '../workflows';
-import {
-  validateAndResolveIsolation,
-  dispatchBackgroundWorkflow,
-  IsolationBlockedError,
-} from './orchestrator';
+import { validateAndResolveIsolation, dispatchBackgroundWorkflow } from './orchestrator';
+import { IsolationBlockedError } from '@archon/isolation';
 import { buildOrchestratorPrompt, buildProjectScopedPrompt } from './prompt-builder';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */

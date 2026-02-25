@@ -227,7 +227,11 @@ export async function workflowRunCommand(
       const provider = getIsolationProvider();
 
       // Check for existing worktree
-      const existingEnv = await isolationDb.findByWorkflow(codebase.id, 'task', options.branchName);
+      const existingEnv = await isolationDb.findActiveByWorkflow(
+        codebase.id,
+        'task',
+        options.branchName
+      );
 
       if (existingEnv && (await provider.healthCheck(existingEnv.working_path))) {
         getLog().info({ path: existingEnv.working_path }, 'worktree_reused');
@@ -241,22 +245,18 @@ export async function workflowRunCommand(
           workflowType: 'task',
           identifier: options.branchName,
           codebaseId: codebase.id,
-          canonicalRepoPath: codebase.default_cwd,
+          canonicalRepoPath: git.toRepoPath(codebase.default_cwd),
           description: `CLI workflow: ${workflowName}`,
         });
 
         // Track in database
-        // Use actual branch name from worktree provider (may differ from requested name)
-        const actualBranchName =
-          isolatedEnv.provider === 'worktree' ? isolatedEnv.branchName : options.branchName;
-
         const envRecord = await isolationDb.create({
           codebase_id: codebase.id,
           workflow_type: 'task',
           workflow_id: options.branchName,
           provider: 'worktree',
           working_path: isolatedEnv.workingPath,
-          branch_name: actualBranchName,
+          branch_name: isolatedEnv.branchName,
           created_by_platform: 'cli',
           metadata: {},
         });

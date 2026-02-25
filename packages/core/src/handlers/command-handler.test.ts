@@ -130,6 +130,17 @@ mock.module('../isolation', () => ({
     healthCheck: mock(() => Promise.resolve(true)),
   }),
 }));
+mock.module('@archon/isolation', () => ({
+  getIsolationProvider: () => ({
+    providerType: 'worktree',
+    create: mockIsolationCreate,
+    destroy: mockIsolationDestroy,
+    get: mock(() => Promise.resolve(null)),
+    list: mock(() => Promise.resolve([])),
+    adopt: mock(() => Promise.resolve(null)),
+    healthCheck: mock(() => Promise.resolve(true)),
+  }),
+}));
 
 // Note: We removed mock.module('child_process') because:
 // 1. We already spy on gitUtils.execFileAsync which covers git operations

@@ -7,7 +7,8 @@ import * as conversationDb from '../db/conversations';
 import * as sessionDb from '../db/sessions';
 import { SessionNotFoundError } from '../db/sessions';
 import * as codebaseDb from '../db/codebases';
-import { getIsolationProvider } from '../isolation';
+import { getIsolationProvider } from '@archon/isolation';
+import type { WorktreeStatusBreakdown } from '@archon/isolation';
 import {
   hasUncommittedChanges,
   worktreeExists,
@@ -18,6 +19,7 @@ import {
   toWorktreePath,
   toBranchName,
 } from '@archon/git';
+import type { RepoPath } from '@archon/git';
 import { createLogger } from '../utils/logger';
 import { IsolationEnvironmentRow, ConversationNotFoundError } from '../types';
 
@@ -142,10 +144,10 @@ export async function removeEnvironment(
   }
 
   // Get canonical repo path from codebase for branch cleanup
-  let canonicalRepoPath: string | undefined;
+  let canonicalRepoPath: RepoPath | undefined;
   if (env.codebase_id) {
     const codebase = await codebaseDb.getCodebase(env.codebase_id);
-    canonicalRepoPath = codebase?.default_cwd;
+    canonicalRepoPath = codebase?.default_cwd ? toRepoPath(codebase.default_cwd) : undefined;
   }
 
   // Check if directory exists before attempting removal
@@ -167,7 +169,7 @@ export async function removeEnvironment(
     // Call destroy even if path doesn't exist - branch cleanup may still be needed
     const destroyResult = await provider.destroy(env.working_path, {
       force: options?.force,
-      branchName: env.branch_name,
+      branchName: toBranchName(env.branch_name),
       canonicalRepoPath,
       deleteRemoteBranch: options?.deleteRemoteBranch,
     });
@@ -361,20 +363,6 @@ async function isEnvironmentStale(
 // =============================================================================
 // Phase 3D: Worktree Limits and User Feedback
 // =============================================================================
-
-/**
- * Detailed worktree status breakdown for a codebase
- */
-export interface WorktreeStatusBreakdown {
-  total: number;
-  merged: number;
-  stale: number;
-  active: number;
-  limit: number;
-  mergedEnvs: { id: string; branchName: string }[];
-  staleEnvs: { id: string; branchName: string; daysInactive: number }[];
-  activeEnvs: { id: string; branchName: string }[];
-}
 
 /**
  * Result from cleanup operations with detailed information

@@ -195,7 +195,7 @@ packages/
 │       ├── config/           # YAML config loading
 │       ├── db/               # Database connection, queries
 │       ├── handlers/         # Command handler (slash commands)
-│       ├── isolation/        # Git worktree management
+│       ├── isolation/        # Re-exports from @archon/isolation (backward compat)
 │       ├── orchestrator/     # AI conversation management
 │       ├── services/         # Background services (cleanup)
 │       ├── state/            # Session state machine
@@ -210,6 +210,17 @@ packages/
 │       ├── repo.ts           # Repository operations (clone, sync, remote URL)
 │       ├── types.ts          # Branded types (RepoPath, BranchName, etc.)
 │       ├── worktree.ts       # Worktree operations (create, remove, list)
+│       └── index.ts          # Package exports
+├── isolation/                # @archon/isolation - Worktree isolation (depends on @archon/git + @archon/paths)
+│   └── src/
+│       ├── types.ts          # Isolation types and interfaces
+│       ├── errors.ts         # Error classifiers (classifyIsolationError, IsolationBlockedError)
+│       ├── factory.ts        # Provider factory (getIsolationProvider, configureIsolation)
+│       ├── resolver.ts       # IsolationResolver (request → environment resolution)
+│       ├── store.ts          # IIsolationStore interface
+│       ├── worktree-copy.ts  # File copy utilities for worktrees
+│       ├── providers/
+│       │   └── worktree.ts   # WorktreeProvider implementation
 │       └── index.ts          # Package exports
 ├── paths/                    # @archon/paths - Path resolution and logger (zero @archon/* deps)
 │   └── src/
@@ -276,8 +287,9 @@ import * as core from '@archon/core';  // Don't do this
 **Package Split:**
 - **@archon/paths**: Path resolution utilities and Pino logger factory (no @archon/* deps)
 - **@archon/git**: Git operations - worktrees, branches, repos, exec wrappers (depends only on @archon/paths)
+- **@archon/isolation**: Worktree isolation types, providers, resolver, error classifiers (depends only on @archon/git + @archon/paths)
 - **@archon/cli**: Command-line interface for running workflows
-- **@archon/core**: Business logic, database, orchestration, workflows (re-exports @archon/git and @archon/paths for backward compat)
+- **@archon/core**: Business logic, database, orchestration, workflows (re-exports @archon/git, @archon/paths, and @archon/isolation for backward compat)
 - **@archon/server**: Platform adapters, Hono server, HTTP endpoints, Web UI static serving
 - **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui), SSE streaming to server
 
@@ -584,7 +596,7 @@ try {
 }
 ```
 
-Pattern: Use `classifyIsolationError()` (in `orchestrator.ts`) to map git errors (permission denied, timeout, no space, not a git repo) to user-friendly messages. Always log the raw error for debugging and send a classified message to the user.
+Pattern: Use `classifyIsolationError()` (from `@archon/isolation`) to map git errors (permission denied, timeout, no space, not a git repo) to user-friendly messages. Always log the raw error for debugging and send a classified message to the user.
 
 ### API Endpoints
 
