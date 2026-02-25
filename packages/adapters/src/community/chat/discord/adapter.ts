@@ -11,8 +11,10 @@ import {
   ThreadAutoArchiveDuration,
 } from 'discord.js';
 import type { IPlatformAdapter, MessageMetadata } from '@archon/core';
-import { isDiscordUserAuthorized, createLogger } from '@archon/core';
-import { parseAllowedUserIds } from '@archon/core/utils/discord-auth';
+import { createLogger } from '@archon/paths';
+import { isDiscordUserAuthorized } from './auth';
+import { parseAllowedUserIds } from './auth';
+import { splitIntoParagraphChunks } from '../../../utils/message-splitting';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -76,64 +78,12 @@ export class DiscordAdapter implements IPlatformAdapter {
       await channel.send(message);
     } else {
       getLog().debug({ messageLength: message.length }, 'message_splitting');
-      const chunks = this.splitIntoParagraphChunks(message, MAX_LENGTH - 100);
+      const chunks = splitIntoParagraphChunks(message, MAX_LENGTH - 100);
 
       for (const chunk of chunks) {
         await channel.send(chunk);
       }
     }
-  }
-
-  /**
-   * Split message into chunks by paragraph boundaries
-   * Paragraphs are separated by double newlines
-   */
-  private splitIntoParagraphChunks(message: string, maxLength: number): string[] {
-    const paragraphs = message.split(/\n\n+/);
-    const chunks: string[] = [];
-    let currentChunk = '';
-
-    for (const para of paragraphs) {
-      const newLength = currentChunk.length + para.length + 2; // +2 for \n\n
-
-      if (newLength > maxLength && currentChunk) {
-        // Current chunk is full, start a new one
-        chunks.push(currentChunk);
-        currentChunk = para;
-      } else {
-        // Add paragraph to current chunk
-        currentChunk += (currentChunk ? '\n\n' : '') + para;
-      }
-    }
-
-    // Don't forget the last chunk
-    if (currentChunk) {
-      chunks.push(currentChunk);
-    }
-
-    // If any chunk is still too long, split by lines as fallback
-    const finalChunks: string[] = [];
-    for (const chunk of chunks) {
-      if (chunk.length <= maxLength) {
-        finalChunks.push(chunk);
-      } else {
-        // Fallback: split by lines
-        const lines = chunk.split('\n');
-        let subChunk = '';
-        for (const line of lines) {
-          if (subChunk.length + line.length + 1 > maxLength) {
-            if (subChunk) finalChunks.push(subChunk);
-            subChunk = line;
-          } else {
-            subChunk += (subChunk ? '\n' : '') + line;
-          }
-        }
-        if (subChunk) finalChunks.push(subChunk);
-      }
-    }
-
-    getLog().debug({ chunkCount: finalChunks.length }, 'message_split_complete');
-    return finalChunks;
   }
 
   /**

@@ -4,8 +4,11 @@
  */
 import { App, LogLevel } from '@slack/bolt';
 import type { IPlatformAdapter, MessageMetadata } from '@archon/core';
-import { isSlackUserAuthorized, createLogger } from '@archon/core';
-import { parseAllowedUserIds } from '@archon/core/utils/slack-auth';
+import { createLogger } from '@archon/paths';
+import { isSlackUserAuthorized } from './auth';
+import { parseAllowedUserIds } from './auth';
+import { splitIntoParagraphChunks } from '../../utils/message-splitting';
+import type { SlackMessageEvent } from './types';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -15,17 +18,6 @@ function getLog(): ReturnType<typeof createLogger> {
 }
 
 const MAX_MARKDOWN_BLOCK_LENGTH = 12000; // Slack markdown block limit
-
-/**
- * Slack message event context for the message handler
- */
-export interface SlackMessageEvent {
-  text: string;
-  user: string;
-  channel: string;
-  ts: string;
-  thread_ts?: string;
-}
 
 export class SlackAdapter implements IPlatformAdapter {
   private app: App;
@@ -76,7 +68,7 @@ export class SlackAdapter implements IPlatformAdapter {
     } else {
       // Long message: split by paragraphs
       getLog().debug({ messageLength: message.length }, 'message_splitting');
-      const chunks = this.splitIntoParagraphChunks(message, MAX_MARKDOWN_BLOCK_LENGTH - 500);
+      const chunks = splitIntoParagraphChunks(message, MAX_MARKDOWN_BLOCK_LENGTH - 500);
 
       for (const chunk of chunks) {
         await this.sendWithMarkdownBlock(channel, chunk, threadTs);
@@ -117,54 +109,6 @@ export class SlackAdapter implements IPlatformAdapter {
         text: message,
       });
     }
-  }
-
-  /**
-   * Split message into chunks by paragraph boundaries
-   * Paragraphs are separated by double newlines
-   */
-  private splitIntoParagraphChunks(message: string, maxLength: number): string[] {
-    const paragraphs = message.split(/\n\n+/);
-    const chunks: string[] = [];
-    let currentChunk = '';
-
-    for (const para of paragraphs) {
-      const newLength = currentChunk.length + para.length + 2; // +2 for \n\n
-
-      if (newLength > maxLength && currentChunk) {
-        chunks.push(currentChunk);
-        currentChunk = para;
-      } else {
-        currentChunk += (currentChunk ? '\n\n' : '') + para;
-      }
-    }
-
-    if (currentChunk) {
-      chunks.push(currentChunk);
-    }
-
-    // Fallback: split by lines if any chunk is still too long
-    const finalChunks: string[] = [];
-    for (const chunk of chunks) {
-      if (chunk.length <= maxLength) {
-        finalChunks.push(chunk);
-      } else {
-        const lines = chunk.split('\n');
-        let subChunk = '';
-        for (const line of lines) {
-          if (subChunk.length + line.length + 1 > maxLength) {
-            if (subChunk) finalChunks.push(subChunk);
-            subChunk = line;
-          } else {
-            subChunk += (subChunk ? '\n' : '') + line;
-          }
-        }
-        if (subChunk) finalChunks.push(subChunk);
-      }
-    }
-
-    getLog().debug({ chunkCount: finalChunks.length }, 'message_split_complete');
-    return finalChunks;
   }
 
   /**

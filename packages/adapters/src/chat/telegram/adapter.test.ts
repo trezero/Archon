@@ -23,11 +23,11 @@ const mockLogger = {
   isLevelEnabled: mock(() => true),
   level: 'info',
 };
-mock.module('@archon/core/utils/logger', () => ({
+mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
 }));
 
-import { TelegramAdapter } from './telegram';
+import { TelegramAdapter } from './adapter';
 
 describe('TelegramAdapter', () => {
   describe('streaming mode configuration', () => {
@@ -115,6 +115,14 @@ describe('TelegramAdapter', () => {
         expect.any(String),
         expect.objectContaining({ parse_mode: 'MarkdownV2' })
       );
+    });
+
+    test('should handle single paragraph longer than MAX_LENGTH', async () => {
+      // A single paragraph (no \n\n breaks) longer than MAX_LENGTH
+      const longLine = 'x'.repeat(5000);
+      await adapter.sendMessage('12345', longLine);
+      // Should still send successfully via sendFormattedChunk fallback
+      expect(mockSendMessage).toHaveBeenCalled();
     });
   });
 });

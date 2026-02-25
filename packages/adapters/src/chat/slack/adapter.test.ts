@@ -19,7 +19,7 @@ const mockLogger = {
   isLevelEnabled: mock(() => true),
   level: 'info',
 };
-mock.module('@archon/core/utils/logger', () => ({
+mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
 }));
 
@@ -52,7 +52,8 @@ mock.module('@slack/bolt', () => ({
   },
 }));
 
-import { SlackAdapter, SlackMessageEvent } from './slack';
+import { SlackAdapter } from './adapter';
+import type { SlackMessageEvent } from './types';
 
 describe('SlackAdapter', () => {
   beforeEach(() => {

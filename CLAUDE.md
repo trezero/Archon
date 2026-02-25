@@ -227,9 +227,16 @@ packages/
 │       ├── archon-paths.ts   # Archon directory path utilities
 │       ├── logger.ts         # Pino logger factory
 │       └── index.ts          # Package exports
-├── server/                   # @archon/server - HTTP server + adapters
+├── adapters/                 # @archon/adapters - Platform adapters (Slack, Telegram, GitHub, Discord)
 │   └── src/
-│       ├── adapters/         # Platform adapters (Slack, Telegram, GitHub, Discord, Web, Test)
+│       ├── chat/             # Chat platform adapters (Slack, Telegram)
+│       ├── forge/            # Forge adapters (GitHub)
+│       ├── community/        # Community adapters (Discord)
+│       ├── utils/            # Shared adapter utilities (message splitting)
+│       └── index.ts          # Package exports
+├── server/                   # @archon/server - HTTP server + Web adapter
+│   └── src/
+│       ├── adapters/         # Web platform adapter (SSE streaming)
 │       ├── routes/           # API routes (REST + SSE)
 │       └── index.ts          # Hono server entry point
 └── web/                      # @archon/web - React frontend (Web UI)
@@ -290,21 +297,22 @@ import * as core from '@archon/core';  // Don't do this
 - **@archon/isolation**: Worktree isolation types, providers, resolver, error classifiers (depends only on @archon/git + @archon/paths)
 - **@archon/cli**: Command-line interface for running workflows
 - **@archon/core**: Business logic, database, orchestration, workflows (re-exports @archon/git, @archon/paths, and @archon/isolation for backward compat)
-- **@archon/server**: Platform adapters, Hono server, HTTP endpoints, Web UI static serving
+- **@archon/adapters**: Platform adapters for Slack, Telegram, GitHub, Discord (depends on @archon/core)
+- **@archon/server**: Hono HTTP server, Web adapter (SSE), API routes, Web UI static serving (depends on @archon/adapters)
 - **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui), SSE streaming to server
 
-**1. Platform Adapters** (`packages/server/src/adapters/`)
+**1. Platform Adapters**
 - Implement `IPlatformAdapter` interface
 - Handle platform-specific message formats
-- **Web**: Server-Sent Events (SSE) streaming, conversation ID = user-provided string
-- **Slack**: SDK with polling (not webhooks), conversation ID = `thread_ts`
-- **Telegram**: Bot API with polling, conversation ID = `chat_id`
-- **GitHub**: Webhooks + GitHub CLI, conversation ID = `owner/repo#number`
-- **Discord**: discord.js WebSocket, conversation ID = channel ID
+- **Web** (`packages/server/src/adapters/web/`): Server-Sent Events (SSE) streaming, conversation ID = user-provided string
+- **Slack** (`packages/adapters/src/chat/slack/`): SDK with polling (not webhooks), conversation ID = `thread_ts`
+- **Telegram** (`packages/adapters/src/chat/telegram/`): Bot API with polling, conversation ID = `chat_id`
+- **GitHub** (`packages/adapters/src/forge/github/`): Webhooks + GitHub CLI, conversation ID = `owner/repo#number`
+- **Discord** (`packages/adapters/src/community/chat/discord/`): discord.js WebSocket, conversation ID = channel ID
 
 **Adapter Authorization Pattern:**
 - Auth checks happen INSIDE adapters (encapsulation, consistency)
-- Auth utilities in `packages/core/src/utils/{platform}-auth.ts`
+- Auth utilities co-located with each adapter (e.g., `packages/adapters/src/chat/slack/auth.ts`)
 - Parse whitelist from env var in constructor (e.g., `TELEGRAM_ALLOWED_USER_IDS`)
 - Check authorization in message handler (before calling `onMessage` callback)
 - Silent rejection for unauthorized users (no error response)

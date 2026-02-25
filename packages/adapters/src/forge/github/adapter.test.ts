@@ -21,7 +21,7 @@ const mockLogger = {
   isLevelEnabled: mock(() => true),
   level: 'info',
 };
-mock.module('@archon/core/utils/logger', () => ({
+mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
 }));
 
@@ -89,8 +89,8 @@ mock.module('@archon/git', () => ({
   toWorktreePath: (p: string) => p,
 }));
 
-import { GitHubAdapter } from './github';
-import { ConversationLockManager } from '../utils/conversation-lock';
+import { GitHubAdapter } from './adapter';
+import { ConversationLockManager } from '@archon/core';
 
 // Create a mock lock manager that immediately executes handlers
 const mockLockManager = {
@@ -1156,11 +1156,11 @@ describe('GitHubAdapter', () => {
 
       await callEnsureRepoReady('owner', 'repo', 'main', '/nonexistent/path', false);
 
-      expect(mockCloneRepository).toHaveBeenCalledWith(
-        'https://github.com/owner/repo.git',
-        '/nonexistent/path',
-        expect.any(Object)
-      );
+      expect(mockCloneRepository).toHaveBeenCalledTimes(1);
+      const [url, path] = mockCloneRepository.mock.calls[0];
+      expect(url).toBe('https://github.com/owner/repo.git');
+      expect(path).toBe('/nonexistent/path');
+      // 3rd arg is { token } when GITHUB_TOKEN is set, undefined otherwise
       expect(mockAddSafeDirectory).toHaveBeenCalledWith('/nonexistent/path');
     });
 

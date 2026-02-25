@@ -19,7 +19,7 @@ const mockLogger = {
   isLevelEnabled: mock(() => true),
   level: 'info',
 };
-mock.module('@archon/core/utils/logger', () => ({
+mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
 }));
 
@@ -67,7 +67,7 @@ mock.module('discord.js', () => ({
   },
 }));
 
-import { DiscordAdapter } from './discord';
+import { DiscordAdapter } from './adapter';
 
 describe('DiscordAdapter', () => {
   beforeEach(() => {

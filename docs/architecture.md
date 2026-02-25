@@ -91,7 +91,7 @@ export interface IPlatformAdapter {
 
 ### Implementation Guide
 
-**1. Create adapter file:** `packages/server/src/adapters/your-platform.ts`
+**1. Create adapter file:** `packages/adapters/src/chat/your-platform/adapter.ts` (or `forge/` / `community/chat/` depending on category)
 
 **2. Implement the interface:**
 
@@ -194,7 +194,7 @@ async sendMessage(conversationId: string, message: string): Promise<void> {
 }
 ```
 
-**Reference:** `packages/server/src/adapters/telegram.ts`
+**Reference:** `packages/adapters/src/chat/telegram/adapter.ts`
 
 #### Server-Sent Events (SSE)
 
@@ -228,7 +228,7 @@ async sendStructuredEvent(conversationId: string, event: MessageChunk): Promise<
 - Message buffering during disconnections
 - Structured events (tool calls, workflow progress, lock state)
 
-**Reference:** `packages/server/src/adapters/web.ts`
+**Reference:** `packages/server/src/adapters/web/`
 
 #### Polling vs Webhooks
 
@@ -271,7 +271,7 @@ async handleWebhook(payload: any, signature: string): Promise<void> {
 }
 ```
 
-**Reference:** `packages/server/src/adapters/github.ts`
+**Reference:** `packages/adapters/src/forge/github/adapter.ts`
 
 ---
 
@@ -594,7 +594,7 @@ DOCKER:  /.archon/worktrees/<project>/<branch>/    ← FIXED, no override
 
 ### Usage Pattern
 
-**GitHub adapter** (`packages/server/src/adapters/github.ts`):
+**GitHub adapter** (`packages/adapters/src/forge/github/adapter.ts`):
 
 ```typescript
 const provider = getIsolationProvider();
@@ -1358,7 +1358,7 @@ await handleMessage(adapter, conversationId, finalMessage, contextToAppend);
 
 Context is passed as a dedicated `issueContext` parameter to `handleMessage()`, keeping it separate from the user's message. For workflows, context is injected via `$CONTEXT` / `$ISSUE_CONTEXT` variable substitution in `buildPromptWithContext()`.
 
-**Reference:** `packages/server/src/adapters/github.ts:879-933`, `packages/core/src/orchestrator/orchestrator.ts:636-644`
+**Reference:** `packages/adapters/src/forge/github/adapter.ts`, `packages/core/src/orchestrator/orchestrator.ts:636-644`
 
 ---
 

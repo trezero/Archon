@@ -19,14 +19,11 @@ if (dotenvResult.error) {
 }
 
 import { Hono } from 'hono';
-import { TelegramAdapter } from './adapters/telegram';
+import { TelegramAdapter, GitHubAdapter, DiscordAdapter, SlackAdapter } from '@archon/adapters';
 import { WebAdapter } from './adapters/web';
 import { MessagePersistence } from './adapters/web/persistence';
 import { SSETransport } from './adapters/web/transport';
 import { WorkflowEventBridge } from './adapters/web/workflow-bridge';
-import { GitHubAdapter } from './adapters/github';
-import { DiscordAdapter } from './adapters/discord';
-import { SlackAdapter } from './adapters/slack';
 import { registerApiRoutes } from './routes/api';
 import {
   handleMessage,

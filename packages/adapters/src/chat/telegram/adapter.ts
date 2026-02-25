@@ -4,13 +4,11 @@
  */
 import { Telegraf, Context } from 'telegraf';
 import type { IPlatformAdapter, MessageMetadata } from '@archon/core';
-import {
-  parseTelegramAllowedUserIds,
-  isTelegramUserAuthorized,
-  convertToTelegramMarkdown,
-  stripMarkdown,
-  createLogger,
-} from '@archon/core';
+import { createLogger } from '@archon/paths';
+import { parseAllowedUserIds, isUserAuthorized } from './auth';
+import { convertToTelegramMarkdown, stripMarkdown } from './markdown';
+import { splitIntoParagraphChunks } from '../../utils/message-splitting';
+import type { TelegramMessageContext } from './types';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -20,15 +18,6 @@ function getLog(): ReturnType<typeof createLogger> {
 }
 
 const MAX_LENGTH = 4096;
-
-/**
- * Message context passed to onMessage handler
- */
-export interface TelegramMessageContext {
-  conversationId: string;
-  message: string;
-  userId: number | undefined;
-}
 
 export class TelegramAdapter implements IPlatformAdapter {
   private bot: Telegraf;
@@ -46,7 +35,7 @@ export class TelegramAdapter implements IPlatformAdapter {
 
     // Parse Telegram user whitelist (optional - empty = open access)
     // Support both TELEGRAM_ALLOWED_USER_IDS and TELEGRAM_ALLOWED_USERS
-    this.allowedUserIds = parseTelegramAllowedUserIds(
+    this.allowedUserIds = parseAllowedUserIds(
       process.env.TELEGRAM_ALLOWED_USER_IDS ?? process.env.TELEGRAM_ALLOWED_USERS
     );
     if (this.allowedUserIds.length > 0) {
@@ -77,43 +66,12 @@ export class TelegramAdapter implements IPlatformAdapter {
     } else {
       // Long message: split by paragraphs, format each chunk
       getLog().debug({ messageLength: message.length }, 'message_splitting');
-      const chunks = this.splitIntoParagraphChunks(message, MAX_LENGTH - 200);
+      const chunks = splitIntoParagraphChunks(message, MAX_LENGTH - 200);
 
       for (const chunk of chunks) {
         await this.sendFormattedChunk(id, chunk);
       }
     }
-  }
-
-  /**
-   * Split message into chunks by paragraph boundaries
-   * Paragraphs are separated by double newlines and usually contain complete formatting
-   */
-  private splitIntoParagraphChunks(message: string, maxLength: number): string[] {
-    const paragraphs = message.split(/\n\n+/);
-    const chunks: string[] = [];
-    let currentChunk = '';
-
-    for (const para of paragraphs) {
-      const newLength = currentChunk.length + para.length + 2; // +2 for \n\n
-
-      if (newLength > maxLength && currentChunk) {
-        // Current chunk is full, start a new one
-        chunks.push(currentChunk);
-        currentChunk = para;
-      } else {
-        // Add paragraph to current chunk
-        currentChunk += (currentChunk ? '\n\n' : '') + para;
-      }
-    }
-
-    // Don't forget the last chunk
-    if (currentChunk) {
-      chunks.push(currentChunk);
-    }
-
-    getLog().debug({ chunkCount: chunks.length }, 'message_split_complete');
-    return chunks;
   }
 
   /**
@@ -220,7 +178,7 @@ export class TelegramAdapter implements IPlatformAdapter {
 
       // Authorization check - verify sender is in whitelist
       const userId = ctx.from.id;
-      if (!isTelegramUserAuthorized(userId, this.allowedUserIds)) {
+      if (!isUserAuthorized(userId, this.allowedUserIds)) {
         // Log unauthorized attempt (mask user ID for privacy)
         const maskedId = `${String(userId).slice(0, 4)}***`;
         getLog().info({ maskedUserId: maskedId }, 'unauthorized_message');

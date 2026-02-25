@@ -4,13 +4,32 @@
  * These tests verify that contextToAppend (issueContext) is set correctly
  * for both slash command and non-slash command webhook events.
  *
- * Separated from github.test.ts because these require heavy module mocking
+ * Separated from adapter.test.ts because these require heavy module mocking
  * of @archon/core and database modules to test the full handleWebhook flow.
  */
-import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import { createHmac } from 'crypto';
 
 // --- Module mocks (must be before imports that use them) ---
+
+// Mock logger to suppress noisy output during tests
+const mockLogger = {
+  fatal: mock(() => undefined),
+  error: mock(() => undefined),
+  warn: mock(() => undefined),
+  info: mock(() => undefined),
+  debug: mock(() => undefined),
+  trace: mock(() => undefined),
+  child: mock(function (this: unknown) {
+    return this;
+  }),
+  bindings: mock(() => ({ module: 'test' })),
+  isLevelEnabled: mock(() => true),
+  level: 'info',
+};
+mock.module('@archon/paths', () => ({
+  createLogger: mock(() => mockLogger),
+}));
 
 const mockHandleMessage = mock(async () => {});
 
@@ -39,11 +58,9 @@ mock.module('@archon/core', () => ({
   handleMessage: mockHandleMessage,
   classifyAndFormatError: () => 'Error occurred',
   ConversationNotFoundError: class extends Error {},
-  parseGitHubAllowedUsers: () => [],
-  isGitHubUserAuthorized: () => true,
+  toError: (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
   getLinkedIssueNumbers: mockGetLinkedIssueNumbers,
   onConversationClosed: mock(async () => {}),
-  isWorktreePath: () => false,
   getArchonWorkspacesPath: () => '/workspace',
   getCommandFolderSearchPaths: () => [],
   ConversationLockManager: class {
@@ -60,6 +77,15 @@ mock.module('@archon/core', () => ({
       };
     }
   },
+}));
+
+mock.module('@archon/git', () => ({
+  isWorktreePath: mock(async () => false),
+  cloneRepository: mock(async () => ({ ok: true, value: undefined })),
+  syncRepository: mock(async () => ({ ok: true, value: undefined })),
+  addSafeDirectory: mock(async () => undefined),
+  toRepoPath: (p: string) => p,
+  toBranchName: (n: string) => n,
 }));
 
 mock.module('@archon/core/db/conversations', () => ({
@@ -102,7 +128,7 @@ mock.module('child_process', () => ({
 
 // --- Imports (after mocks) ---
 
-import { GitHubAdapter } from './github';
+import { GitHubAdapter } from './adapter';
 
 // --- Test helpers ---
 
@@ -225,8 +251,13 @@ function createTestAdapter(): GitHubAdapter {
 
 describe('GitHubAdapter non-slash command context passing', () => {
   let adapter: GitHubAdapter;
+  let originalAllowedUsers: string | undefined;
 
   beforeEach(() => {
+    // Clear env var so auth doesn't reject test senders
+    originalAllowedUsers = process.env.GITHUB_ALLOWED_USERS;
+    delete process.env.GITHUB_ALLOWED_USERS;
+
     mockHandleMessage.mockClear();
     mockGetOrCreateConversation.mockClear();
     mockUpdateConversation.mockClear();
@@ -234,6 +265,14 @@ describe('GitHubAdapter non-slash command context passing', () => {
     mockCreateCodebase.mockClear();
     mockGetLinkedIssueNumbers.mockClear();
     adapter = createTestAdapter();
+  });
+
+  afterEach(() => {
+    if (originalAllowedUsers !== undefined) {
+      process.env.GITHUB_ALLOWED_USERS = originalAllowedUsers;
+    } else {
+      delete process.env.GITHUB_ALLOWED_USERS;
+    }
   });
 
   test('should set contextToAppend for issue_comment events on issues', async () => {
@@ -252,10 +291,6 @@ describe('GitHubAdapter non-slash command context passing', () => {
   });
 
   test('should set contextToAppend for issue_comment events on PRs', async () => {
-    // Note: GitHub issue_comment events on PRs include event.issue (with
-    // pull_request property) but NOT event.pull_request. The adapter's
-    // parseEvent returns issue from event.issue and pullRequest: undefined.
-    // So the context uses issue metadata (matching slash command behavior).
     const payload = createIssueCommentPayload('@archon review this PR', {
       issueNumber: 55,
       issueTitle: 'Add dark mode',

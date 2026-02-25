@@ -1,7 +1,7 @@
 /**
  * Unit tests for GitHub authorization utilities
  */
-import { parseAllowedUsers, isGitHubUserAuthorized } from './github-auth';
+import { parseAllowedUsers, isGitHubUserAuthorized } from './auth';
 
 describe('github-auth', () => {
   describe('parseAllowedUsers', () => {

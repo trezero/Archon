@@ -1,4 +1,4 @@
-import { convertToTelegramMarkdown, escapeMarkdownV2, isAlreadyEscaped } from './telegram-markdown';
+import { convertToTelegramMarkdown, escapeMarkdownV2, isAlreadyEscaped } from './markdown';
 
 describe('telegram-markdown', () => {
   describe('convertToTelegramMarkdown', () => {

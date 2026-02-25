@@ -12,8 +12,6 @@ import {
   handleMessage,
   classifyAndFormatError,
   toError,
-  parseGitHubAllowedUsers,
-  isGitHubUserAuthorized,
   getLinkedIssueNumbers,
   onConversationClosed,
   getArchonWorkspacesPath,
@@ -30,7 +28,10 @@ import {
 } from '@archon/git';
 import * as db from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
-import { createLogger } from '@archon/core';
+import { createLogger } from '@archon/paths';
+import { parseAllowedUsers as parseGitHubAllowedUsers, isGitHubUserAuthorized } from './auth';
+import { splitIntoParagraphChunks } from '../../utils/message-splitting';
+import type { WebhookEvent } from './types';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -43,42 +44,6 @@ const MAX_LENGTH = 65000; // GitHub comment limit (~65,536, leave buffer for saf
 
 /** Hidden marker added to bot comments to prevent self-triggering loops */
 const BOT_RESPONSE_MARKER = '<!-- archon-bot-response -->';
-
-interface WebhookEvent {
-  action: string;
-  issue?: {
-    number: number;
-    title: string;
-    body: string | null;
-    user: { login: string };
-    labels: { name: string }[];
-    state: string;
-    pull_request?: { url: string }; // Present if the issue is actually a PR
-  };
-  pull_request?: {
-    number: number;
-    title: string;
-    body: string | null;
-    user: { login: string };
-    state: string;
-    merged?: boolean;
-    changed_files?: number;
-    additions?: number;
-    deletions?: number;
-  };
-  comment?: {
-    body: string;
-    user: { login: string };
-  };
-  repository: {
-    owner: { login: string };
-    name: string;
-    full_name: string;
-    html_url: string;
-    default_branch: string;
-  };
-  sender: { login: string };
-}
 
 export class GitHubAdapter implements IPlatformAdapter {
   private octokit: Octokit;
@@ -152,7 +117,7 @@ export class GitHubAdapter implements IPlatformAdapter {
       await this.postComment(parsed, message);
     } else {
       getLog().debug({ messageLength: message.length }, 'message_splitting');
-      const chunks = this.splitIntoParagraphChunks(message, MAX_LENGTH - 500);
+      const chunks = splitIntoParagraphChunks(message, MAX_LENGTH - 500);
 
       // Fail-fast: if any chunk fails, stop and propagate error with context
       for (let i = 0; i < chunks.length; i++) {
@@ -226,37 +191,6 @@ export class GitHubAdapter implements IPlatformAdapter {
         throw error;
       }
     }
-  }
-
-  /**
-   * Split message into paragraph-based chunks that fit within maxLength.
-   * Preserves paragraph boundaries to maintain context and readability.
-   */
-  private splitIntoParagraphChunks(message: string, maxLength: number): string[] {
-    const paragraphs = message.split(/\n\n+/);
-    const chunks: string[] = [];
-    let currentChunk = '';
-
-    for (const para of paragraphs) {
-      const newLength = currentChunk.length + para.length + 2; // +2 for \n\n separator
-
-      if (newLength > maxLength && currentChunk) {
-        // Current chunk is full, start new chunk
-        chunks.push(currentChunk);
-        currentChunk = para;
-      } else {
-        // Add paragraph to current chunk
-        currentChunk += (currentChunk ? '\n\n' : '') + para;
-      }
-    }
-
-    // Add remaining chunk
-    if (currentChunk) {
-      chunks.push(currentChunk);
-    }
-
-    getLog().debug({ chunkCount: chunks.length }, 'message_split_complete');
-    return chunks;
   }
 
   /**

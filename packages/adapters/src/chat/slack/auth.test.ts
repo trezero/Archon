@@ -1,9 +1,9 @@
 /**
- * Unit tests for Telegram authorization utilities
+ * Unit tests for Slack authorization utilities
  */
-import { parseAllowedUserIds, isUserAuthorized } from './telegram-auth';
+import { parseAllowedUserIds, isSlackUserAuthorized } from './auth';
 
-describe('telegram-auth', () => {
+describe('slack-auth', () => {
   describe('parseAllowedUserIds', () => {
     test('should return empty array for undefined', () => {
       expect(parseAllowedUserIds(undefined)).toEqual([]);
@@ -18,58 +18,53 @@ describe('telegram-auth', () => {
     });
 
     test('should parse single user ID', () => {
-      expect(parseAllowedUserIds('123456789')).toEqual([123456789]);
+      expect(parseAllowedUserIds('U1234ABCD')).toEqual(['U1234ABCD']);
     });
 
     test('should parse multiple user IDs', () => {
-      expect(parseAllowedUserIds('123,456,789')).toEqual([123, 456, 789]);
+      expect(parseAllowedUserIds('U1234ABCD,W5678EFGH')).toEqual(['U1234ABCD', 'W5678EFGH']);
     });
 
     test('should handle whitespace around IDs', () => {
-      expect(parseAllowedUserIds(' 123 , 456 , 789 ')).toEqual([123, 456, 789]);
+      expect(parseAllowedUserIds(' U1234ABCD , W5678EFGH ')).toEqual(['U1234ABCD', 'W5678EFGH']);
     });
 
     test('should filter out invalid IDs', () => {
-      expect(parseAllowedUserIds('123,abc,456')).toEqual([123, 456]);
-    });
-
-    test('should filter out negative IDs', () => {
-      expect(parseAllowedUserIds('123,-456,789')).toEqual([123, 789]);
-    });
-
-    test('should filter out zero', () => {
-      expect(parseAllowedUserIds('0,123,456')).toEqual([123, 456]);
+      expect(parseAllowedUserIds('U1234ABCD,invalid,W5678EFGH')).toEqual([
+        'U1234ABCD',
+        'W5678EFGH',
+      ]);
     });
 
     test('should handle empty segments', () => {
-      expect(parseAllowedUserIds('123,,456')).toEqual([123, 456]);
+      expect(parseAllowedUserIds('U1234ABCD,,W5678EFGH')).toEqual(['U1234ABCD', 'W5678EFGH']);
     });
   });
 
-  describe('isUserAuthorized', () => {
+  describe('isSlackUserAuthorized', () => {
     describe('open access mode (empty allowedIds)', () => {
       test('should allow any user ID when no whitelist', () => {
-        expect(isUserAuthorized(123456, [])).toBe(true);
+        expect(isSlackUserAuthorized('U1234ABCD', [])).toBe(true);
       });
 
       test('should allow undefined user ID when no whitelist', () => {
-        expect(isUserAuthorized(undefined, [])).toBe(true);
+        expect(isSlackUserAuthorized(undefined, [])).toBe(true);
       });
     });
 
     describe('whitelist mode', () => {
-      const allowedIds = [111, 222, 333];
+      const allowedIds = ['U1234ABCD', 'W5678EFGH', 'U9999ZZZZ'];
 
       test('should allow authorized user', () => {
-        expect(isUserAuthorized(222, allowedIds)).toBe(true);
+        expect(isSlackUserAuthorized('W5678EFGH', allowedIds)).toBe(true);
       });
 
       test('should reject unauthorized user', () => {
-        expect(isUserAuthorized(999, allowedIds)).toBe(false);
+        expect(isSlackUserAuthorized('UNOTALLOWED', allowedIds)).toBe(false);
       });
 
       test('should reject undefined user ID', () => {
-        expect(isUserAuthorized(undefined, allowedIds)).toBe(false);
+        expect(isSlackUserAuthorized(undefined, allowedIds)).toBe(false);
       });
     });
   });
