@@ -81,6 +81,15 @@ export {
   type WorkflowExecutionResult,
   type WorkflowLoadError,
   type WorkflowLoadResult,
+  type DagNodeBase,
+  type DagNode,
+  type CommandNode,
+  type PromptNode,
+  type BashNode,
+  type TriggerRule,
+  TRIGGER_RULES,
+  isDagWorkflow,
+  isBashNode,
 } from './workflows/types';
 
 // Loader

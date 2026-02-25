@@ -618,8 +618,16 @@ export function registerApiRoutes(
       return apiError(c, 400, 'definition object is required');
     }
 
+    let yamlContent: string;
     try {
-      const yamlContent = Bun.YAML.stringify(body.definition);
+      yamlContent = Bun.YAML.stringify(body.definition);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      getLog().error({ err }, 'workflow.serialize_failed');
+      return apiError(c, 400, 'Failed to serialize workflow definition');
+    }
+
+    try {
       const result = parseWorkflow(yamlContent, 'validate-input.yaml');
 
       if (result.error) {

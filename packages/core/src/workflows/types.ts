@@ -148,7 +148,7 @@ const nodeOutputStateCoverage: AssertNodeOutputCoversNodeState = true;
 void nodeOutputStateCoverage; // suppress unused-variable lint warning
 
 /** Shared fields for all DAG node types */
-interface DagNodeBase {
+export interface DagNodeBase {
   id: string;
   /** Node IDs that must complete before this node runs. */
   depends_on?: string[];
@@ -188,16 +188,32 @@ interface DagNodeBase {
 export interface CommandNode extends DagNodeBase {
   command: string;
   prompt?: never;
+  bash?: never;
 }
 
 /** DAG node with an inline prompt (no command file) */
 export interface PromptNode extends DagNodeBase {
   prompt: string;
   command?: never;
+  bash?: never;
 }
 
-/** A single node in a DAG workflow. command and prompt are mutually exclusive. */
-export type DagNode = CommandNode | PromptNode;
+/** DAG node that runs a shell script without AI */
+export interface BashNode extends DagNodeBase {
+  bash: string;
+  /** Execution timeout in milliseconds. Default: 120000 (2 minutes). */
+  timeout?: number;
+  command?: never;
+  prompt?: never;
+}
+
+/** A single node in a DAG workflow. command, prompt, and bash are mutually exclusive. */
+export type DagNode = CommandNode | PromptNode | BashNode;
+
+/** Type guard: check if a DAG node is a bash (shell script) node */
+export function isBashNode(node: DagNode): node is BashNode {
+  return 'bash' in node && typeof node.bash === 'string';
+}
 
 /** DAG-based workflow — nodes with explicit dependency edges */
 interface DagWorkflow extends WorkflowBase {

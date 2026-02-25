@@ -4,6 +4,7 @@
  * SSE streams bypass the proxy in dev mode (Vite proxy buffers SSE responses).
  */
 import type { WorkflowRunStatus } from '@/lib/types';
+import type { WorkflowDefinition } from '@archon/core/workflows/types';
 
 /**
  * Base URL for SSE streams. In dev, bypasses Vite proxy by connecting directly
@@ -146,11 +147,7 @@ export async function deleteCodebase(id: string): Promise<{ success: boolean }> 
 }
 
 // Workflows
-export interface WorkflowDefinitionResponse {
-  name: string;
-  description?: string;
-  steps: unknown[];
-}
+export type { WorkflowDefinition } from '@archon/core/workflows/types';
 
 export interface WorkflowRunResponse {
   id: string;
@@ -178,11 +175,9 @@ export interface WorkflowEventResponse {
   created_at: string;
 }
 
-export async function listWorkflows(cwd?: string): Promise<WorkflowDefinitionResponse[]> {
+export async function listWorkflows(cwd?: string): Promise<WorkflowDefinition[]> {
   const params = cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
-  const result = await fetchJSON<{ workflows: WorkflowDefinitionResponse[] }>(
-    `/api/workflows${params}`
-  );
+  const result = await fetchJSON<{ workflows: WorkflowDefinition[] }>(`/api/workflows${params}`);
   return result.workflows;
 }
 
@@ -234,6 +229,63 @@ export async function getWorkflowRunByWorker(
     }
     throw e;
   }
+}
+
+export type WorkflowSource = 'project' | 'bundled';
+
+export interface GetWorkflowResponse {
+  workflow: WorkflowDefinition;
+  filename: string;
+  source: WorkflowSource;
+}
+
+export async function getWorkflow(name: string, cwd?: string): Promise<GetWorkflowResponse> {
+  const params = cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
+  return fetchJSON(`/api/workflows/${encodeURIComponent(name)}${params}`);
+}
+
+export async function saveWorkflow(
+  name: string,
+  definition: WorkflowDefinition,
+  cwd?: string
+): Promise<GetWorkflowResponse> {
+  const params = cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
+  return fetchJSON(`/api/workflows/${encodeURIComponent(name)}${params}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ definition }),
+  });
+}
+
+export async function deleteWorkflow(
+  name: string,
+  cwd?: string
+): Promise<{ deleted: boolean; name: string }> {
+  const params = cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
+  return fetchJSON(`/api/workflows/${encodeURIComponent(name)}${params}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function validateWorkflow(
+  definition: WorkflowDefinition
+): Promise<{ valid: boolean; errors?: string[] }> {
+  return fetchJSON('/api/workflows/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ definition }),
+  });
+}
+
+export interface CommandEntry {
+  name: string;
+  source: WorkflowSource;
+}
+
+export async function listCommands(cwd?: string): Promise<CommandEntry[]> {
+  const params = cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
+  const result = await fetchJSON<{ commands: CommandEntry[] }>(`/api/commands${params}`);
+  return result.commands;
 }
 
 export async function getConfig(): Promise<{ config: Record<string, unknown>; database: string }> {

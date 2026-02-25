@@ -234,10 +234,10 @@ packages/
 │       └── index.ts          # Hono server entry point
 └── web/                      # @archon/web - React frontend (Web UI)
     └── src/
-        ├── components/       # React components (chat, layout, projects, ui)
+        ├── components/       # React components (chat, layout, projects, ui, workflows)
         ├── hooks/            # Custom hooks (useSSE, etc.)
         ├── lib/              # API client, types, utilities
-        ├── pages/            # Route pages (ChatPage, ProjectsPage)
+        ├── routes/           # Route pages (ChatPage, WorkflowsPage, WorkflowBuilderPage, etc.)
         └── App.tsx           # Router + layout
 ```
 
@@ -544,7 +544,7 @@ async function createSession(conversationId: string, codebaseId: string) {
    - Stored in `.archon/workflows/` (searched recursively)
    - Multi-step AI execution chains, discovered at runtime
    - Three execution modes (mutually exclusive): `steps:` (sequential), `loop:` (iterative), `nodes:` (DAG)
-   - **`nodes:` (DAG mode)**: Nodes with explicit `depends_on` edges; independent nodes in the same topological layer run concurrently. Supports `when:` conditions, `trigger_rule` join semantics, `$nodeId.output` substitution, `output_format` for structured JSON output (Claude only), and `allowed_tools`/`denied_tools` for per-node tool restrictions (Claude only)
+   - **`nodes:` (DAG mode)**: Nodes with explicit `depends_on` edges; independent nodes in the same topological layer run concurrently. Node types: `command:` (named command file), `prompt:` (inline prompt), `bash:` (shell script, stdout captured as `$nodeId.output`, no AI). Supports `when:` conditions, `trigger_rule` join semantics, `$nodeId.output` substitution, `output_format` for structured JSON output (Claude only), and `allowed_tools`/`denied_tools` for per-node tool restrictions (Claude only)
    - Provider inherited from `.archon/config.yaml` unless explicitly set; per-node `provider` and `model` overrides supported in DAG mode
    - Model and options can be set per workflow or inherited from config defaults
    - Model validation ensures provider/model compatibility at load time

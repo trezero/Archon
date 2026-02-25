@@ -329,7 +329,7 @@ export function Sidebar(): React.ReactElement {
           <Hammer className="h-4 w-4" />
           Workflow Builder
           <span className="ml-auto rounded-full bg-accent-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
-            Soon
+            Beta
           </span>
         </NavLink>
         <NavLink to="/settings" className={navLinkClass}>

@@ -11,7 +11,7 @@ mock.module('../utils/logger', () => ({
 }));
 
 import { discoverWorkflows } from './loader';
-import { isParallelBlock } from './types';
+import { isParallelBlock, isDagWorkflow, isBashNode } from './types';
 import * as configLoader from '../config/config-loader';
 import * as bundledDefaults from '../defaults/bundled-defaults';
 
@@ -1374,6 +1374,181 @@ steps:
       // The symlink stat will fail, producing a read_error
       const readErrors = result.errors.filter(e => e.errorType === 'read_error');
       expect(readErrors.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('bash node parsing', () => {
+    it('should parse a valid bash node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bash-test.yaml'),
+        `
+name: bash-test
+description: Test bash node
+nodes:
+  - id: stats
+    bash: "echo hello"
+  - id: process
+    command: my-cmd
+    depends_on: [stats]
+`
+      );
+
+      const result = await discoverWorkflows(testDir);
+      expect(result.errors).toHaveLength(0);
+      expect(result.workflows).toHaveLength(1);
+
+      const wf = result.workflows[0];
+      expect(isDagWorkflow(wf)).toBe(true);
+      if (!isDagWorkflow(wf)) return;
+
+      expect(wf.nodes).toHaveLength(2);
+      expect(isBashNode(wf.nodes[0])).toBe(true);
+      if (isBashNode(wf.nodes[0])) {
+        expect(wf.nodes[0].bash).toBe('echo hello');
+      }
+    });
+
+    it('should parse bash node with timeout', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bash-timeout.yaml'),
+        `
+name: bash-timeout
+description: Bash with timeout
+nodes:
+  - id: slow
+    bash: "sleep 1 && echo done"
+    timeout: 30000
+`
+      );
+
+      const result = await discoverWorkflows(testDir);
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (!isDagWorkflow(wf)) return;
+      if (isBashNode(wf.nodes[0])) {
+        expect(wf.nodes[0].timeout).toBe(30000);
+      }
+    });
+
+    it('should reject bash + command combination', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bash-cmd.yaml'),
+        `
+name: bash-cmd-conflict
+description: Bash and command
+nodes:
+  - id: bad
+    bash: "echo hi"
+    command: my-cmd
+`
+      );
+
+      const result = await discoverWorkflows(testDir);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/mutually exclusive/i);
+    });
+
+    it('should reject bash + prompt combination', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bash-prompt.yaml'),
+        `
+name: bash-prompt-conflict
+description: Bash and prompt
+nodes:
+  - id: bad
+    bash: "echo hi"
+    prompt: "do something"
+`
+      );
+
+      const result = await discoverWorkflows(testDir);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/mutually exclusive/i);
+    });
+
+    it('should reject invalid timeout (negative)', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-timeout.yaml'),
+        `
+name: bad-timeout
+description: Invalid timeout
+nodes:
+  - id: bad
+    bash: "echo hi"
+    timeout: -1
+`
+      );
+
+      const result = await discoverWorkflows(testDir);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/timeout.*positive/i);
+    });
+
+    it('should reject invalid timeout (string)', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'string-timeout.yaml'),
+        `
+name: string-timeout
+description: String timeout
+nodes:
+  - id: bad
+    bash: "echo hi"
+    timeout: "fast"
+`
+      );
+
+      const result = await discoverWorkflows(testDir);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/timeout.*positive/i);
+    });
+
+    it('should ignore AI-specific fields on bash nodes (parses successfully, fields stripped)', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bash-ai-fields.yaml'),
+        `
+name: bash-ai-fields
+description: Bash with AI fields
+nodes:
+  - id: stats
+    bash: "wc -l *.ts"
+    provider: claude
+    model: haiku
+`
+      );
+
+      const result = await discoverWorkflows(testDir);
+      // Should parse successfully (warning only, not error)
+      expect(result.errors).toHaveLength(0);
+      expect(result.workflows).toHaveLength(1);
+
+      const wf = result.workflows[0];
+      if (!isDagWorkflow(wf)) return;
+      // AI fields should NOT appear on the parsed bash node
+      const node = wf.nodes[0];
+      expect(isBashNode(node)).toBe(true);
+      expect(node.provider).toBeUndefined();
+      expect(node.model).toBeUndefined();
     });
   });
 });

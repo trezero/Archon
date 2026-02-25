@@ -138,6 +138,7 @@ describe('bundled-defaults', () => {
         'archon-ralph-fresh',
         'archon-ralph-stateful',
         'archon-resolve-conflicts',
+        'archon-smart-pr-review',
         'archon-test-loop',
       ];
 
@@ -145,7 +146,7 @@ describe('bundled-defaults', () => {
         expect(BUNDLED_WORKFLOWS).toHaveProperty(wf);
       }
 
-      expect(Object.keys(BUNDLED_WORKFLOWS)).toHaveLength(8);
+      expect(Object.keys(BUNDLED_WORKFLOWS)).toHaveLength(9);
     });
 
     it('should have non-empty content for all workflows', () => {
@@ -165,10 +166,11 @@ describe('bundled-defaults', () => {
         expect(content).toContain('name:');
         // Should contain 'description:' as all workflows require description
         expect(content).toContain('description:');
-        // Should contain either 'steps:' or 'loop:' as these are the two workflow types
+        // Should contain steps:, loop:, or nodes: (the three workflow execution modes)
         const hasSteps = content.includes('steps:');
         const hasLoop = content.includes('loop:');
-        expect(hasSteps || hasLoop).toBe(true);
+        const hasNodes = content.includes('nodes:');
+        expect(hasSteps || hasLoop || hasNodes).toBe(true);
       }
     });
   });

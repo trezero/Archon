@@ -11,6 +11,7 @@
     "./db/*": "./src/db/*.ts",
     "./clients": "./src/clients/index.ts",
     "./workflows": "./src/workflows/index.ts",
+    "./workflows/*": "./src/workflows/*.ts",
     "./isolation": "./src/isolation/index.ts",
     "./isolation-store": "./src/db/isolation-environments.ts",
     "./orchestrator": "./src/orchestrator/orchestrator.ts",

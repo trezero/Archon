@@ -6,9 +6,9 @@ import {
   listWorkflowRuns,
   createConversation,
   runWorkflow,
-  type WorkflowDefinitionResponse,
   type WorkflowRunResponse,
 } from '@/lib/api';
+import type { WorkflowDefinition } from '@archon/core/workflows/types';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useProject } from '@/contexts/ProjectContext';
@@ -98,7 +98,7 @@ export function WorkflowList(): React.ReactElement {
           </div>
         ) : (
           <div className="grid gap-2">
-            {workflows.map((wf: WorkflowDefinitionResponse) => (
+            {workflows.map((wf: WorkflowDefinition) => (
               <div key={wf.name}>
                 <button
                   onClick={(): void => {

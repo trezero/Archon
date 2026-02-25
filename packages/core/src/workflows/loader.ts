@@ -172,6 +172,16 @@ function parseStep(s: unknown, index: number, errors: string[]): WorkflowStep | 
   return parseSingleStep(step, String(index + 1), errors);
 }
 
+/** AI-specific fields that are meaningless on bash nodes */
+const BASH_NODE_AI_FIELDS = [
+  'provider',
+  'model',
+  'context',
+  'output_format',
+  'allowed_tools',
+  'denied_tools',
+] as const;
+
 /** Validate and parse a single DagNode from raw YAML data */
 function parseDagNode(
   raw: Record<string, unknown>,
@@ -186,13 +196,16 @@ function parseDagNode(
 
   const hasCommand = typeof raw.command === 'string' && raw.command.trim().length > 0;
   const hasPrompt = typeof raw.prompt === 'string' && raw.prompt.trim().length > 0;
+  const hasBash = typeof raw.bash === 'string' && raw.bash.trim().length > 0;
 
-  if (hasCommand && hasPrompt) {
-    errors.push(`Node '${id}': 'command' and 'prompt' are mutually exclusive`);
+  // Three-way mutual exclusivity: exactly one of command, prompt, bash
+  const modeCount = [hasCommand, hasPrompt, hasBash].filter(Boolean).length;
+  if (modeCount > 1) {
+    errors.push(`Node '${id}': 'command', 'prompt', and 'bash' are mutually exclusive`);
     return null;
   }
-  if (!hasCommand && !hasPrompt) {
-    errors.push(`Node '${id}': must have either 'command' or 'prompt'`);
+  if (modeCount === 0) {
+    errors.push(`Node '${id}': must have either 'command', 'prompt', or 'bash'`);
     return null;
   }
 
@@ -216,6 +229,37 @@ function parseDagNode(
     return null;
   }
 
+  const whenStr = raw.when !== undefined && typeof raw.when === 'string' ? raw.when : undefined;
+
+  // Bash nodes: only DAG-relevant base fields, warn on AI-specific fields
+  if (hasBash) {
+    const presentAiFields = BASH_NODE_AI_FIELDS.filter(f => raw[f] !== undefined);
+    if (presentAiFields.length > 0) {
+      getLog().warn({ id, fields: presentAiFields }, 'bash_node_ai_fields_ignored');
+    }
+
+    // Parse timeout (positive number or undefined)
+    let timeout: number | undefined;
+    if (raw.timeout !== undefined) {
+      if (typeof raw.timeout === 'number' && raw.timeout > 0) {
+        timeout = raw.timeout;
+      } else {
+        errors.push(`Node '${id}': 'timeout' must be a positive number (ms)`);
+        return null;
+      }
+    }
+
+    return {
+      id,
+      bash: String(raw.bash).trim(),
+      ...(timeout !== undefined ? { timeout } : {}),
+      ...(dependsOn.length > 0 ? { depends_on: dependsOn } : {}),
+      ...(whenStr !== undefined ? { when: whenStr } : {}),
+      ...(triggerRule ? { trigger_rule: triggerRule } : {}),
+    };
+  }
+
+  // AI nodes (command or prompt): full validation
   const provider: 'claude' | 'codex' | undefined =
     raw.provider === 'claude' || raw.provider === 'codex' ? raw.provider : undefined;
   const model = typeof raw.model === 'string' ? raw.model : undefined;
@@ -224,8 +268,6 @@ function parseDagNode(
     errors.push(`Node '${id}': model "${model}" is not compatible with provider "${provider}"`);
     return null;
   }
-
-  const whenStr = raw.when !== undefined && typeof raw.when === 'string' ? raw.when : undefined;
 
   const errorsBeforeToolFields = errors.length;
   const baseFields = {

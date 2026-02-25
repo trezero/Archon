@@ -7,13 +7,23 @@
  */
 import { readFile, access } from 'fs/promises';
 import { join } from 'path';
+import { execFileAsync } from '@archon/git';
 import type {
   AssistantRequestOptions,
   IPlatformAdapter,
   MessageMetadata,
   TokenUsage,
 } from '../types';
-import type { DagNode, NodeOutput, TriggerRule, WorkflowRun } from './types';
+import type {
+  DagNode,
+  BashNode,
+  CommandNode,
+  PromptNode,
+  NodeOutput,
+  TriggerRule,
+  WorkflowRun,
+} from './types';
+import { isBashNode } from './types';
 import type { MergedConfig } from '../config/config-types';
 import { getAssistantClient } from '../clients/factory';
 import * as workflowDb from '../db/workflows';
@@ -526,7 +536,7 @@ async function executeNodeInternal(
   conversationId: string,
   cwd: string,
   workflowRun: WorkflowRun,
-  node: DagNode,
+  node: CommandNode | PromptNode,
   provider: string,
   nodeOptions: AssistantRequestOptions | undefined,
   artifactsDir: string,
@@ -719,6 +729,156 @@ async function executeNodeInternal(
   }
 }
 
+/** Default timeout for bash nodes: 2 minutes */
+const BASH_DEFAULT_TIMEOUT = 120_000;
+
+/**
+ * Execute a bash (shell script) DAG node.
+ * Runs the script via `bash -c`, captures stdout as node output.
+ * No AI session is created — bash nodes are free/deterministic.
+ */
+async function executeBashNode(
+  platform: IPlatformAdapter,
+  conversationId: string,
+  cwd: string,
+  workflowRun: WorkflowRun,
+  node: BashNode,
+  artifactsDir: string,
+  logDir: string,
+  baseBranch: string,
+  nodeOutputs: Map<string, NodeOutput>,
+  issueContext?: string
+): Promise<NodeOutput> {
+  const nodeStartTime = Date.now();
+  const nodeContext: SendMessageContext = { workflowId: workflowRun.id, nodeName: node.id };
+
+  getLog().info({ nodeId: node.id, type: 'bash' }, 'dag_node_started');
+  await logNodeStart(logDir, workflowRun.id, node.id, '<bash>');
+
+  workflowEventDb
+    .createWorkflowEvent({
+      workflow_run_id: workflowRun.id,
+      event_type: 'node_started',
+      step_name: node.id,
+      data: { type: 'bash' },
+    })
+    .catch((err: Error) => {
+      getLog().error(
+        { err, workflowRunId: workflowRun.id, eventType: 'node_started' },
+        'workflow_event_persist_failed'
+      );
+    });
+
+  const emitter = getWorkflowEventEmitter();
+  emitter.emit({
+    type: 'node_started',
+    runId: workflowRun.id,
+    nodeId: node.id,
+    nodeName: node.id,
+  });
+
+  // Variable substitution on script
+  const { prompt: substitutedScript } = substituteWorkflowVariables(
+    node.bash,
+    workflowRun.id,
+    workflowRun.user_message,
+    artifactsDir,
+    baseBranch,
+    issueContext
+  );
+  const finalScript = substituteNodeOutputRefs(substitutedScript, nodeOutputs);
+
+  const timeout = node.timeout ?? BASH_DEFAULT_TIMEOUT;
+
+  try {
+    const { stdout, stderr } = await execFileAsync('bash', ['-c', finalScript], {
+      cwd,
+      timeout,
+    });
+
+    // Trim trailing newline from stdout (common shell behavior)
+    const output = stdout.replace(/\n$/, '');
+
+    if (stderr.trim()) {
+      getLog().warn({ nodeId: node.id, stderr: stderr.trim() }, 'bash_node_stderr');
+      await safeSendMessage(
+        platform,
+        conversationId,
+        `Bash node '${node.id}' stderr:\n\`\`\`\n${stderr.trim()}\n\`\`\``,
+        nodeContext
+      );
+    }
+
+    const duration = Date.now() - nodeStartTime;
+    getLog().info({ nodeId: node.id, durationMs: duration }, 'dag_node_completed');
+    await logNodeComplete(logDir, workflowRun.id, node.id, '<bash>', { durationMs: duration });
+
+    workflowEventDb
+      .createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'node_completed',
+        step_name: node.id,
+        data: { duration_ms: duration, type: 'bash' },
+      })
+      .catch((err: Error) => {
+        getLog().error(
+          { err, workflowRunId: workflowRun.id, eventType: 'node_completed' },
+          'workflow_event_persist_failed'
+        );
+      });
+
+    emitter.emit({
+      type: 'node_completed',
+      runId: workflowRun.id,
+      nodeId: node.id,
+      nodeName: node.id,
+      duration,
+    });
+
+    return { state: 'completed', output };
+  } catch (error) {
+    const err = error as Error & { killed?: boolean; code?: number | string };
+    const isTimeout = err.killed === true || (err.message ?? '').includes('timed out');
+    let errorMsg: string;
+    if (isTimeout) {
+      errorMsg = `Bash node '${node.id}' timed out after ${String(timeout)}ms`;
+    } else if (err.message?.includes('ENOENT')) {
+      errorMsg = `Bash node '${node.id}' failed: bash executable not found in PATH`;
+    } else if (err.message?.includes('EACCES')) {
+      errorMsg = `Bash node '${node.id}' failed: permission denied (check cwd permissions)`;
+    } else {
+      errorMsg = `Bash node '${node.id}' failed: ${err.message}`;
+    }
+
+    getLog().error({ err, nodeId: node.id, isTimeout }, 'dag_node_failed');
+    await logNodeError(logDir, workflowRun.id, node.id, errorMsg);
+
+    workflowEventDb
+      .createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'node_failed',
+        step_name: node.id,
+        data: { error: errorMsg, type: 'bash' },
+      })
+      .catch((dbErr: Error) => {
+        getLog().error(
+          { err: dbErr, workflowRunId: workflowRun.id, eventType: 'node_failed' },
+          'workflow_event_persist_failed'
+        );
+      });
+
+    emitter.emit({
+      type: 'node_failed',
+      runId: workflowRun.id,
+      nodeId: node.id,
+      nodeName: node.id,
+      error: errorMsg,
+    });
+
+    return { state: 'failed', output: '', error: errorMsg };
+  }
+}
+
 /**
  * Execute a complete DAG workflow.
  * Called from executeWorkflow() in executor.ts after isDagWorkflow() check.
@@ -841,7 +1001,24 @@ export async function executeDagWorkflow(
             }
           }
 
-          // 3. Resolve per-node provider/model/options
+          // 3. Bash node dispatch — no AI, no session
+          if (isBashNode(node)) {
+            const output = await executeBashNode(
+              platform,
+              conversationId,
+              cwd,
+              workflowRun,
+              node,
+              artifactsDir,
+              logDir,
+              baseBranch,
+              nodeOutputs,
+              issueContext
+            );
+            return { nodeId: node.id, output };
+          }
+
+          // 4. Resolve per-node provider/model/options
           const { provider, options: nodeOptions } = await resolveNodeProviderAndModel(
             node,
             workflowProvider,
@@ -852,11 +1029,11 @@ export async function executeDagWorkflow(
             workflowRun.id
           );
 
-          // 4. Determine session — parallel or context:fresh → always fresh
+          // 5. Determine session — parallel or context:fresh → always fresh
           const isFresh = isParallelLayer || node.context === 'fresh';
           const resumeSessionId = isFresh ? undefined : lastSequentialSessionId;
 
-          // 5. Execute
+          // 6. Execute
           const output = await executeNodeInternal(
             platform,
             conversationId,

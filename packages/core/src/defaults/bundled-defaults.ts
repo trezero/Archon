@@ -30,7 +30,7 @@ import archonSynthesizeReviewCmd from '../../../../.archon/commands/defaults/arc
 import archonTestCoverageAgentCmd from '../../../../.archon/commands/defaults/archon-test-coverage-agent.md' with { type: 'text' };
 
 // =============================================================================
-// Default Workflows (8 total)
+// Default Workflows (9 total)
 // =============================================================================
 
 import archonAssistWf from '../../../../.archon/workflows/defaults/archon-assist.yaml' with { type: 'text' };
@@ -40,6 +40,7 @@ import archonFixGithubIssueWf from '../../../../.archon/workflows/defaults/archo
 import archonRalphFreshWf from '../../../../.archon/workflows/defaults/archon-ralph-fresh.yaml' with { type: 'text' };
 import archonRalphStatefulWf from '../../../../.archon/workflows/defaults/archon-ralph-stateful.yaml' with { type: 'text' };
 import archonResolveConflictsWf from '../../../../.archon/workflows/defaults/archon-resolve-conflicts.yaml' with { type: 'text' };
+import archonSmartPrReviewWf from '../../../../.archon/workflows/defaults/archon-smart-pr-review.yaml' with { type: 'text' };
 import archonTestLoopWf from '../../../../.archon/workflows/defaults/archon-test-loop.yaml' with { type: 'text' };
 
 // =============================================================================
@@ -79,6 +80,7 @@ export const BUNDLED_WORKFLOWS: Record<string, string> = {
   'archon-ralph-fresh': archonRalphFreshWf,
   'archon-ralph-stateful': archonRalphStatefulWf,
   'archon-resolve-conflicts': archonResolveConflictsWf,
+  'archon-smart-pr-review': archonSmartPrReviewWf,
   'archon-test-loop': archonTestLoopWf,
 };
 

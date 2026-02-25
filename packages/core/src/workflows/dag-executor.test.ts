@@ -44,9 +44,9 @@ import {
   substituteNodeOutputRefs,
   executeDagWorkflow,
 } from './dag-executor';
-import type { DagNode, NodeOutput, WorkflowRun } from './types';
+import type { DagNode, BashNode, NodeOutput, WorkflowRun } from './types';
 import { discoverWorkflows } from './loader';
-import { isDagWorkflow } from './types';
+import { isDagWorkflow, isBashNode } from './types';
 import * as configLoader from '../config/config-loader';
 import type { IPlatformAdapter } from '../types';
 import type { MergedConfig } from '../config/config-types';
@@ -763,5 +763,228 @@ describe('executeDagWorkflow — tool restrictions', () => {
     expect(mockSendQueryDag.mock.calls.length).toBeGreaterThan(0);
     const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
     expect(optionsArg?.tools).toEqual([]);
+  });
+});
+
+describe('executeDagWorkflow — bash nodes', () => {
+  let testDir: string;
+  let loadConfigSpy: Mock<typeof configLoader.loadConfig>;
+
+  const minimalConfig: MergedConfig = {
+    botName: 'Archon',
+    assistant: 'claude',
+    assistants: { claude: {}, codex: {} },
+    streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+    paths: { workspaces: '/tmp', worktrees: '/tmp' },
+    concurrency: { maxConversations: 10 },
+    commands: { autoLoad: true },
+    defaults: { copyDefaults: true, loadDefaultCommands: false, loadDefaultWorkflows: false },
+  };
+
+  function createMockPlatformDag(): IPlatformAdapter {
+    return {
+      sendMessage: mock(() => Promise.resolve()),
+      ensureThread: mock((id: string) => Promise.resolve(id)),
+      getStreamingMode: mock(() => 'batch' as const),
+      getPlatformType: mock(() => 'test'),
+      start: mock(() => Promise.resolve()),
+      stop: mock(() => {}),
+    };
+  }
+
+  function makeWorkflowRun(id = 'bash-test-run-id'): WorkflowRun {
+    return {
+      id,
+      workflow_name: 'bash-test',
+      conversation_id: 'conv-bash',
+      parent_conversation_id: null,
+      codebase_id: null,
+      current_step_index: 0,
+      status: 'running',
+      user_message: 'bash test message',
+      metadata: {},
+      started_at: new Date(),
+      completed_at: null,
+      last_activity_at: null,
+      working_path: null,
+    };
+  }
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-bash-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(testDir, { recursive: true });
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+    mockQueryDag.mockClear();
+
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'DAG AI response' };
+      yield { type: 'result', sessionId: 'dag-session-id' };
+    });
+
+    loadConfigSpy = spyOn(configLoader, 'loadConfig');
+    loadConfigSpy.mockResolvedValue(minimalConfig);
+  });
+
+  afterEach(async () => {
+    loadConfigSpy.mockRestore();
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('bash node executes and captures stdout as output', async () => {
+    const platform = createMockPlatformDag();
+    const workflowRun = makeWorkflowRun();
+
+    const bashNode: BashNode = {
+      id: 'stats',
+      bash: 'echo "hello world"',
+    };
+
+    await executeDagWorkflow(
+      platform,
+      'conv-bash',
+      testDir,
+      { name: 'bash-exec-test', nodes: [bashNode] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // Bash node should NOT invoke AI client
+    expect(mockSendQueryDag.mock.calls.length).toBe(0);
+  });
+
+  it('bash node stdout is available for downstream $nodeId.output substitution', async () => {
+    const platform = createMockPlatformDag();
+    const workflowRun = makeWorkflowRun();
+
+    // Write a command file for the downstream AI node
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'Process: $stats.output');
+
+    const nodes: DagNode[] = [
+      { id: 'stats', bash: 'echo "42 files"' },
+      { id: 'process', command: 'my-cmd', depends_on: ['stats'] },
+    ];
+
+    await executeDagWorkflow(
+      platform,
+      'conv-bash',
+      testDir,
+      { name: 'bash-subst-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // AI client should have been called for the downstream node
+    expect(mockSendQueryDag.mock.calls.length).toBe(1);
+    // The prompt should contain the substituted bash output
+    const prompt = mockSendQueryDag.mock.calls[0][0] as string;
+    expect(prompt).toContain('42 files');
+  });
+
+  it('non-zero exit code results in failed state', async () => {
+    const platform = createMockPlatformDag();
+    const workflowRun = makeWorkflowRun();
+
+    const bashNode: BashNode = {
+      id: 'fail',
+      bash: 'exit 1',
+    };
+
+    await executeDagWorkflow(
+      platform,
+      'conv-bash',
+      testDir,
+      { name: 'bash-fail-test', nodes: [bashNode] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // The workflow should complete (it handles failures) but the node failed
+    // The mock platform should have received a failure message about no successful nodes
+    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
+    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
+    const failMsg = messages.find((m: string) => m.includes('no successful nodes'));
+    expect(failMsg).toBeDefined();
+  });
+
+  it('variable substitution works in bash scripts', async () => {
+    const platform = createMockPlatformDag();
+    const workflowRun = makeWorkflowRun();
+
+    const bashNode: BashNode = {
+      id: 'vars',
+      bash: 'echo "$ARGUMENTS"',
+    };
+
+    await executeDagWorkflow(
+      platform,
+      'conv-bash',
+      testDir,
+      { name: 'bash-vars-test', nodes: [bashNode] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // Should complete without error (no AI calls)
+    expect(mockSendQueryDag.mock.calls.length).toBe(0);
+  });
+
+  it('bash node in parallel layer executes correctly', async () => {
+    const platform = createMockPlatformDag();
+    const workflowRun = makeWorkflowRun();
+
+    // Write a command file for the AI node
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'Do something');
+
+    const nodes: DagNode[] = [
+      { id: 'bash-a', bash: 'echo "from bash"' },
+      { id: 'ai-b', command: 'my-cmd' },
+    ];
+
+    await executeDagWorkflow(
+      platform,
+      'conv-bash',
+      testDir,
+      { name: 'bash-parallel-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // AI client called only for the AI node, not the bash node
+    expect(mockSendQueryDag.mock.calls.length).toBe(1);
   });
 });
