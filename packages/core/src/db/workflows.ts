@@ -325,6 +325,67 @@ export async function cancelWorkflowRun(id: string): Promise<void> {
 }
 
 /**
+ * Enriched workflow run with joined data for the dashboard Command Center.
+ */
+export interface DashboardWorkflowRun extends WorkflowRun {
+  codebase_name: string | null;
+  platform_type: string | null;
+  worker_platform_id: string | null;
+  parent_platform_id: string | null;
+}
+
+/**
+ * List workflow runs with enriched JOINs for the dashboard Command Center.
+ * Returns codebase name, platform type, and platform conversation IDs in a single query.
+ */
+export async function listDashboardRuns(options?: {
+  status?: WorkflowRunStatus;
+  codebaseId?: string;
+  limit?: number;
+}): Promise<DashboardWorkflowRun[]> {
+  const whereClauses: string[] = [];
+  const values: unknown[] = [];
+
+  if (options?.status) {
+    values.push(options.status);
+    whereClauses.push(`r.status = $${String(values.length)}`);
+  }
+  if (options?.codebaseId) {
+    values.push(options.codebaseId);
+    whereClauses.push(`r.codebase_id = $${String(values.length)}`);
+  }
+
+  const limit = options?.limit ?? 50;
+  values.push(limit);
+  const limitParam = `$${String(values.length)}`;
+
+  const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+  try {
+    const result = await pool.query<DashboardWorkflowRun>(
+      `SELECT r.*,
+              c.platform_type,
+              c.platform_conversation_id AS worker_platform_id,
+              pc.platform_conversation_id AS parent_platform_id,
+              cb.name AS codebase_name
+       FROM remote_agent_workflow_runs r
+       LEFT JOIN remote_agent_conversations c ON r.conversation_id = c.id
+       LEFT JOIN remote_agent_conversations pc ON r.parent_conversation_id = pc.id
+       LEFT JOIN remote_agent_codebases cb ON r.codebase_id = cb.id
+       ${whereStr}
+       ORDER BY r.started_at DESC
+       LIMIT ${limitParam}`,
+      values
+    );
+    return [...result.rows];
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err }, 'list_dashboard_runs_failed');
+    throw new Error(`Failed to list dashboard runs: ${err.message}`);
+  }
+}
+
+/**
  * List workflow runs with optional filters.
  */
 export async function listWorkflowRuns(options?: {

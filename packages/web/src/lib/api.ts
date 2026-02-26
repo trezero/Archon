@@ -193,6 +193,42 @@ export async function runWorkflow(
   });
 }
 
+// Dashboard-enriched workflow run (includes joined data from single SQL query)
+export interface DashboardRunResponse extends Omit<
+  WorkflowRunResponse,
+  'worker_platform_id' | 'parent_platform_id'
+> {
+  working_path: string | null;
+  codebase_name: string | null;
+  platform_type: string | null;
+  worker_platform_id: string | null;
+  parent_platform_id: string | null;
+}
+
+export async function listDashboardRuns(options?: {
+  status?: WorkflowRunStatus;
+  codebaseId?: string;
+  limit?: number;
+}): Promise<DashboardRunResponse[]> {
+  const params = new URLSearchParams();
+  if (options?.status) params.set('status', options.status);
+  if (options?.codebaseId) params.set('codebaseId', options.codebaseId);
+  if (options?.limit) params.set('limit', String(options.limit));
+  const qs = params.toString();
+  const result = await fetchJSON<{ runs: DashboardRunResponse[] }>(
+    `/api/dashboard/runs${qs ? `?${qs}` : ''}`
+  );
+  return result.runs;
+}
+
+export async function cancelWorkflowRun(
+  runId: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: 'POST',
+  });
+}
+
 export async function listWorkflowRuns(options?: {
   conversationId?: string;
   status?: WorkflowRunStatus;

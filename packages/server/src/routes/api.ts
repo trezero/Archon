@@ -516,12 +516,59 @@ export function registerApiRoutes(
     }
   });
 
+  // GET /api/dashboard/runs - Enriched workflow runs for Command Center
+  app.get('/api/dashboard/runs', async c => {
+    try {
+      const rawStatus = c.req.query('status');
+      const dashboardValidStatuses = [
+        'pending',
+        'running',
+        'completed',
+        'failed',
+        'cancelled',
+      ] as const;
+      type DashboardRunStatus = (typeof dashboardValidStatuses)[number];
+      const status: DashboardRunStatus | undefined =
+        rawStatus && (dashboardValidStatuses as readonly string[]).includes(rawStatus)
+          ? (rawStatus as DashboardRunStatus)
+          : undefined;
+      const codebaseId = c.req.query('codebaseId') ?? undefined;
+      const limitStr = c.req.query('limit');
+      const limit = Math.min(Math.max(1, limitStr ? Number(limitStr) : 50), 200);
+
+      const runs = await workflowDb.listDashboardRuns({ status, codebaseId, limit });
+      return c.json({ runs });
+    } catch (error) {
+      getLog().error({ err: error }, 'list_dashboard_runs_failed');
+      return c.json({ error: 'Failed to list dashboard runs' }, 500);
+    }
+  });
+
+  // POST /api/workflows/runs/:runId/cancel - Cancel a workflow run
+  app.post('/api/workflows/runs/:runId/cancel', async c => {
+    try {
+      const runId = c.req.param('runId');
+      const run = await workflowDb.getWorkflowRun(runId);
+      if (!run) {
+        return c.json({ error: 'Workflow run not found' }, 404);
+      }
+      if (run.status !== 'running' && run.status !== 'pending') {
+        return c.json({ error: `Cannot cancel workflow in '${run.status}' status` }, 400);
+      }
+      await workflowDb.cancelWorkflowRun(runId);
+      return c.json({ success: true, message: `Cancelled workflow: ${run.workflow_name}` });
+    } catch (error) {
+      getLog().error({ err: error }, 'cancel_workflow_run_api_failed');
+      return c.json({ error: 'Failed to cancel workflow run' }, 500);
+    }
+  });
+
   // GET /api/workflows/runs - List workflow runs
   app.get('/api/workflows/runs', async c => {
     try {
       const conversationId = c.req.query('conversationId') ?? undefined;
       const rawStatus = c.req.query('status');
-      const validStatuses = ['pending', 'running', 'completed', 'failed'] as const;
+      const validStatuses = ['pending', 'running', 'completed', 'failed', 'cancelled'] as const;
       type WorkflowRunStatus = (typeof validStatuses)[number];
       const status: WorkflowRunStatus | undefined =
         rawStatus && (validStatuses as readonly string[]).includes(rawStatus)
