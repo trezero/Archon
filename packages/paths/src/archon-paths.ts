@@ -14,7 +14,7 @@
  * For Docker: /.archon/
  */
 
-import { join, dirname } from 'path';
+import { join, dirname, normalize } from 'path';
 import { homedir } from 'os';
 import { access, mkdir, symlink, lstat, readdir, readlink, rm } from 'fs/promises';
 import { createLogger } from './logger';
@@ -279,7 +279,7 @@ export async function createProjectSourceSymlink(
     if (stats.isSymbolicLink()) {
       // Symlink already exists - check if it points to the right place
       const existing = await readlink(linkPath);
-      if (existing === targetPath) {
+      if (normalize(existing) === normalize(targetPath)) {
         return; // Already correct
       }
       throw new Error(
