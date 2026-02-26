@@ -11,8 +11,9 @@ function createTestDb(): SqliteAdapter {
 
 /** Insert a parent codebase row to satisfy FK constraints */
 async function insertCodebase(db: SqliteAdapter, id: string): Promise<void> {
-  await db.query(`INSERT INTO remote_agent_codebases (id, default_cwd) VALUES ($1, $2)`, [
+  await db.query(`INSERT INTO remote_agent_codebases (id, name, default_cwd) VALUES ($1, $2, $3)`, [
     id,
+    `test-codebase-${id}`,
     '/tmp/test-cwd',
   ]);
 }
