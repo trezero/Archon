@@ -8,7 +8,7 @@ import {
   runWorkflow,
   type WorkflowRunResponse,
 } from '@/lib/api';
-import type { WorkflowDefinition } from '@archon/core/workflows/types';
+import type { WorkflowDefinition } from '@archon/workflows';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useProject } from '@/contexts/ProjectContext';

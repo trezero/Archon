@@ -9,11 +9,13 @@ import { readFile, access } from 'fs/promises';
 import { join } from 'path';
 import { execFileAsync } from '@archon/git';
 import type {
-  AssistantRequestOptions,
-  IPlatformAdapter,
-  MessageMetadata,
-  TokenUsage,
-} from '../types';
+  WorkflowAssistantOptions,
+  IWorkflowPlatform,
+  WorkflowMessageMetadata,
+  WorkflowTokenUsage,
+  WorkflowConfig,
+} from './deps';
+import type { WorkflowDeps } from './deps';
 import type {
   DagNode,
   BashNode,
@@ -24,15 +26,10 @@ import type {
   WorkflowRun,
 } from './types';
 import { isBashNode } from './types';
-import type { MergedConfig } from '../config/config-types';
-import { getAssistantClient } from '../clients/factory';
-import * as workflowDb from '../db/workflows';
-import * as workflowEventDb from '../db/workflow-events';
-import { formatToolCall } from '../utils/tool-formatter';
-import * as archonPaths from '../utils/archon-paths';
-import * as configLoader from '../config/config-loader';
-import { BUNDLED_COMMANDS, isBinaryBuild } from '../defaults/bundled-defaults';
-import { createLogger } from '../utils/logger';
+import { formatToolCall } from './utils/tool-formatter';
+import * as archonPaths from '@archon/paths';
+import { BUNDLED_COMMANDS, isBinaryBuild } from './defaults/bundled-defaults';
+import { createLogger } from '@archon/paths';
 import { getWorkflowEventEmitter } from './event-emitter';
 import { evaluateCondition } from './condition-evaluator';
 import { isClaudeModel, isModelCompatible } from './model-validation';
@@ -111,14 +108,14 @@ function classifyError(error: Error): ErrorType {
  *
  * TODO: These helpers (safeSendMessage, substituteWorkflowVariables, loadCommandPrompt,
  * buildPromptWithContext) are duplicated from executor.ts. Rule of Three is met.
- * Extract to a shared module (e.g. packages/core/src/workflows/utils.ts).
+ * Extract to a shared module (e.g. packages/workflows/src/utils.ts).
  */
 async function safeSendMessage(
-  platform: IPlatformAdapter,
+  platform: IWorkflowPlatform,
   conversationId: string,
   message: string,
   context?: SendMessageContext,
-  metadata?: MessageMetadata
+  metadata?: WorkflowMessageMetadata
 ): Promise<boolean> {
   try {
     await platform.sendMessage(conversationId, message, metadata);
@@ -153,7 +150,7 @@ const CONTEXT_VAR_PATTERN_STR = '\\$(?:CONTEXT|EXTERNAL_CONTEXT|ISSUE_CONTEXT)';
 /**
  * Substitute workflow variables in a prompt.
  * Duplicated from executor.ts (Rule of Three is met).
- * TODO: extract to shared module (e.g. packages/core/src/workflows/utils.ts).
+ * TODO: extract to shared module (e.g. packages/workflows/src/utils.ts).
  */
 function substituteWorkflowVariables(
   prompt: string,
@@ -210,9 +207,10 @@ function buildPromptWithContext(
 /**
  * Load command prompt from file.
  * Duplicated from executor.ts (Rule of Three is met).
- * TODO: extract to shared module (e.g. packages/core/src/workflows/utils.ts).
+ * TODO: extract to shared module (e.g. packages/workflows/src/utils.ts).
  */
 async function loadCommandPrompt(
+  deps: WorkflowDeps,
   cwd: string,
   commandName: string,
   configuredFolder?: string
@@ -228,10 +226,17 @@ async function loadCommandPrompt(
 
   let config;
   try {
-    config = await configLoader.loadConfig(cwd);
+    config = await deps.loadConfig(cwd);
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err, cwd }, 'config_load_failed_using_defaults');
+    getLog().warn(
+      {
+        err,
+        cwd,
+        note: 'Default commands will be loaded. Check your .archon/config.yaml if this is unexpected.',
+      },
+      'config_load_failed_using_defaults'
+    );
     config = { defaults: { loadDefaultCommands: true } };
   }
 
@@ -352,14 +357,14 @@ async function resolveNodeProviderAndModel(
   node: DagNode,
   workflowProvider: 'claude' | 'codex',
   workflowModel: string | undefined,
-  config: MergedConfig,
-  platform: IPlatformAdapter,
+  config: WorkflowConfig,
+  platform: IWorkflowPlatform,
   conversationId: string,
   workflowRunId: string
 ): Promise<{
   provider: 'claude' | 'codex';
   model: string | undefined;
-  options: AssistantRequestOptions | undefined;
+  options: WorkflowAssistantOptions | undefined;
 }> {
   let provider: 'claude' | 'codex';
 
@@ -417,7 +422,7 @@ async function resolveNodeProviderAndModel(
     }
   }
 
-  let options: AssistantRequestOptions | undefined;
+  let options: WorkflowAssistantOptions | undefined;
   if (provider === 'codex') {
     options = {
       model,
@@ -426,7 +431,7 @@ async function resolveNodeProviderAndModel(
       additionalDirectories: config.assistants.codex.additionalDirectories,
     };
   } else {
-    const claudeOptions: AssistantRequestOptions = {};
+    const claudeOptions: WorkflowAssistantOptions = {};
     if (model) claudeOptions.model = model;
     if (provider === 'claude' && node.output_format) {
       claudeOptions.outputFormat = {
@@ -447,10 +452,10 @@ export function checkTriggerRule(
   node: DagNode,
   nodeOutputs: Map<string, NodeOutput>
 ): 'run' | 'skip' {
-  const deps = node.depends_on ?? [];
-  if (deps.length === 0) return 'run';
+  const nodeDeps = node.depends_on ?? [];
+  if (nodeDeps.length === 0) return 'run';
 
-  const upstreams = deps.map(
+  const upstreams = nodeDeps.map(
     id =>
       nodeOutputs.get(id) ??
       ({
@@ -532,13 +537,14 @@ export function buildTopologicalLayers(nodes: readonly DagNode[]): DagNode[][] {
  * Parallel nodes and context: 'fresh' nodes always receive fresh sessions (caller ensures resumeSessionId is undefined).
  */
 async function executeNodeInternal(
-  platform: IPlatformAdapter,
+  deps: WorkflowDeps,
+  platform: IWorkflowPlatform,
   conversationId: string,
   cwd: string,
   workflowRun: WorkflowRun,
   node: CommandNode | PromptNode,
-  provider: string,
-  nodeOptions: AssistantRequestOptions | undefined,
+  provider: 'claude' | 'codex',
+  nodeOptions: WorkflowAssistantOptions | undefined,
   artifactsDir: string,
   logDir: string,
   baseBranch: string,
@@ -553,7 +559,7 @@ async function executeNodeInternal(
   getLog().info({ nodeId: node.id, provider }, 'dag_node_started');
   await logNodeStart(logDir, workflowRun.id, node.id, node.command ?? '<inline>');
 
-  workflowEventDb
+  deps.store
     .createWorkflowEvent({
       workflow_run_id: workflowRun.id,
       event_type: 'node_started',
@@ -578,12 +584,12 @@ async function executeNodeInternal(
   // Load prompt
   let rawPrompt: string;
   if (node.command !== undefined) {
-    const promptResult = await loadCommandPrompt(cwd, node.command, configuredCommandFolder);
+    const promptResult = await loadCommandPrompt(deps, cwd, node.command, configuredCommandFolder);
     if (!promptResult.success) {
       const errMsg = promptResult.message;
       getLog().error({ nodeId: node.id, error: errMsg }, 'dag_node_command_load_failed');
       await logNodeError(logDir, workflowRun.id, node.id, errMsg);
-      workflowEventDb
+      deps.store
         .createWorkflowEvent({
           workflow_run_id: workflowRun.id,
           event_type: 'node_failed',
@@ -625,19 +631,19 @@ async function executeNodeInternal(
   // Substitute upstream node output references
   const finalPrompt = substituteNodeOutputRefs(substitutedPrompt, nodeOutputs);
 
-  const aiClient = getAssistantClient(provider);
+  const aiClient = deps.getAssistantClient(provider);
   const streamingMode = platform.getStreamingMode();
 
   let nodeOutputText = ''; // Always accumulate regardless of streaming mode
   let newSessionId: string | undefined;
-  let nodeTokens: TokenUsage | undefined;
+  let nodeTokens: WorkflowTokenUsage | undefined;
   const batchMessages: string[] = [];
 
   try {
     for await (const msg of aiClient.sendQuery(finalPrompt, cwd, resumeSessionId, nodeOptions)) {
       // Update activity timestamp
       try {
-        await workflowDb.updateWorkflowActivity(workflowRun.id);
+        await deps.store.updateWorkflowActivity(workflowRun.id);
       } catch (e) {
         getLog().warn({ err: e as Error, workflowRunId: workflowRun.id }, 'activity_update_failed');
       }
@@ -655,7 +661,7 @@ async function executeNodeInternal(
           const toolMsg = formatToolCall(msg.toolName, msg.toolInput);
           await safeSendMessage(platform, conversationId, toolMsg, nodeContext, {
             category: 'tool_call_formatted',
-          } as MessageMetadata);
+          } as WorkflowMessageMetadata);
         }
         await logTool(logDir, workflowRun.id, msg.toolName, msg.toolInput ?? {});
       } else if (msg.type === 'result') {
@@ -675,7 +681,7 @@ async function executeNodeInternal(
       tokens: nodeTokens,
     });
 
-    workflowEventDb
+    deps.store
       .createWorkflowEvent({
         workflow_run_id: workflowRun.id,
         event_type: 'node_completed',
@@ -703,7 +709,7 @@ async function executeNodeInternal(
     getLog().error({ err, nodeId: node.id }, 'dag_node_failed');
     await logNodeError(logDir, workflowRun.id, node.id, err.message);
 
-    workflowEventDb
+    deps.store
       .createWorkflowEvent({
         workflow_run_id: workflowRun.id,
         event_type: 'node_failed',
@@ -738,7 +744,8 @@ const BASH_DEFAULT_TIMEOUT = 120_000;
  * No AI session is created — bash nodes are free/deterministic.
  */
 async function executeBashNode(
-  platform: IPlatformAdapter,
+  deps: WorkflowDeps,
+  platform: IWorkflowPlatform,
   conversationId: string,
   cwd: string,
   workflowRun: WorkflowRun,
@@ -755,7 +762,7 @@ async function executeBashNode(
   getLog().info({ nodeId: node.id, type: 'bash' }, 'dag_node_started');
   await logNodeStart(logDir, workflowRun.id, node.id, '<bash>');
 
-  workflowEventDb
+  deps.store
     .createWorkflowEvent({
       workflow_run_id: workflowRun.id,
       event_type: 'node_started',
@@ -813,7 +820,7 @@ async function executeBashNode(
     getLog().info({ nodeId: node.id, durationMs: duration }, 'dag_node_completed');
     await logNodeComplete(logDir, workflowRun.id, node.id, '<bash>', { durationMs: duration });
 
-    workflowEventDb
+    deps.store
       .createWorkflowEvent({
         workflow_run_id: workflowRun.id,
         event_type: 'node_completed',
@@ -853,7 +860,7 @@ async function executeBashNode(
     getLog().error({ err, nodeId: node.id, isTimeout }, 'dag_node_failed');
     await logNodeError(logDir, workflowRun.id, node.id, errorMsg);
 
-    workflowEventDb
+    deps.store
       .createWorkflowEvent({
         workflow_run_id: workflowRun.id,
         event_type: 'node_failed',
@@ -884,7 +891,8 @@ async function executeBashNode(
  * Called from executeWorkflow() in executor.ts after isDagWorkflow() check.
  */
 export async function executeDagWorkflow(
-  platform: IPlatformAdapter,
+  deps: WorkflowDeps,
+  platform: IWorkflowPlatform,
   conversationId: string,
   cwd: string,
   workflow: { name: string; nodes: readonly DagNode[] },
@@ -894,7 +902,7 @@ export async function executeDagWorkflow(
   artifactsDir: string,
   logDir: string,
   baseBranch: string,
-  config: MergedConfig,
+  config: WorkflowConfig,
   configuredCommandFolder?: string,
   issueContext?: string
 ): Promise<void> {
@@ -932,7 +940,7 @@ export async function executeDagWorkflow(
           if (triggerDecision === 'skip') {
             getLog().info({ nodeId: node.id, reason: 'trigger_rule' }, 'dag_node_skipped');
             await logNodeSkip(logDir, workflowRun.id, node.id, 'trigger_rule');
-            workflowEventDb
+            deps.store
               .createWorkflowEvent({
                 workflow_run_id: workflowRun.id,
                 event_type: 'node_skipped',
@@ -966,14 +974,14 @@ export async function executeDagWorkflow(
               await safeSendMessage(
                 platform,
                 conversationId,
-                `⚠️ Node '${node.id}': unparseable \`when:\` expression "${node.when}" — node ran (fail-open). Check syntax: use \`$nodeId.output == 'VALUE'\`.`,
+                `\u26a0\ufe0f Node '${node.id}': unparseable \`when:\` expression "${node.when}" \u2014 node ran (fail-open). Check syntax: use \`$nodeId.output == 'VALUE'\`.`,
                 { workflowId: workflowRun.id, nodeName: node.id }
               );
             }
             if (!conditionPasses) {
               getLog().info({ nodeId: node.id, when: node.when }, 'dag_node_skipped_condition');
               await logNodeSkip(logDir, workflowRun.id, node.id, 'when_condition');
-              workflowEventDb
+              deps.store
                 .createWorkflowEvent({
                   workflow_run_id: workflowRun.id,
                   event_type: 'node_skipped',
@@ -1004,6 +1012,7 @@ export async function executeDagWorkflow(
           // 3. Bash node dispatch — no AI, no session
           if (isBashNode(node)) {
             const output = await executeBashNode(
+              deps,
               platform,
               conversationId,
               cwd,
@@ -1035,6 +1044,7 @@ export async function executeDagWorkflow(
 
           // 6. Execute
           const output = await executeNodeInternal(
+            deps,
             platform,
             conversationId,
             cwd,
@@ -1055,7 +1065,7 @@ export async function executeDagWorkflow(
         } catch (error) {
           const err = error as Error;
           getLog().error({ err, nodeId: node.id }, 'dag_node_pre_execution_failed');
-          workflowEventDb
+          deps.store
             .createWorkflowEvent({
               workflow_run_id: workflowRun.id,
               event_type: 'node_failed',
@@ -1128,7 +1138,7 @@ export async function executeDagWorkflow(
     const failMsg =
       `DAG workflow '${workflow.name}' completed with no successful nodes. ` +
       'Check node conditions, trigger rules, and upstream failures.';
-    await workflowDb.failWorkflowRun(workflowRun.id, failMsg).catch((dbErr: Error) => {
+    await deps.store.failWorkflowRun(workflowRun.id, failMsg).catch((dbErr: Error) => {
       getLog().error({ err: dbErr, workflowRunId: workflowRun.id }, 'dag_db_fail_failed');
     });
     await logWorkflowError(logDir, workflowRun.id, failMsg);
@@ -1141,7 +1151,7 @@ export async function executeDagWorkflow(
       stepIndex: 0,
     });
     emitterForFail.unregisterRun(workflowRun.id);
-    await safeSendMessage(platform, conversationId, `❌ ${failMsg}`, {
+    await safeSendMessage(platform, conversationId, `\u274c ${failMsg}`, {
       workflowId: workflowRun.id,
     });
     // DO NOT throw — outer executor.ts catch would duplicate workflow_failed events
@@ -1156,14 +1166,14 @@ export async function executeDagWorkflow(
     await safeSendMessage(
       platform,
       conversationId,
-      `⚠️ Some DAG nodes failed: ${failedNodes}\nSuccessful nodes completed normally.`,
+      `\u26a0\ufe0f Some DAG nodes failed: ${failedNodes}\nSuccessful nodes completed normally.`,
       { workflowId: workflowRun.id }
     );
   }
 
   // Update DB and emit completion
   try {
-    await workflowDb.completeWorkflowRun(workflowRun.id);
+    await deps.store.completeWorkflowRun(workflowRun.id);
   } catch (dbErr) {
     getLog().error(
       { err: dbErr as Error, workflowRunId: workflowRun.id },
@@ -1184,7 +1194,7 @@ export async function executeDagWorkflow(
     workflowName: workflow.name,
     duration: Date.now() - dagStartTime,
   });
-  workflowEventDb
+  deps.store
     .createWorkflowEvent({
       workflow_run_id: workflowRun.id,
       event_type: 'workflow_completed',

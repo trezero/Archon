@@ -7,8 +7,8 @@
 import { readFile } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { isBinaryBuild } from '@archon/core/defaults/bundled-defaults';
 import { getDatabaseType } from '@archon/core';
+import { isBinaryBuild } from '@archon/workflows';
 import { BUNDLED_VERSION } from './bundled-version';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));

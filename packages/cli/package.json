@@ -15,6 +15,7 @@
     "@archon/core": "workspace:*",
     "@archon/git": "workspace:*",
     "@archon/isolation": "workspace:*",
+    "@archon/workflows": "workspace:*",
     "@clack/prompts": "^1.0.0",
     "dotenv": "^17.2.3"
   },

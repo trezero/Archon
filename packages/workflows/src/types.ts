@@ -10,7 +10,8 @@
  * types to enforce mutual exclusivity between steps, loop, and nodes at compile time.
  */
 
-import type { ModelReasoningEffort, WebSearchMode } from '../types';
+export type ModelReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type WebSearchMode = 'disabled' | 'cached' | 'live';
 
 export type WorkflowRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed';

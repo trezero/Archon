@@ -12,72 +12,49 @@ import {
 import { mkdir, writeFile, rm, readFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { IPlatformAdapter } from '../types';
-import type { WorkflowDefinition } from './types';
-import { createQueryResult } from '../test/mocks/database';
-import { createMockLogger } from '../test/mocks/logger';
-
-// Default mock implementation — extracted so tests can restore it after overriding
-function defaultMockQuery(query: string): Promise<ReturnType<typeof createQueryResult>> {
-  // For findResumableRun query (status='failed' + working_path): no resumable run by default
-  if (query.includes("status = 'failed'") && query.includes('working_path')) {
-    return Promise.resolve(createQueryResult([]));
-  }
-  // For resumeWorkflowRun UPDATE (status='running' + completed_at = NULL): empty by default
-  if (query.includes("status = 'running'") && query.includes('completed_at = NULL')) {
-    return Promise.resolve(createQueryResult([]));
-  }
-  // For getActiveWorkflowRun query, return no active workflow by default
-  if (query.includes("status = 'running'")) {
-    return Promise.resolve(createQueryResult([]));
-  }
-  // For createWorkflowRun INSERT, return the new workflow run
-  if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
-    return Promise.resolve(
-      createQueryResult([
-        {
-          id: 'test-workflow-run-id',
-          workflow_name: 'test-workflow',
-          conversation_id: 'conv-123',
-          codebase_id: 'codebase-456',
-          current_step_index: 0,
-          status: 'running' as const,
-          user_message: 'test user message',
-          metadata: {},
-          started_at: new Date(),
-          completed_at: null,
-          last_activity_at: null,
-          working_path: null,
-          parent_conversation_id: null,
-        },
-      ])
-    );
-  }
-  // For getCodebase query (resolveArtifactsDir / resolveLogDir), return null
-  if (query.includes('remote_agent_codebases') && query.includes('WHERE id')) {
-    return Promise.resolve(createQueryResult([]));
-  }
-  // For workflow events INSERT, return empty (fire-and-forget)
-  if (query.includes('INSERT INTO remote_agent_workflow_events')) {
-    return Promise.resolve(createQueryResult([]));
-  }
-  // Default: empty result for UPDATE queries and other operations
-  return Promise.resolve(createQueryResult([]));
-}
-
-// Mock at the connection level to avoid polluting db/workflows module
-const mockQuery = mock(defaultMockQuery);
-
-mock.module('../db/connection', () => ({
-  pool: {
-    query: mockQuery,
-  },
-}));
+import type { WorkflowDefinition, WorkflowRun } from './types';
+import type { IWorkflowStore } from './store';
+import type { WorkflowDeps, IWorkflowPlatform, WorkflowConfig } from './deps';
 
 // Mock Pino logger so executor log calls can be asserted
+interface MockLogger {
+  fatal: ReturnType<typeof mock>;
+  error: ReturnType<typeof mock>;
+  warn: ReturnType<typeof mock>;
+  info: ReturnType<typeof mock>;
+  debug: ReturnType<typeof mock>;
+  trace: ReturnType<typeof mock>;
+  child: ReturnType<typeof mock>;
+}
+
+function createMockLogger(): MockLogger {
+  const logger: MockLogger = {
+    fatal: mock(() => undefined),
+    error: mock(() => undefined),
+    warn: mock(() => undefined),
+    info: mock(() => undefined),
+    debug: mock(() => undefined),
+    trace: mock(() => undefined),
+    child: mock(() => logger),
+  };
+  return logger;
+}
+
 const mockLogger = createMockLogger();
-mock.module('../utils/logger', () => ({
+mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
+  getArchonHome: () => join(tmpdir(), '.archon'),
+  getProjectRoot: (owner: string, repo: string) =>
+    join(tmpdir(), '.archon', 'workspaces', owner, repo),
+  getProjectLogsPath: (owner: string, repo: string) =>
+    join(tmpdir(), '.archon', 'workspaces', owner, repo, 'logs'),
+  getRunArtifactsPath: (owner: string, repo: string, runId: string) =>
+    join(tmpdir(), '.archon', 'workspaces', owner, repo, 'artifacts', 'runs', runId),
+  parseOwnerRepo: (name: string) => {
+    const parts = name.split('/');
+    if (parts.length === 2) return { owner: parts[0], repo: parts[1] };
+    return null;
+  },
 }));
 
 // Mock AI client
@@ -91,44 +68,105 @@ const mockGetAssistantClient = mock(() => ({
   getType: () => 'claude',
 }));
 
-mock.module('../clients/factory', () => ({
-  getAssistantClient: mockGetAssistantClient,
-}));
+// Default workflow run returned by createWorkflowRun
+const DEFAULT_WORKFLOW_RUN: WorkflowRun = {
+  id: 'test-workflow-run-id',
+  workflow_name: 'test-workflow',
+  conversation_id: 'conv-123',
+  codebase_id: 'codebase-456',
+  current_step_index: 0,
+  status: 'running' as const,
+  user_message: 'test user message',
+  metadata: {},
+  started_at: new Date(),
+  completed_at: null,
+  last_activity_at: null,
+  working_path: null,
+  parent_conversation_id: null,
+};
+
+// Default config returned by loadConfig
+const DEFAULT_CONFIG: WorkflowConfig = {
+  assistant: 'claude',
+  assistants: { claude: {}, codex: {} },
+  commands: {},
+  defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+};
+
+/** Create a mock IWorkflowStore with default implementations */
+function createMockStore(overrides?: Partial<IWorkflowStore>): IWorkflowStore {
+  return {
+    createWorkflowRun: mock(() => Promise.resolve({ ...DEFAULT_WORKFLOW_RUN })),
+    getWorkflowRun: mock(() => Promise.resolve(null)),
+    getActiveWorkflowRun: mock(() => Promise.resolve(null)),
+    findResumableRun: mock(() => Promise.resolve(null)),
+    resumeWorkflowRun: mock(() => Promise.resolve({ ...DEFAULT_WORKFLOW_RUN })),
+    updateWorkflowRun: mock(() => Promise.resolve()),
+    updateWorkflowActivity: mock(() => Promise.resolve()),
+    getWorkflowRunStatus: mock(() => Promise.resolve(null)),
+    completeWorkflowRun: mock(() => Promise.resolve()),
+    failWorkflowRun: mock(() => Promise.resolve()),
+    createWorkflowEvent: mock(() => Promise.resolve()),
+    getCodebase: mock(() => Promise.resolve(null)),
+    ...overrides,
+  };
+}
+
+/** Create mock loadConfig function */
+const mockLoadConfig = mock((_cwd: string) => Promise.resolve({ ...DEFAULT_CONFIG }));
+
+/** Create a mock WorkflowDeps */
+function createMockDeps(overrides?: Partial<WorkflowDeps>): WorkflowDeps {
+  return {
+    store: createMockStore(),
+    getAssistantClient: mockGetAssistantClient,
+    loadConfig: mockLoadConfig,
+    ...overrides,
+  };
+}
 
 // Create mock platform adapter
-function createMockPlatform(): IPlatformAdapter {
+function createMockPlatform(): IWorkflowPlatform {
   return {
     sendMessage: mock(() => Promise.resolve()),
-    ensureThread: mock((id: string) => Promise.resolve(id)),
     getStreamingMode: mock(() => 'batch' as const),
     getPlatformType: mock(() => 'test'),
-    start: mock(() => Promise.resolve()),
-    stop: mock(() => {}),
   };
 }
 
 // Import after mocks are set up
-import { executeWorkflow, isValidCommandName } from './executor';
+import { executeWorkflow } from './executor';
+import { isValidCommandName } from './command-validation';
 import * as gitUtils from '@archon/git';
-import * as configLoader from '../config/config-loader';
-import * as bundledDefaults from '../defaults/bundled-defaults';
+import * as bundledDefaults from './defaults/bundled-defaults';
 
 describe('Workflow Executor', () => {
-  let mockPlatform: IPlatformAdapter;
+  let mockPlatform: IWorkflowPlatform;
+  let mockDeps: WorkflowDeps;
+  let mockStore: IWorkflowStore;
   let testDir: string;
   let commitAllChangesSpy: Mock<typeof gitUtils.commitAllChanges>;
   let getDefaultBranchSpy: Mock<typeof gitUtils.getDefaultBranch>;
 
   beforeEach(async () => {
     mockPlatform = createMockPlatform();
-    mockQuery.mockClear();
+    mockStore = createMockStore();
+    mockDeps = {
+      store: mockStore,
+      getAssistantClient: mockGetAssistantClient,
+      loadConfig: mockLoadConfig,
+    };
     mockSendQuery.mockClear();
     mockGetAssistantClient.mockClear();
+    mockLoadConfig.mockClear();
     (mockPlatform.sendMessage as ReturnType<typeof mock>).mockClear();
     mockLogger.error.mockClear();
     mockLogger.warn.mockClear();
     mockLogger.info.mockClear();
     mockLogger.debug.mockClear();
+
+    // Reset loadConfig to default behavior
+    mockLoadConfig.mockImplementation((_cwd: string) => Promise.resolve({ ...DEFAULT_CONFIG }));
 
     // Mock commitAllChanges to return false (no changes to commit) by default
     // This prevents sendCriticalMessage retries from causing test timeouts
@@ -170,13 +208,12 @@ describe('Workflow Executor', () => {
     mock.restore();
   });
 
-  // Helper: Get count of workflow status UPDATE operations in database
+  // Helper: Get count of workflow status updates via mock store methods
   function getWorkflowStatusUpdates(status: 'failed' | 'completed'): unknown[][] {
-    return mockQuery.mock.calls.filter(
-      (call: unknown[]) =>
-        (call[0] as string).includes('UPDATE remote_agent_workflow_runs') &&
-        (call[0] as string).includes(`status = '${status}'`)
-    );
+    if (status === 'failed') {
+      return (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls;
+    }
+    return (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls;
   }
 
   // Helper: Parse JSONL log file into array of events
@@ -200,6 +237,7 @@ describe('Workflow Executor', () => {
 
     it('should create a workflow run record', async () => {
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -209,19 +247,18 @@ describe('Workflow Executor', () => {
         'codebase-id'
       );
 
-      // Verify INSERT query was called with correct parameters
-      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
-        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
-      );
-      expect(insertCalls.length).toBeGreaterThan(0);
-      const params = insertCalls[0][1] as string[];
-      expect(params).toContain('test-workflow');
-      expect(params).toContain('db-conv-id');
-      expect(params).toContain('codebase-id');
+      // Verify createWorkflowRun was called with correct parameters
+      const createCalls = (mockStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls;
+      expect(createCalls.length).toBeGreaterThan(0);
+      const createArg = createCalls[0][0] as Record<string, unknown>;
+      expect(createArg.workflow_name).toBe('test-workflow');
+      expect(createArg.conversation_id).toBe('db-conv-id');
+      expect(createArg.codebase_id).toBe('codebase-id');
     });
 
     it('should send workflow start notification', async () => {
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -244,6 +281,7 @@ describe('Workflow Executor', () => {
 
     it('should execute each step and send notifications', async () => {
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -263,6 +301,7 @@ describe('Workflow Executor', () => {
 
     it('should log workflow events', async () => {
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -288,6 +327,7 @@ describe('Workflow Executor', () => {
 
     it('should update workflow run progress after each step', async () => {
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -297,16 +337,14 @@ describe('Workflow Executor', () => {
       );
 
       // Should have UPDATE queries for step progress
-      const updateCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') &&
-          (call[0] as string).includes('current_step_index')
-      );
-      expect(updateCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.updateWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should complete workflow run on success', async () => {
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -316,15 +354,14 @@ describe('Workflow Executor', () => {
       );
 
       // Should have UPDATE query with 'completed' status
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should send completion message', async () => {
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -357,6 +394,7 @@ describe('Workflow Executor', () => {
         (mockPlatform.getPlatformType as ReturnType<typeof mock>).mockReturnValue(platform);
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -387,6 +425,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -396,11 +435,9 @@ describe('Workflow Executor', () => {
       );
 
       // Should fail the workflow run - verify by checking for UPDATE with 'failed'
-      const failCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
-      );
-      expect(failCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
 
       // Verify error was logged by reading log file
       const logPath = join(testDir, '.archon', 'logs', 'test-workflow-run-id.jsonl');
@@ -419,28 +456,16 @@ describe('Workflow Executor', () => {
     });
 
     it('should resolve project-scoped paths when codebase has owner/repo name', async () => {
-      // Override mockQuery to return a codebase with owner/repo name
-      const originalImpl = mockQuery.getMockImplementation();
-      mockQuery.mockImplementation((query: string, params?: unknown[]) => {
-        if (query.includes('remote_agent_codebases') && query.includes('WHERE id') && params) {
-          return Promise.resolve(
-            createQueryResult([
-              {
-                id: 'codebase-456',
-                name: 'acme/widget',
-                default_cwd: '/some/path',
-                commands: '{}',
-                created_at: new Date(),
-                updated_at: new Date(),
-              },
-            ])
-          );
-        }
-        // Delegate to original for all other queries
-        return originalImpl!(query, params);
+      // Override store.getCodebase to return a codebase with owner/repo name
+      (mockStore.getCodebase as ReturnType<typeof mock>).mockResolvedValue({
+        id: 'codebase-456',
+        name: 'acme/widget',
+        repository_url: null,
+        default_cwd: '/some/path',
       });
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -451,7 +476,7 @@ describe('Workflow Executor', () => {
       );
 
       // Verify log file was written to project-scoped path, NOT cwd-based path
-      const { getProjectLogsPath } = await import('../utils/archon-paths');
+      const { getProjectLogsPath } = await import('@archon/paths');
       const projectLogDir = getProjectLogsPath('acme', 'widget');
       const projectLogPath = join(projectLogDir, 'test-workflow-run-id.jsonl');
       const logContent = await readFile(projectLogPath, 'utf-8');
@@ -472,11 +497,8 @@ describe('Workflow Executor', () => {
       }
       expect(cwdLogExists).toBe(false);
 
-      // Restore original mock
-      mockQuery.mockImplementation(originalImpl!);
-
       // Clean up project-scoped directory
-      const { getProjectRoot } = await import('../utils/archon-paths');
+      const { getProjectRoot } = await import('@archon/paths');
       try {
         await rm(getProjectRoot('acme', 'widget'), { recursive: true, force: true });
       } catch {
@@ -500,6 +522,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -533,6 +556,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -554,17 +578,12 @@ describe('Workflow Executor', () => {
       const commandsDir = join(testDir, '.archon', 'commands');
       await writeFile(join(commandsDir, 'branch-test.md'), 'git rebase origin/$BASE_BRANCH');
 
-      // Spy on loadConfig to return config with baseBranch set
-      const loadConfigSpy = spyOn(configLoader, 'loadConfig');
-      loadConfigSpy.mockResolvedValue({
-        botName: 'Archon',
-        assistant: 'claude',
+      // Override loadConfig to return config with baseBranch set
+      mockLoadConfig.mockResolvedValue({
+        assistant: 'claude' as const,
         assistants: { claude: {}, codex: {} },
-        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
-        paths: { workspaces: '/tmp', worktrees: '/tmp' },
-        concurrency: { maxConversations: 10 },
-        commands: { autoLoad: true },
-        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+        commands: {},
+        defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
         baseBranch: 'staging',
       });
 
@@ -580,6 +599,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -595,12 +615,11 @@ describe('Workflow Executor', () => {
       expect(callArg).toContain('origin/staging');
       // getDefaultBranch should NOT have been called
       expect(getDefaultBranchSpy).not.toHaveBeenCalled();
-
-      loadConfigSpy.mockRestore();
     });
 
     it('should handle codebase_id being undefined', async () => {
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -610,14 +629,11 @@ describe('Workflow Executor', () => {
         undefined // no codebase
       );
 
-      // Verify INSERT was called with null for codebase_id
-      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
-        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
-      );
-      expect(insertCalls.length).toBeGreaterThan(0);
-      const params = insertCalls[0][1] as (string | null)[];
-      // codebase_id should be null (3rd parameter)
-      expect(params[2]).toBeNull();
+      // Verify createWorkflowRun was called without codebase_id
+      const createCalls = (mockStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls;
+      expect(createCalls.length).toBeGreaterThan(0);
+      const createArg = createCalls[0][0] as Record<string, unknown>;
+      expect(createArg.codebase_id).toBeUndefined();
     });
   });
 
@@ -633,6 +649,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -642,11 +659,9 @@ describe('Workflow Executor', () => {
       );
 
       // Workflow executed successfully - verify completion query
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should respect clearContext flag', async () => {
@@ -662,6 +677,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -672,11 +688,9 @@ describe('Workflow Executor', () => {
 
       // Both steps should complete
       expect(mockSendQuery).toHaveBeenCalledTimes(2);
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
   });
 
@@ -692,6 +706,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -701,11 +716,9 @@ describe('Workflow Executor', () => {
       );
 
       expect(mockSendQuery).toHaveBeenCalledTimes(1);
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
 
       // Verify workflow start notification IS sent, but no "Step 1/1" notification
       const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
@@ -730,6 +743,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -740,18 +754,13 @@ describe('Workflow Executor', () => {
 
       expect(mockSendQuery).toHaveBeenCalledTimes(5);
       // Verify multiple UPDATE queries for step progress
-      const updateCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') &&
-          (call[0] as string).includes('current_step_index')
-      );
-      expect(updateCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.updateWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
       // Verify completion
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should substitute $USER_MESSAGE in command prompt', async () => {
@@ -768,6 +777,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -794,6 +804,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -805,7 +816,7 @@ describe('Workflow Executor', () => {
       // The AI client should receive the substituted prompt
       expect(mockSendQuery.mock.calls.length).toBeGreaterThan(callCountBefore);
       // $ARGUMENTS should be replaced with the user message from the mock database row
-      // (which is 'test user message' - see mockQuery setup at top of file)
+      // (which is 'test user message' - see DEFAULT_WORKFLOW_RUN at top of file)
       const callArg = mockSendQuery.mock.calls[callCountBefore][0] as string;
       expect(callArg).toContain('test user message');
       expect(callArg).not.toContain('$ARGUMENTS');
@@ -813,6 +824,7 @@ describe('Workflow Executor', () => {
 
     it('should handle empty user message', async () => {
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -825,15 +837,14 @@ describe('Workflow Executor', () => {
         'db-conv-id'
       );
 
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should handle user message with special characters', async () => {
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -846,11 +857,9 @@ describe('Workflow Executor', () => {
         'db-conv-id'
       );
 
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should fail when command file is empty', async () => {
@@ -864,6 +873,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -873,11 +883,9 @@ describe('Workflow Executor', () => {
       );
 
       // Empty prompt file is treated as invalid - workflow should fail
-      const failCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
-      );
-      expect(failCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should fail on second step if it is missing', async () => {
@@ -892,6 +900,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -911,24 +920,17 @@ describe('Workflow Executor', () => {
       expect(stepCompleteEvents).toHaveLength(1);
 
       // But workflow should fail overall
-      const failCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
-      );
-      expect(failCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should use default provider (claude) when not specified', async () => {
-      const loadConfigSpy = spyOn(configLoader, 'loadConfig');
-      loadConfigSpy.mockResolvedValue({
-        botName: 'Archon',
-        assistant: 'claude',
+      mockLoadConfig.mockResolvedValue({
+        assistant: 'claude' as const,
         assistants: { claude: {}, codex: {} },
-        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
-        paths: { workspaces: '/tmp', worktrees: '/tmp' },
-        concurrency: { maxConversations: 10 },
-        commands: { autoLoad: true },
-        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+        commands: {},
+        defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
       });
 
       const workflow: WorkflowDefinition = {
@@ -942,6 +944,7 @@ describe('Workflow Executor', () => {
       process.env.DEFAULT_AI_ASSISTANT = 'claude';
       try {
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -959,8 +962,6 @@ describe('Workflow Executor', () => {
 
       // Should use claude by default
       expect(mockGetAssistantClient).toHaveBeenCalledWith('claude');
-
-      loadConfigSpy.mockRestore();
     });
 
     it('should use specified provider', async () => {
@@ -972,6 +973,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -984,16 +986,11 @@ describe('Workflow Executor', () => {
     });
 
     it('should infer claude provider when workflow sets a claude model alias', async () => {
-      const loadConfigSpy = spyOn(configLoader, 'loadConfig');
-      loadConfigSpy.mockResolvedValue({
-        botName: 'Archon',
-        assistant: 'codex',
+      mockLoadConfig.mockResolvedValue({
+        assistant: 'codex' as const,
         assistants: { claude: {}, codex: {} },
-        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
-        paths: { workspaces: '/tmp', worktrees: '/tmp' },
-        concurrency: { maxConversations: 10 },
-        commands: { autoLoad: true },
-        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+        commands: {},
+        defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
       });
 
       const workflow: WorkflowDefinition = {
@@ -1005,10 +1002,16 @@ describe('Workflow Executor', () => {
 
       // Should NOT throw - provider inferred as claude from model: sonnet
       await expect(
-        executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User message', 'db-conv-id')
+        executeWorkflow(
+          mockDeps,
+          mockPlatform,
+          'conv-123',
+          testDir,
+          workflow,
+          'User message',
+          'db-conv-id'
+        )
       ).resolves.toBeDefined();
-
-      loadConfigSpy.mockRestore();
     });
 
     it('should reject mismatched model when provider is explicitly set', async () => {
@@ -1021,29 +1024,32 @@ describe('Workflow Executor', () => {
       };
 
       await expect(
-        executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User message', 'db-conv-id')
+        executeWorkflow(
+          mockDeps,
+          mockPlatform,
+          'conv-123',
+          testDir,
+          workflow,
+          'User message',
+          'db-conv-id'
+        )
       ).rejects.toThrow(/not compatible/);
     });
 
     it('should pass resolved options to client for codex', async () => {
-      const loadConfigSpy = spyOn(configLoader, 'loadConfig');
-      loadConfigSpy.mockResolvedValue({
-        botName: 'Archon',
-        assistant: 'codex',
+      mockLoadConfig.mockResolvedValue({
+        assistant: 'codex' as const,
         assistants: {
           claude: {},
           codex: {
             model: 'gpt-5.2-codex',
-            modelReasoningEffort: 'low',
-            webSearchMode: 'cached',
+            modelReasoningEffort: 'low' as const,
+            webSearchMode: 'cached' as const,
             additionalDirectories: ['/from-config'],
           },
         },
-        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
-        paths: { workspaces: '/tmp', worktrees: '/tmp' },
-        concurrency: { maxConversations: 10 },
-        commands: { autoLoad: true },
-        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+        commands: {},
+        defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
       });
 
       const workflow: WorkflowDefinition = {
@@ -1058,6 +1064,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1073,8 +1080,6 @@ describe('Workflow Executor', () => {
         webSearchMode: 'live',
         additionalDirectories: ['/from-workflow'],
       });
-
-      loadConfigSpy.mockRestore();
     });
 
     it('should pass allowed_tools to sendQuery options for Claude step', async () => {
@@ -1085,7 +1090,15 @@ describe('Workflow Executor', () => {
         steps: [{ command: 'command-one', allowed_tools: ['Read', 'Grep'] }],
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User msg',
+        'db-conv-id'
+      );
 
       const optionsArg = mockSendQuery.mock.calls[0][3] as Record<string, unknown>;
       expect(optionsArg?.tools).toEqual(['Read', 'Grep']);
@@ -1099,7 +1112,15 @@ describe('Workflow Executor', () => {
         steps: [{ command: 'command-one', denied_tools: ['WebSearch', 'WebFetch'] }],
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User msg',
+        'db-conv-id'
+      );
 
       const optionsArg = mockSendQuery.mock.calls[0][3] as Record<string, unknown>;
       expect(optionsArg?.disallowedTools).toEqual(['WebSearch', 'WebFetch']);
@@ -1113,23 +1134,26 @@ describe('Workflow Executor', () => {
         steps: [{ command: 'command-one', allowed_tools: [] }],
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User msg',
+        'db-conv-id'
+      );
 
       const optionsArg = mockSendQuery.mock.calls[0][3] as Record<string, unknown>;
       expect(optionsArg?.tools).toEqual([]); // not undefined
     });
 
     it('should warn user when Codex step has allowed_tools', async () => {
-      const loadConfigSpy = spyOn(configLoader, 'loadConfig');
-      loadConfigSpy.mockResolvedValue({
-        botName: 'Archon',
-        assistant: 'codex',
+      mockLoadConfig.mockResolvedValue({
+        assistant: 'codex' as const,
         assistants: { claude: {}, codex: {} },
-        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
-        paths: { workspaces: '/tmp', worktrees: '/tmp' },
-        concurrency: { maxConversations: 10 },
-        commands: { autoLoad: true },
-        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+        commands: {},
+        defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
       });
       mockGetAssistantClient.mockReturnValue({ sendQuery: mockSendQuery, getType: () => 'codex' });
 
@@ -1140,14 +1164,21 @@ describe('Workflow Executor', () => {
         steps: [{ command: 'command-one', allowed_tools: ['Read'] }],
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User msg',
+        'db-conv-id'
+      );
 
       const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
       const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
       const warning = messages.find(m => m.includes('allowed_tools') && m.includes('Codex'));
       expect(warning).toBeDefined();
 
-      loadConfigSpy.mockRestore();
       mockGetAssistantClient.mockImplementation(() => ({
         sendQuery: mockSendQuery,
         getType: () => 'claude',
@@ -1155,16 +1186,11 @@ describe('Workflow Executor', () => {
     });
 
     it('should warn user when Codex step has denied_tools only', async () => {
-      const loadConfigSpy = spyOn(configLoader, 'loadConfig');
-      loadConfigSpy.mockResolvedValue({
-        botName: 'Archon',
-        assistant: 'codex',
+      mockLoadConfig.mockResolvedValue({
+        assistant: 'codex' as const,
         assistants: { claude: {}, codex: {} },
-        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
-        paths: { workspaces: '/tmp', worktrees: '/tmp' },
-        concurrency: { maxConversations: 10 },
-        commands: { autoLoad: true },
-        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+        commands: {},
+        defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
       });
       mockGetAssistantClient.mockReturnValue({ sendQuery: mockSendQuery, getType: () => 'codex' });
 
@@ -1175,14 +1201,21 @@ describe('Workflow Executor', () => {
         steps: [{ command: 'command-one', denied_tools: ['WebSearch'] }],
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User msg',
+        'db-conv-id'
+      );
 
       const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
       const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
       const warning = messages.find(m => m.includes('denied_tools') && m.includes('Codex'));
       expect(warning).toBeDefined();
 
-      loadConfigSpy.mockRestore();
       mockGetAssistantClient.mockImplementation(() => ({
         sendQuery: mockSendQuery,
         getType: () => 'claude',
@@ -1197,7 +1230,15 @@ describe('Workflow Executor', () => {
         steps: [{ command: 'command-one', allowed_tools: ['Read'], denied_tools: ['WebSearch'] }],
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User msg',
+        'db-conv-id'
+      );
 
       const optionsArg = mockSendQuery.mock.calls[0][3] as Record<string, unknown>;
       expect(optionsArg?.tools).toEqual(['Read']);
@@ -1212,7 +1253,15 @@ describe('Workflow Executor', () => {
         steps: [{ command: 'command-one', allowed_tools: ['Read'] }],
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, workflow, 'User msg', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'User msg',
+        'db-conv-id'
+      );
 
       const optionsArg = mockSendQuery.mock.calls[0][3] as Record<string, unknown>;
       expect(optionsArg?.model).toBe('opus');
@@ -1224,6 +1273,7 @@ describe('Workflow Executor', () => {
       (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1237,11 +1287,9 @@ describe('Workflow Executor', () => {
       );
 
       // Should still complete
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should reject invalid command names with path traversal', async () => {
@@ -1252,6 +1300,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1261,11 +1310,9 @@ describe('Workflow Executor', () => {
       );
 
       // Should fail - path traversal rejected
-      const failCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
-      );
-      expect(failCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should reject command names starting with dot', async () => {
@@ -1276,6 +1323,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1285,11 +1333,9 @@ describe('Workflow Executor', () => {
       );
 
       // Should fail - dotfile rejected
-      const failCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
-      );
-      expect(failCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should return specific error message for empty command file (Issue #128)', async () => {
@@ -1303,6 +1349,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1328,6 +1375,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1354,6 +1402,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1382,6 +1431,7 @@ describe('Workflow Executor', () => {
       });
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1412,6 +1462,7 @@ describe('Workflow Executor', () => {
       });
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1439,6 +1490,7 @@ describe('Workflow Executor', () => {
       });
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1467,6 +1519,7 @@ describe('Workflow Executor', () => {
       });
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1495,6 +1548,7 @@ describe('Workflow Executor', () => {
       });
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1533,6 +1587,7 @@ describe('Workflow Executor', () => {
       });
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1566,6 +1621,7 @@ describe('Workflow Executor', () => {
       });
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1596,6 +1652,7 @@ describe('Workflow Executor', () => {
       });
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1635,6 +1692,7 @@ describe('Workflow Executor', () => {
       mockPlatform.sendMessage = sendMessageMock;
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1648,11 +1706,9 @@ describe('Workflow Executor', () => {
       );
 
       // Workflow should still complete successfully despite sendMessage failures
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should continue workflow when sendMessage fails during streaming', async () => {
@@ -1664,6 +1720,7 @@ describe('Workflow Executor', () => {
       mockPlatform.sendMessage = sendMessageMock;
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1677,11 +1734,9 @@ describe('Workflow Executor', () => {
       );
 
       // Workflow should still complete successfully
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should continue to next step when sendMessage fails on step notification', async () => {
@@ -1697,6 +1752,7 @@ describe('Workflow Executor', () => {
       mockPlatform.sendMessage = sendMessageMock;
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1713,11 +1769,9 @@ describe('Workflow Executor', () => {
       expect(mockSendQuery).toHaveBeenCalledTimes(2);
 
       // Workflow should complete
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should log errors with context when sendMessage fails', async () => {
@@ -1727,6 +1781,7 @@ describe('Workflow Executor', () => {
       mockPlatform.sendMessage = sendMessageMock;
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1757,6 +1812,7 @@ describe('Workflow Executor', () => {
       // With top-level error handling, executeWorkflow should NOT throw
       // Instead it marks the workflow as failed and returns normally
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1766,11 +1822,9 @@ describe('Workflow Executor', () => {
       );
 
       // Verify workflow was marked as failed in database
-      const failCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
-      );
-      expect(failCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should continue workflow when tool message send fails in streaming mode', async () => {
@@ -1787,6 +1841,7 @@ describe('Workflow Executor', () => {
       mockPlatform.sendMessage = sendMessageMock;
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1796,11 +1851,9 @@ describe('Workflow Executor', () => {
       );
 
       // Workflow should complete despite all sendMessage calls failing
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should record workflow failure in database even when failure notification fails', async () => {
@@ -1808,6 +1861,7 @@ describe('Workflow Executor', () => {
       mockPlatform.sendMessage = sendMessageMock;
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1821,11 +1875,9 @@ describe('Workflow Executor', () => {
       );
 
       // Database should still record the failure
-      const failCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
-      );
-      expect(failCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should warn user about dropped messages in streaming mode', async () => {
@@ -1852,6 +1904,7 @@ describe('Workflow Executor', () => {
       mockPlatform.sendMessage = sendMessageMock;
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1881,6 +1934,7 @@ describe('Workflow Executor', () => {
       mockPlatform.sendMessage = sendMessageMock;
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1897,11 +1951,9 @@ describe('Workflow Executor', () => {
       expect(mockSendQuery).toHaveBeenCalledTimes(2);
 
       // Workflow should complete
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should retry critical completion message on transient errors', async () => {
@@ -1919,6 +1971,7 @@ describe('Workflow Executor', () => {
       mockPlatform.sendMessage = sendMessageMock;
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -1938,49 +1991,17 @@ describe('Workflow Executor', () => {
 
     describe('staleness detection', () => {
       it('should fail stale workflow and start new one when last_activity_at > 15 min ago', async () => {
-        // Mock getActiveWorkflowRun to return a stale workflow (20 min inactive)
-        const staleTime = new Date(Date.now() - 20 * 60 * 1000); // 20 minutes ago
-        mockQuery.mockImplementation((query: string) => {
-          if (query.includes("status = 'running'")) {
-            return Promise.resolve(
-              createQueryResult([
-                {
-                  id: 'stale-workflow-id',
-                  workflow_name: 'old-workflow',
-                  conversation_id: 'conv-123',
-                  status: 'running' as const,
-                  started_at: staleTime,
-                  last_activity_at: staleTime,
-                  completed_at: null,
-                  current_step_index: 0,
-                  user_message: 'old message',
-                  metadata: {},
-                },
-              ])
-            );
-          }
-          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
-            return Promise.resolve(
-              createQueryResult([
-                {
-                  id: 'new-workflow-run-id',
-                  workflow_name: 'test-workflow',
-                  conversation_id: 'conv-123',
-                  status: 'running' as const,
-                  started_at: new Date(),
-                  last_activity_at: new Date(),
-                  completed_at: null,
-                  current_step_index: 0,
-                  user_message: 'test user message',
-                  metadata: {},
-                },
-              ])
-            );
-          }
-          return Promise.resolve(createQueryResult([]));
+        const staleTime = new Date(Date.now() - 20 * 60 * 1000);
+        (mockStore.getActiveWorkflowRun as ReturnType<typeof mock>).mockResolvedValue({
+          ...DEFAULT_WORKFLOW_RUN,
+          id: 'stale-workflow-id',
+          workflow_name: 'old-workflow',
+          started_at: staleTime,
+          last_activity_at: staleTime,
         });
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -1990,72 +2011,30 @@ describe('Workflow Executor', () => {
         );
 
         // Verify stale workflow was marked as failed
-        const failCalls = mockQuery.mock.calls.filter(
-          (call: unknown[]) =>
-            (call[0] as string).includes('UPDATE') &&
-            (call[0] as string).includes("'failed'") &&
-            (call[1] as string[])?.includes('stale-workflow-id')
+        const failCalls = (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls;
+        const staleFailCalls = failCalls.filter(
+          (call: unknown[]) => call[0] === 'stale-workflow-id'
         );
-        expect(failCalls.length).toBeGreaterThan(0);
+        expect(staleFailCalls.length).toBeGreaterThan(0);
 
         // Verify new workflow was created
-        const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
-          (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
-        );
-        expect(insertCalls.length).toBeGreaterThan(0);
-
-        // Reset mock
-        mockQuery.mockImplementation((query: string) => {
-          if (query.includes("status = 'running'")) {
-            return Promise.resolve(createQueryResult([]));
-          }
-          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
-            return Promise.resolve(
-              createQueryResult([
-                {
-                  id: 'test-workflow-run-id',
-                  workflow_name: 'test-workflow',
-                  conversation_id: 'conv-123',
-                  status: 'running' as const,
-                  started_at: new Date(),
-                  completed_at: null,
-                  current_step_index: 0,
-                  user_message: 'test user message',
-                  metadata: {},
-                },
-              ])
-            );
-          }
-          return Promise.resolve(createQueryResult([]));
-        });
+        expect(
+          (mockStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+        ).toBeGreaterThan(0);
       });
 
       it('should block new workflow when active workflow is not stale', async () => {
-        // Mock getActiveWorkflowRun to return a recent workflow (5 min inactive)
-        const recentTime = new Date(Date.now() - 5 * 60 * 1000); // 5 minutes ago
-        mockQuery.mockImplementation((query: string) => {
-          if (query.includes("status = 'running'")) {
-            return Promise.resolve(
-              createQueryResult([
-                {
-                  id: 'active-workflow-id',
-                  workflow_name: 'active-workflow',
-                  conversation_id: 'conv-123',
-                  status: 'running' as const,
-                  started_at: recentTime,
-                  last_activity_at: recentTime,
-                  completed_at: null,
-                  current_step_index: 0,
-                  user_message: 'active message',
-                  metadata: {},
-                },
-              ])
-            );
-          }
-          return Promise.resolve(createQueryResult([]));
+        const recentTime = new Date(Date.now() - 5 * 60 * 1000);
+        (mockStore.getActiveWorkflowRun as ReturnType<typeof mock>).mockResolvedValue({
+          ...DEFAULT_WORKFLOW_RUN,
+          id: 'active-workflow-id',
+          workflow_name: 'active-workflow',
+          started_at: recentTime,
+          last_activity_at: recentTime,
         });
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -2072,82 +2051,22 @@ describe('Workflow Executor', () => {
         );
         expect(blockingMessages.length).toBe(1);
 
-        // Verify no INSERT was made (new workflow not created)
-        const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
-          (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
-        );
-        expect(insertCalls.length).toBe(0);
-
-        // Reset mock
-        mockQuery.mockImplementation((query: string) => {
-          if (query.includes("status = 'running'")) {
-            return Promise.resolve(createQueryResult([]));
-          }
-          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
-            return Promise.resolve(
-              createQueryResult([
-                {
-                  id: 'test-workflow-run-id',
-                  workflow_name: 'test-workflow',
-                  conversation_id: 'conv-123',
-                  status: 'running' as const,
-                  started_at: new Date(),
-                  completed_at: null,
-                  current_step_index: 0,
-                  user_message: 'test user message',
-                  metadata: {},
-                },
-              ])
-            );
-          }
-          return Promise.resolve(createQueryResult([]));
-        });
+        // Verify no new workflow was created
+        expect((mockStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(0);
       });
 
       it('should fallback to started_at when last_activity_at is null', async () => {
-        // Mock getActiveWorkflowRun to return a workflow with null last_activity_at but old started_at
-        const staleTime = new Date(Date.now() - 20 * 60 * 1000); // 20 minutes ago
-        mockQuery.mockImplementation((query: string) => {
-          if (query.includes("status = 'running'")) {
-            return Promise.resolve(
-              createQueryResult([
-                {
-                  id: 'stale-workflow-id',
-                  workflow_name: 'old-workflow',
-                  conversation_id: 'conv-123',
-                  status: 'running' as const,
-                  started_at: staleTime,
-                  last_activity_at: null, // null - should fallback to started_at
-                  completed_at: null,
-                  current_step_index: 0,
-                  user_message: 'old message',
-                  metadata: {},
-                },
-              ])
-            );
-          }
-          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
-            return Promise.resolve(
-              createQueryResult([
-                {
-                  id: 'new-workflow-run-id',
-                  workflow_name: 'test-workflow',
-                  conversation_id: 'conv-123',
-                  status: 'running' as const,
-                  started_at: new Date(),
-                  last_activity_at: new Date(),
-                  completed_at: null,
-                  current_step_index: 0,
-                  user_message: 'test user message',
-                  metadata: {},
-                },
-              ])
-            );
-          }
-          return Promise.resolve(createQueryResult([]));
+        const staleTime = new Date(Date.now() - 20 * 60 * 1000);
+        (mockStore.getActiveWorkflowRun as ReturnType<typeof mock>).mockResolvedValue({
+          ...DEFAULT_WORKFLOW_RUN,
+          id: 'stale-workflow-id',
+          workflow_name: 'old-workflow',
+          started_at: staleTime,
+          last_activity_at: null,
         });
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -2157,75 +2076,28 @@ describe('Workflow Executor', () => {
         );
 
         // Verify stale workflow was marked as failed (fallback to started_at worked)
-        const failCalls = mockQuery.mock.calls.filter(
-          (call: unknown[]) =>
-            (call[0] as string).includes('UPDATE') &&
-            (call[0] as string).includes("'failed'") &&
-            (call[1] as string[])?.includes('stale-workflow-id')
+        const failCalls = (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls;
+        const staleFailCalls = failCalls.filter(
+          (call: unknown[]) => call[0] === 'stale-workflow-id'
         );
-        expect(failCalls.length).toBeGreaterThan(0);
-
-        // Reset mock
-        mockQuery.mockImplementation((query: string) => {
-          if (query.includes("status = 'running'")) {
-            return Promise.resolve(createQueryResult([]));
-          }
-          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
-            return Promise.resolve(
-              createQueryResult([
-                {
-                  id: 'test-workflow-run-id',
-                  workflow_name: 'test-workflow',
-                  conversation_id: 'conv-123',
-                  status: 'running' as const,
-                  started_at: new Date(),
-                  completed_at: null,
-                  current_step_index: 0,
-                  user_message: 'test user message',
-                  metadata: {},
-                },
-              ])
-            );
-          }
-          return Promise.resolve(createQueryResult([]));
-        });
+        expect(staleFailCalls.length).toBeGreaterThan(0);
       });
 
       it('should show cleanup error message when failWorkflowRun fails for stale workflow', async () => {
-        // Mock getActiveWorkflowRun to return a stale workflow
         const staleTime = new Date(Date.now() - 20 * 60 * 1000);
-        let failWorkflowCallCount = 0;
-        mockQuery.mockImplementation((query: string) => {
-          if (query.includes("status = 'running'")) {
-            return Promise.resolve(
-              createQueryResult([
-                {
-                  id: 'stale-workflow-id',
-                  workflow_name: 'old-workflow',
-                  conversation_id: 'conv-123',
-                  status: 'running' as const,
-                  started_at: staleTime,
-                  last_activity_at: staleTime,
-                  completed_at: null,
-                  current_step_index: 0,
-                  user_message: 'old message',
-                  metadata: {},
-                },
-              ])
-            );
-          }
-          // Fail the staleness cleanup query
-          if (query.includes('UPDATE') && query.includes("'failed'")) {
-            failWorkflowCallCount++;
-            if (failWorkflowCallCount === 1) {
-              // First fail call is for staleness cleanup
-              return Promise.reject(new Error('Database connection lost'));
-            }
-          }
-          return Promise.resolve(createQueryResult([]));
+        (mockStore.getActiveWorkflowRun as ReturnType<typeof mock>).mockResolvedValue({
+          ...DEFAULT_WORKFLOW_RUN,
+          id: 'stale-workflow-id',
+          workflow_name: 'old-workflow',
+          started_at: staleTime,
+          last_activity_at: staleTime,
         });
+        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mockRejectedValueOnce(
+          new Error('Database connection lost')
+        );
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -2245,35 +2117,7 @@ describe('Workflow Executor', () => {
         expect(cleanupErrorMessages.length).toBe(1);
 
         // Verify no new workflow was created
-        const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
-          (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
-        );
-        expect(insertCalls.length).toBe(0);
-
-        // Reset mock
-        mockQuery.mockImplementation((query: string) => {
-          if (query.includes("status = 'running'")) {
-            return Promise.resolve(createQueryResult([]));
-          }
-          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
-            return Promise.resolve(
-              createQueryResult([
-                {
-                  id: 'test-workflow-run-id',
-                  workflow_name: 'test-workflow',
-                  conversation_id: 'conv-123',
-                  status: 'running' as const,
-                  started_at: new Date(),
-                  completed_at: null,
-                  current_step_index: 0,
-                  user_message: 'test user message',
-                  metadata: {},
-                },
-              ])
-            );
-          }
-          return Promise.resolve(createQueryResult([]));
-        });
+        expect((mockStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(0);
       });
     });
   });
@@ -2300,6 +2144,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -2312,11 +2157,9 @@ describe('Workflow Executor', () => {
       expect(mockSendQuery).toHaveBeenCalledTimes(3);
 
       // Should complete successfully
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
 
       // Reset mock
       mockSendQuery.mockImplementation(function* () {
@@ -2340,6 +2183,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -2352,11 +2196,9 @@ describe('Workflow Executor', () => {
       expect(mockSendQuery).toHaveBeenCalledTimes(3);
 
       // Should fail
-      const failCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
-      );
-      expect(failCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
 
       // Reset mock
       mockSendQuery.mockImplementation(function* () {
@@ -2378,7 +2220,15 @@ describe('Workflow Executor', () => {
         prompt: 'Output <promise>DONE</promise> when finished.',
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
 
       // Should complete on first iteration
       expect(mockSendQuery).toHaveBeenCalledTimes(1);
@@ -2403,14 +2253,20 @@ describe('Workflow Executor', () => {
         prompt: 'Complete immediately.',
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
-
-      // Should have UPDATE with metadata
-      const metadataCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes('metadata')
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
       );
-      expect(metadataCalls.length).toBeGreaterThan(0);
+
+      // Should have UPDATE with metadata via updateWorkflowRun
+      expect(
+        (mockStore.updateWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
 
       // Reset mock
       mockSendQuery.mockImplementation(function* () {
@@ -2432,7 +2288,15 @@ describe('Workflow Executor', () => {
         prompt: 'Try once.',
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
 
       // Should have run exactly 1 time
       expect(mockSendQuery).toHaveBeenCalledTimes(1);
@@ -2457,7 +2321,15 @@ describe('Workflow Executor', () => {
         prompt: 'Output COMPLETE when finished.',
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
 
       // Should complete on first iteration (plain signal detected)
       expect(mockSendQuery).toHaveBeenCalledTimes(1);
@@ -2487,17 +2359,23 @@ describe('Workflow Executor', () => {
         prompt: 'Work until done.',
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
 
       // Should have run 2 iterations (failed on 2nd)
       expect(mockSendQuery).toHaveBeenCalledTimes(2);
 
       // Should fail
-      const failCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
-      );
-      expect(failCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
 
       // Reset mock
       mockSendQuery.mockImplementation(function* () {
@@ -2523,6 +2401,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -2569,7 +2448,15 @@ describe('Workflow Executor', () => {
         prompt: 'Do work with fresh context each time.',
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
 
       // Should have run 3 iterations
       expect(mockSendQuery).toHaveBeenCalledTimes(3);
@@ -2601,17 +2488,23 @@ describe('Workflow Executor', () => {
         prompt: 'Output completion signal.',
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
 
       // Should complete on first iteration (signal accumulated across chunks)
       expect(mockSendQuery).toHaveBeenCalledTimes(1);
 
       // Should have marked as completed
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
 
       // Reset mock
       mockSendQuery.mockImplementation(function* () {
@@ -2634,17 +2527,23 @@ describe('Workflow Executor', () => {
         prompt: 'Work until done.',
       };
 
-      await executeWorkflow(mockPlatform, 'conv-123', testDir, loopWorkflow, 'Test', 'db-conv-id');
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
 
       // Should have run max_iterations times (NOT detected as complete)
       expect(mockSendQuery).toHaveBeenCalledTimes(2);
 
       // Should have FAILED (not completed)
-      const failCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
-      );
-      expect(failCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
 
       // Reset mock
       mockSendQuery.mockImplementation(function* () {
@@ -2668,6 +2567,7 @@ describe('Workflow Executor', () => {
           '[GitHub Issue Context]\nIssue #42: "Test Issue"\nAuthor: testuser\n\nDescription:\nTest issue body';
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -2703,6 +2603,7 @@ describe('Workflow Executor', () => {
         const issueContext = 'GitHub Issue #123 content here';
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -2739,6 +2640,7 @@ describe('Workflow Executor', () => {
 
         // No issueContext provided
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -2772,6 +2674,7 @@ describe('Workflow Executor', () => {
           'Issue: Add dark mode with $20 budget & (regex) patterns like .* and [a-z]+ and $CONTEXT literal';
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -2809,6 +2712,7 @@ describe('Workflow Executor', () => {
         const issueContext = 'Shared context value';
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -2856,6 +2760,7 @@ describe('Workflow Executor', () => {
           '[GitHub Issue Context]\nIssue #99: "Loop Test"\nAuthor: loopuser\n\nBody content';
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -2894,6 +2799,7 @@ describe('Workflow Executor', () => {
         const issueContext = 'PR #555 details here';
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -2925,6 +2831,7 @@ describe('Workflow Executor', () => {
         const issueContext = 'Issue #77 context';
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -2936,13 +2843,10 @@ describe('Workflow Executor', () => {
         );
 
         // Check that createWorkflowRun was called with metadata containing github_context
-        const insertCalls = mockQuery.mock.calls.filter(
-          call => typeof call[0] === 'string' && call[0].includes('INSERT')
-        );
-        expect(insertCalls.length).toBeGreaterThan(0);
-        const insertParams = insertCalls[0][1] as string[];
-        // The 5th parameter should be the metadata JSON
-        expect(insertParams[4]).toBe(JSON.stringify({ github_context: 'Issue #77 context' }));
+        const createCalls = (mockStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls;
+        expect(createCalls.length).toBeGreaterThan(0);
+        const createArg = createCalls[0][0] as Record<string, unknown>;
+        expect(createArg.metadata).toEqual({ github_context: 'Issue #77 context' });
       });
 
       it('should store empty metadata when issueContext is undefined', async () => {
@@ -2954,6 +2858,7 @@ describe('Workflow Executor', () => {
         };
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -2963,12 +2868,10 @@ describe('Workflow Executor', () => {
           'codebase-id'
         );
 
-        const insertCalls = mockQuery.mock.calls.filter(
-          call => typeof call[0] === 'string' && call[0].includes('INSERT')
-        );
-        expect(insertCalls.length).toBeGreaterThan(0);
-        const insertParams = insertCalls[0][1] as string[];
-        expect(insertParams[4]).toBe('{}');
+        const createCalls = (mockStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls;
+        expect(createCalls.length).toBeGreaterThan(0);
+        const createArg = createCalls[0][0] as Record<string, unknown>;
+        expect(createArg.metadata).toEqual({});
       });
     });
   });
@@ -3006,6 +2909,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3018,11 +2922,9 @@ describe('Workflow Executor', () => {
       expect(mockSendQuery).toHaveBeenCalledTimes(3);
 
       // Workflow should complete successfully
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should fail workflow if any parallel step fails', async () => {
@@ -3053,6 +2955,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3062,11 +2965,9 @@ describe('Workflow Executor', () => {
       );
 
       // Workflow should fail
-      const failCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
-      );
-      expect(failCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
 
       // Should send failure message to user
       const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
@@ -3096,6 +2997,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3109,11 +3011,9 @@ describe('Workflow Executor', () => {
       expect(mockSendQuery).toHaveBeenCalledTimes(4);
 
       // Workflow should complete successfully
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
 
       // Verify step notifications were sent for all steps
       const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
@@ -3146,6 +3046,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3192,6 +3093,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3231,6 +3133,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3244,11 +3147,9 @@ describe('Workflow Executor', () => {
       expect(mockSendQuery).toHaveBeenCalledTimes(6);
 
       // Workflow should complete successfully
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
     });
 
     it('should report all failures when multiple parallel steps fail', async () => {
@@ -3282,6 +3183,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3291,11 +3193,9 @@ describe('Workflow Executor', () => {
       );
 
       // Workflow should fail
-      const failCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'failed'")
-      );
-      expect(failCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
 
       // Should send failure message containing ALL errors
       const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
@@ -3326,6 +3226,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3338,11 +3239,9 @@ describe('Workflow Executor', () => {
       expect(mockSendQuery).toHaveBeenCalledTimes(2);
 
       // Workflow should complete successfully
-      const completeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes('UPDATE') && (call[0] as string).includes("'completed'")
-      );
-      expect(completeCalls.length).toBeGreaterThan(0);
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
 
       // Should have step notifications (not parallel block notifications)
       const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
@@ -3381,6 +3280,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3423,6 +3323,7 @@ describe('Workflow Executor', () => {
       commitAllChangesSpy.mockResolvedValue(false);
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3446,6 +3347,7 @@ describe('Workflow Executor', () => {
       (mockPlatform.getPlatformType as ReturnType<typeof mock>).mockReturnValue('telegram');
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3470,6 +3372,7 @@ describe('Workflow Executor', () => {
       (mockPlatform.getPlatformType as ReturnType<typeof mock>).mockReturnValue('github');
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3491,6 +3394,7 @@ describe('Workflow Executor', () => {
       commitAllChangesSpy.mockRejectedValue(new Error('pre-commit hook failed'));
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3528,6 +3432,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3567,6 +3472,7 @@ describe('Workflow Executor', () => {
       };
 
       await executeWorkflow(
+        mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
@@ -3599,64 +3505,23 @@ describe('Workflow Executor', () => {
       steps: [{ command: 'command-one' }],
     };
 
-    // Helper: Create mock query handler that allows workflow creation
-    function createSuccessfulWorkflowMock(
-      conversationId: string,
-      codebaseId: string | null = null
-    ): (query: string, params?: unknown[]) => Promise<{ rows: unknown[]; rowCount: number }> {
-      return (query: string) => {
-        if (query.includes("status = 'running'")) {
-          return Promise.resolve(createQueryResult([]));
-        }
-        if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
-          return Promise.resolve(
-            createQueryResult([
-              {
-                id: 'workflow-id',
-                workflow_name: 'test-workflow',
-                conversation_id: conversationId,
-                codebase_id: codebaseId,
-                current_step_index: 0,
-                status: 'running' as const,
-                user_message: 'test',
-                metadata: {},
-                started_at: new Date(),
-                last_activity_at: new Date(),
-                completed_at: null,
-              },
-            ])
-          );
-        }
-        if (
-          query.includes('UPDATE remote_agent_workflow_runs') ||
-          query.includes('last_activity_at')
-        ) {
-          return Promise.resolve(createQueryResult([]));
-        }
-        // Between-step cancellation check (getWorkflowRunStatus)
-        if (query.includes('SELECT status FROM remote_agent_workflow_runs')) {
-          return Promise.resolve(createQueryResult([{ status: 'running' }]));
-        }
-        throw new Error(`Unexpected query: ${query.slice(0, 100)}`);
-      };
-    }
-
-    // Helper: Check if query calls include a specific pattern
-    function hasQueryMatching(pattern: string): boolean {
-      return mockQuery.mock.calls.some((call: unknown[]) => (call[0] as string).includes(pattern));
-    }
-
     // Helper: Find message containing text
-    function findMessage(platform: IPlatformAdapter, text: string): unknown[] | undefined {
+    function findMessage(platform: IWorkflowPlatform, text: string): unknown[] | undefined {
       const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
       return sendMessage.mock.calls.find((call: unknown[]) => (call[1] as string).includes(text));
     }
 
     it('should allow workflow when no active workflow for conversation', async () => {
-      mockQuery.mockImplementation(createSuccessfulWorkflowMock('db-conv-123'));
       const platform = createMockPlatform();
+      const localStore = createMockStore();
+      const localDeps = {
+        store: localStore,
+        getAssistantClient: mockGetAssistantClient,
+        loadConfig: mockLoadConfig,
+      };
 
       await executeWorkflow(
+        localDeps,
         platform,
         'conv-123',
         testDir,
@@ -3665,20 +3530,26 @@ describe('Workflow Executor', () => {
         'db-conv-123'
       );
 
-      expect(hasQueryMatching("status = 'running'")).toBe(true);
-      expect(hasQueryMatching('INSERT INTO remote_agent_workflow_runs')).toBe(true);
+      expect(
+        (localStore.getActiveWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
+      expect(
+        (localStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
       expect(findMessage(platform, '🚀 **Starting workflow**')).toBeDefined();
       expect(findMessage(platform, '✅ **Workflow complete**')).toBeDefined();
     });
 
     it('should use database conversation ID for active workflow check', async () => {
-      const queryCalls: Array<{ query: string; params: unknown[] }> = [];
-      mockQuery.mockImplementation((query: string, params?: unknown[]) => {
-        queryCalls.push({ query, params: params || [] });
-        return createSuccessfulWorkflowMock('db-conv-456', 'codebase-789')(query);
-      });
+      const localStore = createMockStore();
+      const localDeps = {
+        store: localStore,
+        getAssistantClient: mockGetAssistantClient,
+        loadConfig: mockLoadConfig,
+      };
 
       await executeWorkflow(
+        localDeps,
         createMockPlatform(),
         'platform-conv-456',
         testDir,
@@ -3688,22 +3559,26 @@ describe('Workflow Executor', () => {
         'codebase-789'
       );
 
-      const activeCheckCall = queryCalls.find(c => c.query.includes("status = 'running'"));
-      expect(activeCheckCall?.params).toContain('db-conv-456');
-      expect(activeCheckCall?.params).not.toContain('platform-conv-456');
+      const activeCheckCalls = (localStore.getActiveWorkflowRun as ReturnType<typeof mock>).mock
+        .calls;
+      expect(activeCheckCalls.length).toBeGreaterThan(0);
+      expect(activeCheckCalls[0][0]).toBe('db-conv-456');
     });
 
     it('should block workflow when active workflow check fails', async () => {
-      mockQuery.mockImplementation((query: string) => {
-        if (query.includes("status = 'running'")) {
-          return Promise.reject(new Error('Database connection lost'));
-        }
-        throw new Error(`Unexpected query: ${query.slice(0, 100)}`);
+      const localStore = createMockStore({
+        getActiveWorkflowRun: mock(() => Promise.reject(new Error('Database connection lost'))),
       });
+      const localDeps = {
+        store: localStore,
+        getAssistantClient: mockGetAssistantClient,
+        loadConfig: mockLoadConfig,
+      };
 
       const platform = createMockPlatform();
 
       await executeWorkflow(
+        localDeps,
         platform,
         'conv-123',
         testDir,
@@ -3712,7 +3587,7 @@ describe('Workflow Executor', () => {
         'db-conv-123'
       );
 
-      expect(hasQueryMatching('INSERT INTO remote_agent_workflow_runs')).toBe(false);
+      expect((localStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(0);
       const errorMsg =
         findMessage(platform, 'Unable to verify') || findMessage(platform, 'Workflow blocked');
       expect(errorMsg).toBeDefined();
@@ -3720,34 +3595,6 @@ describe('Workflow Executor', () => {
   });
 
   describe('error tracking improvements (#259)', () => {
-    beforeEach(() => {
-      // Reset mockQuery to default implementation (previous tests may override it)
-      mockQuery.mockImplementation((query: string) => {
-        if (query.includes("status = 'running'")) {
-          return Promise.resolve(createQueryResult([]));
-        }
-        if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
-          return Promise.resolve(
-            createQueryResult([
-              {
-                id: 'test-workflow-run-id',
-                workflow_name: 'test-workflow',
-                conversation_id: 'conv-123',
-                codebase_id: 'codebase-456',
-                current_step_index: 0,
-                status: 'running' as const,
-                user_message: 'test user message',
-                metadata: {},
-                started_at: new Date(),
-                completed_at: null,
-              },
-            ])
-          );
-        }
-        return Promise.resolve(createQueryResult([]));
-      });
-    });
-
     describe('consecutive UNKNOWN error tracking', () => {
       it('should fail workflow step after 3 consecutive unknown errors in stream mode', async () => {
         // Unknown errors: message doesn't match any FATAL or TRANSIENT patterns
@@ -3766,6 +3613,7 @@ describe('Workflow Executor', () => {
         });
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -3808,6 +3656,7 @@ describe('Workflow Executor', () => {
 
         // Should NOT abort because counter resets on success (call 3)
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -3842,6 +3691,7 @@ describe('Workflow Executor', () => {
         // Should NOT abort - transient errors don't increment unknown counter
         // Workflow completes because transient send failures are suppressed
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -3861,34 +3711,10 @@ describe('Workflow Executor', () => {
 
     describe('activity update failure tracking', () => {
       it('should warn user after 5 consecutive activity update failures', async () => {
-        // Make activity updates fail (the UPDATE query for last_activity_at)
-        mockQuery.mockImplementation((query: string) => {
-          if (typeof query === 'string' && query.includes('last_activity_at')) {
-            return Promise.reject(new Error('DB connection lost'));
-          }
-          if (query.includes("status = 'running'")) {
-            return Promise.resolve(createQueryResult([]));
-          }
-          if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
-            return Promise.resolve(
-              createQueryResult([
-                {
-                  id: 'test-workflow-run-id',
-                  workflow_name: 'test-workflow',
-                  conversation_id: 'conv-123',
-                  codebase_id: 'codebase-456',
-                  current_step_index: 0,
-                  status: 'running' as const,
-                  user_message: 'test user message',
-                  metadata: {},
-                  started_at: new Date(),
-                  completed_at: null,
-                },
-              ])
-            );
-          }
-          return Promise.resolve(createQueryResult([]));
-        });
+        // Make activity updates fail
+        (mockStore.updateWorkflowActivity as ReturnType<typeof mock>).mockRejectedValue(
+          new Error('DB connection lost')
+        );
 
         (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
 
@@ -3904,6 +3730,7 @@ describe('Workflow Executor', () => {
         });
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -3943,6 +3770,7 @@ describe('Workflow Executor', () => {
         });
 
         await executeWorkflow(
+          mockDeps,
           mockPlatform,
           'conv-123',
           testDir,
@@ -4017,59 +3845,24 @@ describe('isValidCommandName', () => {
 });
 
 describe('app defaults command loading', () => {
-  let mockPlatform: IPlatformAdapter;
+  let localPlatform: IWorkflowPlatform;
+  let localDeps: WorkflowDeps;
+  let localStore: IWorkflowStore;
   let testDir: string;
-  let loadConfigSpy: Mock<typeof configLoader.loadConfig>;
   let commitAllChangesSpy: Mock<typeof gitUtils.commitAllChanges>;
   let getDefaultBranchSpy: Mock<typeof gitUtils.getDefaultBranch>;
 
-  // Create mock platform adapter
-  function createMockPlatform(): IPlatformAdapter {
-    return {
-      sendMessage: mock(() => Promise.resolve()),
-      ensureThread: mock((id: string) => Promise.resolve(id)),
-      getStreamingMode: mock(() => 'batch' as const),
-      getPlatformType: mock(() => 'test'),
-      start: mock(() => Promise.resolve()),
-      stop: mock(() => {}),
-    };
-  }
-
   beforeEach(async () => {
-    mockPlatform = createMockPlatform();
-    mockQuery.mockClear();
+    localPlatform = createMockPlatform();
+    localStore = createMockStore();
+    localDeps = {
+      store: localStore,
+      getAssistantClient: mockGetAssistantClient,
+      loadConfig: mockLoadConfig,
+    };
     mockSendQuery.mockClear();
     mockGetAssistantClient.mockClear();
-    (mockPlatform.sendMessage as ReturnType<typeof mock>).mockClear();
-
-    // Reset mockQuery implementation to ensure database mocking works
-    mockQuery.mockImplementation((query: string) => {
-      // For getActiveWorkflowRun query, return no active workflow by default
-      if (query.includes("status = 'running'")) {
-        return Promise.resolve(createQueryResult([]));
-      }
-      // For createWorkflowRun INSERT, return the new workflow run
-      if (query.includes('INSERT INTO remote_agent_workflow_runs')) {
-        return Promise.resolve(
-          createQueryResult([
-            {
-              id: 'test-workflow-run-id',
-              workflow_name: 'test-workflow',
-              conversation_id: 'conv-123',
-              codebase_id: 'codebase-456',
-              current_step_index: 0,
-              status: 'running' as const,
-              user_message: 'test user message',
-              metadata: {},
-              started_at: new Date(),
-              completed_at: null,
-            },
-          ])
-        );
-      }
-      // Default: empty result for UPDATE queries and other operations
-      return Promise.resolve(createQueryResult([]));
-    });
+    (localPlatform.sendMessage as ReturnType<typeof mock>).mockClear();
 
     // Reset mock implementation to default behavior
     mockSendQuery.mockImplementation(function* () {
@@ -4091,21 +3884,15 @@ describe('app defaults command loading', () => {
     await mkdir(join(testDir, '.archon', 'commands'), { recursive: true });
 
     // Mock loadConfig with default values (app defaults enabled)
-    loadConfigSpy = spyOn(configLoader, 'loadConfig');
-    loadConfigSpy.mockResolvedValue({
-      botName: 'Archon',
-      assistant: 'claude',
+    mockLoadConfig.mockResolvedValue({
+      assistant: 'claude' as const,
       assistants: { claude: {}, codex: {} },
-      streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
-      paths: { workspaces: '/tmp', worktrees: '/tmp' },
-      concurrency: { maxConversations: 10 },
-      commands: { autoLoad: true },
-      defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+      commands: {},
+      defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
     });
   });
 
   afterEach(async () => {
-    loadConfigSpy.mockRestore();
     commitAllChangesSpy.mockRestore();
     getDefaultBranchSpy.mockRestore();
     try {
@@ -4124,7 +3911,8 @@ describe('app defaults command loading', () => {
     };
 
     const result = await executeWorkflow(
-      mockPlatform,
+      localDeps,
+      localPlatform,
       'conv-123',
       testDir,
       workflow,
@@ -4152,7 +3940,8 @@ describe('app defaults command loading', () => {
     };
 
     await executeWorkflow(
-      mockPlatform,
+      localDeps,
+      localPlatform,
       'conv-123',
       testDir,
       workflow,
@@ -4170,15 +3959,11 @@ describe('app defaults command loading', () => {
 
   it('should skip app defaults when loadDefaultCommands is false', async () => {
     // Configure to disable app default commands
-    loadConfigSpy.mockResolvedValue({
-      botName: 'Archon',
-      assistant: 'claude',
+    mockLoadConfig.mockResolvedValue({
+      assistant: 'claude' as const,
       assistants: { claude: {}, codex: {} },
-      streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
-      paths: { workspaces: '/tmp', worktrees: '/tmp' },
-      concurrency: { maxConversations: 10 },
-      commands: { autoLoad: true },
-      defaults: { copyDefaults: true, loadDefaultCommands: false, loadDefaultWorkflows: true },
+      commands: {},
+      defaults: { loadDefaultCommands: false, loadDefaultWorkflows: true },
     });
 
     // Try to load a real app default command - should fail since app defaults disabled
@@ -4189,7 +3974,8 @@ describe('app defaults command loading', () => {
     };
 
     await executeWorkflow(
-      mockPlatform,
+      localDeps,
+      localPlatform,
       'conv-123',
       testDir,
       workflow,
@@ -4198,7 +3984,7 @@ describe('app defaults command loading', () => {
     );
 
     // Should fail with "not found" error (not search app defaults)
-    const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+    const sendMessageCalls = (localPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
     const failureMessages = sendMessageCalls.filter(
       (call: unknown[]) =>
         typeof call[1] === 'string' && (call[1] as string).includes('Command prompt not found')
@@ -4214,7 +4000,8 @@ describe('app defaults command loading', () => {
     };
 
     await executeWorkflow(
-      mockPlatform,
+      localDeps,
+      localPlatform,
       'conv-123',
       testDir,
       workflow,
@@ -4223,7 +4010,7 @@ describe('app defaults command loading', () => {
     );
 
     // Should fail with "not found" error but not crash
-    const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+    const sendMessageCalls = (localPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
     const failureMessages = sendMessageCalls.filter(
       (call: unknown[]) =>
         typeof call[1] === 'string' && (call[1] as string).includes('Command prompt not found')
@@ -4233,16 +4020,13 @@ describe('app defaults command loading', () => {
 
   describe('binary build bundled commands', () => {
     let isBinaryBuildSpy: Mock<typeof bundledDefaults.isBinaryBuild>;
-    let loadConfigSpy: Mock<typeof configLoader.loadConfig>;
 
     beforeEach(() => {
       isBinaryBuildSpy = spyOn(bundledDefaults, 'isBinaryBuild');
-      loadConfigSpy = spyOn(configLoader, 'loadConfig');
     });
 
     afterEach(() => {
       isBinaryBuildSpy.mockRestore();
-      loadConfigSpy.mockRestore();
     });
 
     it('should load command from bundled defaults when running as binary', async () => {
@@ -4250,15 +4034,11 @@ describe('app defaults command loading', () => {
       isBinaryBuildSpy.mockReturnValue(true);
 
       // Enable default command loading
-      loadConfigSpy.mockResolvedValue({
-        botName: 'Archon',
-        assistant: 'claude',
+      mockLoadConfig.mockResolvedValue({
+        assistant: 'claude' as const,
         assistants: { claude: {}, codex: {} },
-        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
-        paths: { workspaces: '/tmp', worktrees: '/tmp' },
-        concurrency: { maxConversations: 10 },
-        commands: { autoLoad: true },
-        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+        commands: {},
+        defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
       });
 
       // Use a known bundled command name
@@ -4269,7 +4049,8 @@ describe('app defaults command loading', () => {
       };
 
       await executeWorkflow(
-        mockPlatform,
+        localDeps,
+        localPlatform,
         'conv-123',
         testDir,
         workflow,
@@ -4278,7 +4059,7 @@ describe('app defaults command loading', () => {
       );
 
       // Should have called AI with the bundled command content (not fail with not found)
-      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const sendMessageCalls = (localPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
       const notFoundMessages = sendMessageCalls.filter(
         (call: unknown[]) =>
           typeof call[1] === 'string' && (call[1] as string).includes('Command prompt not found')
@@ -4292,15 +4073,11 @@ describe('app defaults command loading', () => {
       isBinaryBuildSpy.mockReturnValue(true);
 
       // Enable default command loading
-      loadConfigSpy.mockResolvedValue({
-        botName: 'Archon',
-        assistant: 'claude',
+      mockLoadConfig.mockResolvedValue({
+        assistant: 'claude' as const,
         assistants: { claude: {}, codex: {} },
-        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
-        paths: { workspaces: '/tmp', worktrees: '/tmp' },
-        concurrency: { maxConversations: 10 },
-        commands: { autoLoad: true },
-        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+        commands: {},
+        defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
       });
 
       const workflow: WorkflowDefinition = {
@@ -4310,7 +4087,8 @@ describe('app defaults command loading', () => {
       };
 
       await executeWorkflow(
-        mockPlatform,
+        localDeps,
+        localPlatform,
         'conv-123',
         testDir,
         workflow,
@@ -4319,7 +4097,7 @@ describe('app defaults command loading', () => {
       );
 
       // Should fail with not found error
-      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const sendMessageCalls = (localPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
       const notFoundMessages = sendMessageCalls.filter(
         (call: unknown[]) =>
           typeof call[1] === 'string' && (call[1] as string).includes('Command prompt not found')
@@ -4332,7 +4110,7 @@ describe('app defaults command loading', () => {
       isBinaryBuildSpy.mockReturnValue(true);
 
       // Disable default command loading
-      loadConfigSpy.mockResolvedValue({
+      mockLoadConfig.mockResolvedValue({
         botName: 'Archon',
         assistant: 'claude',
         assistants: { claude: {}, codex: {} },
@@ -4351,7 +4129,8 @@ describe('app defaults command loading', () => {
       };
 
       await executeWorkflow(
-        mockPlatform,
+        localDeps,
+        localPlatform,
         'conv-123',
         testDir,
         workflow,
@@ -4360,7 +4139,7 @@ describe('app defaults command loading', () => {
       );
 
       // Should fail with not found because defaults are disabled
-      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const sendMessageCalls = (localPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
       const notFoundMessages = sendMessageCalls.filter(
         (call: unknown[]) =>
           typeof call[1] === 'string' && (call[1] as string).includes('Command prompt not found')
@@ -4378,9 +4157,10 @@ describe('app defaults command loading', () => {
     };
 
     it('creates a fresh run when no prior failed run exists', async () => {
-      // mockQuery already returns [] for status='failed' queries by default
+      // localStore.findResumableRun returns null by default
       await executeWorkflow(
-        mockPlatform,
+        localDeps,
+        localPlatform,
         'conv-123',
         testDir,
         twoStepWorkflow,
@@ -4388,21 +4168,17 @@ describe('app defaults command loading', () => {
         'db-conv-id'
       );
 
-      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
-        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
-      );
-      expect(insertCalls.length).toBe(1);
+      expect((localStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(1);
     });
 
     it('resumes a prior failed run when found with completed steps', async () => {
-      const priorRunId = 'prior-run-id';
-      const priorRun = {
-        id: priorRunId,
+      const priorRun: WorkflowRun = {
+        id: 'prior-run-id',
         workflow_name: 'test-workflow',
         conversation_id: 'conv-123',
         parent_conversation_id: null,
         codebase_id: null,
-        current_step_index: 1, // step 0 completed
+        current_step_index: 1,
         status: 'failed' as const,
         user_message: 'original message',
         metadata: {},
@@ -4411,48 +4187,18 @@ describe('app defaults command loading', () => {
         last_activity_at: new Date(),
         working_path: testDir,
       };
-      const resumedRun = { ...priorRun, status: 'running' as const, completed_at: null };
+      const resumedRun: WorkflowRun = {
+        ...priorRun,
+        status: 'running' as const,
+        completed_at: null,
+      };
 
-      mockQuery.mockImplementation((query: string) => {
-        if (
-          (query as string).includes("status = 'failed'") &&
-          (query as string).includes('working_path')
-        ) {
-          return Promise.resolve(createQueryResult([priorRun]));
-        }
-        if (
-          (query as string).includes("status = 'running'") &&
-          (query as string).includes('completed_at = NULL')
-        ) {
-          return Promise.resolve(createQueryResult([resumedRun]));
-        }
-        // resumeWorkflowRun: SELECT after UPDATE (split for SQLite compatibility)
-        if (
-          (query as string).includes('SELECT') &&
-          (query as string).includes('remote_agent_workflow_runs WHERE id')
-        ) {
-          return Promise.resolve(createQueryResult([resumedRun]));
-        }
-        if ((query as string).includes("status = 'running'")) {
-          return Promise.resolve(createQueryResult([]));
-        }
-        if ((query as string).includes('INSERT INTO remote_agent_workflow_runs')) {
-          return Promise.resolve(createQueryResult([resumedRun]));
-        }
-        if (
-          (query as string).includes('remote_agent_codebases') &&
-          (query as string).includes('WHERE id')
-        ) {
-          return Promise.resolve(createQueryResult([]));
-        }
-        if ((query as string).includes('INSERT INTO remote_agent_workflow_events')) {
-          return Promise.resolve(createQueryResult([]));
-        }
-        return Promise.resolve(createQueryResult([]));
-      });
+      (localStore.findResumableRun as ReturnType<typeof mock>).mockResolvedValue(priorRun);
+      (localStore.resumeWorkflowRun as ReturnType<typeof mock>).mockResolvedValue(resumedRun);
 
       await executeWorkflow(
-        mockPlatform,
+        localDeps,
+        localPlatform,
         'conv-123',
         testDir,
         twoStepWorkflow,
@@ -4460,107 +4206,47 @@ describe('app defaults command loading', () => {
         'db-conv-id'
       );
 
-      // No INSERT — resume used existing run
-      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
-        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
-      );
-      expect(insertCalls.length).toBe(0);
+      // No createWorkflowRun — resume used existing run
+      expect((localStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(0);
 
-      // UPDATE status='running' was called (resumeWorkflowRun)
-      const resumeCalls = mockQuery.mock.calls.filter(
-        (call: unknown[]) =>
-          (call[0] as string).includes("status = 'running'") &&
-          (call[0] as string).includes('completed_at = NULL')
-      );
-      expect(resumeCalls.length).toBe(1);
+      // resumeWorkflowRun was called
+      expect((localStore.resumeWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(1);
 
       // Resume message was sent to user with correct step numbers
-      const sendMessageCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const sendMessageCalls = (localPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
       const resumeMessages = sendMessageCalls.filter(
         (call: unknown[]) =>
           typeof call[1] === 'string' && (call[1] as string).includes('▶️ **Resuming**')
       );
       expect(resumeMessages.length).toBe(1);
       const resumeMsg = resumeMessages[0][1] as string;
-      expect(resumeMsg).toContain('from step 2'); // resumeFromStepIndex=1 → step 2
+      expect(resumeMsg).toContain('from step 2');
       expect(resumeMsg).toContain('skipping 1 already-completed step(s)');
       expect(resumeMsg).toContain('session context from prior steps is not restored');
 
       // step_skipped_prior_success event was emitted for step 0
-      const skipEventCalls = mockQuery.mock.calls.filter(
+      const eventCalls = (localStore.createWorkflowEvent as ReturnType<typeof mock>).mock.calls;
+      const skipEventCalls = eventCalls.filter(
         (call: unknown[]) =>
-          (call[0] as string).includes('INSERT INTO remote_agent_workflow_events') &&
-          JSON.stringify(call[1]).includes('step_skipped_prior_success')
+          (call[0] as Record<string, unknown>).event_type === 'step_skipped_prior_success'
       );
       expect(skipEventCalls.length).toBe(1);
-
-      // Restore default mock after test
-      mockQuery.mockImplementation(defaultMockQuery);
     });
 
     it('creates a fresh run when prior failed run has current_step_index=0', async () => {
-      // A run that failed on step 0 (nothing completed) — not worth resuming
-      const priorRun = {
+      const priorRun: WorkflowRun = {
+        ...DEFAULT_WORKFLOW_RUN,
         id: 'prior-run-id',
-        workflow_name: 'test-workflow',
-        conversation_id: 'conv-123',
-        parent_conversation_id: null,
-        codebase_id: null,
-        current_step_index: 0, // no steps completed
+        current_step_index: 0,
         status: 'failed' as const,
-        user_message: 'original message',
-        metadata: {},
-        started_at: new Date(),
-        completed_at: new Date(),
-        last_activity_at: new Date(),
         working_path: testDir,
       };
 
-      mockQuery.mockImplementation((query: string) => {
-        if (
-          (query as string).includes("status = 'failed'") &&
-          (query as string).includes('working_path')
-        ) {
-          return Promise.resolve(createQueryResult([priorRun]));
-        }
-        if ((query as string).includes("status = 'running'")) {
-          return Promise.resolve(createQueryResult([]));
-        }
-        if ((query as string).includes('INSERT INTO remote_agent_workflow_runs')) {
-          return Promise.resolve(
-            createQueryResult([
-              {
-                id: 'new-run-id',
-                workflow_name: 'test-workflow',
-                conversation_id: 'conv-123',
-                parent_conversation_id: null,
-                codebase_id: null,
-                current_step_index: 0,
-                status: 'running' as const,
-                user_message: 'User message',
-                metadata: {},
-                started_at: new Date(),
-                completed_at: null,
-                last_activity_at: null,
-                working_path: testDir,
-              },
-            ])
-          );
-        }
-        if (
-          (query as string).includes('remote_agent_codebases') &&
-          (query as string).includes('WHERE id')
-        ) {
-          return Promise.resolve(createQueryResult([]));
-        }
-        if ((query as string).includes('INSERT INTO remote_agent_workflow_events')) {
-          return Promise.resolve(createQueryResult([]));
-        }
-        return Promise.resolve(createQueryResult([]));
-      });
+      (localStore.findResumableRun as ReturnType<typeof mock>).mockResolvedValue(priorRun);
 
       await executeWorkflow(
-        mockPlatform,
+        localDeps,
+        localPlatform,
         'conv-123',
         testDir,
         twoStepWorkflow,
@@ -4568,57 +4254,27 @@ describe('app defaults command loading', () => {
         'db-conv-id'
       );
 
-      // Fresh INSERT was called (current_step_index=0 → no steps to skip → fresh run)
-      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
-        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
-      );
-      expect(insertCalls.length).toBe(1);
-
-      // Restore default mock after test
-      mockQuery.mockImplementation(defaultMockQuery);
+      // Fresh createWorkflowRun was called (current_step_index=0 → no steps to skip → fresh run)
+      expect((localStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(1);
     });
 
     it('fails workflow when resume activation (resumeWorkflowRun) throws', async () => {
-      const priorRun = {
+      const priorRun: WorkflowRun = {
+        ...DEFAULT_WORKFLOW_RUN,
         id: 'prior-run-id',
-        workflow_name: 'test-workflow',
-        conversation_id: 'conv-123',
-        parent_conversation_id: null,
-        codebase_id: null,
-        current_step_index: 1, // step 0 completed — activation will be attempted
+        current_step_index: 1,
         status: 'failed' as const,
-        user_message: 'original message',
-        metadata: {},
-        started_at: new Date(),
-        completed_at: new Date(),
-        last_activity_at: new Date(),
         working_path: testDir,
       };
 
-      mockQuery.mockImplementation((query: string) => {
-        if (
-          (query as string).includes("status = 'failed'") &&
-          (query as string).includes('working_path')
-        ) {
-          return Promise.resolve(createQueryResult([priorRun]));
-        }
-        if (
-          (query as string).includes("status = 'running'") &&
-          (query as string).includes('completed_at = NULL')
-        ) {
-          return Promise.reject(new Error('Database connection lost'));
-        }
-        if ((query as string).includes("status = 'running'")) {
-          return Promise.resolve(createQueryResult([]));
-        }
-        if ((query as string).includes('INSERT INTO remote_agent_workflow_events')) {
-          return Promise.resolve(createQueryResult([]));
-        }
-        return Promise.resolve(createQueryResult([]));
-      });
+      (localStore.findResumableRun as ReturnType<typeof mock>).mockResolvedValue(priorRun);
+      (localStore.resumeWorkflowRun as ReturnType<typeof mock>).mockRejectedValue(
+        new Error('Database connection lost')
+      );
 
       const result = await executeWorkflow(
-        mockPlatform,
+        localDeps,
+        localPlatform,
         'conv-123',
         testDir,
         twoStepWorkflow,
@@ -4630,7 +4286,7 @@ describe('app defaults command loading', () => {
       expect(result.error).toBe('Database error resuming workflow run');
 
       // Error message sent to user
-      const sendCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const sendCalls = (localPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
       const errorMessages = sendCalls.filter(
         (call: unknown[]) =>
           typeof call[1] === 'string' && (call[1] as string).includes('could not activate it')
@@ -4638,28 +4294,17 @@ describe('app defaults command loading', () => {
       expect(errorMessages.length).toBeGreaterThan(0);
 
       // No new run was created
-      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
-        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
-      );
-      expect(insertCalls.length).toBe(0);
-
-      // Restore default mock after test
-      mockQuery.mockImplementation(defaultMockQuery);
+      expect((localStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(0);
     });
 
     it('falls through to fresh run when findResumableRun throws (non-critical)', async () => {
-      mockQuery.mockImplementation((query: string) => {
-        if (
-          (query as string).includes("status = 'failed'") &&
-          (query as string).includes('working_path')
-        ) {
-          return Promise.reject(new Error('DB timeout'));
-        }
-        return defaultMockQuery(query);
-      });
+      (localStore.findResumableRun as ReturnType<typeof mock>).mockRejectedValue(
+        new Error('DB timeout')
+      );
 
       await executeWorkflow(
-        mockPlatform,
+        localDeps,
+        localPlatform,
         'conv-123',
         testDir,
         twoStepWorkflow,
@@ -4668,22 +4313,16 @@ describe('app defaults command loading', () => {
       );
 
       // Fresh run was created (not blocked by resume check failure)
-      const insertCalls = mockQuery.mock.calls.filter((call: unknown[]) =>
-        (call[0] as string).includes('INSERT INTO remote_agent_workflow_runs')
-      );
-      expect(insertCalls.length).toBe(1);
+      expect((localStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(1);
 
       // Warning message was sent so the user knows resume was skipped
-      const sendCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const sendCalls = (localPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
       const warnMessages = sendCalls.filter(
         (call: unknown[]) =>
           typeof call[1] === 'string' &&
           (call[1] as string).includes('Could not check for a prior run to resume')
       );
       expect(warnMessages.length).toBeGreaterThan(0);
-
-      // Restore default mock after test
-      mockQuery.mockImplementation(defaultMockQuery);
     });
   });
 });

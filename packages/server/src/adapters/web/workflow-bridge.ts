@@ -1,4 +1,5 @@
-import { createLogger, getWorkflowEventEmitter, type WorkflowEmitterEvent } from '@archon/core';
+import { createLogger } from '@archon/core';
+import { getWorkflowEventEmitter, type WorkflowEmitterEvent } from '@archon/workflows';
 import { SSETransport } from './transport';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */

@@ -2,11 +2,23 @@ import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { mkdir, rm, readFile, chmod } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createMockLogger } from '../test/mocks/logger';
 
-// Mock logger to suppress noisy output during tests
-const mockLogger = createMockLogger();
-mock.module('../utils/logger', () => ({
+// Inline mock logger to suppress noisy output during tests
+const mockLogger = {
+  fatal: mock(() => undefined),
+  error: mock(() => undefined),
+  warn: mock(() => undefined),
+  info: mock(() => undefined),
+  debug: mock(() => undefined),
+  trace: mock(() => undefined),
+  child: mock(function () {
+    return mockLogger;
+  }),
+  bindings: mock(() => ({ module: 'test' })),
+  isLevelEnabled: mock(() => true),
+  level: 'info',
+};
+mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
 }));
 

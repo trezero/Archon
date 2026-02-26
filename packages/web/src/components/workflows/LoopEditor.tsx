@@ -1,4 +1,4 @@
-import type { LoopConfig } from '@archon/core/workflows/types';
+import type { LoopConfig } from '@archon/workflows';
 
 interface LoopEditorProps {
   prompt: string;

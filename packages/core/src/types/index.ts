@@ -2,7 +2,7 @@
  * Core type definitions for the Remote Coding Agent platform
  */
 import type { TransitionTrigger } from '../state/session-transitions';
-import type { WorkflowDefinition } from '../workflows/types';
+import type { WorkflowDefinition } from '@archon/workflows';
 
 /**
  * Custom error for when a conversation is not found during update operations
@@ -187,8 +187,8 @@ export type MessageChunk =
   | { type: 'tool'; toolName: string; toolInput?: Record<string, unknown> }
   | { type: 'workflow_dispatch'; workerConversationId: string; workflowName: string };
 
-export type ModelReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-export type WebSearchMode = 'disabled' | 'cached' | 'live';
+import type { ModelReasoningEffort, WebSearchMode } from '@archon/workflows';
+export type { ModelReasoningEffort, WebSearchMode };
 
 export interface AssistantRequestOptions {
   model?: string;

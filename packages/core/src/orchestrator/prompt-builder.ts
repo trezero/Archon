@@ -4,8 +4,8 @@
  * registered projects and available workflows.
  */
 import type { Codebase } from '../types';
-import type { WorkflowDefinition } from '../workflows/types';
-import { isSingleStep } from '../workflows/types';
+import type { WorkflowDefinition } from '@archon/workflows';
+import { isSingleStep } from '@archon/workflows';
 
 /**
  * Format a single project for the orchestrator prompt.

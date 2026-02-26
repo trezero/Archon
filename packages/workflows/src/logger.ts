@@ -3,8 +3,8 @@
  */
 import { appendFile, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
-import type { TokenUsage } from '../types';
-import { createLogger } from '../utils/logger';
+import type { WorkflowTokenUsage } from './deps';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -44,7 +44,7 @@ export interface WorkflowEvent {
   tool_name?: string;
   tool_input?: Record<string, unknown>;
   duration_ms?: number;
-  tokens?: TokenUsage;
+  tokens?: WorkflowTokenUsage;
   check?: string;
   result?: 'pass' | 'fail' | 'warn' | 'unknown';
   error?: string;
@@ -135,7 +135,7 @@ export async function logStepComplete(
   workflowRunId: string,
   stepName: string,
   stepIndex: number,
-  meta?: { durationMs?: number; tokens?: TokenUsage }
+  meta?: { durationMs?: number; tokens?: WorkflowTokenUsage }
 ): Promise<void> {
   await logWorkflowEvent(logDir, workflowRunId, {
     type: 'step_complete',
@@ -275,7 +275,7 @@ export async function logNodeComplete(
   workflowRunId: string,
   nodeId: string,
   commandName: string,
-  meta?: { durationMs?: number; tokens?: TokenUsage }
+  meta?: { durationMs?: number; tokens?: WorkflowTokenUsage }
 ): Promise<void> {
   await logWorkflowEvent(logDir, workflowRunId, {
     type: 'node_complete',

@@ -30,16 +30,6 @@ mock.module('@archon/core', () => ({
   handleMessage: mock(async () => {}),
   getDatabaseType: () => 'sqlite',
   loadConfig: mock(async () => ({})),
-  discoverWorkflows: mockDiscoverWorkflows,
-  parseWorkflow: mockParseWorkflow,
-  isValidCommandName: mock(
-    (name: string) =>
-      !name.includes('/') &&
-      !name.includes('\\') &&
-      !name.includes('..') &&
-      !!name &&
-      !name.startsWith('.')
-  ),
   getWorkflowFolderSearchPaths: mock(() => ['.archon/workflows']),
   getCommandFolderSearchPaths: mock(() => ['.archon/commands', '.archon/commands/defaults']),
   getDefaultCommandsPath: mock(() => '/tmp/.archon-test-nonexistent/commands/defaults'),
@@ -63,6 +53,22 @@ mock.module('@archon/core', () => ({
     isLevelEnabled: mock(() => true),
     level: 'info',
   }),
+}));
+
+mock.module('@archon/workflows', () => ({
+  discoverWorkflowsWithConfig: mockDiscoverWorkflows,
+  parseWorkflow: mockParseWorkflow,
+  isValidCommandName: mock(
+    (name: string) =>
+      !name.includes('/') &&
+      !name.includes('\\') &&
+      !name.includes('..') &&
+      !!name &&
+      !name.startsWith('.')
+  ),
+  BUNDLED_WORKFLOWS: new Map(),
+  BUNDLED_COMMANDS: new Map(),
+  isBinaryBuild: mock(() => false),
 }));
 
 // Note: @archon/core/defaults/bundled-defaults and @archon/core/utils/commands are NOT mocked.
@@ -99,7 +105,7 @@ describe('GET /api/workflows', () => {
     expect(Array.isArray(body.workflows)).toBe(true);
     expect(body.workflows[0]?.name).toBe('deploy');
     expect(body.workflows.workflows).toBeUndefined();
-    expect(mockDiscoverWorkflows).toHaveBeenCalledWith('/tmp/project');
+    expect(mockDiscoverWorkflows).toHaveBeenCalledWith('/tmp/project', expect.any(Function));
     expect(body.errors).toBeDefined();
     expect(Array.isArray(body.errors)).toBe(true);
   });

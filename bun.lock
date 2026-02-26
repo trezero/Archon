@@ -45,6 +45,7 @@
         "@archon/core": "workspace:*",
         "@archon/git": "workspace:*",
         "@archon/isolation": "workspace:*",
+        "@archon/workflows": "workspace:*",
         "@clack/prompts": "^1.0.0",
         "dotenv": "^17.2.3",
       },
@@ -60,6 +61,7 @@
         "@archon/git": "workspace:*",
         "@archon/isolation": "workspace:*",
         "@archon/paths": "workspace:*",
+        "@archon/workflows": "workspace:*",
         "@openai/codex-sdk": "^0.104.0",
         "pg": "^8.11.0",
         "pino": "^9",
@@ -112,6 +114,7 @@
         "@archon/adapters": "workspace:*",
         "@archon/core": "workspace:*",
         "@archon/git": "workspace:*",
+        "@archon/workflows": "workspace:*",
         "dotenv": "^17.2.3",
         "hono": "^4.11.4",
       },
@@ -123,6 +126,7 @@
       "name": "@archon/web",
       "version": "0.2.0",
       "dependencies": {
+        "@archon/workflows": "workspace:*",
         "@dagrejs/dagre": "^2.0.4",
         "@radix-ui/react-alert-dialog": "^1.1.15",
         "@tanstack/react-query": "^5.0.0",
@@ -156,6 +160,17 @@
         "vite": "^6.0.0",
       },
     },
+    "packages/workflows": {
+      "name": "@archon/workflows",
+      "version": "0.1.0",
+      "dependencies": {
+        "@archon/git": "workspace:*",
+        "@archon/paths": "workspace:*",
+      },
+      "peerDependencies": {
+        "typescript": "^5.0.0",
+      },
+    },
   },
   "overrides": {
     "test-exclude": "^7.0.1",
@@ -180,6 +195,8 @@
     "@archon/server": ["@archon/server@workspace:packages/server"],
 
     "@archon/web": ["@archon/web@workspace:packages/web"],
+
+    "@archon/workflows": ["@archon/workflows@workspace:packages/workflows"],
 
     "@babel/code-frame": ["@babel/code-frame@7.29.0", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.28.5", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-9NhCeYjq9+3uxgdtp20LSiJXJvN0FeCtNGpJxuMFZ1Kv3cWUNb6DOhJwUvcVCzKGR66cw4njwM6hrJLqgOwbcw=="],
 

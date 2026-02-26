@@ -47,8 +47,8 @@ import {
 import * as db from '../db/conversations';
 import { createIsolationStore } from '../db/isolation-environments';
 import { toError } from '../utils/error';
-import { executeWorkflow } from '../workflows';
-import type { WorkflowDefinition } from '../workflows';
+import { executeWorkflow, type WorkflowDefinition } from '@archon/workflows';
+import { createWorkflowDeps } from '../workflows/store-adapter';
 import {
   cleanupToMakeRoom,
   getWorktreeStatusBreakdown,
@@ -305,6 +305,7 @@ export async function dispatchBackgroundWorkflow(
     try {
       try {
         const result = await executeWorkflow(
+          createWorkflowDeps(),
           ctx.platform,
           workerPlatformId,
           ctx.cwd,

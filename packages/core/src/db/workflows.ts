@@ -2,7 +2,7 @@
  * Database operations for workflow runs
  */
 import { pool, getDialect } from './connection';
-import type { WorkflowRun, WorkflowRunStatus } from '../workflows/types';
+import type { WorkflowRun, WorkflowRunStatus } from '@archon/workflows';
 import { createLogger } from '../utils/logger';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */

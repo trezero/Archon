@@ -1,9 +1,5 @@
 /**
- * Workflow Engine - Prompt orchestration built on files and prompts
+ * Workflow Store Adapter - bridges @archon/core DB to @archon/workflows IWorkflowStore
  */
 
-export * from './types';
-export * from './loader';
-export * from './router';
-export * from './executor';
-export * from './logger';
+export { createWorkflowStore, createWorkflowDeps } from './store-adapter';

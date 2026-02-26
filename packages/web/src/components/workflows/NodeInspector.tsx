@@ -1,9 +1,9 @@
 import { useState, useCallback } from 'react';
-import { TRIGGER_RULES } from '@archon/core/workflows/types';
-import type { TriggerRule } from '@archon/core/workflows/types';
+import { TRIGGER_RULES } from '@archon/workflows';
+import type { TriggerRule } from '@archon/workflows';
 import type { DagNodeData } from './DagNodeComponent';
 import type { CommandEntry } from '@/lib/api';
-import type { SingleStep, ParallelBlock } from '@archon/core/workflows/types';
+import type { SingleStep, ParallelBlock } from '@archon/workflows';
 
 interface DagInspectorProps {
   mode: 'dag';

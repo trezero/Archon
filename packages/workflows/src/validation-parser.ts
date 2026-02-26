@@ -5,7 +5,7 @@ export interface ValidationResult {
 }
 
 const HEADER_REGEX = /^#\s+Validation Results\s*$/m;
-const TABLE_HEADER_REGEX = /^\|\s*Check\s*\|\s*Result\s*\|\s*$/;
+const TABLE_HEADER_REGEX = /^\|\s*Check\s*\|\s*Result\s*\|$/;
 const SEPARATOR_ROW_REGEX = /^\|?\s*[-:]+\s*\|\s*[-:]+\s*\|?/;
 
 function normalizeCheckName(raw: string): string {

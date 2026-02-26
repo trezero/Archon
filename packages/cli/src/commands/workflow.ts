@@ -1,14 +1,13 @@
 /**
  * Workflow command - list and run workflows
  */
+import { getIsolationProvider, registerRepository, createLogger, loadConfig } from '@archon/core';
+import { createWorkflowDeps } from '@archon/core/workflows/store-adapter';
 import {
-  discoverWorkflows,
+  discoverWorkflowsWithConfig,
   executeWorkflow,
-  getIsolationProvider,
-  registerRepository,
-  createLogger,
   type WorkflowLoadResult,
-} from '@archon/core';
+} from '@archon/workflows';
 import * as conversationDb from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
 import * as isolationDb from '@archon/core/db/isolation-environments';
@@ -46,7 +45,7 @@ function generateConversationId(): string {
  */
 async function loadWorkflows(cwd: string): Promise<WorkflowLoadResult> {
   try {
-    return await discoverWorkflows(cwd);
+    return await discoverWorkflowsWithConfig(cwd, loadConfig);
   } catch (error) {
     const err = error as Error;
     throw new Error(
@@ -282,6 +281,7 @@ export async function workflowRunCommand(
 
   // Execute workflow with workingCwd (may be worktree path)
   const result = await executeWorkflow(
+    createWorkflowDeps(),
     adapter,
     conversationId,
     workingCwd,

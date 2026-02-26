@@ -4,7 +4,7 @@
  * SSE streams bypass the proxy in dev mode (Vite proxy buffers SSE responses).
  */
 import type { WorkflowRunStatus } from '@/lib/types';
-import type { WorkflowDefinition } from '@archon/core/workflows/types';
+import type { WorkflowDefinition } from '@archon/workflows';
 
 /**
  * Base URL for SSE streams. In dev, bypasses Vite proxy by connecting directly
@@ -147,7 +147,7 @@ export async function deleteCodebase(id: string): Promise<{ success: boolean }> 
 }
 
 // Workflows
-export type { WorkflowDefinition } from '@archon/core/workflows/types';
+export type { WorkflowDefinition } from '@archon/workflows';
 
 export interface WorkflowRunResponse {
   id: string;

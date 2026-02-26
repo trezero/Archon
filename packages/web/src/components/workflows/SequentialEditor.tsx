@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
-import type { WorkflowStep, SingleStep, ParallelBlock } from '@archon/core/workflows/types';
-import { isParallelBlock, isSingleStep } from '@archon/core/workflows/types';
+import type { WorkflowStep, SingleStep, ParallelBlock } from '@archon/workflows';
+import { isParallelBlock, isSingleStep } from '@archon/workflows';
 import type { CommandEntry } from '@/lib/api';
 
 interface SequentialEditorProps {

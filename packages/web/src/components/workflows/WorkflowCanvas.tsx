@@ -10,7 +10,7 @@ import {
 } from '@xyflow/react';
 import type { Connection, Edge, OnConnect, NodeTypes } from '@xyflow/react';
 import dagre from '@dagrejs/dagre';
-import type { DagNode } from '@archon/core/workflows/types';
+import type { DagNode } from '@archon/workflows';
 import { dagNodeComponent, type DagFlowNode } from './DagNodeComponent';
 
 const NODE_WIDTH = 160;

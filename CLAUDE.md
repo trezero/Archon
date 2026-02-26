@@ -49,7 +49,7 @@ These are implementation constraints, not slogans. Apply them by default.
 
 **SRP + ISP — Single Responsibility + Interface Segregation**
 - Keep each module and package focused on one concern
-- Extend behavior by implementing existing narrow interfaces (`IPlatformAdapter`, `IAssistantClient`, `IDatabase`) whenever possible
+- Extend behavior by implementing existing narrow interfaces (`IPlatformAdapter`, `IAssistantClient`, `IDatabase`, `IWorkflowStore`) whenever possible
 - Avoid fat interfaces and "god modules" that mix policy, transport, and storage
 - Do not add unrelated methods to an existing interface — define a new one
 
@@ -201,7 +201,21 @@ packages/
 │       ├── state/            # Session state machine
 │       ├── types/            # TypeScript types and interfaces
 │       ├── utils/            # Shared utilities
-│       ├── workflows/        # YAML workflow engine
+│       ├── workflows/        # Store adapter (createWorkflowStore) bridging core DB → IWorkflowStore
+│       └── index.ts          # Package exports
+├── workflows/                # @archon/workflows - Workflow engine (depends on @archon/git + @archon/paths)
+│   └── src/
+│       ├── types.ts          # Workflow type definitions (step, loop, DAG)
+│       ├── loader.ts         # YAML parsing + validation (discoverWorkflows, parseWorkflow)
+│       ├── router.ts         # Prompt building + invocation parsing
+│       ├── executor.ts       # Sequential, parallel, loop, DAG execution (executeWorkflow)
+│       ├── dag-executor.ts   # DAG-specific execution logic
+│       ├── store.ts          # IWorkflowStore interface (database abstraction)
+│       ├── deps.ts           # WorkflowDeps injection types (IWorkflowPlatform, IWorkflowAssistantClient)
+│       ├── event-emitter.ts  # Workflow observability events
+│       ├── logger.ts         # JSONL file logger
+│       ├── defaults/         # Bundled default commands and workflows
+│       ├── utils/            # Variable substitution, tool formatting
 │       └── index.ts          # Package exports
 ├── git/                      # @archon/git - Git operations (no @archon/core dep)
 │   └── src/
@@ -263,6 +277,10 @@ import { handleMessage, ConversationLockManager, pool } from '@archon/core';
 import * as conversationDb from '@archon/core/db/conversations';
 import * as git from '@archon/git';
 
+// ✅ CORRECT: Import workflow engine types/functions directly from @archon/workflows
+import type { WorkflowDeps, IWorkflowStore } from '@archon/workflows';
+import { executeWorkflow, discoverWorkflows } from '@archon/workflows';
+
 // ❌ WRONG: Never use generic import for main package
 import * as core from '@archon/core';  // Don't do this
 ```
@@ -295,8 +313,9 @@ import * as core from '@archon/core';  // Don't do this
 - **@archon/paths**: Path resolution utilities and Pino logger factory (no @archon/* deps)
 - **@archon/git**: Git operations - worktrees, branches, repos, exec wrappers (depends only on @archon/paths)
 - **@archon/isolation**: Worktree isolation types, providers, resolver, error classifiers (depends only on @archon/git + @archon/paths)
+- **@archon/workflows**: Workflow engine - loader, router, executor, DAG, logger, bundled defaults (depends only on @archon/git + @archon/paths; DB/AI/config injected via `WorkflowDeps`)
 - **@archon/cli**: Command-line interface for running workflows
-- **@archon/core**: Business logic, database, orchestration, workflows (re-exports @archon/git, @archon/paths, and @archon/isolation for backward compat)
+- **@archon/core**: Business logic, database, orchestration, AI clients (re-exports @archon/git, @archon/paths, @archon/isolation; provides `createWorkflowStore()` adapter bridging core DB → `IWorkflowStore`)
 - **@archon/adapters**: Platform adapters for Slack, Telegram, GitHub, Discord (depends on @archon/core)
 - **@archon/server**: Hono HTTP server, Web adapter (SSE), API routes, Web UI static serving (depends on @archon/adapters)
 - **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui), SSE streaming to server

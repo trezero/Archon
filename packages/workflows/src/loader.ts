@@ -13,12 +13,11 @@ import type {
   DagNode,
 } from './types';
 import { TRIGGER_RULES, isTriggerRule } from './types';
-import type { ModelReasoningEffort, WebSearchMode } from '../types';
-import * as archonPaths from '../utils/archon-paths';
-import * as configLoader from '../config/config-loader';
+import type { ModelReasoningEffort, WebSearchMode } from './types';
+import * as archonPaths from '@archon/paths';
 import { isValidCommandName } from './command-validation';
-import { BUNDLED_WORKFLOWS, isBinaryBuild } from '../defaults/bundled-defaults';
-import { createLogger } from '../utils/logger';
+import { BUNDLED_WORKFLOWS, isBinaryBuild } from './defaults/bundled-defaults';
+import { createLogger } from '@archon/paths';
 import { isModelCompatible } from './model-validation';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -807,31 +806,14 @@ function loadBundledWorkflows(): Map<string, WorkflowDefinition> {
  */
 export async function discoverWorkflows(
   cwd: string,
-  globalSearchPath?: string
+  options?: { globalSearchPath?: string; loadDefaults?: boolean }
 ): Promise<WorkflowLoadResult> {
   // Map of filename -> workflow for deduplication
   const workflowsByFile = new Map<string, WorkflowDefinition>();
   const allErrors: WorkflowLoadError[] = [];
 
-  // Load config to check opt-out settings
-  let config;
-  try {
-    config = await configLoader.loadConfig(cwd);
-  } catch (error) {
-    const err = error as Error;
-    getLog().warn(
-      {
-        err,
-        cwd,
-        note: 'Default workflows will be loaded. Check your .archon/config.yaml if this is unexpected.',
-      },
-      'config_load_failed_using_defaults'
-    );
-    config = { defaults: { loadDefaultWorkflows: true } };
-  }
-
   // 1. Load from app's bundled defaults (unless opted out)
-  const loadDefaultWorkflows = config.defaults?.loadDefaultWorkflows ?? true;
+  const loadDefaultWorkflows = options?.loadDefaults !== false;
   if (loadDefaultWorkflows) {
     if (isBinaryBuild()) {
       // Binary: load from embedded bundled content
@@ -871,9 +853,9 @@ export async function discoverWorkflows(
   }
 
   // 2. Load from global search path (e.g., ~/.archon/.archon/workflows/ for orchestrator)
-  if (globalSearchPath) {
+  if (options?.globalSearchPath) {
     const [globalWorkflowFolder] = archonPaths.getWorkflowFolderSearchPaths();
-    const globalWorkflowPath = join(globalSearchPath, globalWorkflowFolder);
+    const globalWorkflowPath = join(options.globalSearchPath, globalWorkflowFolder);
     getLog().debug({ globalWorkflowPath }, 'searching_global_workflows');
     try {
       await access(globalWorkflowPath);
@@ -954,4 +936,29 @@ export async function discoverWorkflows(
     'workflows_discovery_complete'
   );
   return { workflows, errors: allErrors };
+}
+
+/**
+ * Discover workflows with config-aware default loading.
+ *
+ * Wraps discoverWorkflows with the standard pattern: try loadConfig to read
+ * defaults.loadDefaultWorkflows, fall back to true on config load failure.
+ * Logs config failures at warn level for observability.
+ */
+export async function discoverWorkflowsWithConfig(
+  cwd: string,
+  loadConfig: (cwd: string) => Promise<{ defaults?: { loadDefaultWorkflows?: boolean } }>,
+  options?: { globalSearchPath?: string }
+): Promise<WorkflowLoadResult> {
+  let loadDefaults = true;
+  try {
+    const cfg = await loadConfig(cwd);
+    loadDefaults = cfg.defaults?.loadDefaultWorkflows ?? true;
+  } catch (error) {
+    getLog().warn(
+      { err: error as Error, cwd },
+      'config_load_failed_using_default_workflow_discovery'
+    );
+  }
+  return discoverWorkflows(cwd, { ...options, loadDefaults });
 }

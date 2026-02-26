@@ -4,18 +4,16 @@
 import { readFile, access, mkdir } from 'fs/promises';
 import { join } from 'path';
 import type {
-  AssistantRequestOptions,
-  IPlatformAdapter,
-  MessageMetadata,
-  TokenUsage,
-} from '../types';
-import { getAssistantClient } from '../clients/factory';
-import * as workflowDb from '../db/workflows';
-import * as codebaseDb from '../db/codebases';
-import { formatToolCall } from '../utils/tool-formatter';
-import * as archonPaths from '../utils/archon-paths';
-import * as configLoader from '../config/config-loader';
-import { BUNDLED_COMMANDS, isBinaryBuild } from '../defaults/bundled-defaults';
+  WorkflowAssistantOptions,
+  IWorkflowPlatform,
+  WorkflowMessageMetadata,
+  WorkflowTokenUsage,
+} from './deps';
+import type { WorkflowDeps } from './deps';
+import { formatToolCall } from './utils/tool-formatter';
+import * as archonPaths from '@archon/paths';
+import { BUNDLED_COMMANDS, isBinaryBuild } from './defaults/bundled-defaults';
+import { createLogger } from '@archon/paths';
 import {
   commitAllChanges,
   execFileAsync,
@@ -23,7 +21,6 @@ import {
   toRepoPath,
   toWorktreePath,
 } from '@archon/git';
-import { createLogger } from '../utils/logger';
 import type {
   WorkflowDefinition,
   WorkflowRun,
@@ -48,7 +45,6 @@ import {
 } from './logger';
 import { parseValidationResults } from './validation-parser';
 import { getWorkflowEventEmitter } from './event-emitter';
-import * as workflowEventDb from '../db/workflow-events';
 import { isClaudeModel, isModelCompatible } from './model-validation';
 import { isValidCommandName } from './command-validation';
 
@@ -129,7 +125,11 @@ async function emitValidationResults(
 
   try {
     await access(validationPath);
-  } catch {
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code !== 'ENOENT') {
+      getLog().warn({ err, validationPath }, 'validation_file_access_error');
+    }
     return;
   }
 
@@ -158,13 +158,14 @@ async function emitValidationResults(
  * Falls back to cwd-based paths for unregistered repos.
  */
 async function resolveProjectPaths(
+  deps: WorkflowDeps,
   cwd: string,
   workflowRunId: string,
   codebaseId?: string
 ): Promise<{ artifactsDir: string; logDir: string }> {
   if (codebaseId) {
     try {
-      const codebase = await codebaseDb.getCodebase(codebaseId);
+      const codebase = await deps.store.getCodebase(codebaseId);
       if (codebase) {
         const parsed = archonPaths.parseOwnerRepo(codebase.name);
         if (parsed) {
@@ -176,7 +177,11 @@ async function resolveProjectPaths(
         getLog().warn({ codebaseName: codebase.name }, 'codebase_name_not_owner_repo_format');
       }
     } catch (error) {
-      getLog().warn({ err: error as Error, codebaseId }, 'project_paths_resolve_failed');
+      const fallbackArtifactsDir = join(cwd, '.archon', 'artifacts', 'runs', workflowRunId);
+      getLog().error(
+        { err: error as Error, codebaseId, fallbackArtifactsDir },
+        'project_paths_resolve_failed_using_fallback'
+      );
     }
   }
   // Fallback for unregistered repos
@@ -245,7 +250,7 @@ function classifyError(error: Error): ErrorType {
 function logSendError(
   label: string,
   error: Error,
-  platform: IPlatformAdapter,
+  platform: IWorkflowPlatform,
   conversationId: string,
   message: string,
   context?: SendMessageContext,
@@ -284,12 +289,12 @@ interface UnknownErrorTracker {
  * and the workflow is aborted after UNKNOWN_ERROR_THRESHOLD consecutive failures.
  */
 async function safeSendMessage(
-  platform: IPlatformAdapter,
+  platform: IWorkflowPlatform,
   conversationId: string,
   message: string,
   context?: SendMessageContext,
   unknownErrorTracker?: UnknownErrorTracker,
-  metadata?: MessageMetadata
+  metadata?: WorkflowMessageMetadata
 ): Promise<boolean> {
   try {
     await platform.sendMessage(conversationId, message, metadata);
@@ -335,12 +340,12 @@ function delay(ms: number): Promise<void> {
  * Used for failure/completion notifications that the user must receive.
  */
 async function sendCriticalMessage(
-  platform: IPlatformAdapter,
+  platform: IWorkflowPlatform,
   conversationId: string,
   message: string,
   context?: SendMessageContext,
   maxRetries = 3,
-  metadata?: MessageMetadata
+  metadata?: WorkflowMessageMetadata
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -384,18 +389,17 @@ async function sendCriticalMessage(
   return false;
 }
 
-// Re-exported to keep existing consumers working (isValidCommandName moved to command-validation.ts)
-export { isValidCommandName };
-
 /**
  * Load command prompt from file
  *
  * @param cwd - Working directory (repo root)
  * @param commandName - Name of the command (without .md extension)
  * @param configuredFolder - Optional additional folder from config to search
+ * @param deps - Workflow dependencies (for config loading)
  * @returns On success: `{ success: true, content }`. On failure: `{ success: false, reason, message }`.
  */
 async function loadCommandPrompt(
+  deps: WorkflowDeps,
   cwd: string,
   commandName: string,
   configuredFolder?: string
@@ -413,7 +417,7 @@ async function loadCommandPrompt(
   // Load config to check opt-out
   let config;
   try {
-    config = await configLoader.loadConfig(cwd);
+    config = await deps.loadConfig(cwd);
   } catch (error) {
     const err = error as Error;
     getLog().warn(
@@ -627,15 +631,16 @@ function buildPromptWithContext(
  * (extracted to allow parallel execution)
  */
 async function executeStepInternal(
-  platform: IPlatformAdapter,
+  deps: WorkflowDeps,
+  platform: IWorkflowPlatform,
   conversationId: string,
   cwd: string,
   workflowRun: WorkflowRun,
   stepDef: SingleStep,
   stepId: string, // For logging: "0", "1", "2.0", "2.1", etc.
-  resolvedProvider: string, // Provider resolved from workflow or config
+  resolvedProvider: 'claude' | 'codex', // Provider resolved from workflow or config
   resolvedModel: string | undefined, // Model from workflow (if any)
-  resolvedOptions: AssistantRequestOptions | undefined,
+  resolvedOptions: WorkflowAssistantOptions | undefined,
   artifactsDir: string, // External artifacts directory
   logDir: string, // External log directory
   baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
@@ -649,10 +654,10 @@ async function executeStepInternal(
   getLog().info({ stepId, commandName }, 'step_executing');
   await logStepStart(logDir, workflowRun.id, commandName, Number(stepId.split('.')[0]));
   const stepStartTime = Date.now();
-  let stepTokens: TokenUsage | undefined;
+  let stepTokens: WorkflowTokenUsage | undefined;
 
   // Load command prompt
-  const promptResult = await loadCommandPrompt(cwd, commandName, configuredCommandFolder);
+  const promptResult = await loadCommandPrompt(deps, cwd, commandName, configuredCommandFolder);
   if (!promptResult.success) {
     return {
       commandName,
@@ -691,7 +696,7 @@ async function executeStepInternal(
   // Get AI client with enhanced error context
   let aiClient;
   try {
-    aiClient = getAssistantClient(resolvedProvider);
+    aiClient = deps.getAssistantClient(resolvedProvider);
   } catch (error) {
     const err = error as Error;
     throw new Error(
@@ -711,7 +716,7 @@ async function executeStepInternal(
   let newSessionId: string | undefined;
 
   // Merge per-step tool restrictions into options for this call
-  let stepOptions: AssistantRequestOptions | undefined = resolvedOptions;
+  let stepOptions: WorkflowAssistantOptions | undefined = resolvedOptions;
   if (stepDef.allowed_tools !== undefined || stepDef.denied_tools !== undefined) {
     if (resolvedProvider === 'codex') {
       // Warn: restrictions are not supported — user must know
@@ -750,7 +755,7 @@ async function executeStepInternal(
     )) {
       // Update activity timestamp with failure tracking
       try {
-        await workflowDb.updateWorkflowActivity(workflowRun.id);
+        await deps.store.updateWorkflowActivity(workflowRun.id);
         activityUpdateFailures = 0;
       } catch (error) {
         activityUpdateFailures++;
@@ -860,13 +865,20 @@ async function executeStepInternal(
       stepName: commandName,
       duration: Date.now() - stepStartTime,
     });
-    void workflowEventDb.createWorkflowEvent({
-      workflow_run_id: workflowRun.id,
-      event_type: 'step_completed',
-      step_index: stepIndex,
-      step_name: commandName,
-      data: { duration_ms: Date.now() - stepStartTime },
-    });
+    deps.store
+      .createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'step_completed',
+        step_index: stepIndex,
+        step_name: commandName,
+        data: { duration_ms: Date.now() - stepStartTime },
+      })
+      .catch((err: Error) => {
+        getLog().error(
+          { err, workflowRunId: workflowRun.id, eventType: 'step_completed' },
+          'workflow_event_persist_failed'
+        );
+      });
 
     return {
       commandName,
@@ -889,13 +901,20 @@ async function executeStepInternal(
       stepName: commandName,
       error: err.message,
     });
-    void workflowEventDb.createWorkflowEvent({
-      workflow_run_id: workflowRun.id,
-      event_type: 'step_failed',
-      step_index: stepIdx,
-      step_name: commandName,
-      data: { error: err.message },
-    });
+    deps.store
+      .createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'step_failed',
+        step_index: stepIdx,
+        step_name: commandName,
+        data: { error: err.message },
+      })
+      .catch((err: Error) => {
+        getLog().error(
+          { err, workflowRunId: workflowRun.id, eventType: 'step_failed' },
+          'workflow_event_persist_failed'
+        );
+      });
 
     // Add user-friendly hints based on error classification
     let userHint = '';
@@ -955,15 +974,16 @@ interface ParallelStepResult {
  * @param cwd - Working directory (same for all agents)
  */
 async function executeParallelBlock(
-  platform: IPlatformAdapter,
+  deps: WorkflowDeps,
+  platform: IWorkflowPlatform,
   conversationId: string,
   cwd: string, // All agents share this worktree
   workflowRun: WorkflowRun,
   parallelSteps: readonly SingleStep[],
   blockIndex: number,
-  resolvedProvider: string, // Provider resolved from workflow or config
+  resolvedProvider: 'claude' | 'codex', // Provider resolved from workflow or config
   resolvedModel: string | undefined, // Model from workflow (if any)
-  resolvedOptions: AssistantRequestOptions | undefined,
+  resolvedOptions: WorkflowAssistantOptions | undefined,
   artifactsDir: string,
   logDir: string,
   baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
@@ -993,19 +1013,27 @@ async function executeParallelBlock(
         totalAgents,
         agentName: step.command,
       });
-      void workflowEventDb.createWorkflowEvent({
-        workflow_run_id: workflowRun.id,
-        event_type: 'parallel_agent_started',
-        step_index: blockIndex,
-        step_name: step.command,
-        data: { agentIndex: i, totalAgents },
-      });
+      deps.store
+        .createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'parallel_agent_started',
+          step_index: blockIndex,
+          step_name: step.command,
+          data: { agentIndex: i, totalAgents },
+        })
+        .catch((err: Error) => {
+          getLog().error(
+            { err, workflowRunId: workflowRun.id, eventType: 'parallel_agent_started' },
+            'workflow_event_persist_failed'
+          );
+        });
 
       const agentStart = Date.now();
 
       // Each parallel step is an independent agent
       // clearContext is always effectively true (fresh session)
       const result = await executeStepInternal(
+        deps,
         platform,
         conversationId,
         cwd, // Same worktree for all agents
@@ -1034,13 +1062,20 @@ async function executeParallelBlock(
           agentName: step.command,
           duration: Date.now() - agentStart,
         });
-        void workflowEventDb.createWorkflowEvent({
-          workflow_run_id: workflowRun.id,
-          event_type: 'parallel_agent_completed',
-          step_index: blockIndex,
-          step_name: step.command,
-          data: { agentIndex: i, duration_ms: Date.now() - agentStart },
-        });
+        deps.store
+          .createWorkflowEvent({
+            workflow_run_id: workflowRun.id,
+            event_type: 'parallel_agent_completed',
+            step_index: blockIndex,
+            step_name: step.command,
+            data: { agentIndex: i, duration_ms: Date.now() - agentStart },
+          })
+          .catch((err: Error) => {
+            getLog().error(
+              { err, workflowRunId: workflowRun.id, eventType: 'parallel_agent_completed' },
+              'workflow_event_persist_failed'
+            );
+          });
       } else {
         emitter.emit({
           type: 'parallel_agent_failed',
@@ -1050,13 +1085,20 @@ async function executeParallelBlock(
           agentName: step.command,
           error: result.error,
         });
-        void workflowEventDb.createWorkflowEvent({
-          workflow_run_id: workflowRun.id,
-          event_type: 'parallel_agent_failed',
-          step_index: blockIndex,
-          step_name: step.command,
-          data: { agentIndex: i, error: result.error },
-        });
+        deps.store
+          .createWorkflowEvent({
+            workflow_run_id: workflowRun.id,
+            event_type: 'parallel_agent_failed',
+            step_index: blockIndex,
+            step_name: step.command,
+            data: { agentIndex: i, error: result.error },
+          })
+          .catch((err: Error) => {
+            getLog().error(
+              { err, workflowRunId: workflowRun.id, eventType: 'parallel_agent_failed' },
+              'workflow_event_persist_failed'
+            );
+          });
       }
 
       return { index: i, result };
@@ -1074,14 +1116,15 @@ async function executeParallelBlock(
  * Execute a loop-based workflow (Ralph-style autonomous iteration)
  */
 async function executeLoopWorkflow(
-  platform: IPlatformAdapter,
+  deps: WorkflowDeps,
+  platform: IWorkflowPlatform,
   conversationId: string,
   cwd: string,
   workflow: WorkflowDefinition,
   workflowRun: WorkflowRun,
-  resolvedProvider: string, // Provider resolved from workflow or config
+  resolvedProvider: 'claude' | 'codex', // Provider resolved from workflow or config
   resolvedModel: string | undefined, // Model from workflow (if any)
-  resolvedOptions: AssistantRequestOptions | undefined,
+  resolvedOptions: WorkflowAssistantOptions | undefined,
   artifactsDir: string,
   logDir: string,
   baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
@@ -1122,7 +1165,7 @@ async function executeLoopWorkflow(
       `❌ **Cannot resume** \`${workflow.name}\`: prior run reached iteration ${String(startIteration)} but current \`max_iterations\` is ${String(loop.max_iterations)}. Increase \`max_iterations\` or start a fresh run.`,
       workflowContext
     );
-    await workflowDb.failWorkflowRun(
+    await deps.store.failWorkflowRun(
       workflowRun.id,
       `Resume aborted: prior iteration ${String(startIteration)} exceeds current max_iterations ${String(loop.max_iterations)}`
     );
@@ -1144,7 +1187,7 @@ async function executeLoopWorkflow(
 
   for (let i = startIteration; i <= loop.max_iterations; i++) {
     // Between-iteration cancellation check
-    const currentStatus = await workflowDb.getWorkflowRunStatus(workflowRun.id);
+    const currentStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
     if (currentStatus === 'cancelled') {
       getLog().info({ workflowRunId: workflowRun.id, iteration: i }, 'workflow.cancel_detected');
       await sendCriticalMessage(
@@ -1160,7 +1203,7 @@ async function executeLoopWorkflow(
 
     // Update metadata with current iteration (non-critical - log but don't fail on db error)
     try {
-      await workflowDb.updateWorkflowRun(workflowRun.id, {
+      await deps.store.updateWorkflowRun(workflowRun.id, {
         current_step_index: i,
         metadata: { iteration_count: i, max_iterations: loop.max_iterations },
       });
@@ -1199,13 +1242,20 @@ async function executeLoopWorkflow(
       iteration: i,
       maxIterations: loop.max_iterations,
     });
-    void workflowEventDb.createWorkflowEvent({
-      workflow_run_id: workflowRun.id,
-      event_type: 'loop_iteration_started',
-      step_index: i - 1,
-      step_name: `iteration-${String(i)}`,
-      data: { iteration: i, maxIterations: loop.max_iterations },
-    });
+    deps.store
+      .createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'loop_iteration_started',
+        step_index: i - 1,
+        step_name: `iteration-${String(i)}`,
+        data: { iteration: i, maxIterations: loop.max_iterations },
+      })
+      .catch((err: Error) => {
+        getLog().error(
+          { err, workflowRunId: workflowRun.id, eventType: 'loop_iteration_started' },
+          'workflow_event_persist_failed'
+        );
+      });
 
     // Determine session handling — treat the first executed iteration as a session start,
     // whether that is iteration 1 (fresh run) or a later iteration (resume).
@@ -1238,7 +1288,7 @@ async function executeLoopWorkflow(
     // Get AI client with enhanced error context
     let aiClient;
     try {
-      aiClient = getAssistantClient(resolvedProvider);
+      aiClient = deps.getAssistantClient(resolvedProvider);
     } catch (error) {
       const err = error as Error;
       throw new Error(
@@ -1268,7 +1318,7 @@ async function executeLoopWorkflow(
       )) {
         // Update activity timestamp with failure tracking
         try {
-          await workflowDb.updateWorkflowActivity(workflowRun.id);
+          await deps.store.updateWorkflowActivity(workflowRun.id);
           activityUpdateFailures = 0;
         } catch (error) {
           activityUpdateFailures++;
@@ -1369,19 +1419,26 @@ async function executeLoopWorkflow(
           duration: Date.now() - iterationStart,
           completionDetected: true,
         });
-        void workflowEventDb.createWorkflowEvent({
-          workflow_run_id: workflowRun.id,
-          event_type: 'loop_iteration_completed',
-          step_index: i - 1,
-          step_name: `iteration-${String(i)}`,
-          data: {
-            iteration: i,
-            duration_ms: Date.now() - iterationStart,
-            completionDetected: true,
-          },
-        });
+        deps.store
+          .createWorkflowEvent({
+            workflow_run_id: workflowRun.id,
+            event_type: 'loop_iteration_completed',
+            step_index: i - 1,
+            step_name: `iteration-${String(i)}`,
+            data: {
+              iteration: i,
+              duration_ms: Date.now() - iterationStart,
+              completionDetected: true,
+            },
+          })
+          .catch((err: Error) => {
+            getLog().error(
+              { err, workflowRunId: workflowRun.id, eventType: 'loop_iteration_completed' },
+              'workflow_event_persist_failed'
+            );
+          });
 
-        await workflowDb.completeWorkflowRun(workflowRun.id);
+        await deps.store.completeWorkflowRun(workflowRun.id);
         await logWorkflowComplete(logDir, workflowRun.id);
         await sendCriticalMessage(
           platform,
@@ -1418,17 +1475,24 @@ async function executeLoopWorkflow(
         duration: Date.now() - iterationStart,
         completionDetected: false,
       });
-      void workflowEventDb.createWorkflowEvent({
-        workflow_run_id: workflowRun.id,
-        event_type: 'loop_iteration_completed',
-        step_index: i - 1,
-        step_name: `iteration-${String(i)}`,
-        data: {
-          iteration: i,
-          duration_ms: Date.now() - iterationStart,
-          completionDetected: false,
-        },
-      });
+      deps.store
+        .createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'loop_iteration_completed',
+          step_index: i - 1,
+          step_name: `iteration-${String(i)}`,
+          data: {
+            iteration: i,
+            duration_ms: Date.now() - iterationStart,
+            completionDetected: false,
+          },
+        })
+        .catch((err: Error) => {
+          getLog().error(
+            { err, workflowRunId: workflowRun.id, eventType: 'loop_iteration_completed' },
+            'workflow_event_persist_failed'
+          );
+        });
     } catch (error) {
       const err = error as Error;
       getLog().error({ err, iteration: i }, 'loop_iteration_failed');
@@ -1442,19 +1506,26 @@ async function executeLoopWorkflow(
       });
 
       // Persist failure event to DB for page-reload hydration
-      void workflowEventDb.createWorkflowEvent({
-        workflow_run_id: workflowRun.id,
-        event_type: 'loop_iteration_failed',
-        step_index: i - 1,
-        step_name: `iteration-${String(i)}`,
-        data: {
-          iteration: i,
-          error: err.message,
-          duration_ms: Date.now() - iterationStart,
-        },
-      });
+      deps.store
+        .createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'loop_iteration_failed',
+          step_index: i - 1,
+          step_name: `iteration-${String(i)}`,
+          data: {
+            iteration: i,
+            error: err.message,
+            duration_ms: Date.now() - iterationStart,
+          },
+        })
+        .catch((err: Error) => {
+          getLog().error(
+            { err, workflowRunId: workflowRun.id, eventType: 'loop_iteration_failed' },
+            'workflow_event_persist_failed'
+          );
+        });
 
-      await workflowDb.failWorkflowRun(workflowRun.id, `Iteration ${String(i)}: ${err.message}`);
+      await deps.store.failWorkflowRun(workflowRun.id, `Iteration ${String(i)}: ${err.message}`);
       await logWorkflowError(logDir, workflowRun.id, err.message);
       await sendCriticalMessage(
         platform,
@@ -1482,7 +1553,7 @@ async function executeLoopWorkflow(
     { maxIterations: loop.max_iterations, signal: loop.until },
     'loop_max_iterations_reached'
   );
-  await workflowDb.failWorkflowRun(workflowRun.id, errorMsg);
+  await deps.store.failWorkflowRun(workflowRun.id, errorMsg);
   await logWorkflowError(logDir, workflowRun.id, errorMsg);
 
   const userMsg = `❌ **Loop incomplete**: \`${workflow.name}\`
@@ -1510,6 +1581,7 @@ ${errorMsg}
 /**
  * Execute a complete workflow (step-based or loop-based).
  *
+ * @param deps - Workflow dependencies (store, assistant client factory, config loader)
  * @param platform - The platform adapter for sending messages
  * @param conversationId - The platform-specific conversation ID
  * @param cwd - The working directory for command execution
@@ -1524,7 +1596,8 @@ ${errorMsg}
  *   Expected format: Markdown with issue title, author, labels, and body
  */
 export async function executeWorkflow(
-  platform: IPlatformAdapter,
+  deps: WorkflowDeps,
+  platform: IWorkflowPlatform,
   conversationId: string,
   cwd: string,
   workflow: WorkflowDefinition,
@@ -1541,7 +1614,7 @@ export async function executeWorkflow(
   parentConversationId?: string
 ): Promise<WorkflowExecutionResult> {
   // Load config once for the entire workflow execution
-  const config = await configLoader.loadConfig(cwd);
+  const config = await deps.loadConfig(cwd);
   const configuredCommandFolder = config.commands.folder;
 
   // Resolve base branch once (used for $BASE_BRANCH substitution in all steps)
@@ -1589,7 +1662,7 @@ export async function executeWorkflow(
     );
   }
 
-  const resolvedOptions: AssistantRequestOptions | undefined =
+  const resolvedOptions: WorkflowAssistantOptions | undefined =
     resolvedProvider === 'codex'
       ? {
           model: resolvedModel,
@@ -1619,7 +1692,7 @@ export async function executeWorkflow(
   // Check for concurrent workflow execution with staleness detection
   let activeWorkflow;
   try {
-    activeWorkflow = await workflowDb.getActiveWorkflowRun(conversationDbId);
+    activeWorkflow = await deps.store.getActiveWorkflowRun(conversationDbId);
   } catch (error) {
     const err = error as Error;
     getLog().error({ err, conversationId }, 'db_active_workflow_check_failed');
@@ -1643,7 +1716,7 @@ export async function executeWorkflow(
         'stale_workflow_detected'
       );
       try {
-        await workflowDb.failWorkflowRun(
+        await deps.store.failWorkflowRun(
           activeWorkflow.id,
           `Workflow timed out after ${Math.floor(minutesSinceActivity)} minutes of inactivity`
         );
@@ -1676,9 +1749,9 @@ export async function executeWorkflow(
   let workflowRun: WorkflowRun | undefined;
 
   // Step 1: Find prior failed run — non-critical, fall through on DB error
-  let resumableRun: Awaited<ReturnType<typeof workflowDb.findResumableRun>> = null;
+  let resumableRun: Awaited<ReturnType<typeof deps.store.findResumableRun>> = null;
   try {
-    resumableRun = await workflowDb.findResumableRun(workflow.name, cwd, conversationDbId);
+    resumableRun = await deps.store.findResumableRun(workflow.name, cwd, conversationDbId);
   } catch (error) {
     const err = error as Error;
     getLog().warn({ err, workflowName: workflow.name, cwd }, 'workflow_resume_check_failed');
@@ -1694,7 +1767,7 @@ export async function executeWorkflow(
   // Step 2: Activate the resume — propagate as error if this fails (resume detected but couldn't activate)
   if (resumableRun && resumableRun.current_step_index > 0) {
     try {
-      workflowRun = await workflowDb.resumeWorkflowRun(resumableRun.id);
+      workflowRun = await deps.store.resumeWorkflowRun(resumableRun.id);
       resumeFromStepIndex = resumableRun.current_step_index;
       getLog().info({ workflowRunId: workflowRun.id, resumeFromStepIndex }, 'workflow_resuming');
       await safeSendMessage(
@@ -1726,7 +1799,7 @@ export async function executeWorkflow(
   if (!workflowRun) {
     // Create workflow run record
     try {
-      workflowRun = await workflowDb.createWorkflowRun({
+      workflowRun = await deps.store.createWorkflowRun({
         workflow_name: workflow.name,
         conversation_id: conversationDbId,
         codebase_id: codebaseId,
@@ -1751,7 +1824,7 @@ export async function executeWorkflow(
   }
 
   // Resolve external artifact and log directories
-  const { artifactsDir, logDir } = await resolveProjectPaths(cwd, workflowRun.id, codebaseId);
+  const { artifactsDir, logDir } = await resolveProjectPaths(deps, cwd, workflowRun.id, codebaseId);
 
   // Pre-create the artifacts directory so commands can write to it immediately
   await mkdir(artifactsDir, { recursive: true });
@@ -1787,16 +1860,23 @@ export async function executeWorkflow(
       totalSteps,
       isLoop,
     });
-    void workflowEventDb.createWorkflowEvent({
-      workflow_run_id: workflowRun.id,
-      event_type: 'workflow_started',
-      data: { workflowName: workflow.name, totalSteps, isLoop },
-    });
+    deps.store
+      .createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'workflow_started',
+        data: { workflowName: workflow.name, totalSteps, isLoop },
+      })
+      .catch((err: Error) => {
+        getLog().error(
+          { err, workflowRunId: workflowRun.id, eventType: 'workflow_started' },
+          'workflow_event_persist_failed'
+        );
+      });
 
     // Set status to running now that execution has started (skip for resumed runs — already running)
     if (!resumeFromStepIndex) {
       try {
-        await workflowDb.updateWorkflowRun(workflowRun.id, { status: 'running' });
+        await deps.store.updateWorkflowRun(workflowRun.id, { status: 'running' });
       } catch (dbError) {
         getLog().error(
           { err: dbError as Error, workflowRunId: workflowRun.id },
@@ -1887,6 +1967,7 @@ export async function executeWorkflow(
     // Route DAG workflows to dag-executor
     if (isDagWorkflow(workflow)) {
       await executeDagWorkflow(
+        deps,
         platform,
         conversationId,
         cwd,
@@ -1902,7 +1983,7 @@ export async function executeWorkflow(
         issueContext
       );
       // executeDagWorkflow throws on fatal errors; check DB status for result
-      const finalStatus = await workflowDb.getWorkflowRun(workflowRun.id);
+      const finalStatus = await deps.store.getWorkflowRun(workflowRun.id);
       if (finalStatus?.status === 'completed') {
         return { success: true, workflowRunId: workflowRun.id };
       } else {
@@ -1916,6 +1997,7 @@ export async function executeWorkflow(
 
     if (workflow.loop) {
       await executeLoopWorkflow(
+        deps,
         platform,
         conversationId,
         cwd,
@@ -1932,7 +2014,7 @@ export async function executeWorkflow(
       );
       // Loop workflow handles its own success/failure internally
       // Check the database status to determine result
-      const finalStatus = await workflowDb.getWorkflowRun(workflowRun.id);
+      const finalStatus = await deps.store.getWorkflowRun(workflowRun.id);
       if (finalStatus?.status === 'completed') {
         return { success: true, workflowRunId: workflowRun.id };
       } else {
@@ -1969,18 +2051,25 @@ export async function executeWorkflow(
         );
         // No emitter.emit here — skip events during resume have no in-process subscribers;
         // the workflow progress card uses DB events for historical display only
-        void workflowEventDb.createWorkflowEvent({
-          workflow_run_id: workflowRun.id,
-          event_type: 'step_skipped_prior_success',
-          step_index: i,
-          step_name: skippedName,
-          data: { resumedFrom: resumeFromStepIndex },
-        });
+        deps.store
+          .createWorkflowEvent({
+            workflow_run_id: workflowRun.id,
+            event_type: 'step_skipped_prior_success',
+            step_index: i,
+            step_name: skippedName,
+            data: { resumedFrom: resumeFromStepIndex },
+          })
+          .catch((err: Error) => {
+            getLog().error(
+              { err, workflowRunId: workflowRun.id, eventType: 'step_skipped_prior_success' },
+              'workflow_event_persist_failed'
+            );
+          });
         continue;
       }
 
       // Between-step cancellation check
-      const stepStatus = await workflowDb.getWorkflowRunStatus(workflowRun.id);
+      const stepStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
       if (stepStatus === 'cancelled') {
         getLog().info({ workflowRunId: workflowRun.id, stepIndex: i }, 'workflow.cancel_detected');
         workflowAbortController.abort();
@@ -2015,13 +2104,20 @@ export async function executeWorkflow(
           stepName: `parallel(${stepCommands.join(', ')})`,
           totalSteps: steps.length,
         });
-        void workflowEventDb.createWorkflowEvent({
-          workflow_run_id: workflowRun.id,
-          event_type: 'step_started',
-          step_index: i,
-          step_name: `parallel(${stepCommands.join(', ')})`,
-          data: { totalSteps: steps.length, parallelAgents: stepCount },
-        });
+        deps.store
+          .createWorkflowEvent({
+            workflow_run_id: workflowRun.id,
+            event_type: 'step_started',
+            step_index: i,
+            step_name: `parallel(${stepCommands.join(', ')})`,
+            data: { totalSteps: steps.length, parallelAgents: stepCount },
+          })
+          .catch((err: Error) => {
+            getLog().error(
+              { err, workflowRunId: workflowRun.id, eventType: 'step_started' },
+              'workflow_event_persist_failed'
+            );
+          });
 
         // Notify user
         const stepNames = parallelSteps.map(s => `\`${s.command}\``).join(', ');
@@ -2034,6 +2130,7 @@ export async function executeWorkflow(
 
         // Execute all in parallel
         const results = await executeParallelBlock(
+          deps,
           platform,
           conversationId,
           cwd,
@@ -2074,17 +2171,24 @@ export async function executeWorkflow(
             error: errorMsg,
             stepIndex: i,
           });
-          void workflowEventDb.createWorkflowEvent({
-            workflow_run_id: workflowRun.id,
-            event_type: 'workflow_failed',
-            step_index: i,
-            data: { error: errorMsg },
-          });
+          deps.store
+            .createWorkflowEvent({
+              workflow_run_id: workflowRun.id,
+              event_type: 'workflow_failed',
+              step_index: i,
+              data: { error: errorMsg },
+            })
+            .catch((err: Error) => {
+              getLog().error(
+                { err, workflowRunId: workflowRun.id, eventType: 'workflow_failed' },
+                'workflow_event_persist_failed'
+              );
+            });
           emitter.unregisterRun(workflowRun.id);
 
           // Record failure in database (non-critical - log but don't prevent user notification)
           try {
-            await workflowDb.failWorkflowRun(workflowRun.id, errorMsg);
+            await deps.store.failWorkflowRun(workflowRun.id, errorMsg);
           } catch (dbError) {
             getLog().error(
               { err: dbError as Error, workflowId: workflowRun.id },
@@ -2120,13 +2224,20 @@ export async function executeWorkflow(
           stepName: `parallel(${stepCommands.join(', ')})`,
           duration: 0, // Duration tracked per-agent, not per-block
         });
-        void workflowEventDb.createWorkflowEvent({
-          workflow_run_id: workflowRun.id,
-          event_type: 'step_completed',
-          step_index: i,
-          step_name: `parallel(${stepCommands.join(', ')})`,
-          data: {},
-        });
+        deps.store
+          .createWorkflowEvent({
+            workflow_run_id: workflowRun.id,
+            event_type: 'step_completed',
+            step_index: i,
+            step_name: `parallel(${stepCommands.join(', ')})`,
+            data: {},
+          })
+          .catch((err: Error) => {
+            getLog().error(
+              { err, workflowRunId: workflowRun.id, eventType: 'step_completed' },
+              'workflow_event_persist_failed'
+            );
+          });
 
         // All parallel steps succeeded - no session to carry forward
         currentSessionId = undefined;
@@ -2161,15 +2272,23 @@ export async function executeWorkflow(
           stepName: step.command,
           totalSteps: steps.length,
         });
-        void workflowEventDb.createWorkflowEvent({
-          workflow_run_id: workflowRun.id,
-          event_type: 'step_started',
-          step_index: i,
-          step_name: step.command,
-          data: { totalSteps: steps.length },
-        });
+        deps.store
+          .createWorkflowEvent({
+            workflow_run_id: workflowRun.id,
+            event_type: 'step_started',
+            step_index: i,
+            step_name: step.command,
+            data: { totalSteps: steps.length },
+          })
+          .catch((err: Error) => {
+            getLog().error(
+              { err, workflowRunId: workflowRun.id, eventType: 'step_started' },
+              'workflow_event_persist_failed'
+            );
+          });
 
         const result = await executeStepInternal(
+          deps,
           platform,
           conversationId,
           cwd,
@@ -2199,18 +2318,25 @@ export async function executeWorkflow(
             error: result.error,
             stepIndex: i,
           });
-          void workflowEventDb.createWorkflowEvent({
-            workflow_run_id: workflowRun.id,
-            event_type: 'workflow_failed',
-            step_index: i,
-            step_name: result.commandName,
-            data: { error: result.error },
-          });
+          deps.store
+            .createWorkflowEvent({
+              workflow_run_id: workflowRun.id,
+              event_type: 'workflow_failed',
+              step_index: i,
+              step_name: result.commandName,
+              data: { error: result.error },
+            })
+            .catch((err: Error) => {
+              getLog().error(
+                { err, workflowRunId: workflowRun.id, eventType: 'workflow_failed' },
+                'workflow_event_persist_failed'
+              );
+            });
           emitter.unregisterRun(workflowRun.id);
 
           // Record failure in database (non-critical - log but don't prevent user notification)
           try {
-            await workflowDb.failWorkflowRun(workflowRun.id, result.error);
+            await deps.store.failWorkflowRun(workflowRun.id, result.error);
           } catch (dbError) {
             getLog().error(
               { err: dbError as Error, workflowId: workflowRun.id, stepName: result.commandName },
@@ -2240,7 +2366,7 @@ export async function executeWorkflow(
 
       // Update progress (non-critical - log but don't fail workflow on db error)
       try {
-        await workflowDb.updateWorkflowRun(workflowRun.id, {
+        await deps.store.updateWorkflowRun(workflowRun.id, {
           current_step_index: i + 1,
         });
       } catch (dbError) {
@@ -2254,7 +2380,7 @@ export async function executeWorkflow(
 
     // Workflow complete
     try {
-      await workflowDb.completeWorkflowRun(workflowRun.id);
+      await deps.store.completeWorkflowRun(workflowRun.id);
     } catch (dbError) {
       getLog().error(
         { err: dbError as Error, workflowId: workflowRun.id },
@@ -2292,11 +2418,18 @@ export async function executeWorkflow(
       workflowName: workflow.name,
       duration: Date.now() - workflowStartTime,
     });
-    void workflowEventDb.createWorkflowEvent({
-      workflow_run_id: workflowRun.id,
-      event_type: 'workflow_completed',
-      data: { duration_ms: Date.now() - workflowStartTime },
-    });
+    deps.store
+      .createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'workflow_completed',
+        data: { duration_ms: Date.now() - workflowStartTime },
+      })
+      .catch((err: Error) => {
+        getLog().error(
+          { err, workflowRunId: workflowRun.id, eventType: 'workflow_completed' },
+          'workflow_event_persist_failed'
+        );
+      });
     emitter.unregisterRun(workflowRun.id);
 
     // Safety net: Commit any artifacts created during workflow but not yet committed
@@ -2320,7 +2453,7 @@ export async function executeWorkflow(
 
     // Record failure in database (non-blocking - log but don't re-throw on DB error)
     try {
-      await workflowDb.failWorkflowRun(workflowRun.id, err.message);
+      await deps.store.failWorkflowRun(workflowRun.id, err.message);
     } catch (dbError) {
       getLog().error(
         { err: dbError as Error, workflowId: workflowRun.id, originalError: err.message },
@@ -2346,11 +2479,18 @@ export async function executeWorkflow(
       workflowName: workflow.name,
       error: err.message,
     });
-    void workflowEventDb.createWorkflowEvent({
-      workflow_run_id: workflowRun.id,
-      event_type: 'workflow_failed',
-      data: { error: err.message },
-    });
+    deps.store
+      .createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'workflow_failed',
+        data: { error: err.message },
+      })
+      .catch((err: Error) => {
+        getLog().error(
+          { err, workflowRunId: workflowRun.id, eventType: 'workflow_failed' },
+          'workflow_event_persist_failed'
+        );
+      });
     emitter.unregisterRun(workflowRun.id);
 
     // Notify user about the failure
@@ -2375,7 +2515,7 @@ export async function executeWorkflow(
  * Shared between step-based and loop-based workflows
  */
 async function commitWorkflowArtifacts(
-  platform: IPlatformAdapter,
+  platform: IWorkflowPlatform,
   conversationId: string,
   cwd: string,
   workflowName: string,
@@ -2392,21 +2532,13 @@ async function commitWorkflowArtifacts(
     if (committed) {
       getLog().info({ workflowName }, 'workflow_artifacts_committed');
 
-      // Emit workflow_artifact event
+      // Emit workflow_artifact event (in-memory only; DB persistence not available here)
       const emitter = getWorkflowEventEmitter();
       emitter.emit({
         type: 'workflow_artifact',
         runId: workflowId,
         artifactType: 'commit',
         label: `Auto-commit workflow artifacts (${workflowName})`,
-      });
-      void workflowEventDb.createWorkflowEvent({
-        workflow_run_id: workflowId,
-        event_type: 'workflow_artifact',
-        data: {
-          artifactType: 'commit',
-          label: `Auto-commit workflow artifacts (${workflowName})`,
-        },
       });
 
       // Push the committed artifacts

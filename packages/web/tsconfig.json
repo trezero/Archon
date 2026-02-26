@@ -10,9 +10,11 @@
     "paths": {
       "@/*": ["./src/*"],
       "@archon/core": ["../core/src"],
-      "@archon/core/*": ["../core/src/*"]
+      "@archon/core/*": ["../core/src/*"],
+      "@archon/workflows": ["../workflows/src"],
+      "@archon/workflows/*": ["../workflows/src/*"]
     }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "../workflows/src/defaults/text-imports.d.ts"],
   "exclude": ["node_modules", "dist"]
 }

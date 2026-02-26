@@ -1,40 +1,28 @@
-import { describe, it, expect, beforeEach, afterEach, mock, spyOn, type Mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { mkdir, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createMockLogger } from '../test/mocks/logger';
-import { createQueryResult } from '../test/mocks/database';
 
-// --- Mocks (MUST come before imports of modules under test) ---
+// --- Mock logger (MUST come before imports of modules under test) ---
 
-const mockLogger = createMockLogger();
-mock.module('../utils/logger', () => ({ createLogger: mock(() => mockLogger) }));
-
-// Mock AI client for executeDagWorkflow tests
-const mockSendQueryDag = mock(function* () {
-  yield { type: 'assistant', content: 'DAG AI response' };
-  yield { type: 'result', sessionId: 'dag-session-id' };
-});
-
-const mockGetAssistantClientDag = mock(() => ({
-  sendQuery: mockSendQueryDag,
-  getType: () => 'claude',
-}));
-
-mock.module('../clients/factory', () => ({
-  getAssistantClient: mockGetAssistantClientDag,
-}));
-
-// Mock database for executeDagWorkflow tests
-const mockQueryDag = mock((query: string) => {
-  if (query.includes('INSERT INTO remote_agent_workflow_events')) {
-    return Promise.resolve(createQueryResult([]));
-  }
-  return Promise.resolve(createQueryResult([]));
-});
-
-mock.module('../db/connection', () => ({
-  pool: { query: mockQueryDag },
+const mockLogFn = mock(() => {});
+const mockLogger = {
+  info: mockLogFn,
+  warn: mockLogFn,
+  error: mockLogFn,
+  debug: mockLogFn,
+  trace: mockLogFn,
+  fatal: mockLogFn,
+  child: mock(() => mockLogger),
+};
+mock.module('@archon/paths', () => ({
+  createLogger: mock(() => mockLogger),
+  getCommandFolderSearchPaths: (folder?: string) => {
+    const paths = ['.archon/commands'];
+    if (folder) paths.unshift(folder);
+    return paths;
+  },
+  getDefaultCommandsPath: () => '/nonexistent/defaults',
 }));
 
 // --- Imports (after mocks) ---
@@ -46,10 +34,102 @@ import {
 } from './dag-executor';
 import type { DagNode, BashNode, NodeOutput, WorkflowRun } from './types';
 import { discoverWorkflows } from './loader';
-import { isDagWorkflow, isBashNode } from './types';
-import * as configLoader from '../config/config-loader';
-import type { IPlatformAdapter } from '../types';
-import type { MergedConfig } from '../config/config-types';
+import { isDagWorkflow } from './types';
+import type { WorkflowDeps, IWorkflowPlatform, WorkflowConfig } from './deps';
+import type { IWorkflowStore } from './store';
+
+// --- Mock helpers ---
+
+function createMockStore(): IWorkflowStore {
+  return {
+    createWorkflowRun: mock(() =>
+      Promise.resolve({
+        id: 'mock-run-id',
+        workflow_name: 'mock',
+        conversation_id: 'conv-mock',
+        parent_conversation_id: null,
+        codebase_id: null,
+        current_step_index: 0,
+        status: 'running' as const,
+        user_message: 'mock message',
+        metadata: {},
+        started_at: new Date(),
+        completed_at: null,
+        last_activity_at: null,
+        working_path: null,
+      })
+    ),
+    getWorkflowRun: mock(() => Promise.resolve(null)),
+    getActiveWorkflowRun: mock(() => Promise.resolve(null)),
+    findResumableRun: mock(() => Promise.resolve(null)),
+    resumeWorkflowRun: mock(() =>
+      Promise.resolve({
+        id: 'mock-run-id',
+        workflow_name: 'mock',
+        conversation_id: 'conv-mock',
+        parent_conversation_id: null,
+        codebase_id: null,
+        current_step_index: 0,
+        status: 'running' as const,
+        user_message: 'mock message',
+        metadata: {},
+        started_at: new Date(),
+        completed_at: null,
+        last_activity_at: null,
+        working_path: null,
+      })
+    ),
+    updateWorkflowRun: mock(() => Promise.resolve()),
+    updateWorkflowActivity: mock(() => Promise.resolve()),
+    getWorkflowRunStatus: mock(() => Promise.resolve(null)),
+    completeWorkflowRun: mock(() => Promise.resolve()),
+    failWorkflowRun: mock(() => Promise.resolve()),
+    createWorkflowEvent: mock(() => Promise.resolve()),
+    getCodebase: mock(() => Promise.resolve(null)),
+  };
+}
+
+/** Mock AI sendQuery generator */
+const mockSendQueryDag = mock(function* () {
+  yield { type: 'assistant', content: 'DAG AI response' };
+  yield { type: 'result', sessionId: 'dag-session-id' };
+});
+
+const mockGetAssistantClientDag = mock(() => ({
+  sendQuery: mockSendQueryDag,
+  getType: () => 'claude',
+}));
+
+function createMockDeps(storeOverride?: IWorkflowStore): WorkflowDeps {
+  const store = storeOverride ?? createMockStore();
+  return {
+    store,
+    getAssistantClient: mockGetAssistantClientDag,
+    loadConfig: mock(() =>
+      Promise.resolve({
+        assistant: 'claude' as const,
+        commands: {},
+        defaults: { loadDefaultCommands: false, loadDefaultWorkflows: false },
+        assistants: { claude: {}, codex: {} },
+      })
+    ),
+  };
+}
+
+function createMockPlatform(): IWorkflowPlatform {
+  return {
+    sendMessage: mock(() => Promise.resolve()),
+    getStreamingMode: mock(() => 'batch' as const),
+    getPlatformType: mock(() => 'test'),
+  };
+}
+
+const minimalConfig: WorkflowConfig = {
+  assistant: 'claude',
+  assistants: { claude: {}, codex: {} },
+  commands: {},
+  defaults: { loadDefaultCommands: false, loadDefaultWorkflows: false },
+};
 
 // --- Helpers ---
 
@@ -62,16 +142,35 @@ function makeOutput(state: NodeOutput['state'], output = ''): NodeOutput {
   return { state, output } as NodeOutput;
 }
 
+function makeWorkflowRun(id = 'dag-test-run-id', overrides?: Partial<WorkflowRun>): WorkflowRun {
+  return {
+    id,
+    workflow_name: 'dag-test',
+    conversation_id: 'conv-dag',
+    parent_conversation_id: null,
+    codebase_id: null,
+    current_step_index: 0,
+    status: 'running',
+    user_message: 'dag test message',
+    metadata: {},
+    started_at: new Date(),
+    completed_at: null,
+    last_activity_at: null,
+    working_path: null,
+    ...overrides,
+  };
+}
+
 // --- Tests ---
 
 describe('buildTopologicalLayers', () => {
-  it('single node with no dependencies → one layer', () => {
+  it('single node with no dependencies -> one layer', () => {
     const layers = buildTopologicalLayers([node('a')]);
     expect(layers).toHaveLength(1);
     expect(layers[0].map(n => n.id)).toEqual(['a']);
   });
 
-  it('linear chain → one node per layer', () => {
+  it('linear chain -> one node per layer', () => {
     const layers = buildTopologicalLayers([node('a'), node('b', ['a']), node('c', ['b'])]);
     expect(layers).toHaveLength(3);
     expect(layers[0].map(n => n.id)).toEqual(['a']);
@@ -79,7 +178,7 @@ describe('buildTopologicalLayers', () => {
     expect(layers[2].map(n => n.id)).toEqual(['c']);
   });
 
-  it('fan-out: classify → [investigate, plan] in same layer', () => {
+  it('fan-out: classify -> [investigate, plan] in same layer', () => {
     const layers = buildTopologicalLayers([
       node('classify'),
       node('investigate', ['classify']),
@@ -91,14 +190,14 @@ describe('buildTopologicalLayers', () => {
     expect(layer1Ids).toEqual(['investigate', 'plan']);
   });
 
-  it('fan-in: [a, b] → implement in its own layer', () => {
+  it('fan-in: [a, b] -> implement in its own layer', () => {
     const layers = buildTopologicalLayers([node('a'), node('b'), node('implement', ['a', 'b'])]);
     expect(layers).toHaveLength(2);
     expect(layers[0].map(n => n.id).sort()).toEqual(['a', 'b']);
     expect(layers[1].map(n => n.id)).toEqual(['implement']);
   });
 
-  it('diamond: classify → [investigate, plan] → implement', () => {
+  it('diamond: classify -> [investigate, plan] -> implement', () => {
     const layers = buildTopologicalLayers([
       node('classify'),
       node('investigate', ['classify']),
@@ -150,7 +249,7 @@ describe('checkTriggerRule', () => {
     expect(checkTriggerRule(n, outputs)).toBe('skip');
   });
 
-  it('all_success: skips when one dep skipped (skipped ≠ success)', () => {
+  it('all_success: skips when one dep skipped (skipped != success)', () => {
     const n = node('c', ['a', 'b']);
     const outputs = new Map([
       ['a', makeOutput('completed')],
@@ -185,7 +284,7 @@ describe('checkTriggerRule', () => {
       ['investigate', makeOutput('skipped')],
       ['plan', makeOutput('completed')],
     ]);
-    // skipped is not failed, plan succeeded → run
+    // skipped is not failed, plan succeeded -> run
     expect(checkTriggerRule(n, outputs)).toBe('run');
   });
 
@@ -227,40 +326,26 @@ describe('checkTriggerRule', () => {
   it('all_success: skips when upstream absent from outputs (synthesised as failed)', () => {
     const n = node('c', ['a', 'b']);
     const outputs = new Map([['a', makeOutput('completed')]]);
-    // 'b' is absent → synthesised as failed → all_success skips
+    // 'b' is absent -> synthesised as failed -> all_success skips
     expect(checkTriggerRule(n, outputs)).toBe('skip');
   });
 
   it('all_done: runs when absent upstream is synthesised as failed (failed is terminal)', () => {
     const n = node('c', ['a'], { trigger_rule: 'all_done' });
-    const outputs = new Map<string, NodeOutput>(); // 'a' absent → synthesised as failed → terminal
+    const outputs = new Map<string, NodeOutput>(); // 'a' absent -> synthesised as failed -> terminal
     expect(checkTriggerRule(n, outputs)).toBe('run');
   });
 });
 
-describe('DAG Loader — cycle detection', () => {
+describe('DAG Loader -- cycle detection', () => {
   let testDir: string;
-  let loadConfigSpy: Mock<typeof configLoader.loadConfig>;
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `dag-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(testDir, { recursive: true });
-
-    loadConfigSpy = spyOn(configLoader, 'loadConfig');
-    loadConfigSpy.mockResolvedValue({
-      botName: 'Archon',
-      assistant: 'claude',
-      assistants: { claude: {}, codex: {} },
-      streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
-      paths: { workspaces: '/tmp', worktrees: '/tmp' },
-      concurrency: { maxConversations: 10 },
-      commands: { autoLoad: true },
-      defaults: { copyDefaults: true, loadDefaultCommands: false, loadDefaultWorkflows: false },
-    });
   });
 
   afterEach(async () => {
-    loadConfigSpy.mockRestore();
     try {
       await rm(testDir, { recursive: true, force: true });
     } catch {
@@ -287,7 +372,7 @@ nodes:
 `
     );
 
-    const result = await discoverWorkflows(testDir);
+    const result = await discoverWorkflows(testDir, { loadDefaults: false });
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0].error).toMatch(/cycle/i);
   });
@@ -308,7 +393,7 @@ nodes:
 `
     );
 
-    const result = await discoverWorkflows(testDir);
+    const result = await discoverWorkflows(testDir, { loadDefaults: false });
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0].error).toMatch(/nonexistent/);
   });
@@ -330,7 +415,7 @@ nodes:
 `
     );
 
-    const result = await discoverWorkflows(testDir);
+    const result = await discoverWorkflows(testDir, { loadDefaults: false });
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0].error).toMatch(/duplicate/i);
   });
@@ -351,7 +436,7 @@ nodes:
 `
     );
 
-    const result = await discoverWorkflows(testDir);
+    const result = await discoverWorkflows(testDir, { loadDefaults: false });
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0].error).toMatch(/mutually exclusive/i);
   });
@@ -371,7 +456,7 @@ nodes:
 `
     );
 
-    const result = await discoverWorkflows(testDir);
+    const result = await discoverWorkflows(testDir, { loadDefaults: false });
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0].error).toMatch(/must have either/i);
   });
@@ -410,7 +495,7 @@ nodes:
 `
     );
 
-    const result = await discoverWorkflows(testDir);
+    const result = await discoverWorkflows(testDir, { loadDefaults: false });
     expect(result.errors).toHaveLength(0);
     expect(result.workflows).toHaveLength(1);
 
@@ -442,7 +527,7 @@ steps:
 `
     );
 
-    const result = await discoverWorkflows(testDir);
+    const result = await discoverWorkflows(testDir, { loadDefaults: false });
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0].error).toMatch(/mutually exclusive/i);
   });
@@ -465,7 +550,7 @@ nodes:
 `
     );
 
-    const result = await discoverWorkflows(testDir);
+    const result = await discoverWorkflows(testDir, { loadDefaults: false });
     expect(result.errors).toHaveLength(0);
     expect(result.workflows).toHaveLength(1);
 
@@ -495,7 +580,7 @@ prompt: "do something"
 `
     );
 
-    const result = await discoverWorkflows(testDir);
+    const result = await discoverWorkflows(testDir, { loadDefaults: false });
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0].error).toMatch(/mutually exclusive/i);
   });
@@ -519,7 +604,7 @@ nodes:
 `
     );
 
-    const result = await discoverWorkflows(testDir);
+    const result = await discoverWorkflows(testDir, { loadDefaults: false });
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0].error).toMatch(/trigger_rule/i);
   });
@@ -546,7 +631,7 @@ nodes:
 `
     );
 
-    const result = await discoverWorkflows(testDir);
+    const result = await discoverWorkflows(testDir, { loadDefaults: false });
     expect(result.errors).toHaveLength(0);
     const wf = result.workflows.find(w => w.name === 'tool-restriction-test');
     expect(wf).toBeDefined();
@@ -585,7 +670,7 @@ describe('substituteNodeOutputRefs', () => {
   });
 });
 
-describe('checkTriggerRule — missing upstream treated as failed', () => {
+describe('checkTriggerRule -- missing upstream treated as failed', () => {
   it('none_failed_min_one_success: skips when all deps skipped (no success)', () => {
     const n = node('implement', ['a', 'b'], { trigger_rule: 'none_failed_min_one_success' });
     const outputs = new Map([
@@ -599,55 +684,11 @@ describe('checkTriggerRule — missing upstream treated as failed', () => {
     const n = node('b', ['a']);
     const outputs = new Map([['a', makeOutput('skipped')]]);
     expect(checkTriggerRule(n, outputs)).toBe('skip');
-    // Demonstrates the mechanism behind the all-nodes-skipped error:
-    // if every node skips, nodeOutputs has no 'completed' entries
-    // and executeDagWorkflow throws.
   });
 });
 
-describe('executeDagWorkflow — tool restrictions', () => {
+describe('executeDagWorkflow -- tool restrictions', () => {
   let testDir: string;
-  let loadConfigSpy: Mock<typeof configLoader.loadConfig>;
-
-  const minimalConfig: MergedConfig = {
-    botName: 'Archon',
-    assistant: 'claude',
-    assistants: { claude: {}, codex: {} },
-    streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
-    paths: { workspaces: '/tmp', worktrees: '/tmp' },
-    concurrency: { maxConversations: 10 },
-    commands: { autoLoad: true },
-    defaults: { copyDefaults: true, loadDefaultCommands: false, loadDefaultWorkflows: false },
-  };
-
-  function createMockPlatformDag(): IPlatformAdapter {
-    return {
-      sendMessage: mock(() => Promise.resolve()),
-      ensureThread: mock((id: string) => Promise.resolve(id)),
-      getStreamingMode: mock(() => 'batch' as const),
-      getPlatformType: mock(() => 'test'),
-      start: mock(() => Promise.resolve()),
-      stop: mock(() => {}),
-    };
-  }
-
-  function makeWorkflowRun(id = 'dag-test-run-id'): WorkflowRun {
-    return {
-      id,
-      workflow_name: 'dag-test',
-      conversation_id: 'conv-dag',
-      parent_conversation_id: null,
-      codebase_id: null,
-      current_step_index: 0,
-      status: 'running',
-      user_message: 'dag test message',
-      metadata: {},
-      started_at: new Date(),
-      completed_at: null,
-      last_activity_at: null,
-      working_path: null,
-    };
-  }
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `dag-exec-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -657,19 +698,19 @@ describe('executeDagWorkflow — tool restrictions', () => {
 
     mockSendQueryDag.mockClear();
     mockGetAssistantClientDag.mockClear();
-    mockQueryDag.mockClear();
 
     mockSendQueryDag.mockImplementation(function* () {
       yield { type: 'assistant', content: 'DAG AI response' };
       yield { type: 'result', sessionId: 'dag-session-id' };
     });
-
-    loadConfigSpy = spyOn(configLoader, 'loadConfig');
-    loadConfigSpy.mockResolvedValue(minimalConfig);
   });
 
   afterEach(async () => {
-    loadConfigSpy.mockRestore();
+    // Restore default claude client
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
     try {
       await rm(testDir, { recursive: true, force: true });
     } catch {
@@ -678,10 +719,12 @@ describe('executeDagWorkflow — tool restrictions', () => {
   });
 
   it('passes allowed_tools to sendQuery options for Claude node', async () => {
-    const platform = createMockPlatformDag();
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
     const workflowRun = makeWorkflowRun();
 
     await executeDagWorkflow(
+      mockDeps,
       platform,
       'conv-dag',
       testDir,
@@ -709,10 +752,12 @@ describe('executeDagWorkflow — tool restrictions', () => {
       getType: () => 'codex',
     });
 
-    const platform = createMockPlatformDag();
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
     const workflowRun = makeWorkflowRun();
 
     await executeDagWorkflow(
+      mockDeps,
       platform,
       'conv-dag',
       testDir,
@@ -735,18 +780,15 @@ describe('executeDagWorkflow — tool restrictions', () => {
     const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
     const warning = messages.find(m => m.includes('denied_tools') && m.includes('Codex'));
     expect(warning).toBeDefined();
-
-    mockGetAssistantClientDag.mockImplementation(() => ({
-      sendQuery: mockSendQueryDag,
-      getType: () => 'claude',
-    }));
   });
 
   it('passes empty allowed_tools: [] (disable all tools) to sendQuery', async () => {
-    const platform = createMockPlatformDag();
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
     const workflowRun = makeWorkflowRun();
 
     await executeDagWorkflow(
+      mockDeps,
       platform,
       'conv-dag',
       testDir,
@@ -766,49 +808,8 @@ describe('executeDagWorkflow — tool restrictions', () => {
   });
 });
 
-describe('executeDagWorkflow — bash nodes', () => {
+describe('executeDagWorkflow -- bash nodes', () => {
   let testDir: string;
-  let loadConfigSpy: Mock<typeof configLoader.loadConfig>;
-
-  const minimalConfig: MergedConfig = {
-    botName: 'Archon',
-    assistant: 'claude',
-    assistants: { claude: {}, codex: {} },
-    streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
-    paths: { workspaces: '/tmp', worktrees: '/tmp' },
-    concurrency: { maxConversations: 10 },
-    commands: { autoLoad: true },
-    defaults: { copyDefaults: true, loadDefaultCommands: false, loadDefaultWorkflows: false },
-  };
-
-  function createMockPlatformDag(): IPlatformAdapter {
-    return {
-      sendMessage: mock(() => Promise.resolve()),
-      ensureThread: mock((id: string) => Promise.resolve(id)),
-      getStreamingMode: mock(() => 'batch' as const),
-      getPlatformType: mock(() => 'test'),
-      start: mock(() => Promise.resolve()),
-      stop: mock(() => {}),
-    };
-  }
-
-  function makeWorkflowRun(id = 'bash-test-run-id'): WorkflowRun {
-    return {
-      id,
-      workflow_name: 'bash-test',
-      conversation_id: 'conv-bash',
-      parent_conversation_id: null,
-      codebase_id: null,
-      current_step_index: 0,
-      status: 'running',
-      user_message: 'bash test message',
-      metadata: {},
-      started_at: new Date(),
-      completed_at: null,
-      last_activity_at: null,
-      working_path: null,
-    };
-  }
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `dag-bash-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -816,19 +817,19 @@ describe('executeDagWorkflow — bash nodes', () => {
 
     mockSendQueryDag.mockClear();
     mockGetAssistantClientDag.mockClear();
-    mockQueryDag.mockClear();
 
     mockSendQueryDag.mockImplementation(function* () {
       yield { type: 'assistant', content: 'DAG AI response' };
       yield { type: 'result', sessionId: 'dag-session-id' };
     });
 
-    loadConfigSpy = spyOn(configLoader, 'loadConfig');
-    loadConfigSpy.mockResolvedValue(minimalConfig);
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
   });
 
   afterEach(async () => {
-    loadConfigSpy.mockRestore();
     try {
       await rm(testDir, { recursive: true, force: true });
     } catch {
@@ -837,8 +838,13 @@ describe('executeDagWorkflow — bash nodes', () => {
   });
 
   it('bash node executes and captures stdout as output', async () => {
-    const platform = createMockPlatformDag();
-    const workflowRun = makeWorkflowRun();
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('bash-test-run-id', {
+      workflow_name: 'bash-test',
+      conversation_id: 'conv-bash',
+      user_message: 'bash test message',
+    });
 
     const bashNode: BashNode = {
       id: 'stats',
@@ -846,6 +852,7 @@ describe('executeDagWorkflow — bash nodes', () => {
     };
 
     await executeDagWorkflow(
+      mockDeps,
       platform,
       'conv-bash',
       testDir,
@@ -864,8 +871,13 @@ describe('executeDagWorkflow — bash nodes', () => {
   });
 
   it('bash node stdout is available for downstream $nodeId.output substitution', async () => {
-    const platform = createMockPlatformDag();
-    const workflowRun = makeWorkflowRun();
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('bash-test-run-id', {
+      workflow_name: 'bash-test',
+      conversation_id: 'conv-bash',
+      user_message: 'bash test message',
+    });
 
     // Write a command file for the downstream AI node
     const commandsDir = join(testDir, '.archon', 'commands');
@@ -878,6 +890,7 @@ describe('executeDagWorkflow — bash nodes', () => {
     ];
 
     await executeDagWorkflow(
+      mockDeps,
       platform,
       'conv-bash',
       testDir,
@@ -899,8 +912,13 @@ describe('executeDagWorkflow — bash nodes', () => {
   });
 
   it('non-zero exit code results in failed state', async () => {
-    const platform = createMockPlatformDag();
-    const workflowRun = makeWorkflowRun();
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('bash-test-run-id', {
+      workflow_name: 'bash-test',
+      conversation_id: 'conv-bash',
+      user_message: 'bash test message',
+    });
 
     const bashNode: BashNode = {
       id: 'fail',
@@ -908,6 +926,7 @@ describe('executeDagWorkflow — bash nodes', () => {
     };
 
     await executeDagWorkflow(
+      mockDeps,
       platform,
       'conv-bash',
       testDir,
@@ -930,8 +949,13 @@ describe('executeDagWorkflow — bash nodes', () => {
   });
 
   it('variable substitution works in bash scripts', async () => {
-    const platform = createMockPlatformDag();
-    const workflowRun = makeWorkflowRun();
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('bash-test-run-id', {
+      workflow_name: 'bash-test',
+      conversation_id: 'conv-bash',
+      user_message: 'bash test message',
+    });
 
     const bashNode: BashNode = {
       id: 'vars',
@@ -939,6 +963,7 @@ describe('executeDagWorkflow — bash nodes', () => {
     };
 
     await executeDagWorkflow(
+      mockDeps,
       platform,
       'conv-bash',
       testDir,
@@ -957,8 +982,13 @@ describe('executeDagWorkflow — bash nodes', () => {
   });
 
   it('bash node in parallel layer executes correctly', async () => {
-    const platform = createMockPlatformDag();
-    const workflowRun = makeWorkflowRun();
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('bash-test-run-id', {
+      workflow_name: 'bash-test',
+      conversation_id: 'conv-bash',
+      user_message: 'bash test message',
+    });
 
     // Write a command file for the AI node
     const commandsDir = join(testDir, '.archon', 'commands');
@@ -971,6 +1001,7 @@ describe('executeDagWorkflow — bash nodes', () => {
     ];
 
     await executeDagWorkflow(
+      mockDeps,
       platform,
       'conv-bash',
       testDir,

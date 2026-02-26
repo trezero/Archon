@@ -20,8 +20,13 @@ import {
   MAX_WORKTREES_PER_CODEBASE,
 } from '../services/cleanup-service';
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
-import { discoverWorkflows } from '../workflows';
-import { isSingleStep, type WorkflowDefinition, type WorkflowLoadError } from '../workflows/types';
+import { loadConfig } from '../config/config-loader';
+import {
+  discoverWorkflowsWithConfig,
+  isSingleStep,
+  type WorkflowDefinition,
+  type WorkflowLoadError,
+} from '@archon/workflows';
 import * as workflowDb from '../db/workflows';
 import { getTriggerForCommand, type DeactivatingCommand } from '../state/session-transitions';
 import { SessionNotFoundError } from '../db/sessions';
@@ -1282,7 +1287,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
           const workflowCwd = codebase
             ? (conversation.cwd ?? codebase.default_cwd)
             : getArchonWorkspacesPath();
-          const { workflows, errors } = await discoverWorkflows(workflowCwd);
+          const { workflows, errors } = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
 
           if (workflows.length === 0 && errors.length === 0) {
             return {
@@ -1324,7 +1329,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
             ? (conversation.cwd ?? codebase.default_cwd)
             : getArchonWorkspacesPath();
           const { workflows: reloadedWorkflows, errors: reloadErrors } =
-            await discoverWorkflows(reloadCwd);
+            await discoverWorkflowsWithConfig(reloadCwd, loadConfig);
           let msg = `Discovered ${String(reloadedWorkflows.length)} workflow(s).`;
           if (reloadErrors.length > 0) {
             msg += `\n\n**${String(reloadErrors.length)} failed to load:**\n`;
@@ -1428,7 +1433,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
           let workflows: readonly WorkflowDefinition[];
           let loadErrors: readonly WorkflowLoadError[];
           try {
-            const result = await discoverWorkflows(workflowCwd);
+            const result = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
             workflows = result.workflows;
             loadErrors = result.errors;
           } catch (error) {

@@ -14,9 +14,6 @@ import {
   handleMessage,
   getDatabaseType,
   loadConfig,
-  discoverWorkflows,
-  parseWorkflow,
-  isValidCommandName,
   getWorkflowFolderSearchPaths,
   getCommandFolderSearchPaths,
   getDefaultCommandsPath,
@@ -31,10 +28,13 @@ import {
   createLogger,
 } from '@archon/core';
 import {
+  discoverWorkflowsWithConfig,
+  parseWorkflow,
+  isValidCommandName,
   BUNDLED_WORKFLOWS,
   BUNDLED_COMMANDS,
   isBinaryBuild,
-} from '@archon/core/defaults/bundled-defaults';
+} from '@archon/workflows';
 import { findMarkdownFilesRecursive } from '@archon/core/utils/commands';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -486,7 +486,7 @@ export function registerApiRoutes(
         return c.json({ workflows: [] });
       }
 
-      const result = await discoverWorkflows(workingDir);
+      const result = await discoverWorkflowsWithConfig(workingDir, loadConfig);
       return c.json({ workflows: result.workflows, errors: result.errors });
     } catch (error) {
       // Workflow discovery can fail if cwd is stale or deleted — return empty with warning

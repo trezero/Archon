@@ -15,7 +15,7 @@ import { resolve, join } from 'path';
 import * as fsPromises from 'fs/promises';
 import * as gitUtils from '@archon/git';
 import * as pathValidation from '../utils/path-validation';
-import * as workflows from '../workflows';
+import * as workflows from '@archon/workflows';
 
 // Create mock functions for database modules (safe to mock - no standalone tests)
 const mockUpdateConversation = mock(() => Promise.resolve());
@@ -211,7 +211,7 @@ function setupSpies(): void {
   spyFsRm = spyOn(fsPromises, 'rm').mockImplementation(() => Promise.resolve());
 
   // Workflow spies
-  spyDiscoverWorkflows = spyOn(workflows, 'discoverWorkflows').mockResolvedValue({
+  spyDiscoverWorkflows = spyOn(workflows, 'discoverWorkflowsWithConfig').mockResolvedValue({
     workflows: [],
     errors: [],
   });
@@ -1888,6 +1888,18 @@ describe('CommandHandler', () => {
         expect(result.message).toContain('broken-9.yaml');
         expect(result.message).not.toContain('broken-10.yaml');
         expect(result.message).toContain('and 5 more');
+      });
+
+      test('should pass loadConfig as second argument to discoverWorkflowsWithConfig', async () => {
+        spyDiscoverWorkflows.mockResolvedValueOnce({
+          workflows: [{ name: 'test-wf', description: 'Test', steps: [{ command: 'test' }] }],
+          errors: [],
+        });
+
+        await handleCommand(conversationWithCodebase, '/workflow list');
+
+        // Verify loadConfig function is passed as the second argument
+        expect(spyDiscoverWorkflows).toHaveBeenCalledWith(expect.any(String), expect.any(Function));
       });
     });
 

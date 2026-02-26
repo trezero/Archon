@@ -14,14 +14,20 @@ import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
 import * as commandHandler from '../handlers/command-handler';
-import { formatToolCall } from '../utils/tool-formatter';
+import { formatToolCall } from '@archon/workflows';
 import { classifyAndFormatError } from '../utils/error-formatter';
 import { toError } from '../utils/error';
 import { getAssistantClient } from '../clients/factory';
 import { getArchonHome, getArchonWorkspacesPath } from '../utils/archon-paths';
 import { syncArchonToWorktree } from '../utils/worktree-sync';
-import { discoverWorkflows, findWorkflow, executeWorkflow } from '../workflows';
-import type { WorkflowDefinition } from '../workflows';
+import {
+  discoverWorkflowsWithConfig,
+  findWorkflow,
+  executeWorkflow,
+  type WorkflowDefinition,
+} from '@archon/workflows';
+import { createWorkflowDeps } from '../workflows/store-adapter';
+import { loadConfig } from '../config/config-loader';
 import { validateAndResolveIsolation, dispatchBackgroundWorkflow } from './orchestrator';
 import { IsolationBlockedError } from '@archon/isolation';
 import { buildOrchestratorPrompt, buildProjectScopedPrompt } from './prompt-builder';
@@ -240,6 +246,7 @@ async function dispatchOrchestratorWorkflow(
     );
   } else {
     await executeWorkflow(
+      createWorkflowDeps(),
       platform,
       conversationId,
       cwd,
@@ -355,7 +362,9 @@ export async function handleMessage(
     // 4. Discover global workflows
     let workflows: WorkflowDefinition[] = [];
     try {
-      const result = await discoverWorkflows(getArchonWorkspacesPath(), getArchonHome());
+      const result = await discoverWorkflowsWithConfig(getArchonWorkspacesPath(), loadConfig, {
+        globalSearchPath: getArchonHome(),
+      });
       workflows = [...result.workflows];
     } catch (error) {
       getLog().warn({ err: error as Error }, 'global_workflow_discovery_failed');
@@ -369,7 +378,7 @@ export async function handleMessage(
           const workflowCwd = conversation.cwd ?? codebase.default_cwd;
           // Sync .archon from canonical repo to worktree if needed
           await syncArchonToWorktree(workflowCwd);
-          const repoResult = await discoverWorkflows(workflowCwd);
+          const repoResult = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
           // Merge: repo workflows override global by name
           const workflowMap = new Map(workflows.map(w => [w.name, w]));
           for (const rw of repoResult.workflows) {
@@ -898,7 +907,7 @@ async function handleWorkflowRunCommand(
 
     let discovery;
     try {
-      discovery = await discoverWorkflows(workflowCwd);
+      discovery = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
     } catch (error) {
       const err = error as Error;
       getLog().error({ err, cwd: workflowCwd }, 'workflow_discovery_failed');

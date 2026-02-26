@@ -1,7 +1,7 @@
 /**
  * WorkflowEventEmitter - typed event emitter for workflow execution observability.
  *
- * Lives in @archon/core so the executor can emit events.
+ * Lives in @archon/workflows so the executor can emit events.
  * The Web adapter in @archon/server subscribes to forward events to SSE streams.
  *
  * Design:
@@ -11,7 +11,7 @@
  */
 import { EventEmitter } from 'events';
 import type { ArtifactType } from './types';
-import { createLogger } from '../utils/logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

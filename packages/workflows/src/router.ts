@@ -2,8 +2,7 @@
  * Workflow Router - builds prompts and detects workflow invocation
  */
 import type { WorkflowDefinition } from './types';
-import type { IsolationHints } from '../types';
-import { createLogger } from '../utils/logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -27,8 +26,8 @@ export interface RouterContext {
   labels?: string[];
   /** Thread/comment history - previous messages for context */
   threadHistory?: string;
-  /** Workflow type hint - uses same type as IsolationHints to avoid duplication */
-  workflowType?: IsolationHints['workflowType'];
+  /** Workflow type hint (e.g., 'pr-review', 'issue', etc.) */
+  workflowType?: string;
 }
 
 /**

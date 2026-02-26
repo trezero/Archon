@@ -2,11 +2,11 @@
  * @archon/core - Shared business logic for Archon
  *
  * This package contains:
- * - Workflow engine (YAML-based multi-step workflows)
  * - AI client adapters (Claude, Codex)
  * - Database operations (SQLite/PostgreSQL)
  * - Isolation providers (git worktrees, extensible for containers/VMs)
  * - Orchestration logic
+ * - Workflow store adapter (bridges core DB to @archon/workflows IWorkflowStore)
  * - Utility functions
  */
 
@@ -62,74 +62,9 @@ export { getAssistantClient } from './clients/factory';
 // =============================================================================
 // Workflows
 // =============================================================================
-// Types
-export {
-  type SingleStep,
-  type StepDefinition,
-  type ParallelBlock,
-  type WorkflowStep,
-  isParallelBlock,
-  isSingleStep,
-  type LoopConfig,
-  type WorkflowDefinition,
-  type WorkflowRun,
-  type WorkflowRunStatus,
-  type WorkflowStepStatus,
-  type ArtifactType,
-  type StepResult,
-  type LoadCommandResult,
-  type WorkflowExecutionResult,
-  type WorkflowLoadError,
-  type WorkflowLoadResult,
-  type DagNodeBase,
-  type DagNode,
-  type CommandNode,
-  type PromptNode,
-  type BashNode,
-  type TriggerRule,
-  TRIGGER_RULES,
-  isDagWorkflow,
-  isBashNode,
-} from './workflows/types';
 
-// Loader
-export { discoverWorkflows, parseWorkflow } from './workflows/loader';
-export type { ParseResult } from './workflows/loader';
-
-// Router
-export {
-  type RouterContext,
-  buildRouterPrompt,
-  type WorkflowInvocation,
-  parseWorkflowInvocation,
-  findWorkflow,
-} from './workflows/router';
-
-// Executor
-export { isValidCommandName, executeWorkflow } from './workflows/executor';
-
-// Logger
-export {
-  type WorkflowEvent,
-  logWorkflowEvent,
-  logWorkflowStart,
-  logStepStart,
-  logStepComplete,
-  logAssistant,
-  logTool,
-  logValidation,
-  logWorkflowError,
-  logWorkflowComplete,
-  logParallelBlockStart,
-  logParallelBlockComplete,
-} from './workflows/logger';
-
-// Event Emitter
-export {
-  type WorkflowEmitterEvent,
-  getWorkflowEventEmitter,
-  resetWorkflowEventEmitter,
-} from './workflows/event-emitter';
+// Store adapter (bridges core DB to @archon/workflows IWorkflowStore)
+export { createWorkflowStore } from './workflows/store-adapter';
 
 // Workflow Events DB
 export * as workflowEventDb from './db/workflow-events';
@@ -212,12 +147,6 @@ export { ConversationLockManager, type LockAcquisitionResult } from './utils/con
 // Error formatting
 export { classifyAndFormatError } from './utils/error-formatter';
 export { toError } from './utils/error';
-
-// Tool formatting
-export { formatToolCall, formatThinking } from './utils/tool-formatter';
-
-// Variable substitution
-export { substituteVariables } from './utils/variable-substitution';
 
 // Credential sanitization
 export { sanitizeCredentials, sanitizeError } from './utils/credential-sanitizer';

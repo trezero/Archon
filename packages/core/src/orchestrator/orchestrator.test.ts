@@ -3,7 +3,7 @@ import { MockPlatformAdapter } from '../test/mocks/platform';
 import { createMockLogger } from '../test/mocks/logger';
 import type { Conversation, Codebase, Session } from '../types';
 import { ConversationNotFoundError } from '../types';
-import type { WorkflowDefinition } from '../workflows/types';
+import type { WorkflowDefinition } from '@archon/workflows';
 
 // ─── Mock setup (BEFORE importing module under test) ─────────────────────────
 
@@ -90,10 +90,12 @@ const mockFindWorkflow = mock((name: string, workflows: readonly WorkflowDefinit
   workflows.find(w => w.name === name)
 );
 
-mock.module('../workflows', () => ({
-  discoverWorkflows: mockDiscoverWorkflows,
-  executeWorkflow: mockExecuteWorkflow,
-  findWorkflow: mockFindWorkflow,
+mock.module('../workflows/store-adapter', () => ({
+  createWorkflowDeps: mock(() => ({
+    store: {},
+    getAssistantClient: () => ({}),
+    loadConfig: async () => ({}),
+  })),
 }));
 
 // Config mock
@@ -158,7 +160,10 @@ mock.module('../utils/error-formatter', () => ({
   classifyAndFormatError: mock((err: Error) => `⚠️ Error: ${err.message}`),
 }));
 
-mock.module('../utils/tool-formatter', () => ({
+mock.module('@archon/workflows', () => ({
+  discoverWorkflowsWithConfig: mockDiscoverWorkflows,
+  executeWorkflow: mockExecuteWorkflow,
+  findWorkflow: mockFindWorkflow,
   formatToolCall: mock((toolName: string, _toolInput: unknown) => `🔧 ${toolName.toUpperCase()}`),
 }));
 
@@ -547,7 +552,10 @@ describe('orchestrator-agent handleMessage', () => {
 
       await handleMessage(platform, 'chat-456', '/workflow run test-workflow payload');
 
-      expect(mockDiscoverWorkflows).toHaveBeenCalledWith('/workspace/test-project');
+      expect(mockDiscoverWorkflows).toHaveBeenCalledWith(
+        '/workspace/test-project',
+        expect.any(Function)
+      );
       expect(platform.sendMessage).toHaveBeenCalledWith(
         'chat-456',
         'Workflow `test-workflow` not found.\n\nUse /workflow list to see available workflows.'
@@ -897,6 +905,7 @@ describe('orchestrator-agent handleMessage', () => {
       await handleMessage(platform, 'chat-456', 'do that analysis thing');
 
       expect(mockExecuteWorkflow).toHaveBeenCalledWith(
+        expect.anything(), // deps
         expect.anything(), // platform
         expect.anything(), // conversationId
         expect.anything(), // cwd
@@ -921,6 +930,7 @@ describe('orchestrator-agent handleMessage', () => {
       await handleMessage(platform, 'chat-456', 'fix the login bug');
 
       expect(mockExecuteWorkflow).toHaveBeenCalledWith(
+        expect.anything(), // deps
         expect.anything(),
         expect.anything(),
         expect.anything(),
@@ -976,7 +986,8 @@ describe('orchestrator-agent handleMessage', () => {
 
       expect(mockDiscoverWorkflows).toHaveBeenCalledWith(
         '/home/test/.archon/workspaces',
-        '/home/test/.archon'
+        expect.any(Function),
+        { globalSearchPath: '/home/test/.archon' }
       );
     });
 
@@ -992,7 +1003,10 @@ describe('orchestrator-agent handleMessage', () => {
 
       // Should call discoverWorkflows twice: global + repo-specific
       expect(mockDiscoverWorkflows).toHaveBeenCalledTimes(2);
-      expect(mockDiscoverWorkflows).toHaveBeenCalledWith('/workspace/project');
+      expect(mockDiscoverWorkflows).toHaveBeenCalledWith(
+        '/workspace/project',
+        expect.any(Function)
+      );
     });
 
     test('syncs .archon to worktree before repo workflow discovery', async () => {
@@ -1008,9 +1022,9 @@ describe('orchestrator-agent handleMessage', () => {
         callOrder.push('sync');
         return false;
       });
-      mockDiscoverWorkflows.mockImplementation(async (...args: unknown[]) => {
-        // Only track repo-specific calls (those with 1 arg)
-        if (args.length === 1) callOrder.push('discover-repo');
+      mockDiscoverWorkflows.mockImplementation(async (cwd: string) => {
+        // Only track repo-specific calls (those for the project path)
+        if (cwd === '/workspace/project') callOrder.push('discover-repo');
         return { workflows: [], errors: [] };
       });
 
