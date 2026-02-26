@@ -20,7 +20,7 @@ import {
   runWorkflow,
 } from '@/lib/api';
 import { useProject } from '@/contexts/ProjectContext';
-import type { WorkflowDefinition } from '@archon/workflows';
+import type { WorkflowDefinition } from '@archon/workflows/types';
 
 export type BuilderMode = 'dag' | 'sequential' | 'loop';
 

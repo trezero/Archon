@@ -9,8 +9,8 @@ import type {
   LoopConfig,
   SingleStep,
   ParallelBlock,
-} from '@archon/workflows';
-import { isDagWorkflow, isParallelBlock } from '@archon/workflows';
+} from '@archon/workflows/types';
+import { isDagWorkflow, isParallelBlock } from '@archon/workflows/types';
 import { useProject } from '@/contexts/ProjectContext';
 import { getWorkflow, listCommands, type CommandEntry } from '@/lib/api';
 import { WorkflowToolbar, type BuilderMode } from './WorkflowToolbar';

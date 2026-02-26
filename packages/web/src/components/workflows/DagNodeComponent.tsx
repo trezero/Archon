@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps, Node } from '@xyflow/react';
-import type { DagNodeBase } from '@archon/workflows';
+import type { DagNodeBase } from '@archon/workflows/types';
 
 export interface DagNodeData extends DagNodeBase {
   /** For command nodes: the command name. For prompt nodes: display label ("Prompt"). For bash: display label ("Shell"). */
