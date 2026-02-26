@@ -2,7 +2,7 @@ import { mock, describe, test, expect, beforeEach, afterAll } from 'bun:test';
 import { createMockLogger } from '../test/mocks/logger';
 // Mock logger to suppress noisy output during tests
 const mockLogger = createMockLogger();
-mock.module('../utils/logger', () => ({
+mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
 }));
 

@@ -6,7 +6,8 @@ import { Octokit } from '@octokit/rest';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { readdir, access } from 'fs/promises';
 import { join } from 'path';
-import type { IPlatformAdapter, IsolationHints, MessageMetadata } from '@archon/core';
+import type { IPlatformAdapter, MessageMetadata } from '@archon/core';
+import type { IsolationHints } from '@archon/isolation';
 import {
   ConversationNotFoundError,
   handleMessage,
@@ -14,10 +15,9 @@ import {
   toError,
   getLinkedIssueNumbers,
   onConversationClosed,
-  getArchonWorkspacesPath,
-  getCommandFolderSearchPaths,
   ConversationLockManager,
 } from '@archon/core';
+import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '@archon/paths';
 import {
   isWorktreePath,
   cloneRepository,

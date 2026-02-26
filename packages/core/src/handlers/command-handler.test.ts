@@ -151,8 +151,20 @@ mock.module('@archon/isolation', () => ({
 
 // Mock logger to suppress noisy output during tests
 const mockLogger = createMockLogger();
-mock.module('../utils/logger', () => ({
+mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
+  getArchonWorkspacesPath: mock(() => '/home/test/.archon/workspaces'),
+  getCommandFolderSearchPaths: mock(() => ['.archon/commands']),
+  expandTilde: mock((p: string) => p.replace(/^~/, '/home/test')),
+  ensureProjectStructure: mock(() => Promise.resolve()),
+  getProjectSourcePath: mock(
+    (owner: string, repo: string) => `/home/test/.archon/workspaces/${owner}/${repo}/source`
+  ),
+  createProjectSourceSymlink: mock(() => Promise.resolve()),
+  parseOwnerRepo: mock((name: string) => {
+    const parts = name.split('/');
+    return parts.length === 2 ? { owner: parts[0], repo: parts[1] } : null;
+  }),
 }));
 
 import { parseCommand, handleCommand } from './command-handler';

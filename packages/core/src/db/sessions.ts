@@ -4,7 +4,7 @@
 import { pool, getDialect, getDatabase } from './connection';
 import type { Session } from '../types';
 import type { TransitionTrigger } from '../state/session-transitions';
-import { createLogger } from '../utils/logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

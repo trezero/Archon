@@ -14,19 +14,19 @@ import {
   handleMessage,
   getDatabaseType,
   loadConfig,
+  cloneRepository,
+  registerRepository,
+  ConversationNotFoundError,
+} from '@archon/core';
+import { removeWorktree, toRepoPath, toWorktreePath } from '@archon/git';
+import {
+  createLogger,
   getWorkflowFolderSearchPaths,
   getCommandFolderSearchPaths,
   getDefaultCommandsPath,
   getDefaultWorkflowsPath,
-  cloneRepository,
-  registerRepository,
-  removeWorktree,
-  toRepoPath,
-  toWorktreePath,
-  ConversationNotFoundError,
   getArchonWorkspacesPath,
-  createLogger,
-} from '@archon/core';
+} from '@archon/paths';
 import {
   discoverWorkflowsWithConfig,
   parseWorkflow,

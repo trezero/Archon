@@ -9,8 +9,14 @@ import type { CopyFileEntry } from '@archon/isolation';
 import { createMockLogger } from '../test/mocks/logger';
 
 const mockLogger = createMockLogger();
-mock.module('./logger', () => ({
+mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
+  getArchonHome: mock(() => '/home/test/.archon'),
+  getArchonConfigPath: mock(() => '/home/test/.archon/config.yaml'),
+  getArchonWorkspacesPath: mock(() => '/home/test/.archon/workspaces'),
+  getArchonWorktreesPath: mock(() => '/home/test/.archon/worktrees'),
+  getDefaultCommandsPath: mock(() => '/app/.archon/commands/defaults'),
+  getDefaultWorkflowsPath: mock(() => '/app/.archon/workflows/defaults'),
 }));
 
 import { syncArchonToWorktree } from './worktree-sync';

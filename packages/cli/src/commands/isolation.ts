@@ -2,7 +2,7 @@
  * Isolation commands - list and cleanup worktrees
  */
 import * as isolationDb from '@archon/core/db/isolation-environments';
-import { createLogger } from '@archon/core';
+import { createLogger } from '@archon/paths';
 import { toRepoPath, toBranchName } from '@archon/git';
 import { getIsolationProvider } from '@archon/isolation';
 import { cleanupMergedWorktrees } from '@archon/core/services/cleanup-service';

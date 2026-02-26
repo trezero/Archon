@@ -7,7 +7,7 @@
  * - Explicit queueing with observability
  */
 
-import { createLogger } from './logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

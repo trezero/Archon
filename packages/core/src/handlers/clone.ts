@@ -14,9 +14,9 @@ import {
   getProjectSourcePath,
   createProjectSourceSymlink,
   parseOwnerRepo,
-} from '../utils/archon-paths';
+} from '@archon/paths';
 import { findMarkdownFilesRecursive } from '../utils/commands';
-import { createLogger } from '../utils/logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

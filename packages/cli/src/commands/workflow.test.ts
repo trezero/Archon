@@ -14,6 +14,19 @@ const mockLogger = {
   child: mock(() => mockLogger),
 };
 
+// Mock @archon/paths (createLogger moved here from @archon/core)
+mock.module('@archon/paths', () => ({
+  createLogger: mock(() => mockLogger),
+}));
+
+// Mock @archon/isolation (getIsolationProvider moved here from @archon/core)
+mock.module('@archon/isolation', () => ({
+  getIsolationProvider: mock(() => ({
+    createEnvironment: mock(() => Promise.resolve({ cwd: '/test/path' })),
+    cleanupEnvironment: mock(() => Promise.resolve()),
+  })),
+}));
+
 // Mock the @archon/core modules
 mock.module('@archon/core', () => ({
   registerRepository: mock(() =>
@@ -26,12 +39,7 @@ mock.module('@archon/core', () => ({
       alreadyExisted: false,
     })
   ),
-  createLogger: mock(() => mockLogger),
   loadConfig: mock(() => Promise.resolve({ defaults: {} })),
-  getIsolationProvider: mock(() => ({
-    createEnvironment: mock(() => Promise.resolve({ cwd: '/test/path' })),
-    cleanupEnvironment: mock(() => Promise.resolve()),
-  })),
 }));
 
 mock.module('@archon/workflows', () => ({

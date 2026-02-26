@@ -8,8 +8,10 @@ import type { WorkflowDefinition } from '@archon/workflows';
 // ─── Mock setup (BEFORE importing module under test) ─────────────────────────
 
 const mockLogger = createMockLogger();
-mock.module('../utils/logger', () => ({
+mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
+  getArchonWorkspacesPath: mock(() => '/home/test/.archon/workspaces'),
+  getArchonHome: mock(() => '/home/test/.archon'),
 }));
 
 // DB mocks
@@ -114,12 +116,6 @@ const mockLoadConfig = mock(() =>
 
 mock.module('../config/config-loader', () => ({
   loadConfig: mockLoadConfig,
-}));
-
-// Archon paths mock
-mock.module('../utils/archon-paths', () => ({
-  getArchonWorkspacesPath: mock(() => '/home/test/.archon/workspaces'),
-  getArchonHome: mock(() => '/home/test/.archon'),
 }));
 
 // Worktree sync mock

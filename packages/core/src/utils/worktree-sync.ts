@@ -4,7 +4,7 @@ import { stat } from 'fs/promises';
 import type { Stats } from 'fs';
 import { join } from 'path';
 import { loadRepoConfig } from '../config/config-loader';
-import { createLogger } from './logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

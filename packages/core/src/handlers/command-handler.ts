@@ -19,7 +19,7 @@ import {
   getWorktreeStatusBreakdown,
   MAX_WORKTREES_PER_CODEBASE,
 } from '../services/cleanup-service';
-import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '../utils/archon-paths';
+import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '@archon/paths';
 import { loadConfig } from '../config/config-loader';
 import {
   discoverWorkflowsWithConfig,
@@ -32,7 +32,7 @@ import { getTriggerForCommand, type DeactivatingCommand } from '../state/session
 import { SessionNotFoundError } from '../db/sessions';
 import { cloneRepository } from './clone';
 import { findMarkdownFilesRecursive } from '../utils/commands';
-import { createLogger } from '../utils/logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

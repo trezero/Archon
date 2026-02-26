@@ -492,30 +492,6 @@ describe('validateAppDefaultsPaths', () => {
   });
 });
 
-describe('re-export shim integration', () => {
-  test('core shim re-exports match @archon/paths exports', async () => {
-    const pathsModule = await import('./archon-paths');
-    const coreShim = await import('@archon/core/utils/archon-paths');
-
-    // Every export from the core shim should be the same function from @archon/paths
-    for (const key of Object.keys(coreShim)) {
-      expect((pathsModule as Record<string, unknown>)[key]).toBe(
-        (coreShim as Record<string, unknown>)[key]
-      );
-    }
-  });
-
-  test('core logger shim re-exports match @archon/paths logger', async () => {
-    const pathsLogger = await import('./logger');
-    const coreLogger = await import('@archon/core/utils/logger');
-
-    expect(coreLogger.createLogger).toBe(pathsLogger.createLogger);
-    expect(coreLogger.setLogLevel).toBe(pathsLogger.setLogLevel);
-    expect(coreLogger.getLogLevel).toBe(pathsLogger.getLogLevel);
-    expect(coreLogger.rootLogger).toBe(pathsLogger.rootLogger);
-  });
-});
-
 // =========================================================================
 // Async filesystem tests (use temp directories for isolation)
 // =========================================================================

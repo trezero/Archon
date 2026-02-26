@@ -7,7 +7,7 @@
  * - Does NOT require a project to be selected before starting a conversation
  */
 import { existsSync } from 'fs';
-import { createLogger } from '../utils/logger';
+import { createLogger } from '@archon/paths';
 import type { IPlatformAdapter, HandleMessageContext, Conversation, Codebase } from '../types';
 import { ConversationNotFoundError } from '../types';
 import * as db from '../db/conversations';
@@ -18,7 +18,7 @@ import { formatToolCall } from '@archon/workflows';
 import { classifyAndFormatError } from '../utils/error-formatter';
 import { toError } from '../utils/error';
 import { getAssistantClient } from '../clients/factory';
-import { getArchonHome, getArchonWorkspacesPath } from '../utils/archon-paths';
+import { getArchonHome, getArchonWorkspacesPath } from '@archon/paths';
 import { syncArchonToWorktree } from '../utils/worktree-sync';
 import {
   discoverWorkflowsWithConfig,
@@ -272,6 +272,106 @@ async function tryPersistSessionId(sessionId: string, assistantSessionId: string
   }
 }
 
+// ─── Extracted Helpers ──────────────────────────────────────────────────────
+
+/** Copy parent conversation's project context to child thread if missing */
+async function inheritThreadContext(
+  platform: IPlatformAdapter,
+  conversation: Conversation,
+  parentConversationId: string | undefined,
+  conversationId: string
+): Promise<Conversation> {
+  if (!parentConversationId || conversation.codebase_id) return conversation;
+
+  const parentConversation = await db.getConversationByPlatformId(
+    platform.getPlatformType(),
+    parentConversationId
+  );
+  if (!parentConversation?.codebase_id) return conversation;
+
+  try {
+    await db.updateConversation(conversation.id, {
+      codebase_id: parentConversation.codebase_id,
+      cwd: parentConversation.cwd,
+    });
+    const refreshed = await db.getOrCreateConversation(platform.getPlatformType(), conversationId);
+    getLog().debug({ conversationId, parentConversationId }, 'thread_context_inherited');
+    return refreshed;
+  } catch (err) {
+    if (err instanceof ConversationNotFoundError) {
+      getLog().warn({ conversationId: conversation.id }, 'thread_inheritance_failed');
+      return conversation;
+    }
+    throw err;
+  }
+}
+
+/** Discover global + repo-specific workflows, merge by name (repo overrides global) */
+async function discoverAllWorkflows(conversation: Conversation): Promise<WorkflowDefinition[]> {
+  let workflows: WorkflowDefinition[] = [];
+  try {
+    const result = await discoverWorkflowsWithConfig(getArchonWorkspacesPath(), loadConfig, {
+      globalSearchPath: getArchonHome(),
+    });
+    workflows = [...result.workflows];
+  } catch (error) {
+    getLog().warn({ err: error as Error }, 'global_workflow_discovery_failed');
+  }
+
+  if (conversation.codebase_id) {
+    try {
+      const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
+      if (codebase) {
+        const workflowCwd = conversation.cwd ?? codebase.default_cwd;
+        await syncArchonToWorktree(workflowCwd);
+        const repoResult = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
+        const workflowMap = new Map(workflows.map(w => [w.name, w]));
+        for (const rw of repoResult.workflows) {
+          workflowMap.set(rw.name, rw);
+        }
+        workflows = Array.from(workflowMap.values());
+      }
+    } catch (error) {
+      getLog().debug({ err: error as Error }, 'repo_workflow_discovery_failed');
+    }
+  }
+
+  return workflows;
+}
+
+/** Build the full prompt with system prompt, user message, and optional contexts */
+function buildFullPrompt(
+  conversation: Conversation,
+  codebases: readonly Codebase[],
+  workflows: readonly WorkflowDefinition[],
+  message: string,
+  issueContext: string | undefined,
+  threadContext: string | undefined
+): string {
+  const scopedCodebase = conversation.codebase_id
+    ? codebases.find(c => c.id === conversation.codebase_id)
+    : undefined;
+
+  const systemPrompt = scopedCodebase
+    ? buildProjectScopedPrompt(scopedCodebase, codebases, workflows)
+    : buildOrchestratorPrompt(codebases, workflows);
+
+  const contextSuffix = issueContext ? '\n\n---\n\n## Additional Context\n\n' + issueContext : '';
+
+  if (threadContext) {
+    return (
+      systemPrompt +
+      '\n\n---\n\n## Thread Context (previous messages)\n\n' +
+      threadContext +
+      '\n\n---\n\n## Current Request\n\n' +
+      message +
+      contextSuffix
+    );
+  }
+
+  return systemPrompt + '\n\n---\n\n## User Message\n\n' + message + contextSuffix;
+}
+
 // ─── Main Handler ───────────────────────────────────────────────────────────
 
 /**
@@ -290,40 +390,19 @@ export async function handleMessage(
   try {
     getLog().debug({ conversationId }, 'orchestrator_message_received');
 
-    // 1. Get/create conversation (NO codebase required)
+    // 1. Get/create conversation and inherit thread context
     let conversation = await db.getOrCreateConversation(
       platform.getPlatformType(),
       conversationId,
       undefined,
       parentConversationId
     );
-
-    // 1b. Thread context inheritance — copy parent's project context to child thread
-    if (parentConversationId && !conversation.codebase_id) {
-      const parentConversation = await db.getConversationByPlatformId(
-        platform.getPlatformType(),
-        parentConversationId
-      );
-      if (parentConversation?.codebase_id) {
-        try {
-          await db.updateConversation(conversation.id, {
-            codebase_id: parentConversation.codebase_id,
-            cwd: parentConversation.cwd,
-          });
-          conversation = await db.getOrCreateConversation(
-            platform.getPlatformType(),
-            conversationId
-          );
-          getLog().debug({ conversationId, parentConversationId }, 'thread_context_inherited');
-        } catch (err) {
-          if (err instanceof ConversationNotFoundError) {
-            getLog().warn({ conversationId: conversation.id }, 'thread_inheritance_failed');
-          } else {
-            throw err;
-          }
-        }
-      }
-    }
+    conversation = await inheritThreadContext(
+      platform,
+      conversation,
+      parentConversationId,
+      conversationId
+    );
 
     // 1c. Auto-generate title for untitled conversations (fire-and-forget)
     if (!conversation.title && !message.startsWith('/')) {
@@ -341,7 +420,6 @@ export async function handleMessage(
       const deterministicCommands = ['help', 'status', 'reset', 'workflow', 'register-project'];
 
       if (deterministicCommands.includes(command)) {
-        // Handle /register-project specially
         if (command === 'register-project') {
           const result = await handleRegisterProject(message, platform, conversationId);
           await platform.sendMessage(conversationId, result);
@@ -352,7 +430,6 @@ export async function handleMessage(
         const result = await commandHandler.handleCommand(conversation, message);
         await platform.sendMessage(conversationId, result.message);
 
-        // Handle workflow execution trigger from /workflow run
         if (result.workflow) {
           await handleWorkflowRunCommand(
             platform,
@@ -367,76 +444,21 @@ export async function handleMessage(
       }
     }
 
-    // 3. Load all codebases (fresh every message)
+    // 3. Load codebases, discover workflows, build prompt
     const codebases = await codebaseDb.listCodebases();
-
-    // 4. Discover global workflows
-    let workflows: WorkflowDefinition[] = [];
-    try {
-      const result = await discoverWorkflowsWithConfig(getArchonWorkspacesPath(), loadConfig, {
-        globalSearchPath: getArchonHome(),
-      });
-      workflows = [...result.workflows];
-    } catch (error) {
-      getLog().warn({ err: error as Error }, 'global_workflow_discovery_failed');
-    }
-
-    // Also load repo-specific workflows if conversation has a codebase
-    if (conversation.codebase_id) {
-      try {
-        const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
-        if (codebase) {
-          const workflowCwd = conversation.cwd ?? codebase.default_cwd;
-          // Sync .archon from canonical repo to worktree if needed
-          await syncArchonToWorktree(workflowCwd);
-          const repoResult = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
-          // Merge: repo workflows override global by name
-          const workflowMap = new Map(workflows.map(w => [w.name, w]));
-          for (const rw of repoResult.workflows) {
-            workflowMap.set(rw.name, rw);
-          }
-          workflows = Array.from(workflowMap.values());
-        }
-      } catch (error) {
-        getLog().debug({ err: error as Error }, 'repo_workflow_discovery_failed');
-      }
-    }
-
-    // 5. Build orchestrator prompt (scoped if conversation has a project)
-    let systemPrompt: string;
-    if (conversation.codebase_id) {
-      const scopedCodebase = codebases.find(c => c.id === conversation.codebase_id);
-      systemPrompt = scopedCodebase
-        ? buildProjectScopedPrompt(scopedCodebase, codebases, workflows)
-        : buildOrchestratorPrompt(codebases, workflows);
-    } else {
-      systemPrompt = buildOrchestratorPrompt(codebases, workflows);
-    }
-
-    // 6. Combine with user message + optional contexts
-    let fullPrompt = systemPrompt + '\n\n---\n\n## User Message\n\n' + message;
-
-    if (issueContext) {
-      fullPrompt += '\n\n---\n\n## Additional Context\n\n' + issueContext;
-    }
-
-    if (threadContext) {
-      fullPrompt =
-        systemPrompt +
-        '\n\n---\n\n## Thread Context (previous messages)\n\n' +
-        threadContext +
-        '\n\n---\n\n## Current Request\n\n' +
-        message +
-        (issueContext ? '\n\n---\n\n## Additional Context\n\n' + issueContext : '');
-    }
-
-    // 7. Determine CWD (orchestrator uses workspaces root)
+    const workflows = await discoverAllWorkflows(conversation);
+    const fullPrompt = buildFullPrompt(
+      conversation,
+      codebases,
+      workflows,
+      message,
+      issueContext,
+      threadContext
+    );
     const cwd = getArchonWorkspacesPath();
 
-    // 8. Update activity timestamp for staleness tracking
+    // 4. Update activity and get/create session
     await db.touchConversation(conversation.id);
-
-    // 9. Get/create session
     let session = await sessionDb.getActiveSession(conversation.id);
     if (!session) {
       session = await sessionDb.transitionSession(conversation.id, 'first-message', {
@@ -444,13 +466,11 @@ export async function handleMessage(
       });
     }
 
-    // 10. Send to AI client
+    // 5. Send to AI client
     const aiClient = getAssistantClient(conversation.ai_assistant_type);
     getLog().debug({ assistantType: conversation.ai_assistant_type }, 'sending_to_ai');
 
-    // 11. Route based on platform streaming mode
     const mode = platform.getStreamingMode();
-
     if (mode === 'stream') {
       await handleStreamMode(
         platform,

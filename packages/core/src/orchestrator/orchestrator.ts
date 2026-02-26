@@ -22,7 +22,7 @@ export async function commandFileExists(path: string): Promise<boolean> {
     throw new Error(`Cannot access command file at ${path}: ${err.message}`);
   }
 }
-import { createLogger } from '../utils/logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

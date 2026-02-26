@@ -56,7 +56,7 @@ In Docker containers, the Archon home is fixed at `/.archon/` (root level). This
 
 ## Path Resolution
 
-All path resolution is centralized in `packages/paths/src/archon-paths.ts` (`@archon/paths`). Re-export shims in `packages/core/src/utils/archon-paths.ts` maintain backward compatibility.
+All path resolution is centralized in `packages/paths/src/archon-paths.ts` (`@archon/paths`).
 
 ### Core Functions
 

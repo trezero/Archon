@@ -12,9 +12,9 @@
 
 import { access, readdir, mkdir, copyFile } from 'fs/promises';
 import { join } from 'path';
-import { getDefaultCommandsPath, getDefaultWorkflowsPath } from './archon-paths';
+import { getDefaultCommandsPath, getDefaultWorkflowsPath } from '@archon/paths';
 import { loadRepoConfig } from '../config/config-loader';
-import { createLogger } from './logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

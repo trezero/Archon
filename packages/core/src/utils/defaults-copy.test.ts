@@ -1,17 +1,26 @@
-import { describe, test, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, spyOn, mock, type Mock } from 'bun:test';
 import * as fs from 'fs/promises';
 import type { Dirent } from 'fs';
-import { copyDefaultsToRepo } from './defaults-copy';
-import * as archonPaths from './archon-paths';
 import * as configLoader from '../config/config-loader';
+import { createMockLogger } from '../test/mocks/logger';
+
+const mockLogger = createMockLogger();
+const mockGetDefaultCommandsPath = mock(() => '/app/.archon/commands/defaults');
+const mockGetDefaultWorkflowsPath = mock(() => '/app/.archon/workflows/defaults');
+
+mock.module('@archon/paths', () => ({
+  createLogger: mock(() => mockLogger),
+  getDefaultCommandsPath: mockGetDefaultCommandsPath,
+  getDefaultWorkflowsPath: mockGetDefaultWorkflowsPath,
+}));
+
+import { copyDefaultsToRepo } from './defaults-copy';
 
 describe('defaults-copy', () => {
   let accessSpy: Mock<typeof fs.access>;
   let readdirSpy: Mock<typeof fs.readdir>;
   let mkdirSpy: Mock<typeof fs.mkdir>;
   let copyFileSpy: Mock<typeof fs.copyFile>;
-  let getDefaultCommandsPathSpy: Mock<typeof archonPaths.getDefaultCommandsPath>;
-  let getDefaultWorkflowsPathSpy: Mock<typeof archonPaths.getDefaultWorkflowsPath>;
   let loadRepoConfigSpy: Mock<typeof configLoader.loadRepoConfig>;
 
   // Helper to create mock Dirent
@@ -35,15 +44,13 @@ describe('defaults-copy', () => {
     readdirSpy = spyOn(fs, 'readdir');
     mkdirSpy = spyOn(fs, 'mkdir');
     copyFileSpy = spyOn(fs, 'copyFile');
-    getDefaultCommandsPathSpy = spyOn(archonPaths, 'getDefaultCommandsPath');
-    getDefaultWorkflowsPathSpy = spyOn(archonPaths, 'getDefaultWorkflowsPath');
     loadRepoConfigSpy = spyOn(configLoader, 'loadRepoConfig');
 
     // Default mock implementations
     mkdirSpy.mockResolvedValue(undefined);
     copyFileSpy.mockResolvedValue(undefined);
-    getDefaultCommandsPathSpy.mockReturnValue('/app/.archon/commands/defaults');
-    getDefaultWorkflowsPathSpy.mockReturnValue('/app/.archon/workflows/defaults');
+    mockGetDefaultCommandsPath.mockReturnValue('/app/.archon/commands/defaults');
+    mockGetDefaultWorkflowsPath.mockReturnValue('/app/.archon/workflows/defaults');
     loadRepoConfigSpy.mockResolvedValue({});
   });
 
@@ -52,9 +59,9 @@ describe('defaults-copy', () => {
     readdirSpy.mockRestore();
     mkdirSpy.mockRestore();
     copyFileSpy.mockRestore();
-    getDefaultCommandsPathSpy.mockRestore();
-    getDefaultWorkflowsPathSpy.mockRestore();
     loadRepoConfigSpy.mockRestore();
+    mockGetDefaultCommandsPath.mockClear();
+    mockGetDefaultWorkflowsPath.mockClear();
   });
 
   describe('copyDefaultsToRepo', () => {

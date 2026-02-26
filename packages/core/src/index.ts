@@ -4,7 +4,6 @@
  * This package contains:
  * - AI client adapters (Claude, Codex)
  * - Database operations (SQLite/PostgreSQL)
- * - Isolation providers (git worktrees, extensible for containers/VMs)
  * - Orchestration logic
  * - Workflow store adapter (bridges core DB to @archon/workflows IWorkflowStore)
  * - Utility functions
@@ -70,28 +69,6 @@ export { createWorkflowStore } from './workflows/store-adapter';
 export * as workflowEventDb from './db/workflow-events';
 
 // =============================================================================
-// Isolation (re-exported from @archon/isolation for backward compatibility)
-// =============================================================================
-export {
-  type IIsolationProvider,
-  type IsolatedEnvironment,
-  type IsolationRequest,
-  type IsolationHints,
-  type IsolationBlockReason,
-  type IsolationEnvironmentRow,
-  type IsolationWorkflowType,
-  type WorktreeStatusBreakdown,
-  type IsolationResolution,
-  type IIsolationStore,
-  type IsolationResolverDeps,
-  getIsolationProvider,
-  configureIsolation,
-  resetIsolationProvider,
-  IsolationBlockedError,
-  IsolationResolver,
-} from '@archon/isolation';
-
-// =============================================================================
 // Orchestrator
 // =============================================================================
 export { handleMessage } from './orchestrator/orchestrator-agent';
@@ -153,66 +130,6 @@ export { toError } from './utils/error';
 // Credential sanitization
 export { sanitizeCredentials, sanitizeError } from './utils/credential-sanitizer';
 
-// Archon paths
-export {
-  expandTilde,
-  isDocker,
-  getArchonHome,
-  getArchonWorkspacesPath,
-  getArchonWorktreesPath,
-  getArchonConfigPath,
-  getCommandFolderSearchPaths,
-  getWorkflowFolderSearchPaths,
-  getAppArchonBasePath,
-  getDefaultCommandsPath,
-  getDefaultWorkflowsPath,
-  logArchonPaths,
-  validateAppDefaultsPaths,
-  // Project-centric path functions
-  parseOwnerRepo,
-  getProjectRoot,
-  getProjectSourcePath,
-  getProjectWorktreesPath,
-  getProjectArtifactsPath,
-  getProjectLogsPath,
-  getRunArtifactsPath,
-  getRunLogPath,
-  resolveProjectRootFromCwd,
-  ensureProjectStructure,
-  createProjectSourceSymlink,
-} from './utils/archon-paths';
-
-// Git utilities (re-exported from @archon/git for backward compatibility)
-export {
-  // Exec wrappers
-  execFileAsync,
-  mkdirAsync,
-  // Worktree operations
-  getWorktreeBase,
-  isProjectScopedWorktreeBase,
-  worktreeExists,
-  listWorktrees,
-  findWorktreeByBranch,
-  isWorktreePath,
-  createWorktreeForIssue,
-  removeWorktree,
-  getCanonicalRepoPath,
-  // Branch operations
-  commitAllChanges,
-  hasUncommittedChanges,
-  getDefaultBranch,
-  checkout,
-  // Repository operations
-  syncWorkspace,
-  findRepoRoot,
-  getRemoteUrl,
-  // Branded type conversions
-  toRepoPath,
-  toBranchName,
-  toWorktreePath,
-} from '@archon/git';
-export type { RepoPath, BranchName, WorktreePath, WorktreeInfo } from '@archon/git';
-
 // GitHub GraphQL
 export { getLinkedIssueNumbers } from './utils/github-graphql';
 
@@ -222,20 +139,8 @@ export { isPathWithinWorkspace, validateAndResolvePath } from './utils/path-vali
 // Port allocation
 export { getPort } from './utils/port-allocation';
 
-// Worktree copy (re-exported from @archon/isolation for backward compatibility)
-export {
-  parseCopyFileEntry,
-  isPathWithinRoot,
-  copyWorktreeFile,
-  copyWorktreeFiles,
-} from '@archon/isolation';
-
 // Worktree sync
 export { syncArchonToWorktree } from './utils/worktree-sync';
-
-// Logger
-export { createLogger, setLogLevel, getLogLevel } from './utils/logger';
-export type { Logger } from './utils/logger';
 
 // Defaults copy
 export { copyDefaultsToRepo } from './utils/defaults-copy';

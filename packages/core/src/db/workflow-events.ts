@@ -8,7 +8,7 @@
  * because workflow execution must not fail due to event logging.
  */
 import { pool, getDialect } from './connection';
-import { createLogger } from '../utils/logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

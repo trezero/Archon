@@ -31,12 +31,6 @@ export interface Conversation {
   updated_at: Date;
 }
 
-// Re-exported from @archon/isolation for backward compatibility
-export type {
-  IsolationHints,
-  IsolationBlockReason,
-  IsolationEnvironmentRow,
-} from '@archon/isolation';
 import type { IsolationHints } from '@archon/isolation';
 
 export interface HandleMessageContext {

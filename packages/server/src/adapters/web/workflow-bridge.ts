@@ -1,4 +1,4 @@
-import { createLogger } from '@archon/core';
+import { createLogger } from '@archon/paths';
 import { getWorkflowEventEmitter, type WorkflowEmitterEvent } from '@archon/workflows';
 import { SSETransport } from './transport';
 

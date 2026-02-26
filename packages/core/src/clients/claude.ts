@@ -15,7 +15,7 @@
  */
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { type AssistantRequestOptions, IAssistantClient, MessageChunk, TokenUsage } from '../types';
-import { createLogger } from '../utils/logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

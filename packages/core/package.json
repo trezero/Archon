@@ -12,7 +12,6 @@
     "./clients": "./src/clients/index.ts",
     "./workflows": "./src/workflows/index.ts",
     "./workflows/*": "./src/workflows/*.ts",
-    "./isolation": "./src/isolation/index.ts",
     "./isolation-store": "./src/db/isolation-environments.ts",
     "./orchestrator": "./src/orchestrator/orchestrator.ts",
     "./handlers": "./src/handlers/command-handler.ts",
@@ -22,7 +21,7 @@
     "./state/*": "./src/state/*.ts"
   },
   "scripts": {
-    "test": "bun test src/clients/ && bun test src/handlers/ && bun test src/db/ src/utils/ src/config/ src/state/ src/isolation/ && bun test src/services/cleanup-service.test.ts && bun test src/services/title-generator.test.ts && bun test src/workflows/ && bun test src/orchestrator/",
+    "test": "bun test src/clients/ && bun test src/handlers/ && bun test src/db/ src/utils/defaults-copy.test.ts src/utils/worktree-sync.test.ts src/utils/conversation-lock.test.ts src/utils/credential-sanitizer.test.ts src/utils/port-allocation.test.ts src/utils/error.test.ts src/utils/worktree-copy.test.ts src/utils/github-graphql.test.ts src/config/ src/state/ && bun test src/utils/path-validation.test.ts && bun test src/services/cleanup-service.test.ts && bun test src/services/title-generator.test.ts && bun test src/workflows/ && bun test src/orchestrator/",
     "type-check": "bun x tsc --noEmit",
     "build": "echo 'No build needed - Bun runs TypeScript directly'"
   },
@@ -33,8 +32,7 @@
     "@archon/workflows": "workspace:*",
     "@anthropic-ai/claude-agent-sdk": "^0.2.45",
     "@openai/codex-sdk": "^0.104.0",
-    "pg": "^8.11.0",
-    "pino": "^9"
+    "pg": "^8.11.0"
   },
   "devDependencies": {
     "@types/pg": "^8.11.0"

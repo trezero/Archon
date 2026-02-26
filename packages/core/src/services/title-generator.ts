@@ -7,7 +7,7 @@
  */
 import { getAssistantClient } from '../clients/factory';
 import * as conversationDb from '../db/conversations';
-import { createLogger } from '../utils/logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

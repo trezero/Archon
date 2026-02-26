@@ -15,6 +15,7 @@
   "dependencies": {
     "@archon/core": "workspace:*",
     "@archon/git": "workspace:*",
+    "@archon/isolation": "workspace:*",
     "@archon/paths": "workspace:*",
     "@octokit/rest": "^22.0.0",
     "@slack/bolt": "^4.6.0",

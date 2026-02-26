@@ -32,15 +32,13 @@ import {
   classifyAndFormatError,
   startCleanupScheduler,
   stopCleanupScheduler,
-  logArchonPaths,
-  validateAppDefaultsPaths,
   loadConfig,
   logConfig,
   getPort,
-  createLogger,
 } from '@archon/core';
 import { failStaleWorkflowRuns } from '@archon/core/db/workflows';
 import type { IPlatformAdapter } from '@archon/core';
+import { createLogger, logArchonPaths, validateAppDefaultsPaths } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

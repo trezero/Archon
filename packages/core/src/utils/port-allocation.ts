@@ -4,7 +4,7 @@
  */
 import { createHash } from 'crypto';
 import { isWorktreePath } from '@archon/git';
-import { createLogger } from './logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

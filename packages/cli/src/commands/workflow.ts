@@ -1,13 +1,9 @@
 /**
  * Workflow command - list and run workflows
  */
-import {
-  getIsolationProvider,
-  registerRepository,
-  createLogger,
-  loadConfig,
-  generateAndSetTitle,
-} from '@archon/core';
+import { registerRepository, loadConfig, generateAndSetTitle } from '@archon/core';
+import { getIsolationProvider } from '@archon/isolation';
+import { createLogger } from '@archon/paths';
 import { createWorkflowDeps } from '@archon/core/workflows/store-adapter';
 import {
   discoverWorkflowsWithConfig,

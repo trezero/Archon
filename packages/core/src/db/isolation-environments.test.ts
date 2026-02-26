@@ -1,6 +1,6 @@
 import { mock, describe, test, expect, beforeEach } from 'bun:test';
 import { createQueryResult, mockPostgresDialect } from '../test/mocks/database';
-import { IsolationEnvironmentRow } from '../types';
+import type { IsolationEnvironmentRow } from '@archon/isolation';
 
 const mockQuery = mock(() => Promise.resolve(createQueryResult([])));
 

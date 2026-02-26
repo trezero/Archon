@@ -20,8 +20,9 @@ import {
   toBranchName,
 } from '@archon/git';
 import type { RepoPath } from '@archon/git';
-import { createLogger } from '../utils/logger';
-import { IsolationEnvironmentRow, ConversationNotFoundError } from '../types';
+import { createLogger } from '@archon/paths';
+import type { IsolationEnvironmentRow } from '@archon/isolation';
+import { ConversationNotFoundError } from '../types';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

@@ -4,8 +4,15 @@ import { join } from 'path';
 import { createMockLogger } from '../test/mocks/logger';
 
 const mockLogger = createMockLogger();
-mock.module('../utils/logger', () => ({
+const archonHome = join(homedir(), '.archon');
+mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
+  getArchonHome: mock(() => archonHome),
+  getArchonConfigPath: mock(() => join(archonHome, 'config.yaml')),
+  getArchonWorkspacesPath: mock(() => join(archonHome, 'workspaces')),
+  getArchonWorktreesPath: mock(() => join(archonHome, 'worktrees')),
+  getDefaultCommandsPath: mock(() => '/app/.archon/commands/defaults'),
+  getDefaultWorkflowsPath: mock(() => '/app/.archon/workflows/defaults'),
 }));
 
 // Mock for reading config files (replaces fs/promises mock)

@@ -79,7 +79,7 @@ packages/cli/
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ @archon/core discoverWorkflows(cwd)                             │
+│ @archon/workflows discoverWorkflows(cwd)                        │
 │ - Loads bundled defaults                                        │
 │ - Searches .archon/workflows/ recursively                       │
 │ - Merges (repo overrides defaults by name)                      │
@@ -246,18 +246,18 @@ Implements `IPlatformAdapter` for terminal output.
 
 ---
 
-## Dependencies from @archon/core
+## Key Dependencies
 
-| Function | Location | Purpose |
-|----------|----------|---------|
-| `discoverWorkflows(cwd)` | `core/src/workflows/loader.ts` | Find and parse workflow YAML |
-| `executeWorkflow(...)` | `core/src/workflows/executor.ts` | Run workflow steps |
-| `getIsolationProvider()` | `core/src/isolation/index.ts` | Get WorktreeProvider singleton |
-| `conversationDb.*` | `core/src/db/conversations.ts` | Conversation CRUD |
-| `codebaseDb.*` | `core/src/db/codebases.ts` | Codebase CRUD |
-| `isolationDb.*` | `core/src/db/isolation-environments.ts` | Worktree tracking |
-| `git.*` | `@archon/git` (`packages/git/src/`) | Git operations |
-| `closeDatabase()` | `core/src/db/connection.ts` | Clean shutdown |
+| Function | Package | Location | Purpose |
+|----------|---------|----------|---------|
+| `discoverWorkflows(cwd)` | `@archon/workflows` | `workflows/src/loader.ts` | Find and parse workflow YAML |
+| `executeWorkflow(...)` | `@archon/workflows` | `workflows/src/executor.ts` | Run workflow steps |
+| `getIsolationProvider()` | `@archon/isolation` | `isolation/src/factory.ts` | Get WorktreeProvider singleton |
+| `conversationDb.*` | `@archon/core` | `core/src/db/conversations.ts` | Conversation CRUD |
+| `codebaseDb.*` | `@archon/core` | `core/src/db/codebases.ts` | Codebase CRUD |
+| `isolationDb.*` | `@archon/core` | `core/src/db/isolation-environments.ts` | Worktree tracking |
+| `git.*` | `@archon/git` | `packages/git/src/` | Git operations |
+| `closeDatabase()` | `@archon/core` | `core/src/db/connection.ts` | Clean shutdown |
 
 ---
 

@@ -14,7 +14,7 @@ import * as workflowEventDb from '../db/workflow-events';
 import * as codebaseDb from '../db/codebases';
 import { getAssistantClient } from '../clients/factory';
 import { loadConfig as loadMergedConfig } from '../config/config-loader';
-import { createLogger } from '../utils/logger';
+import { createLogger } from '@archon/paths';
 
 // Compile-time assertion: MergedConfig must remain a structural subtype of WorkflowConfig.
 // If MergedConfig drifts from WorkflowConfig, this line becomes a type error.

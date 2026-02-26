@@ -54,7 +54,8 @@ import {
 } from './commands/isolation';
 import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
-import { closeDatabase, setLogLevel, createLogger } from '@archon/core';
+import { closeDatabase } from '@archon/core';
+import { setLogLevel, createLogger } from '@archon/paths';
 import * as git from '@archon/git';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */

@@ -3,7 +3,7 @@
  */
 import { pool, getDialect } from './connection';
 import type { Codebase } from '../types';
-import { createLogger } from '../utils/logger';
+import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

@@ -1,4 +1,5 @@
-import { createLogger, type MessageMetadata } from '@archon/core';
+import { createLogger } from '@archon/paths';
+import type { MessageMetadata } from '@archon/core';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
