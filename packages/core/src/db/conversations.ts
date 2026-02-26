@@ -25,6 +25,21 @@ export async function getConversationById(id: string): Promise<Conversation | nu
 }
 
 /**
+ * Find a conversation by platform_conversation_id only (no platform_type filter).
+ * Safe because all platform IDs are globally unique (they include platform prefix + timestamp + random).
+ * Used by the Web UI API to load conversations from any platform.
+ */
+export async function findConversationByPlatformId(
+  platformId: string
+): Promise<Conversation | null> {
+  const result = await pool.query<Conversation>(
+    'SELECT * FROM remote_agent_conversations WHERE platform_conversation_id = $1',
+    [platformId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
  * Get a conversation by platform type and platform ID
  * Returns null if not found (unlike getOrCreate which creates)
  */

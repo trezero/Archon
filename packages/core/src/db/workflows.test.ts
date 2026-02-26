@@ -23,6 +23,7 @@ import {
   updateWorkflowActivity,
   findResumableRun,
   resumeWorkflowRun,
+  failStaleWorkflowRuns,
 } from './workflows';
 
 describe('workflows database', () => {
@@ -528,6 +529,56 @@ describe('workflows database', () => {
 
       await expect(resumeWorkflowRun('workflow-run-123')).rejects.toThrow(
         'Workflow run vanished after update (id: workflow-run-123)'
+      );
+    });
+  });
+
+  describe('failStaleWorkflowRuns', () => {
+    test('transitions stale running runs to failed and returns count', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 3));
+
+      const result = await failStaleWorkflowRuns(60);
+
+      expect(result.count).toBe(3);
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining("status = 'failed'"),
+        expect.arrayContaining([expect.stringContaining('Process terminated unexpectedly')])
+      );
+    });
+
+    test('returns count 0 when no stale runs exist', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 0));
+
+      const result = await failStaleWorkflowRuns();
+
+      expect(result.count).toBe(0);
+    });
+
+    test('uses daysSince dialect helper for threshold comparison', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 0));
+
+      await failStaleWorkflowRuns(120);
+
+      const [sql] = mockQuery.mock.calls[0] as [string, unknown[]];
+      // PostgreSQL dialect uses EXTRACT(EPOCH FROM ...)
+      expect(sql).toContain('EXTRACT(EPOCH FROM');
+      expect(sql).toContain("status = 'running'");
+    });
+
+    test('uses COALESCE to handle null last_activity_at', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 0));
+
+      await failStaleWorkflowRuns();
+
+      const [sql] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('COALESCE(last_activity_at, started_at)');
+    });
+
+    test('throws on database error', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('connection lost'));
+
+      await expect(failStaleWorkflowRuns()).rejects.toThrow(
+        'Failed to clean up stale workflow runs'
       );
     });
   });

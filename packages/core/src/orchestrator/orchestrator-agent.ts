@@ -28,6 +28,7 @@ import {
 } from '@archon/workflows';
 import { createWorkflowDeps } from '../workflows/store-adapter';
 import { loadConfig } from '../config/config-loader';
+import { generateAndSetTitle } from '../services/title-generator';
 import { validateAndResolveIsolation, dispatchBackgroundWorkflow } from './orchestrator';
 import { IsolationBlockedError } from '@archon/isolation';
 import { buildOrchestratorPrompt, buildProjectScopedPrompt } from './prompt-builder';
@@ -322,6 +323,16 @@ export async function handleMessage(
           }
         }
       }
+    }
+
+    // 1c. Auto-generate title for untitled conversations (fire-and-forget)
+    if (!conversation.title && !message.startsWith('/')) {
+      void generateAndSetTitle(
+        conversation.id,
+        message,
+        conversation.ai_assistant_type,
+        getArchonWorkspacesPath()
+      );
     }
 
     // 2. Check for deterministic commands

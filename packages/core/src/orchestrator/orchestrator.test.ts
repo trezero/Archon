@@ -173,6 +173,12 @@ mock.module('fs', () => ({
   existsSync: mockExistsSync,
 }));
 
+// Title generator mock
+const mockGenerateAndSetTitle = mock(() => Promise.resolve());
+mock.module('../services/title-generator', () => ({
+  generateAndSetTitle: mockGenerateAndSetTitle,
+}));
+
 // ─── Import module under test (AFTER all mocks) ─────────────────────────────
 
 import { handleMessage, parseOrchestratorCommands } from './orchestrator-agent';
@@ -287,6 +293,7 @@ function clearAllMocks(): void {
   mockBuildProjectScopedPrompt.mockClear();
   mockLoadConfig.mockClear();
   mockExistsSync.mockClear();
+  mockGenerateAndSetTitle.mockClear();
   mockClient.sendQuery.mockClear();
   mockClient.getType.mockClear();
 }
@@ -1277,6 +1284,53 @@ describe('orchestrator-agent handleMessage', () => {
       const prompt = mockClient.sendQuery.mock.calls[0][0] as string;
       expect(prompt).toContain('Thread Context');
       expect(prompt).toContain('Previous: user said hello');
+    });
+  });
+
+  // ─── Title Generation ──────────────────────────────────────────────────
+
+  describe('title generation', () => {
+    test('triggers title generation for untitled conversation with regular message', async () => {
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'Hello world');
+
+      expect(mockGenerateAndSetTitle).toHaveBeenCalledTimes(1);
+      expect(mockGenerateAndSetTitle).toHaveBeenCalledWith(
+        'conv-123',
+        'Hello world',
+        'claude',
+        '/home/test/.archon/workspaces'
+      );
+    });
+
+    test('does NOT trigger title generation for slash commands', async () => {
+      mockHandleCommand.mockResolvedValue({
+        message: 'Status info',
+        modified: false,
+        success: true,
+      });
+
+      await handleMessage(platform, 'chat-456', '/status');
+
+      expect(mockGenerateAndSetTitle).not.toHaveBeenCalled();
+    });
+
+    test('does NOT trigger title generation for already-titled conversations', async () => {
+      mockGetOrCreateConversation.mockResolvedValue({
+        ...mockConversation,
+        title: 'Existing Title',
+      });
+
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'Hello world');
+
+      expect(mockGenerateAndSetTitle).not.toHaveBeenCalled();
     });
   });
 });

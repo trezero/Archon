@@ -140,12 +140,19 @@ export function ConversationItem({
             className="w-full bg-transparent text-sm text-text-primary outline-none border-b border-primary"
           />
         ) : (
-          <span
-            className="truncate text-sm text-text-primary"
-            title={conversation.title ?? 'Untitled conversation'}
-          >
-            {displayName}
-          </span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span
+              className="truncate text-sm text-text-primary"
+              title={conversation.title ?? 'Untitled conversation'}
+            >
+              {displayName}
+            </span>
+            {conversation.platform_type !== 'web' && (
+              <span className="text-[10px] font-medium uppercase tracking-wider text-text-tertiary bg-surface-secondary rounded px-1 py-0.5 shrink-0">
+                {conversation.platform_type}
+              </span>
+            )}
+          </div>
         )}
         <span className="truncate text-[11px] text-text-tertiary">{lastActivity}</span>
         {projectName && (

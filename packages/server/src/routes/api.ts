@@ -189,7 +189,7 @@ export function registerApiRoutes(
     const platformConversationId = c.req.param('id');
     const limit = Math.min(Number(c.req.query('limit') ?? '200'), 500);
     try {
-      const conv = await conversationDb.getConversationByPlatformId('web', platformConversationId);
+      const conv = await conversationDb.findConversationByPlatformId(platformConversationId);
       if (!conv) {
         return c.json({ error: 'Conversation not found' }, 404);
       }
@@ -225,22 +225,12 @@ export function registerApiRoutes(
 
     const message = body.message;
 
-    // Look up conversation for persistence and auto-titling
-    let conv: Awaited<ReturnType<typeof conversationDb.getConversationByPlatformId>> = null;
+    // Look up conversation for message persistence
+    let conv: Awaited<ReturnType<typeof conversationDb.findConversationByPlatformId>> = null;
     try {
-      conv = await conversationDb.getConversationByPlatformId('web', conversationId);
+      conv = await conversationDb.findConversationByPlatformId(conversationId);
     } catch (e: unknown) {
       getLog().error({ err: e, conversationId }, 'conversation_lookup_failed');
-    }
-
-    // Auto-title from first non-command message (non-critical)
-    if (conv && !conv.title && !message.startsWith('/')) {
-      try {
-        const title = message.length > 80 ? message.slice(0, 77) + '...' : message;
-        await conversationDb.updateConversationTitle(conv.id, title);
-      } catch (e: unknown) {
-        getLog().warn({ err: e, conversationId }, 'auto_title_failed');
-      }
     }
 
     // Persist user message and pass DB ID to adapter for assistant message persistence

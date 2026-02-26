@@ -11,8 +11,13 @@ mock.module('./connection', () => ({
   getDialect: () => mockPostgresDialect,
 }));
 
-import { getOrCreateConversation, updateConversation } from './conversations';
-import { Conversation, ConversationNotFoundError } from '../types';
+import {
+  getOrCreateConversation,
+  updateConversation,
+  findConversationByPlatformId,
+} from './conversations';
+import type { Conversation } from '../types';
+import { ConversationNotFoundError } from '../types';
 
 describe('conversations', () => {
   beforeEach(() => {
@@ -241,6 +246,60 @@ describe('conversations', () => {
         3,
         'INSERT INTO remote_agent_conversations (platform_type, platform_conversation_id, ai_assistant_type, codebase_id, cwd) VALUES ($1, $2, $3, $4, $5) RETURNING *',
         ['discord', 'thread-123', 'claude', null, null]
+      );
+    });
+  });
+
+  describe('findConversationByPlatformId', () => {
+    const cliConversation: Conversation = {
+      id: 'conv-cli-1',
+      platform_type: 'cli',
+      platform_conversation_id: 'cli-1234-abc',
+      ai_assistant_type: 'claude',
+      codebase_id: null,
+      cwd: null,
+      isolation_env_id: null,
+      last_activity_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+
+    test('returns conversation when platform_conversation_id matches', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([cliConversation]));
+
+      const result = await findConversationByPlatformId('cli-1234-abc');
+
+      expect(result).toEqual(cliConversation);
+      expect(mockQuery).toHaveBeenCalledWith(
+        'SELECT * FROM remote_agent_conversations WHERE platform_conversation_id = $1',
+        ['cli-1234-abc']
+      );
+    });
+
+    test('returns null when no conversation matches', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      const result = await findConversationByPlatformId('nonexistent');
+
+      expect(result).toBeNull();
+    });
+
+    test('works for any platform type without filtering', async () => {
+      const telegramConv: Conversation = {
+        ...cliConversation,
+        id: 'conv-tg-1',
+        platform_type: 'telegram',
+        platform_conversation_id: 'tg-chat-999',
+      };
+      mockQuery.mockResolvedValueOnce(createQueryResult([telegramConv]));
+
+      const result = await findConversationByPlatformId('tg-chat-999');
+
+      expect(result).toEqual(telegramConv);
+      // Verify no platform_type in the query
+      expect(mockQuery).toHaveBeenCalledWith(
+        'SELECT * FROM remote_agent_conversations WHERE platform_conversation_id = $1',
+        ['tg-chat-999']
       );
     });
   });

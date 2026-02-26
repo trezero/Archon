@@ -507,7 +507,15 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         <WorkflowProgressCard workflow={activeWorkflow} onCancel={handleCancelWorkflow} />
       )}
       <LockIndicator locked={locked && hasSentMessage} queuePosition={queuePosition} />
-      <MessageInput onSend={handleSend} disabled={sending} />
+      <MessageInput
+        onSend={handleSend}
+        disabled={sending || (currentConv != null && currentConv.platform_type !== 'web')}
+        disabledReason={
+          currentConv != null && currentConv.platform_type !== 'web'
+            ? 'Continuing chats from other platforms in the Web UI is coming soon'
+            : undefined
+        }
+      />
     </div>
   );
 }

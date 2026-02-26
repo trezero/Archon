@@ -39,6 +39,7 @@ import {
   getPort,
   createLogger,
 } from '@archon/core';
+import { failStaleWorkflowRuns } from '@archon/core/db/workflows';
 import type { IPlatformAdapter } from '@archon/core';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -128,6 +129,11 @@ async function main(): Promise<void> {
 
   // Start cleanup scheduler
   startCleanupScheduler();
+
+  // Clean up workflow runs orphaned by previous process termination
+  void failStaleWorkflowRuns().catch(err => {
+    getLog().error({ err }, 'stale_workflow_cleanup_failed');
+  });
 
   // Log Archon paths configuration
   logArchonPaths();

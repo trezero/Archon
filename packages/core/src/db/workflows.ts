@@ -402,3 +402,42 @@ export async function updateWorkflowActivity(id: string): Promise<void> {
     [id]
   );
 }
+
+/**
+ * Transition stale 'running' workflow runs to 'failed'.
+ * A run is stale if its last_activity_at (or started_at as fallback) is older than the threshold.
+ * Called on server startup and periodically to clean up runs orphaned by process termination.
+ */
+export async function failStaleWorkflowRuns(
+  staleThresholdMinutes = 60
+): Promise<{ count: number }> {
+  const dialect = getDialect();
+  const thresholdDays = staleThresholdMinutes / (60 * 24);
+  try {
+    const result = await pool.query(
+      `UPDATE remote_agent_workflow_runs
+       SET status = 'failed',
+           completed_at = ${dialect.now()},
+           metadata = ${dialect.jsonMerge('metadata', 1)}
+       WHERE status = 'running'
+         AND ${dialect.daysSince('COALESCE(last_activity_at, started_at)')} > ${String(thresholdDays)}`,
+      [
+        JSON.stringify({
+          error: 'Process terminated unexpectedly — marked as failed during cleanup',
+        }),
+      ]
+    );
+    const count = result.rowCount ?? 0;
+    if (count > 0) {
+      getLog().info(
+        { count, thresholdMinutes: staleThresholdMinutes },
+        'stale_runs.cleanup_completed'
+      );
+    }
+    return { count };
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err }, 'stale_runs.cleanup_failed');
+    throw new Error(`Failed to clean up stale workflow runs: ${err.message}`);
+  }
+}

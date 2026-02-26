@@ -1,7 +1,13 @@
 /**
  * Workflow command - list and run workflows
  */
-import { getIsolationProvider, registerRepository, createLogger, loadConfig } from '@archon/core';
+import {
+  getIsolationProvider,
+  registerRepository,
+  createLogger,
+  loadConfig,
+  generateAndSetTitle,
+} from '@archon/core';
 import { createWorkflowDeps } from '@archon/core/workflows/store-adapter';
 import {
   discoverWorkflowsWithConfig,
@@ -11,6 +17,7 @@ import {
 import * as conversationDb from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
 import * as isolationDb from '@archon/core/db/isolation-environments';
+import * as messageDb from '@archon/core/db/messages';
 import * as git from '@archon/git';
 import { CLIAdapter } from '../adapters/cli-adapter';
 
@@ -278,6 +285,28 @@ export async function workflowRunCommand(
     const err = error as Error;
     throw new Error(`Failed to update conversation: ${err.message}`);
   }
+
+  // Wire adapter for assistant message persistence
+  adapter.setConversationDbId(conversation.id);
+
+  // Persist user message for Web UI history
+  try {
+    await messageDb.addMessage(conversation.id, 'user', userMessage);
+  } catch (error) {
+    getLog().warn(
+      { err: error as Error, conversationId: conversation.id },
+      'cli_user_message_persist_failed'
+    );
+  }
+
+  // Auto-generate title for CLI workflow conversations (fire-and-forget)
+  void generateAndSetTitle(
+    conversation.id,
+    userMessage,
+    conversation.ai_assistant_type,
+    workingCwd,
+    workflowName
+  );
 
   // Execute workflow with workingCwd (may be worktree path)
   const result = await executeWorkflow(

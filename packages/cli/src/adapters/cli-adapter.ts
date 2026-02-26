@@ -3,6 +3,15 @@
  * Implements IPlatformAdapter to allow workflow execution via command line
  */
 import type { IPlatformAdapter, MessageMetadata } from '@archon/core';
+import { createLogger } from '@archon/core';
+import * as messageDb from '@archon/core/db/messages';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('cli.adapter');
+  return cachedLog;
+}
 
 /** Configuration options for CLIAdapter */
 export interface CLIAdapterOptions {
@@ -12,9 +21,18 @@ export interface CLIAdapterOptions {
 
 export class CLIAdapter implements IPlatformAdapter {
   private readonly streamingMode: 'stream' | 'batch';
+  private conversationDbId: string | undefined;
 
   constructor(options?: CLIAdapterOptions) {
     this.streamingMode = options?.streamingMode ?? 'batch';
+  }
+
+  /**
+   * Set the database conversation ID for message persistence.
+   * Must be called after conversation creation and before executeWorkflow.
+   */
+  setConversationDbId(dbId: string): void {
+    this.conversationDbId = dbId;
   }
 
   async sendMessage(
@@ -24,6 +42,18 @@ export class CLIAdapter implements IPlatformAdapter {
   ): Promise<void> {
     // Output to stdout
     console.log(message);
+
+    // Persist assistant message for Web UI history
+    if (this.conversationDbId) {
+      try {
+        await messageDb.addMessage(this.conversationDbId, 'assistant', message);
+      } catch (error) {
+        getLog().warn(
+          { err: error as Error, conversationDbId: this.conversationDbId },
+          'cli_message_persist_failed'
+        );
+      }
+    }
   }
 
   /**

@@ -126,6 +126,8 @@ export {
   onConversationClosed,
 } from './services/cleanup-service';
 
+export { generateAndSetTitle } from './services/title-generator';
+
 // =============================================================================
 // State
 // =============================================================================

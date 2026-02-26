@@ -2,6 +2,37 @@
  * Tests for CLIAdapter
  */
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
+
+// Mock dependencies BEFORE importing CLIAdapter
+const mockAddMessage = mock(() =>
+  Promise.resolve({
+    id: 'msg-1',
+    conversation_id: 'conv-1',
+    role: 'assistant' as const,
+    content: '',
+    metadata: '{}',
+    created_at: '',
+  })
+);
+mock.module('@archon/core/db/messages', () => ({
+  addMessage: mockAddMessage,
+}));
+
+const mockLogger = {
+  fatal: mock(() => undefined),
+  error: mock(() => undefined),
+  warn: mock(() => undefined),
+  info: mock(() => undefined),
+  debug: mock(() => undefined),
+  trace: mock(() => undefined),
+  child: mock(function (this: unknown) {
+    return this;
+  }),
+};
+mock.module('@archon/core', () => ({
+  createLogger: mock(() => mockLogger),
+}));
+
 import { CLIAdapter } from './cli-adapter';
 
 describe('CLIAdapter', () => {
@@ -11,6 +42,8 @@ describe('CLIAdapter', () => {
   beforeEach(() => {
     adapter = new CLIAdapter();
     consoleSpy = spyOn(console, 'log').mockImplementation(() => {});
+    mockAddMessage.mockClear();
+    mockLogger.warn.mockClear();
   });
 
   afterEach(() => {
@@ -55,6 +88,29 @@ describe('CLIAdapter', () => {
       await adapter.sendMessage('any-id', 'test');
       await adapter.sendMessage('different-id', 'test');
       expect(consoleSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('message persistence', () => {
+    it('persists assistant message when conversationDbId is set', async () => {
+      adapter.setConversationDbId('conv-db-123');
+      await adapter.sendMessage('conv-id', 'Hello from AI');
+      expect(consoleSpy).toHaveBeenCalledWith('Hello from AI');
+      expect(mockAddMessage).toHaveBeenCalledWith('conv-db-123', 'assistant', 'Hello from AI');
+    });
+
+    it('does NOT persist when conversationDbId is not set', async () => {
+      await adapter.sendMessage('conv-id', 'Hello');
+      expect(consoleSpy).toHaveBeenCalledWith('Hello');
+      expect(mockAddMessage).not.toHaveBeenCalled();
+    });
+
+    it('handles addMessage errors gracefully (warn, no throw)', async () => {
+      mockAddMessage.mockRejectedValueOnce(new Error('DB connection failed'));
+      adapter.setConversationDbId('conv-db-123');
+      await expect(adapter.sendMessage('conv-id', 'Hello')).resolves.toBeUndefined();
+      expect(consoleSpy).toHaveBeenCalledWith('Hello');
+      expect(mockLogger.warn).toHaveBeenCalled();
     });
   });
 
