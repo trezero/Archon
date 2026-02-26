@@ -91,10 +91,14 @@ docker-compose --profile with-db up -d postgres
 ### Testing
 
 ```bash
-bun test
-bun test --watch
-bun test packages/core/src/handlers/command-handler.test.ts
+bun run test                # Run all tests (per-package, isolated processes)
+bun test --watch            # Watch mode (single package)
+bun test packages/core/src/handlers/command-handler.test.ts  # Single file
 ```
+
+**Test isolation (mock.module pollution):** Bun's `mock.module()` permanently replaces modules in the process-wide cache — `mock.restore()` does NOT undo it ([oven-sh/bun#7823](https://github.com/oven-sh/bun/issues/7823)). To prevent cross-file pollution, packages that have conflicting `mock.module()` calls split their tests into separate `bun test` invocations: `@archon/core` (6 batches), `@archon/workflows` (5), `@archon/adapters` (3), `@archon/isolation` (3). See each package's `package.json` for the exact splits.
+
+**Do NOT run `bun test` from the repo root** — it discovers all test files across all packages and runs them in one process, causing ~135 mock pollution failures. Always use `bun run test` (which uses `bun --filter '*' test` for per-package isolation).
 
 ### Type Checking & Linting
 
@@ -503,6 +507,13 @@ This ensures type compatibility with SDK updates and eliminates `as any` casts.
 - Test database operations with test database
 - Test end-to-end flows (mock platforms/AI but use real orchestrator)
 - Clean up test data after each test
+
+**Mock isolation rules (IMPORTANT):**
+- Bun's `mock.module()` is process-global and irreversible — `mock.restore()` does NOT undo it
+- Do NOT add `afterAll(() => mock.restore())` for `mock.module()` cleanup — it has no effect
+- Use `spyOn()` for internal modules that other test files import directly (e.g., `spyOn(git, 'checkout')`) — `spy.mockRestore()` DOES work for spies
+- Never `mock.module()` a module path that another test file also `mock.module()`s with a different implementation
+- When adding a new test file with `mock.module()`, ensure its package.json test script runs it in a separate `bun test` invocation from any conflicting files
 
 **Manual Validation:** Use the web API (`curl`) or CLI commands directly for end-to-end testing of new features.
 

@@ -66,8 +66,12 @@ mock.module('@archon/workflows', () => ({
       !!name &&
       !name.startsWith('.')
   ),
-  BUNDLED_WORKFLOWS: new Map(),
-  BUNDLED_COMMANDS: new Map(),
+  BUNDLED_WORKFLOWS: {
+    'archon-assist': 'name: archon-assist\ndescription: Archon Assist\nsteps: []',
+  },
+  BUNDLED_COMMANDS: {
+    'archon-assist': '# archon-assist command',
+  },
   isBinaryBuild: mock(() => false),
 }));
 

@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, spyOn, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
 import * as git from '@archon/git';
 
 // Mock logger to suppress noisy output
@@ -92,6 +92,12 @@ describe('IsolationResolver', () => {
       '/repos/myrepo' as git.RepoPath
     );
     findWorktreeByBranchSpy = spyOn(git, 'findWorktreeByBranch').mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    worktreeExistsSpy.mockRestore();
+    getCanonicalSpy.mockRestore();
+    findWorktreeByBranchSpy.mockRestore();
   });
 
   function createResolver(overrides?: Partial<IsolationResolverDeps>): IsolationResolver {

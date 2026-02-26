@@ -9,7 +9,7 @@
     "./*": "./src/*"
   },
   "scripts": {
-    "test": "bun test src/",
+    "test": "bun test src/chat/ src/community/ src/forge/github/auth.test.ts src/utils/ && bun test src/forge/github/adapter.test.ts && bun test src/forge/github/context.test.ts",
     "type-check": "bun x tsc --noEmit"
   },
   "dependencies": {

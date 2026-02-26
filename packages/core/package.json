@@ -22,7 +22,7 @@
     "./state/*": "./src/state/*.ts"
   },
   "scripts": {
-    "test": "bun test src/",
+    "test": "bun test src/clients/ && bun test src/handlers/ && bun test src/db/ src/utils/ src/config/ src/state/ src/isolation/ && bun test src/services/ && bun test src/workflows/ && bun test src/orchestrator/",
     "type-check": "bun x tsc --noEmit",
     "build": "echo 'No build needed - Bun runs TypeScript directly'"
   },
