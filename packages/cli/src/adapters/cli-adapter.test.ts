@@ -29,7 +29,7 @@ const mockLogger = {
     return this;
   }),
 };
-mock.module('@archon/core', () => ({
+mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
 }));
 
