@@ -35,11 +35,14 @@ export function WorkflowLogs({
 }: WorkflowLogsProps): React.ReactElement {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
-  // Load historical messages on mount
+  // Load historical messages on mount.
+  // Uses a cancelled flag so StrictMode's unmount/remount cycle discards
+  // the stale first fetch, preventing duplicate messages.
   useEffect(() => {
+    let cancelled = false;
     void getMessages(conversationId)
       .then((rows: MessageResponse[]) => {
-        if (rows.length === 0) return;
+        if (cancelled || rows.length === 0) return;
         const hydrated: ChatMessage[] = rows.map(row => {
           let meta: {
             toolCalls?: {
@@ -71,14 +74,48 @@ export function WorkflowLogs({
           };
         });
         const filtered = startedAt ? hydrated.filter(m => m.timestamp >= startedAt) : hydrated;
-        setMessages(prev => (prev.length > 0 ? prev : filtered));
+        // Merge history with any SSE messages that arrived during fetch
+        setMessages(prev => {
+          if (prev.length === 0) {
+            return filtered;
+          }
+          // Build dedup set for hydrated messages (role+content)
+          const hydratedSigs = new Set(filtered.map(m => `${m.role}:${m.content}`));
+          // Keep prev messages that are newer than history or still streaming,
+          // but exclude any that match a hydrated message by role+content (dedup)
+          const latestHistoryTs = Math.max(...filtered.map(m => m.timestamp));
+          const sseOnly = prev.filter(
+            m =>
+              (m.timestamp > latestHistoryTs || m.isStreaming) &&
+              !hydratedSigs.has(`${m.role}:${m.content}`)
+          );
+          return [...filtered, ...sseOnly];
+        });
       })
       .catch((e: unknown) => {
+        if (cancelled) return;
         console.error('[WorkflowLogs] Failed to load message history', {
           conversationId,
           error: e instanceof Error ? e.message : e,
         });
+        setMessages(prev => [
+          ...prev,
+          {
+            id: 'error-load-history',
+            role: 'assistant' as const,
+            content: '',
+            error: {
+              message: 'Failed to load workflow message history. Try refreshing the page.',
+              classification: 'transient' as const,
+              suggestedActions: ['Refresh page'],
+            },
+            timestamp: Date.now(),
+          },
+        ]);
       });
+    return (): void => {
+      cancelled = true;
+    };
   }, [conversationId, startedAt]);
 
   const onText = useCallback((content: string): void => {

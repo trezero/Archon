@@ -154,7 +154,9 @@ async function main(): Promise<void> {
   //   only invoked from a 60s timer — well after all constructors complete)
   // - persistence's emitEvent closure references transport.emit (same lazy pattern)
   const transport = new SSETransport(conversationId => {
-    persistence.clearConversation(conversationId);
+    void persistence.clearConversation(conversationId).catch((e: unknown) => {
+      getLog().error({ conversationId, err: e }, 'transport_cleanup_flush_failed');
+    });
     workflowBridge.clearConversation(conversationId);
   });
   const persistence = new MessagePersistence((conversationId, event) =>
@@ -163,6 +165,7 @@ async function main(): Promise<void> {
   const workflowBridge = new WorkflowEventBridge(transport);
   const webAdapter = new WebAdapter(transport, persistence, workflowBridge);
   await webAdapter.start();
+  persistence.startPeriodicFlush();
 
   // Check that at least one platform is configured
   const hasTelegram = Boolean(process.env.TELEGRAM_BOT_TOKEN);
@@ -417,19 +420,27 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     getLog().info('server_shutting_down');
     stopCleanupScheduler();
+    persistence.stopPeriodicFlush();
 
-    // Stop adapters (these should not throw, but be defensive)
-    try {
-      telegram?.stop();
-      discord?.stop();
-      slack?.stop();
-      webAdapter.stop();
-    } catch (error) {
-      getLog().error({ err: error }, 'adapter_stop_error');
-    }
+    // Flush all buffered messages before stopping adapters
+    persistence
+      .flushAll()
+      .catch((e: unknown) => {
+        getLog().error({ err: e }, 'shutdown_flush_failed');
+      })
+      .then(async () => {
+        // Stop adapters (these should not throw, but be defensive)
+        try {
+          telegram?.stop();
+          discord?.stop();
+          slack?.stop();
+          await webAdapter.stop();
+        } catch (error) {
+          getLog().error({ err: error }, 'adapter_stop_error');
+        }
 
-    pool
-      .end()
+        return pool.end();
+      })
       .then(() => {
         getLog().info('database_pool_closed');
         process.exit(0);

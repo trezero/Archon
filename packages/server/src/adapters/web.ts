@@ -3,9 +3,17 @@
  * Bridge between the orchestrator and the React frontend via Server-Sent Events.
  */
 import type { IWebPlatformAdapter, MessageChunk, MessageMetadata } from '@archon/core';
+import { createLogger } from '@archon/paths';
 import { MessagePersistence } from './web/persistence';
 import { SSETransport, type SSEWriter } from './web/transport';
 import { WorkflowEventBridge } from './web/workflow-bridge';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('adapter.web');
+  return cachedLog;
+}
 
 export class WebAdapter implements IWebPlatformAdapter {
   constructor(
@@ -64,7 +72,9 @@ export class WebAdapter implements IWebPlatformAdapter {
     // Workflow result arrives after the parent lock is released (background dispatch),
     // so it would never be flushed. Force persistence flush for these messages.
     if (metadata?.category === 'workflow_result') {
-      void this.persistence.flush(conversationId);
+      this.persistence.flush(conversationId).catch((e: unknown) => {
+        getLog().error({ conversationId, err: e }, 'workflow_result_flush_failed');
+      });
     }
   }
 
@@ -120,7 +130,8 @@ export class WebAdapter implements IWebPlatformAdapter {
     this.transport.start();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
+    await this.persistence.flushAll();
     this.transport.stop();
     this.workflowBridge.stop();
     this.persistence.clearAll();
@@ -132,7 +143,9 @@ export class WebAdapter implements IWebPlatformAdapter {
    */
   emitLockEvent(conversationId: string, locked: boolean, queuePosition?: number): void {
     if (!locked) {
-      void this.persistence.flush(conversationId);
+      this.persistence.flush(conversationId).catch((e: unknown) => {
+        getLog().error({ conversationId, err: e }, 'lock_release_flush_failed');
+      });
     }
     this.transport.emitLockEvent(conversationId, locked, queuePosition);
   }

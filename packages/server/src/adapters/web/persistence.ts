@@ -89,7 +89,9 @@ export class MessagePersistence {
     // Prevent unbounded buffer growth — force flush if too many segments
     if (buf.segments.length > 50) {
       getLog().warn({ conversationId, segments: buf.segments.length }, 'assistant_buffer_overflow');
-      void this.flush(conversationId);
+      this.flush(conversationId).catch((e: unknown) => {
+        getLog().error({ conversationId, err: e }, 'buffer_overflow_flush_failed');
+      });
     }
   }
 
@@ -194,9 +196,46 @@ export class MessagePersistence {
     }
   }
 
-  clearConversation(conversationId: string): void {
+  async clearConversation(conversationId: string): Promise<void> {
+    // Attempt to flush before clearing so buffered messages aren't lost
+    await this.flush(conversationId).catch((e: unknown) => {
+      getLog().error({ conversationId, err: e }, 'clear_conversation_flush_failed');
+    });
     this.assistantBuffer.delete(conversationId);
     this.dbIdMap.delete(conversationId);
+  }
+
+  /**
+   * Flush all buffered conversations. Used by shutdown and periodic flush.
+   */
+  async flushAll(): Promise<void> {
+    const ids = [...this.assistantBuffer.keys()];
+    if (ids.length === 0) return;
+    getLog().info({ count: ids.length }, 'flush_all_started');
+    await Promise.allSettled(ids.map(id => this.flush(id)));
+    getLog().info({ count: ids.length }, 'flush_all_completed');
+  }
+
+  private periodicFlushTimer: ReturnType<typeof setInterval> | undefined;
+
+  /**
+   * Start a periodic timer that flushes all buffered conversations every 30s.
+   * Ensures messages are persisted even if the lock-release flush is missed.
+   */
+  startPeriodicFlush(): void {
+    if (this.periodicFlushTimer) return;
+    this.periodicFlushTimer = setInterval(() => {
+      this.flushAll().catch((e: unknown) => {
+        getLog().error({ err: e }, 'periodic_flush_failed');
+      });
+    }, 30_000);
+  }
+
+  stopPeriodicFlush(): void {
+    if (this.periodicFlushTimer) {
+      clearInterval(this.periodicFlushTimer);
+      this.periodicFlushTimer = undefined;
+    }
   }
 
   clearAll(): void {
