@@ -224,6 +224,7 @@ async def update_source_info(
     source_url: str | None = None,
     source_display_name: str | None = None,
     source_type: str | None = None,
+    project_id: str | None = None,
 ):
     """
     Update or insert source information in the sources table.
@@ -237,6 +238,11 @@ async def update_source_info(
         knowledge_type: Type of knowledge
         tags: List of tags
         update_frequency: Update frequency in days
+        original_url: Original URL that was crawled
+        source_url: URL of the source
+        source_display_name: Human-readable name for the source
+        source_type: Type of source (url, file, etc.)
+        project_id: Optional project ID to associate with this source
     """
     search_logger.info(f"Updating source {source_id} with knowledge_type={knowledge_type}")
     try:
@@ -269,6 +275,8 @@ async def update_source_info(
                 "auto_generated": False,  # Mark as not auto-generated since we're preserving
                 "update_frequency": update_frequency,
             }
+            if project_id:
+                metadata["project_id"] = project_id
             search_logger.info(f"Updating existing source {source_id} metadata: knowledge_type={knowledge_type}")
             if original_url:
                 metadata["original_url"] = original_url
@@ -330,10 +338,12 @@ async def update_source_info(
                 else:
                     metadata["source_type"] = "url"
 
-            # Add update_frequency and original_url to metadata
+            # Add update_frequency, original_url, and project_id to metadata
             metadata["update_frequency"] = update_frequency
             if original_url:
                 metadata["original_url"] = original_url
+            if project_id:
+                metadata["project_id"] = project_id
 
             search_logger.info(f"Creating new source {source_id} with knowledge_type={knowledge_type}")
             # Use upsert to avoid race conditions with concurrent crawls

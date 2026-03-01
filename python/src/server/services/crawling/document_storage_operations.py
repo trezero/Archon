@@ -370,6 +370,7 @@ class DocumentStorageOperations:
                     original_url=request.get("url"),  # Store the original crawl URL
                     source_url=source_url,
                     source_display_name=source_display_name,
+                    project_id=request.get("project_id"),
                 )
                 safe_logfire_info(f"Successfully created/updated source record for '{source_id}'")
             except Exception as e:
@@ -380,18 +381,22 @@ class DocumentStorageOperations:
                 # Try a simpler approach with minimal data
                 try:
                     safe_logfire_info(f"Attempting fallback source creation for '{source_id}'")
+                    fallback_metadata = {
+                        "knowledge_type": request.get("knowledge_type", "documentation"),
+                        "tags": request.get("tags", []),
+                        "auto_generated": True,
+                        "fallback_creation": True,
+                        "original_url": request.get("url"),
+                    }
+                    if request.get("project_id"):
+                        fallback_metadata["project_id"] = request["project_id"]
+
                     fallback_data = {
                         "source_id": source_id,
                         "title": source_id,  # Use source_id as title fallback
                         "summary": summary,
                         "total_word_count": source_id_word_counts[source_id],
-                        "metadata": {
-                            "knowledge_type": request.get("knowledge_type", "documentation"),
-                            "tags": request.get("tags", []),
-                            "auto_generated": True,
-                            "fallback_creation": True,
-                            "original_url": request.get("url"),
-                        },
+                        "metadata": fallback_metadata,
                     }
 
                     # Add new fields if provided

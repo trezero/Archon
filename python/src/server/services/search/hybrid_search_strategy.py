@@ -36,23 +36,29 @@ class HybridSearchStrategy:
         filter_metadata: dict | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Perform hybrid search on archon_crawled_pages table using the PostgreSQL 
+        Perform hybrid search on archon_crawled_pages table using the PostgreSQL
         hybrid search function that combines vector and full-text search.
 
         Args:
             query: Original search query text
             query_embedding: Pre-computed query embedding
             match_count: Number of results to return
-            filter_metadata: Optional metadata filter dict
+            filter_metadata: Optional metadata filter dict. Supports:
+                - {"source": "single_source_id"} for single source filtering
+                - {"source_ids": ["id1", "id2"]} for multi-source filtering
 
         Returns:
             List of matching documents from both vector and text search
         """
         with safe_span("hybrid_search_documents") as span:
             try:
-                # Prepare filter and source parameters
-                filter_json = filter_metadata or {}
-                source_filter = filter_json.pop("source", None) if "source" in filter_json else None
+                # Extract multi-source filter before processing
+                filter_json = filter_metadata.copy() if filter_metadata else {}
+                source_ids_filter = filter_json.pop("source_ids", None)
+                source_filter = filter_json.pop("source", None)
+
+                # For multi-source filtering, request more results since we'll filter in Python
+                rpc_match_count = match_count * 5 if source_ids_filter else match_count
 
                 # Call the hybrid search PostgreSQL function
                 response = self.supabase_client.rpc(
@@ -60,7 +66,7 @@ class HybridSearchStrategy:
                     {
                         "query_embedding": query_embedding,
                         "query_text": query,
-                        "match_count": match_count,
+                        "match_count": rpc_match_count,
                         "filter": filter_json,
                         "source_filter": source_filter,
                     },
@@ -70,9 +76,13 @@ class HybridSearchStrategy:
                     logger.debug("No results from hybrid search")
                     return []
 
-                # Format results to match expected structure
+                # Format results to match expected structure, applying multi-source filter
                 results = []
                 for row in response.data:
+                    # Apply multi-source filter if specified
+                    if source_ids_filter and row.get("source_id") not in source_ids_filter:
+                        continue
+
                     result = {
                         "id": row["id"],
                         "url": row["url"],
@@ -84,6 +94,10 @@ class HybridSearchStrategy:
                         "match_type": row["match_type"],
                     }
                     results.append(result)
+
+                # Trim to requested match_count after filtering
+                if source_ids_filter and len(results) > match_count:
+                    results = results[:match_count]
 
                 span.set_attribute("results_count", len(results))
 
@@ -113,13 +127,15 @@ class HybridSearchStrategy:
         source_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Perform hybrid search on archon_code_examples table using the PostgreSQL 
+        Perform hybrid search on archon_code_examples table using the PostgreSQL
         hybrid search function that combines vector and full-text search.
 
         Args:
             query: Search query text
             match_count: Number of results to return
-            filter_metadata: Optional metadata filter dict
+            filter_metadata: Optional metadata filter dict. Supports:
+                - {"source": "single_source_id"} for single source filtering
+                - {"source_ids": ["id1", "id2"]} for multi-source filtering
             source_id: Optional source ID to filter results
 
         Returns:
@@ -134,12 +150,17 @@ class HybridSearchStrategy:
                     logger.error("Failed to create embedding for code example query")
                     return []
 
-                # Prepare filter and source parameters
-                filter_json = filter_metadata or {}
+                # Extract multi-source filter before processing
+                filter_json = filter_metadata.copy() if filter_metadata else {}
+                source_ids_filter = filter_json.pop("source_ids", None)
+
                 # Use source_id parameter if provided, otherwise check filter_metadata
                 final_source_filter = source_id
                 if not final_source_filter and "source" in filter_json:
                     final_source_filter = filter_json.pop("source")
+
+                # For multi-source filtering, request more results since we'll filter in Python
+                rpc_match_count = match_count * 5 if source_ids_filter else match_count
 
                 # Call the hybrid search PostgreSQL function
                 response = self.supabase_client.rpc(
@@ -147,7 +168,7 @@ class HybridSearchStrategy:
                     {
                         "query_embedding": query_embedding,
                         "query_text": query,
-                        "match_count": match_count,
+                        "match_count": rpc_match_count,
                         "filter": filter_json,
                         "source_filter": final_source_filter,
                     },
@@ -157,9 +178,13 @@ class HybridSearchStrategy:
                     logger.debug("No results from hybrid code search")
                     return []
 
-                # Format results to match expected structure
+                # Format results to match expected structure, applying multi-source filter
                 results = []
                 for row in response.data:
+                    # Apply multi-source filter if specified
+                    if source_ids_filter and row.get("source_id") not in source_ids_filter:
+                        continue
+
                     result = {
                         "id": row["id"],
                         "url": row["url"],
@@ -172,6 +197,10 @@ class HybridSearchStrategy:
                         "match_type": row["match_type"],
                     }
                     results.append(result)
+
+                # Trim to requested match_count after filtering
+                if source_ids_filter and len(results) > match_count:
+                    results = results[:match_count]
 
                 span.set_attribute("results_count", len(results))
 

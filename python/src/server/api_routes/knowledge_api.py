@@ -177,6 +177,7 @@ class CrawlRequest(BaseModel):
 class RagQueryRequest(BaseModel):
     query: str
     source: str | None = None
+    project_id: str | None = None
     match_count: int = 5
     return_mode: str = "chunks"  # "chunks" or "pages"
 
@@ -1320,11 +1321,25 @@ async def perform_rag_query(request: RagQueryRequest):
         raise HTTPException(status_code=422, detail="Query cannot be empty")
 
     try:
+        # Resolve project_id to source filter if no explicit source is provided
+        source_filter = request.source
+        if request.project_id and not source_filter:
+            try:
+                project_sources = get_supabase_client().table("archon_sources").select(
+                    "source_id"
+                ).filter(
+                    "metadata->>project_id", "eq", request.project_id
+                ).execute()
+                if project_sources.data:
+                    source_filter = ",".join(s["source_id"] for s in project_sources.data)
+            except Exception as e:
+                logger.warning(f"Failed to resolve project_id to sources: {e}")
+
         # Use RAGService for unified RAG query with return_mode support
         search_service = RAGService(get_supabase_client())
         success, result = await search_service.perform_rag_query(
             query=request.query,
-            source=request.source,
+            source=source_filter,
             match_count=request.match_count,
             return_mode=request.return_mode
         )
@@ -1350,11 +1365,25 @@ async def perform_rag_query(request: RagQueryRequest):
 async def search_code_examples(request: RagQueryRequest):
     """Search for code examples relevant to the query using dedicated code examples service."""
     try:
+        # Resolve project_id to source filter if no explicit source is provided
+        source_filter = request.source
+        if request.project_id and not source_filter:
+            try:
+                project_sources = get_supabase_client().table("archon_sources").select(
+                    "source_id"
+                ).filter(
+                    "metadata->>project_id", "eq", request.project_id
+                ).execute()
+                if project_sources.data:
+                    source_filter = ",".join(s["source_id"] for s in project_sources.data)
+            except Exception as e:
+                logger.warning(f"Failed to resolve project_id to sources: {e}")
+
         # Use RAGService for code examples search
         search_service = RAGService(get_supabase_client())
         success, result = await search_service.search_code_examples_service(
             query=request.query,
-            source_id=request.source,  # This is Optional[str] which matches the method signature
+            source_id=source_filter,
             match_count=request.match_count,
         )
 
