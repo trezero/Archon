@@ -909,6 +909,136 @@ async def _perform_crawl_with_progress(
                 )
 
 
+async def _perform_inline_ingest(
+    progress_id: str,
+    source_id: str,
+    request: InlineIngestRequest,
+    valid_docs: list[InlineDocument],
+    tracker,
+):
+    """Perform inline document ingestion with progress tracking."""
+    async with crawl_semaphore:
+        try:
+            supabase_client = get_supabase_client()
+            total_docs = len(valid_docs)
+
+            await tracker.update(
+                status="processing",
+                progress=5,
+                log=f"Processing {total_docs} documents",
+            )
+
+            # Build crawl_results in the format DocumentStorageOperations expects
+            crawl_results = []
+            doc_failures = []
+
+            for i, doc in enumerate(valid_docs):
+                content = doc.content.strip()
+                if not content:
+                    doc_failures.append({"title": doc.title, "error": "empty content"})
+                    continue
+
+                # Create a synthetic URL for this document using path or title
+                doc_path = doc.path or doc.title
+                synthetic_url = f"inline://{source_id}/{doc_path}"
+
+                crawl_results.append({
+                    "url": synthetic_url,
+                    "markdown": content,
+                    "title": doc.title,
+                    "description": "",
+                })
+
+                doc_progress = int(5 + (i + 1) / total_docs * 15)  # 5-20%
+                await tracker.update(
+                    status="processing",
+                    progress=doc_progress,
+                    log=f"Prepared document {i + 1}/{total_docs}: {doc.title}",
+                )
+
+            if not crawl_results:
+                await tracker.error("All documents failed validation")
+                return
+
+            # Use DocumentStorageOperations to chunk, embed, and store
+            from ..services.crawling.document_storage_operations import DocumentStorageOperations
+            storage_ops = DocumentStorageOperations(supabase_client)
+
+            # Build the request dict matching what process_and_store_documents expects
+            request_dict = {
+                "knowledge_type": request.knowledge_type,
+                "tags": request.tags or [],
+                "extract_code_examples": request.extract_code_examples,
+                "generate_summary": False,  # Skip AI summary for inline docs
+            }
+
+            # Add project_id to metadata if provided
+            if request.project_id:
+                request_dict["project_id"] = request.project_id
+
+            async def storage_progress_callback(status, progress, message, **kwargs):
+                # Map storage progress from 20-90%
+                mapped_progress = int(20 + progress * 0.7)
+                await tracker.update(
+                    status=status,
+                    progress=mapped_progress,
+                    log=message,
+                )
+
+            result = await storage_ops.process_and_store_documents(
+                crawl_results=crawl_results,
+                request=request_dict,
+                crawl_type="inline",
+                original_source_id=source_id,
+                progress_callback=storage_progress_callback,
+                source_url=f"inline://{source_id}",
+                source_display_name=request.title,
+            )
+
+            # Update source metadata with project_id and source_type
+            try:
+                existing = supabase_client.table("archon_sources").select("metadata").eq(
+                    "source_id", source_id
+                ).execute()
+                if existing.data:
+                    metadata = existing.data[0].get("metadata", {}) or {}
+                    metadata["source_type"] = "inline"
+                    metadata["ingestion_method"] = "mcp_inline"
+                    if request.project_id:
+                        metadata["project_id"] = request.project_id
+                    supabase_client.table("archon_sources").update(
+                        {"metadata": metadata}
+                    ).eq("source_id", source_id).execute()
+            except Exception as e:
+                logger.warning(f"Failed to update source metadata: {e}")
+
+            chunks_stored = result.get("chunks_stored", 0)
+            code_examples_stored = result.get("code_examples_count", 0)
+
+            await tracker.complete({
+                "source_id": source_id,
+                "ingested": len(crawl_results),
+                "failed": len(doc_failures),
+                "failures": doc_failures,
+                "chunks_stored": chunks_stored,
+                "code_examples_stored": code_examples_stored,
+            })
+
+        except asyncio.CancelledError:
+            logger.info(f"Inline ingest cancelled | progress_id={progress_id}")
+            raise
+        except Exception as e:
+            error_message = f"Inline ingestion failed: {str(e)}"
+            logger.error(f"Inline ingest error | progress_id={progress_id} | error={error_message}", exc_info=True)
+            try:
+                await tracker.error(error_message)
+            except Exception:
+                pass
+        finally:
+            if progress_id in active_crawl_tasks:
+                del active_crawl_tasks[progress_id]
+
+
 @router.post("/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
@@ -988,6 +1118,61 @@ async def upload_document(
             f"Failed to start document upload | error={str(e)} | filename={file.filename} | error_type={type(e).__name__}"
         )
         raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.post("/knowledge/ingest-inline")
+async def ingest_inline_documents(request: InlineIngestRequest):
+    """Ingest a batch of inline documents into the knowledge base."""
+    # Validate request
+    if not request.documents:
+        raise HTTPException(status_code=422, detail="At least one document is required")
+
+    # Filter out empty documents
+    valid_docs = [doc for doc in request.documents if doc.content and doc.content.strip()]
+    if not valid_docs:
+        raise HTTPException(status_code=422, detail="All documents have empty content")
+
+    # Validate API key
+    await _validate_provider_api_key()
+
+    # Generate source_id from title + timestamp
+    timestamp = datetime.now(timezone.utc).isoformat()
+    source_id = hashlib.sha256(f"{request.title}-{timestamp}".encode()).hexdigest()[:16]
+
+    # Generate progress_id
+    progress_id = str(uuid.uuid4())
+
+    # Estimate completion time (~1 second per document for embedding)
+    estimated_seconds = max(10, len(valid_docs) * 1)
+
+    # Initialize progress tracker
+    from ..utils.progress.progress_tracker import ProgressTracker
+    tracker = ProgressTracker(progress_id, operation_type="inline_ingest")
+    await tracker.start({
+        "source_id": source_id,
+        "title": request.title,
+        "total_documents": len(valid_docs),
+        "status": "starting",
+    })
+
+    # Spawn background task
+    task = asyncio.create_task(
+        _perform_inline_ingest(
+            progress_id=progress_id,
+            source_id=source_id,
+            request=request,
+            valid_docs=valid_docs,
+            tracker=tracker,
+        )
+    )
+    active_crawl_tasks[progress_id] = task
+
+    return {
+        "success": True,
+        "progressId": progress_id,
+        "sourceId": source_id,
+        "estimatedSeconds": estimated_seconds,
+    }
 
 
 async def _perform_upload_with_progress(
