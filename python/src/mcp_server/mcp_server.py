@@ -308,6 +308,46 @@ Create feature-level tasks:
 - "Implement user authentication feature"
 - "Add payment processing system"
 - "Create admin dashboard"
+
+## 📦 Source Management
+
+### manage_rag_source — Add, Sync, and Delete Knowledge Sources
+- `manage_rag_source(action="add", source_type="url", url="https://docs.example.com", max_pages=50)`
+  - Crawls a website and ingests its pages into the knowledge base
+  - Returns a `progress_id` for tracking the async operation
+- `manage_rag_source(action="add", source_type="inline", title="Design Notes", content="...")`
+  - Ingests inline text directly (no crawling)
+  - Returns a `progress_id` for tracking
+- `manage_rag_source(action="sync", source_id="src_xxx")`
+  - Re-ingests an existing source to pick up changes (re-crawls URLs, re-processes inline content)
+  - Returns a `progress_id` for tracking
+- `manage_rag_source(action="delete", source_id="src_xxx")`
+  - Removes source and all its documents from the knowledge base
+
+**IMPORTANT**: Use "add" once per source, then "sync" for updates. Do NOT add the same URL twice — it creates duplicates.
+
+## ⏳ Progress Tracking
+
+### rag_check_progress — Poll Async Operations
+- `rag_check_progress(progress_id="prog_xxx")`
+  - Returns status (`pending`, `processing`, `completed`, `failed`), progress percentage, and details
+  - Poll every few seconds until status is `completed` or `failed`
+
+## 🔄 Ingestion Workflow
+
+Recommended flow for adding knowledge:
+1. **Add source**: `manage_rag_source(action="add", source_type="url", url="...")` → get `progress_id`
+2. **Poll progress**: `rag_check_progress(progress_id="...")` until completed
+3. **Search**: `rag_search_knowledge_base(query="...")` to verify content
+4. **Update later**: `manage_rag_source(action="sync", source_id="...")` → poll again
+
+## 🎯 Project-Scoped Search
+
+Use `project_id` to restrict searches to sources linked to a specific project:
+- `rag_search_knowledge_base(query="auth flow", project_id="proj_xxx")`
+- `rag_search_code_examples(query="middleware", project_id="proj_xxx")`
+
+Omit `project_id` to search across all sources.
 """
 
 # Initialize the main FastMCP server with fixed configuration
