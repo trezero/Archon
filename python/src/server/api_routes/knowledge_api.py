@@ -10,9 +10,10 @@ This module handles all knowledge base operations including:
 """
 
 import asyncio
+import hashlib
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -178,6 +179,23 @@ class RagQueryRequest(BaseModel):
     source: str | None = None
     match_count: int = 5
     return_mode: str = "chunks"  # "chunks" or "pages"
+
+
+class InlineDocument(BaseModel):
+    """A single document to ingest inline."""
+    title: str
+    content: str
+    path: str | None = None
+
+
+class InlineIngestRequest(BaseModel):
+    """Request to ingest a batch of inline documents."""
+    title: str  # Source title
+    documents: list[InlineDocument]
+    tags: list[str] = []
+    project_id: str | None = None
+    knowledge_type: str = "technical"
+    extract_code_examples: bool = True
 
 
 @router.get("/crawl-progress/{progress_id}")
