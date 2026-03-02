@@ -476,14 +476,17 @@ def register_rag_tools(mcp: FastMCP):
                             "validation_error", "url is required for url mode"
                         )
                     async with httpx.AsyncClient(timeout=timeout) as client:
+                        payload = {
+                            "url": url,
+                            "knowledge_type": knowledge_type,
+                            "tags": tags or [],
+                            "extract_code_examples": extract_code_examples,
+                        }
+                        if project_id:
+                            payload["project_id"] = project_id
                         response = await client.post(
                             urljoin(api_url, "/api/knowledge-items/crawl"),
-                            json={
-                                "url": url,
-                                "knowledge_type": knowledge_type,
-                                "tags": tags or [],
-                                "extract_code_examples": extract_code_examples,
-                            },
+                            json=payload,
                         )
                         if response.status_code == 200:
                             data = response.json()
@@ -564,8 +567,7 @@ def register_rag_tools(mcp: FastMCP):
             progress_id: The progress ID returned by manage_rag_source
 
         Returns:
-            JSON with {success, status, progress, documents_processed, documents_total,
-                       estimated_remaining_seconds, results?}
+            JSON with {success, status, progress, documents_processed, documents_total, results?}
 
             Status values: "starting", "processing", "document_storage", "completed", "failed", "error"
 
@@ -594,16 +596,6 @@ def register_rag_tools(mcp: FastMCP):
                         "documents_total": data.get("total_pages", 0),
                         "log": data.get("log", ""),
                     }
-
-                    # Add estimated remaining time
-                    if status not in ("completed", "failed", "error", "cancelled"):
-                        if progress > 0:
-                            # Rough estimate based on progress
-                            elapsed_ratio = progress / 100.0
-                            if elapsed_ratio > 0.1:
-                                result["estimated_remaining_seconds"] = int(
-                                    (1.0 - elapsed_ratio) / elapsed_ratio * 10
-                                )
 
                     # Include completion results if done
                     if status == "completed":

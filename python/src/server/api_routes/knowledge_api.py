@@ -152,6 +152,7 @@ class KnowledgeItemRequest(BaseModel):
     update_frequency: int = 7
     max_depth: int = 2  # Maximum crawl depth (1-5)
     extract_code_examples: bool = True  # Whether to extract code examples
+    project_id: str | None = None  # Optional project association for scoped searches
 
     class Config:
         schema_extra = {
@@ -771,6 +772,11 @@ async def crawl_knowledge_item(request: KnowledgeItemRequest):
         # Generate unique progress ID
         progress_id = str(uuid.uuid4())
 
+        # Pre-generate source_id using the same algorithm as CrawlingService
+        # so we can return it immediately in the response
+        from ..services.crawling.helpers.url_handler import URLHandler
+        source_id = URLHandler.generate_unique_source_id(str(request.url))
+
         # Initialize progress tracker IMMEDIATELY so it's available for polling
         from ..utils.progress.progress_tracker import ProgressTracker
         tracker = ProgressTracker(progress_id, operation_type="crawl")
@@ -796,28 +802,16 @@ async def crawl_knowledge_item(request: KnowledgeItemRequest):
         # The actual crawl task will be stored inside _perform_crawl_with_progress
         asyncio.create_task(_perform_crawl_with_progress(progress_id, request, tracker))
         safe_logfire_info(
-            f"Crawl started successfully | progress_id={progress_id} | url={str(request.url)}"
-        )
-        # Create a proper response that will be converted to camelCase
-        from pydantic import BaseModel, Field
-
-        class CrawlStartResponse(BaseModel):
-            success: bool
-            progress_id: str = Field(alias="progressId")
-            message: str
-            estimated_duration: str = Field(alias="estimatedDuration")
-
-            class Config:
-                populate_by_name = True
-
-        response = CrawlStartResponse(
-            success=True,
-            progress_id=progress_id,
-            message="Crawling started",
-            estimated_duration="3-5 minutes"
+            f"Crawl started successfully | progress_id={progress_id} | source_id={source_id} | url={str(request.url)}"
         )
 
-        return response.model_dump(by_alias=True)
+        return {
+            "success": True,
+            "progressId": progress_id,
+            "sourceId": source_id,
+            "message": "Crawling started",
+            "estimatedDuration": "3-5 minutes",
+        }
     except Exception as e:
         safe_logfire_error(f"Failed to start crawl | error={str(e)} | url={str(request.url)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -860,6 +854,10 @@ async def _perform_crawl_with_progress(
                 "extract_code_examples": request.extract_code_examples,
                 "generate_summary": True,
             }
+
+            # Pass project_id through so DocumentStorageOperations can tag the source
+            if request.project_id:
+                request_dict["project_id"] = request.project_id
 
             # Orchestrate the crawl - this returns immediately with task info including the actual task
             result = await orchestration_service.orchestrate_crawl(request_dict)
@@ -1310,6 +1308,25 @@ async def search_knowledge_items(request: RagQueryRequest):
     return await perform_rag_query(request)
 
 
+def _resolve_project_source_filter(project_id: str | None, existing_source: str | None) -> str | None:
+    """Resolve project_id to comma-separated source_ids, or return existing source filter."""
+    if existing_source:
+        return existing_source
+    if not project_id:
+        return None
+    try:
+        project_sources = get_supabase_client().table("archon_sources").select(
+            "source_id"
+        ).filter(
+            "metadata->>project_id", "eq", project_id
+        ).execute()
+        if project_sources.data:
+            return ",".join(s["source_id"] for s in project_sources.data)
+    except Exception as e:
+        logger.warning(f"Failed to resolve project_id to sources: {e}")
+    return existing_source
+
+
 @router.post("/rag/query")
 async def perform_rag_query(request: RagQueryRequest):
     """Perform a RAG query on the knowledge base using service layer."""
@@ -1321,19 +1338,7 @@ async def perform_rag_query(request: RagQueryRequest):
         raise HTTPException(status_code=422, detail="Query cannot be empty")
 
     try:
-        # Resolve project_id to source filter if no explicit source is provided
-        source_filter = request.source
-        if request.project_id and not source_filter:
-            try:
-                project_sources = get_supabase_client().table("archon_sources").select(
-                    "source_id"
-                ).filter(
-                    "metadata->>project_id", "eq", request.project_id
-                ).execute()
-                if project_sources.data:
-                    source_filter = ",".join(s["source_id"] for s in project_sources.data)
-            except Exception as e:
-                logger.warning(f"Failed to resolve project_id to sources: {e}")
+        source_filter = _resolve_project_source_filter(request.project_id, request.source)
 
         # Use RAGService for unified RAG query with return_mode support
         search_service = RAGService(get_supabase_client())
@@ -1365,19 +1370,7 @@ async def perform_rag_query(request: RagQueryRequest):
 async def search_code_examples(request: RagQueryRequest):
     """Search for code examples relevant to the query using dedicated code examples service."""
     try:
-        # Resolve project_id to source filter if no explicit source is provided
-        source_filter = request.source
-        if request.project_id and not source_filter:
-            try:
-                project_sources = get_supabase_client().table("archon_sources").select(
-                    "source_id"
-                ).filter(
-                    "metadata->>project_id", "eq", request.project_id
-                ).execute()
-                if project_sources.data:
-                    source_filter = ",".join(s["source_id"] for s in project_sources.data)
-            except Exception as e:
-                logger.warning(f"Failed to resolve project_id to sources: {e}")
+        source_filter = _resolve_project_source_filter(request.project_id, request.source)
 
         # Use RAGService for code examples search
         search_service = RAGService(get_supabase_client())

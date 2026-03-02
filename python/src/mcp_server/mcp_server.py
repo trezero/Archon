@@ -312,11 +312,11 @@ Create feature-level tasks:
 ## 📦 Source Management
 
 ### manage_rag_source — Add, Sync, and Delete Knowledge Sources
-- `manage_rag_source(action="add", source_type="url", url="https://docs.example.com", max_pages=50)`
+- `manage_rag_source(action="add", source_type="url", title="Example Docs", url="https://docs.example.com")`
   - Crawls a website and ingests its pages into the knowledge base
-  - Returns a `progress_id` for tracking the async operation
-- `manage_rag_source(action="add", source_type="inline", title="Design Notes", content="...")`
-  - Ingests inline text directly (no crawling)
+  - Returns a `progress_id` and `source_id` for tracking the async operation
+- `manage_rag_source(action="add", source_type="inline", title="Design Notes", documents='[{"title": "notes.md", "content": "# Notes..."}]')`
+  - Ingests inline documents directly (no crawling)
   - Returns a `progress_id` for tracking
 - `manage_rag_source(action="sync", source_id="src_xxx")`
   - Re-ingests an existing source to pick up changes (re-crawls URLs, re-processes inline content)
