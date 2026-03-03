@@ -20,6 +20,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 # Import service discovery for HTTP communication
 from src.server.config.service_discovery import get_api_url
+from src.mcp_server.utils.error_handling import MCPErrorFormatter
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,7 @@ def register_rag_tools(mcp: FastMCP):
         ctx: Context,
         query: str,
         source_id: str | None = None,
+        project_id: str | None = None,
         match_count: int = 5,
         return_mode: str = "pages"
     ) -> str:
@@ -93,6 +95,7 @@ def register_rag_tools(mcp: FastMCP):
             source_id: Optional source ID filter from rag_get_available_sources().
                       This is the 'id' field from available sources, NOT a URL or domain name.
                       Example: "src_1234abcd" not "docs.anthropic.com"
+            project_id: Optional project ID to scope search to sources associated with a project
             match_count: Max results (default: 5)
             return_mode: "pages" (default, full pages with metadata) or "chunks" (raw text chunks)
 
@@ -121,6 +124,8 @@ def register_rag_tools(mcp: FastMCP):
                 }
                 if source_id:
                     request_data["source"] = source_id
+                if project_id:
+                    request_data["project_id"] = project_id
 
                 response = await client.post(urljoin(api_url, "/api/rag/query"), json=request_data)
 
@@ -153,7 +158,7 @@ def register_rag_tools(mcp: FastMCP):
 
     @mcp.tool()
     async def rag_search_code_examples(
-        ctx: Context, query: str, source_id: str | None = None, match_count: int = 5
+        ctx: Context, query: str, source_id: str | None = None, project_id: str | None = None, match_count: int = 5
     ) -> str:
         """
         Search for relevant code examples in the knowledge base.
@@ -165,6 +170,7 @@ def register_rag_tools(mcp: FastMCP):
             source_id: Optional source ID filter from rag_get_available_sources().
                       This is the 'id' field from available sources, NOT a URL or domain name.
                       Example: "src_1234abcd" not "docs.anthropic.com"
+            project_id: Optional project ID to scope search to sources associated with a project
             match_count: Max results (default: 5)
 
         Returns:
@@ -182,6 +188,8 @@ def register_rag_tools(mcp: FastMCP):
                 request_data = {"query": query, "match_count": match_count}
                 if source_id:
                     request_data["source"] = source_id
+                if project_id:
+                    request_data["project_id"] = project_id
 
                 # Call the dedicated code examples endpoint
                 response = await client.post(
@@ -356,6 +364,270 @@ def register_rag_tools(mcp: FastMCP):
         except Exception as e:
             logger.error(f"Error reading page: {e}")
             return json.dumps({"success": False, "page": None, "error": str(e)}, indent=2)
+
+    @mcp.tool()
+    async def manage_rag_source(
+        ctx: Context,
+        action: str,
+        title: str | None = None,
+        source_type: str | None = None,
+        documents: str | list | None = None,
+        url: str | None = None,
+        tags: list[str] | None = None,
+        project_id: str | None = None,
+        knowledge_type: str = "technical",
+        extract_code_examples: bool = True,
+        source_id: str | None = None,
+        force: bool = False,
+    ) -> str:
+        """
+        Manage RAG knowledge base sources (consolidated: add/sync/delete).
+
+        Args:
+            action: "add" | "sync" | "delete"
+            title: Source title (required for add)
+            source_type: "inline" | "url" (required for add)
+            documents: List of documents for inline mode (also accepts JSON string).
+                Format: [{"title": "file.md", "content": "# Markdown...", "path": "docs/file.md"}]
+                Each document must have "title" and "content". "path" is optional.
+            url: URL to crawl (required for add with source_type="url")
+            tags: Tags for categorization, e.g. ["project-name", "docs"]
+            project_id: Associate source with an Archon project for scoped searches
+            knowledge_type: Classification (default: "technical")
+            extract_code_examples: Extract and index code blocks (default: true)
+            source_id: Source ID for sync/delete (from rag_get_available_sources)
+            force: For sync: re-chunk everything (true) vs only changed (false)
+
+        Workflow:
+            1. Add source: manage_rag_source(action="add", title="My Docs", source_type="inline", documents='[...]')
+            2. Poll progress: rag_check_progress(progress_id="...") until status="completed"
+            3. Search: rag_search_knowledge_base(query="...", project_id="...")
+            4. Update later: manage_rag_source(action="sync", source_id="...")
+            5. Remove: manage_rag_source(action="delete", source_id="...")
+
+        IMPORTANT: Use "add" once per document set. Use "sync" to update.
+        Calling "add" repeatedly creates duplicate sources.
+
+        Returns:
+            JSON with {success, progress_id?, source_id?, estimated_seconds?, message?}
+        """
+        try:
+            api_url = get_api_url()
+            from src.mcp_server.utils.timeout_config import get_default_timeout, get_polling_timeout
+            timeout = get_default_timeout()
+
+            if action == "add":
+                if not title:
+                    return MCPErrorFormatter.format_error(
+                        "validation_error", "title is required for add action"
+                    )
+                if not source_type or source_type not in ("inline", "url"):
+                    return MCPErrorFormatter.format_error(
+                        "validation_error", 'source_type must be "inline" or "url"'
+                    )
+
+                if source_type == "inline":
+                    if not documents:
+                        return MCPErrorFormatter.format_error(
+                            "validation_error",
+                            "documents is required for inline mode. "
+                            'Format: [{"title": "file.md", "content": "# Content..."}]'
+                        )
+                    # Handle both list (from MCP transport auto-deserialization) and JSON string
+                    if isinstance(documents, list):
+                        docs_list = documents
+                    elif isinstance(documents, str):
+                        try:
+                            docs_list = json.loads(documents)
+                        except json.JSONDecodeError as e:
+                            return MCPErrorFormatter.format_error(
+                                "validation_error", f"Invalid JSON in documents parameter: {e}"
+                            )
+                    else:
+                        return MCPErrorFormatter.format_error(
+                            "validation_error", "documents must be a list or JSON string"
+                        )
+                    if not isinstance(docs_list, list) or not docs_list:
+                        return MCPErrorFormatter.format_error(
+                            "validation_error", "documents must be a non-empty array"
+                        )
+
+                    async with httpx.AsyncClient(timeout=get_polling_timeout()) as client:
+                        response = await client.post(
+                            urljoin(api_url, "/api/knowledge/ingest-inline"),
+                            json={
+                                "title": title,
+                                "documents": docs_list,
+                                "tags": tags or [],
+                                "project_id": project_id,
+                                "knowledge_type": knowledge_type,
+                                "extract_code_examples": extract_code_examples,
+                            },
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            return json.dumps({
+                                "success": True,
+                                "progress_id": data.get("progressId"),
+                                "source_id": data.get("sourceId"),
+                                "estimated_seconds": data.get("estimatedSeconds"),
+                                "message": f"Ingestion started for '{title}'. "
+                                           f"Poll rag_check_progress(progress_id='{data.get('progressId')}') for status.",
+                            })
+                        else:
+                            return MCPErrorFormatter.from_http_error(response, "inline ingestion")
+
+                elif source_type == "url":
+                    if not url:
+                        return MCPErrorFormatter.format_error(
+                            "validation_error", "url is required for url mode"
+                        )
+                    async with httpx.AsyncClient(timeout=timeout) as client:
+                        payload = {
+                            "url": url,
+                            "knowledge_type": knowledge_type,
+                            "tags": tags or [],
+                            "extract_code_examples": extract_code_examples,
+                        }
+                        if project_id:
+                            payload["project_id"] = project_id
+                        response = await client.post(
+                            urljoin(api_url, "/api/knowledge-items/crawl"),
+                            json=payload,
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            return json.dumps({
+                                "success": True,
+                                "progress_id": data.get("progressId"),
+                                "source_id": data.get("sourceId"),
+                                "estimated_seconds": data.get("estimatedSeconds"),
+                                "message": f"Crawl started for '{url}'. "
+                                           f"Poll rag_check_progress(progress_id='{data.get('progressId')}') for status.",
+                            })
+                        else:
+                            return MCPErrorFormatter.from_http_error(response, "url crawl")
+
+            elif action == "sync":
+                if not source_id:
+                    return MCPErrorFormatter.format_error(
+                        "validation_error",
+                        "source_id is required for sync action. Get it from rag_get_available_sources()."
+                    )
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(
+                        urljoin(api_url, f"/api/knowledge-items/{source_id}/refresh"),
+                        json={"force": force},
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        return json.dumps({
+                            "success": True,
+                            "progress_id": data.get("progressId"),
+                            "estimated_seconds": data.get("estimatedSeconds"),
+                            "message": f"Sync started for source '{source_id}'. "
+                                       f"Poll rag_check_progress(progress_id='{data.get('progressId')}') for status.",
+                        })
+                    else:
+                        return MCPErrorFormatter.from_http_error(response, "sync source")
+
+            elif action == "delete":
+                if not source_id:
+                    return MCPErrorFormatter.format_error(
+                        "validation_error",
+                        "source_id is required for delete action. Get it from rag_get_available_sources()."
+                    )
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.delete(
+                        urljoin(api_url, f"/api/sources/{source_id}"),
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        return json.dumps({
+                            "success": True,
+                            "message": data.get("message", f"Source {source_id} deleted"),
+                        })
+                    else:
+                        return MCPErrorFormatter.from_http_error(response, "delete source")
+
+            else:
+                return MCPErrorFormatter.format_error(
+                    "validation_error",
+                    f'Invalid action "{action}". Must be "add", "sync", or "delete".'
+                )
+
+        except httpx.RequestError as e:
+            return MCPErrorFormatter.from_exception(e, f"manage_rag_source ({action})")
+        except Exception as e:
+            logger.error(f"Error in manage_rag_source: {e}", exc_info=True)
+            return MCPErrorFormatter.from_exception(e, f"manage_rag_source ({action})")
+
+    @mcp.tool()
+    async def rag_check_progress(
+        ctx: Context,
+        progress_id: str,
+    ) -> str:
+        """
+        Check progress of an async RAG operation (ingestion, sync, or crawl).
+
+        Args:
+            progress_id: The progress ID returned by manage_rag_source
+
+        Returns:
+            JSON with {success, status, progress, documents_processed, documents_total, results?}
+
+            Status values: "starting", "processing", "document_storage", "completed", "failed", "error"
+
+            When status is "completed", results contains:
+            {source_id, ingested, failed, failures, chunks_stored, code_examples_stored}
+        """
+        try:
+            api_url = get_api_url()
+            timeout = httpx.Timeout(30.0, connect=5.0)
+
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(
+                    urljoin(api_url, f"/api/crawl-progress/{progress_id}")
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    status = data.get("status", "unknown")
+                    progress = data.get("progress", 0)
+
+                    result = {
+                        "success": True,
+                        "status": status,
+                        "progress": progress,
+                        "documents_processed": data.get("processed_pages", 0),
+                        "documents_total": data.get("total_pages", 0),
+                        "log": data.get("log", ""),
+                    }
+
+                    # Include completion results if done
+                    if status == "completed":
+                        result["results"] = data.get("result", data.get("results", {}))
+
+                    if status in ("failed", "error"):
+                        result["error"] = data.get("error", "Unknown error")
+
+                    return json.dumps(result, indent=2)
+
+                elif response.status_code == 404:
+                    return MCPErrorFormatter.format_error(
+                        "not_found",
+                        f"No operation found with progress_id '{progress_id}'",
+                        suggestion="The operation may have completed and been cleaned up. "
+                                   "Progress data is kept for ~30 seconds after completion.",
+                    )
+                else:
+                    return MCPErrorFormatter.from_http_error(response, "check progress")
+
+        except httpx.RequestError as e:
+            return MCPErrorFormatter.from_exception(e, "check progress")
+        except Exception as e:
+            logger.error(f"Error checking progress: {e}", exc_info=True)
+            return MCPErrorFormatter.from_exception(e, "check progress")
 
     # Log successful registration
     logger.info("✓ RAG tools registered (HTTP-based version)")

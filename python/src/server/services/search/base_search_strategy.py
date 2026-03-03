@@ -39,7 +39,9 @@ class BaseSearchStrategy:
         Args:
             query_embedding: The embedding vector for the query
             match_count: Number of results to return
-            filter_metadata: Optional metadata filters
+            filter_metadata: Optional metadata filters. Supports:
+                - {"source": "single_source_id"} for single source filtering
+                - {"source_ids": ["id1", "id2"]} for multi-source filtering
             table_rpc: The RPC function to call (match_archon_crawled_pages or match_archon_code_examples)
 
         Returns:
@@ -47,6 +49,13 @@ class BaseSearchStrategy:
         """
         with safe_span("base_vector_search", table=table_rpc, match_count=match_count) as span:
             try:
+                # Check for multi-source filtering
+                source_ids_filter = None
+                if filter_metadata and "source_ids" in filter_metadata:
+                    source_ids_filter = filter_metadata["source_ids"]
+                    # Remove source_ids from filter_metadata to avoid passing it to RPC
+                    filter_metadata = {k: v for k, v in filter_metadata.items() if k != "source_ids"}
+
                 # Build RPC parameters
                 rpc_params = {"query_embedding": query_embedding, "match_count": match_count}
 
@@ -60,16 +69,28 @@ class BaseSearchStrategy:
                 else:
                     rpc_params["filter"] = {}
 
+                # For multi-source filtering, request more results since we'll filter in Python
+                if source_ids_filter:
+                    rpc_params["match_count"] = match_count * 5
+
                 # Execute search
                 response = self.supabase_client.rpc(table_rpc, rpc_params).execute()
 
-                # Filter by similarity threshold
+                # Filter by similarity threshold and optionally by source_ids
                 filtered_results = []
                 if response.data:
                     for result in response.data:
                         similarity = float(result.get("similarity", 0.0))
-                        if similarity >= SIMILARITY_THRESHOLD:
-                            filtered_results.append(result)
+                        if similarity < SIMILARITY_THRESHOLD:
+                            continue
+                        # Apply multi-source filter if specified
+                        if source_ids_filter and result.get("source_id") not in source_ids_filter:
+                            continue
+                        filtered_results.append(result)
+
+                # Trim to requested match_count after filtering
+                if source_ids_filter and len(filtered_results) > match_count:
+                    filtered_results = filtered_results[:match_count]
 
                 span.set_attribute("results_found", len(filtered_results))
                 span.set_attribute(

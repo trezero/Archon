@@ -267,8 +267,14 @@ class RAGService:
             try:
                 logger.info(f"RAG query started: {query[:100]}{'...' if len(query) > 100 else ''}")
 
-                # Build filter metadata
-                filter_metadata = {"source": source} if source else None
+                # Build filter metadata, supporting comma-separated source IDs for multi-source filtering
+                if source:
+                    if "," in source:
+                        filter_metadata = {"source_ids": source.split(",")}
+                    else:
+                        filter_metadata = {"source": source}
+                else:
+                    filter_metadata = None
 
                 # Check which strategies are enabled
                 use_hybrid_search = self.get_bool_setting("USE_HYBRID_SEARCH", False)
@@ -421,8 +427,17 @@ class RAGService:
                     search_match_count = match_count * 5
                     logger.debug(f"Reranking enabled for code search - fetching {search_match_count} candidates")
 
-                # Prepare filter
-                filter_metadata = {"source": source_id} if source_id and source_id.strip() else None
+                # Prepare filter, supporting comma-separated source IDs for multi-source filtering
+                # When multi-source, use filter_metadata only; don't pass comma-separated string as source_id
+                single_source_id = None
+                if source_id and source_id.strip():
+                    if "," in source_id:
+                        filter_metadata = {"source_ids": source_id.split(",")}
+                    else:
+                        filter_metadata = {"source": source_id}
+                        single_source_id = source_id
+                else:
+                    filter_metadata = None
 
                 if use_hybrid_search:
                     # Use hybrid search for code examples
@@ -430,7 +445,7 @@ class RAGService:
                         query=query,
                         match_count=search_match_count,
                         filter_metadata=filter_metadata,
-                        source_id=source_id,
+                        source_id=single_source_id,
                     )
                 else:
                     # Use standard agentic search
@@ -438,7 +453,7 @@ class RAGService:
                         query=query,
                         match_count=search_match_count,
                         filter_metadata=filter_metadata,
-                        source_id=source_id,
+                        source_id=single_source_id,
                     )
 
                 # Apply reranking if we have a strategy

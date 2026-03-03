@@ -10,9 +10,10 @@ This module handles all knowledge base operations including:
 """
 
 import asyncio
+import hashlib
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -151,6 +152,7 @@ class KnowledgeItemRequest(BaseModel):
     update_frequency: int = 7
     max_depth: int = 2  # Maximum crawl depth (1-5)
     extract_code_examples: bool = True  # Whether to extract code examples
+    project_id: str | None = None  # Optional project association for scoped searches
 
     class Config:
         schema_extra = {
@@ -176,8 +178,26 @@ class CrawlRequest(BaseModel):
 class RagQueryRequest(BaseModel):
     query: str
     source: str | None = None
+    project_id: str | None = None
     match_count: int = 5
     return_mode: str = "chunks"  # "chunks" or "pages"
+
+
+class InlineDocument(BaseModel):
+    """A single document to ingest inline."""
+    title: str
+    content: str
+    path: str | None = None
+
+
+class InlineIngestRequest(BaseModel):
+    """Request to ingest a batch of inline documents."""
+    title: str  # Source title
+    documents: list[InlineDocument]
+    tags: list[str] = []
+    project_id: str | None = None
+    knowledge_type: str = "technical"
+    extract_code_examples: bool = True
 
 
 @router.get("/crawl-progress/{progress_id}")
@@ -752,6 +772,11 @@ async def crawl_knowledge_item(request: KnowledgeItemRequest):
         # Generate unique progress ID
         progress_id = str(uuid.uuid4())
 
+        # Pre-generate source_id using the same algorithm as CrawlingService
+        # so we can return it immediately in the response
+        from ..services.crawling.helpers.url_handler import URLHandler
+        source_id = URLHandler.generate_unique_source_id(str(request.url))
+
         # Initialize progress tracker IMMEDIATELY so it's available for polling
         from ..utils.progress.progress_tracker import ProgressTracker
         tracker = ProgressTracker(progress_id, operation_type="crawl")
@@ -777,28 +802,16 @@ async def crawl_knowledge_item(request: KnowledgeItemRequest):
         # The actual crawl task will be stored inside _perform_crawl_with_progress
         asyncio.create_task(_perform_crawl_with_progress(progress_id, request, tracker))
         safe_logfire_info(
-            f"Crawl started successfully | progress_id={progress_id} | url={str(request.url)}"
-        )
-        # Create a proper response that will be converted to camelCase
-        from pydantic import BaseModel, Field
-
-        class CrawlStartResponse(BaseModel):
-            success: bool
-            progress_id: str = Field(alias="progressId")
-            message: str
-            estimated_duration: str = Field(alias="estimatedDuration")
-
-            class Config:
-                populate_by_name = True
-
-        response = CrawlStartResponse(
-            success=True,
-            progress_id=progress_id,
-            message="Crawling started",
-            estimated_duration="3-5 minutes"
+            f"Crawl started successfully | progress_id={progress_id} | source_id={source_id} | url={str(request.url)}"
         )
 
-        return response.model_dump(by_alias=True)
+        return {
+            "success": True,
+            "progressId": progress_id,
+            "sourceId": source_id,
+            "message": "Crawling started",
+            "estimatedDuration": "3-5 minutes",
+        }
     except Exception as e:
         safe_logfire_error(f"Failed to start crawl | error={str(e)} | url={str(request.url)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -841,6 +854,10 @@ async def _perform_crawl_with_progress(
                 "extract_code_examples": request.extract_code_examples,
                 "generate_summary": True,
             }
+
+            # Pass project_id through so DocumentStorageOperations can tag the source
+            if request.project_id:
+                request_dict["project_id"] = request.project_id
 
             # Orchestrate the crawl - this returns immediately with task info including the actual task
             result = await orchestration_service.orchestrate_crawl(request_dict)
@@ -889,6 +906,136 @@ async def _perform_crawl_with_progress(
                 safe_logfire_info(
                     f"Cleaned up crawl task from registry | progress_id={progress_id}"
                 )
+
+
+async def _perform_inline_ingest(
+    progress_id: str,
+    source_id: str,
+    request: InlineIngestRequest,
+    valid_docs: list[InlineDocument],
+    tracker,
+):
+    """Perform inline document ingestion with progress tracking."""
+    async with crawl_semaphore:
+        try:
+            supabase_client = get_supabase_client()
+            total_docs = len(valid_docs)
+
+            await tracker.update(
+                status="processing",
+                progress=5,
+                log=f"Processing {total_docs} documents",
+            )
+
+            # Build crawl_results in the format DocumentStorageOperations expects
+            crawl_results = []
+            doc_failures = []
+
+            for i, doc in enumerate(valid_docs):
+                content = doc.content.strip()
+                if not content:
+                    doc_failures.append({"title": doc.title, "error": "empty content"})
+                    continue
+
+                # Create a synthetic URL for this document using path or title
+                doc_path = doc.path or doc.title
+                synthetic_url = f"inline://{source_id}/{doc_path}"
+
+                crawl_results.append({
+                    "url": synthetic_url,
+                    "markdown": content,
+                    "title": doc.title,
+                    "description": "",
+                })
+
+                doc_progress = int(5 + (i + 1) / total_docs * 15)  # 5-20%
+                await tracker.update(
+                    status="processing",
+                    progress=doc_progress,
+                    log=f"Prepared document {i + 1}/{total_docs}: {doc.title}",
+                )
+
+            if not crawl_results:
+                await tracker.error("All documents failed validation")
+                return
+
+            # Use DocumentStorageOperations to chunk, embed, and store
+            from ..services.crawling.document_storage_operations import DocumentStorageOperations
+            storage_ops = DocumentStorageOperations(supabase_client)
+
+            # Build the request dict matching what process_and_store_documents expects
+            request_dict = {
+                "knowledge_type": request.knowledge_type,
+                "tags": request.tags or [],
+                "extract_code_examples": request.extract_code_examples,
+                "generate_summary": False,  # Skip AI summary for inline docs
+            }
+
+            # Add project_id to metadata if provided
+            if request.project_id:
+                request_dict["project_id"] = request.project_id
+
+            async def storage_progress_callback(status, progress, message, **kwargs):
+                # Map storage progress from 20-90%
+                mapped_progress = int(20 + progress * 0.7)
+                await tracker.update(
+                    status=status,
+                    progress=mapped_progress,
+                    log=message,
+                )
+
+            result = await storage_ops.process_and_store_documents(
+                crawl_results=crawl_results,
+                request=request_dict,
+                crawl_type="inline",
+                original_source_id=source_id,
+                progress_callback=storage_progress_callback,
+                source_url=f"inline://{source_id}",
+                source_display_name=request.title,
+            )
+
+            # Update source metadata with project_id and source_type
+            try:
+                existing = supabase_client.table("archon_sources").select("metadata").eq(
+                    "source_id", source_id
+                ).execute()
+                if existing.data:
+                    metadata = existing.data[0].get("metadata", {}) or {}
+                    metadata["source_type"] = "inline"
+                    metadata["ingestion_method"] = "mcp_inline"
+                    if request.project_id:
+                        metadata["project_id"] = request.project_id
+                    supabase_client.table("archon_sources").update(
+                        {"metadata": metadata}
+                    ).eq("source_id", source_id).execute()
+            except Exception as e:
+                logger.warning(f"Failed to update source metadata: {e}")
+
+            chunks_stored = result.get("chunks_stored", 0)
+            code_examples_stored = result.get("code_examples_count", 0)
+
+            await tracker.complete({
+                "source_id": source_id,
+                "ingested": len(crawl_results),
+                "failed": len(doc_failures),
+                "failures": doc_failures,
+                "chunks_stored": chunks_stored,
+                "code_examples_stored": code_examples_stored,
+            })
+
+        except asyncio.CancelledError:
+            logger.info(f"Inline ingest cancelled | progress_id={progress_id}")
+            raise
+        except Exception as e:
+            error_message = f"Inline ingestion failed: {str(e)}"
+            logger.error(f"Inline ingest error | progress_id={progress_id} | error={error_message}", exc_info=True)
+            try:
+                await tracker.error(error_message)
+            except Exception:
+                pass
+        finally:
+            if progress_id in active_crawl_tasks:
+                del active_crawl_tasks[progress_id]
 
 
 @router.post("/documents/upload")
@@ -970,6 +1117,61 @@ async def upload_document(
             f"Failed to start document upload | error={str(e)} | filename={file.filename} | error_type={type(e).__name__}"
         )
         raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.post("/knowledge/ingest-inline")
+async def ingest_inline_documents(request: InlineIngestRequest):
+    """Ingest a batch of inline documents into the knowledge base."""
+    # Validate request
+    if not request.documents:
+        raise HTTPException(status_code=422, detail="At least one document is required")
+
+    # Filter out empty documents
+    valid_docs = [doc for doc in request.documents if doc.content and doc.content.strip()]
+    if not valid_docs:
+        raise HTTPException(status_code=422, detail="All documents have empty content")
+
+    # Validate API key
+    await _validate_provider_api_key()
+
+    # Generate source_id from title + timestamp
+    timestamp = datetime.now(timezone.utc).isoformat()
+    source_id = hashlib.sha256(f"{request.title}-{timestamp}".encode()).hexdigest()[:16]
+
+    # Generate progress_id
+    progress_id = str(uuid.uuid4())
+
+    # Estimate completion time (~1 second per document for embedding)
+    estimated_seconds = max(10, len(valid_docs) * 1)
+
+    # Initialize progress tracker
+    from ..utils.progress.progress_tracker import ProgressTracker
+    tracker = ProgressTracker(progress_id, operation_type="inline_ingest")
+    await tracker.start({
+        "source_id": source_id,
+        "title": request.title,
+        "total_documents": len(valid_docs),
+        "status": "starting",
+    })
+
+    # Spawn background task
+    task = asyncio.create_task(
+        _perform_inline_ingest(
+            progress_id=progress_id,
+            source_id=source_id,
+            request=request,
+            valid_docs=valid_docs,
+            tracker=tracker,
+        )
+    )
+    active_crawl_tasks[progress_id] = task
+
+    return {
+        "success": True,
+        "progressId": progress_id,
+        "sourceId": source_id,
+        "estimatedSeconds": estimated_seconds,
+    }
 
 
 async def _perform_upload_with_progress(
@@ -1106,6 +1308,25 @@ async def search_knowledge_items(request: RagQueryRequest):
     return await perform_rag_query(request)
 
 
+def _resolve_project_source_filter(project_id: str | None, existing_source: str | None) -> str | None:
+    """Resolve project_id to comma-separated source_ids, or return existing source filter."""
+    if existing_source:
+        return existing_source
+    if not project_id:
+        return None
+    try:
+        project_sources = get_supabase_client().table("archon_sources").select(
+            "source_id"
+        ).filter(
+            "metadata->>project_id", "eq", project_id
+        ).execute()
+        if project_sources.data:
+            return ",".join(s["source_id"] for s in project_sources.data)
+    except Exception as e:
+        logger.warning(f"Failed to resolve project_id to sources: {e}")
+    return existing_source
+
+
 @router.post("/rag/query")
 async def perform_rag_query(request: RagQueryRequest):
     """Perform a RAG query on the knowledge base using service layer."""
@@ -1117,11 +1338,13 @@ async def perform_rag_query(request: RagQueryRequest):
         raise HTTPException(status_code=422, detail="Query cannot be empty")
 
     try:
+        source_filter = _resolve_project_source_filter(request.project_id, request.source)
+
         # Use RAGService for unified RAG query with return_mode support
         search_service = RAGService(get_supabase_client())
         success, result = await search_service.perform_rag_query(
             query=request.query,
-            source=request.source,
+            source=source_filter,
             match_count=request.match_count,
             return_mode=request.return_mode
         )
@@ -1147,11 +1370,13 @@ async def perform_rag_query(request: RagQueryRequest):
 async def search_code_examples(request: RagQueryRequest):
     """Search for code examples relevant to the query using dedicated code examples service."""
     try:
+        source_filter = _resolve_project_source_filter(request.project_id, request.source)
+
         # Use RAGService for code examples search
         search_service = RAGService(get_supabase_client())
         success, result = await search_service.search_code_examples_service(
             query=request.query,
-            source_id=request.source,  # This is Optional[str] which matches the method signature
+            source_id=source_filter,
             match_count=request.match_count,
         )
 

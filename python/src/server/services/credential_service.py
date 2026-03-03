@@ -52,7 +52,7 @@ class CredentialService:
     def _get_supabase_client(self) -> Client:
         """
         Get or create a properly configured Supabase client using environment variables.
-        Uses the standard Supabase client initialization.
+        Uses the standard Supabase client initialization with increased timeout.
         """
         if self._supabase is None:
             url = os.getenv("SUPABASE_URL")
@@ -64,8 +64,24 @@ class CredentialService:
                 )
 
             try:
-                # Initialize with standard Supabase client - no need for custom headers
-                self._supabase = create_client(url, key)
+                # Initialize with custom timeout for slow connections
+                import httpx
+                from supabase import create_client, ClientOptions
+                
+                # Create httpx client with longer timeout
+                http_client = httpx.Client(timeout=30.0)
+                
+                # Initialize with custom client options
+                options = ClientOptions(
+                    postgrest_client_timeout=30,
+                    storage_client_timeout=30
+                )
+                
+                self._supabase = create_client(url, key, options)
+                
+                # Monkey patch the underlying httpx client for the postgrest client
+                if hasattr(self._supabase.postgrest, 'session'):
+                    self._supabase.postgrest.session.timeout = httpx.Timeout(30.0)
 
                 # Extract project ID from URL for logging purposes only
                 match = re.match(r"https://([^.]+)\.supabase\.co", url)
