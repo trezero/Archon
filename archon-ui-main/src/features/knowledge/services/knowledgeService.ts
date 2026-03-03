@@ -37,6 +37,7 @@ export const knowledgeService = {
         params.append("tags", tag);
       }
     }
+    if (filter?.project_id) params.append("project_id", filter.project_id);
 
     const queryString = params.toString();
     const endpoint = `/api/knowledge-items/summary${queryString ? `?${queryString}` : ""}`;

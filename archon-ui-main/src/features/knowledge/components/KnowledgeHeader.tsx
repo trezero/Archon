@@ -14,6 +14,9 @@ interface KnowledgeHeaderProps {
   onSearchChange: (query: string) => void;
   typeFilter: "all" | "technical" | "business";
   onTypeFilterChange: (type: "all" | "technical" | "business") => void;
+  projectFilter: string;
+  onProjectFilterChange: (projectId: string) => void;
+  projects: Array<{ id: string; title: string }>;
   viewMode: "grid" | "table";
   onViewModeChange: (mode: "grid" | "table") => void;
   onAddKnowledge: () => void;
@@ -26,6 +29,9 @@ export const KnowledgeHeader: React.FC<KnowledgeHeaderProps> = ({
   onSearchChange,
   typeFilter,
   onTypeFilterChange,
+  projectFilter,
+  onProjectFilterChange,
+  projects,
   viewMode,
   onViewModeChange,
   onAddKnowledge,
@@ -91,6 +97,21 @@ export const KnowledgeHeader: React.FC<KnowledgeHeaderProps> = ({
             <Briefcase className="w-4 h-4" aria-hidden="true" />
           </ToggleGroupItem>
         </ToggleGroup>
+
+        {/* Project filter */}
+        {projects.length > 0 && (
+          <select
+            value={projectFilter}
+            onChange={(e) => onProjectFilterChange(e.target.value)}
+            className="h-8 px-2 text-xs bg-white/5 border border-white/10 rounded text-gray-300 focus:outline-none focus:border-cyan-500/50"
+            aria-label="Filter by project"
+          >
+            <option value="">All Projects</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{p.title}</option>
+            ))}
+          </select>
+        )}
 
         {/* View Mode Toggle */}
         <div className="flex gap-1 p-1 bg-black/30 rounded-lg border border-white/10">

@@ -129,6 +129,7 @@ export interface KnowledgeItemsFilter {
   tags?: string[];
   source_type?: "url" | "file";
   search?: string;
+  project_id?: string;
   page?: number;
   per_page?: number;
 }

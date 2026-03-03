@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "@/features/shared/hooks/useToast";
+import { useProjects } from "@/features/projects/hooks/useProjectQueries";
 import { CrawlingProgress } from "../../progress/components/CrawlingProgress";
 import type { ActiveOperation } from "../../progress/types";
 import { AddKnowledgeDialog } from "../components/AddKnowledgeDialog";
@@ -19,6 +20,14 @@ export const KnowledgeView = () => {
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "technical" | "business">("all");
+  const [projectFilter, setProjectFilter] = useState("");
+
+  // Projects query for filter dropdown
+  const { data: projectsData = [] } = useProjects();
+  const projects = (projectsData as Array<{ id: string; title: string }>).map((p) => ({
+    id: p.id,
+    title: p.title,
+  }));
 
   // Dialog state
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -40,8 +49,12 @@ export const KnowledgeView = () => {
       f.knowledge_type = typeFilter;
     }
 
+    if (projectFilter) {
+      f.project_id = projectFilter;
+    }
+
     return f;
-  }, [searchQuery, typeFilter]);
+  }, [searchQuery, typeFilter, projectFilter]);
 
   // Fetch knowledge summaries (no automatic polling!)
   const { data, isLoading, error, refetch, setActiveCrawlIds, activeOperations } = useKnowledgeSummaries(filter);
@@ -128,6 +141,9 @@ export const KnowledgeView = () => {
         onSearchChange={setSearchQuery}
         typeFilter={typeFilter}
         onTypeFilterChange={setTypeFilter}
+        projectFilter={projectFilter}
+        onProjectFilterChange={setProjectFilter}
+        projects={projects}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onAddKnowledge={handleAddKnowledge}
