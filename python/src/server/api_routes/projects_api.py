@@ -34,6 +34,7 @@ from ..services.projects import (
 )
 from ..services.projects.document_service import DocumentService
 from ..services.projects.versioning_service import VersioningService
+from ..services.knowledge import KnowledgeSummaryService
 
 # Using HTTP polling for real-time updates
 
@@ -1274,5 +1275,39 @@ async def restore_project_version(
     except Exception as e:
         logfire.error(
             f"Failed to restore version | error={str(e)} | project_id={project_id} | field_name={field_name} | version_number={version_number}"
+        )
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+# ==================== PROJECT KNOWLEDGE SOURCES ENDPOINT ====================
+
+
+@router.get("/projects/{project_id}/knowledge-sources")
+async def get_project_knowledge_sources(
+    project_id: str,
+    page: int = 1,
+    per_page: int = 20,
+    knowledge_type: str | None = None,
+    search: str | None = None,
+):
+    """Get knowledge sources associated with a project via metadata.project_id."""
+    try:
+        page = max(1, page)
+        per_page = min(100, max(1, per_page))
+
+        service = KnowledgeSummaryService(get_supabase_client())
+        return await service.get_summaries(
+            page=page,
+            per_page=per_page,
+            knowledge_type=knowledge_type,
+            search=search,
+            project_id=project_id,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logfire.error(
+            f"Failed to get project knowledge sources | error={str(e)} | project_id={project_id}"
         )
         raise HTTPException(status_code=500, detail={"error": str(e)})

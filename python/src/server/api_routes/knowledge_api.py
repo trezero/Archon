@@ -277,7 +277,11 @@ async def get_knowledge_items(
 
 @router.get("/knowledge-items/summary")
 async def get_knowledge_items_summary(
-    page: int = 1, per_page: int = 20, knowledge_type: str | None = None, search: str | None = None
+    page: int = 1,
+    per_page: int = 20,
+    knowledge_type: str | None = None,
+    search: str | None = None,
+    project_id: str | None = None,
 ):
     """
     Get lightweight summaries of knowledge items.
@@ -295,7 +299,7 @@ async def get_knowledge_items_summary(
         per_page = min(100, max(1, per_page))
         service = KnowledgeSummaryService(get_supabase_client())
         result = await service.get_summaries(
-            page=page, per_page=per_page, knowledge_type=knowledge_type, search=search
+            page=page, per_page=per_page, knowledge_type=knowledge_type, search=search, project_id=project_id
         )
         return result
 
