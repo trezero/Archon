@@ -46,7 +46,8 @@ class KnowledgeSummaryService:
             per_page: Items per page
             knowledge_type: Optional filter by knowledge type
             search: Optional search term
-            
+            project_id: Optional filter by project ID via metadata
+
         Returns:
             Dict with minimal item summaries and pagination info
         """
