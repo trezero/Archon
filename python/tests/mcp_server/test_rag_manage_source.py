@@ -115,6 +115,33 @@ class TestManageRagSourceValidation:
         assert "non-empty" in data["error"]["message"].lower()
 
     @pytest.mark.asyncio
+    async def test_add_inline_list_documents_accepted(self, manage_rag_source, mock_context):
+        """Test that documents passed as a native list (MCP auto-deserialization) are accepted."""
+        # This should pass validation and proceed to the HTTP call, which will fail
+        # since we don't mock it — but validation should NOT fail.
+        docs_list = [{"title": "test.md", "content": "# Test content"}]
+        result = await manage_rag_source(
+            mock_context, action="add", title="Test", source_type="inline", documents=docs_list
+        )
+        data = json.loads(result)
+        # Should either succeed (with HTTP error since no server) or fail with connection error
+        # but NOT with a validation error about documents format
+        if not data["success"]:
+            assert data["error"]["type"] != "validation_error", (
+                f"List documents should pass validation, got: {data['error']['message']}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_add_inline_empty_list_rejected(self, manage_rag_source, mock_context):
+        """Test that an empty native list is rejected."""
+        result = await manage_rag_source(
+            mock_context, action="add", title="Test", source_type="inline", documents=[]
+        )
+        data = json.loads(result)
+        assert data["success"] is False
+        assert data["error"]["type"] == "validation_error"
+
+    @pytest.mark.asyncio
     async def test_add_url_missing_url(self, manage_rag_source, mock_context):
         result = await manage_rag_source(mock_context, action="add", title="Test", source_type="url")
         data = json.loads(result)

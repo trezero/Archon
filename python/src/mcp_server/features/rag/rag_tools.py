@@ -371,7 +371,7 @@ def register_rag_tools(mcp: FastMCP):
         action: str,
         title: str | None = None,
         source_type: str | None = None,
-        documents: str | None = None,
+        documents: str | list | None = None,
         url: str | None = None,
         tags: list[str] | None = None,
         project_id: str | None = None,
@@ -387,10 +387,9 @@ def register_rag_tools(mcp: FastMCP):
             action: "add" | "sync" | "delete"
             title: Source title (required for add)
             source_type: "inline" | "url" (required for add)
-            documents: JSON string of documents for inline mode.
+            documents: List of documents for inline mode (also accepts JSON string).
                 Format: [{"title": "file.md", "content": "# Markdown...", "path": "docs/file.md"}]
                 Each document must have "title" and "content". "path" is optional.
-                Example: '[{"title": "auth.md", "content": "# Auth\\n## Overview\\n..."}]'
             url: URL to crawl (required for add with source_type="url")
             tags: Tags for categorization, e.g. ["project-name", "docs"]
             project_id: Associate source with an Archon project for scoped searches
@@ -432,17 +431,25 @@ def register_rag_tools(mcp: FastMCP):
                         return MCPErrorFormatter.format_error(
                             "validation_error",
                             "documents is required for inline mode. "
-                            'Format: \'[{"title": "file.md", "content": "# Content..."}]\''
+                            'Format: [{"title": "file.md", "content": "# Content..."}]'
                         )
-                    try:
-                        docs_list = json.loads(documents)
-                        if not isinstance(docs_list, list) or not docs_list:
+                    # Handle both list (from MCP transport auto-deserialization) and JSON string
+                    if isinstance(documents, list):
+                        docs_list = documents
+                    elif isinstance(documents, str):
+                        try:
+                            docs_list = json.loads(documents)
+                        except json.JSONDecodeError as e:
                             return MCPErrorFormatter.format_error(
-                                "validation_error", "documents must be a non-empty JSON array"
+                                "validation_error", f"Invalid JSON in documents parameter: {e}"
                             )
-                    except json.JSONDecodeError as e:
+                    else:
                         return MCPErrorFormatter.format_error(
-                            "validation_error", f"Invalid JSON in documents parameter: {e}"
+                            "validation_error", "documents must be a list or JSON string"
+                        )
+                    if not isinstance(docs_list, list) or not docs_list:
+                        return MCPErrorFormatter.format_error(
+                            "validation_error", "documents must be a non-empty array"
                         )
 
                     async with httpx.AsyncClient(timeout=get_polling_timeout()) as client:

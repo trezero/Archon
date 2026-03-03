@@ -108,7 +108,7 @@ manage_rag_source(
 - `action`: Must be `"add"`
 - `source_type`: Must be `"inline"` for local files
 - `title`: A human-readable name for this source
-- `documents`: A **JSON string** (not a native list) of document objects
+- `documents`: A **list of document objects** or a **JSON string**. Most MCP clients auto-serialize, so passing a native list works. A JSON string is also accepted and will be parsed server-side
 - `tags`: Optional list of tags for categorization
 - `project_id`: Optional — associates this source with an Archon project so searches can be scoped
 - `knowledge_type`: Defaults to `"technical"`. Any string is accepted
@@ -322,7 +322,7 @@ rag_read_full_page(page_id="uuid-from-list")
 | `action` | `str` | — | Always. `"add"` / `"sync"` / `"delete"` |
 | `title` | `str` | `None` | `action="add"` |
 | `source_type` | `str` | `None` | `action="add"`. `"inline"` / `"url"` |
-| `documents` | `str` | `None` | `action="add"` + `source_type="inline"`. JSON string |
+| `documents` | `list` or `str` | `None` | `action="add"` + `source_type="inline"`. List or JSON string |
 | `url` | `str` | `None` | `action="add"` + `source_type="url"` |
 | `tags` | `list[str]` | `None` | Never |
 | `project_id` | `str` | `None` | Never |
@@ -462,7 +462,7 @@ code = rag_search_code_examples(
 
 ## Key Constraints
 
-- **documents parameter is a JSON string**, not a native list/array. The MCP client must serialize the documents array to a JSON string before passing it
+- **documents parameter accepts both a native list and a JSON string**. Most MCP transports auto-deserialize JSON strings to native types, so passing a list directly works. A JSON string is also accepted as a fallback
 - **source_id is a 16-character hex hash**, not a URL. Always get it from `rag_get_available_sources()` or the `manage_rag_source(action="add")` response
 - **Ingestion is async**. The `manage_rag_source(action="add")` call returns immediately. You must poll `rag_check_progress` to know when it's done
 - **One add per document set**. Use `sync` to update, not `add` again. Repeated `add` calls create duplicate sources
