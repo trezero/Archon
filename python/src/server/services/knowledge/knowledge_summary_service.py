@@ -31,6 +31,7 @@ class KnowledgeSummaryService:
         per_page: int = 20,
         knowledge_type: Optional[str] = None,
         search: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Get lightweight summaries of knowledge items.
@@ -66,7 +67,10 @@ class KnowledgeSummaryService:
                 query = query.or_(
                     f"title.ilike.{search_pattern},summary.ilike.{search_pattern}"
                 )
-            
+
+            if project_id:
+                query = query.eq("metadata->>project_id", project_id)
+
             # Get total count
             count_query = self.supabase.from_("archon_sources").select(
                 "*", count="exact", head=True
@@ -80,7 +84,10 @@ class KnowledgeSummaryService:
                 count_query = count_query.or_(
                     f"title.ilike.{search_pattern},summary.ilike.{search_pattern}"
                 )
-            
+
+            if project_id:
+                count_query = count_query.eq("metadata->>project_id", project_id)
+
             count_result = count_query.execute()
             total = count_result.count if hasattr(count_result, "count") else 0
             
