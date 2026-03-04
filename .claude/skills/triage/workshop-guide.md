@@ -37,59 +37,113 @@ User invokes /triage 42
 
 ### 1. `context: fork` — Isolated Execution
 
-The skill runs in a **separate context window**. All the issue details, label
-fetching, and codebase exploration happen in isolation. Only the final triage
-summary returns to the main conversation.
+**What is it?** A skill frontmatter field that runs the skill in a **new isolated
+subagent context** instead of inline in the main conversation. The skill body
+becomes the task prompt for the subagent. When the subagent finishes, only its
+final response returns to the main conversation — all intermediate tool calls,
+file reads, and reasoning are discarded.
 
-**Why this matters**: Triaging 20 issues could consume 50K+ tokens of context.
-Without forking, your main conversation would be polluted with issue bodies,
-label lists, and grep results you'll never reference again.
+**Key properties:**
+- The forked context has **no access** to the main conversation history
+- Only the **final summary** flows back — intermediate work is discarded
+- `CLAUDE.md` files are still loaded in the forked context
+- The fork cannot spawn further subagents (no nesting)
+- Forked skills must contain **concrete tasks**, not just reference material
+
+**In this skill**: Triaging 20 issues could consume 50K+ tokens of context
+(issue bodies, label lists, grep results). Without forking, all of that pollutes
+the main conversation. With forking, only the structured triage summary returns.
 
 ### 2. `agent: triage-agent` — Custom Agent Delegation
 
-Instead of `agent: general-purpose`, this skill delegates to a **custom agent**
-defined in `.claude/agents/triage-agent.md`. The agent has:
-- Its own system prompt (triage specialist persona)
-- Its own tool restrictions
-- Its own scoped hooks
+**What is it?** When a skill has `context: fork`, the `agent:` field controls
+which agent type runs the forked context. Options:
 
-**Teaching moment**: Skills can delegate to built-in agents (`Explore`, `Plan`,
-`general-purpose`) or to custom agents you define. Custom agents let you embed
-domain expertise (label taxonomy, classification rules) in the agent itself,
-keeping the skill focused on scope and context.
+| Agent | Model | Tools | Use case |
+|-------|-------|-------|----------|
+| `Explore` | Haiku (fast, cheap) | Read-only | File search, codebase exploration |
+| `Plan` | Inherits from main | Read-only | Planning and research |
+| `general-purpose` | Inherits from main | All tools | Complex multi-step tasks |
+| Any custom agent | Whatever agent defines | Whatever agent defines | Domain-specific work |
 
-### 3. `type: "prompt"` Hook as Guardrail
+Custom agents are `.md` files in `.claude/agents/` with their own frontmatter
+(model, tools, hooks, memory, permissions) and a markdown body that serves as
+the system prompt.
 
-The triage agent has a PostToolUse hook that fires on every Bash call. When it
-detects a `gh issue edit --add-label` command, it sends the command to an LLM
-that verifies all four label categories are present.
+**In this skill**: Instead of `agent: general-purpose`, this skill delegates to
+`triage-agent` — a custom agent defined in `.claude/agents/triage-agent.md` with:
+- A triage specialist system prompt (label taxonomy, classification rules)
+- Its own PostToolUse hook for label validation
+- Restricted tool access
 
-**What happens if validation fails**: The LLM returns `{"ok": false, "reason": "Missing effort label"}`,
-and Claude receives that feedback. It can then fix the label application
-before moving to the next issue.
+**Teaching moment**: Skills define *what* to do (scope, context, arguments).
+Agents define *how* to do it (persona, tools, guardrails). Separating them
+makes both composable — the same agent could be used by multiple skills.
 
-**Smart filtering**: The prompt hook checks if the command was actually a label
-command. For `gh issue list` or `gh label list`, it returns `{"ok": true}`
-immediately — no false positives.
+### 3. `type: "prompt"` Hook — LLM as Guardrail
 
-### 4. `allowed-tools: Bash(gh *)` — Restricted Toolset
+**What is it?** One of four hook handler types. A prompt hook sends the event
+context to an LLM (Haiku by default) for a single-turn yes/no evaluation.
+The LLM must return `{"ok": true}` to allow the action or
+`{"ok": false, "reason": "..."}` to block it.
 
-The skill restricts Bash to only `gh` subcommands. The agent can't run arbitrary
-shell commands — only GitHub CLI operations. Combined with `Read`, `Glob`, `Grep`
-for codebase exploration.
+**How it differs from the other hook types:**
+- `type: "command"` — runs a shell script, blocks via exit code 2
+- `type: "http"` — POSTs JSON to a URL, blocks via JSON response
+- `type: "prompt"` — asks an LLM to evaluate, blocks via `{"ok": false}`
+- `type: "agent"` — spawns a subagent with Read/Grep/Glob to verify conditions
+
+Prompt hooks are ideal for **semantic validation** — cases where the decision
+requires understanding intent, not just pattern matching.
+
+**In this skill**: The triage agent has a PostToolUse hook on Bash. When it
+detects a `gh issue edit --add-label` command, the LLM verifies all four label
+categories (type, effort, priority, area) are present.
+
+**What happens if validation fails**: The LLM returns
+`{"ok": false, "reason": "Missing effort label"}` and Claude receives that
+feedback. It can fix the label application before moving to the next issue.
+
+**Smart filtering**: The prompt instructs the LLM to return `{"ok": true}`
+for non-label commands (`gh issue list`, `gh label list`) — no false positives.
+
+### 4. `allowed-tools` — Restricted Toolset
+
+**What is it?** A skill frontmatter field that controls which tools Claude can
+use **without per-use permission prompts** when the skill is active. It acts as
+both an allowlist (pre-approves listed tools) and a restriction (only these
+tools are available in the forked context).
+
+**Wildcard patterns** are supported:
+- `Bash(gh *)` — only `gh` subcommands, no arbitrary shell
+- `Bash(npm *)` — only npm commands
+- `Read, Glob, Grep` — read-only codebase access
+
+**In this skill**: `allowed-tools: Bash(gh *), Read, Glob, Grep` means the
+agent can interact with GitHub and read the codebase, but can't run arbitrary
+shell commands, write files, or edit code. This is a security boundary.
 
 ### 5. `disable-model-invocation: true`
 
-Triage modifies GitHub issues (side effects). Only the user should trigger it.
+**What is it?** Prevents Claude from auto-invoking this skill. By default, Claude
+reads skill descriptions and can invoke them when it determines they're relevant.
+Setting this to `true` means only the user can trigger it via `/triage`.
 
-### 6. Dynamic Context Injection
+**In this skill**: Triage modifies GitHub issues (side effects). Only the user
+should decide when to apply labels.
 
-Three `!`command`` blocks inject live repo data before the agent sees the prompt:
-- Current repository name
-- Open issue count
-- Existing label taxonomy
+### 6. Dynamic Context Injection (`!`command``)
 
-The agent starts with real context, not instructions to go fetch it.
+**What is it?** Shell commands in the skill body using `!`command`` syntax that
+execute as preprocessing — before Claude sees the prompt. The command's stdout
+replaces the placeholder. This is not tool use; it happens at skill load time.
+
+**In this skill**: Three commands inject live repo data:
+- Repository name (`gh repo view`)
+- Open issue count (`gh issue list | length`)
+- Existing label taxonomy (`gh label list`)
+
+The agent starts with real context instead of instructions to go fetch it.
 
 ## Live Demo Steps
 
