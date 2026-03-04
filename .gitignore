@@ -44,6 +44,7 @@ e2e-screenshots/
 .agents/plans/
 .agents/pr-reviews
 .claude/PRPs/
+.claude/archon/
 e2e-testing-findings-session2.md
 
 # Local workspace
