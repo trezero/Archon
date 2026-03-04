@@ -4,7 +4,7 @@ import { Pencil, Trash2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ConversationResponse } from '@/lib/api';
 import { deleteConversation, updateConversation } from '@/lib/api';
-import { cn, formatTime } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,7 +44,18 @@ export function ConversationItem({
       : conversation.title
     : 'Untitled conversation';
 
-  const lastActivity = formatTime(conversation.last_activity_at) || 'No activity';
+  const lastActivity = conversation.last_activity_at
+    ? new Date(
+        conversation.last_activity_at.endsWith('Z')
+          ? conversation.last_activity_at
+          : conversation.last_activity_at + 'Z'
+      ).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : 'No activity';
 
   const handleDelete = useCallback((): void => {
     setDeleteError(null);

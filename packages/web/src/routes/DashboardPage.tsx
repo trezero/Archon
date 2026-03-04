@@ -10,7 +10,17 @@ import {
   type WorkflowRunResponse,
 } from '@/lib/api';
 import { useProject } from '@/contexts/ProjectContext';
-import { formatTime } from '@/lib/utils';
+
+function formatTime(dateStr: string | null): string {
+  if (!dateStr) return '';
+  const d = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 const STATUS_COLORS: Record<string, string> = {
   running: 'bg-primary',

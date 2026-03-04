@@ -222,12 +222,17 @@ export function WorkflowLogs({
     }
   }, []);
 
+  const onSessionInfo = useCallback((_sessionId: string, _cost?: number): void => {
+    // No-op for read-only view
+  }, []);
+
   useSSE(conversationId, {
     onText,
     onToolCall,
     onToolResult,
     onError,
     onLockChange,
+    onSessionInfo,
     ...workflowHandlers,
   });
 

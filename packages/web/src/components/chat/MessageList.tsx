@@ -11,7 +11,6 @@ import { ErrorCard } from './ErrorCard';
 import { useAutoScroll } from '@/hooks/useAutoScroll';
 import { getWorkflowRunByWorker } from '@/lib/api';
 import type { ChatMessage } from '@/lib/types';
-import { isTerminalWorkflowStatus } from '@/lib/types';
 
 function WorkflowDispatchInline({
   workflowName,
@@ -27,7 +26,7 @@ function WorkflowDispatchInline({
     queryFn: () => getWorkflowRunByWorker(workerConversationId),
     refetchInterval: (query): number | false => {
       const status = query.state.data?.run.status;
-      if (status && isTerminalWorkflowStatus(status)) return false;
+      if (status === 'completed' || status === 'failed') return false;
       return 3000;
     },
   });

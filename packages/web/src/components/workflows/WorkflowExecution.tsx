@@ -7,9 +7,17 @@ import { WorkflowLogs } from './WorkflowLogs';
 import { ArtifactSummary } from './ArtifactSummary';
 import { useWorkflowStatus } from '@/hooks/useWorkflowStatus';
 import { getWorkflowRun, getWorkflowRunByWorker, getCodebase } from '@/lib/api';
-import { formatDuration, ensureUtc } from '@/lib/utils';
-import type { WorkflowState, ArtifactType } from '@/lib/types';
-import { isTerminalWorkflowStatus as isTerminal } from '@/lib/types';
+import type { WorkflowState, ArtifactType, WorkflowRunStatus } from '@/lib/types';
+
+function ensureUtc(timestamp: string): string {
+  return timestamp.endsWith('Z') ? timestamp : timestamp + 'Z';
+}
+
+const TERMINAL_STATUSES: readonly WorkflowRunStatus[] = ['completed', 'failed', 'cancelled'];
+
+function isTerminal(status: WorkflowRunStatus): boolean {
+  return TERMINAL_STATUSES.includes(status);
+}
 
 interface WorkflowExecutionProps {
   runId: string;
@@ -30,6 +38,12 @@ function StatusBadge({ status }: { status: string }): React.ReactElement {
       {status}
     </span>
   );
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${String(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60000).toFixed(1)}m`;
 }
 
 export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.ReactElement {

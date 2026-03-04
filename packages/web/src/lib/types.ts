@@ -6,16 +6,6 @@
 import type { WorkflowRunStatus, WorkflowStepStatus, ArtifactType } from '@archon/workflows/types';
 export type { WorkflowRunStatus, WorkflowStepStatus, ArtifactType };
 
-const TERMINAL_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set([
-  'completed',
-  'failed',
-  'cancelled',
-]);
-
-export function isTerminalWorkflowStatus(status: WorkflowRunStatus): boolean {
-  return TERMINAL_STATUSES.has(status);
-}
-
 // Base SSE event
 interface BaseSSEEvent {
   type: string;

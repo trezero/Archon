@@ -1,8 +1,13 @@
-import { formatDuration } from '@/lib/utils';
 import type { WorkflowState } from '@/lib/types';
 
 interface LoopIterationViewProps {
   workflow: WorkflowState;
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${String(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60000).toFixed(1)}m`;
 }
 
 export function LoopIterationView({ workflow }: LoopIterationViewProps): React.ReactElement {
