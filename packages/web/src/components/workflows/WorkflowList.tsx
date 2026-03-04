@@ -57,7 +57,10 @@ export function WorkflowList(): React.ReactElement {
   const { data: runs, isLoading: loadingRuns } = useQuery({
     queryKey: ['workflow-runs'],
     queryFn: () => listWorkflowRuns({ limit: 20 }),
-    refetchInterval: 5000,
+    refetchInterval: (query): number | false => {
+      const hasRunning = query.state.data?.some((r: WorkflowRunResponse) => r.status === 'running');
+      return hasRunning ? 5000 : 30_000;
+    },
   });
 
   const hasActiveRuns = useMemo(

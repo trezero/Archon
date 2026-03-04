@@ -9,6 +9,7 @@ import type {
   WorkflowDispatchEvent,
   WorkflowOutputPreviewEvent,
 } from '@/lib/types';
+import { isTerminalWorkflowStatus } from '@/lib/types';
 import { SSE_BASE_URL } from '@/lib/api';
 
 function parseSSEEvent(raw: string): SSEEvent | null {
@@ -34,7 +35,7 @@ interface SSEHandlers {
   onToolResult: (name: string, output: string, duration: number) => void;
   onError: (error: ErrorDisplay) => void;
   onLockChange: (locked: boolean, queuePosition?: number) => void;
-  onSessionInfo: (sessionId: string, cost?: number) => void;
+  onSessionInfo?: (sessionId: string, cost?: number) => void;
   onWorkflowStep?: (event: WorkflowStepEvent) => void;
   onWorkflowStatus?: (event: WorkflowStatusEvent) => void;
   onParallelAgent?: (event: ParallelAgentEvent) => void;
@@ -168,18 +169,14 @@ export function useSSE(
             h.onLockChange(data.locked, data.queuePosition);
             break;
           case 'session_info':
-            h.onSessionInfo(data.sessionId, data.cost);
+            h.onSessionInfo?.(data.sessionId, data.cost);
             break;
           case 'workflow_step':
             h.onWorkflowStep?.(data);
             break;
           case 'workflow_status':
             h.onWorkflowStatus?.(data);
-            if (
-              data.status === 'completed' ||
-              data.status === 'failed' ||
-              data.status === 'cancelled'
-            ) {
+            if (isTerminalWorkflowStatus(data.status)) {
               h.onLockChange(false);
             }
             break;

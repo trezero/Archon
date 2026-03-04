@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { LoopIterationView } from '@/components/workflows/LoopIterationView';
+import { WorkflowStatusIcon as StatusIcon } from '@/components/workflows/WorkflowStatusIcon';
+import { formatDuration } from '@/lib/utils';
 import type { WorkflowState } from '@/lib/types';
 
 interface WorkflowProgressCardProps {
@@ -8,27 +10,6 @@ interface WorkflowProgressCardProps {
   onCancel?: () => void;
   compact?: boolean;
   onViewFullScreen?: () => void;
-}
-
-function StatusIcon({ status }: { status: string }): React.ReactElement {
-  switch (status) {
-    case 'completed':
-      return <span className="text-success">&#x2713;</span>;
-    case 'running':
-      return (
-        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-      );
-    case 'failed':
-      return <span className="text-error">&#x2717;</span>;
-    default:
-      return <span className="text-text-secondary">&#x25CB;</span>;
-  }
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${String(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
 }
 
 export function WorkflowProgressCard({

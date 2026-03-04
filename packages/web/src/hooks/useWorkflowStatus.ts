@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getWorkflowRun } from '@/lib/api';
+import { ensureUtc } from '@/lib/utils';
 import type {
   WorkflowState,
   WorkflowStepState,
@@ -8,6 +9,7 @@ import type {
   ParallelAgentEvent,
   WorkflowArtifactEvent,
 } from '@/lib/types';
+import { isTerminalWorkflowStatus } from '@/lib/types';
 
 interface UseWorkflowStatusReturn {
   workflows: Map<string, WorkflowState>;
@@ -163,11 +165,7 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
           void getWorkflowRun(wf.runId)
             .then(data => {
               const serverStatus = data.run.status;
-              if (
-                serverStatus === 'completed' ||
-                serverStatus === 'failed' ||
-                serverStatus === 'cancelled'
-              ) {
+              if (isTerminalWorkflowStatus(serverStatus)) {
                 setWorkflows(prev => {
                   const next = new Map(prev);
                   const existing = next.get(wf.runId);
@@ -176,11 +174,7 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
                       ...existing,
                       status: serverStatus,
                       completedAt: data.run.completed_at
-                        ? new Date(
-                            data.run.completed_at.endsWith('Z')
-                              ? data.run.completed_at
-                              : data.run.completed_at + 'Z'
-                          ).getTime()
+                        ? new Date(ensureUtc(data.run.completed_at)).getTime()
                         : Date.now(),
                     });
                   }

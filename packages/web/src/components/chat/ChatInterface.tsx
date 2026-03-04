@@ -346,10 +346,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     }
   }, []);
 
-  const onSessionInfo = useCallback((_sessionId: string, _cost?: number): void => {
-    // Session info can be stored for display later
-  }, []);
-
   const onWorkflowDispatch = useCallback((event: WorkflowDispatchEvent): void => {
     setMessages(prev => {
       let lastAssistantIdx = -1;
@@ -404,7 +400,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     onToolResult,
     onError,
     onLockChange,
-    onSessionInfo,
     onWorkflowDispatch,
     onWarning,
     onRetract,

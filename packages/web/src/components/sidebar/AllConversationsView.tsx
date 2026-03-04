@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { listConversations } from '@/lib/api';
@@ -21,12 +22,15 @@ export function AllConversationsView({
     refetchInterval: 10_000,
   });
 
-  const codebaseMap = new Map<string, CodebaseResponse>();
-  if (codebases) {
-    for (const cb of codebases) {
-      codebaseMap.set(cb.id, cb);
+  const codebaseMap = useMemo(() => {
+    const map = new Map<string, CodebaseResponse>();
+    if (codebases) {
+      for (const cb of codebases) {
+        map.set(cb.id, cb);
+      }
     }
-  }
+    return map;
+  }, [codebases]);
 
   const handleNewChat = (): void => {
     navigate('/chat');

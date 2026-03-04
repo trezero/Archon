@@ -5,7 +5,9 @@ import { listConversations, listWorkflowRuns } from '@/lib/api';
 import type { WorkflowRunResponse } from '@/lib/api';
 import { ConversationItem } from '@/components/conversations/ConversationItem';
 import { WorkflowInvoker } from '@/components/sidebar/WorkflowInvoker';
-import { cn } from '@/lib/utils';
+import { cn, formatDuration, ensureUtc } from '@/lib/utils';
+
+const RUN_PRIORITY: Record<string, number> = { failed: 0, running: 1, completed: 2 };
 
 interface ProjectDetailProps {
   codebaseId: string;
@@ -30,17 +32,10 @@ function RunStatusBadge({ status }: { status: string }): React.ReactElement {
   );
 }
 
-function ensureUtc(timestamp: string): string {
-  return timestamp.endsWith('Z') ? timestamp : timestamp + 'Z';
-}
-
-function formatDuration(startedAt: string, completedAt: string | null): string {
+function formatRunDuration(startedAt: string, completedAt: string | null): string {
   const start = new Date(ensureUtc(startedAt)).getTime();
   const end = completedAt ? new Date(ensureUtc(completedAt)).getTime() : Date.now();
-  const ms = end - start;
-  if (ms < 1000) return `${String(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
+  return formatDuration(end - start);
 }
 
 export function ProjectDetail({
@@ -92,15 +87,16 @@ export function ProjectDetail({
   });
 
   // Filter and sort runs by search and status
-  const sortedRuns = runs
-    ?.filter(run => {
-      if (!searchQuery) return true;
-      return run.workflow_name.toLowerCase().includes(searchQuery.toLowerCase());
-    })
-    .sort((a, b) => {
-      const priority: Record<string, number> = { failed: 0, running: 1, completed: 2 };
-      return (priority[a.status] ?? 3) - (priority[b.status] ?? 3);
-    });
+  const sortedRuns = useMemo(
+    () =>
+      runs
+        ?.filter(run => {
+          if (!searchQuery) return true;
+          return run.workflow_name.toLowerCase().includes(searchQuery.toLowerCase());
+        })
+        .sort((a, b) => (RUN_PRIORITY[a.status] ?? 3) - (RUN_PRIORITY[b.status] ?? 3)),
+    [runs, searchQuery]
+  );
 
   return (
     <div className="min-w-0 flex flex-col gap-3">
@@ -158,7 +154,7 @@ export function ProjectDetail({
                 <span className="truncate flex-1 text-text-primary">{run.workflow_name}</span>
                 <RunStatusBadge status={run.status} />
                 <span className="text-text-tertiary shrink-0">
-                  {formatDuration(run.started_at, run.completed_at)}
+                  {formatRunDuration(run.started_at, run.completed_at)}
                 </span>
               </button>
             ))
