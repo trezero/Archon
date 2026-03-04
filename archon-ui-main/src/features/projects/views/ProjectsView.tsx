@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Activity, CheckCircle2, FileText, List, ListTodo, Pin } from "lucide-react";
+import { Activity, CheckCircle2, FileText, List, ListTodo, Pin, Puzzle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useStaggeredEntrance } from "../../../hooks/useStaggeredEntrance";
@@ -16,6 +16,7 @@ import { ProjectList } from "../components/ProjectList";
 import { DocsTab } from "../documents/DocsTab";
 import { projectKeys, useDeleteProject, useProjects, useUpdateProject } from "../hooks/useProjectQueries";
 import { useTaskCounts } from "../tasks/hooks";
+import { SkillsTab } from "../skills/SkillsTab";
 import { TasksTab } from "../tasks/TasksTab";
 import type { Project } from "../types";
 
@@ -213,6 +214,7 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
                 <PillNavigation
                   items={[
                     { id: "docs", label: "Docs", icon: <FileText className="w-4 h-4" /> },
+                    { id: "skills", label: "Skills", icon: <Puzzle className="w-4 h-4" /> },
                     { id: "tasks", label: "Tasks", icon: <ListTodo className="w-4 h-4" /> },
                   ]}
                   activeSection={activeTab}
@@ -229,6 +231,7 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
               {/* Tab content */}
               <div>
                 {activeTab === "docs" && <DocsTab project={selectedProject} />}
+                {activeTab === "skills" && <SkillsTab projectId={selectedProject.id} />}
                 {activeTab === "tasks" && <TasksTab projectId={selectedProject.id} />}
               </div>
             </motion.div>
@@ -292,6 +295,7 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
                     <PillNavigation
                       items={[
                         { id: "docs", label: "Docs", icon: <FileText className="w-4 h-4" /> },
+                        { id: "skills", label: "Skills", icon: <Puzzle className="w-4 h-4" /> },
                         { id: "tasks", label: "Tasks", icon: <ListTodo className="w-4 h-4" /> },
                       ]}
                       activeSection={activeTab}
@@ -309,6 +313,7 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
                 {/* Tab Content */}
                 <div>
                   {activeTab === "docs" && <DocsTab project={selectedProject} />}
+                  {activeTab === "skills" && <SkillsTab projectId={selectedProject.id} />}
                   {activeTab === "tasks" && <TasksTab projectId={selectedProject.id} />}
                 </div>
               </>
