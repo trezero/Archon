@@ -39,6 +39,7 @@ e2e-screenshots/
 .archon/artifacts/
 
 # Agent artifacts (generated, local only)
+.agents/
 .agents/rca-reports/
 .agents/plans/
 .agents/pr-reviews
