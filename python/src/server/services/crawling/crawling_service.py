@@ -689,6 +689,30 @@ class CrawlingService:
                 total_pages=len(crawl_results),
             )
 
+            # Persist completion summary to source metadata for durable querying
+            crawl_source_id = storage_results.get("source_id", "")
+            if crawl_source_id:
+                try:
+                    from datetime import datetime, timezone
+                    sc = get_supabase_client()
+                    existing_meta = sc.table("archon_sources").select("metadata").eq(
+                        "source_id", crawl_source_id
+                    ).execute()
+                    if existing_meta.data:
+                        meta = existing_meta.data[0].get("metadata", {}) or {}
+                        meta["last_ingestion"] = {
+                            "completed_at": datetime.now(timezone.utc).isoformat(),
+                            "documents_processed": len(crawl_results),
+                            "chunks_stored": actual_chunks_stored,
+                            "code_examples_stored": code_examples_count,
+                            "status": "completed",
+                        }
+                        sc.table("archon_sources").update(
+                            {"metadata": meta}
+                        ).eq("source_id", crawl_source_id).execute()
+                except Exception as persist_err:
+                    safe_logfire_error(f"Failed to persist crawl completion summary: {persist_err}")
+
             # Mark crawl as completed
             if self.progress_tracker:
                 await self.progress_tracker.complete({
@@ -696,7 +720,7 @@ class CrawlingService:
                     "code_examples_found": code_examples_count,
                     "processed_pages": len(crawl_results),
                     "total_pages": len(crawl_results),
-                    "sourceId": storage_results.get("source_id", ""),
+                    "sourceId": crawl_source_id,
                     "log": "Crawl completed successfully!",
                 })
 

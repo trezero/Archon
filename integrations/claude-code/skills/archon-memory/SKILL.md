@@ -18,6 +18,7 @@ Examples:
 - `/archon-memory search-all firebase auth patterns` — Search all projects
 - `/archon-memory shared add https://firebase.google.com/docs` — Add shared knowledge
 - `/archon-memory shared list` — List shared knowledge sources
+- `/archon-memory ecosystem` — Show all ecosystem projects' Archon status
 - `/archon-memory tasks` — List project tasks
 - `/archon-memory forget` — Remove project from Archon
 
@@ -62,6 +63,7 @@ Read these if they exist (don't fail if missing — some modes create them):
 | `task create <title>` | TASK-CREATE |
 | `task update <id> <status>` | TASK-UPDATE |
 | `project` | PROJECT-INFO |
+| `ecosystem` | ECOSYSTEM |
 | `forget` | FORGET |
 
 ---
@@ -289,9 +291,9 @@ If no changes detected:
 
 ### Phase 3: Re-ingest
 
-**Important:** This uses delete + re-add. If delete succeeds but re-add fails (server goes down, network error), indexed docs are temporarily lost. Recovery: re-run `/archon-memory ingest` to recreate from local files.
+**Warning:** Sync uses delete + re-add, which means there's a brief window where the knowledge base has no content for this project. If the delete succeeds but re-add fails, run `/archon-memory ingest` to recover.
 
-1. Read all docs first (same as Ingest Phase 3) — do this BEFORE deleting so the payload is ready
+1. Re-read all docs first (same as Ingest Phase 3) — read BEFORE deleting to ensure content is ready
 
 2. Delete old source:
    ```
@@ -350,14 +352,14 @@ No `project_id` — searches across all projects and shared knowledge.
 
 ### Present Results
 
-Show as a table (fields from the API: `section_title`, `aggregate_similarity`, `word_count`, `chunk_matches`, `source_id`):
+Show as a table:
 ```
 ## Search Results for "<query>"
 
 | # | Section Title | Similarity | Words | Chunks | Source ID |
 |---|--------------|------------|-------|--------|-----------|
-| 1 | subscriptions.md | 0.89 | 1,250 | 3 | a3f2e1b4c5d67890 |
-| 2 | userLogic.md | 0.72 | 3,400 | 1 | a3f2e1b4c5d67890 |
+| 1 | subscriptions.md | 0.89 | 1,250 | 3 | src-xxx |
+| 2 | userLogic.md | 0.72 | 3,400 | 5 | src-xxx |
 ```
 
 Then ask:
@@ -573,6 +575,68 @@ Display project details including title, description, github_repo, features.
 
 ---
 
+## ECOSYSTEM Mode
+
+Show status of all RecipeRaiders ecosystem projects in Archon. No arguments needed.
+
+### Phase 1: Load Global State
+
+Read `~/.claude/archon-global.json`. If missing:
+> "No ecosystem configuration found. Run `/archon-memory ingest` in each project first, or set up the ecosystem via the multi-project rollout process."
+
+### Phase 2: Query Archon for All Projects
+
+For each project in `ecosystem_projects`:
+```
+find_projects(project_id="<project-id>")
+```
+
+Also check the shared knowledge project:
+```
+find_projects(project_id="<shared-project-id>")
+```
+
+### Phase 3: Check Local State for Current Project
+
+If the current working directory matches one of the ecosystem projects, read its `.claude/archon-state.json` and run a freshness check (compare file hashes).
+
+### Phase 4: Display Ecosystem Dashboard
+
+```
+## RecipeRaiders Ecosystem — Archon Status
+
+### Shared Knowledge
+| Source | Docs | Last Synced | Status |
+|--------|------|-------------|--------|
+| RecipeRaiders Ecosystem Documentation | 2 | <date> | <fresh/stale> |
+
+### Projects
+| Project | Archon ID | Docs | Last Synced | Status |
+|---------|-----------|------|-------------|--------|
+| RecipeRaiders (main) | 2d747998... | 51 | <date> | <fresh/stale/unknown> |
+| reciperaiders-spa | d452583d... | 2 | <date> | <fresh/stale/unknown> |
+| reciperaiders-repdash | 9b18cc38... | 3 | <date> | <fresh/stale/unknown> |
+| RecipeRaiders-Marketing | 5ba91517... | 2 | <date> | <fresh/stale/unknown> |
+
+### Current Project: <name>
+<Freshness details if available>
+```
+
+**Status values:**
+- **fresh**: File hashes match stored hashes (can only check if in that project's directory)
+- **stale**: File hashes differ — run `/archon-memory sync`
+- **unknown**: Not in this project's directory, can't check local files
+- **missing**: Archon project or source not found
+
+### Phase 5: Suggestions
+
+Based on ecosystem state, suggest:
+- If any projects are stale: "Run `/archon-memory sync` in <project-dir> to update."
+- If shared knowledge is stale: "Run `/archon-memory shared sync` to update ecosystem docs."
+- If a project has no archon state: "Run `/archon-memory ingest` in <project-dir> to set up."
+
+---
+
 ## FORGET Mode
 
 Remove all project knowledge from Archon.
@@ -631,7 +695,7 @@ Report: "Project knowledge removed from Archon."
 - If Archon is unreachable, all modes fail gracefully with a clear message
 - If source_id in state file doesn't match Archon, suggest re-ingest
 - If progress polling returns 404, check `rag_get_available_sources()` to verify
-- If ingestion fails, the old source (if any) was already deleted — re-run ingest to recove
+- If ingestion fails, the old source (if any) was already deleted — re-run ingest to recover
 
 ### Multi-Agent Awareness
 All Archon data is shared across agents. When this Claude Code instance ingests or modifies data, other agents (Cursor, Windsurf, other Claude instances) see the changes immediately. Use Archon tasks for coordinating work across agents.

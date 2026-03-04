@@ -1,6 +1,11 @@
-# Archon Memory — Claude Code Integration
+# Archon — Claude Code Integration
 
-A Claude Code skill that bridges Claude Code's native memory with Archon's RAG knowledge base. Provides semantic search across unlimited documentation, cross-project knowledge sharing, and multi-agent collaboration.
+Claude Code skills for managing knowledge and project ecosystems via Archon's RAG knowledge base.
+
+## Available Skills
+
+- **`/archon-memory`** — Ingest, search, and sync project documentation
+- **`/link-to-project`** — Link repos to an Archon project ecosystem (hierarchy, source linking, doc ingestion)
 
 ## What It Does
 
@@ -37,15 +42,17 @@ Replace `localhost` with the Archon server's hostname/IP if it runs on a differe
 
 ### 1. Install the skill
 
-Copy the skill into Claude Code's global skills directory:
+Copy the skills into Claude Code's global skills directory:
 
 ```bash
 # From the Archon repo
 cp -r integrations/claude-code/skills/archon-memory ~/.claude/skills/
+cp -r integrations/claude-code/skills/archon-link-project ~/.claude/skills/
 
 # Or clone directly
 mkdir -p ~/.claude/skills
 cp -r /path/to/Archon/integrations/claude-code/skills/archon-memory ~/.claude/skills/
+cp -r /path/to/Archon/integrations/claude-code/skills/archon-link-project ~/.claude/skills/
 ```
 
 The skill is auto-discovered by Claude Code — no registration needed.

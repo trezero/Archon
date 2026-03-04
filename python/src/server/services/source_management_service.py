@@ -364,6 +364,24 @@ async def update_source_info(
             client.table("archon_sources").upsert(upsert_data).execute()
             search_logger.info(f"Created/updated source {source_id} with title: {title}")
 
+        # Link source to project in junction table (canonical project-source link)
+        if project_id:
+            try:
+                client.table("archon_project_sources").upsert(
+                    {
+                        "project_id": project_id,
+                        "source_id": source_id,
+                        "notes": "technical",
+                        "created_by": "ingestion",
+                    },
+                    on_conflict="project_id,source_id",
+                ).execute()
+                # Invalidate search cache since a new source was linked
+                from ..utils.source_cache import invalidate_source_cache
+                invalidate_source_cache(project_id)
+            except Exception as e:
+                search_logger.warning(f"Failed to link source {source_id} to project {project_id} in junction table: {e}")
+
     except Exception as e:
         search_logger.error(f"Error updating source {source_id}: {e}")
         raise  # Re-raise the exception so the caller knows it failed

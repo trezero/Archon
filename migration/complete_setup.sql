@@ -883,9 +883,39 @@ CREATE TABLE IF NOT EXISTS archon_projects (
   data JSONB DEFAULT '[]'::jsonb,
   github_repo TEXT,
   pinned BOOLEAN DEFAULT false,
+  parent_project_id UUID REFERENCES archon_projects(id) ON DELETE SET NULL,
+  metadata JSONB DEFAULT '{}',
+  tags TEXT[] DEFAULT '{}',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Single-level hierarchy constraint for project parent/child relationships
+CREATE OR REPLACE FUNCTION enforce_single_level_hierarchy()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.parent_project_id IS NOT NULL THEN
+    IF EXISTS (
+      SELECT 1 FROM archon_projects
+      WHERE id = NEW.parent_project_id AND parent_project_id IS NOT NULL
+    ) THEN
+      RAISE EXCEPTION 'Cannot nest projects more than one level deep. Parent project % is already a child project.', NEW.parent_project_id;
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM archon_projects
+      WHERE parent_project_id = NEW.id
+    ) THEN
+      RAISE EXCEPTION 'Cannot make project % a child — it already has child projects.', NEW.id;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_enforce_single_level_hierarchy ON archon_projects;
+CREATE TRIGGER trg_enforce_single_level_hierarchy
+  BEFORE INSERT OR UPDATE OF parent_project_id ON archon_projects
+  FOR EACH ROW EXECUTE FUNCTION enforce_single_level_hierarchy();
 
 -- Tasks table
 CREATE TABLE IF NOT EXISTS archon_tasks (
@@ -952,6 +982,9 @@ CREATE INDEX IF NOT EXISTS idx_archon_tasks_archived ON archon_tasks(archived);
 CREATE INDEX IF NOT EXISTS idx_archon_tasks_archived_at ON archon_tasks(archived_at);
 CREATE INDEX IF NOT EXISTS idx_archon_project_sources_project_id ON archon_project_sources(project_id);
 CREATE INDEX IF NOT EXISTS idx_archon_project_sources_source_id ON archon_project_sources(source_id);
+CREATE INDEX IF NOT EXISTS idx_archon_projects_parent ON archon_projects(parent_project_id);
+CREATE INDEX IF NOT EXISTS idx_archon_projects_metadata ON archon_projects USING GIN(metadata);
+CREATE INDEX IF NOT EXISTS idx_archon_projects_tags ON archon_projects USING GIN(tags);
 CREATE INDEX IF NOT EXISTS idx_archon_document_versions_project_id ON archon_document_versions(project_id);
 CREATE INDEX IF NOT EXISTS idx_archon_document_versions_task_id ON archon_document_versions(task_id);
 CREATE INDEX IF NOT EXISTS idx_archon_document_versions_field_name ON archon_document_versions(field_name);

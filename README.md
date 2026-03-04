@@ -14,6 +14,7 @@
   <a href="#quick-start">Quick Start</a> •
   <a href="#upgrading">Upgrading</a> •
   <a href="#whats-included">What's Included</a> •
+  <a href="#-coding-agent-integration">Agent Integration</a> •
   <a href="#architecture">Architecture</a> •
   <a href="#troubleshooting">Troubleshooting</a>
 </p>
@@ -26,8 +27,9 @@
 
 Archon is the **command center** for AI coding assistants. For you, it's a sleek interface to manage knowledge, context, and tasks for your projects. For the AI coding assistant(s), it's a **Model Context Protocol (MCP) server** to collaborate on and leverage the same knowledge, context, and tasks. Connect Claude Code, Kiro, Cursor, Windsurf, etc. to give your AI agents access to:
 
-- **Your documentation** (crawled websites, uploaded PDFs/docs)
-- **Smart search capabilities** with advanced RAG strategies
+- **Your documentation** (crawled websites, uploaded PDFs/docs, or ingested directly from your codebase)
+- **Smart search capabilities** with advanced RAG strategies and project-scoped filtering
+- **Programmatic ingestion** — coding agents can ingest local project docs into the knowledge base via MCP tools
 - **Task management** integrated with your knowledge base
 - **Real-time updates** as you add new content and collaborate with your coding assistant on tasks
 - **Much more** coming soon to build Archon into an integrated environment for all context engineering
@@ -117,6 +119,93 @@ Once everything is running:
 2. **Test Document Upload**: Knowledge Base → Upload a PDF
 3. **Test Projects**: Projects → Create a new project and add tasks
 4. **Integrate with your AI coding assistant**: MCP Dashboard → Copy connection config for your AI coding assistant 
+
+## 🤖 Coding Agent Integration
+
+Archon can be used directly by AI coding agents to ingest, search, and manage project documentation. This replaces the pattern of reading dozens of documentation files per session with targeted semantic search.
+
+### Connecting Any MCP Client
+
+Add Archon as an MCP server in your client's configuration:
+
+**Claude Code** (`.mcp.json` or `~/.claude/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "archon": {
+      "type": "streamable-http",
+      "url": "http://localhost:8051/mcp"
+    }
+  }
+}
+```
+
+**Cursor / Windsurf / Kiro** (MCP settings):
+```json
+{
+  "archon": {
+    "url": "http://localhost:8051/mcp",
+    "transport": "streamable-http"
+  }
+}
+```
+
+Replace `localhost` with the Archon server's hostname/IP if running on a different machine.
+
+### MCP Tools for Agents
+
+Once connected, agents have access to these tools:
+
+| Tool | Purpose |
+|------|---------|
+| `manage_rag_source` | Add, sync, or delete knowledge sources (inline docs or URLs) |
+| `rag_check_progress` | Poll async ingestion/sync progress |
+| `rag_search_knowledge_base` | Semantic search across documentation (supports `project_id` scoping) |
+| `rag_search_code_examples` | Search for code snippets extracted from documentation |
+| `rag_get_available_sources` | List all knowledge sources |
+| `rag_list_pages_for_source` | Browse pages within a source |
+| `rag_read_full_page` | Read complete page content |
+| `find_projects` / `manage_project` | Project management |
+| `find_tasks` / `manage_task` | Task management |
+
+### Typical Agent Workflow
+
+1. **Ingest project docs** — Agent reads local `.md` files and sends them to Archon:
+   ```
+   manage_rag_source(action="add", source_type="inline", title="My Project Docs",
+       documents=[{"title": "auth.md", "content": "...", "path": "docs/auth.md"}, ...],
+       project_id="proj-123")
+   ```
+2. **Poll until complete** — `rag_check_progress(progress_id="...")` until `status="completed"`
+3. **Search during development** — `rag_search_knowledge_base(query="auth middleware", project_id="proj-123")`
+4. **Update after changes** — Delete and re-add, or use `manage_rag_source(action="sync", source_id="...")`
+
+For a comprehensive integration guide, see [`archonIntegration.md`](archonIntegration.md).
+
+### Claude Code Skill
+
+A pre-built Claude Code skill is available at [`integrations/claude-code/`](integrations/claude-code/) that automates the full workflow:
+
+```bash
+# Install the skill
+cp -r integrations/claude-code/skills/archon-memory ~/.claude/skills/
+
+# Add ambient behavior to your global instructions
+cat integrations/claude-code/claude-md-snippet.md >> ~/.claude/CLAUDE.md
+```
+
+Then use `/archon-memory` in any Claude Code session:
+
+| Command | Purpose |
+|---------|---------|
+| `/archon-memory ingest` | Ingest project docs (first time) |
+| `/archon-memory sync` | Re-ingest after doc changes |
+| `/archon-memory search <query>` | Search project knowledge |
+| `/archon-memory search-all <query>` | Search across all projects |
+| `/archon-memory shared add <url>` | Add shared cross-project knowledge |
+| `/archon-memory tasks` | View project tasks |
+
+See the [integration README](integrations/claude-code/README.md) for full details.
 
 ## Installing Make
 
@@ -240,15 +329,19 @@ To upgrade Archon to the latest version:
 
 - **Smart Web Crawling**: Automatically detects and crawls entire documentation sites, sitemaps, and individual pages
 - **Document Processing**: Upload and process PDFs, Word docs, markdown files, and text documents with intelligent chunking
+- **Inline Ingestion**: Coding agents can read local project files and ingest them directly into the knowledge base via MCP tools — no manual upload needed
 - **Code Example Extraction**: Automatically identifies and indexes code examples from documentation for enhanced search
 - **Vector Search**: Advanced semantic search with contextual embeddings for precise knowledge retrieval
-- **Source Management**: Organize knowledge by source, type, and tags for easy filtering
+- **Project-Scoped Search**: Filter search results by project so different repos' docs don't pollute each other
+- **Source Management**: Organize knowledge by source, type, and tags for easy filtering. Add, sync, and delete sources programmatically
 
 ### 🤖 AI Integration
 
-- **Model Context Protocol (MCP)**: Connect any MCP-compatible client (Claude Code, Cursor, even non-AI coding assistants like Claude Desktop)
-- **MCP Tools**: Comprehensive yet simple set of tools for RAG queries, task management, and project operations
-- **Multi-LLM Support**: Works with OpenAI, Ollama, and Google Gemini models
+- **Model Context Protocol (MCP)**: Connect any MCP-compatible client (Claude Code, Kiro, Cursor, Windsurf, even non-AI coding assistants like Claude Desktop)
+- **MCP Tools**: Comprehensive yet simple set of tools for RAG queries, source management, task management, and project operations
+- **Source Management via MCP**: `manage_rag_source` tool lets agents add, sync, and delete knowledge sources; `rag_check_progress` tracks async ingestion
+- **Claude Code Skill**: Pre-built `/archon-memory` skill for Claude Code that handles ingestion, sync, search, and cross-project knowledge sharing (see [Coding Agent Integration](#-coding-agent-integration))
+- **Multi-LLM Support**: Works with OpenAI, OpenRouter, Ollama, and Google Gemini models
 - **RAG Strategies**: Hybrid search, contextual embeddings, and result reranking for optimal AI responses
 - **Real-time Streaming**: Live responses from AI agents with progress tracking
 

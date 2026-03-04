@@ -407,6 +407,21 @@ class DocumentStorageOperations:
 
                     self.supabase_client.table("archon_sources").upsert(fallback_data).execute()
                     safe_logfire_info(f"Fallback source creation succeeded for '{source_id}'")
+
+                    # Link source to project in junction table (fallback path)
+                    if request.get("project_id"):
+                        try:
+                            self.supabase_client.table("archon_project_sources").upsert(
+                                {
+                                    "project_id": request["project_id"],
+                                    "source_id": source_id,
+                                    "notes": "technical",
+                                    "created_by": "ingestion",
+                                },
+                                on_conflict="project_id,source_id",
+                            ).execute()
+                        except Exception as link_error:
+                            logger.warning(f"Failed to link source {source_id} to project in junction table: {link_error}")
                 except Exception as fallback_error:
                     logger.error(f"Both source creation attempts failed for '{source_id}'", exc_info=True)
                     safe_logfire_error(

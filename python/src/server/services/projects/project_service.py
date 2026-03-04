@@ -24,7 +24,14 @@ class ProjectService:
         """Initialize with optional supabase client"""
         self.supabase_client = supabase_client or get_supabase_client()
 
-    def create_project(self, title: str, github_repo: str = None) -> tuple[bool, dict[str, Any]]:
+    def create_project(
+        self,
+        title: str,
+        github_repo: str = None,
+        parent_project_id: str | None = None,
+        metadata: dict | None = None,
+        tags: list[str] | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
         """
         Create a new project with optional PRD and GitHub repo.
 
@@ -48,6 +55,12 @@ class ProjectService:
 
             if github_repo and isinstance(github_repo, str) and len(github_repo.strip()) > 0:
                 project_data["github_repo"] = github_repo.strip()
+            if parent_project_id:
+                project_data["parent_project_id"] = parent_project_id
+            if metadata is not None:
+                project_data["metadata"] = metadata
+            if tags is not None:
+                project_data["tags"] = tags
 
             # Insert project
             response = self.supabase_client.table("archon_projects").insert(project_data).execute()
@@ -104,6 +117,9 @@ class ProjectService:
                         "updated_at": project["updated_at"],
                         "pinned": project.get("pinned", False),
                         "description": project.get("description", ""),
+                        "parent_project_id": project.get("parent_project_id"),
+                        "metadata": project.get("metadata", {}),
+                        "tags": project.get("tags", []),
                         "docs": project.get("docs", []),
                         "features": project.get("features", []),
                         "data": project.get("data", []),
@@ -134,6 +150,9 @@ class ProjectService:
                         "updated_at": project["updated_at"],
                         "pinned": project.get("pinned", False),
                         "description": project.get("description", ""),
+                        "parent_project_id": project.get("parent_project_id"),
+                        "metadata": project.get("metadata", {}),
+                        "tags": project.get("tags", []),
                         "stats": {
                             "docs_count": docs_count,
                             "features_count": features_count,
@@ -251,6 +270,22 @@ class ProjectService:
             )
             tasks_count = len(tasks_response.data) if tasks_response.data else 0
 
+            # Check for child projects (ON DELETE SET NULL will orphan them)
+            children_response = (
+                self.supabase_client.table("archon_projects")
+                .select("id, title")
+                .eq("parent_project_id", project_id)
+                .execute()
+            )
+            children = children_response.data or []
+
+            # Invalidate search cache for children before deletion
+            # Their cached source lists may include this parent's sources
+            if children:
+                from ...server.utils.source_cache import invalidate_source_cache
+                for child in children:
+                    invalidate_source_cache(child["id"])
+
             # Delete the project (tasks will be deleted by cascade)
             response = (
                 self.supabase_client.table("archon_projects")
@@ -261,11 +296,19 @@ class ProjectService:
 
             # For DELETE operations, success is indicated by no error, not by response.data content
             # response.data will be empty list [] even on successful deletion
-            return True, {
+            result = {
                 "project_id": project_id,
                 "deleted_tasks": tasks_count,
                 "message": "Project deleted successfully",
             }
+
+            if children:
+                child_titles = [c["title"] for c in children]
+                result["warning"] = (
+                    f"This project had {len(children)} child project(s) that are now standalone: {child_titles}"
+                )
+
+            return True, result
 
         except Exception as e:
             logger.error(f"Error deleting project: {e}")
@@ -338,6 +381,9 @@ class ProjectService:
                 "technical_sources",
                 "business_sources",
                 "pinned",
+                "parent_project_id",
+                "metadata",
+                "tags",
             ]
 
             for field in allowed_fields:

@@ -179,6 +179,7 @@ class RagQueryRequest(BaseModel):
     query: str
     source: str | None = None
     project_id: str | None = None
+    include_parent: bool = True  # Include parent project's sources in search
     match_count: int = 5
     return_mode: str = "chunks"  # "chunks" or "pages"
 
@@ -188,6 +189,7 @@ class InlineDocument(BaseModel):
     title: str
     content: str
     path: str | None = None
+    file_hash: str | None = None
 
 
 class InlineIngestRequest(BaseModel):
@@ -196,6 +198,14 @@ class InlineIngestRequest(BaseModel):
     documents: list[InlineDocument]
     tags: list[str] = []
     project_id: str | None = None
+    knowledge_type: str = "technical"
+    extract_code_examples: bool = True
+
+
+class InlineSyncRequest(BaseModel):
+    """Request to sync inline documents for an existing source."""
+    source_id: str
+    documents: list[InlineDocument]
     knowledge_type: str = "technical"
     extract_code_examples: bool = True
 
@@ -998,7 +1008,7 @@ async def _perform_inline_ingest(
                 source_display_name=request.title,
             )
 
-            # Update source metadata with project_id and source_type
+            # Update source metadata with project_id, source_type, and file_hashes
             try:
                 existing = supabase_client.table("archon_sources").select("metadata").eq(
                     "source_id", source_id
@@ -1009,6 +1019,14 @@ async def _perform_inline_ingest(
                     metadata["ingestion_method"] = "mcp_inline"
                     if request.project_id:
                         metadata["project_id"] = request.project_id
+                    # Store file hashes for incremental sync
+                    file_hashes = {}
+                    for doc in valid_docs:
+                        if doc.file_hash:
+                            file_hashes[doc.title] = doc.file_hash
+                    if file_hashes:
+                        metadata["file_hashes"] = file_hashes
+                    metadata["last_synced"] = datetime.now(timezone.utc).isoformat()
                     supabase_client.table("archon_sources").update(
                         {"metadata": metadata}
                     ).eq("source_id", source_id).execute()
@@ -1017,6 +1035,26 @@ async def _perform_inline_ingest(
 
             chunks_stored = result.get("chunks_stored", 0)
             code_examples_stored = result.get("code_examples_count", 0)
+
+            # Persist completion summary to source metadata for durable querying
+            try:
+                existing_meta = supabase_client.table("archon_sources").select("metadata").eq(
+                    "source_id", source_id
+                ).execute()
+                if existing_meta.data:
+                    meta = existing_meta.data[0].get("metadata", {}) or {}
+                    meta["last_ingestion"] = {
+                        "completed_at": datetime.now(timezone.utc).isoformat(),
+                        "documents_processed": len(crawl_results),
+                        "chunks_stored": chunks_stored,
+                        "code_examples_stored": code_examples_stored,
+                        "status": "completed",
+                    }
+                    supabase_client.table("archon_sources").update(
+                        {"metadata": meta}
+                    ).eq("source_id", source_id).execute()
+            except Exception as e:
+                logger.warning(f"Failed to persist completion summary to source metadata: {e}")
 
             await tracker.complete({
                 "source_id": source_id,
@@ -1138,9 +1176,34 @@ async def ingest_inline_documents(request: InlineIngestRequest):
     # Validate API key
     await _validate_provider_api_key()
 
-    # Generate source_id from title + timestamp
-    timestamp = datetime.now(timezone.utc).isoformat()
-    source_id = hashlib.sha256(f"{request.title}-{timestamp}".encode()).hexdigest()[:16]
+    # Generate source_id: deterministic when project_id is provided, random otherwise
+    if request.project_id:
+        source_id = hashlib.sha256(
+            f"inline_{request.project_id}_{request.title}".encode()
+        ).hexdigest()[:16]
+    else:
+        timestamp = datetime.now(timezone.utc).isoformat()
+        source_id = hashlib.sha256(f"{request.title}-{timestamp}".encode()).hexdigest()[:16]
+
+    # Check if source_id already exists (upsert behavior for deterministic IDs)
+    is_upsert = False
+    supabase_client = get_supabase_client()
+    try:
+        existing = supabase_client.table("archon_sources").select("source_id").eq(
+            "source_id", source_id
+        ).execute()
+        if existing.data:
+            is_upsert = True
+            # Delete existing chunks and code examples so we can re-ingest cleanly
+            supabase_client.table("archon_crawled_pages").delete().eq(
+                "source_id", source_id
+            ).execute()
+            supabase_client.table("archon_code_examples").delete().eq(
+                "source_id", source_id
+            ).execute()
+            logger.info(f"Upsert: cleared existing data for source_id={source_id}")
+    except Exception as e:
+        logger.warning(f"Failed to check/clean existing source {source_id}: {e}")
 
     # Generate progress_id
     progress_id = str(uuid.uuid4())
@@ -1175,7 +1238,191 @@ async def ingest_inline_documents(request: InlineIngestRequest):
         "progressId": progress_id,
         "sourceId": source_id,
         "estimatedSeconds": estimated_seconds,
+        "isUpdate": is_upsert,
     }
+
+
+@router.post("/knowledge/sync-inline")
+async def sync_inline_documents(request: InlineSyncRequest):
+    """Sync inline documents for an existing source with incremental hash comparison.
+
+    When documents include file_hash values and the source has stored hashes,
+    only changed/new documents are re-embedded. Unchanged documents are skipped.
+    """
+    # Validate source exists
+    supabase_client = get_supabase_client()
+    existing = supabase_client.table("archon_sources").select(
+        "source_id, title, metadata"
+    ).eq("source_id", request.source_id).execute()
+    if not existing.data:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Source {request.source_id} not found. Use action='add' to create a new source.",
+        )
+
+    source_data = existing.data[0]
+    source_metadata = source_data.get("metadata", {}) or {}
+
+    # Validate documents
+    if not request.documents:
+        raise HTTPException(status_code=422, detail="At least one document is required")
+
+    valid_docs = [doc for doc in request.documents if doc.content and doc.content.strip()]
+    if not valid_docs:
+        raise HTTPException(status_code=422, detail="All documents have empty content")
+
+    # Validate API key
+    await _validate_provider_api_key()
+
+    # --- Incremental sync: compare file hashes ---
+    stored_hashes = source_metadata.get("file_hashes", {})
+    incoming_titles = {doc.title for doc in valid_docs}
+    stored_titles = set(stored_hashes.keys())
+
+    # Determine which docs have hashes for comparison
+    has_hashes = any(doc.file_hash for doc in valid_docs) and stored_hashes
+
+    if has_hashes:
+        # Compute sync diff
+        changed_docs = []
+        unchanged_docs = []
+        new_docs = []
+
+        for doc in valid_docs:
+            if doc.title in stored_hashes:
+                if doc.file_hash and doc.file_hash == stored_hashes[doc.title]:
+                    unchanged_docs.append(doc)
+                else:
+                    changed_docs.append(doc)
+            else:
+                new_docs.append(doc)
+
+        deleted_titles = list(stored_titles - incoming_titles)
+        docs_to_process = changed_docs + new_docs
+
+        sync_diff = {
+            "changed": [d.title for d in changed_docs],
+            "unchanged": [d.title for d in unchanged_docs],
+            "new": [d.title for d in new_docs],
+            "deleted": deleted_titles,
+        }
+
+        logger.info(
+            f"Incremental sync for {request.source_id}: "
+            f"{len(changed_docs)} changed, {len(new_docs)} new, "
+            f"{len(unchanged_docs)} unchanged, {len(deleted_titles)} deleted"
+        )
+
+        # Delete pages for changed + deleted docs (keep unchanged)
+        urls_to_delete = []
+        for doc in changed_docs:
+            doc_path = doc.path or doc.title
+            urls_to_delete.append(f"inline://{request.source_id}/{doc_path}")
+        for title in deleted_titles:
+            urls_to_delete.append(f"inline://{request.source_id}/{title}")
+
+        if urls_to_delete:
+            try:
+                for url in urls_to_delete:
+                    supabase_client.table("archon_crawled_pages").delete().eq(
+                        "source_id", request.source_id
+                    ).eq("url", url).execute()
+                    supabase_client.table("archon_code_examples").delete().eq(
+                        "source_id", request.source_id
+                    ).eq("url", url).execute()
+            except Exception as e:
+                logger.warning(f"Failed to delete specific pages during incremental sync: {e}")
+                # Fall back to full sync on failure
+                docs_to_process = list(valid_docs)
+                sync_diff = None
+
+        if not docs_to_process:
+            # Nothing changed — update last_synced and return early
+            new_hashes = {doc.title: doc.file_hash for doc in valid_docs if doc.file_hash}
+            source_metadata["file_hashes"] = new_hashes
+            source_metadata["last_synced"] = datetime.now(timezone.utc).isoformat()
+            try:
+                supabase_client.table("archon_sources").update(
+                    {"metadata": source_metadata}
+                ).eq("source_id", request.source_id).execute()
+            except Exception as e:
+                logger.warning(f"Failed to update metadata after no-op sync: {e}")
+
+            return {
+                "success": True,
+                "progressId": None,
+                "sourceId": request.source_id,
+                "estimatedSeconds": 0,
+                "syncDiff": sync_diff,
+                "documentsToProcess": 0,
+                "documentsSkipped": len(unchanged_docs),
+                "message": "All documents unchanged — no re-embedding needed.",
+            }
+    else:
+        # No hashes available — full sync (delete all, re-ingest all)
+        docs_to_process = list(valid_docs)
+        sync_diff = None
+        try:
+            supabase_client.table("archon_crawled_pages").delete().eq(
+                "source_id", request.source_id
+            ).execute()
+            supabase_client.table("archon_code_examples").delete().eq(
+                "source_id", request.source_id
+            ).execute()
+            logger.info(f"Full sync: cleared existing data for source_id={request.source_id}")
+        except Exception as e:
+            logger.error(f"Failed to clear existing data for sync: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to clear existing data: {e}")
+
+    # Build an InlineIngestRequest-compatible object for _perform_inline_ingest
+    ingest_request = InlineIngestRequest(
+        title=source_data["title"],
+        documents=[InlineDocument(title=d.title, content=d.content, path=d.path, file_hash=d.file_hash) for d in docs_to_process],
+        tags=source_metadata.get("tags", []),
+        project_id=source_metadata.get("project_id"),
+        knowledge_type=request.knowledge_type,
+        extract_code_examples=request.extract_code_examples,
+    )
+
+    # Convert docs_to_process to valid_docs format for _perform_inline_ingest
+    filtered_valid_docs = [d for d in docs_to_process if d.content and d.content.strip()]
+
+    progress_id = str(uuid.uuid4())
+    estimated_seconds = max(10, len(filtered_valid_docs) * 1)
+
+    from ..utils.progress.progress_tracker import ProgressTracker
+    tracker = ProgressTracker(progress_id, operation_type="inline_sync")
+    await tracker.start({
+        "source_id": request.source_id,
+        "title": source_data["title"],
+        "total_documents": len(filtered_valid_docs),
+        "status": "starting",
+        "operation": "sync",
+    })
+
+    task = asyncio.create_task(
+        _perform_inline_ingest(
+            progress_id=progress_id,
+            source_id=request.source_id,
+            request=ingest_request,
+            valid_docs=filtered_valid_docs,
+            tracker=tracker,
+        )
+    )
+    active_crawl_tasks[progress_id] = task
+
+    response = {
+        "success": True,
+        "progressId": progress_id,
+        "sourceId": request.source_id,
+        "estimatedSeconds": estimated_seconds,
+        "documentsToProcess": len(filtered_valid_docs),
+    }
+    if sync_diff:
+        response["syncDiff"] = sync_diff
+        response["documentsSkipped"] = len(sync_diff["unchanged"])
+
+    return response
 
 
 async def _perform_upload_with_progress(
@@ -1270,12 +1517,35 @@ async def _perform_upload_with_progress(
         )
 
         if success:
+            # Persist completion summary to source metadata
+            upload_source_id = result.get("source_id")
+            if upload_source_id:
+                try:
+                    sc = get_supabase_client()
+                    existing_meta = sc.table("archon_sources").select("metadata").eq(
+                        "source_id", upload_source_id
+                    ).execute()
+                    if existing_meta.data:
+                        meta = existing_meta.data[0].get("metadata", {}) or {}
+                        meta["last_ingestion"] = {
+                            "completed_at": datetime.now(timezone.utc).isoformat(),
+                            "documents_processed": 1,
+                            "chunks_stored": result.get("chunks_stored", 0),
+                            "code_examples_stored": result.get("code_examples_stored", 0),
+                            "status": "completed",
+                        }
+                        sc.table("archon_sources").update(
+                            {"metadata": meta}
+                        ).eq("source_id", upload_source_id).execute()
+                except Exception as e:
+                    logger.warning(f"Failed to persist upload completion summary: {e}")
+
             # Complete the upload with 100% progress
             await tracker.complete({
                 "log": "Document uploaded successfully!",
                 "chunks_stored": result.get("chunks_stored"),
                 "code_examples_stored": result.get("code_examples_stored", 0),
-                "sourceId": result.get("source_id"),
+                "sourceId": upload_source_id,
             })
             safe_logfire_info(
                 f"Document uploaded successfully | progress_id={progress_id} | source_id={result.get('source_id')} | chunks_stored={result.get('chunks_stored')} | code_examples_stored={result.get('code_examples_stored', 0)}"
@@ -1312,20 +1582,74 @@ async def search_knowledge_items(request: RagQueryRequest):
     return await perform_rag_query(request)
 
 
-def _resolve_project_source_filter(project_id: str | None, existing_source: str | None) -> str | None:
-    """Resolve project_id to comma-separated source_ids, or return existing source filter."""
+def _resolve_project_source_filter(
+    project_id: str | None,
+    existing_source: str | None,
+    include_parent: bool = True,
+) -> str | None:
+    """Resolve project_id to comma-separated source_ids using the junction table.
+
+    Uses archon_project_sources as the canonical source for project-source links.
+    When include_parent is True and the project has a parent_project_id, the parent's
+    sources are included in the result (cascading search).
+    Results are cached in-memory with a 5-minute TTL.
+
+    When project_id is provided but no sources are linked, returns a non-existent
+    source_id sentinel to ensure no results are returned (rather than falling through
+    to an unfiltered search across all sources).
+    """
     if existing_source:
         return existing_source
     if not project_id:
         return None
+
+    # Sentinel value: when a project has no linked sources, return this to ensure
+    # the search matches nothing rather than searching all sources globally.
+    NO_SOURCES_SENTINEL = "__no_linked_sources__"
+
+    from ..utils.source_cache import (
+        get_cached_project_sources,
+        set_cached_project_sources,
+    )
+
+    # Check cache first
+    cached, hit = get_cached_project_sources(project_id, include_parent)
+    if hit:
+        return ",".join(cached) if cached else NO_SOURCES_SENTINEL
+
     try:
-        project_sources = get_supabase_client().table("archon_sources").select(
+        source_ids = []
+        client = get_supabase_client()
+
+        # Get this project's sources from junction table
+        project_sources = client.table("archon_project_sources").select(
             "source_id"
-        ).filter(
-            "metadata->>project_id", "eq", project_id
-        ).execute()
+        ).eq("project_id", project_id).execute()
         if project_sources.data:
-            return ",".join(s["source_id"] for s in project_sources.data)
+            source_ids.extend(s["source_id"] for s in project_sources.data)
+
+        # Include parent's sources if requested
+        if include_parent:
+            project = client.table("archon_projects").select(
+                "parent_project_id"
+            ).eq("id", project_id).maybe_single().execute()
+
+            if project.data and project.data.get("parent_project_id"):
+                parent_id = project.data["parent_project_id"]
+                parent_sources = client.table("archon_project_sources").select(
+                    "source_id"
+                ).eq("project_id", parent_id).execute()
+                if parent_sources.data:
+                    source_ids.extend(s["source_id"] for s in parent_sources.data)
+
+        # Cache the result
+        set_cached_project_sources(project_id, include_parent, source_ids)
+
+        if source_ids:
+            return ",".join(source_ids)
+
+        logger.info(f"No sources linked to project {project_id} in junction table")
+        return NO_SOURCES_SENTINEL
     except Exception as e:
         logger.warning(f"Failed to resolve project_id to sources: {e}")
     return existing_source
@@ -1342,7 +1666,7 @@ async def perform_rag_query(request: RagQueryRequest):
         raise HTTPException(status_code=422, detail="Query cannot be empty")
 
     try:
-        source_filter = _resolve_project_source_filter(request.project_id, request.source)
+        source_filter = _resolve_project_source_filter(request.project_id, request.source, request.include_parent)
 
         # Use RAGService for unified RAG query with return_mode support
         search_service = RAGService(get_supabase_client())
@@ -1374,7 +1698,7 @@ async def perform_rag_query(request: RagQueryRequest):
 async def search_code_examples(request: RagQueryRequest):
     """Search for code examples relevant to the query using dedicated code examples service."""
     try:
-        source_filter = _resolve_project_source_filter(request.project_id, request.source)
+        source_filter = _resolve_project_source_filter(request.project_id, request.source, request.include_parent)
 
         # Use RAGService for code examples search
         search_service = RAGService(get_supabase_client())

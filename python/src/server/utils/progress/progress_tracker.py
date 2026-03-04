@@ -5,10 +5,15 @@ Tracks operation progress in memory for HTTP polling access.
 """
 
 import asyncio
+import os
 from datetime import datetime
 from typing import Any
 
 from ...config.logfire_config import safe_logfire_error, safe_logfire_info
+
+# How long to keep completed/failed progress data before cleanup (seconds).
+# Configurable via environment variable; defaults to 5 minutes.
+COMPLETION_TTL = int(os.getenv("PROGRESS_COMPLETION_TTL", "300"))
 
 
 class ProgressTracker:
@@ -58,13 +63,14 @@ class ProgressTracker:
         return cls._progress_states.copy()
 
     @classmethod
-    async def _delayed_cleanup(cls, progress_id: str, delay_seconds: int = 30):
+    async def _delayed_cleanup(cls, progress_id: str, delay_seconds: int | None = None):
         """
         Remove progress state from memory after a delay.
-        
+
         This gives clients time to see the final state before cleanup.
+        Uses COMPLETION_TTL (default 5 minutes) unless overridden.
         """
-        await asyncio.sleep(delay_seconds)
+        await asyncio.sleep(delay_seconds if delay_seconds is not None else COMPLETION_TTL)
         if progress_id in cls._progress_states:
             status = cls._progress_states[progress_id].get("status", "unknown")
             # Only clean up if still in terminal state (prevent cleanup of reused IDs)

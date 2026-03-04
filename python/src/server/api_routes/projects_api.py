@@ -51,6 +51,9 @@ class CreateProjectRequest(BaseModel):
     technical_sources: list[str] | None = None  # List of knowledge source IDs
     business_sources: list[str] | None = None  # List of knowledge source IDs
     pinned: bool | None = None  # Whether this project should be pinned to top
+    parent_project_id: str | None = None  # Parent project for hierarchy
+    metadata: dict[str, Any] | None = None  # Key-value metadata
+    tags: list[str] | None = None  # Filterable tags
 
 
 class UpdateProjectRequest(BaseModel):
@@ -63,6 +66,9 @@ class UpdateProjectRequest(BaseModel):
     technical_sources: list[str] | None = None  # List of knowledge source IDs
     business_sources: list[str] | None = None  # List of knowledge source IDs
     pinned: bool | None = None  # Whether this project is pinned to top
+    parent_project_id: str | None = None  # Parent project for hierarchy
+    metadata: dict[str, Any] | None = None  # Key-value metadata
+    tags: list[str] | None = None  # Filterable tags
 
 
 class CreateTaskRequest(BaseModel):
@@ -183,6 +189,12 @@ async def create_project(request: CreateProjectRequest):
             kwargs["features"] = request.features
         if request.data:
             kwargs["data"] = request.data
+        if request.parent_project_id is not None:
+            kwargs["parent_project_id"] = request.parent_project_id
+        if request.metadata is not None:
+            kwargs["metadata"] = request.metadata
+        if request.tags is not None:
+            kwargs["tags"] = request.tags
 
         # Create project directly with AI assistance
         project_service = ProjectCreationService()
@@ -398,6 +410,12 @@ async def update_project(project_id: str, request: UpdateProjectRequest):
             update_fields["data"] = request.data
         if request.pinned is not None:
             update_fields["pinned"] = request.pinned
+        if request.parent_project_id is not None:
+            update_fields["parent_project_id"] = request.parent_project_id
+        if request.metadata is not None:
+            update_fields["metadata"] = request.metadata
+        if request.tags is not None:
+            update_fields["tags"] = request.tags
 
         # Create version snapshots for JSONB fields before updating
         if update_fields:
@@ -453,6 +471,11 @@ async def update_project(project_id: str, request: UpdateProjectRequest):
                 raise HTTPException(status_code=500, detail=result)
 
         project = result["project"]
+
+        # Invalidate search cache when parent_project_id changes
+        if "parent_project_id" in update_fields:
+            from ..utils.source_cache import invalidate_source_cache
+            invalidate_source_cache(project_id)
 
         # Handle source updates using SourceLinkingService
         source_service = SourceLinkingService(supabase_client)

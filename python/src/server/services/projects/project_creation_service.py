@@ -63,7 +63,7 @@ class ProjectCreationService:
             }
 
             # Add any additional fields from kwargs
-            for key in ["pinned"]:
+            for key in ["pinned", "parent_project_id", "metadata", "tags"]:
                 if key in kwargs:
                     project_data[key] = kwargs[key]
 

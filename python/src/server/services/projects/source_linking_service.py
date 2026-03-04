@@ -121,6 +121,10 @@ class SourceLinkingService:
             # Overall success if no critical failures
             total_failed = result["technical_failed"] + result["business_failed"]
 
+            # Invalidate search cache since project-source links changed
+            from ...server.utils.source_cache import invalidate_source_cache
+            invalidate_source_cache(project_id)
+
             return True, result
 
         except Exception as e:
@@ -162,6 +166,9 @@ class SourceLinkingService:
             "technical_sources": sources["technical_sources"],
             "business_sources": sources["business_sources"],
             "pinned": project.get("pinned", False),
+            "parent_project_id": project.get("parent_project_id"),
+            "metadata": project.get("metadata", {}),
+            "tags": project.get("tags", []),
         }
 
     def format_projects_with_sources(self, projects: list[dict[str, Any]]) -> list[dict[str, Any]]:

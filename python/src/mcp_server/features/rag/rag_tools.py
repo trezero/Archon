@@ -82,6 +82,7 @@ def register_rag_tools(mcp: FastMCP):
         query: str,
         source_id: str | None = None,
         project_id: str | None = None,
+        include_parent: bool = True,
         match_count: int = 5,
         return_mode: str = "pages"
     ) -> str:
@@ -96,6 +97,8 @@ def register_rag_tools(mcp: FastMCP):
                       This is the 'id' field from available sources, NOT a URL or domain name.
                       Example: "src_1234abcd" not "docs.anthropic.com"
             project_id: Optional project ID to scope search to sources associated with a project
+            include_parent: Include parent project's sources in search (default: true).
+                           When true, if the project has a parent, its sources are also searched.
             match_count: Max results (default: 5)
             return_mode: "pages" (default, full pages with metadata) or "chunks" (raw text chunks)
 
@@ -120,7 +123,8 @@ def register_rag_tools(mcp: FastMCP):
                 request_data = {
                     "query": query,
                     "match_count": match_count,
-                    "return_mode": return_mode
+                    "return_mode": return_mode,
+                    "include_parent": include_parent,
                 }
                 if source_id:
                     request_data["source"] = source_id
@@ -158,7 +162,12 @@ def register_rag_tools(mcp: FastMCP):
 
     @mcp.tool()
     async def rag_search_code_examples(
-        ctx: Context, query: str, source_id: str | None = None, project_id: str | None = None, match_count: int = 5
+        ctx: Context,
+        query: str,
+        source_id: str | None = None,
+        project_id: str | None = None,
+        include_parent: bool = True,
+        match_count: int = 5,
     ) -> str:
         """
         Search for relevant code examples in the knowledge base.
@@ -171,6 +180,7 @@ def register_rag_tools(mcp: FastMCP):
                       This is the 'id' field from available sources, NOT a URL or domain name.
                       Example: "src_1234abcd" not "docs.anthropic.com"
             project_id: Optional project ID to scope search to sources associated with a project
+            include_parent: Include parent project's sources in search (default: true)
             match_count: Max results (default: 5)
 
         Returns:
@@ -185,7 +195,11 @@ def register_rag_tools(mcp: FastMCP):
             timeout = httpx.Timeout(30.0, connect=5.0)
 
             async with httpx.AsyncClient(timeout=timeout) as client:
-                request_data = {"query": query, "match_count": match_count}
+                request_data = {
+                    "query": query,
+                    "match_count": match_count,
+                    "include_parent": include_parent,
+                }
                 if source_id:
                     request_data["source"] = source_id
                 if project_id:
@@ -402,11 +416,14 @@ def register_rag_tools(mcp: FastMCP):
             1. Add source: manage_rag_source(action="add", title="My Docs", source_type="inline", documents='[...]')
             2. Poll progress: rag_check_progress(progress_id="...") until status="completed"
             3. Search: rag_search_knowledge_base(query="...", project_id="...")
-            4. Update later: manage_rag_source(action="sync", source_id="...")
+            4. Update later: manage_rag_source(action="sync", source_id="...", documents='[...]')
             5. Remove: manage_rag_source(action="delete", source_id="...")
 
-        IMPORTANT: Use "add" once per document set. Use "sync" to update.
-        Calling "add" repeatedly creates duplicate sources.
+        IMPORTANT: When project_id is provided with action="add", the source_id is deterministic
+        (based on project_id + title). Calling "add" again with the same title and project_id
+        will update the existing source instead of creating a duplicate.
+
+        For sync: pass documents to re-ingest inline content, or omit documents to re-crawl a URL source.
 
         Returns:
             JSON with {success, progress_id?, source_id?, estimated_seconds?, message?}
@@ -514,22 +531,78 @@ def register_rag_tools(mcp: FastMCP):
                         "validation_error",
                         "source_id is required for sync action. Get it from rag_get_available_sources()."
                     )
-                async with httpx.AsyncClient(timeout=timeout) as client:
-                    response = await client.post(
-                        urljoin(api_url, f"/api/knowledge-items/{source_id}/refresh"),
-                        json={"force": force},
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        return json.dumps({
-                            "success": True,
-                            "progress_id": data.get("progressId"),
-                            "estimated_seconds": data.get("estimatedSeconds"),
-                            "message": f"Sync started for source '{source_id}'. "
-                                       f"Poll rag_check_progress(progress_id='{data.get('progressId')}') for status.",
-                        })
+
+                if documents:
+                    # Inline sync path: re-ingest documents under the same source_id
+                    if isinstance(documents, list):
+                        docs_list = documents
+                    elif isinstance(documents, str):
+                        try:
+                            docs_list = json.loads(documents)
+                        except json.JSONDecodeError as e:
+                            return MCPErrorFormatter.format_error(
+                                "validation_error", f"Invalid JSON in documents parameter: {e}"
+                            )
                     else:
-                        return MCPErrorFormatter.from_http_error(response, "sync source")
+                        return MCPErrorFormatter.format_error(
+                            "validation_error", "documents must be a list or JSON string"
+                        )
+                    if not isinstance(docs_list, list) or not docs_list:
+                        return MCPErrorFormatter.format_error(
+                            "validation_error", "documents must be a non-empty array"
+                        )
+
+                    async with httpx.AsyncClient(timeout=get_polling_timeout()) as client:
+                        response = await client.post(
+                            urljoin(api_url, "/api/knowledge/sync-inline"),
+                            json={
+                                "source_id": source_id,
+                                "documents": docs_list,
+                                "knowledge_type": knowledge_type,
+                                "extract_code_examples": extract_code_examples,
+                            },
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            result = {
+                                "success": True,
+                                "progress_id": data.get("progressId"),
+                                "source_id": data.get("sourceId"),
+                                "estimated_seconds": data.get("estimatedSeconds"),
+                                "documents_to_process": data.get("documentsToProcess", 0),
+                                "documents_skipped": data.get("documentsSkipped", 0),
+                            }
+                            # Include sync diff if incremental sync was used
+                            if data.get("syncDiff"):
+                                result["sync_diff"] = data["syncDiff"]
+                            if data.get("progressId"):
+                                result["message"] = (
+                                    f"Inline sync started for source '{source_id}'. "
+                                    f"Poll rag_check_progress(progress_id='{data.get('progressId')}') for status."
+                                )
+                            else:
+                                result["message"] = data.get("message", "Sync complete — no changes detected.")
+                            return json.dumps(result, indent=2)
+                        else:
+                            return MCPErrorFormatter.from_http_error(response, "inline sync")
+                else:
+                    # URL sync path: re-crawl the source's URL
+                    async with httpx.AsyncClient(timeout=timeout) as client:
+                        response = await client.post(
+                            urljoin(api_url, f"/api/knowledge-items/{source_id}/refresh"),
+                            json={"force": force},
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            return json.dumps({
+                                "success": True,
+                                "progress_id": data.get("progressId"),
+                                "estimated_seconds": data.get("estimatedSeconds"),
+                                "message": f"Sync started for source '{source_id}'. "
+                                           f"Poll rag_check_progress(progress_id='{data.get('progressId')}') for status.",
+                            })
+                        else:
+                            return MCPErrorFormatter.from_http_error(response, "sync source")
 
             elif action == "delete":
                 if not source_id:
