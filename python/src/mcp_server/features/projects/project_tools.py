@@ -58,16 +58,20 @@ def register_project_tools(mcp: FastMCP):
         ctx: Context,
         project_id: str | None = None,  # For getting single project
         query: str | None = None,  # Search capability
+        parent_project_id: str | None = None,  # Filter by parent (find children)
+        tag: str | None = None,  # Filter by tag
         page: int = 1,
         per_page: int = DEFAULT_PAGE_SIZE,
     ) -> str:
         """
         List and search projects (consolidated: list + search + get).
-        
+
         Args:
             project_id: Get specific project by ID (returns full details)
             query: Keyword search in title/description
-            page: Page number for pagination  
+            parent_project_id: Find children of a parent project
+            tag: Filter projects by tag
+            page: Page number for pagination
             per_page: Items per page (default: 10)
         
         Returns:
@@ -109,13 +113,23 @@ def register_project_tools(mcp: FastMCP):
                     data = response.json()
                     projects = data.get("projects", [])
                     
-                    # Apply search filter if provided
+                    # Apply filters
                     if query:
                         query_lower = query.lower()
                         projects = [
                             p for p in projects
                             if query_lower in p.get("title", "").lower()
                             or query_lower in p.get("description", "").lower()
+                        ]
+                    if parent_project_id:
+                        projects = [
+                            p for p in projects
+                            if p.get("parent_project_id") == parent_project_id
+                        ]
+                    if tag:
+                        projects = [
+                            p for p in projects
+                            if tag in (p.get("tags") or [])
                         ]
                     
                     # Apply pagination
@@ -152,22 +166,33 @@ def register_project_tools(mcp: FastMCP):
         title: str | None = None,
         description: str | None = None,
         github_repo: str | None = None,
+        parent_project_id: str | None = None,
+        metadata: dict | None = None,
+        tags: list[str] | None = None,
+        technical_sources: list[str] | None = None,
+        business_sources: list[str] | None = None,
     ) -> str:
         """
         Manage projects (consolidated: create/update/delete).
-        
+
         Args:
             action: "create" | "update" | "delete"
             project_id: Project UUID for update/delete
             title: Project title (required for create)
             description: Project goals and scope
             github_repo: GitHub URL (e.g. "https://github.com/org/repo")
-        
+            parent_project_id: Parent project UUID for hierarchy (single level only)
+            metadata: Key-value metadata dict (e.g. {"domain": "recipes", "directory": "/app"})
+            tags: Filterable tags list (e.g. ["frontend", "production"])
+            technical_sources: Source IDs to link as technical knowledge (for update)
+            business_sources: Source IDs to link as business knowledge (for update)
+
         Examples:
             manage_project("create", title="Auth System")
-            manage_project("update", project_id="p-1", description="Updated")
+            manage_project("create", title="Sub App", parent_project_id="parent-uuid")
+            manage_project("update", project_id="p-1", tags=["frontend"])
             manage_project("delete", project_id="p-1")
-        
+
         Returns: {success: bool, project?: object, message: string}
         """
         try:
@@ -182,13 +207,21 @@ def register_project_tools(mcp: FastMCP):
                             "title required for create"
                         )
                     
-                    response = await client.post(
-                        urljoin(api_url, "/api/projects"),
-                        json={
+                    create_data = {
                             "title": title,
                             "description": description or "",
-                            "github_repo": github_repo
+                            "github_repo": github_repo,
                         }
+                    if parent_project_id is not None:
+                        create_data["parent_project_id"] = parent_project_id
+                    if metadata is not None:
+                        create_data["metadata"] = metadata
+                    if tags is not None:
+                        create_data["tags"] = tags
+
+                    response = await client.post(
+                        urljoin(api_url, "/api/projects"),
+                        json=create_data,
                     )
                     
                     if response.status_code == 200:
@@ -270,7 +303,17 @@ def register_project_tools(mcp: FastMCP):
                         update_data["description"] = description
                     if github_repo is not None:
                         update_data["github_repo"] = github_repo
-                    
+                    if parent_project_id is not None:
+                        update_data["parent_project_id"] = parent_project_id
+                    if metadata is not None:
+                        update_data["metadata"] = metadata
+                    if tags is not None:
+                        update_data["tags"] = tags
+                    if technical_sources is not None:
+                        update_data["technical_sources"] = technical_sources
+                    if business_sources is not None:
+                        update_data["business_sources"] = business_sources
+
                     if not update_data:
                         return MCPErrorFormatter.format_error(
                             "validation_error",
