@@ -17,15 +17,15 @@ CREATE TABLE IF NOT EXISTS archon_systems (
 CREATE TABLE IF NOT EXISTS archon_skills (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL UNIQUE,
-  display_name TEXT NOT NULL,
+  display_name TEXT DEFAULT '',
   description TEXT DEFAULT '',
   content TEXT NOT NULL,
   content_hash TEXT NOT NULL,
-  version INTEGER DEFAULT 1,
+  current_version INTEGER DEFAULT 1,
   is_required BOOLEAN DEFAULT false,
   is_validated BOOLEAN DEFAULT false,
   tags TEXT[] DEFAULT '{}',
-  created_by_system_id UUID REFERENCES archon_systems(id) ON DELETE SET NULL,
+  created_by TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -34,13 +34,13 @@ CREATE TABLE IF NOT EXISTS archon_skills (
 CREATE TABLE IF NOT EXISTS archon_skill_versions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   skill_id UUID NOT NULL REFERENCES archon_skills(id) ON DELETE CASCADE,
-  version INTEGER NOT NULL,
+  version_number INTEGER NOT NULL,
   content TEXT NOT NULL,
   content_hash TEXT NOT NULL,
   change_summary TEXT,
-  created_by_system_id UUID REFERENCES archon_systems(id) ON DELETE SET NULL,
+  created_by TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(skill_id, version)
+  UNIQUE(skill_id, version_number)
 );
 
 -- archon_project_skills: Project-specific overrides
@@ -48,8 +48,9 @@ CREATE TABLE IF NOT EXISTS archon_project_skills (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID NOT NULL REFERENCES archon_projects(id) ON DELETE CASCADE,
   skill_id UUID NOT NULL REFERENCES archon_skills(id) ON DELETE CASCADE,
-  content_override TEXT,
+  custom_content TEXT,
   content_hash TEXT,
+  is_enabled BOOLEAN DEFAULT true,
   override_version INTEGER DEFAULT 1,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),

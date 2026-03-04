@@ -57,6 +57,7 @@ class SkillService:
 
         skill_data = {
             "name": name,
+            "display_name": name,
             "description": description,
             "content": content,
             "content_hash": content_hash,
@@ -93,7 +94,7 @@ class SkillService:
         """
         response = (
             self.supabase_client.table(SKILLS_TABLE)
-            .select("id, name, description, current_version, content_hash, created_by, created_at, updated_at")
+            .select("id, name, display_name, description, current_version, content_hash, is_required, is_validated, tags, created_by, created_at, updated_at")
             .order("name")
             .execute()
         )

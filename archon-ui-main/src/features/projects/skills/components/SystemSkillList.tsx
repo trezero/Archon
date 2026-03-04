@@ -22,7 +22,7 @@ export function SystemSkillList({ systemSkills, allSkills, onInstall }: SystemSk
 						{systemSkills.map((ss) => (
 							<div key={ss.id} className="flex items-center justify-between p-2 rounded-md bg-white/5">
 								<span className="text-sm text-white">
-									{ss.archon_skills?.display_name ?? ss.skill_id}
+									{ss.archon_skills?.display_name || ss.archon_skills?.name || ss.skill_id}
 								</span>
 								<SkillStatusBadge status={ss.status} hasLocalChanges={ss.has_local_changes} />
 							</div>
@@ -41,7 +41,7 @@ export function SystemSkillList({ systemSkills, allSkills, onInstall }: SystemSk
 								className="flex items-center justify-between p-2 rounded-md bg-white/5"
 							>
 								<div>
-									<span className="text-sm text-white">{skill.display_name}</span>
+									<span className="text-sm text-white">{skill.display_name || skill.name}</span>
 									{skill.is_required && (
 										<span className="ml-2 text-xs text-cyan-400">Required</span>
 									)}

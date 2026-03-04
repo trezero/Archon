@@ -57,7 +57,29 @@ class RemoveSkillRequest(BaseModel):
     system_ids: list[str]
 
 
+class RegisterSystemRequest(BaseModel):
+    fingerprint: str
+    name: str
+    hostname: str | None = None
+    os: str | None = None
+
+
 # ── Skills CRUD ───────────────────────────────────────────────────────────────
+
+
+@router.post("/skills/validate")
+async def validate_skill_standalone(request: ValidateSkillRequest):
+    """Validate skill content without requiring an existing skill ID."""
+    try:
+        logfire.debug("Validating skill content (standalone)")
+        validator = SkillValidationService()
+        result = validator.validate(request.content)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logfire.error(f"Failed to validate skill | error={e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
 @router.get("/skills")
@@ -240,6 +262,35 @@ async def get_skill_versions(skill_id: str):
 # ── Systems ───────────────────────────────────────────────────────────────────
 
 
+@router.post("/systems")
+async def register_system(request: RegisterSystemRequest):
+    """Register a new system or return existing one if fingerprint already exists."""
+    try:
+        logfire.info(f"Registering system | fingerprint={request.fingerprint}")
+        service = SystemService()
+
+        # Check if system already exists by fingerprint
+        existing = service.find_by_fingerprint(request.fingerprint)
+        if existing:
+            # Update last seen and return existing
+            service.update_last_seen(existing["id"])
+            return {"system": existing, "is_new": False}
+
+        system = service.register_system(
+            fingerprint=request.fingerprint,
+            name=request.name,
+            hostname=request.hostname,
+            os=request.os,
+        )
+        logfire.info(f"System registered | system_id={system.get('id')}")
+        return {"system": system, "is_new": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logfire.error(f"Failed to register system | fingerprint={request.fingerprint} | error={e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"error": str(e)}) from e
+
+
 @router.get("/systems")
 async def list_systems():
     """List all registered systems."""
@@ -319,37 +370,34 @@ async def delete_system(system_id: str):
 
 @router.get("/projects/{project_id}/skills")
 async def get_project_skills(project_id: str):
-    """Get all skill overrides for a project.
+    """Get skills data for a project.
 
-    Returns project-skill configuration including custom content and enabled state.
-    If SkillSyncService is available, also includes system install state.
+    Returns all skills from the registry and systems with their install state,
+    matching the frontend ProjectSkillsResponse shape: {all_skills, systems}.
     """
     try:
         logfire.debug(f"Getting project skills | project_id={project_id}")
-        service = SkillService()
-        overrides = service.get_project_skills(project_id)
+        skill_service = SkillService()
+        all_skills = skill_service.list_skills()
 
-        # Attempt to enrich with system install state from sync service
+        # Build systems with nested skill install state
+        systems_with_skills: list[dict[str, Any]] = []
         try:
             from ..services.skills.skill_sync_service import SkillSyncService
 
             sync_service = SkillSyncService()
-            # Get systems associated with this project
             systems = sync_service.get_project_systems(project_id)
-            system_skills: dict[str, Any] = {}
+
             for system in systems:
                 sys_skills = sync_service.get_system_project_skills(system["id"], project_id)
-                system_skills[system["id"]] = sys_skills
-
-            return {
-                "overrides": overrides,
-                "systems": systems,
-                "system_skills": system_skills,
-                "count": len(overrides),
-            }
+                systems_with_skills.append({**system, "skills": sys_skills})
         except ImportError:
-            # SkillSyncService not yet available
-            return {"overrides": overrides, "count": len(overrides)}
+            pass
+
+        return {
+            "all_skills": all_skills,
+            "systems": systems_with_skills,
+        }
 
     except HTTPException:
         raise

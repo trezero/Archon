@@ -6,7 +6,6 @@ Provides two consolidated tools:
 - manage_skills: Sync, upload, validate, install, and remove skills
 """
 
-import hashlib
 import json
 import logging
 import re
@@ -266,7 +265,7 @@ async def _handle_validate(client: httpx.AsyncClient, api_url: str, skill_conten
         )
 
     response = await client.post(
-        urljoin(api_url, "/api/skills/_/validate"),
+        urljoin(api_url, "/api/skills/validate"),
         json={"content": skill_content},
     )
 
@@ -295,24 +294,19 @@ async def _handle_upload(
             "Skill name is required. Provide skill_name parameter or include 'name' in YAML frontmatter.",
         )
 
-    content_hash = hashlib.sha256(skill_content.encode()).hexdigest()
+    description = metadata.get("description", "")
 
-    payload = {
+    create_payload = {
         "name": name,
+        "description": description,
         "content": skill_content,
-        "content_hash": content_hash,
+        "created_by": "mcp-upload",
     }
-    if metadata.get("description"):
-        payload["description"] = metadata["description"]
-    if metadata.get("version"):
-        payload["version"] = metadata["version"]
-    if metadata.get("tags"):
-        payload["tags"] = metadata["tags"]
 
     # Try to create
-    response = await client.post(urljoin(api_url, "/api/skills"), json=payload)
+    response = await client.post(urljoin(api_url, "/api/skills"), json=create_payload)
 
-    if response.status_code == 200 or response.status_code == 201:
+    if response.status_code in (200, 201):
         result = response.json()
         return json.dumps({
             "success": True,
@@ -338,9 +332,16 @@ async def _handle_upload(
             )
 
         existing_id = existing["id"]
+        update_payload = {
+            "content": skill_content,
+            "updated_by": "mcp-upload",
+        }
+        if description:
+            update_payload["description"] = description
+
         update_response = await client.put(
             urljoin(api_url, f"/api/skills/{existing_id}"),
-            json=payload,
+            json=update_payload,
         )
 
         if update_response.status_code == 200:
@@ -483,9 +484,13 @@ async def _handle_install(
             "project_id is required for install action",
         )
 
-    payload: dict = {}
-    if system_id:
-        payload["system_id"] = system_id
+    if not system_id:
+        return MCPErrorFormatter.format_error(
+            "validation_error",
+            "system_id is required for install action",
+        )
+
+    payload = {"system_ids": [system_id]}
 
     response = await client.post(
         urljoin(api_url, f"/api/projects/{project_id}/skills/{skill_id}/install"),
@@ -496,8 +501,7 @@ async def _handle_install(
         result = response.json()
         return json.dumps({
             "success": True,
-            "message": result.get("message", f"Skill {skill_id} installed for project {project_id}"),
-            "installation": result.get("installation"),
+            "message": result.get("message", f"Skill {skill_id} install queued for project {project_id}"),
         })
     else:
         return MCPErrorFormatter.from_http_error(response, "install skill")
@@ -518,9 +522,13 @@ async def _handle_remove(
             "project_id is required for remove action",
         )
 
-    payload: dict = {}
-    if system_id:
-        payload["system_id"] = system_id
+    if not system_id:
+        return MCPErrorFormatter.format_error(
+            "validation_error",
+            "system_id is required for remove action",
+        )
+
+    payload = {"system_ids": [system_id]}
 
     response = await client.post(
         urljoin(api_url, f"/api/projects/{project_id}/skills/{skill_id}/remove"),
@@ -531,7 +539,7 @@ async def _handle_remove(
         result = response.json()
         return json.dumps({
             "success": True,
-            "message": result.get("message", f"Skill {skill_id} removed from project {project_id}"),
+            "message": result.get("message", f"Skill {skill_id} removal queued for project {project_id}"),
         })
     else:
         return MCPErrorFormatter.from_http_error(response, "remove skill")

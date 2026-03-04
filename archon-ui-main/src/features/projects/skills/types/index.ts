@@ -5,10 +5,11 @@ export interface Skill {
 	description: string;
 	content?: string;
 	content_hash: string;
-	version: number;
+	current_version: number;
 	is_required: boolean;
 	is_validated: boolean;
 	tags: string[];
+	created_by: string | null;
 	created_at: string;
 	updated_at: string;
 }

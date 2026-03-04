@@ -129,7 +129,7 @@ class SkillSyncService:
         result = (
             self.supabase_client.table(SYSTEM_SKILLS_TABLE)
             .select(
-                "*, archon_skills(id, name, display_name, description, version,"
+                "*, archon_skills(id, name, display_name, description, current_version,"
                 " content_hash, is_required, is_validated, tags)"
             )
             .eq("system_id", system_id)

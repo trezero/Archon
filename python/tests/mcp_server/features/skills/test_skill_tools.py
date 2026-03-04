@@ -373,6 +373,7 @@ async def test_manage_skills_remove(registered_tools, mock_context):
             action="remove",
             skill_id="sk-1",
             project_id="proj-1",
+            system_id="sys-1",
         )
 
         data = json.loads(result)
