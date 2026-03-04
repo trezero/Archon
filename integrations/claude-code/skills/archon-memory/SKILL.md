@@ -39,14 +39,21 @@ If Archon is down or `api_service` is false:
 
 Stop here if unhealthy.
 
-### 0b. Load state files
+### 0b. Check skill sync freshness
+
+Read `.claude/archon-state.json`. If `last_skill_sync` is missing or older than 24 hours:
+> "Skills are out of sync. Running skill sync first..."
+
+Run `/archon-skill-sync` before continuing.
+
+### 0c. Load state files
 
 Read these if they exist (don't fail if missing — some modes create them):
 
 - **Project state:** `.claude/archon-state.json` in the current project
 - **Global state:** `~/.claude/archon-global.json`
 
-### 0c. Parse the mode
+### 0d. Parse the mode
 
 | Argument | Mode |
 |----------|------|

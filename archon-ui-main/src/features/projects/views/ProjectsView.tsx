@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Activity, CheckCircle2, FileText, Library, List, ListTodo, Pin } from "lucide-react";
+import { Activity, CheckCircle2, FileText, Library, List, ListTodo, Pin, Puzzle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useStaggeredEntrance } from "../../../hooks/useStaggeredEntrance";
@@ -17,6 +17,7 @@ import { DocsTab } from "../documents/DocsTab";
 import { KnowledgeTab } from "../knowledge/KnowledgeTab";
 import { projectKeys, useDeleteProject, useProjects, useUpdateProject } from "../hooks/useProjectQueries";
 import { useTaskCounts } from "../tasks/hooks";
+import { SkillsTab } from "../skills/SkillsTab";
 import { TasksTab } from "../tasks/TasksTab";
 import type { Project } from "../types";
 
@@ -215,6 +216,7 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
                   items={[
                     { id: "docs", label: "Docs", icon: <FileText className="w-4 h-4" /> },
                     { id: "knowledge", label: "Knowledge", icon: <Library className="w-4 h-4" /> },
+                    { id: "skills", label: "Skills", icon: <Puzzle className="w-4 h-4" /> },
                     { id: "tasks", label: "Tasks", icon: <ListTodo className="w-4 h-4" /> },
                   ]}
                   activeSection={activeTab}
@@ -232,6 +234,7 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
               <div>
                 {activeTab === "docs" && <DocsTab project={selectedProject} />}
                 {activeTab === "knowledge" && <KnowledgeTab projectId={selectedProject.id} />}
+                {activeTab === "skills" && <SkillsTab projectId={selectedProject.id} />}
                 {activeTab === "tasks" && <TasksTab projectId={selectedProject.id} />}
               </div>
             </motion.div>
@@ -295,6 +298,8 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
                     <PillNavigation
                       items={[
                         { id: "docs", label: "Docs", icon: <FileText className="w-4 h-4" /> },
+                        { id: "knowledge", label: "Knowledge", icon: <Library className="w-4 h-4" /> },
+                        { id: "skills", label: "Skills", icon: <Puzzle className="w-4 h-4" /> },
                         { id: "tasks", label: "Tasks", icon: <ListTodo className="w-4 h-4" /> },
                       ]}
                       activeSection={activeTab}
@@ -313,6 +318,7 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
                 <div>
                   {activeTab === "docs" && <DocsTab project={selectedProject} />}
                   {activeTab === "knowledge" && <KnowledgeTab projectId={selectedProject.id} />}
+                  {activeTab === "skills" && <SkillsTab projectId={selectedProject.id} />}
                   {activeTab === "tasks" && <TasksTab projectId={selectedProject.id} />}
                 </div>
               </>
