@@ -1,6 +1,6 @@
 # Combined Workshop Rundown
 
-**Hosts**: Thomas (platform features) + Rasmus (extensibility skills)
+**Host**: Rasmus (Thomas prepped the platform features section)
 **Duration**: ~70 min + Q&A
 **Required**: Claude Code v2.1.63+, Max plan, tmux, GitHub CLI (`gh`)
 
@@ -26,10 +26,10 @@ export IS_DEMO=1          # Hide email/org in UI
 
 ---
 
-## Part 1 — Platform Features (Thomas, ~33 min)
+## Part 1 — Platform Features (~33 min)
 
 The "what Claude Code can do now" half. Shows the multi-agent orchestration
-platform that shipped in Jan-Feb 2026.
+platform that shipped in Jan-Feb 2026. (Prepped by Thomas.)
 
 ### 1. Agent Teams (10 min)
 
@@ -84,16 +84,17 @@ platform that shipped in Jan-Feb 2026.
 
 ## Transition (~2 min)
 
-> "Thomas showed what the platform can do out of the box. Now Rasmus will show
-> how to build your own power on top of it — custom skills, agents, hooks, and
-> autonomous workflows. Same building blocks, composed into something new."
+> "That was the platform — what Claude Code can do out of the box. Now let's
+> look at how to build your own power on top of it — custom skills, agents,
+> hooks, and autonomous workflows. Same building blocks, composed into
+> something new."
 
 ---
 
-## Part 2 — Extensibility: Skills, Agents & Hooks (Rasmus, ~35 min)
+## Part 2 — Extensibility: Skills, Agents & Hooks (~35 min)
 
 The "how to extend Claude Code yourself" half. Three skills, progressive
-complexity, each building on the previous.
+complexity, each building on the previous. (Prepped by Rasmus.)
 
 ### 6. save-task-list — Hook Lifecycle (10 min)
 
@@ -201,8 +202,8 @@ complexity, each building on the previous.
 
 ## Closing (~2 min)
 
-> "Thomas showed the platform: teams, worktrees, batch, remote control,
-> teleportation. Rasmus showed the extensibility layer: skills, agents, hooks,
+> "Part 1 was the platform: teams, worktrees, batch, remote control,
+> teleportation. Part 2 was the extensibility layer: skills, agents, hooks,
 > memory, safety gates. Together, that's the full picture — use the platform,
 > and extend it for your specific workflows."
 

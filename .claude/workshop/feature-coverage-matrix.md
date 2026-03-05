@@ -1,6 +1,6 @@
 # Claude Code Workshop — Feature Coverage Matrix
 
-**Combined workshop**: Thomas (platform features) + Rasmus (extensibility skills)
+**Host**: Rasmus | Thomas prepped the platform features section, Rasmus prepped the extensibility skills
 
 ---
 
