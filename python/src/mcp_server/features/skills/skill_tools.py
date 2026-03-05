@@ -3,7 +3,7 @@ Skills management tools for Archon MCP Server.
 
 Provides two consolidated tools:
 - find_skills: List, search, and get skill details
-- manage_skills: Sync, upload, validate, install, and remove skills
+- manage_skills: Sync, upload, validate, install, remove, and bootstrap skills
 """
 
 import json
@@ -198,10 +198,10 @@ def register_skill_tools(mcp: FastMCP):
         system_id: str | None = None,
     ) -> str:
         """
-        Manage skills: sync, upload, validate, install, or remove.
+        Manage skills: sync, upload, validate, install, remove, or bootstrap.
 
         Args:
-            action: "sync" | "upload" | "validate" | "install" | "remove"
+            action: "sync" | "upload" | "validate" | "install" | "remove" | "bootstrap"
             local_skills: JSON array of local skill objects for sync (each with name, content_hash, version)
             system_fingerprint: Unique fingerprint identifying this system (for sync)
             system_name: Human-readable name for this system (for sync)
@@ -243,10 +243,15 @@ def register_skill_tools(mcp: FastMCP):
                 elif action == "remove":
                     return await _handle_remove(client, api_url, skill_id, project_id, system_id)
 
+                elif action == "bootstrap":
+                    return await _handle_bootstrap(
+                        client, api_url, system_fingerprint, system_name, project_id
+                    )
+
                 else:
                     return MCPErrorFormatter.format_error(
                         "invalid_action",
-                        f"Unknown action: {action}. Valid actions: sync, upload, validate, install, remove",
+                        f"Unknown action: {action}. Valid actions: sync, upload, validate, install, remove, bootstrap",
                     )
 
         except httpx.RequestError as e:
@@ -509,3 +514,57 @@ async def _handle_remove(
         })
     else:
         return MCPErrorFormatter.from_http_error(response, "remove skill")
+
+
+async def _handle_bootstrap(
+    client: httpx.AsyncClient,
+    api_url: str,
+    system_fingerprint: str | None,
+    system_name: str | None,
+    project_id: str | None,
+) -> str:
+    """Fetch all skills with content and optionally register the system with a project."""
+    # Fetch all skills with full content
+    response = await client.get(urljoin(api_url, "/api/skills"), params={"include_content": "true"})
+
+    if response.status_code != 200:
+        return MCPErrorFormatter.from_http_error(response, "fetch skills for bootstrap")
+
+    data = response.json()
+    raw_skills = data.get("skills", [])
+
+    # Normalize: keep only name, display_name, content per skill
+    skills = [
+        {
+            "name": s.get("name", ""),
+            "display_name": s.get("display_name", ""),
+            "content": s.get("content", ""),
+        }
+        for s in raw_skills
+    ]
+
+    # Register system with project when both fingerprint and project_id are provided
+    system = None
+    if system_fingerprint and project_id:
+        payload: dict = {
+            "fingerprint": system_fingerprint,
+            "local_skills": [],
+        }
+        if system_name:
+            payload["system_name"] = system_name
+
+        sync_response = await client.post(
+            urljoin(api_url, f"/api/projects/{project_id}/sync"),
+            json=payload,
+        )
+
+        if sync_response.status_code == 200:
+            system = sync_response.json().get("system")
+
+    return json.dumps({
+        "success": True,
+        "skills": skills,
+        "system": system,
+        "install_path": "~/.claude/skills",
+        "message": f"Bootstrap complete: {len(skills)} skill(s) ready to install",
+    })

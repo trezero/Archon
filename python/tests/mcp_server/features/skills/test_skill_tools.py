@@ -458,3 +458,93 @@ async def test_manage_skills_sync_missing_params(registered_tools, mock_context)
     result = await manage_skills(mock_context, action="sync", local_skills="[]", system_fingerprint="fp")
     data = json.loads(result)
     assert data["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_manage_skills_bootstrap_basic(registered_tools, mock_context):
+    """Bootstrap returns all skills and registers system when fingerprint+project provided."""
+    manage_skills = registered_tools["manage_skills"]
+
+    mock_skills_response = MagicMock()
+    mock_skills_response.status_code = 200
+    mock_skills_response.json.return_value = {
+        "skills": [
+            {"name": "archon-memory", "content": "---\nname: archon-memory\n---\n# Content", "display_name": "Archon Memory"},
+            {"name": "archon-bootstrap", "content": "---\nname: archon-bootstrap\n---\n# Bootstrap", "display_name": "Archon Bootstrap"},
+        ]
+    }
+
+    mock_sync_response = MagicMock()
+    mock_sync_response.status_code = 200
+    mock_sync_response.json.return_value = {
+        "system": {"id": "sys-1", "name": "My Mac", "is_new": True},
+        "in_sync": [], "pending_install": [], "pending_remove": [],
+        "local_changes": [], "unknown_local": [],
+    }
+
+    with patch("src.mcp_server.features.skills.skill_tools.httpx.AsyncClient") as mock_client:
+        mock_async_client = AsyncMock()
+        mock_async_client.get.return_value = mock_skills_response
+        mock_async_client.post.return_value = mock_sync_response
+        mock_client.return_value.__aenter__.return_value = mock_async_client
+
+        result = await manage_skills(
+            mock_context,
+            action="bootstrap",
+            system_fingerprint="fp-abc",
+            system_name="My Mac",
+            project_id="proj-1",
+        )
+
+        data = json.loads(result)
+        assert data["success"] is True
+        assert len(data["skills"]) == 2
+        assert data["skills"][0]["name"] == "archon-memory"
+        assert data["system"]["id"] == "sys-1"
+        assert data["system"]["is_new"] is True
+        assert data["install_path"] == "~/.claude/skills"
+        assert "Bootstrap complete" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_manage_skills_bootstrap_no_project(registered_tools, mock_context):
+    """Bootstrap without project_id skips sync call, still returns skills."""
+    manage_skills = registered_tools["manage_skills"]
+
+    mock_skills_response = MagicMock()
+    mock_skills_response.status_code = 200
+    mock_skills_response.json.return_value = {
+        "skills": [{"name": "archon-memory", "content": "---\nname: archon-memory\n---\n# Content", "display_name": "Archon Memory"}]
+    }
+
+    with patch("src.mcp_server.features.skills.skill_tools.httpx.AsyncClient") as mock_client:
+        mock_async_client = AsyncMock()
+        mock_async_client.get.return_value = mock_skills_response
+        mock_client.return_value.__aenter__.return_value = mock_async_client
+
+        result = await manage_skills(mock_context, action="bootstrap")
+
+        data = json.loads(result)
+        assert data["success"] is True
+        assert len(data["skills"]) == 1
+        assert data["system"] is None
+        mock_async_client.post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_manage_skills_bootstrap_not_invalid_action(registered_tools, mock_context):
+    """'bootstrap' is now a valid action and must NOT return invalid_action error."""
+    manage_skills = registered_tools["manage_skills"]
+
+    mock_skills_response = MagicMock()
+    mock_skills_response.status_code = 200
+    mock_skills_response.json.return_value = {"skills": []}
+
+    with patch("src.mcp_server.features.skills.skill_tools.httpx.AsyncClient") as mock_client:
+        mock_async_client = AsyncMock()
+        mock_async_client.get.return_value = mock_skills_response
+        mock_client.return_value.__aenter__.return_value = mock_async_client
+
+        result = await manage_skills(mock_context, action="bootstrap")
+        data = json.loads(result)
+        assert data.get("error", {}).get("type") != "invalid_action"
