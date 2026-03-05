@@ -19,16 +19,22 @@ Archon server is not reachable. Ensure Archon is running and configured in .mcp.
 
 ## Phase 1: Compute System Fingerprint
 
-Run the following command to compute a unique fingerprint for this machine:
+Run the following command to detect the operating system:
 
 ```bash
-echo -n "$(hostname)|$(whoami)|$(uname -s)" | sha256sum | cut -d' ' -f1
+uname -s
 ```
 
-On macOS (where `sha256sum` is not available), use:
+If the output is `Darwin`, use `shasum -a 256` to compute the fingerprint:
 
 ```bash
 echo -n "$(hostname)|$(whoami)|$(uname -s)" | shasum -a 256 | cut -d' ' -f1
+```
+
+Otherwise (Linux and all other systems), use `sha256sum`:
+
+```bash
+echo -n "$(hostname)|$(whoami)|$(uname -s)" | sha256sum | cut -d' ' -f1
 ```
 
 Store the resulting hash as `<fingerprint>`.
@@ -70,6 +76,8 @@ manage_skills(
 
 If the call fails, report the error and stop.
 
+Extract `<system_id>` from `response.system.id` (if `response.system` is present, otherwise use `"unknown"`).
+
 ## Phase 5: Write Skill Files
 
 For each skill object in `response.skills`:
@@ -88,6 +96,8 @@ Merge in the following fields:
 - `system_fingerprint`: `<fingerprint>`
 - `system_name`: `<system_name>`
 - `last_bootstrap`: current timestamp in ISO 8601 format
+
+Merge with existing state — do not overwrite other fields such as `archon_project_id`.
 
 Write the merged object back to `.claude/archon-state.json`.
 
