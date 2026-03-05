@@ -44,6 +44,7 @@ services:
       - ./python/src:/app/src # Mount source code for hot reload
       - ./python/tests:/app/tests # Mount tests for UI test execution
       - ./migration:/app/migration # Mount migration files for version tracking
+      - ./integrations:/app/integrations # Bundled skills for registry seeding
       - archon-server-data:/app/data # Persistent data storage
     extra_hosts:
       - "host.docker.internal:host-gateway"

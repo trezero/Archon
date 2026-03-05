@@ -414,10 +414,10 @@ async def test_manage_skills_sync(registered_tools, mock_context):
         mock_async_client.post.return_value = mock_sync_response
         mock_client.return_value.__aenter__.return_value = mock_async_client
 
-        local_skills = json.dumps([
+        local_skills = [
             {"name": "memory", "content_hash": "aaa"},
             {"name": "new-skill", "content_hash": "ccc"},
-        ])
+        ]
 
         result = await manage_skills(
             mock_context,
@@ -450,12 +450,12 @@ async def test_manage_skills_sync_missing_params(registered_tools, mock_context)
     assert data["success"] is False
 
     # Missing system_fingerprint
-    result = await manage_skills(mock_context, action="sync", local_skills="[]")
+    result = await manage_skills(mock_context, action="sync", local_skills=[])
     data = json.loads(result)
     assert data["success"] is False
 
     # Missing project_id
-    result = await manage_skills(mock_context, action="sync", local_skills="[]", system_fingerprint="fp")
+    result = await manage_skills(mock_context, action="sync", local_skills=[], system_fingerprint="fp")
     data = json.loads(result)
     assert data["success"] is False
 

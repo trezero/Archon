@@ -48,10 +48,16 @@ class SkillSeedingService:
     def default_skills_dir() -> Path:
         """Return the absolute path to the bundled skills directory.
 
-        Navigates from this file's location up through:
-          skill_seeding_service.py → skills/ → services/ → server/ → src/ → python/
-        then into integrations/claude-code/skills/ at the repository root.
+        Walks up the directory tree from this file's location until it finds
+        an ancestor that contains integrations/claude-code/skills/. This works
+        for both local development (python/ is an intermediate directory) and
+        Docker (python/ is stripped, /app is the root).
         """
+        for parent in Path(__file__).resolve().parents:
+            candidate = parent / "integrations" / "claude-code" / "skills"
+            if candidate.is_dir():
+                return candidate
+        # Fall back to a sensible guess — caller handles missing path gracefully
         return Path(__file__).parents[5] / "integrations" / "claude-code" / "skills"
 
     def seed_skills(self, skills_dir: Path | None = None) -> dict[str, int]:

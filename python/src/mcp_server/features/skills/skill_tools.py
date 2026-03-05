@@ -186,7 +186,7 @@ def register_skill_tools(mcp: FastMCP):
         ctx: Context,
         action: str,
         # For sync
-        local_skills: str | None = None,
+        local_skills: list | None = None,
         system_fingerprint: str | None = None,
         system_name: str | None = None,
         project_id: str | None = None,
@@ -202,7 +202,7 @@ def register_skill_tools(mcp: FastMCP):
 
         Args:
             action: "sync" | "upload" | "validate" | "install" | "remove" | "bootstrap"
-            local_skills: JSON array of local skill objects for sync (each with name, content_hash, version)
+            local_skills: Array of local skill objects for sync (each with name, content_hash, version)
             system_fingerprint: Unique fingerprint identifying this system (for sync)
             system_name: Human-readable name for this system (for sync)
             project_id: Project ID for sync/install/remove context
@@ -219,7 +219,7 @@ def register_skill_tools(mcp: FastMCP):
             manage_skills("upload", skill_content="---\\nname: my-skill\\n---\\n# Content")
             manage_skills("install", skill_id="sk-1", project_id="proj-1", system_id="sys-1")
             manage_skills("remove", skill_id="sk-1", project_id="proj-1", system_id="sys-1")
-            manage_skills("sync", local_skills='[...]', system_fingerprint="fp-abc", project_id="proj-1")
+            manage_skills("sync", local_skills=[...], system_fingerprint="fp-abc", project_id="proj-1")
         """
         try:
             api_url = get_api_url()
@@ -367,16 +367,16 @@ async def _handle_upload(
 async def _handle_sync(
     client: httpx.AsyncClient,
     api_url: str,
-    local_skills: str | None,
+    local_skills: list | None,
     system_fingerprint: str | None,
     system_name: str | None,
     project_id: str | None,
 ) -> str:
     """Sync local skills with the remote registry via the project sync endpoint."""
-    if not local_skills:
+    if local_skills is None:
         return MCPErrorFormatter.format_error(
             "validation_error",
-            "local_skills JSON array is required for sync action",
+            "local_skills array is required for sync action",
         )
 
     if not system_fingerprint:
@@ -391,19 +391,7 @@ async def _handle_sync(
             "project_id is required for sync action",
         )
 
-    # Parse local skills
-    try:
-        local_list = json.loads(local_skills)
-        if not isinstance(local_list, list):
-            return MCPErrorFormatter.format_error(
-                "validation_error",
-                "local_skills must be a JSON array",
-            )
-    except json.JSONDecodeError as e:
-        return MCPErrorFormatter.format_error(
-            "validation_error",
-            f"Invalid JSON in local_skills: {e}",
-        )
+    local_list = local_skills
 
     payload = {
         "fingerprint": system_fingerprint,
