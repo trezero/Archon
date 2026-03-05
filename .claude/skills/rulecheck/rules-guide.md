@@ -1,75 +1,95 @@
 # Rules Guide — Where to Find Project Rules
 
-Reference for the rulecheck agent on locating and interpreting project rules.
+Reference for the rulecheck agent. Focus on rules that **linters can't enforce** —
+architectural principles, patterns, and conventions from CLAUDE.md.
 
-## Rule Sources
+## Primary Source: `CLAUDE.md` (Root)
 
-### 1. `CLAUDE.md` (Root)
+Read this file thoroughly. Every section contains enforceable rules.
 
-The primary source of engineering principles. Key sections:
+### Engineering Principles (each is a concrete rule, not a slogan)
 
-- **Core Principles** — KISS, YAGNI, type safety
-- **Engineering Principles** — SRP, ISP, Fail Fast, DRY + Rule of Three
-- **Import Patterns** — `import type` for type-only, specific named imports, no generic `import *` for `@archon/core`
-- **Error Handling** — always log errors, use `classifyIsolationError()` for git errors, never swallow
-- **Logging** — event naming `{domain}.{action}_{state}`, never log secrets
-- **ESLint Guidelines** — zero-tolerance policy, inline disables almost never acceptable
+| Principle | What to Look For |
+|-----------|-----------------|
+| **Fail Fast** | Silent fallbacks, swallowed errors, catch blocks that return defaults instead of throwing, silently broadened permissions |
+| **KISS** | Clever meta-programming, hidden dynamic behavior, convoluted control flow, magic that obscures intent |
+| **YAGNI** | Config keys with no caller, speculative abstractions, feature flags for unplanned features, partial fake support |
+| **DRY + Rule of Three** | Same pattern copy-pasted 3+ times without extraction; OR premature abstractions extracted from only 1-2 uses |
+| **SRP + ISP** | God modules mixing policy/transport/storage, fat interfaces with unrelated methods, modules doing too many things |
+| **Determinism** | Flaky tests with timing dependencies, network-dependent tests without guardrails |
+| **Reversibility** | Mixed mega-patches, changes with unclear blast radius |
 
-### 2. `eslint.config.mjs`
+### Logging Rules
 
-Enforced lint rules (CI blocks on any warning). Key rules to watch:
+| Rule | Violation |
+|------|-----------|
+| Use Pino structured logger | `console.log`, `console.error`, `console.warn` in production code |
+| Event naming: `{domain}.{action}_{state}` | Events like `processing`, `handling`, `doing_stuff` |
+| Standard states: `_started`, `_completed`, `_failed` | Unpaired events (a `_started` without matching `_completed`/`_failed`) |
+| Never log secrets | Logging variables named token, key, password, secret without masking |
+| Include context in logs | `log.error("failed")` without IDs, durations, or error details |
+| Log levels matter | Using `log.info` for errors, or `log.error` for non-errors |
 
-| Rule | Impact |
-|------|--------|
-| `@typescript-eslint/explicit-function-return-type` | Functions must declare return types |
-| `@typescript-eslint/no-explicit-any` | No `any` without justification comment |
-| `@typescript-eslint/consistent-type-imports` | Use `import type` for type-only imports |
-| `no-console` | Use structured Pino logger, not console.log |
-| `@typescript-eslint/no-unused-vars` | No unused variables (prefix with `_` if intentional) |
+### Error Handling Rules
 
-### 3. `tsconfig.json`
+| Rule | Violation |
+|------|-----------|
+| Log with structured context | `catch(e) { throw e }` without `log.error({ err, contextId })` |
+| Use `classifyIsolationError()` | Git operation catch blocks that don't classify the error for users |
+| Surface errors to users | Catch blocks that silently swallow without notifying the user |
+| Include error type info | `log.error({ error: err.message })` instead of `log.error({ err, errorType: err.constructor.name, err })` |
+| Clear error messages | `throw new Error("failed")` without saying what failed or why |
 
-Strict TypeScript configuration:
-- `strict: true` — enables all strict checks
-- `noUncheckedIndexedAccess` — array/object access may be undefined
-- `noImplicitReturns` — all code paths must return
+### Import Rules
 
-### 4. `.prettierrc`
+| Rule | Violation |
+|------|-----------|
+| No generic `import *` from `@archon/core` | `import * as core from '@archon/core'` |
+| Use `import type` for type-only | `import { MyType } from '...'` when MyType is only used as a type |
+| Namespace imports for submodules only | `import * as conversationDb from '@archon/core/db/conversations'` is fine |
+| Specific named imports for values | `import { handleMessage, pool } from '@archon/core'` |
 
-Formatting rules (checked by `bun run format:check`):
-- Single quotes, trailing commas, print width, etc.
-- Formatting violations are auto-fixable — lower priority than logic issues
+### Git Safety Rules
 
-### 5. Scoped Rules (`packages/*/CLAUDE.md`)
-
-Check for package-specific CLAUDE.md files. None currently exist, but they could
-be added for package-specific conventions.
+| Rule | Violation |
+|------|-----------|
+| Never `git clean -fd` | Any use of `git clean` (use `git checkout .` instead) |
+| Use `execFileAsync` not `exec` | `exec("git ...")` instead of `execFileAsync("git", [...])` |
+| Use `@archon/git` functions | Direct git shell calls when an `@archon/git` function exists |
 
 ## Violation Categories by Impact
 
 ### Tier 1 — Critical (fix first)
 
-- **Missing return types** on exported functions
-- **`any` usage** without an ESLint disable comment with justification
-- **Swallowed errors** (empty catch blocks, catch-and-ignore)
-- **`import *` from `@archon/core`** (should use specific named imports)
+- **Swallowed errors** — catch blocks that silently eat errors without logging or re-throwing
+- **Silent fallbacks** — returning defaults for unexpected states instead of failing fast
+- **Missing error context** — throw/log without IDs, descriptions, or structured data
+- **God modules** — files mixing unrelated concerns (>300 lines doing multiple jobs)
 
 ### Tier 2 — High (fix next)
 
-- **Missing `import type`** for type-only imports
-- **`console.log`/`console.error`** in production code (should use Pino logger)
-- **Missing error classification** for git operations (should use `classifyIsolationError`)
-- **Generic error messages** ("Something went wrong") without context
+- **Wrong logger** — `console.log`/`console.error` in production code instead of Pino
+- **Bad log event names** — events not following `{domain}.{action}_{state}` convention
+- **Missing error classification** — git catch blocks without `classifyIsolationError()`
+- **Generic `import *`** — from `@archon/core` instead of specific named imports
 
 ### Tier 3 — Medium (fix if time permits)
 
+- **Unpaired log events** — `_started` without corresponding `_completed`/`_failed`
+- **DRY violations** — same pattern in 3+ places without extraction
 - **Nested ternaries** — should be if/else or switch
-- **Over-abstraction** — abstractions that obscure rather than clarify
-- **Dead code** — unused exports, unreachable branches
-- **Inconsistent naming** — doesn't follow project conventions
+- **Clever code** — meta-programming or hidden dynamic behavior that obscures intent
+- **YAGNI violations** — speculative code with no current caller
 
 ### Tier 4 — Low (note for backlog)
 
-- **Formatting issues** — auto-fixable by prettier
+- **Missing `import type`** — type-only imports without `type` keyword (often auto-fixable)
+- **Inconsistent naming** — doesn't follow project conventions
 - **Comment quality** — obvious comments, outdated descriptions
-- **Import ordering** — cosmetic but auto-fixable
+
+## What NOT to Check
+
+These are already enforced by tooling — don't waste time on them:
+- ESLint rules (return types, unused vars, etc.) — `bun run lint` catches these
+- TypeScript strict mode violations — `bun run type-check` catches these
+- Formatting (quotes, commas, indentation) — Prettier handles this
