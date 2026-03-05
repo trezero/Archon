@@ -31,7 +31,7 @@ from typing import Any
 from dotenv import load_dotenv
 from mcp.server.fastmcp import Context, FastMCP
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, PlainTextResponse
 
 # Add the project root to Python path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -652,6 +652,72 @@ try:
 except Exception as e:
     logger.error(f"✗ Failed to register /health endpoint: {e}")
     logger.error(traceback.format_exc())
+
+
+# ── Setup file endpoints ────────────────────────────────────────────────────
+
+
+async def http_archon_setup_sh(request: Request) -> PlainTextResponse:
+    """Serve archonSetup.sh with the Archon server URL baked in."""
+    server_url = str(request.base_url).rstrip("/")
+    script = _render_setup_sh(server_url)
+    return PlainTextResponse(
+        script,
+        headers={"Content-Disposition": 'attachment; filename="archonSetup.sh"'},
+    )
+
+
+async def http_archon_setup_bat(request: Request) -> PlainTextResponse:
+    """Serve archonSetup.bat with the Archon server URL baked in."""
+    server_url = str(request.base_url).rstrip("/")
+    script = _render_setup_bat(server_url)
+    return PlainTextResponse(
+        script,
+        headers={"Content-Disposition": 'attachment; filename="archonSetup.bat"'},
+    )
+
+
+async def http_archon_setup_md(request: Request) -> PlainTextResponse:
+    """Serve the /archon-setup Claude Code slash command."""
+    content = _render_setup_md()
+    return PlainTextResponse(content)
+
+
+def _render_setup_sh(server_url: str) -> str:
+    """Generate archonSetup.sh with server_url injected."""
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "integrations" / "claude-code" / "setup" / "archonSetup.sh"
+        if candidate.exists():
+            return candidate.read_text().replace("{{ARCHON_SERVER_URL}}", server_url)
+    raise FileNotFoundError("archonSetup.sh template not found")
+
+
+def _render_setup_bat(server_url: str) -> str:
+    """Generate archonSetup.bat with server_url injected."""
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "integrations" / "claude-code" / "setup" / "archonSetup.bat"
+        if candidate.exists():
+            return candidate.read_text().replace("{{ARCHON_SERVER_URL}}", server_url)
+    raise FileNotFoundError("archonSetup.bat template not found")
+
+
+def _render_setup_md() -> str:
+    """Return the /archon-setup Claude Code slash command content."""
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "integrations" / "claude-code" / "commands" / "archon-setup.md"
+        if candidate.exists():
+            return candidate.read_text()
+    raise FileNotFoundError("archon-setup.md not found")
+
+
+# Register setup endpoints
+try:
+    mcp.custom_route("/archon-setup.sh", methods=["GET"])(http_archon_setup_sh)
+    mcp.custom_route("/archon-setup.bat", methods=["GET"])(http_archon_setup_bat)
+    mcp.custom_route("/archon-setup.md", methods=["GET"])(http_archon_setup_md)
+    logger.info("✓ Setup file endpoints registered")
+except Exception as e:
+    logger.error(f"✗ Failed to register setup endpoints: {e}")
 
 
 def main():
