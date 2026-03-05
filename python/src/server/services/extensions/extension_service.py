@@ -1,8 +1,8 @@
-"""Skill CRUD and version management service.
+"""Extension CRUD and version management service.
 
-Handles creating, reading, updating, and deleting skills in the
-archon_skills table, maintaining version history in archon_skill_versions,
-and managing per-project overrides in archon_project_skills.
+Handles creating, reading, updating, and deleting extensions in the
+archon_extensions table, maintaining version history in archon_extension_versions,
+and managing per-project overrides in archon_project_extensions.
 """
 
 import hashlib
@@ -14,13 +14,13 @@ from src.server.utils import get_supabase_client
 
 logger = get_logger(__name__)
 
-SKILLS_TABLE = "archon_skills"
-VERSIONS_TABLE = "archon_skill_versions"
-PROJECT_SKILLS_TABLE = "archon_project_skills"
+EXTENSIONS_TABLE = "archon_extensions"
+VERSIONS_TABLE = "archon_extension_versions"
+PROJECT_EXTENSIONS_TABLE = "archon_project_extensions"
 
 
-class SkillService:
-    """Service for skill CRUD operations and version management."""
+class ExtensionService:
+    """Service for extension CRUD operations and version management."""
 
     def __init__(self, supabase_client=None):
         """Initialize with optional Supabase client (defaults to shared instance)."""
@@ -28,26 +28,26 @@ class SkillService:
 
     @staticmethod
     def compute_content_hash(content: str) -> str:
-        """Compute SHA-256 hex digest of skill content."""
+        """Compute SHA-256 hex digest of extension content."""
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
-    def create_skill(
+    def create_extension(
         self,
         name: str,
         description: str,
         content: str,
         created_by: str,
     ) -> dict[str, Any]:
-        """Create a new skill and save version 1.
+        """Create a new extension and save version 1.
 
         Args:
-            name: Kebab-case skill name (must be unique).
+            name: Kebab-case extension name (must be unique).
             description: Human-readable description.
             content: Full SKILL.md content.
-            created_by: Identifier of the user or agent creating the skill.
+            created_by: Identifier of the user or agent creating the extension.
 
         Returns:
-            The created skill row as a dict.
+            The created extension row as a dict.
 
         Raises:
             RuntimeError: If the database insert returns no data.
@@ -55,7 +55,7 @@ class SkillService:
         content_hash = self.compute_content_hash(content)
         now = datetime.now(UTC).isoformat()
 
-        skill_data = {
+        extension_data = {
             "name": name,
             "display_name": name,
             "description": description,
@@ -67,58 +67,58 @@ class SkillService:
             "updated_at": now,
         }
 
-        response = self.supabase_client.table(SKILLS_TABLE).insert(skill_data).execute()
+        response = self.supabase_client.table(EXTENSIONS_TABLE).insert(extension_data).execute()
 
         if not response.data:
-            raise RuntimeError(f"Failed to create skill '{name}': database returned no data")
+            raise RuntimeError(f"Failed to create extension '{name}': database returned no data")
 
-        skill = response.data[0]
-        logger.info(f"Skill created: {skill.get('id')} ({name})")
+        extension = response.data[0]
+        logger.info(f"Extension created: {extension.get('id')} ({name})")
 
         # Save initial version
         self._save_version(
-            skill_id=skill["id"],
+            extension_id=extension["id"],
             version_number=1,
             content=content,
             content_hash=content_hash,
             created_by=created_by,
         )
 
-        return skill
+        return extension
 
-    def list_skills(self) -> list[dict[str, Any]]:
-        """List all skills without the full content field.
+    def list_extensions(self) -> list[dict[str, Any]]:
+        """List all extensions without the full content field.
 
         Returns:
-            List of skill metadata dicts (id, name, description, version, timestamps).
+            List of extension metadata dicts (id, name, description, version, timestamps).
         """
         response = (
-            self.supabase_client.table(SKILLS_TABLE)
+            self.supabase_client.table(EXTENSIONS_TABLE)
             .select("id, name, display_name, description, current_version, content_hash, is_required, is_validated, tags, created_by, created_at, updated_at")
             .order("name")
             .execute()
         )
         return response.data
 
-    def list_skills_full(self) -> list[dict[str, Any]]:
-        """List all skills including full content (used by sync endpoint).
+    def list_extensions_full(self) -> list[dict[str, Any]]:
+        """List all extensions including full content (used by sync endpoint).
 
         Returns:
-            List of full skill dicts including the content field.
+            List of full extension dicts including the content field.
         """
-        response = self.supabase_client.table(SKILLS_TABLE).select("*").order("name").execute()
+        response = self.supabase_client.table(EXTENSIONS_TABLE).select("*").order("name").execute()
         return response.data
 
-    def get_skill(self, skill_id: str) -> dict[str, Any] | None:
-        """Get a single skill by ID including full content.
+    def get_extension(self, extension_id: str) -> dict[str, Any] | None:
+        """Get a single extension by ID including full content.
 
         Returns:
-            Skill dict or None if not found.
+            Extension dict or None if not found.
         """
         response = (
-            self.supabase_client.table(SKILLS_TABLE)
+            self.supabase_client.table(EXTENSIONS_TABLE)
             .select("*")
-            .eq("id", skill_id)
+            .eq("id", extension_id)
             .execute()
         )
         if response.data:
@@ -126,13 +126,13 @@ class SkillService:
         return None
 
     def find_by_name(self, name: str) -> dict[str, Any] | None:
-        """Find a skill by its unique kebab-case name.
+        """Find an extension by its unique kebab-case name.
 
         Returns:
-            Skill dict or None if not found.
+            Extension dict or None if not found.
         """
         response = (
-            self.supabase_client.table(SKILLS_TABLE)
+            self.supabase_client.table(EXTENSIONS_TABLE)
             .select("*")
             .eq("name", name)
             .limit(1)
@@ -142,28 +142,28 @@ class SkillService:
             return response.data[0]
         return None
 
-    def update_skill(
+    def update_extension(
         self,
-        skill_id: str,
+        extension_id: str,
         content: str,
         new_version: int,
         updated_by: str,
         description: str | None = None,
     ) -> dict[str, Any]:
-        """Update a skill's content and bump its version.
+        """Update an extension's content and bump its version.
 
         Args:
-            skill_id: The skill UUID.
+            extension_id: The extension UUID.
             content: New SKILL.md content.
             new_version: The new version number (caller must compute this).
             updated_by: Identifier of the user or agent performing the update.
             description: Optional updated description.
 
         Returns:
-            The updated skill row as a dict.
+            The updated extension row as a dict.
 
         Raises:
-            RuntimeError: If the database update returns no data (e.g., skill not found).
+            RuntimeError: If the database update returns no data (e.g., extension not found).
         """
         content_hash = self.compute_content_hash(content)
         now = datetime.now(UTC).isoformat()
@@ -178,42 +178,42 @@ class SkillService:
             update_data["description"] = description
 
         response = (
-            self.supabase_client.table(SKILLS_TABLE)
+            self.supabase_client.table(EXTENSIONS_TABLE)
             .update(update_data)
-            .eq("id", skill_id)
+            .eq("id", extension_id)
             .execute()
         )
 
         if not response.data:
-            raise RuntimeError(f"Failed to update skill '{skill_id}': database returned no data")
+            raise RuntimeError(f"Failed to update extension '{extension_id}': database returned no data")
 
-        skill = response.data[0]
-        logger.info(f"Skill updated: {skill_id} -> v{new_version}")
+        extension = response.data[0]
+        logger.info(f"Extension updated: {extension_id} -> v{new_version}")
 
         # Save version history entry
         self._save_version(
-            skill_id=skill_id,
+            extension_id=extension_id,
             version_number=new_version,
             content=content,
             content_hash=content_hash,
             created_by=updated_by,
         )
 
-        return skill
+        return extension
 
-    def delete_skill(self, skill_id: str) -> None:
-        """Delete a skill by ID.
+    def delete_extension(self, extension_id: str) -> None:
+        """Delete an extension by ID.
 
         Version history rows are expected to be cascade-deleted by the database.
         """
-        self.supabase_client.table(SKILLS_TABLE).delete().eq("id", skill_id).execute()
-        logger.info(f"Skill deleted: {skill_id}")
+        self.supabase_client.table(EXTENSIONS_TABLE).delete().eq("id", extension_id).execute()
+        logger.info(f"Extension deleted: {extension_id}")
 
-    def get_versions(self, skill_id: str) -> list[dict[str, Any]]:
-        """Get the version history for a skill, newest first.
+    def get_versions(self, extension_id: str) -> list[dict[str, Any]]:
+        """Get the version history for an extension, newest first.
 
         Args:
-            skill_id: The skill UUID.
+            extension_id: The extension UUID.
 
         Returns:
             List of version rows ordered by version_number descending.
@@ -221,23 +221,23 @@ class SkillService:
         response = (
             self.supabase_client.table(VERSIONS_TABLE)
             .select("*")
-            .eq("skill_id", skill_id)
+            .eq("extension_id", extension_id)
             .order("version_number", desc=True)
             .execute()
         )
         return response.data
 
-    def get_project_skills(self, project_id: str) -> list[dict[str, Any]]:
-        """Get all skill overrides for a project.
+    def get_project_extensions(self, project_id: str) -> list[dict[str, Any]]:
+        """Get all extension overrides for a project.
 
         Args:
             project_id: The project UUID.
 
         Returns:
-            List of project-skill override rows.
+            List of project-extension override rows.
         """
         response = (
-            self.supabase_client.table(PROJECT_SKILLS_TABLE)
+            self.supabase_client.table(PROJECT_EXTENSIONS_TABLE)
             .select("*")
             .eq("project_id", project_id)
             .execute()
@@ -247,33 +247,33 @@ class SkillService:
     def save_project_override(
         self,
         project_id: str,
-        skill_id: str,
+        extension_id: str,
         custom_content: str | None = None,
         is_enabled: bool = True,
     ) -> dict[str, Any]:
-        """Upsert a per-project skill override.
+        """Upsert a per-project extension override.
 
         Args:
             project_id: The project UUID.
-            skill_id: The skill UUID.
+            extension_id: The extension UUID.
             custom_content: Optional project-specific content override.
-            is_enabled: Whether the skill is enabled for this project.
+            is_enabled: Whether the extension is enabled for this project.
 
         Returns:
-            The upserted project-skill row.
+            The upserted project-extension row.
         """
         now = datetime.now(UTC).isoformat()
 
         upsert_data = {
             "project_id": project_id,
-            "skill_id": skill_id,
+            "extension_id": extension_id,
             "custom_content": custom_content,
             "is_enabled": is_enabled,
             "updated_at": now,
         }
 
         response = (
-            self.supabase_client.table(PROJECT_SKILLS_TABLE)
+            self.supabase_client.table(PROJECT_EXTENSIONS_TABLE)
             .upsert(upsert_data)
             .execute()
         )
@@ -281,23 +281,23 @@ class SkillService:
 
     def _save_version(
         self,
-        skill_id: str,
+        extension_id: str,
         version_number: int,
         content: str,
         content_hash: str,
         created_by: str,
     ) -> None:
-        """Save a version history entry for a skill.
+        """Save a version history entry for an extension.
 
         Args:
-            skill_id: The skill UUID.
+            extension_id: The extension UUID.
             version_number: Sequential version number.
             content: Full content snapshot at this version.
             content_hash: SHA-256 hash of the content.
             created_by: Identifier of the user or agent.
         """
         version_data = {
-            "skill_id": skill_id,
+            "extension_id": extension_id,
             "version_number": version_number,
             "content": content,
             "content_hash": content_hash,
@@ -306,4 +306,4 @@ class SkillService:
         }
 
         self.supabase_client.table(VERSIONS_TABLE).insert(version_data).execute()
-        logger.debug(f"Version {version_number} saved for skill {skill_id}")
+        logger.debug(f"Version {version_number} saved for extension {extension_id}")

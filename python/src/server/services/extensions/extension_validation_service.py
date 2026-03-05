@@ -1,4 +1,4 @@
-"""Skill content validation for SKILL.md files.
+"""Extension content validation for SKILL.md files.
 
 Validates frontmatter structure, naming conventions, content quality,
 and scans for accidentally embedded secrets before allowing upload.
@@ -9,8 +9,8 @@ from typing import Any
 
 import yaml
 
-# Maximum allowed size for a skill file (50 KB)
-MAX_SKILL_SIZE_BYTES = 50 * 1024
+# Maximum allowed size for an extension file (50 KB)
+MAX_EXTENSION_SIZE_BYTES = 50 * 1024
 
 # Minimum description length to avoid a quality warning
 MIN_DESCRIPTION_LENGTH = 20
@@ -35,7 +35,7 @@ HARDCODED_PATH_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
-class SkillValidationService:
+class ExtensionValidationService:
     """Validates SKILL.md content before upload or update.
 
     Returns a result dict with:
@@ -46,12 +46,12 @@ class SkillValidationService:
     """
 
     def validate(self, content: str, existing_name: str | None = None) -> dict[str, Any]:
-        """Validate skill content and return structured results.
+        """Validate extension content and return structured results.
 
         Args:
             content: Raw SKILL.md file content.
             existing_name: If provided, the name in frontmatter must match this value.
-                           Used when updating an existing skill to prevent name changes.
+                           Used when updating an existing extension to prevent name changes.
 
         Returns:
             Dict with keys: valid, errors, warnings, parsed.
@@ -80,7 +80,7 @@ class SkillValidationService:
             if existing_name is not None and name and name != existing_name:
                 errors.append(
                     f"Name mismatch: frontmatter name '{name}' does not match "
-                    f"existing skill name '{existing_name}'. Skill names cannot be changed after creation."
+                    f"existing extension name '{existing_name}'. Extension names cannot be changed after creation."
                 )
 
             # Extract and check description
@@ -153,7 +153,7 @@ class SkillValidationService:
         return stripped[second_delimiter + 3:].strip()
 
     def _check_name(self, name: Any, errors: list[str]) -> None:
-        """Validate the skill name field."""
+        """Validate the extension name field."""
         if not name or not isinstance(name, str) or not name.strip():
             errors.append("Missing required 'name' field in frontmatter.")
             return
@@ -162,13 +162,13 @@ class SkillValidationService:
             errors.append(
                 f"Invalid name format '{name}'. Must be kebab-case "
                 "(lowercase letters, digits, and hyphens; must start with a letter). "
-                "Examples: 'my-skill', 'archon-memory', 'code-review'."
+                "Examples: 'my-extension', 'archon-memory', 'code-review'."
             )
 
     def _check_description(self, description: Any, warnings: list[str]) -> None:
         """Check description quality (warnings only, never errors)."""
         if not description or not isinstance(description, str) or not description.strip():
-            warnings.append("Missing 'description' field in frontmatter. A description helps users discover the skill.")
+            warnings.append("Missing 'description' field in frontmatter. A description helps users discover the extension.")
             return
 
         if len(description.strip()) < MIN_DESCRIPTION_LENGTH:
@@ -180,10 +180,10 @@ class SkillValidationService:
     def _check_size_limit(self, content: str, errors: list[str]) -> None:
         """Check that content does not exceed the maximum allowed size."""
         size = len(content.encode("utf-8"))
-        if size > MAX_SKILL_SIZE_BYTES:
+        if size > MAX_EXTENSION_SIZE_BYTES:
             errors.append(
-                f"Content size ({size:,} bytes) exceeds the {MAX_SKILL_SIZE_BYTES:,}-byte limit. "
-                "Consider splitting into smaller, focused skills."
+                f"Content size ({size:,} bytes) exceeds the {MAX_EXTENSION_SIZE_BYTES:,}-byte limit. "
+                "Consider splitting into smaller, focused extensions."
             )
 
     def _check_secrets(self, content: str, errors: list[str]) -> None:
@@ -200,7 +200,7 @@ class SkillValidationService:
         if not re.search(r"^#{1,6}\s+", body, re.MULTILINE):
             warnings.append(
                 "No markdown headings found in the body. "
-                "Adding ## sections improves readability and helps AI parse the skill."
+                "Adding ## sections improves readability and helps AI parse the extension."
             )
 
     def _check_hardcoded_paths(self, body: str, warnings: list[str]) -> None:
