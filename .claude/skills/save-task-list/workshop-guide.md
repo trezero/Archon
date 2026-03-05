@@ -6,6 +6,8 @@ A simple command upgraded to a skill to showcase Claude Code extensibility featu
 across **two lifecycle phases**: during skill execution (skill-scoped hooks) and at
 next session startup (settings-level SessionStart hook).
 
+**Full demo steps**: See [part2-guide.md](../../workshop/part2-guide.md) — Feature 6.
+
 ## Features to Walk Through
 
 ### 1. Skill-Scoped Hooks (frontmatter `hooks:`)

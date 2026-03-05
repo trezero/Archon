@@ -5,6 +5,8 @@
 A command upgraded to a skill + custom agent pair, showcasing **context forking**,
 **custom agent delegation**, **prompt hooks as guardrails**, and **restricted toolsets**.
 
+**Full demo steps**: See [part2-guide.md](../../workshop/part2-guide.md) — Feature 7.
+
 ## Architecture
 
 ```

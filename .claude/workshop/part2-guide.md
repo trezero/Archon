@@ -28,6 +28,9 @@ Three skills, progressive complexity. Each builds on the previous:
 
 ## Feature 6: save-task-list — Hook Lifecycle (10 min)
 
+> **Deep dive**: [workshop-guide.md](../skills/save-task-list/workshop-guide.md) —
+> explains each feature concept in detail with "What is it?" definitions.
+
 ### What It Is
 
 A skill that saves the current session's task list for reuse in future sessions.
@@ -184,6 +187,9 @@ from the SessionStart hook, then the task count confirmation.
 
 ## Feature 7: triage — Fork + Agent + Tool Restriction (10 min)
 
+> **Deep dive**: [workshop-guide.md](../skills/triage/workshop-guide.md) —
+> architecture diagram, agent type comparison table, detailed feature explanations.
+
 ### What It Is
 
 A skill that triages GitHub issues by applying labels. Demonstrates the
@@ -331,6 +337,9 @@ gh issue view <issue-number> --json labels --jq '.labels[].name'
 ---
 
 ## Feature 8: rulecheck — Full Autonomy (15 min)
+
+> **Deep dive**: [workshop-guide.md](../skills/rulecheck/workshop-guide.md) —
+> all 17 features explained individually with "What is it?" + "In this skill" format.
 
 ### What It Is
 
