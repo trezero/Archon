@@ -86,6 +86,7 @@ class CreateTaskRequest(BaseModel):
 async def list_projects(
     response: Response,
     include_content: bool = True,
+    q: str | None = None,
     if_none_match: str | None = Header(None)
 ):
     """
@@ -113,6 +114,14 @@ async def list_projects(
         else:
             # Lightweight response doesn't need source formatting
             formatted_projects = result["projects"]
+
+        # Apply title search filter if provided
+        if q:
+            q_lower = q.lower()
+            formatted_projects = [
+                p for p in formatted_projects
+                if q_lower in (p.get("title") or "").lower()
+            ]
 
         # Monitor response size for optimization validation
         response_json = json.dumps(formatted_projects)
