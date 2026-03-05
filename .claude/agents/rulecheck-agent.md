@@ -8,7 +8,7 @@ isolation: worktree
 background: true
 memory: project
 permissionMode: acceptEdits
-maxTurns: 200
+maxTurns: 500
 model: sonnet
 hooks:
   PostToolUse:
