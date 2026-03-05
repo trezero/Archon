@@ -113,6 +113,18 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             api_logger.warning(f"Could not initialize prompt service: {e}")
 
+        # Seed bundled skills into the registry on startup
+        try:
+            from .services.skills.skill_seeding_service import SkillSeedingService
+
+            seeder = SkillSeedingService()
+            counts = seeder.seed_skills()
+            api_logger.info(
+                f"✅ Skills seeded: {counts['created']} created, "
+                f"{counts['updated']} updated, {counts['skipped']} unchanged"
+            )
+        except Exception as e:
+            api_logger.warning(f"Skill seeding failed (non-fatal): {e}", exc_info=True)
 
         # MCP Client functionality removed from architecture
         # Agents now use MCP tools directly
