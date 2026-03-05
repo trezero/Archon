@@ -137,7 +137,7 @@ def register_skill_tools(mcp: FastMCP):
 
                     if response.status_code == 200:
                         data = response.json()
-                        skills = data.get("skills", [])
+                        skills = data.get("all_skills", [])
                         optimized = [optimize_skill_response(s, include_content) for s in skills]
                         return json.dumps({
                             "success": True,

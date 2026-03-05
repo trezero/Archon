@@ -397,7 +397,7 @@ class TestGetSystemProjectSkills:
 
 class TestUnlinkSystemFromProject:
     def test_deletes_registration_record(self, service, mock_supabase):
-        """Should delete from archon_project_system_registrations."""
+        """Should delete from archon_project_system_registrations and return True when found."""
         builder = MagicMock()
         builder.delete.return_value = builder
         builder.eq.return_value = builder
@@ -405,7 +405,21 @@ class TestUnlinkSystemFromProject:
 
         mock_supabase.table.side_effect = lambda name: builder
 
-        service.unlink_system_from_project("sys-1", "proj-1")
+        result = service.unlink_system_from_project("sys-1", "proj-1")
 
+        assert result is True
         mock_supabase.table.assert_called_with("archon_project_system_registrations")
         builder.delete.assert_called_once()
+
+    def test_returns_false_when_not_found(self, service, mock_supabase):
+        """Should return False when the association does not exist."""
+        builder = MagicMock()
+        builder.delete.return_value = builder
+        builder.eq.return_value = builder
+        builder.execute.return_value = MagicMock(data=[])
+
+        mock_supabase.table.side_effect = lambda name: builder
+
+        result = service.unlink_system_from_project("sys-1", "proj-1")
+
+        assert result is False

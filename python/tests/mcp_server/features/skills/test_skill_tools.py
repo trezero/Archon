@@ -154,7 +154,7 @@ async def test_find_skills_for_project(registered_tools, mock_context):
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "skills": [
+        "all_skills": [
             {"id": "sk-1", "name": "memory", "description": "Memory skill", "installed": True},
         ],
     }

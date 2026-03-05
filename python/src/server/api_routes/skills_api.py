@@ -521,7 +521,10 @@ async def unlink_system_from_project(project_id: str, system_id: str):
         from ..services.skills.skill_sync_service import SkillSyncService
 
         sync_service = SkillSyncService()
-        sync_service.unlink_system_from_project(system_id, project_id)
+        found = sync_service.unlink_system_from_project(system_id, project_id)
+
+        if not found:
+            raise HTTPException(status_code=404, detail={"error": "System-project association not found"})
 
         logfire.info(f"System unlinked | project_id={project_id} | system_id={system_id}")
         return {"status": "unlinked", "project_id": project_id, "system_id": system_id}
