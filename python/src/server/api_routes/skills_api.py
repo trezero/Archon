@@ -8,7 +8,7 @@ Handles:
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ..config.logfire_config import get_logger, logfire
@@ -89,12 +89,15 @@ async def validate_skill_standalone(request: ValidateSkillRequest):
 
 
 @router.get("/skills")
-async def list_skills():
-    """List all skills (metadata only, no full content)."""
+async def list_skills(include_content: bool = Query(False)):
+    """List all skills. Pass ?include_content=true to include full skill content."""
     try:
-        logfire.debug("Listing all skills")
+        logfire.debug(f"Listing all skills | include_content={include_content}")
         service = SkillService()
-        skills = service.list_skills()
+        if include_content:
+            skills = service.list_skills_full()
+        else:
+            skills = service.list_skills()
         return {"skills": skills, "count": len(skills)}
     except HTTPException:
         raise
