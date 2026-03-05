@@ -38,6 +38,6 @@ def test_archon_setup_md_returns_200(mcp_test_client):
 
 
 def test_archon_setup_sh_contains_server_url(mcp_test_client):
-    with patch("src.mcp_server.mcp_server._render_setup_sh", return_value="#!/bin/bash\nARCHON_SERVER=http://testserver"):
+    with patch("src.mcp_server.mcp_server._render_setup_sh", return_value="#!/bin/bash\nARCHON_MCP_URL=http://testserver"):
         response = mcp_test_client.get("/archon-setup.sh")
-        assert "ARCHON_SERVER=" in response.text
+        assert "ARCHON_MCP_URL=" in response.text

@@ -657,10 +657,29 @@ except Exception as e:
 # ── Setup file endpoints ────────────────────────────────────────────────────
 
 
+def _get_setup_urls(request: Request) -> tuple[str, str]:
+    """Derive (api_url, mcp_url) for baking into setup scripts.
+
+    When the request comes through the Vite proxy, X-Forwarded-Host
+    carries the external hostname (e.g. '192.168.1.10:3737').
+    We extract just the hostname and combine with the known service ports
+    so users outside Docker get reachable URLs.
+    """
+    forwarded_host = request.headers.get("x-forwarded-host", "")
+    if forwarded_host:
+        hostname = forwarded_host.split(":")[0]
+    else:
+        hostname = request.url.hostname or "localhost"
+
+    mcp_port = os.environ.get("ARCHON_MCP_PORT", "8051")
+    api_port = os.environ.get("ARCHON_SERVER_PORT", "8181")
+    return f"http://{hostname}:{api_port}", f"http://{hostname}:{mcp_port}"
+
+
 async def http_archon_setup_sh(request: Request) -> PlainTextResponse:
-    """Serve archonSetup.sh with the Archon server URL baked in."""
-    server_url = str(request.base_url).rstrip("/")
-    script = _render_setup_sh(server_url)
+    """Serve archonSetup.sh with API and MCP URLs baked in."""
+    api_url, mcp_url = _get_setup_urls(request)
+    script = _render_setup_sh(api_url, mcp_url)
     return PlainTextResponse(
         script,
         headers={"Content-Disposition": 'attachment; filename="archonSetup.sh"'},
@@ -668,9 +687,9 @@ async def http_archon_setup_sh(request: Request) -> PlainTextResponse:
 
 
 async def http_archon_setup_bat(request: Request) -> PlainTextResponse:
-    """Serve archonSetup.bat with the Archon server URL baked in."""
-    server_url = str(request.base_url).rstrip("/")
-    script = _render_setup_bat(server_url)
+    """Serve archonSetup.bat with API and MCP URLs baked in."""
+    api_url, mcp_url = _get_setup_urls(request)
+    script = _render_setup_bat(api_url, mcp_url)
     return PlainTextResponse(
         script,
         headers={"Content-Disposition": 'attachment; filename="archonSetup.bat"'},
@@ -683,21 +702,27 @@ async def http_archon_setup_md(request: Request) -> PlainTextResponse:
     return PlainTextResponse(content)
 
 
-def _render_setup_sh(server_url: str) -> str:
-    """Generate archonSetup.sh with server_url injected."""
+def _render_setup_sh(api_url: str, mcp_url: str) -> str:
+    """Generate archonSetup.sh with API and MCP URLs injected."""
     for parent in Path(__file__).resolve().parents:
         candidate = parent / "integrations" / "claude-code" / "setup" / "archonSetup.sh"
         if candidate.exists():
-            return candidate.read_text().replace("{{ARCHON_SERVER_URL}}", server_url)
+            content = candidate.read_text()
+            content = content.replace("{{ARCHON_API_URL}}", api_url)
+            content = content.replace("{{ARCHON_MCP_URL}}", mcp_url)
+            return content
     raise FileNotFoundError("archonSetup.sh template not found")
 
 
-def _render_setup_bat(server_url: str) -> str:
-    """Generate archonSetup.bat with server_url injected."""
+def _render_setup_bat(api_url: str, mcp_url: str) -> str:
+    """Generate archonSetup.bat with API and MCP URLs injected."""
     for parent in Path(__file__).resolve().parents:
         candidate = parent / "integrations" / "claude-code" / "setup" / "archonSetup.bat"
         if candidate.exists():
-            return candidate.read_text().replace("{{ARCHON_SERVER_URL}}", server_url)
+            content = candidate.read_text()
+            content = content.replace("{{ARCHON_API_URL}}", api_url)
+            content = content.replace("{{ARCHON_MCP_URL}}", mcp_url)
+            return content
     raise FileNotFoundError("archonSetup.bat template not found")
 
 

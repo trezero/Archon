@@ -4,8 +4,9 @@
 
 set -e
 
-ARCHON_SERVER="{{ARCHON_SERVER_URL}}"
-API_BASE="$ARCHON_SERVER"
+ARCHON_API_URL="{{ARCHON_API_URL}}"
+ARCHON_MCP_URL="{{ARCHON_MCP_URL}}"
+API_BASE="$ARCHON_API_URL"
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -13,7 +14,7 @@ print_header() {
   echo ""
   echo "╔══════════════════════════════════════╗"
   echo "║         Archon Setup                 ║"
-  printf "║  Server: %-28s  ║\n" "$ARCHON_SERVER"
+  printf "║  Server: %-28s  ║\n" "$ARCHON_MCP_URL"
   echo "╚══════════════════════════════════════╝"
   echo ""
 }
@@ -152,7 +153,7 @@ echo ""
 # ── Step 3/4: Add MCP ────────────────────────────────────────────────────────
 
 echo "[3/4] Setting up Claude Code MCP..."
-MCP_URL="$ARCHON_SERVER/mcp"
+MCP_URL="$ARCHON_MCP_URL/mcp"
 if claude mcp add --transport http archon "$MCP_URL" 2>/dev/null; then
   echo "      ✓ Added archon MCP server ($MCP_URL)"
 else
@@ -164,7 +165,7 @@ echo ""
 
 echo "[4/4] Installing /archon-setup command..."
 mkdir -p "$HOME/.claude/commands"
-curl -sf "$ARCHON_SERVER/archon-setup.md" -o "$HOME/.claude/commands/archon-setup.md"
+curl -sf "$ARCHON_MCP_URL/archon-setup.md" -o "$HOME/.claude/commands/archon-setup.md"
 echo "      ✓ Installed to ~/.claude/commands/archon-setup.md"
 echo ""
 

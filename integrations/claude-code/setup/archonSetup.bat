@@ -1,12 +1,13 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-set "ARCHON_SERVER={{ARCHON_SERVER_URL}}"
+set "ARCHON_API_URL={{ARCHON_API_URL}}"
+set "ARCHON_MCP_URL={{ARCHON_MCP_URL}}"
 
 echo.
 echo  =============================================
 echo    Archon Setup
-echo    Server: %ARCHON_SERVER%
+echo    Server: %ARCHON_MCP_URL%
 echo  =============================================
 echo.
 
@@ -32,7 +33,7 @@ set "PROJECT_TITLE="
 set "ENCODED_DIR="
 for /f "delims=" %%E in ('powershell -Command "[uri]::EscapeDataString('!DIR_NAME!')"') do set "ENCODED_DIR=%%E"
 set "MATCH_FILE=%TEMP%\archon_match.json"
-curl -sf "%ARCHON_SERVER%/api/projects?include_content=false&q=!ENCODED_DIR!" -o "%MATCH_FILE%" 2>nul
+curl -sf "%ARCHON_API_URL%/api/projects?include_content=false&q=!ENCODED_DIR!" -o "%MATCH_FILE%" 2>nul
 
 set "MATCH_COUNT=0"
 for /f "delims=" %%C in ('powershell -Command "$d = Get-Content '%MATCH_FILE%' | ConvertFrom-Json; $d.projects.Count" 2^>nul') do set "MATCH_COUNT=%%C"
@@ -62,7 +63,7 @@ set "ENCODED_TERM="
 for /f "delims=" %%E in ('powershell -Command "[uri]::EscapeDataString('%SEARCH_TERM%')"') do set "ENCODED_TERM=%%E"
 
 set "RESULTS_FILE=%TEMP%\archon_projects.json"
-curl -sf "%ARCHON_SERVER%/api/projects?include_content=false&q=!ENCODED_TERM!" -o "%RESULTS_FILE%" 2>nul
+curl -sf "%ARCHON_API_URL%/api/projects?include_content=false&q=!ENCODED_TERM!" -o "%RESULTS_FILE%" 2>nul
 
 powershell -Command ^
   "$data = Get-Content '%RESULTS_FILE%' | ConvertFrom-Json; " ^
@@ -116,7 +117,7 @@ powershell -Command ^
   "@{ title = $n; description = $d } | ConvertTo-Json | Set-Content '%BODY_FILE%'"
 
 powershell -Command ^
-  "try { $r = Invoke-RestMethod -Uri '%ARCHON_SERVER%/api/projects' -Method POST -Body (Get-Content '%BODY_FILE%' -Raw) -ContentType 'application/json'; $r.id } catch { '' }" ^
+  "try { $r = Invoke-RestMethod -Uri '%ARCHON_API_URL%/api/projects' -Method POST -Body (Get-Content '%BODY_FILE%' -Raw) -ContentType 'application/json'; $r.id } catch { '' }" ^
   > "%CREATE_FILE%" 2>nul
 
 set "PROJECT_ID="
@@ -133,14 +134,14 @@ echo.
 
 :: ── Step 3/4: Add MCP ─────────────────────────────────────────────────────
 echo [3/4] Setting up Claude Code MCP...
-claude mcp add --transport http archon "%ARCHON_SERVER%/mcp" 2>nul || echo       (Already configured)
+claude mcp add --transport http archon "%ARCHON_MCP_URL%/mcp" 2>nul || echo       (Already configured)
 echo       Added archon MCP server
 echo.
 
 :: ── Step 4/4: Install /archon-setup ───────────────────────────────────────
 echo [4/4] Installing /archon-setup command...
 if not exist "%USERPROFILE%\.claude\commands" mkdir "%USERPROFILE%\.claude\commands"
-curl -sf "%ARCHON_SERVER%/archon-setup.md" -o "%USERPROFILE%\.claude\commands\archon-setup.md"
+curl -sf "%ARCHON_MCP_URL%/archon-setup.md" -o "%USERPROFILE%\.claude\commands\archon-setup.md"
 echo       Installed to %USERPROFILE%\.claude\commands\archon-setup.md
 echo.
 

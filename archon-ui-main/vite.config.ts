@@ -365,6 +365,7 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
         proxyConfig['/archon-setup'] = {
           target: isDocker ? `http://archon-mcp:${mcpPort}` : `http://localhost:${mcpPort}`,
           changeOrigin: true,
+          xfwd: true,
         };
 
         // General /api proxy (always enabled, comes after specific routes if agent work orders is enabled)
