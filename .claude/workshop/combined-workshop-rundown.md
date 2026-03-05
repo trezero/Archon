@@ -59,124 +59,16 @@ gotchas, and example commands.
 The "how to extend Claude Code yourself" half. Three skills, progressive
 complexity, each building on the previous. (Prepped by Rasmus.)
 
-### 6. save-task-list — Hook Lifecycle (10 min)
+**Follow the full guide**: [part2-guide.md](part2-guide.md) — contains all
+copy-paste prompts, feature tables, architecture diagrams, bash commands,
+talking points, and cleanup steps. Runs on this codebase (`dynamous-community/remote-coding-agent`).
 
-**Complexity**: Simple. One skill, no custom agent, hooks in skill frontmatter.
+**Section summary** (see part2-guide.md for full demo steps):
 
-**Features shown** (7):
-- Skills system (SKILL.md format, slash menu, frontmatter)
-- `disable-model-invocation: true`
-- `!`command`` dynamic context injection
-- `${CLAUDE_SESSION_ID}`
-- Hooks in skill frontmatter (scoped lifetime — active only while skill runs)
-- `type: prompt` hook (LLM evaluates completion quality)
-- `once: true` hook modifier
-- `statusMessage` (custom spinner text)
-- SessionStart hook (installed into settings.local.json for cross-session use)
-
-**Demo flow**:
-1. Open SKILL.md — walk through frontmatter fields
-2. Create some tasks first ("plan a refactor, break into tasks")
-3. Invoke `/save-task-list`
-4. Point out: statusMessage spinners, the Stop prompt hook catching incomplete output
-5. Show the SessionStart hook installed in `.claude/settings.local.json`
-6. Show the startup command: `CLAUDE_CODE_TASK_LIST_ID=<id> claude`
-7. (Optional) Start new session to show SessionStart hook firing
-
-**Key points**:
-- "Hooks in skill frontmatter are scoped — they only live while the skill runs."
-- "The prompt hook is an LLM checking another LLM's work. That's the quality gate pattern."
-- "This skill installs its own SessionStart hook — a self-configuring workflow."
-
-### 7. triage — Fork + Agent + Tool Restriction (10 min)
-
-**Complexity**: Medium. Adds context forking, custom agent delegation, tool restrictions.
-
-**Features shown** (6 new, building on previous):
-- `context: fork` (isolated subagent context — only summary returns)
-- `agent: triage-agent` (custom agent delegation)
-- Custom agent file (`.claude/agents/triage-agent.md`)
-- `allowed-tools: Bash(gh *), Read, Glob, Grep` (security boundary)
-- `type: prompt` hook in agent frontmatter (validates label completeness)
-- `argument-hint`
-- `$ARGUMENTS` (skill arguments passed through)
-
-**Demo flow**:
-1. Open both files side by side: SKILL.md + `.claude/agents/triage-agent.md`
-2. Trace the delegation chain: skill -> `context: fork` -> `agent: triage-agent`
-3. Point out `allowed-tools` — "only `gh` commands, no arbitrary shell"
-4. Invoke `/triage 42` (or a real issue number)
-5. While running: point out the main conversation stays clean
-6. Show the structured summary that returns (intermediate work discarded)
-7. Show the prompt hook validation ("Validating label application...")
-
-**Key points**:
-- "Skills define *what* to do. Agents define *how* to do it. Separating them makes both composable."
-- "`Bash(gh *)` is a security boundary — the agent can talk to GitHub but can't `rm -rf`."
-- "Context forking is information hygiene — 50K tokens of issue data stays in the fork."
-
-### 8. rulecheck — Full Autonomy (15 min)
-
-**Complexity**: High. The "kitchen sink" — 16 features composed into one autonomous workflow.
-
-**Features shown** (new on top of previous):
-- `isolation: worktree` (agent works in temporary worktree)
-- `background: true` (runs while user keeps working)
-- `memory: project` (persistent memory across runs)
-- `permissionMode: acceptEdits` (auto-approve file edits)
-- `maxTurns: 50` (safety cap)
-- `model: sonnet` per-agent
-- PreToolUse hook: `type: command` (block-dangerous.sh — safety gate)
-- PostToolUse hook: `type: command` (auto lint:fix after edits)
-- Stop hook: `type: command` (slack-notify.sh — Slack webhook)
-- Stop hook: `type: agent` (meta-judge — LLM evaluates LLM)
-- Supporting files (rules-guide.md, lazy-loaded)
-- Inter-hook communication (summary JSON file read by Slack hook)
-
-**Demo flow**:
-1. Open all files — show the architecture:
-   - `.claude/skills/rulecheck/SKILL.md`
-   - `.claude/agents/rulecheck-agent.md`
-   - `.claude/skills/rulecheck/hooks/block-dangerous.sh`
-   - `.claude/skills/rulecheck/hooks/slack-notify.sh`
-   - `.claude/skills/rulecheck/rules-guide.md`
-2. Trace the full chain: skill -> fork -> agent -> worktree -> background
-3. Test the safety hook live:
-   ```bash
-   echo '{"tool_input":{"command":"git push --force"}}' | .claude/skills/rulecheck/hooks/block-dangerous.sh
-   # Blocked!
-   echo '{"tool_input":{"command":"bun run lint"}}' | .claude/skills/rulecheck/hooks/block-dangerous.sh
-   # Allowed
-   ```
-4. Invoke `/rulecheck type safety`
-5. Show: background execution, user can keep chatting
-6. Show: agent scanning, fixing, validating in the worktree
-7. Show outputs: PR on GitHub, Slack notification, memory file, meta-judge feedback
-8. Compare before/after table (advisory vs autonomous)
-
-**Key points**:
-- "16 features, one skill. Each is simple — the power is in composition."
-- "The safety hook is a shell script. Reads JSON, checks a blocklist, exits 2. No framework."
-- "Memory makes the agent better over time. Each run builds on the last."
-- "The meta-judge is an LLM evaluating another LLM. It writes feedback the agent reads next run."
-- "Worktree isolation means the agent can break things safely. Your working directory is untouched."
-
-### 9. Auto-Memory with `/memory` (2 min)
-
-**Follows directly from rulecheck** — the agent just used `memory: project`.
-
-**What it is**: Claude auto-saves useful context (build commands, test
-conventions, debugging patterns) to a persistent memory directory. Survives
-context compaction. Shared across git worktrees of the same repo, so parallel
-agents benefit from the same learned context.
-
-**Demo flow**:
-1. After the rulecheck demo, point out the agent wrote to its memory
-2. Run `/memory` to show what Claude has saved globally for this project
-3. Show the auto-memory directory: `ls .claude/agent-memory/`
-
-**Key point**:
-- "Claude learns your project across sessions without you maintaining CLAUDE.md manually. The rulecheck agent's `memory: project` is the same system — scoped to that agent."
+6. **save-task-list** (10 min) — Skills system, hook types (prompt + command), `once: true`, SessionStart hooks, dynamic context injection
+7. **triage** (10 min) — `context: fork`, custom agent delegation, `allowed-tools` wildcards, prompt hook as LLM guardrail
+8. **rulecheck** (15 min) — Full autonomy: worktree isolation, background execution, persistent memory, 4 hook types (command + prompt + http + agent), meta-judge, safety gate, Slack notifications
+9. **Auto-Memory** (2 min) — `/memory`, agent memory directory, cross-worktree sharing
 
 ---
 
