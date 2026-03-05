@@ -5,7 +5,6 @@ description: |
   fixes the highest-impact ones in an isolated worktree, runs full validation,
   creates a PR, and notifies Slack. Uses memory to track progress across runs.
 disable-model-invocation: true
-context: fork
 agent: rulecheck-agent
 argument-hint: "[focus area]"
 ---
