@@ -198,6 +198,23 @@ complexity, each building on the previous. (Prepped by Rasmus.)
 - "The meta-judge is an LLM evaluating another LLM. It writes feedback the agent reads next run."
 - "Worktree isolation means the agent can break things safely. Your working directory is untouched."
 
+### 9. Auto-Memory with `/memory` (2 min)
+
+**Follows directly from rulecheck** — the agent just used `memory: project`.
+
+**What it is**: Claude auto-saves useful context (build commands, test
+conventions, debugging patterns) to a persistent memory directory. Survives
+context compaction. Shared across git worktrees of the same repo, so parallel
+agents benefit from the same learned context.
+
+**Demo flow**:
+1. After the rulecheck demo, point out the agent wrote to its memory
+2. Run `/memory` to show what Claude has saved globally for this project
+3. Show the auto-memory directory: `ls .claude/agent-memory/`
+
+**Key point**:
+- "Claude learns your project across sessions without you maintaining CLAUDE.md manually. The rulecheck agent's `memory: project` is the same system — scoped to that agent."
+
 ---
 
 ## Closing (~2 min)
