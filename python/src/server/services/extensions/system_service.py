@@ -1,7 +1,7 @@
 """System registration service for machine fingerprint tracking.
 
 Manages the archon_systems table, which records each machine that
-interacts with the skills management system.  A system is identified
+interacts with the extensions management system.  A system is identified
 by a unique fingerprint derived from hardware/OS attributes.
 """
 
