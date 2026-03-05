@@ -1,8 +1,9 @@
 #!/bin/bash
-# Stop hook: notify Slack with a formatted summary of the rulecheck run.
-# Reads the agent's summary file and formats a Slack message payload.
+# Stop hook: notify Slack with a summary of the rulecheck run.
+# Extracts info from the stop event JSON (last_assistant_message) since
+# the summary file may not exist yet when this hook fires.
 #
-# Input: JSON on stdin with stop event context (includes last_assistant_message)
+# Input: JSON on stdin with stop event context
 # Output: exit 0 always (notification failure should not block the agent)
 #
 # Requires: SLACK_WEBHOOK_URL environment variable (optional — graceful skip if unset)
@@ -15,35 +16,28 @@ if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
   exit 0
 fi
 
-# Try to read the summary file written by the agent
-SUMMARY_FILE=".claude/archon/rulecheck-last-run.json"
-if [ -f "$SUMMARY_FILE" ]; then
-  FIXED_COUNT=$(jq -r '.fixed_count // 0' "$SUMMARY_FILE" 2>/dev/null)
-  PR_URL=$(jq -r '.pr_url // "none"' "$SUMMARY_FILE" 2>/dev/null)
-  OPPORTUNITIES=$(jq -r '.opportunities_remaining // 0' "$SUMMARY_FILE" 2>/dev/null)
-  FOCUS=$(jq -r '.focus_area // "general"' "$SUMMARY_FILE" 2>/dev/null)
-  FILES_CHANGED=$(jq -r '.files_changed // [] | join(", ")' "$SUMMARY_FILE" 2>/dev/null)
-else
-  FIXED_COUNT="?"
-  PR_URL="none"
-  OPPORTUNITIES="?"
-  FOCUS="general"
-  FILES_CHANGED="unknown"
+# Extract the last assistant message from the stop event
+LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null)
+
+if [ -z "$LAST_MESSAGE" ]; then
+  LAST_MESSAGE="Rulecheck agent completed (no summary available)"
 fi
 
-# Build Slack message
-if [ "$PR_URL" != "none" ] && [ "$PR_URL" != "null" ] && [ -n "$PR_URL" ]; then
+# Try to extract a PR URL from the message
+PR_URL=$(echo "$LAST_MESSAGE" | grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' | head -1)
+
+if [ -n "$PR_URL" ]; then
   PR_LINE="*PR*: <${PR_URL}|View Pull Request>"
 else
   PR_LINE="*PR*: No PR created"
 fi
 
+# Truncate message for Slack (max 3000 chars in a section)
+SUMMARY=$(echo "$LAST_MESSAGE" | head -20 | cut -c1-2000)
+
 PAYLOAD=$(jq -n \
-  --arg fixed "$FIXED_COUNT" \
   --arg pr "$PR_LINE" \
-  --arg opps "$OPPORTUNITIES" \
-  --arg focus "$FOCUS" \
-  --arg files "$FILES_CHANGED" \
+  --arg summary "$SUMMARY" \
   '{
     "blocks": [
       {
@@ -52,16 +46,11 @@ PAYLOAD=$(jq -n \
       },
       {
         "type": "section",
-        "fields": [
-          { "type": "mrkdwn", "text": ("*Focus*: " + $focus) },
-          { "type": "mrkdwn", "text": ("*Fixed*: " + $fixed + " violations") },
-          { "type": "mrkdwn", "text": $pr },
-          { "type": "mrkdwn", "text": ("*Remaining*: " + $opps + " opportunities") }
-        ]
+        "text": { "type": "mrkdwn", "text": $pr }
       },
       {
         "type": "section",
-        "text": { "type": "mrkdwn", "text": ("*Files changed*: " + $files) }
+        "text": { "type": "mrkdwn", "text": $summary }
       }
     ]
   }')
