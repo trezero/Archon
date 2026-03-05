@@ -100,6 +100,15 @@ class SkillService:
         )
         return response.data
 
+    def list_skills_full(self) -> list[dict[str, Any]]:
+        """List all skills including full content (used by sync endpoint).
+
+        Returns:
+            List of full skill dicts including the content field.
+        """
+        response = self.supabase_client.table(SKILLS_TABLE).select("*").order("name").execute()
+        return response.data
+
     def get_skill(self, skill_id: str) -> dict[str, Any] | None:
         """Get a single skill by ID including full content.
 

@@ -332,7 +332,8 @@ To upgrade Archon to the latest version:
 - **Inline Ingestion**: Coding agents can read local project files and ingest them directly into the knowledge base via MCP tools — no manual upload needed
 - **Code Example Extraction**: Automatically identifies and indexes code examples from documentation for enhanced search
 - **Vector Search**: Advanced semantic search with contextual embeddings for precise knowledge retrieval
-- **Project-Scoped Search**: Filter search results by project so different repos' docs don't pollute each other
+- **Project-Scoped Search**: Filter search results by project so
+ different repos' docs don't pollute each other
 - **Source Management**: Organize knowledge by source, type, and tags for easy filtering. Add, sync, and delete sources programmatically
 
 ### 🤖 AI Integration

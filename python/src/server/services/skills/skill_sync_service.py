@@ -12,6 +12,7 @@ from ...config.logfire_config import get_logger
 logger = get_logger(__name__)
 
 SYSTEM_SKILLS_TABLE = "archon_system_skills"
+REGISTRATIONS_TABLE = "archon_project_system_registrations"
 
 
 class SkillSyncService:
@@ -107,6 +108,31 @@ class SkillSyncService:
             "unknown_local": unknown_local,
         }
 
+    # ── Project-System Registration ────────────────────────────────────────
+
+    def register_system_for_project(self, system_id: str, project_id: str) -> None:
+        """Upsert a registration record linking a system to a project.
+
+        Called on every skill sync so the system appears in the project's
+        Skills tab immediately, even before any skills are installed.
+        """
+        self.supabase_client.table(REGISTRATIONS_TABLE).upsert(
+            {"project_id": project_id, "system_id": system_id, "last_sync_at": "now()"},
+            on_conflict="project_id,system_id",
+        ).execute()
+
+    def get_project_systems(self, project_id: str) -> list[dict[str, Any]]:
+        """Get all systems that have synced with a project."""
+        result = (
+            self.supabase_client.table(REGISTRATIONS_TABLE)
+            .select("system_id, archon_systems(*)")
+            .eq("project_id", project_id)
+            .execute()
+        )
+        if not result.data:
+            return []
+        return [row["archon_systems"] for row in result.data if row.get("archon_systems")]
+
     # ── System Skill Queries ───────────────────────────────────────────────
 
     def get_system_skills(self, system_id: str, project_id: str) -> list[dict[str, Any]]:
@@ -137,31 +163,6 @@ class SkillSyncService:
             .execute()
         )
         return result.data or []
-
-    def get_project_systems(self, project_id: str) -> list[dict[str, Any]]:
-        """Get all systems that have skills installed for a project.
-
-        Deduplicates by system_id and returns the joined archon_systems
-        records. Rows where the joined system data is null are skipped.
-        """
-        result = (
-            self.supabase_client.table(SYSTEM_SKILLS_TABLE)
-            .select("system_id, archon_systems(*)")
-            .eq("project_id", project_id)
-            .execute()
-        )
-        if not result.data:
-            return []
-
-        seen: set[str] = set()
-        systems: list[dict[str, Any]] = []
-        for row in result.data:
-            sys_id = row["system_id"]
-            if sys_id not in seen:
-                seen.add(sys_id)
-                if row.get("archon_systems"):
-                    systems.append(row["archon_systems"])
-        return systems
 
     # ── Install Status Management ──────────────────────────────────────────
 

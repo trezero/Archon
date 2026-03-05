@@ -297,10 +297,9 @@ class TestQueueRemove:
 
 
 class TestGetProjectSystems:
-    def test_returns_deduplicated_systems(self, service, mock_supabase):
-        """Should deduplicate by system_id and return system records."""
+    def test_returns_registered_systems(self, service, mock_supabase):
+        """Should return systems from the registrations table."""
         query_data = [
-            {"system_id": "sys-1", "archon_systems": {"id": "sys-1", "name": "Dev Machine"}},
             {"system_id": "sys-1", "archon_systems": {"id": "sys-1", "name": "Dev Machine"}},
             {"system_id": "sys-2", "archon_systems": {"id": "sys-2", "name": "CI Server"}},
         ]

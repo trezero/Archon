@@ -1478,6 +1478,17 @@ CREATE INDEX IF NOT EXISTS idx_archon_system_skills_status ON archon_system_skil
 CREATE INDEX IF NOT EXISTS idx_archon_skill_versions_skill ON archon_skill_versions(skill_id);
 CREATE INDEX IF NOT EXISTS idx_archon_project_skills_project ON archon_project_skills(project_id);
 
+-- archon_project_system_registrations: Tracks which systems have synced with which projects
+CREATE TABLE IF NOT EXISTS archon_project_system_registrations (
+  project_id UUID NOT NULL REFERENCES archon_projects(id) ON DELETE CASCADE,
+  system_id  UUID NOT NULL REFERENCES archon_systems(id)  ON DELETE CASCADE,
+  last_sync_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (project_id, system_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_system_reg_project ON archon_project_system_registrations(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_system_reg_system  ON archon_project_system_registrations(system_id);
+
 -- =====================================================
 -- SETUP COMPLETE
 -- =====================================================

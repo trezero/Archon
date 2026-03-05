@@ -367,7 +367,7 @@ async def _handle_sync(
     system_name: str | None,
     project_id: str | None,
 ) -> str:
-    """Sync local skills with the remote registry."""
+    """Sync local skills with the remote registry via the project sync endpoint."""
     if not local_skills:
         return MCPErrorFormatter.format_error(
             "validation_error",
@@ -378,6 +378,12 @@ async def _handle_sync(
         return MCPErrorFormatter.format_error(
             "validation_error",
             "system_fingerprint is required for sync action",
+        )
+
+    if not project_id:
+        return MCPErrorFormatter.format_error(
+            "validation_error",
+            "project_id is required for sync action",
         )
 
     # Parse local skills
@@ -394,77 +400,37 @@ async def _handle_sync(
             f"Invalid JSON in local_skills: {e}",
         )
 
-    # Register or find the system
-    system_payload = {
+    payload = {
         "fingerprint": system_fingerprint,
-        "name": system_name or system_fingerprint,
+        "local_skills": local_list,
     }
-    system_response = await client.post(
-        urljoin(api_url, "/api/systems"),
-        json=system_payload,
+    if system_name:
+        payload["system_name"] = system_name
+
+    response = await client.post(
+        urljoin(api_url, f"/api/projects/{project_id}/sync"),
+        json=payload,
     )
 
-    resolved_system_id: str | None = None
-    if system_response.status_code in (200, 201):
-        system_data = system_response.json()
-        resolved_system_id = system_data.get("system", {}).get("id") or system_data.get("id")
-    elif system_response.status_code == 409:
-        # System already exists - find it
-        systems_response = await client.get(urljoin(api_url, "/api/systems"))
-        if systems_response.status_code == 200:
-            systems = systems_response.json().get("systems", [])
-            existing = next((s for s in systems if s.get("fingerprint") == system_fingerprint), None)
-            if existing:
-                resolved_system_id = existing["id"]
+    if response.status_code != 200:
+        return MCPErrorFormatter.from_http_error(response, "sync system with project")
 
-    # Get remote skills catalog
-    remote_response = await client.get(urljoin(api_url, "/api/skills"))
-    if remote_response.status_code != 200:
-        return MCPErrorFormatter.from_http_error(remote_response, "fetch remote skills for sync")
-
-    remote_skills = remote_response.json().get("skills", [])
-    remote_by_name = {s.get("name"): s for s in remote_skills}
-
-    # Build local index
-    local_by_name = {s.get("name"): s for s in local_list}
-
-    # Compare and build sync report
-    to_upload = []  # Local skills not in remote or with different hash
-    to_download = []  # Remote skills not in local or with different hash
-    up_to_date = []
-
-    for name, local_skill in local_by_name.items():
-        remote_skill = remote_by_name.get(name)
-        if not remote_skill:
-            to_upload.append({"name": name, "reason": "not_in_remote"})
-        elif local_skill.get("content_hash") != remote_skill.get("content_hash"):
-            to_upload.append({"name": name, "reason": "hash_mismatch"})
-        else:
-            up_to_date.append(name)
-
-    for name, remote_skill in remote_by_name.items():
-        if name not in local_by_name:
-            to_download.append({
-                "name": name,
-                "skill_id": remote_skill.get("id"),
-                "reason": "not_in_local",
-            })
+    data = response.json()
+    system = data.get("system", {})
 
     return json.dumps({
         "success": True,
-        "sync_report": {
-            "system_id": resolved_system_id,
-            "project_id": project_id,
-            "to_upload": to_upload,
-            "to_download": to_download,
-            "up_to_date": up_to_date,
-            "local_count": len(local_list),
-            "remote_count": len(remote_skills),
-        },
+        "system": system,
+        "pending_install": data.get("pending_install", []),
+        "pending_remove": data.get("pending_remove", []),
+        "local_changes": data.get("local_changes", []),
+        "unknown_local": data.get("unknown_local", []),
+        "in_sync": data.get("in_sync", []),
         "message": (
-            f"Sync report: {len(to_upload)} to upload, "
-            f"{len(to_download)} to download, "
-            f"{len(up_to_date)} up to date"
+            f"Sync complete: {len(data.get('in_sync', []))} in sync, "
+            f"{len(data.get('pending_install', []))} to install, "
+            f"{len(data.get('local_changes', []))} with local changes, "
+            f"{len(data.get('unknown_local', []))} unknown local"
         ),
     })
 

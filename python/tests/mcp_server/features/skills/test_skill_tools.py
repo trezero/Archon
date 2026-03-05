@@ -394,33 +394,29 @@ async def test_manage_skills_invalid_action(registered_tools, mock_context):
 
 @pytest.mark.asyncio
 async def test_manage_skills_sync(registered_tools, mock_context):
-    """Test sync builds a correct sync report."""
+    """Test sync calls the project sync endpoint and returns correct field names."""
     manage_skills = registered_tools["manage_skills"]
 
-    # POST /api/systems returns new system
-    mock_system_response = MagicMock()
-    mock_system_response.status_code = 200
-    mock_system_response.json.return_value = {"system": {"id": "sys-1"}}
-
-    # GET /api/skills returns remote catalog
-    mock_skills_response = MagicMock()
-    mock_skills_response.status_code = 200
-    mock_skills_response.json.return_value = {
-        "skills": [
-            {"id": "sk-1", "name": "memory", "content_hash": "aaa"},
-            {"id": "sk-2", "name": "deploy", "content_hash": "bbb"},
-        ],
+    # POST /api/projects/{project_id}/sync returns sync report
+    mock_sync_response = MagicMock()
+    mock_sync_response.status_code = 200
+    mock_sync_response.json.return_value = {
+        "system": {"id": "sys-1", "name": "My Machine", "is_new": True},
+        "in_sync": ["memory"],
+        "local_changes": [],
+        "pending_install": [{"skill_id": "sk-2", "name": "deploy", "content": "---\nname: deploy\n---\n"}],
+        "pending_remove": [],
+        "unknown_local": [{"name": "new-skill", "content_hash": "ccc"}],
     }
 
     with patch("src.mcp_server.features.skills.skill_tools.httpx.AsyncClient") as mock_client:
         mock_async_client = AsyncMock()
-        mock_async_client.post.return_value = mock_system_response
-        mock_async_client.get.return_value = mock_skills_response
+        mock_async_client.post.return_value = mock_sync_response
         mock_client.return_value.__aenter__.return_value = mock_async_client
 
         local_skills = json.dumps([
-            {"name": "memory", "content_hash": "aaa"},  # matches remote
-            {"name": "new-skill", "content_hash": "ccc"},  # not in remote
+            {"name": "memory", "content_hash": "aaa"},
+            {"name": "new-skill", "content_hash": "ccc"},
         ])
 
         result = await manage_skills(
@@ -434,15 +430,13 @@ async def test_manage_skills_sync(registered_tools, mock_context):
 
         data = json.loads(result)
         assert data["success"] is True
-
-        report = data["sync_report"]
-        assert report["system_id"] == "sys-1"
-        assert len(report["up_to_date"]) == 1
-        assert report["up_to_date"][0] == "memory"
-        assert len(report["to_upload"]) == 1
-        assert report["to_upload"][0]["name"] == "new-skill"
-        assert len(report["to_download"]) == 1
-        assert report["to_download"][0]["name"] == "deploy"
+        assert data["system"]["id"] == "sys-1"
+        assert data["system"]["is_new"] is True
+        assert data["in_sync"] == ["memory"]
+        assert len(data["pending_install"]) == 1
+        assert data["pending_install"][0]["name"] == "deploy"
+        assert len(data["unknown_local"]) == 1
+        assert data["unknown_local"][0]["name"] == "new-skill"
 
 
 @pytest.mark.asyncio
@@ -457,5 +451,10 @@ async def test_manage_skills_sync_missing_params(registered_tools, mock_context)
 
     # Missing system_fingerprint
     result = await manage_skills(mock_context, action="sync", local_skills="[]")
+    data = json.loads(result)
+    assert data["success"] is False
+
+    # Missing project_id
+    result = await manage_skills(mock_context, action="sync", local_skills="[]", system_fingerprint="fp")
     data = json.loads(result)
     assert data["success"] is False

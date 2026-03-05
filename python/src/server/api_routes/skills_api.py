@@ -64,6 +64,12 @@ class RegisterSystemRequest(BaseModel):
     os: str | None = None
 
 
+class SyncSystemRequest(BaseModel):
+    fingerprint: str
+    system_name: str | None = None
+    local_skills: list[dict[str, Any]] = []
+
+
 # ── Skills CRUD ───────────────────────────────────────────────────────────────
 
 
@@ -368,6 +374,74 @@ async def delete_system(system_id: str):
 # ── Project-scoped skills ─────────────────────────────────────────────────────
 
 
+@router.post("/projects/{project_id}/sync")
+async def sync_system(project_id: str, request: SyncSystemRequest):
+    """Register a system for a project and compute a skill sync report.
+
+    Registers the system globally (or updates last_seen), associates it with
+    the project so it appears in the Skills tab, then compares the system's
+    local skills against the Archon registry and returns a full sync report.
+    """
+    try:
+        logfire.info(f"Syncing system | project_id={project_id} | fingerprint={request.fingerprint}")
+
+        system_service = SystemService()
+        skill_service = SkillService()
+
+        from ..services.skills.skill_sync_service import SkillSyncService
+
+        sync_service = SkillSyncService()
+
+        # Register or look up system
+        existing = system_service.find_by_fingerprint(request.fingerprint)
+        if existing:
+            system_service.update_last_seen(existing["id"])
+            system = existing
+            is_new = False
+        else:
+            name = request.system_name or request.fingerprint
+            system = system_service.register_system(
+                fingerprint=request.fingerprint,
+                name=name,
+            )
+            is_new = True
+
+        system_id = system["id"]
+
+        # Associate system with this project
+        sync_service.register_system_for_project(system_id, project_id)
+
+        # Fetch full skill registry (content needed for pending_install items)
+        archon_skills = skill_service.list_skills_full()
+
+        # Fetch existing system-project install records
+        system_skills = sync_service.get_system_skills(system_id, project_id)
+
+        # Compute sync report
+        report = sync_service.compute_sync_report(
+            local_skills=request.local_skills,
+            archon_skills=archon_skills,
+            system_skills=system_skills,
+        )
+
+        logfire.info(
+            f"Sync complete | project_id={project_id} | system_id={system_id} | "
+            f"in_sync={len(report['in_sync'])} | pending_install={len(report['pending_install'])} | "
+            f"local_changes={len(report['local_changes'])} | unknown_local={len(report['unknown_local'])}"
+        )
+
+        return {
+            "system": {**system, "is_new": is_new},
+            **report,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logfire.error(f"Failed to sync system | project_id={project_id} | error={e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"error": str(e)}) from e
+
+
 @router.get("/projects/{project_id}/skills")
 async def get_project_skills(project_id: str):
     """Get skills data for a project.
@@ -454,7 +528,7 @@ async def install_skill(project_id: str, skill_id: str, request: InstallSkillReq
             )
 
             logfire.info(f"Skill install queued | project_id={project_id} | skill_id={skill_id}")
-            return result
+            return {"queued": result, "skill_id": skill_id, "project_id": project_id}
         except ImportError:
             raise HTTPException(
                 status_code=501,
@@ -494,7 +568,7 @@ async def remove_skill(project_id: str, skill_id: str, request: RemoveSkillReque
             )
 
             logfire.info(f"Skill removal queued | project_id={project_id} | skill_id={skill_id}")
-            return result
+            return {"queued": result, "skill_id": skill_id, "project_id": project_id}
         except ImportError:
             raise HTTPException(
                 status_code=501,
