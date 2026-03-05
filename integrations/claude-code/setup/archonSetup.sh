@@ -117,9 +117,13 @@ PYEOF
       printf "      Description (optional): "
       read -r NEW_DESC
       echo "      Creating project..."
+      CREATE_PAYLOAD=$(python3 -c "
+import json, sys
+print(json.dumps({'title': sys.argv[1], 'description': sys.argv[2]}))
+" "$NEW_NAME" "$NEW_DESC")
       CREATE_RESULT=$(curl -sf -X POST "$API_BASE/api/projects" \
         -H "Content-Type: application/json" \
-        -d "{\"title\":\"$NEW_NAME\",\"description\":\"$NEW_DESC\"}" 2>/dev/null)
+        -d "$CREATE_PAYLOAD" 2>/dev/null)
       PROJECT_ID=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d.get('id',''))" "$CREATE_RESULT")
       PROJECT_TITLE="$NEW_NAME"
       if [ -z "$PROJECT_ID" ]; then
