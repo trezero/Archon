@@ -31,54 +31,17 @@ export IS_DEMO=1          # Hide email/org in UI
 The "what Claude Code can do now" half. Shows the multi-agent orchestration
 platform that shipped in Jan-Feb 2026. (Prepped by Thomas.)
 
-### 1. Agent Teams (10 min)
+**Follow the full guide**: [part1-guide.md](part1-guide.md) — contains all
+copy-paste prompts, comparison tables, ASCII diagrams, keyboard shortcuts,
+gotchas, and example commands.
 
-**Features shown**: Split panes, shared task list, teammate messaging, delegate mode
+**Section summary** (see part1-guide.md for full demo steps):
 
-- Start Claude in tmux, give a 3-teammate review task
-- Show split panes (each teammate working independently)
-- Show teammates messaging each other (not just reporting to lead)
-- Demo Shift+Down (cycle), Ctrl+T (task list), Shift+Tab (delegate mode)
-- Key point: "Subagents report up. Teammates talk to each other."
-
-### 2. Native Git Worktrees (5 min)
-
-**Features shown**: `--worktree` CLI flag, `--worktree + --tmux`, cleanup behavior
-
-- `git worktree list` (before)
-- `claude --worktree demo-feature`
-- Make a change, prove isolation from main tree
-- Exit, show auto-cleanup
-- Key point: "Without worktrees, parallel agents are fragile. With worktrees, each agent owns the entire codebase."
-
-### 3. /batch — Parallel Codebase-Wide Changes (8 min)
-
-**Features shown**: Decomposition plan, approval gate, parallel execution, PR per unit
-
-- Show a pattern to fix (`grep -r "console.log" src/`)
-- `/batch replace all console.log with structured logger`
-- Review the decomposition plan (audience sees the approval gate)
-- Approve, watch parallel execution status table
-- `gh pr list` to show results
-- Key point: "A week-long migration, parallelized. Each PR is independently reviewable."
-
-### 4. Remote Control (5 min)
-
-**Features shown**: `/rc`, QR code, phone connection, architecture (code stays local)
-
-- Start working on a task
-- `/rc` — show QR code
-- Scan from phone, type message from phone
-- Key point: "Your code never leaves your machine. Only chat messages flow through the bridge."
-
-### 5. Session Teleportation (5 min)
-
-**Features shown**: `--remote` (local->cloud), `/tp` (cloud->local), plan+execute pattern
-
-- `claude --remote "Add input validation to all API endpoints"`
-- Show it running on claude.ai
-- `/tp` to pull it back
-- Key point: "Plan locally, execute remotely, teleport back when done."
+1. **Agent Teams** (10 min) — Split panes, shared task list, teammate messaging, delegate mode
+2. **Native Git Worktrees** (5 min) — `--worktree` CLI flag, isolation proof, auto-cleanup
+3. **`/batch`** (8 min) — Decomposition plan, approval gate, parallel execution, PR per unit
+4. **Remote Control** (5 min) — `/rc`, QR code, phone connection, code stays local
+5. **Session Teleportation** (5 min) — `--remote` to cloud, `/tp` back to local
 
 ---
 
