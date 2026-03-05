@@ -28,6 +28,9 @@ hooks:
         - type: command
           command: ".claude/skills/rulecheck/hooks/slack-notify.sh"
           statusMessage: "Notifying Slack..."
+        - type: http
+          url: https://hooks.slack.com/services/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
+          statusMessage: "Posting run event to Slack..."
         - type: agent
           prompt: |
             You are a meta-judge evaluating the rulecheck agent's execution.
