@@ -390,3 +390,22 @@ class TestGetSystemProjectSkills:
         result = service.get_system_project_skills("sys-1", "proj-1")
 
         assert result == []
+
+
+# ── unlink_system_from_project ───────────────────────────────────────────────
+
+
+class TestUnlinkSystemFromProject:
+    def test_deletes_registration_record(self, service, mock_supabase):
+        """Should delete from archon_project_system_registrations."""
+        builder = MagicMock()
+        builder.delete.return_value = builder
+        builder.eq.return_value = builder
+        builder.execute.return_value = MagicMock(data=[{"project_id": "proj-1", "system_id": "sys-1"}])
+
+        mock_supabase.table.side_effect = lambda name: builder
+
+        service.unlink_system_from_project("sys-1", "proj-1")
+
+        mock_supabase.table.assert_called_with("archon_project_system_registrations")
+        builder.delete.assert_called_once()

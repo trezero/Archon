@@ -121,6 +121,20 @@ class SkillSyncService:
             on_conflict="project_id,system_id",
         ).execute()
 
+    def unlink_system_from_project(self, system_id: str, project_id: str) -> None:
+        """Remove a system's association with a project.
+
+        Deletes from archon_project_system_registrations. The system remains
+        globally in archon_systems — only the project link is removed.
+        """
+        (
+            self.supabase_client.table(REGISTRATIONS_TABLE)
+            .delete()
+            .eq("project_id", project_id)
+            .eq("system_id", system_id)
+            .execute()
+        )
+
     def get_project_systems(self, project_id: str) -> list[dict[str, Any]]:
         """Get all systems that have synced with a project."""
         result = (

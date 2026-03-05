@@ -508,6 +508,34 @@ async def get_project_systems(project_id: str):
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
+@router.delete("/projects/{project_id}/systems/{system_id}")
+async def unlink_system_from_project(project_id: str, system_id: str):
+    """Remove a system's association with a project.
+
+    The system remains in the global archon_systems table — only the
+    project-level link in archon_project_system_registrations is removed.
+    """
+    try:
+        logfire.info(f"Unlinking system | project_id={project_id} | system_id={system_id}")
+
+        from ..services.skills.skill_sync_service import SkillSyncService
+
+        sync_service = SkillSyncService()
+        sync_service.unlink_system_from_project(system_id, project_id)
+
+        logfire.info(f"System unlinked | project_id={project_id} | system_id={system_id}")
+        return {"status": "unlinked", "project_id": project_id, "system_id": system_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logfire.error(
+            f"Failed to unlink system | project_id={project_id} | system_id={system_id} | error={e}",
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail={"error": str(e)}) from e
+
+
 @router.post("/projects/{project_id}/skills/{skill_id}/install")
 async def install_skill(project_id: str, skill_id: str, request: InstallSkillRequest):
     """Queue a skill install on specified systems for a project."""
