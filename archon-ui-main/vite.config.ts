@@ -360,6 +360,13 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
           console.log('⚠️ [VITE PROXY] Agent Work Orders proxy disabled via AGENT_WORK_ORDERS_ENABLED=false');
         }
         
+        // Archon setup script download proxy (served by MCP server)
+        const mcpPort = env.ARCHON_MCP_PORT || '8051';
+        proxyConfig['/archon-setup'] = {
+          target: isDocker ? `http://archon-mcp:${mcpPort}` : `http://localhost:${mcpPort}`,
+          changeOrigin: true,
+        };
+
         // General /api proxy (always enabled, comes after specific routes if agent work orders is enabled)
         proxyConfig['/api'] = {
           target: `http://${proxyHost}:${port}`,

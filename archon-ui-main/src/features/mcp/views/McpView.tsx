@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { Loader, Server } from "lucide-react";
 import type React from "react";
 import { useStaggeredEntrance } from "../../../hooks/useStaggeredEntrance";
-import { McpClientList, McpConfigSection, McpStatusBar } from "../components";
+import { ArchonSetupDownload, McpClientList, McpConfigSection, McpStatusBar } from "../components";
 import { useMcpClients, useMcpConfig, useMcpSessionInfo, useMcpStatus } from "../hooks";
 
 export const McpView: React.FC = () => {
@@ -85,6 +85,11 @@ export const McpView: React.FC = () => {
         </svg>
         MCP Status Dashboard
       </motion.h1>
+
+      {/* Connect a New Machine */}
+      <motion.div variants={itemVariants}>
+        <ArchonSetupDownload />
+      </motion.div>
 
       {/* Status Bar */}
       <motion.div variants={itemVariants}>

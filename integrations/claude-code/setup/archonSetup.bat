@@ -100,15 +100,33 @@ set /p "NEW_NAME=      New project name [%DIR_NAME%]: "
 if "%NEW_NAME%"=="" set "NEW_NAME=%DIR_NAME%"
 set /p "NEW_DESC=      Description (optional): "
 echo       Creating project...
+set "NAME_FILE=%TEMP%\archon_name.txt"
+set "DESC_FILE=%TEMP%\archon_desc.txt"
+set "BODY_FILE=%TEMP%\archon_body.json"
 set "CREATE_FILE=%TEMP%\archon_create.json"
+
+:: Write user inputs to temp files so they are never interpolated into PowerShell command strings
+echo !NEW_NAME!>"%NAME_FILE%"
+echo !NEW_DESC!>"%DESC_FILE%"
+
+:: Build JSON body by reading temp files inside PowerShell — no user input in the -Command string
 powershell -Command ^
-  "$body = @{ title = '%NEW_NAME%'; description = '%NEW_DESC%' } | ConvertTo-Json; " ^
-  "Invoke-RestMethod -Uri '%ARCHON_SERVER%/api/projects' -Method POST -Body $body -ContentType 'application/json' | ConvertTo-Json" ^
+  "$n = (Get-Content '%NAME_FILE%').Trim(); " ^
+  "$d = (Get-Content '%DESC_FILE%').Trim(); " ^
+  "@{ title = $n; description = $d } | ConvertTo-Json | Set-Content '%BODY_FILE%'"
+
+powershell -Command ^
+  "try { $r = Invoke-RestMethod -Uri '%ARCHON_SERVER%/api/projects' -Method POST -Body (Get-Content '%BODY_FILE%' -Raw) -ContentType 'application/json'; $r.id } catch { '' }" ^
   > "%CREATE_FILE%" 2>nul
-for /f "delims=" %%I in ('powershell -Command ^
-  "$d = Get-Content '%CREATE_FILE%' | ConvertFrom-Json; $d.id"') do set "PROJECT_ID=%%I"
-set "PROJECT_TITLE=%NEW_NAME%"
-echo       Created "%NEW_NAME%"
+
+set "PROJECT_ID="
+for /f "delims=" %%I in (%CREATE_FILE%) do set "PROJECT_ID=%%I"
+set "PROJECT_TITLE=!NEW_NAME!"
+if defined PROJECT_ID (
+  echo       Created "!NEW_NAME!"
+) else (
+  echo       Error creating project. Continuing without project link.
+)
 
 :project_done
 echo.
@@ -128,10 +146,19 @@ echo.
 
 :: ── Write initial state ───────────────────────────────────────────────────
 if not exist ".claude" mkdir ".claude"
+set "SYSNAME_FILE=%TEMP%\archon_sysname.txt"
+set "PROJID_FILE=%TEMP%\archon_projid.txt"
+
+:: Write user-supplied values to temp files to avoid interpolation into PowerShell command strings
+echo !SYSTEM_NAME!>"%SYSNAME_FILE%"
+echo !PROJECT_ID!>"%PROJID_FILE%"
+
 powershell -Command ^
+  "$sysName = (Get-Content '%SYSNAME_FILE%').Trim(); " ^
+  "$projId = (Get-Content '%PROJID_FILE%').Trim(); " ^
   "$state = if (Test-Path '.claude\archon-state.json') { Get-Content '.claude\archon-state.json' | ConvertFrom-Json } else { @{} }; " ^
-  "$state | Add-Member -Force NotePropertyName 'system_name' -NotePropertyValue '%SYSTEM_NAME%'; " ^
-  "if ('%PROJECT_ID%') { $state | Add-Member -Force NotePropertyName 'archon_project_id' -NotePropertyValue '%PROJECT_ID%' }; " ^
+  "$state | Add-Member -Force NotePropertyName 'system_name' -NotePropertyValue $sysName; " ^
+  "if ($projId) { $state | Add-Member -Force NotePropertyName 'archon_project_id' -NotePropertyValue $projId }; " ^
   "$state | ConvertTo-Json | Set-Content '.claude\archon-state.json'"
 
 :: ── Done ─────────────────────────────────────────────────────────────────
