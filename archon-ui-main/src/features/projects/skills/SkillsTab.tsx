@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { SystemCard } from "./components/SystemCard";
 import { SystemSkillList } from "./components/SystemSkillList";
-import { useInstallSkill, useProjectSkills, useRemoveSkill } from "./hooks/useSkillQueries";
+import { useInstallSkill, useProjectSkills, useRemoveSkill, useUnlinkSystem } from "./hooks/useSkillQueries";
 
 interface SkillsTabProps {
   projectId: string;
@@ -11,6 +11,7 @@ export function SkillsTab({ projectId }: SkillsTabProps) {
   const { data, isLoading, error } = useProjectSkills(projectId);
   const installSkill = useInstallSkill();
   const removeSkill = useRemoveSkill();
+  const unlinkSystem = useUnlinkSystem();
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
 
   if (isLoading) {
@@ -45,6 +46,13 @@ export function SkillsTab({ projectId }: SkillsTabProps) {
     });
   };
 
+  const handleUnlink = (systemId: string) => {
+    unlinkSystem.mutate({ projectId, systemId });
+    if (selectedSystemId === systemId) {
+      setSelectedSystemId(null);
+    }
+  };
+
   if (systems.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-zinc-400 space-y-2">
@@ -67,6 +75,7 @@ export function SkillsTab({ projectId }: SkillsTabProps) {
             system={system}
             isSelected={system.id === (selectedSystem?.id ?? null)}
             onClick={() => setSelectedSystemId(system.id)}
+            onUnlink={handleUnlink}
           />
         ))}
       </div>
