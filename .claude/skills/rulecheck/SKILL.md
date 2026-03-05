@@ -9,39 +9,25 @@ agent: rulecheck-agent
 argument-hint: "[focus area]"
 ---
 
-# Rulecheck — Autonomous Rule Adherence Checker
+# Rulecheck
 
-Scan the codebase for rule violations, fix the top items, and create a PR.
+Launch the rulecheck-agent to autonomously scan and fix CLAUDE.md rule violations.
 
-## Current Context
+## Your Job (Main Agent)
 
-- **Branch**: !`git branch --show-current`
-- **Recent changes**: !`git log --oneline -10`
+You are the orchestrator. Your ONLY job is to launch the rulecheck-agent and
+report its results when it completes. You do NOT do the scanning or fixing yourself.
 
----
+1. **Launch the rulecheck-agent** with the focus area (if any): `$ARGUMENTS`
+2. **Wait for it to complete** — do NOT poll, tail, or check on it. You will be
+   notified automatically when it finishes.
+3. **Report the results** — summarize what was fixed, link the PR, mention any
+   remaining opportunities.
 
-## Focus Area
+## Rules for You
 
-**$ARGUMENTS**
-
-If a focus area is specified (e.g., "error handling", "logging", "fail fast",
-"imports", "DRY"), prioritize violations in that category. Otherwise, scan all
-categories and pick the highest-impact items.
-
-## Rules Reference
-
-Load [rules-guide.md](rules-guide.md) for a categorized guide on where to find
-project rules and how violations are ranked by impact.
-
-## Instructions
-
-1. **Read your memory** — check for previous runs, backlog, meta-judge feedback
-2. **Read CLAUDE.md** — learn the engineering rules (not lint rules — those are automated)
-3. **Deep scan source code** — grep and read actual `.ts` files in `packages/*/src/`
-4. **Group related violations** — cluster by type (e.g., "all swallowed errors")
-5. **Pick one group** — fix a cohesive set, not scattered unrelated things
-6. **Fix the group** — minimal, focused edits in the worktree
-7. **Validate after changes** — `bun run validate` (only after editing, not before)
-8. **Create PR** — read `.github/pull_request_template.md`, fill it in
-9. **Write summary** — `.claude/archon/rulecheck-last-run.json` for Slack hook
-10. **Update memory** — record what was fixed, what remains, patterns noticed
+- **Do NOT scan the codebase yourself** — that's the agent's job
+- **Do NOT grep, read source files, or run linters** — the agent handles all of that
+- **Do NOT try to resume or check on the agent** while it's running — just wait
+- **Do NOT do the agent's work** if it fails — report the failure to the user
+- Trust the agent. It runs in an isolated worktree and will create a PR when done.
