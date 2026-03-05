@@ -525,7 +525,7 @@ async def _handle_bootstrap(
 ) -> str:
     """Fetch all skills with content and optionally register the system with a project."""
     # Fetch all skills with full content
-    response = await client.get(urljoin(api_url, "/api/skills"), params={"include_content": "true"})
+    response = await client.get(urljoin(api_url, "/api/skills"), params={"include_content": True})
 
     if response.status_code != 200:
         return MCPErrorFormatter.from_http_error(response, "fetch skills for bootstrap")
