@@ -588,6 +588,23 @@ def register_modules():
         logger.error(f"✗ Failed to register extension tools: {e}")
         logger.error(traceback.format_exc())
 
+    # Session Memory Tools
+    try:
+        from src.mcp_server.features.sessions import register_session_tools
+
+        register_session_tools(mcp)
+        modules_registered += 1
+        logger.info("✓ Session tools registered")
+    except ImportError as e:
+        logger.warning(f"⚠ Session tools module not available (optional): {e}")
+    except (SyntaxError, NameError, AttributeError) as e:
+        logger.error(f"✗ Code error in session tools - MUST FIX: {e}")
+        logger.error(traceback.format_exc())
+        raise
+    except Exception as e:
+        logger.error(f"✗ Failed to register session tools: {e}")
+        logger.error(traceback.format_exc())
+
     logger.info(f"📦 Total modules registered: {modules_registered}")
 
     if modules_registered == 0:
