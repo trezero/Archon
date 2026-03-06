@@ -344,13 +344,13 @@ gh issue view <issue-number> --json labels --jq '.labels[].name'
 ### What It Is
 
 An autonomous code quality agent that scans the codebase for CLAUDE.md rule
-violations, fixes the highest-impact group, validates, creates a PR, and
+violations, fixes one cohesive concern, validates, creates a PR, and
 notifies Slack. Uses persistent memory to improve across runs. A meta-judge
 evaluates each run.
 
 This is the "kitchen sink" — every prior concept plus worktree isolation,
-background execution, persistent memory, four hook types, and inter-hook
-communication.
+background execution, persistent memory, hook scoping with matchers, and
+settings-level hooks.
 
 ### Features Covered
 
@@ -359,20 +359,17 @@ communication.
 | 1 | **`agent: rulecheck-agent`** — skill delegates to autonomous agent | Skill frontmatter |
 | 2 | **No `context: fork`** — skill orchestrates, agent runs autonomously | Skill design |
 | 3 | **`isolation: worktree`** — agent works in its own git worktree | Agent frontmatter |
-| 4 | **`background: true`** — agent runs while user keeps working | Agent frontmatter |
-| 5 | **`memory: project`** — persistent memory across runs | Agent frontmatter |
-| 6 | **`permissionMode: acceptEdits`** — auto-approve file edits | Agent frontmatter |
-| 7 | **`maxTurns: 500`** — safety cap on API round-trips | Agent frontmatter |
-| 8 | **`model: sonnet`** — per-agent model override | Agent frontmatter |
-| 9 | **PreToolUse `type: command`** — block-dangerous.sh safety gate | Agent hooks |
-| 10 | **PostToolUse `type: command`** — auto lint:fix after edits | Agent hooks |
-| 11 | **Stop `type: command`** — slack-notify.sh reads summary file | Agent hooks |
-| 12 | **Stop `type: http`** — POST event directly to Slack webhook | Agent hooks |
-| 13 | **Stop `type: agent`** — meta-judge evaluates the run | Agent hooks |
-| 14 | **Supporting files** — rules-guide.md (lazy-loaded) | Skill body |
-| 15 | **Inter-hook communication** — summary JSON file shared between agent and hooks | Pattern |
-| 16 | **`$ARGUMENTS`** — focus area passed through | Skill + agent |
-| 17 | **`argument-hint`** — "[focus area]" shown in `/help` | Skill frontmatter |
+| 4 | **`memory: project`** — persistent memory across runs | Agent frontmatter |
+| 5 | **`permissionMode: acceptEdits`** — auto-approve file edits | Agent frontmatter |
+| 6 | **`maxTurns: 500`** — safety cap on API round-trips | Agent frontmatter |
+| 7 | **`model: sonnet`** — per-agent model override | Agent frontmatter |
+| 8 | **PreToolUse `type: command`** — block-dangerous.sh safety gate | Agent hooks |
+| 9 | **PostToolUse `type: command`** — auto lint:fix after edits | Agent hooks |
+| 10 | **Stop `type: command`** — slack-notify.sh for Slack notification | Agent hooks |
+| 11 | **Stop `type: agent`** — meta-judge evaluates the run | Agent hooks |
+| 12 | **`SubagentStop` with `matcher`** — settings-level hook scoped to this agent | Settings hooks |
+| 13 | **`$ARGUMENTS`** — focus area passed through | Skill + agent |
+| 14 | **`argument-hint`** — "[focus area]" shown in `/help` | Skill frontmatter |
 
 ### Architecture
 
@@ -387,33 +384,37 @@ User invokes /rulecheck [focus area]
 |  Launches agent, reports  |
 |  results when complete    |
 +----------+----------------+
-           | delegates to agent
+           | delegates to agent (runs as background subagent)
            v
 +---------------------------+
 |  rulecheck-agent.md       |  isolation: worktree
-|  (.claude/agents/)        |  background: true
-|                           |  memory: project
-|  model: sonnet            |  permissionMode: acceptEdits
-|  maxTurns: 500            |
+|  (.claude/agents/)        |  memory: project
+|                           |  permissionMode: acceptEdits
+|  model: sonnet            |  maxTurns: 500
 |                           |
 |  hooks:                   |
 |  +- PreToolUse [Bash]     |-> block-dangerous.sh (exit 2 = block)
 |  +- PostToolUse [Edit]    |-> bun run lint:fix (auto-format)
 |  +- Stop                  |
-|     +- type: command      |-> slack-notify.sh (reads summary JSON)
-|     +- type: http         |-> POST to Slack webhook URL
+|     +- type: command      |-> slack-notify.sh (Slack notification)
 |     +- type: agent        |-> meta-judge (LLM evaluation)
 +---------------------------+
+           |
+           | settings.json SubagentStop hook
+           | (matcher: "rulecheck-agent")
+           |-> slack-notify.sh (fires in parent session)
+           |
            | works in worktree
            v
-  1. Read memory (previous runs, meta-judge feedback)
-  2. Read CLAUDE.md rules
-  3. Deep scan packages/*/src/*.ts
-  4. Group violations, pick one group
-  5. Fix all instances
+  0. Verify running in worktree (refuse if on main)
+  1. Check open PRs + read memory
+  2. Read CLAUDE.md — derive scan targets from rules
+  3. Broad scan across all concern types
+  4. Pick one cohesive concern
+  5. Deep scan + fix every instance
   6. bun run validate
   7. Commit, push, gh pr create
-  8. Write summary JSON + update memory
+  8. Update memory
 ```
 
 ### Live Demo
@@ -447,7 +448,6 @@ Open `.claude/agents/rulecheck-agent.md` and walk through the frontmatter:
 ---
 name: rulecheck-agent
 isolation: worktree        # <-- own git worktree
-background: true           # <-- runs while you keep working
 memory: project            # <-- remembers across runs
 permissionMode: acceptEdits # <-- auto-approve file edits
 maxTurns: 500              # <-- safety cap
@@ -470,9 +470,6 @@ hooks:
         - type: command
           command: ".claude/skills/rulecheck/hooks/slack-notify.sh"
           statusMessage: "Notifying Slack..."
-        - type: http
-          url: https://hooks.slack.com/services/...
-          statusMessage: "Posting run event to Slack..."
         - type: agent
           prompt: |
             You are a meta-judge evaluating the rulecheck agent's execution...
@@ -490,13 +487,11 @@ hooks:
 > **PostToolUse [Edit|Write] — Auto-Fix**: "After every file edit, `bun run
 > lint:fix` runs automatically to correct formatting. Issues don't accumulate."
 
-> **Stop hooks — Three types firing in sequence**:
-> 1. `type: command` — `slack-notify.sh` reads the summary JSON the agent wrote
->    and sends a formatted Slack message. This is **inter-hook communication** —
->    the agent writes a file, the hook reads it.
-> 2. `type: http` — POSTs the event directly to a Slack webhook URL. No script
->    needed. This is the **fourth hook type** — HTTP hooks for external services.
-> 3. `type: agent` — A meta-judge subagent evaluates the rulecheck's execution.
+> **Stop hooks — Two types firing in sequence**:
+> 1. `type: command` — `slack-notify.sh` reads the agent's last message from
+>    the stop event JSON on stdin, extracts the PR URL, and sends a formatted
+>    Slack message via webhook.
+> 2. `type: agent` — A meta-judge subagent evaluates the rulecheck's execution.
 >    Reviews what was fixed, assesses quality, and writes feedback to memory.
 >    The agent reads this feedback on its next run.
 
@@ -527,64 +522,29 @@ echo "Exit code: $?"
 cat .claude/skills/rulecheck/hooks/slack-notify.sh
 ```
 
-> **Explain**: "This reads `.claude/archon/rulecheck-last-run.json` — a summary
-> file the agent writes before stopping. Extracts the fixed count, PR URL, and
-> remaining opportunities, formats a Slack Block Kit message, and POSTs it.
-> That's inter-hook communication: the agent produces data, the hook consumes it."
+> **Explain**: "This hook reads the stop event JSON from stdin — specifically
+> `last_assistant_message` — extracts the PR URL, formats a Slack Block Kit
+> message, and POSTs it to a webhook. The webhook URL is hardcoded as a
+> fallback but can be overridden via `SLACK_WEBHOOK_URL` env var."
 
-#### Step 5: Show the rules guide
+#### Step 5: Show the settings-level SubagentStop hook
 
 ```bash
-head -30 .claude/skills/rulecheck/rules-guide.md
+cat .claude/settings.json | jq '.hooks.SubagentStop'
 ```
 
-> **Explain**: "This is a supporting file linked from the skill body. The agent
-> loads it lazily — only when it needs the rules reference. Keeps the initial
-> prompt small."
+> **Explain**: "Here's a key lesson we learned building this. Hooks defined
+> in agent frontmatter only fire when the agent runs standalone via
+> `claude --agent`. When a skill delegates with `agent:`, the agent runs as
+> a background subagent — and the frontmatter Stop hooks don't fire in the
+> parent session.
+>
+> The fix: use a `SubagentStop` hook in `settings.json` with a `matcher`
+> scoped to `rulecheck-agent`. This fires in the parent session when the
+> subagent completes, and the matcher ensures it only fires for this specific
+> agent — not for every subagent."
 
-#### Step 6: Add Slack hooks to settings (before invoking)
-
-> **Why this step**: Hooks defined in agent frontmatter (`rulecheck-agent.md`)
-> only fire when the agent is launched directly via `claude agents` CLI.
-> When a skill delegates to an agent using `agent:` in its frontmatter, the
-> agent runs as a subagent — and subagent-level hooks from the agent file
-> do not fire. To demo the Slack notification, we temporarily add the hooks
-> at the settings level, where they apply to all `Stop` events.
-
-Add the Slack hooks to `.claude/settings.local.json` (create if it doesn't exist):
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/skills/rulecheck/hooks/slack-notify.sh",
-            "statusMessage": "Notifying Slack..."
-          },
-          {
-            "type": "http",
-            "url": "https://hooks.slack.com/services/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",
-            "statusMessage": "Posting run event to Slack..."
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-> **Explain to participants**: "Agent frontmatter hooks only fire when an
-> agent is launched standalone via `claude agents`. When a skill delegates
-> with `agent:` in its frontmatter, the agent runs as a background subagent —
-> and subagent hooks don't fire. So for the demo, we add the Slack hooks at
-> the settings level. In practice, you'd keep these in settings if you always
-> want Slack notifications, or remove them if you only want them for specific
-> agents."
-
-**Restart Claude Code** so the new settings take effect, then invoke:
+#### Step 6: Invoke the rulecheck
 
 ```
 /rulecheck error handling
@@ -593,15 +553,14 @@ Add the Slack hooks to `.claude/settings.local.json` (create if it doesn't exist
 **Point out to the audience:**
 
 - The skill launches the agent and immediately returns control to you
-- `background: true` means the agent runs in a separate worktree while you
-  keep chatting in the main session
+- The agent runs in a separate worktree while you keep chatting
 - Show the "Checking command safety..." spinner appearing on Bash calls
 - Show the "Auto-fixing lint issues..." spinner after edits
 
-> **Explain**: "The agent is now working in an isolated git worktree. It's
-> scanning `packages/*/src/*.ts` for CLAUDE.md violations — things linters
-> can't catch. Swallowed errors, silent fallbacks, wrong logger patterns,
-> missing error context. When it's done, it'll create a PR and notify Slack."
+> **Explain**: "The agent is now working in an isolated git worktree. It
+> reads CLAUDE.md fresh each run and derives its own scan targets — so
+> different runs find different things. When it's done, it'll create a PR
+> and Slack gets notified via the SubagentStop hook."
 
 #### Step 7: While the agent works, explain the memory system
 
@@ -618,9 +577,6 @@ ls -la .claude/agent-memory/rulecheck-agent/ 2>/dev/null || echo "First run — 
 #### Step 8: Show outputs (when agent completes)
 
 ```bash
-# The summary JSON (read by the Slack hook)
-cat .claude/archon/rulecheck-last-run.json
-
 # The PR
 gh pr list --head worktree-
 
@@ -629,15 +585,9 @@ cat .claude/agent-memory/rulecheck-agent/MEMORY.md
 
 # Meta-judge feedback
 cat .claude/agent-memory/rulecheck-agent/meta-judge-feedback.md
-```
 
-#### Step 9: Remove the Slack hooks
-
-Remove `.claude/settings.local.json` (or delete the `Stop` hooks from it) so
-the Slack notifications don't fire on every future session stop:
-
-```bash
-rm .claude/settings.local.json
+# Show the Slack notification that was posted
+# (check the Slack channel)
 ```
 
 ### Comparison: Before vs After
@@ -650,18 +600,18 @@ rm .claude/settings.local.json
 | Isolation | None (reads in-place) | Git worktree |
 | Safety | None | PreToolUse command blocklist |
 | Validation | None | `bun run validate` |
-| Notifications | None | Slack webhook (command + HTTP hooks) |
+| Notifications | None | Slack via SubagentStop hook (scoped by matcher) |
 | Learning | None | Persistent memory + meta-judge |
 | Autonomy | Reports findings only | Finds, fixes, validates, PRs |
 
 ### Key Talking Points
 
-- "This is 17 features in one skill. Each is simple — the power is in composition."
+- "14 features in one skill. Each is simple — the power is in composition."
 - "The safety hook is a shell script. Reads JSON, checks a blocklist, exits 2 to block. No framework."
 - "Memory makes the agent better over time. Each run builds on the last — it remembers the backlog."
 - "The meta-judge is an LLM evaluating another LLM. It writes structured feedback the agent reads next run."
 - "Worktree isolation means the agent can break things safely. Your working directory is untouched."
-- "Four hook types in one agent: command (safety gate + lint + Slack script), HTTP (Slack webhook), agent (meta-judge). We saw prompt hooks in triage."
+- "The Slack notification uses a `SubagentStop` hook with a `matcher` — it only fires when the rulecheck agent finishes, not for every subagent. That's how you scope settings-level hooks to specific agents."
 - "The old rulecheck was advisory. This one actually fixes things. Same domain, fundamentally different capability."
 
 ---
@@ -732,24 +682,21 @@ cat .claude/agent-memory/rulecheck-agent/MEMORY.md
 | 8 | Hook `type: command` (shell scripts) | save-task-list, rulecheck |
 | 9 | Hook `type: prompt` (LLM guardrail) | save-task-list, triage |
 | 10 | Hook `type: agent` (subagent evaluator) | rulecheck |
-| 11 | Hook `type: http` (external webhook) | rulecheck |
-| 12 | `once: true` hook modifier | save-task-list |
-| 13 | Hook scoping: skill-scoped | save-task-list |
-| 14 | Hook scoping: agent-scoped | triage, rulecheck |
-| 15 | Hook scoping: settings-level (SessionStart) | save-task-list |
+| 11 | `once: true` hook modifier | save-task-list |
+| 12 | Hook scoping: skill-scoped | save-task-list |
+| 13 | Hook scoping: agent-scoped | triage, rulecheck |
+| 14 | Hook scoping: settings-level (SessionStart) | save-task-list |
+| 15 | `SubagentStop` with `matcher` (agent-scoped settings hook) | rulecheck |
 | 16 | `context: fork` (isolated subagent context) | triage |
 | 17 | `agent:` custom agent delegation | triage, rulecheck |
 | 18 | Custom agent files (`.claude/agents/`) | triage, rulecheck |
 | 19 | `allowed-tools` + wildcards | triage |
 | 20 | `model:` per-agent override | triage, rulecheck |
 | 21 | `isolation: worktree` | rulecheck |
-| 22 | `background: true` | rulecheck |
-| 23 | `memory: project` | rulecheck |
-| 24 | `permissionMode: acceptEdits` | rulecheck |
-| 25 | `maxTurns` safety cap | rulecheck |
-| 26 | Supporting files (lazy-loaded markdown) | rulecheck |
-| 27 | Inter-hook communication (summary file) | rulecheck |
-| 28 | Auto-Memory (`/memory`) | rulecheck follow-up |
+| 22 | `memory: project` | rulecheck |
+| 23 | `permissionMode: acceptEdits` | rulecheck |
+| 24 | `maxTurns` safety cap | rulecheck |
+| 25 | Auto-Memory (`/memory`) | rulecheck follow-up |
 
 ---
 
@@ -758,9 +705,6 @@ cat .claude/agent-memory/rulecheck-agent/MEMORY.md
 ```bash
 # Close any test issues created during the triage demo
 gh issue close <number> --reason "not planned" --comment "Created for workshop demo"
-
-# Clean up the SessionStart hook if you don't want it persisting
-# (read .claude/settings.local.json and remove the SessionStart entry)
 
 # Clean up any rulecheck worktrees still running
 git worktree list
