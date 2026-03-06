@@ -1,9 +1,9 @@
-"""Skills management API endpoints for Archon.
+"""Extensions management API endpoints for Archon.
 
 Handles:
-- Skill CRUD operations with version management
+- Extension CRUD operations with version management
 - System registration and lookup
-- Project-scoped skill configuration and install queuing
+- Project-scoped extension configuration and install queuing
 """
 
 from typing import Any
@@ -12,30 +12,30 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ..config.logfire_config import get_logger, logfire
-from ..services.skills import SkillService, SkillValidationService, SystemService
+from ..services.extensions import ExtensionService, ExtensionValidationService, SystemService
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/api", tags=["skills"])
+router = APIRouter(prefix="/api", tags=["extensions"])
 
 
 # ── Request models ────────────────────────────────────────────────────────────
 
 
-class CreateSkillRequest(BaseModel):
+class CreateExtensionRequest(BaseModel):
     name: str
     description: str
     content: str
     created_by: str
 
 
-class UpdateSkillRequest(BaseModel):
+class UpdateExtensionRequest(BaseModel):
     content: str
     updated_by: str
     description: str | None = None
 
 
-class ValidateSkillRequest(BaseModel):
+class ValidateExtensionRequest(BaseModel):
     content: str
 
 
@@ -49,11 +49,11 @@ class SaveProjectOverrideRequest(BaseModel):
     is_enabled: bool = True
 
 
-class InstallSkillRequest(BaseModel):
+class InstallExtensionRequest(BaseModel):
     system_ids: list[str]
 
 
-class RemoveSkillRequest(BaseModel):
+class RemoveExtensionRequest(BaseModel):
     system_ids: list[str]
 
 
@@ -67,204 +67,204 @@ class RegisterSystemRequest(BaseModel):
 class SyncSystemRequest(BaseModel):
     fingerprint: str
     system_name: str | None = None
-    local_skills: list[dict[str, Any]] = []
+    local_extensions: list[dict[str, Any]] = []
 
 
-# ── Skills CRUD ───────────────────────────────────────────────────────────────
+# ── Extensions CRUD ───────────────────────────────────────────────────────────
 
 
-@router.post("/skills/validate")
-async def validate_skill_standalone(request: ValidateSkillRequest):
-    """Validate skill content without requiring an existing skill ID."""
+@router.post("/extensions/validate")
+async def validate_extension_standalone(request: ValidateExtensionRequest):
+    """Validate extension content without requiring an existing extension ID."""
     try:
-        logfire.debug("Validating skill content (standalone)")
-        validator = SkillValidationService()
+        logfire.debug("Validating extension content (standalone)")
+        validator = ExtensionValidationService()
         result = validator.validate(request.content)
         return result
     except HTTPException:
         raise
     except Exception as e:
-        logfire.error(f"Failed to validate skill | error={e}", exc_info=True)
+        logfire.error(f"Failed to validate extension | error={e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
-@router.get("/skills")
-async def list_skills(include_content: bool = Query(False)):
-    """List all skills. Pass ?include_content=true to include full skill content."""
+@router.get("/extensions")
+async def list_extensions(include_content: bool = Query(False)):
+    """List all extensions. Pass ?include_content=true to include full extension content."""
     try:
-        logfire.debug(f"Listing all skills | include_content={include_content}")
-        service = SkillService()
+        logfire.debug(f"Listing all extensions | include_content={include_content}")
+        service = ExtensionService()
         if include_content:
-            skills = service.list_skills_full()
+            extensions = service.list_extensions_full()
         else:
-            skills = service.list_skills()
-        return {"skills": skills, "count": len(skills)}
+            extensions = service.list_extensions()
+        return {"extensions": extensions, "count": len(extensions)}
     except HTTPException:
         raise
     except Exception as e:
-        logfire.error(f"Failed to list skills | error={e}", exc_info=True)
+        logfire.error(f"Failed to list extensions | error={e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
-@router.get("/skills/{skill_id}")
-async def get_skill(skill_id: str):
-    """Get a single skill by ID including full content."""
+@router.get("/extensions/{extension_id}")
+async def get_extension(extension_id: str):
+    """Get a single extension by ID including full content."""
     try:
-        logfire.debug(f"Getting skill | skill_id={skill_id}")
-        service = SkillService()
-        skill = service.get_skill(skill_id)
-        if skill is None:
-            raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
-        return skill
+        logfire.debug(f"Getting extension | extension_id={extension_id}")
+        service = ExtensionService()
+        extension = service.get_extension(extension_id)
+        if extension is None:
+            raise HTTPException(status_code=404, detail=f"Extension '{extension_id}' not found")
+        return extension
     except HTTPException:
         raise
     except Exception as e:
-        logfire.error(f"Failed to get skill | skill_id={skill_id} | error={e}", exc_info=True)
+        logfire.error(f"Failed to get extension | extension_id={extension_id} | error={e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
-@router.post("/skills")
-async def create_skill(request: CreateSkillRequest):
-    """Create a new skill. Validates content before saving."""
+@router.post("/extensions")
+async def create_extension(request: CreateExtensionRequest):
+    """Create a new extension. Validates content before saving."""
     try:
-        logfire.info(f"Creating skill | name={request.name}")
+        logfire.info(f"Creating extension | name={request.name}")
 
         # Validate content first
-        validator = SkillValidationService()
+        validator = ExtensionValidationService()
         validation = validator.validate(request.content)
         if not validation["valid"]:
             raise HTTPException(
                 status_code=422,
                 detail={
-                    "message": "Skill content validation failed",
+                    "message": "Extension content validation failed",
                     "errors": validation["errors"],
                     "warnings": validation["warnings"],
                 },
             )
 
-        service = SkillService()
-        skill = service.create_skill(
+        service = ExtensionService()
+        extension = service.create_extension(
             name=request.name,
             description=request.description,
             content=request.content,
             created_by=request.created_by,
         )
 
-        logfire.info(f"Skill created | skill_id={skill.get('id')} | name={request.name}")
-        return skill
+        logfire.info(f"Extension created | extension_id={extension.get('id')} | name={request.name}")
+        return extension
     except HTTPException:
         raise
     except Exception as e:
-        logfire.error(f"Failed to create skill | name={request.name} | error={e}", exc_info=True)
+        logfire.error(f"Failed to create extension | name={request.name} | error={e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
-@router.put("/skills/{skill_id}")
-async def update_skill(skill_id: str, request: UpdateSkillRequest):
-    """Update a skill's content and bump its version."""
+@router.put("/extensions/{extension_id}")
+async def update_extension(extension_id: str, request: UpdateExtensionRequest):
+    """Update an extension's content and bump its version."""
     try:
-        logfire.info(f"Updating skill | skill_id={skill_id}")
+        logfire.info(f"Updating extension | extension_id={extension_id}")
 
-        service = SkillService()
+        service = ExtensionService()
 
-        # Fetch existing skill to compute next version and validate name
-        existing = service.get_skill(skill_id)
+        # Fetch existing extension to compute next version and validate name
+        existing = service.get_extension(extension_id)
         if existing is None:
-            raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
+            raise HTTPException(status_code=404, detail=f"Extension '{extension_id}' not found")
 
         # Validate content (pass existing name so name-change is rejected)
-        validator = SkillValidationService()
+        validator = ExtensionValidationService()
         validation = validator.validate(request.content, existing_name=existing.get("name"))
         if not validation["valid"]:
             raise HTTPException(
                 status_code=422,
                 detail={
-                    "message": "Skill content validation failed",
+                    "message": "Extension content validation failed",
                     "errors": validation["errors"],
                     "warnings": validation["warnings"],
                 },
             )
 
         new_version = existing["current_version"] + 1
-        skill = service.update_skill(
-            skill_id=skill_id,
+        extension = service.update_extension(
+            extension_id=extension_id,
             content=request.content,
             new_version=new_version,
             updated_by=request.updated_by,
             description=request.description,
         )
 
-        logfire.info(f"Skill updated | skill_id={skill_id} | version={new_version}")
-        return skill
+        logfire.info(f"Extension updated | extension_id={extension_id} | version={new_version}")
+        return extension
     except HTTPException:
         raise
     except Exception as e:
-        logfire.error(f"Failed to update skill | skill_id={skill_id} | error={e}", exc_info=True)
+        logfire.error(f"Failed to update extension | extension_id={extension_id} | error={e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
-@router.delete("/skills/{skill_id}")
-async def delete_skill(skill_id: str):
-    """Delete a skill and its version history."""
+@router.delete("/extensions/{extension_id}")
+async def delete_extension(extension_id: str):
+    """Delete an extension and its version history."""
     try:
-        logfire.info(f"Deleting skill | skill_id={skill_id}")
+        logfire.info(f"Deleting extension | extension_id={extension_id}")
 
-        service = SkillService()
+        service = ExtensionService()
 
-        # Verify skill exists
-        existing = service.get_skill(skill_id)
+        # Verify extension exists
+        existing = service.get_extension(extension_id)
         if existing is None:
-            raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
+            raise HTTPException(status_code=404, detail=f"Extension '{extension_id}' not found")
 
-        service.delete_skill(skill_id)
-        logfire.info(f"Skill deleted | skill_id={skill_id}")
-        return {"status": "deleted", "skill_id": skill_id}
+        service.delete_extension(extension_id)
+        logfire.info(f"Extension deleted | extension_id={extension_id}")
+        return {"status": "deleted", "extension_id": extension_id}
     except HTTPException:
         raise
     except Exception as e:
-        logfire.error(f"Failed to delete skill | skill_id={skill_id} | error={e}", exc_info=True)
+        logfire.error(f"Failed to delete extension | extension_id={extension_id} | error={e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
-@router.post("/skills/{skill_id}/validate")
-async def validate_skill(skill_id: str, request: ValidateSkillRequest):
-    """Validate skill content without saving. Returns errors and warnings."""
+@router.post("/extensions/{extension_id}/validate")
+async def validate_extension(extension_id: str, request: ValidateExtensionRequest):
+    """Validate extension content without saving. Returns errors and warnings."""
     try:
-        logfire.debug(f"Validating skill content | skill_id={skill_id}")
+        logfire.debug(f"Validating extension content | extension_id={extension_id}")
 
-        service = SkillService()
-        existing = service.get_skill(skill_id)
+        service = ExtensionService()
+        existing = service.get_extension(extension_id)
         existing_name = existing.get("name") if existing else None
 
-        validator = SkillValidationService()
+        validator = ExtensionValidationService()
         result = validator.validate(request.content, existing_name=existing_name)
         return result
     except HTTPException:
         raise
     except Exception as e:
-        logfire.error(f"Failed to validate skill | skill_id={skill_id} | error={e}", exc_info=True)
+        logfire.error(f"Failed to validate extension | extension_id={extension_id} | error={e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
-@router.get("/skills/{skill_id}/versions")
-async def get_skill_versions(skill_id: str):
-    """Get version history for a skill, newest first."""
+@router.get("/extensions/{extension_id}/versions")
+async def get_extension_versions(extension_id: str):
+    """Get version history for an extension, newest first."""
     try:
-        logfire.debug(f"Getting skill versions | skill_id={skill_id}")
+        logfire.debug(f"Getting extension versions | extension_id={extension_id}")
 
-        service = SkillService()
+        service = ExtensionService()
 
-        # Verify skill exists
-        existing = service.get_skill(skill_id)
+        # Verify extension exists
+        existing = service.get_extension(extension_id)
         if existing is None:
-            raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
+            raise HTTPException(status_code=404, detail=f"Extension '{extension_id}' not found")
 
-        versions = service.get_versions(skill_id)
+        versions = service.get_versions(extension_id)
         return {"versions": versions, "count": len(versions)}
     except HTTPException:
         raise
     except Exception as e:
-        logfire.error(f"Failed to get skill versions | skill_id={skill_id} | error={e}", exc_info=True)
+        logfire.error(f"Failed to get extension versions | extension_id={extension_id} | error={e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
@@ -374,7 +374,7 @@ async def delete_system(system_id: str):
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
-# ── Project-scoped skills ─────────────────────────────────────────────────────
+# ── Project-scoped extensions ─────────────────────────────────────────────────
 
 
 @router.post("/projects/{project_id}/sync")
@@ -383,17 +383,17 @@ async def sync_system(project_id: str, request: SyncSystemRequest):
 
     Registers the system globally (or updates last_seen), associates it with
     the project so it appears in the Skills tab, then compares the system's
-    local skills against the Archon registry and returns a full sync report.
+    local extensions against the Archon registry and returns a full sync report.
     """
     try:
         logfire.info(f"Syncing system | project_id={project_id} | fingerprint={request.fingerprint}")
 
         system_service = SystemService()
-        skill_service = SkillService()
+        extension_service = ExtensionService()
 
-        from ..services.skills.skill_sync_service import SkillSyncService
+        from ..services.extensions.extension_sync_service import ExtensionSyncService
 
-        sync_service = SkillSyncService()
+        sync_service = ExtensionSyncService()
 
         # Register or look up system
         existing = system_service.find_by_fingerprint(request.fingerprint)
@@ -414,17 +414,17 @@ async def sync_system(project_id: str, request: SyncSystemRequest):
         # Associate system with this project
         sync_service.register_system_for_project(system_id, project_id)
 
-        # Fetch full skill registry (content needed for pending_install items)
-        archon_skills = skill_service.list_skills_full()
+        # Fetch full extension registry (content needed for pending_install items)
+        archon_extensions = extension_service.list_extensions_full()
 
         # Fetch existing system-project install records
-        system_skills = sync_service.get_system_skills(system_id, project_id)
+        system_extensions = sync_service.get_system_extensions(system_id, project_id)
 
         # Compute sync report
         report = sync_service.compute_sync_report(
-            local_skills=request.local_skills,
-            archon_skills=archon_skills,
-            system_skills=system_skills,
+            local_extensions=request.local_extensions,
+            archon_extensions=archon_extensions,
+            system_extensions=system_extensions,
         )
 
         logfire.info(
@@ -445,41 +445,41 @@ async def sync_system(project_id: str, request: SyncSystemRequest):
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
-@router.get("/projects/{project_id}/skills")
-async def get_project_skills(project_id: str):
-    """Get skills data for a project.
+@router.get("/projects/{project_id}/extensions")
+async def get_project_extensions(project_id: str):
+    """Get extensions data for a project.
 
-    Returns all skills from the registry and systems with their install state,
-    matching the frontend ProjectSkillsResponse shape: {all_skills, systems}.
+    Returns all extensions from the registry and systems with their install state,
+    matching the frontend ProjectExtensionsResponse shape: {all_extensions, systems}.
     """
     try:
-        logfire.debug(f"Getting project skills | project_id={project_id}")
-        skill_service = SkillService()
-        all_skills = skill_service.list_skills()
+        logfire.debug(f"Getting project extensions | project_id={project_id}")
+        extension_service = ExtensionService()
+        all_extensions = extension_service.list_extensions()
 
-        # Build systems with nested skill install state
-        systems_with_skills: list[dict[str, Any]] = []
+        # Build systems with nested extension install state
+        systems_with_extensions: list[dict[str, Any]] = []
         try:
-            from ..services.skills.skill_sync_service import SkillSyncService
+            from ..services.extensions.extension_sync_service import ExtensionSyncService
 
-            sync_service = SkillSyncService()
+            sync_service = ExtensionSyncService()
             systems = sync_service.get_project_systems(project_id)
 
             for system in systems:
-                sys_skills = sync_service.get_system_project_skills(system["id"], project_id)
-                systems_with_skills.append({**system, "skills": sys_skills})
+                sys_extensions = sync_service.get_system_project_extensions(system["id"], project_id)
+                systems_with_extensions.append({**system, "extensions": sys_extensions})
         except ImportError:
             pass
 
         return {
-            "all_skills": all_skills,
-            "systems": systems_with_skills,
+            "all_extensions": all_extensions,
+            "systems": systems_with_extensions,
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logfire.error(f"Failed to get project skills | project_id={project_id} | error={e}", exc_info=True)
+        logfire.error(f"Failed to get project extensions | project_id={project_id} | error={e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
@@ -490,15 +490,15 @@ async def get_project_systems(project_id: str):
         logfire.debug(f"Getting project systems | project_id={project_id}")
 
         try:
-            from ..services.skills.skill_sync_service import SkillSyncService
+            from ..services.extensions.extension_sync_service import ExtensionSyncService
 
-            sync_service = SkillSyncService()
+            sync_service = ExtensionSyncService()
             systems = sync_service.get_project_systems(project_id)
             return {"systems": systems, "count": len(systems)}
         except ImportError:
             raise HTTPException(
                 status_code=501,
-                detail="SkillSyncService is not yet available. Project-system mapping requires the sync service.",
+                detail="ExtensionSyncService is not yet available. Project-system mapping requires the sync service.",
             ) from None
 
     except HTTPException:
@@ -518,9 +518,9 @@ async def unlink_system_from_project(project_id: str, system_id: str):
     try:
         logfire.info(f"Unlinking system | project_id={project_id} | system_id={system_id}")
 
-        from ..services.skills.skill_sync_service import SkillSyncService
+        from ..services.extensions.extension_sync_service import ExtensionSyncService
 
-        sync_service = SkillSyncService()
+        sync_service = ExtensionSyncService()
         found = sync_service.unlink_system_from_project(system_id, project_id)
 
         if not found:
@@ -539,12 +539,12 @@ async def unlink_system_from_project(project_id: str, system_id: str):
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
-@router.post("/projects/{project_id}/skills/{skill_id}/install")
-async def install_skill(project_id: str, skill_id: str, request: InstallSkillRequest):
-    """Queue a skill install on specified systems for a project."""
+@router.post("/projects/{project_id}/extensions/{extension_id}/install")
+async def install_extension(project_id: str, extension_id: str, request: InstallExtensionRequest):
+    """Queue an extension install on specified systems for a project."""
     try:
         logfire.info(
-            f"Queueing skill install | project_id={project_id} | skill_id={skill_id} | "
+            f"Queueing extension install | project_id={project_id} | extension_id={extension_id} | "
             f"system_count={len(request.system_ids)}"
         )
 
@@ -552,39 +552,39 @@ async def install_skill(project_id: str, skill_id: str, request: InstallSkillReq
             raise HTTPException(status_code=422, detail="At least one system_id is required")
 
         try:
-            from ..services.skills.skill_sync_service import SkillSyncService
+            from ..services.extensions.extension_sync_service import ExtensionSyncService
 
-            sync_service = SkillSyncService()
+            sync_service = ExtensionSyncService()
             result = sync_service.queue_install(
                 system_ids=request.system_ids,
-                skill_id=skill_id,
+                extension_id=extension_id,
                 project_id=project_id,
             )
 
-            logfire.info(f"Skill install queued | project_id={project_id} | skill_id={skill_id}")
-            return {"queued": result, "skill_id": skill_id, "project_id": project_id}
+            logfire.info(f"Extension install queued | project_id={project_id} | extension_id={extension_id}")
+            return {"queued": result, "extension_id": extension_id, "project_id": project_id}
         except ImportError:
             raise HTTPException(
                 status_code=501,
-                detail="SkillSyncService is not yet available. Install queuing requires the sync service.",
+                detail="ExtensionSyncService is not yet available. Install queuing requires the sync service.",
             ) from None
 
     except HTTPException:
         raise
     except Exception as e:
         logfire.error(
-            f"Failed to queue skill install | project_id={project_id} | skill_id={skill_id} | error={e}",
+            f"Failed to queue extension install | project_id={project_id} | extension_id={extension_id} | error={e}",
             exc_info=True,
         )
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
-@router.post("/projects/{project_id}/skills/{skill_id}/remove")
-async def remove_skill(project_id: str, skill_id: str, request: RemoveSkillRequest):
-    """Queue a skill removal on specified systems for a project."""
+@router.post("/projects/{project_id}/extensions/{extension_id}/remove")
+async def remove_extension(project_id: str, extension_id: str, request: RemoveExtensionRequest):
+    """Queue an extension removal on specified systems for a project."""
     try:
         logfire.info(
-            f"Queueing skill removal | project_id={project_id} | skill_id={skill_id} | "
+            f"Queueing extension removal | project_id={project_id} | extension_id={extension_id} | "
             f"system_count={len(request.system_ids)}"
         )
 
@@ -592,49 +592,49 @@ async def remove_skill(project_id: str, skill_id: str, request: RemoveSkillReque
             raise HTTPException(status_code=422, detail="At least one system_id is required")
 
         try:
-            from ..services.skills.skill_sync_service import SkillSyncService
+            from ..services.extensions.extension_sync_service import ExtensionSyncService
 
-            sync_service = SkillSyncService()
+            sync_service = ExtensionSyncService()
             result = sync_service.queue_remove(
                 system_ids=request.system_ids,
-                skill_id=skill_id,
+                extension_id=extension_id,
                 project_id=project_id,
             )
 
-            logfire.info(f"Skill removal queued | project_id={project_id} | skill_id={skill_id}")
-            return {"queued": result, "skill_id": skill_id, "project_id": project_id}
+            logfire.info(f"Extension removal queued | project_id={project_id} | extension_id={extension_id}")
+            return {"queued": result, "extension_id": extension_id, "project_id": project_id}
         except ImportError:
             raise HTTPException(
                 status_code=501,
-                detail="SkillSyncService is not yet available. Removal queuing requires the sync service.",
+                detail="ExtensionSyncService is not yet available. Removal queuing requires the sync service.",
             ) from None
 
     except HTTPException:
         raise
     except Exception as e:
         logfire.error(
-            f"Failed to queue skill removal | project_id={project_id} | skill_id={skill_id} | error={e}",
+            f"Failed to queue extension removal | project_id={project_id} | extension_id={extension_id} | error={e}",
             exc_info=True,
         )
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
-@router.put("/projects/{project_id}/skills/{skill_id}")
-async def save_project_override(project_id: str, skill_id: str, request: SaveProjectOverrideRequest):
-    """Save a per-project skill override (custom content and/or enabled state)."""
+@router.put("/projects/{project_id}/extensions/{extension_id}")
+async def save_project_override(project_id: str, extension_id: str, request: SaveProjectOverrideRequest):
+    """Save a per-project extension override (custom content and/or enabled state)."""
     try:
-        logfire.info(f"Saving project skill override | project_id={project_id} | skill_id={skill_id}")
+        logfire.info(f"Saving project extension override | project_id={project_id} | extension_id={extension_id}")
 
-        service = SkillService()
+        service = ExtensionService()
 
-        # Verify skill exists
-        existing = service.get_skill(skill_id)
+        # Verify extension exists
+        existing = service.get_extension(extension_id)
         if existing is None:
-            raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
+            raise HTTPException(status_code=404, detail=f"Extension '{extension_id}' not found")
 
         # Validate custom content if provided
         if request.custom_content is not None:
-            validator = SkillValidationService()
+            validator = ExtensionValidationService()
             validation = validator.validate(request.custom_content, existing_name=existing.get("name"))
             if not validation["valid"]:
                 raise HTTPException(
@@ -648,18 +648,18 @@ async def save_project_override(project_id: str, skill_id: str, request: SavePro
 
         override = service.save_project_override(
             project_id=project_id,
-            skill_id=skill_id,
+            extension_id=extension_id,
             custom_content=request.custom_content,
             is_enabled=request.is_enabled,
         )
 
-        logfire.info(f"Project skill override saved | project_id={project_id} | skill_id={skill_id}")
+        logfire.info(f"Project extension override saved | project_id={project_id} | extension_id={extension_id}")
         return override
     except HTTPException:
         raise
     except Exception as e:
         logfire.error(
-            f"Failed to save project override | project_id={project_id} | skill_id={skill_id} | error={e}",
+            f"Failed to save project override | project_id={project_id} | extension_id={extension_id} | error={e}",
             exc_info=True,
         )
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
