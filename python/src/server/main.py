@@ -31,7 +31,8 @@ from .api_routes.pages_api import router as pages_router
 from .api_routes.progress_api import router as progress_router
 from .api_routes.projects_api import router as projects_router
 from .api_routes.providers_api import router as providers_router
-from .api_routes.skills_api import router as skills_router
+from .api_routes.extensions_api import router as extensions_router
+from .api_routes.sessions_api import router as sessions_router
 from .api_routes.version_api import router as version_router
 
 # Import modular API routers
@@ -113,18 +114,22 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             api_logger.warning(f"Could not initialize prompt service: {e}")
 
-        # Seed bundled skills into the registry on startup
+        # Seed bundled extensions and plugins into the registry on startup
         try:
-            from .services.skills.skill_seeding_service import SkillSeedingService
+            from .services.extensions.extension_seeding_service import ExtensionSeedingService
 
-            seeder = SkillSeedingService()
-            counts = seeder.seed_skills()
+            seeder = ExtensionSeedingService()
+            counts = seeder.seed_extensions()
+            plugin_counts = seeder.seed_plugins()
+            total_created = counts["created"] + plugin_counts["created"]
+            total_updated = counts["updated"] + plugin_counts["updated"]
+            total_skipped = counts["skipped"] + plugin_counts["skipped"]
             api_logger.info(
-                f"✅ Skills seeded: {counts['created']} created, "
-                f"{counts['updated']} updated, {counts['skipped']} unchanged"
+                f"✅ Extensions seeded: {total_created} created, "
+                f"{total_updated} updated, {total_skipped} unchanged"
             )
         except Exception as e:
-            api_logger.warning(f"Skill seeding failed (non-fatal): {e}", exc_info=True)
+            api_logger.warning(f"Extension seeding failed (non-fatal): {e}", exc_info=True)
 
         # MCP Client functionality removed from architecture
         # Agents now use MCP tools directly
@@ -211,7 +216,8 @@ app.include_router(bug_report_router)
 app.include_router(providers_router)
 app.include_router(version_router)
 app.include_router(migration_router)
-app.include_router(skills_router)
+app.include_router(extensions_router)
+app.include_router(sessions_router)
 
 
 # Root endpoint

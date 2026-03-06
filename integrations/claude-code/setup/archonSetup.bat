@@ -138,6 +138,110 @@ claude mcp add --transport http archon "%ARCHON_MCP_URL%/mcp" 2>nul || echo     
 echo       Added archon MCP server
 echo.
 
+:: ── Step 3.5: Install scope ────────────────────────────────────────────────
+echo.
+echo Where should Archon tools be installed?
+echo.
+echo   [1] This project only (recommended)
+echo       Installed to .claude\ in your project root.
+echo       Customize per-project, changes stay isolated.
+echo.
+echo   [2] Global (all projects)
+echo       Installed to %USERPROFILE%\.claude\ in your home directory.
+echo       Same setup shared across all projects.
+echo.
+set /p "INSTALL_SCOPE=Choice [1]: "
+if "!INSTALL_SCOPE!"=="" set "INSTALL_SCOPE=1"
+
+if "!INSTALL_SCOPE!"=="2" (
+    set "INSTALL_DIR=%USERPROFILE%\.claude"
+) else (
+    set "INSTALL_DIR=.claude"
+)
+echo.
+
+:: ── Check for existing claude-mem plugin ────────────────────────────────────
+set "SKIP_PLUGIN_INSTALL=false"
+if exist "%USERPROFILE%\.claude\plugins\cache\thedotmack\claude-mem" goto :claude_mem_found
+if exist ".claude\plugins\claude-mem" goto :claude_mem_found
+goto :plugin_install
+
+:claude_mem_found
+echo Detected existing plugin: claude-mem
+echo The archon-memory plugin replaces claude-mem with enhanced
+echo features and Archon integration.
+echo.
+echo   [1] Remove claude-mem and install archon-memory (recommended)
+echo   [2] Keep both (not recommended - duplicate hooks and tools)
+echo   [3] Skip plugin installation
+echo.
+set /p "CLAUDE_MEM_CHOICE=Choice [1]: "
+if "!CLAUDE_MEM_CHOICE!"=="" set "CLAUDE_MEM_CHOICE=1"
+
+if "!CLAUDE_MEM_CHOICE!"=="1" (
+    if exist "%USERPROFILE%\.claude\plugins\cache\thedotmack\claude-mem" rmdir /s /q "%USERPROFILE%\.claude\plugins\cache\thedotmack\claude-mem"
+    if exist ".claude\plugins\claude-mem" rmdir /s /q ".claude\plugins\claude-mem"
+    echo ^✓ Removed claude-mem
+)
+if "!CLAUDE_MEM_CHOICE!"=="3" set "SKIP_PLUGIN_INSTALL=true"
+echo.
+
+:plugin_install
+:: ── Install archon-memory plugin ─────────────────────────────────────────────
+if "!SKIP_PLUGIN_INSTALL!"=="true" goto :plugin_done
+
+echo Installing archon-memory plugin...
+if not exist "!INSTALL_DIR!\plugins\archon-memory" mkdir "!INSTALL_DIR!\plugins\archon-memory"
+set "PLUGIN_TMP=%TEMP%\archon-memory.tar.gz"
+curl -sf "%ARCHON_MCP_URL%/archon-setup/plugin/archon-memory.tar.gz" -o "%PLUGIN_TMP%" 2>nul
+if %errorlevel%==0 (
+    powershell -Command "tar -xzf '%PLUGIN_TMP%' -C '!INSTALL_DIR!\plugins\'" 2>nul
+    echo       ^✓ Plugin installed to !INSTALL_DIR!\plugins\archon-memory\
+) else (
+    echo       ^⚠ Plugin download failed -- install manually from Archon
+)
+del "%PLUGIN_TMP%" 2>nul
+echo.
+
+:plugin_done
+:: ── Write archon-config.json ─────────────────────────────────────────────────
+set "FINGERPRINT_FILE=%TEMP%\archon_fp.txt"
+powershell -Command ^
+  "$h = [System.Security.Cryptography.MD5]::Create(); " ^
+  "$b = [System.Text.Encoding]::UTF8.GetBytes($env:COMPUTERNAME + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value); " ^
+  "$hash = ($h.ComputeHash($b) | ForEach-Object { $_.ToString('x2') }) -join ''; " ^
+  "$hash.Substring(0,16)" > "%FINGERPRINT_FILE%" 2>nul
+set "MACHINE_FINGERPRINT="
+for /f "delims=" %%F in (%FINGERPRINT_FILE%) do set "MACHINE_FINGERPRINT=%%F"
+del "%FINGERPRINT_FILE%" 2>nul
+
+set "CONFIG_FILE=%TEMP%\archon_config_vals.txt"
+echo !ARCHON_API_URL!>"%TEMP%\archon_apiurl.txt"
+echo !ARCHON_MCP_URL!>"%TEMP%\archon_mcpurl.txt"
+echo !PROJECT_ID!>"%TEMP%\archon_pid.txt"
+echo !PROJECT_TITLE!>"%TEMP%\archon_ptitle.txt"
+echo !MACHINE_FINGERPRINT!>"%TEMP%\archon_mfp.txt"
+echo !INSTALL_SCOPE!>"%TEMP%\archon_scope.txt"
+
+powershell -Command ^
+  "$apiUrl  = (Get-Content '%TEMP%\archon_apiurl.txt').Trim(); " ^
+  "$mcpUrl  = (Get-Content '%TEMP%\archon_mcpurl.txt').Trim(); " ^
+  "$projId  = (Get-Content '%TEMP%\archon_pid.txt').Trim(); " ^
+  "$projTitle = (Get-Content '%TEMP%\archon_ptitle.txt').Trim(); " ^
+  "$mfp     = (Get-Content '%TEMP%\archon_mfp.txt').Trim(); " ^
+  "$scope   = (Get-Content '%TEMP%\archon_scope.txt').Trim(); " ^
+  "$ts      = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); " ^
+  "$cfg = [ordered]@{ archon_api_url=$apiUrl; archon_mcp_url=$mcpUrl; project_id=$projId; project_title=$projTitle; machine_id=$mfp; install_scope=$scope; installed_at=$ts }; " ^
+  "$cfg | ConvertTo-Json | Set-Content '!INSTALL_DIR!\archon-config.json'"
+
+echo       ^✓ Wrote !INSTALL_DIR!\archon-config.json
+echo.
+
+:: ── Update .gitignore ────────────────────────────────────────────────────────
+for %%G in (".claude/plugins/" ".claude/archon-config.json" ".claude/archon-memory-buffer.jsonl") do (
+    findstr /x /c:"%%~G" .gitignore >nul 2>&1 || echo %%~G>>.gitignore
+)
+
 :: ── Step 4/4: Install /archon-setup ───────────────────────────────────────
 echo [4/4] Installing /archon-setup command...
 if not exist "%USERPROFILE%\.claude\commands" mkdir "%USERPROFILE%\.claude\commands"
@@ -170,6 +274,6 @@ echo  Open Claude Code and run:
 echo.
 echo    /archon-setup
 echo.
-echo  This will register your system and install all project skills.
+echo  This will sync extensions and project context.
 echo =============================================
 echo.

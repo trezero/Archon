@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "archon-memory": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/src/mcp_server.py"]
+    }
+  }
+}

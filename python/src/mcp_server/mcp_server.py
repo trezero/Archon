@@ -571,21 +571,38 @@ def register_modules():
         logger.error(f"✗ Failed to register feature tools: {e}")
         logger.error(traceback.format_exc())
 
-    # Skill Management Tools
+    # Extension Management Tools
     try:
-        from src.mcp_server.features.skills import register_skill_tools
+        from src.mcp_server.features.extensions import register_extension_tools
 
-        register_skill_tools(mcp)
+        register_extension_tools(mcp)
         modules_registered += 1
-        logger.info("✓ Skill tools registered")
+        logger.info("✓ Extension tools registered")
     except ImportError as e:
-        logger.warning(f"⚠ Skill tools module not available (optional): {e}")
+        logger.warning(f"⚠ Extension tools module not available (optional): {e}")
     except (SyntaxError, NameError, AttributeError) as e:
-        logger.error(f"✗ Code error in skill tools - MUST FIX: {e}")
+        logger.error(f"✗ Code error in extension tools - MUST FIX: {e}")
         logger.error(traceback.format_exc())
         raise
     except Exception as e:
-        logger.error(f"✗ Failed to register skill tools: {e}")
+        logger.error(f"✗ Failed to register extension tools: {e}")
+        logger.error(traceback.format_exc())
+
+    # Session Memory Tools
+    try:
+        from src.mcp_server.features.sessions import register_session_tools
+
+        register_session_tools(mcp)
+        modules_registered += 1
+        logger.info("✓ Session tools registered")
+    except ImportError as e:
+        logger.warning(f"⚠ Session tools module not available (optional): {e}")
+    except (SyntaxError, NameError, AttributeError) as e:
+        logger.error(f"✗ Code error in session tools - MUST FIX: {e}")
+        logger.error(traceback.format_exc())
+        raise
+    except Exception as e:
+        logger.error(f"✗ Failed to register session tools: {e}")
         logger.error(traceback.format_exc())
 
     logger.info(f"📦 Total modules registered: {modules_registered}")
@@ -735,12 +752,47 @@ def _render_setup_md() -> str:
     raise FileNotFoundError("archon-setup.md not found")
 
 
+async def http_plugin_manifest(request: Request) -> JSONResponse:
+    """Return the archon-memory plugin manifest."""
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "integrations" / "claude-code" / "plugins" / "archon-memory" / ".claude-plugin" / "plugin.json"
+        if candidate.exists():
+            import json
+            data = json.loads(candidate.read_text())
+            return JSONResponse(data)
+    return JSONResponse({"error": "plugin manifest not found"}, status_code=404)
+
+
+async def http_download_plugin(request: Request):
+    """Return the archon-memory plugin as a compressed tar archive."""
+    import io
+    import tarfile
+    from starlette.responses import Response
+
+    for parent in Path(__file__).resolve().parents:
+        plugin_dir = parent / "integrations" / "claude-code" / "plugins" / "archon-memory"
+        if plugin_dir.is_dir():
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+                tar.add(plugin_dir, arcname="archon-memory")
+            buf.seek(0)
+            return Response(
+                content=buf.read(),
+                media_type="application/gzip",
+                headers={"Content-Disposition": 'attachment; filename="archon-memory.tar.gz"'},
+            )
+    return JSONResponse({"error": "plugin not found"}, status_code=404)
+
+
 # Register setup endpoints
 try:
     mcp.custom_route("/archon-setup.sh", methods=["GET"])(http_archon_setup_sh)
     mcp.custom_route("/archon-setup.bat", methods=["GET"])(http_archon_setup_bat)
     mcp.custom_route("/archon-setup.md", methods=["GET"])(http_archon_setup_md)
     logger.info("✓ Setup file endpoints registered")
+    mcp.custom_route("/archon-setup/plugin-manifest", methods=["GET"])(http_plugin_manifest)
+    mcp.custom_route("/archon-setup/plugin/archon-memory.tar.gz", methods=["GET"])(http_download_plugin)
+    logger.info("✓ Plugin distribution endpoints registered")
 except Exception as e:
     logger.error(f"✗ Failed to register setup endpoints: {e}")
 
