@@ -5,7 +5,7 @@ description: Bootstrap Archon extensions onto this machine. Fetches all extensio
 
 # Archon Bootstrap
 
-Bootstrap Archon extensions onto this machine by fetching all extensions from the Archon registry, installing them to `~/.claude/skills/`, registering this system, and optionally linking it to the current project.
+Bootstrap Archon extensions onto this machine by fetching all extensions from the Archon registry, installing them to `~/.claude/skills/` (extension definition files), registering this system, and optionally linking it to the current project.
 
 ## Phase 0: Health Check
 
@@ -83,7 +83,7 @@ Extract `<system_id>` from `response.system.id` (if `response.system` is present
 For each extension object in `response.extensions`:
 
 1. Create the directory `~/.claude/skills/<name>/`
-2. Write the extension content to `~/.claude/skills/<name>/SKILL.md`
+2. Write the extension content to `~/.claude/skills/<name>/SKILL.md` (extension definition file)
 
 Use the Write tool (not a bash heredoc) to write each file.
 
@@ -109,7 +109,7 @@ Print the following summary:
 ## Archon Bootstrap Complete
 
 **System:** <system_name> (<system_id>)
-**Extensions installed:** <N> → ~/.claude/skills/
+**Extensions installed:** <N> → ~/.claude/skills/ (extension definition files)
   - <list each extension name>
 **Project:** <project_title if registered> — or "No project linked"
 

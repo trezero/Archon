@@ -42,9 +42,9 @@ Store as `system_fingerprint`.
 
 ## Phase 1: Scan Local Extensions
 
-### 1a. Find all SKILL.md files
+### 1a. Find all extension definition files
 
-Scan these directories for SKILL.md files:
+Scan these directories for SKILL.md extension definition files:
 - `.claude/skills/` (user-installed extensions)
 - `integrations/claude-code/extensions/` (repo extensions, if in Archon repo)
 - Any directory listed in `.claude/archon-state.json` under `extension_directories`
@@ -56,7 +56,7 @@ Glob: integrations/claude-code/extensions/**/SKILL.md
 
 ### 1b. Parse each extension
 
-For each SKILL.md found:
+For each extension definition file found:
 1. Read the file content
 2. Parse YAML frontmatter to extract `name`
 3. Compute SHA256 hash of the full content:
@@ -117,13 +117,13 @@ manage_extensions(
 ### 3a. Install pending extensions
 
 For each item in `pending_install`:
-1. Write the `content` to `.claude/skills/<name>/SKILL.md`
+1. Write the `content` to `.claude/skills/<name>/SKILL.md` (extension definition file)
 2. Report: "Installed extension: <name>"
 
 ### 3b. Remove pending extensions
 
 For each item in `pending_remove`:
-1. Delete `.claude/skills/<name>/SKILL.md`
+1. Delete `.claude/skills/<name>/SKILL.md` (extension definition file)
 2. Report: "Removed extension: <name>"
 
 ### 3c. Resolve local changes
@@ -223,7 +223,7 @@ If last_extension_sync is missing or older than 24h:
 
 ### Extension File Locations
 
-- **Installed extensions:** `.claude/skills/<name>/SKILL.md`
+- **Installed extensions:** `.claude/skills/<name>/SKILL.md` (extension definition file)
 - **Repo extensions:** `integrations/claude-code/extensions/<name>/SKILL.md`
 - Extensions are identified by their frontmatter `name` field, not directory name
 
