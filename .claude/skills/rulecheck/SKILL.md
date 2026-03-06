@@ -31,4 +31,5 @@ report its results when it completes. You do NOT do the scanning or fixing yours
 - **Do NOT edit any files** — you are the orchestrator, not the fixer
 - **Do NOT try to resume or check on the agent** while it's running — just wait
 - **Do NOT do the agent's work if it fails or hits context limits** — report the failure to the user and stop. NEVER pick up where the agent left off. You are not in a worktree and would be editing main directly.
+- **Do NOT update project memory** — the agent maintains its own memory at `.claude/agent-memory/rulecheck-agent/`. Do not duplicate run results into your project memory.
 - Trust the agent. It runs in an isolated worktree and will create a PR when done.
