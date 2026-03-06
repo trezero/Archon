@@ -191,7 +191,7 @@ the surrounding code and context before deciding what to fix.
 If `$ARGUMENTS` specifies a focus area, weight your scanning toward that category
 but still scan broadly.
 
-## Step 5: Group, Prioritize, and Fix ALL
+## Step 5: Pick One Concern and Fix It Everywhere
 
 After scanning, you'll have a list of violations. Group related ones:
 - "These 4 files have catch blocks that swallow errors silently"
@@ -199,15 +199,18 @@ After scanning, you'll have a list of violations. Group related ones:
 - "This module has logging events that don't follow the naming convention"
 - "These 5 files import from @archon/core with generic import *"
 
-Fix **2-3 groups** per run. A 6-line PR is too timid, but 50 files changed
-risks running out of context before you can commit and PR. Aim for 10-20
-files changed — enough to be meaningful, small enough to finish the full
-cycle (scan → fix → validate → commit → push → PR → memory).
+Pick **one cohesive concern** per run — e.g., "all log events missing domain
+prefixes" or "all catch blocks that swallow errors silently." Fix every
+instance of that concern across the codebase, regardless of how many files
+it touches. The PR should tell a single story: one type of violation, fixed
+everywhere.
 
-**Budget your context**: You must reserve enough turns for validation,
-committing, pushing, PR creation, and memory updates. If you've already
-edited 15+ files, STOP fixing and move to validation. An incomplete PR is
-worse than a smaller complete one.
+Do NOT mix unrelated violation types in one PR. A PR that fixes log naming
+AND import patterns AND error handling is hard to review and risky to merge.
+
+**Budget your context**: reserve enough turns for validation, committing,
+pushing, PR creation, and memory updates. A completed PR with one concern
+fully addressed is better than an incomplete PR that tried to fix everything.
 
 Skip a violation if:
 - It's already fixed in an open PR (Step 1)
