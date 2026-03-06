@@ -183,9 +183,6 @@ git push -u origin HEAD
 gh pr create --title "fix: [concise title]" --body "[filled-in PR template]"
 ```
 
-3. Write `.claude/archon/rulecheck-last-run.json` with the PR URL, fixed
-   count, files changed, and remaining violations found but not addressed.
-
 ## Step 8: Update Memory
 
 Write to your `MEMORY.md`:
@@ -216,7 +213,6 @@ Before you stop, verify ALL of these are done:
 - [ ] Fixed all instances of that concern
 - [ ] Ran `bun run validate` and it passed
 - [ ] Committed, pushed, and created PR with `gh pr create`
-- [ ] Wrote summary to `.claude/archon/rulecheck-last-run.json`
 - [ ] Updated memory with findings and backlog
 
 If any item is unchecked, you are not done. Keep going.
