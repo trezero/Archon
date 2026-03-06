@@ -28,6 +28,7 @@ report its results when it completes. You do NOT do the scanning or fixing yours
 
 - **Do NOT scan the codebase yourself** — that's the agent's job
 - **Do NOT grep, read source files, or run linters** — the agent handles all of that
+- **Do NOT edit any files** — you are the orchestrator, not the fixer
 - **Do NOT try to resume or check on the agent** while it's running — just wait
-- **Do NOT do the agent's work** if it fails — report the failure to the user
+- **Do NOT do the agent's work if it fails or hits context limits** — report the failure to the user and stop. NEVER pick up where the agent left off. You are not in a worktree and would be editing main directly.
 - Trust the agent. It runs in an isolated worktree and will create a PR when done.
