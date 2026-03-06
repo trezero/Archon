@@ -752,12 +752,47 @@ def _render_setup_md() -> str:
     raise FileNotFoundError("archon-setup.md not found")
 
 
+async def http_plugin_manifest(request: Request) -> JSONResponse:
+    """Return the archon-memory plugin manifest."""
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "integrations" / "claude-code" / "plugins" / "archon-memory" / ".claude-plugin" / "plugin.json"
+        if candidate.exists():
+            import json
+            data = json.loads(candidate.read_text())
+            return JSONResponse(data)
+    return JSONResponse({"error": "plugin manifest not found"}, status_code=404)
+
+
+async def http_download_plugin(request: Request):
+    """Return the archon-memory plugin as a compressed tar archive."""
+    import io
+    import tarfile
+    from starlette.responses import Response
+
+    for parent in Path(__file__).resolve().parents:
+        plugin_dir = parent / "integrations" / "claude-code" / "plugins" / "archon-memory"
+        if plugin_dir.is_dir():
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+                tar.add(plugin_dir, arcname="archon-memory")
+            buf.seek(0)
+            return Response(
+                content=buf.read(),
+                media_type="application/gzip",
+                headers={"Content-Disposition": 'attachment; filename="archon-memory.tar.gz"'},
+            )
+    return JSONResponse({"error": "plugin not found"}, status_code=404)
+
+
 # Register setup endpoints
 try:
     mcp.custom_route("/archon-setup.sh", methods=["GET"])(http_archon_setup_sh)
     mcp.custom_route("/archon-setup.bat", methods=["GET"])(http_archon_setup_bat)
     mcp.custom_route("/archon-setup.md", methods=["GET"])(http_archon_setup_md)
     logger.info("✓ Setup file endpoints registered")
+    mcp.custom_route("/archon-setup/plugin-manifest", methods=["GET"])(http_plugin_manifest)
+    mcp.custom_route("/archon-setup/plugin/archon-memory.tar.gz", methods=["GET"])(http_download_plugin)
+    logger.info("✓ Plugin distribution endpoints registered")
 except Exception as e:
     logger.error(f"✗ Failed to register setup endpoints: {e}")
 
