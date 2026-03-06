@@ -323,6 +323,16 @@ When connected to Claude/Cursor/Windsurf, the following tools are available:
 - `archon:find_versions` - Find version history or get specific version
 - `archon:manage_version` - Manage versions with actions: "create", "restore"
 
+### Extension Management
+
+- `archon:find_extensions` - Find all extensions, search, or get specific extension (by extension_id)
+- `archon:manage_extensions` - Manage extensions with actions: "create", "update", "delete"
+
+### Session Memory
+
+- `archon:archon_search_sessions` - Search session history across agents and machines
+- `archon:archon_get_session` - Get a specific session with all its observations
+
 ## Important Notes
 
 - Projects feature is optional - toggle in Settings UI
