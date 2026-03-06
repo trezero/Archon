@@ -39,12 +39,12 @@ If Archon is down or `api_service` is false:
 
 Stop here if unhealthy.
 
-### 0b. Check skill sync freshness
+### 0b. Check extension sync freshness
 
-Read `.claude/archon-state.json`. If `last_skill_sync` is missing or older than 24 hours:
-> "Skills are out of sync. Running skill sync first..."
+Read `.claude/archon-state.json`. If `last_extension_sync` is missing or older than 24 hours:
+> "Extensions are out of sync. Running extension sync first..."
 
-Run `/archon-skill-sync` before continuing.
+Run `/archon-extension-sync` before continuing.
 
 ### 0c. Load state files
 

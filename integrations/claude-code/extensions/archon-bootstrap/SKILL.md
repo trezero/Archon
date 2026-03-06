@@ -1,11 +1,11 @@
 ---
 name: archon-bootstrap
-description: Bootstrap Archon skills onto this machine. Fetches all skills from the Archon registry and installs them to ~/.claude/skills/, registers this system, and links it to the current project. Run once on any new machine to set up Archon integration. Use when the user says "bootstrap archon", "install archon skills", "set up archon", or "run archon bootstrap".
+description: Bootstrap Archon extensions onto this machine. Fetches all extensions from the Archon registry and installs them to ~/.claude/skills/, registers this system, and links it to the current project. Run once on any new machine to set up Archon integration. Use when the user says "bootstrap archon", "install archon extensions", "set up archon", or "run archon bootstrap".
 ---
 
 # Archon Bootstrap
 
-Bootstrap Archon skills onto this machine by fetching all skills from the Archon registry, installing them to `~/.claude/skills/`, registering this system, and optionally linking it to the current project.
+Bootstrap Archon extensions onto this machine by fetching all extensions from the Archon registry, installing them to `~/.claude/skills/`, registering this system, and optionally linking it to the current project.
 
 ## Phase 0: Health Check
 
@@ -66,7 +66,7 @@ If the file does not exist or the key is absent, `<project_id>` is omitted from 
 Call:
 
 ```
-manage_skills(
+manage_extensions(
     action="bootstrap",
     system_fingerprint="<fingerprint>",
     system_name="<system_name>",
@@ -78,12 +78,12 @@ If the call fails, report the error and stop.
 
 Extract `<system_id>` from `response.system.id` (if `response.system` is present, otherwise use `"unknown"`).
 
-## Phase 5: Write Skill Files
+## Phase 5: Write Extension Files
 
-For each skill object in `response.skills`:
+For each extension object in `response.extensions`:
 
 1. Create the directory `~/.claude/skills/<name>/`
-2. Write the skill content to `~/.claude/skills/<name>/SKILL.md`
+2. Write the extension content to `~/.claude/skills/<name>/SKILL.md`
 
 Use the Write tool (not a bash heredoc) to write each file.
 
@@ -109,11 +109,11 @@ Print the following summary:
 ## Archon Bootstrap Complete
 
 **System:** <system_name> (<system_id>)
-**Skills installed:** <N> → ~/.claude/skills/
-  - <list each skill name>
+**Extensions installed:** <N> → ~/.claude/skills/
+  - <list each extension name>
 **Project:** <project_title if registered> — or "No project linked"
 
-Restart Claude Code for the new skills to take effect.
+Restart Claude Code for the new extensions to take effect.
 ```
 
 If `response.system.is_new` is `true`, also print:

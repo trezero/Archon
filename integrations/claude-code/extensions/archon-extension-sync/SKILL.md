@@ -1,14 +1,14 @@
 ---
-name: archon-skill-sync
-description: Sync local Claude Code skills with the Archon skill registry. Detects new skills, local modifications, and pending installs. Use when "sync skills", "check skills", "update skills", or at startup when sync is stale.
+name: archon-extension-sync
+description: Sync local Claude Code extensions with the Archon extension registry. Detects new extensions, local modifications, and pending installs. Use when "sync extensions", "check extensions", "update extensions", or at startup when sync is stale.
 ---
 
-# Archon Skill Sync
+# Archon Extension Sync
 
-Synchronizes local Claude Code skills with the Archon skill registry. Detects drift, handles conflict resolution, installs pending skills, and uploads new local skills.
+Synchronizes local Claude Code extensions with the Archon extension registry. Detects drift, handles conflict resolution, installs pending extensions, and uploads new local extensions.
 
-**Invocation:** `/archon-skill-sync`
-**Auto-trigger:** Runs automatically when any Archon skill detects last_skill_sync > 24h in `.claude/archon-state.json`
+**Invocation:** `/archon-extension-sync`
+**Auto-trigger:** Runs automatically when any Archon extension detects last_extension_sync > 24h in `.claude/archon-state.json`
 
 ---
 
@@ -40,21 +40,21 @@ Store as `system_fingerprint`.
 
 ---
 
-## Phase 1: Scan Local Skills
+## Phase 1: Scan Local Extensions
 
 ### 1a. Find all SKILL.md files
 
 Scan these directories for SKILL.md files:
-- `.claude/skills/` (user-installed skills)
-- `integrations/claude-code/skills/` (repo skills, if in Archon repo)
-- Any directory listed in `.claude/archon-state.json` under `skill_directories`
+- `.claude/skills/` (user-installed extensions)
+- `integrations/claude-code/extensions/` (repo extensions, if in Archon repo)
+- Any directory listed in `.claude/archon-state.json` under `extension_directories`
 
 ```
 Glob: .claude/skills/**/SKILL.md
-Glob: integrations/claude-code/skills/**/SKILL.md
+Glob: integrations/claude-code/extensions/**/SKILL.md
 ```
 
-### 1b. Parse each skill
+### 1b. Parse each extension
 
 For each SKILL.md found:
 1. Read the file content
@@ -64,7 +64,7 @@ For each SKILL.md found:
    sha256sum <filepath> | cut -d' ' -f1
    ```
 
-Build `local_skills` list: `[{name, content_hash}]`
+Build `local_extensions` list: `[{name, content_hash}]`
 
 ---
 
@@ -82,9 +82,9 @@ Stop here.
 ### 2b. Call sync
 
 ```
-manage_skills(
+manage_extensions(
     action="sync",
-    local_skills=<local_skills list>,
+    local_extensions=<local_extensions list>,
     system_fingerprint="<fingerprint>",
     project_id="<archon_project_id>"
 )
@@ -101,9 +101,9 @@ Ask the user:
 
 Store the user's choice, then re-call:
 ```
-manage_skills(
+manage_extensions(
     action="sync",
-    local_skills=<local_skills list>,
+    local_extensions=<local_extensions list>,
     system_fingerprint="<fingerprint>",
     system_name="<user-provided-name>",
     project_id="<archon_project_id>"
@@ -114,57 +114,57 @@ manage_skills(
 
 ## Phase 3: Process Sync Results
 
-### 3a. Install pending skills
+### 3a. Install pending extensions
 
 For each item in `pending_install`:
 1. Write the `content` to `.claude/skills/<name>/SKILL.md`
-2. Report: "Installed skill: <name>"
+2. Report: "Installed extension: <name>"
 
-### 3b. Remove pending skills
+### 3b. Remove pending extensions
 
 For each item in `pending_remove`:
 1. Delete `.claude/skills/<name>/SKILL.md`
-2. Report: "Removed skill: <name>"
+2. Report: "Removed extension: <name>"
 
 ### 3c. Resolve local changes
 
 For each item in `local_changes`, ask the user:
 
-> "Skill **<name>** has local modifications (local hash: `<local_hash>`, Archon hash: `<archon_hash>`). What would you like to do?"
+> "Extension **<name>** has local modifications (local hash: `<local_hash>`, Archon hash: `<archon_hash>`). What would you like to do?"
 
 Options:
 - **Update Source** — Push local content to Archon as a new version
 - **Save as Project Version** — Store as a project-specific override
-- **Create New Skill** — Upload as a new skill with a different name
+- **Create New Extension** — Upload as a new extension with a different name
 - **Discard Changes** — Overwrite local with Archon version
 
 **If Update Source:**
 Read the local file content, then:
 ```
-manage_skills(action="upload", skill_content="<local content>")
+manage_extensions(action="upload", extension_content="<local content>")
 ```
 
 **If Save as Project Version:**
 Read the local file content. The backend stores it as a project override (future API call).
 
-**If Create New Skill:**
+**If Create New Extension:**
 Ask for a new name, then:
 ```
-manage_skills(action="validate", skill_content="<local content>")
+manage_extensions(action="validate", extension_content="<local content>")
 ```
 If validation passes:
 ```
-manage_skills(action="upload", skill_content="<local content>", skill_name="<new-name>")
+manage_extensions(action="upload", extension_content="<local content>", extension_name="<new-name>")
 ```
 
 **If Discard Changes:**
-Fetch the Archon version via `find_skills(skill_id="<skill_id>")` and overwrite the local file.
+Fetch the Archon version via `find_extensions(extension_id="<extension_id>")` and overwrite the local file.
 
-### 3d. Handle unknown local skills
+### 3d. Handle unknown local extensions
 
 For each item in `unknown_local`, ask the user:
 
-> "Found local skill **<name>** not in Archon. Would you like to upload it to the registry?"
+> "Found local extension **<name>** not in Archon. Would you like to upload it to the registry?"
 
 Options:
 - **Upload** — Validate and upload
@@ -173,11 +173,11 @@ Options:
 **If Upload:**
 Read the local file, then:
 ```
-manage_skills(action="validate", skill_content="<content>")
+manage_extensions(action="validate", extension_content="<content>")
 ```
 If validation passes (or user accepts warnings):
 ```
-manage_skills(action="upload", skill_content="<content>")
+manage_extensions(action="upload", extension_content="<content>")
 ```
 If validation has errors, show them and ask user to fix.
 
@@ -190,7 +190,7 @@ If validation has errors, show them and ask user to fix.
 Update `.claude/archon-state.json`:
 ```json
 {
-  "last_skill_sync": "<ISO timestamp>",
+  "last_extension_sync": "<ISO timestamp>",
   "system_fingerprint": "<fingerprint>",
   "system_name": "<name>"
 }
@@ -200,8 +200,8 @@ Merge with existing state — do not overwrite other fields.
 
 ### 4b. Summary
 
-> "**Skill sync complete:**
-> - In sync: <N> skills
+> "**Extension sync complete:**
+> - In sync: <N> extensions
 > - Installed: <list or 'none'>
 > - Removed: <list or 'none'>
 > - Updated: <list or 'none'>
@@ -214,21 +214,21 @@ Merge with existing state — do not overwrite other fields.
 
 ### Sync Freshness
 
-Other Archon skills check sync freshness in their Phase 0:
+Other Archon extensions check sync freshness in their Phase 0:
 ```
 Read .claude/archon-state.json
-If last_skill_sync is missing or older than 24h:
-  → Run /archon-skill-sync before continuing
+If last_extension_sync is missing or older than 24h:
+  → Run /archon-extension-sync before continuing
 ```
 
-### Skill File Locations
+### Extension File Locations
 
-- **Installed skills:** `.claude/skills/<name>/SKILL.md`
-- **Repo skills:** `integrations/claude-code/skills/<name>/SKILL.md`
-- Skills are identified by their frontmatter `name` field, not directory name
+- **Installed extensions:** `.claude/skills/<name>/SKILL.md`
+- **Repo extensions:** `integrations/claude-code/extensions/<name>/SKILL.md`
+- Extensions are identified by their frontmatter `name` field, not directory name
 
 ### Error Recovery
 
 - If Archon is unreachable, skip sync and continue with stale state
-- If a single skill install/upload fails, continue with remaining operations
+- If a single extension install/upload fails, continue with remaining operations
 - Always save the sync timestamp even if some operations failed (prevents retry loops)
