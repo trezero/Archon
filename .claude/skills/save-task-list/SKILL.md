@@ -58,9 +58,10 @@ Save the current session's task list so it can be restored in future sessions.
      >> .claude/archon/sessions/task-lists.jsonl
    ```
 
-4. **Install the SessionStart verification hook** — ensure `.claude/settings.local.json`
-   has a SessionStart hook that verifies the task list on next launch. Read the file
-   first (create it if missing), then merge this hook config into the `hooks` key:
+4. **Verify the SessionStart hook is installed** — the project-level
+   `.claude/settings.json` already includes a SessionStart hook that runs
+   `verify-task-list.sh` on every session start. Confirm it's present by
+   reading the file. If it's missing for some reason, add it back:
 
    ```json
    {

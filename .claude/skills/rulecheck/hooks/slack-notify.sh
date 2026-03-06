@@ -6,15 +6,11 @@
 # Input: JSON on stdin with stop event context
 # Output: exit 0 always (notification failure should not block the agent)
 #
-# Requires: SLACK_WEBHOOK_URL environment variable (optional — graceful skip if unset)
+# Uses SLACK_WEBHOOK_URL env var if set, otherwise falls back to hardcoded URL.
 
 INPUT=$(cat)
 
-# No webhook URL — skip gracefully
-if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
-  echo "SLACK_WEBHOOK_URL not set, skipping notification" >&2
-  exit 0
-fi
+SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/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}"
 
 # Extract the last assistant message from the stop event
 LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null)

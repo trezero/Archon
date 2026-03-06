@@ -145,14 +145,14 @@ cat .claude/archon/sessions/task-lists.jsonl
 ```
 
 ```bash
-# The SessionStart hook in settings
-cat .claude/settings.local.json
+# The SessionStart hook in project settings (committed to git)
+cat .claude/settings.json | jq '.hooks.SessionStart'
 ```
 
-> **Explain**: "The skill installed a SessionStart hook into
-> `.claude/settings.local.json`. This hook runs at the start of every
-> future session — not just while the skill is active. That's two
-> different hook lifetimes in one skill: skill-scoped during execution,
+> **Explain**: "The SessionStart hook lives in `.claude/settings.json` —
+> the project-level settings file, committed to git. This hook runs at the
+> start of every future session — not just while the skill is active. That's
+> two different hook lifetimes in one skill: skill-scoped during execution,
 > settings-level across sessions."
 
 #### Step 5: Show the hook verification script
@@ -542,7 +542,49 @@ head -30 .claude/skills/rulecheck/rules-guide.md
 > loads it lazily — only when it needs the rules reference. Keeps the initial
 > prompt small."
 
-#### Step 6: Invoke the rulecheck
+#### Step 6: Add Slack hooks to settings (before invoking)
+
+> **Why this step**: Hooks defined in agent frontmatter (`rulecheck-agent.md`)
+> only fire when the agent is launched directly via `claude agents` CLI.
+> When a skill delegates to an agent using `agent:` in its frontmatter, the
+> agent runs as a subagent — and subagent-level hooks from the agent file
+> do not fire. To demo the Slack notification, we temporarily add the hooks
+> at the settings level, where they apply to all `Stop` events.
+
+Add the Slack hooks to `.claude/settings.local.json` (create if it doesn't exist):
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/skills/rulecheck/hooks/slack-notify.sh",
+            "statusMessage": "Notifying Slack..."
+          },
+          {
+            "type": "http",
+            "url": "https://hooks.slack.com/services/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",
+            "statusMessage": "Posting run event to Slack..."
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+> **Explain to participants**: "Agent frontmatter hooks only fire when an
+> agent is launched standalone via `claude agents`. When a skill delegates
+> with `agent:` in its frontmatter, the agent runs as a background subagent —
+> and subagent hooks don't fire. So for the demo, we add the Slack hooks at
+> the settings level. In practice, you'd keep these in settings if you always
+> want Slack notifications, or remove them if you only want them for specific
+> agents."
+
+**Restart Claude Code** so the new settings take effect, then invoke:
 
 ```
 /rulecheck error handling
@@ -587,6 +629,15 @@ cat .claude/agent-memory/rulecheck-agent/MEMORY.md
 
 # Meta-judge feedback
 cat .claude/agent-memory/rulecheck-agent/meta-judge-feedback.md
+```
+
+#### Step 9: Remove the Slack hooks
+
+Remove `.claude/settings.local.json` (or delete the `Stop` hooks from it) so
+the Slack notifications don't fire on every future session stop:
+
+```bash
+rm .claude/settings.local.json
 ```
 
 ### Comparison: Before vs After

@@ -5,7 +5,6 @@ description: |
   in an isolated worktree, runs validation, creates a PR, and updates memory
   with findings for future runs.
 isolation: worktree
-background: true
 memory: project
 permissionMode: acceptEdits
 maxTurns: 500
@@ -82,17 +81,28 @@ and create a pull request. You do not stop until the PR is created.
 
 - **NEVER ask questions** — make decisions yourself and move forward
 - **NEVER stop to confirm** — you have full authority to scan, edit, commit, and PR
-- **NEVER stop after editing files** — editing is step 5 of 8, you must continue through validation, commit, push, and PR creation
+- **NEVER stop after editing files** — editing is step 5 of 9, you must continue through validation, commit, push, and PR creation
 - **NEVER just run linters** — linters are for validation after you've made changes, not for finding work
 - **Your job is to READ source code** and find violations of CLAUDE.md rules that linters can't catch
 - If something is ambiguous, make the conservative choice and move on
 - If you can't fix something safely, skip it and note it in the backlog
 
 **Your work is NOT done until you have a PR URL.** The full sequence is:
-scan → read files → group violations → fix → validate → commit → push → `gh pr create` → update memory.
+check open PRs → read memory → scan → read files → group violations → fix ALL → validate → commit → push → `gh pr create` → update memory.
 Do not stop at any intermediate step.
 
-## Step 1: Read Memory
+## Step 1: Check for Duplicate Work
+
+Before doing anything, check if there are already open rulecheck PRs:
+
+```bash
+gh pr list --state open --search "rulecheck" --json number,title,url
+```
+
+If open PRs exist, read their diffs to understand what's already been fixed.
+Do NOT duplicate fixes that are already in an open PR.
+
+## Step 2: Read Memory
 
 Check your memory for context from previous runs:
 - `MEMORY.md` — what was fixed before, known patterns, backlog
@@ -101,7 +111,7 @@ Check your memory for context from previous runs:
 Use these to avoid re-doing work and to act on improvement suggestions.
 If no memory exists yet, that's fine — this is your first run.
 
-## Step 2: Learn the Rules
+## Step 3: Learn the Rules
 
 Read `CLAUDE.md` thoroughly. This is your source of truth. The rules you're
 checking go far beyond what linters catch. Key areas:
@@ -122,7 +132,7 @@ Also load [rules-guide.md](.claude/skills/rulecheck/rules-guide.md) for addition
 Do NOT rely on eslint/tsconfig/prettier — those are enforced by tooling already.
 Your job is to find violations that **linters can't catch**.
 
-## Step 3: Deep Scan — Read Actual Source Code
+## Step 4: Deep Scan — Read Actual Source Code
 
 This is the core of your job. You must grep through and read actual `.ts` files
 in `packages/*/src/` to find CLAUDE.md rule violations. Do NOT run `bun run lint`.
@@ -169,7 +179,7 @@ the surrounding code and context before deciding what to fix.
 If `$ARGUMENTS` specifies a focus area, weight your scanning toward that category
 but still scan broadly.
 
-## Step 4: Group and Prioritize
+## Step 5: Group, Prioritize, and Fix ALL
 
 After scanning, you'll have a list of violations. Group related ones:
 - "These 4 files have catch blocks that swallow errors silently"
@@ -177,12 +187,17 @@ After scanning, you'll have a list of violations. Group related ones:
 - "This module has logging events that don't follow the naming convention"
 - "These 5 files import from @archon/core with generic import *"
 
-Pick ONE related group to fix in this run. A cohesive PR is better than
-scattered unrelated fixes. Choose the group with highest impact.
+**Fix ALL groups you found.** You have 500 turns — use them. A 6-line PR after
+15 minutes of scanning is a waste. You are very capable of fixing 20-50
+violations across multiple categories in a single run. Prioritize by impact
+but keep going through every group until there's nothing left to fix.
 
-## Step 5: Fix the Group
+Skip a violation ONLY if:
+- It's already fixed in an open PR (Step 1)
+- Fixing it would change behavior, not just style
+- You're genuinely unsure if it's a violation
 
-Fix all instances in your chosen group:
+For each group:
 - Read each file fully before editing
 - Make focused, minimal edits — change only what's needed
 - Preserve all existing functionality
@@ -201,6 +216,10 @@ bun run validate
 If validation fails, fix the issues and run again. Iterate until it passes.
 
 ## Step 7: Write Summary + Create PR
+
+**IMPORTANT**: If you only found a handful of trivial fixes (< 10 lines changed),
+go back to Step 4 and scan harder. Read more files. Look for violations you missed.
+The codebase has thousands of lines — there is always more to find.
 
 Create the `.claude/archon/` directory if needed:
 ```bash
@@ -241,7 +260,7 @@ gh pr create --title "fix: [concise title]" --body "[filled-in PR template]"
 
 Update the summary JSON with the actual PR URL after creation.
 
-## Step 8: Update Memory
+## Step 9: Update Memory
 
 Write to your `MEMORY.md`:
 - Date of this run
@@ -254,7 +273,7 @@ Write to your `MEMORY.md`:
 - **Do not stop until the PR is created** — your final action must be `gh pr create`
 - **Be fully autonomous** — never ask, never stop, never wait for input
 - **Read actual code** — grep and read `.ts` files, don't rely on linters to find work
-- **Group related fixes** — one cohesive PR per run, not scattered changes
+- **Fix broadly** — fix all violation groups, not just one
 - **Never force push** — the safety hook blocks it, but don't even try
 - **Never modify main/master** — work in the worktree branch only
 - **Fix, don't refactor** — address violations, don't redesign code
@@ -266,8 +285,8 @@ Write to your `MEMORY.md`:
 Before you stop, verify ALL of these are done:
 - [ ] Scanned source code with Grep (not linters)
 - [ ] Read full files to understand context
-- [ ] Grouped violations and picked one group
-- [ ] Fixed all instances in the group
+- [ ] Checked open PRs for duplicate work
+- [ ] Grouped violations and fixed ALL groups (not just one)
 - [ ] Ran `bun run validate` and it passed
 - [ ] Committed changes with descriptive message
 - [ ] Pushed branch with `git push -u origin HEAD`

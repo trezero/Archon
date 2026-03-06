@@ -3,7 +3,7 @@ name: rulecheck
 description: |
   Autonomous rule adherence checker. Scans the codebase for rule violations,
   fixes the highest-impact ones in an isolated worktree, runs full validation,
-  creates a PR, and notifies Slack. Uses memory to track progress across runs.
+  creates a PR. Uses memory to track progress across runs.
 disable-model-invocation: true
 agent: rulecheck-agent
 argument-hint: "[focus area]"
