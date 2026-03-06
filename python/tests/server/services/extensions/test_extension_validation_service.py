@@ -1,5 +1,5 @@
 """
-Unit tests for SkillValidationService.
+Unit tests for ExtensionValidationService.
 
 Tests validation of SKILL.md content including frontmatter parsing,
 name format checks, secret detection, size limits, and content quality.
@@ -7,13 +7,13 @@ name format checks, secret detection, size limits, and content quality.
 
 import pytest
 
-from src.server.services.skills import SkillValidationService
+from src.server.services.extensions import ExtensionValidationService
 
 
 @pytest.fixture
 def validator():
-    """Create a fresh SkillValidationService instance."""
-    return SkillValidationService()
+    """Create a fresh ExtensionValidationService instance."""
+    return ExtensionValidationService()
 
 
 VALID_SKILL_CONTENT = """\

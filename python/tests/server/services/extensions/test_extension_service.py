@@ -1,15 +1,15 @@
 """
-Unit tests for SkillService.
+Unit tests for ExtensionService.
 
 Tests CRUD operations, version management, content hashing,
-and project skill overrides using mocked Supabase client.
+and project extension overrides using mocked Supabase client.
 """
 
 from unittest.mock import MagicMock, call
 
 import pytest
 
-from src.server.services.skills.skill_service import SkillService
+from src.server.services.extensions.extension_service import ExtensionService
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
@@ -39,8 +39,8 @@ def mock_supabase():
 
 @pytest.fixture
 def service(mock_supabase):
-    """Create a SkillService instance with mocked Supabase."""
-    return SkillService(supabase_client=mock_supabase)
+    """Create an ExtensionService instance with mocked Supabase."""
+    return ExtensionService(supabase_client=mock_supabase)
 
 
 # ── Content Hashing ────────────────────────────────────────────────────────
@@ -49,43 +49,43 @@ def service(mock_supabase):
 class TestComputeContentHash:
     def test_returns_sha256_hex_digest(self):
         """Hash output should be a 64-character hex string (SHA-256)."""
-        result = SkillService.compute_content_hash("hello world")
+        result = ExtensionService.compute_content_hash("hello world")
         assert isinstance(result, str)
         assert len(result) == 64
         assert all(c in "0123456789abcdef" for c in result)
 
     def test_same_content_same_hash(self):
         """Identical content must produce the same hash."""
-        content = "---\nname: my-skill\n---\n## Body"
-        assert SkillService.compute_content_hash(content) == SkillService.compute_content_hash(content)
+        content = "---\nname: my-extension\n---\n## Body"
+        assert ExtensionService.compute_content_hash(content) == ExtensionService.compute_content_hash(content)
 
     def test_different_content_different_hash(self):
         """Different content must produce different hashes."""
-        hash_a = SkillService.compute_content_hash("content A")
-        hash_b = SkillService.compute_content_hash("content B")
+        hash_a = ExtensionService.compute_content_hash("content A")
+        hash_b = ExtensionService.compute_content_hash("content B")
         assert hash_a != hash_b
 
 
-# ── create_skill ────────────────────────────────────────────────────────────
+# ── create_extension ────────────────────────────────────────────────────────
 
 
-class TestCreateSkill:
-    def test_inserts_skill_and_saves_version(self, service, mock_supabase):
-        """create_skill should insert into skills table and save version 1."""
-        skill_row = {
-            "id": "skill-uuid-1",
-            "name": "my-skill",
-            "description": "A useful skill",
-            "content": "# Skill content",
-            "content_hash": SkillService.compute_content_hash("# Skill content"),
+class TestCreateExtension:
+    def test_inserts_extension_and_saves_version(self, service, mock_supabase):
+        """create_extension should insert into extensions table and save version 1."""
+        extension_row = {
+            "id": "extension-uuid-1",
+            "name": "my-extension",
+            "description": "A useful extension",
+            "content": "# Extension content",
+            "content_hash": ExtensionService.compute_content_hash("# Extension content"),
             "current_version": 1,
             "created_by": "user-1",
         }
 
-        # Configure skills table insert
-        skills_builder = MagicMock()
-        skills_builder.insert.return_value = skills_builder
-        skills_builder.execute.return_value = MagicMock(data=[skill_row])
+        # Configure extensions table insert
+        extensions_builder = MagicMock()
+        extensions_builder.insert.return_value = extensions_builder
+        extensions_builder.execute.return_value = MagicMock(data=[extension_row])
 
         # Configure versions table insert
         versions_builder = MagicMock()
@@ -93,75 +93,75 @@ class TestCreateSkill:
         versions_builder.execute.return_value = MagicMock(data=[{"id": "version-uuid-1"}])
 
         def _table(name):
-            if name == "archon_skills":
-                return skills_builder
-            if name == "archon_skill_versions":
+            if name == "archon_extensions":
+                return extensions_builder
+            if name == "archon_extension_versions":
                 return versions_builder
             return MagicMock()
 
         mock_supabase.table.side_effect = _table
 
-        result = service.create_skill(
-            name="my-skill",
-            description="A useful skill",
-            content="# Skill content",
+        result = service.create_extension(
+            name="my-extension",
+            description="A useful extension",
+            content="# Extension content",
             created_by="user-1",
         )
 
-        assert result["id"] == "skill-uuid-1"
-        assert result["name"] == "my-skill"
+        assert result["id"] == "extension-uuid-1"
+        assert result["name"] == "my-extension"
         assert result["current_version"] == 1
 
-        # Verify insert was called on skills table
-        skills_builder.insert.assert_called_once()
-        insert_data = skills_builder.insert.call_args[0][0]
-        assert insert_data["name"] == "my-skill"
+        # Verify insert was called on extensions table
+        extensions_builder.insert.assert_called_once()
+        insert_data = extensions_builder.insert.call_args[0][0]
+        assert insert_data["name"] == "my-extension"
         assert insert_data["current_version"] == 1
-        assert insert_data["content_hash"] == SkillService.compute_content_hash("# Skill content")
+        assert insert_data["content_hash"] == ExtensionService.compute_content_hash("# Extension content")
 
         # Verify version was saved
         versions_builder.insert.assert_called_once()
 
-    def test_create_skill_raises_on_empty_response(self, service, mock_supabase):
-        """create_skill should raise RuntimeError when insert returns no data."""
+    def test_create_extension_raises_on_empty_response(self, service, mock_supabase):
+        """create_extension should raise RuntimeError when insert returns no data."""
         builder = MagicMock()
         builder.insert.return_value = builder
         builder.execute.return_value = MagicMock(data=[])
 
         mock_supabase.table.side_effect = lambda name: builder
 
-        with pytest.raises(RuntimeError, match="Failed to create skill"):
-            service.create_skill(
-                name="bad-skill",
+        with pytest.raises(RuntimeError, match="Failed to create extension"):
+            service.create_extension(
+                name="bad-extension",
                 description="Will fail",
                 content="# Content",
                 created_by="user-1",
             )
 
 
-# ── list_skills ─────────────────────────────────────────────────────────────
+# ── list_extensions ─────────────────────────────────────────────────────────
 
 
-class TestListSkills:
-    def test_returns_skills_without_content(self, service, mock_supabase):
-        """list_skills should select specific fields excluding content."""
-        skills_data = [
-            {"id": "s1", "name": "skill-a", "description": "Desc A", "current_version": 1, "created_at": "2026-01-01"},
-            {"id": "s2", "name": "skill-b", "description": "Desc B", "current_version": 2, "created_at": "2026-01-02"},
+class TestListExtensions:
+    def test_returns_extensions_without_content(self, service, mock_supabase):
+        """list_extensions should select specific fields excluding content."""
+        extensions_data = [
+            {"id": "s1", "name": "extension-a", "description": "Desc A", "current_version": 1, "created_at": "2026-01-01"},
+            {"id": "s2", "name": "extension-b", "description": "Desc B", "current_version": 2, "created_at": "2026-01-02"},
         ]
 
         builder = MagicMock()
         builder.select.return_value = builder
         builder.order.return_value = builder
-        builder.execute.return_value = MagicMock(data=skills_data)
+        builder.execute.return_value = MagicMock(data=extensions_data)
 
         mock_supabase.table.side_effect = lambda name: builder
 
-        result = service.list_skills()
+        result = service.list_extensions()
 
         assert len(result) == 2
-        assert result[0]["name"] == "skill-a"
-        assert result[1]["name"] == "skill-b"
+        assert result[0]["name"] == "extension-a"
+        assert result[1]["name"] == "extension-b"
 
         # Verify select was called with fields that exclude the full content column.
         # The select string may contain "content_hash" which is fine -- we check
@@ -169,18 +169,18 @@ class TestListSkills:
         builder.select.assert_called_once()
         select_arg = builder.select.call_args[0][0]
         fields = [f.strip() for f in select_arg.split(",")]
-        assert "content" not in fields, "list_skills should not select the 'content' column"
+        assert "content" not in fields, "list_extensions should not select the 'content' column"
 
 
-# ── get_skill ───────────────────────────────────────────────────────────────
+# ── get_extension ───────────────────────────────────────────────────────────
 
 
-class TestGetSkill:
-    def test_returns_full_skill_by_id(self, service, mock_supabase):
-        """get_skill should return the full skill record including content."""
-        skill_row = {
+class TestGetExtension:
+    def test_returns_full_extension_by_id(self, service, mock_supabase):
+        """get_extension should return the full extension record including content."""
+        extension_row = {
             "id": "s1",
-            "name": "my-skill",
+            "name": "my-extension",
             "content": "# Full content",
             "current_version": 3,
         }
@@ -188,11 +188,11 @@ class TestGetSkill:
         builder = MagicMock()
         builder.select.return_value = builder
         builder.eq.return_value = builder
-        builder.execute.return_value = MagicMock(data=[skill_row])
+        builder.execute.return_value = MagicMock(data=[extension_row])
 
         mock_supabase.table.side_effect = lambda name: builder
 
-        result = service.get_skill("s1")
+        result = service.get_extension("s1")
 
         assert result is not None
         assert result["id"] == "s1"
@@ -201,7 +201,7 @@ class TestGetSkill:
         builder.eq.assert_called_once_with("id", "s1")
 
     def test_returns_none_for_missing_id(self, service, mock_supabase):
-        """get_skill should return None when no skill is found."""
+        """get_extension should return None when no extension is found."""
         builder = MagicMock()
         builder.select.return_value = builder
         builder.eq.return_value = builder
@@ -209,7 +209,7 @@ class TestGetSkill:
 
         mock_supabase.table.side_effect = lambda name: builder
 
-        result = service.get_skill("nonexistent-id")
+        result = service.get_extension("nonexistent-id")
 
         assert result is None
 
@@ -218,15 +218,15 @@ class TestGetSkill:
 
 
 class TestFindByName:
-    def test_finds_skill_by_name(self, service, mock_supabase):
-        """find_by_name should look up a skill by its unique name."""
-        skill_row = {"id": "s1", "name": "archon-memory", "content": "# Memory"}
+    def test_finds_extension_by_name(self, service, mock_supabase):
+        """find_by_name should look up an extension by its unique name."""
+        extension_row = {"id": "s1", "name": "archon-memory", "content": "# Memory"}
 
         builder = MagicMock()
         builder.select.return_value = builder
         builder.eq.return_value = builder
         builder.limit.return_value = builder
-        builder.execute.return_value = MagicMock(data=[skill_row])
+        builder.execute.return_value = MagicMock(data=[extension_row])
 
         mock_supabase.table.side_effect = lambda name: builder
 
@@ -237,7 +237,7 @@ class TestFindByName:
         builder.eq.assert_called_once_with("name", "archon-memory")
 
     def test_returns_none_for_unknown_name(self, service, mock_supabase):
-        """find_by_name should return None when no skill matches."""
+        """find_by_name should return None when no extension matches."""
         builder = MagicMock()
         builder.select.return_value = builder
         builder.eq.return_value = builder
@@ -246,29 +246,29 @@ class TestFindByName:
 
         mock_supabase.table.side_effect = lambda name: builder
 
-        result = service.find_by_name("nonexistent-skill")
+        result = service.find_by_name("nonexistent-extension")
         assert result is None
 
 
-# ── update_skill ────────────────────────────────────────────────────────────
+# ── update_extension ────────────────────────────────────────────────────────
 
 
-class TestUpdateSkill:
+class TestUpdateExtension:
     def test_bumps_version_and_saves_history(self, service, mock_supabase):
-        """update_skill should increment version and save to version history."""
+        """update_extension should increment version and save to version history."""
         updated_row = {
             "id": "s1",
-            "name": "my-skill",
+            "name": "my-extension",
             "content": "# Updated content",
-            "content_hash": SkillService.compute_content_hash("# Updated content"),
+            "content_hash": ExtensionService.compute_content_hash("# Updated content"),
             "current_version": 3,
         }
 
-        # Configure skills table for update
-        skills_builder = MagicMock()
-        skills_builder.update.return_value = skills_builder
-        skills_builder.eq.return_value = skills_builder
-        skills_builder.execute.return_value = MagicMock(data=[updated_row])
+        # Configure extensions table for update
+        extensions_builder = MagicMock()
+        extensions_builder.update.return_value = extensions_builder
+        extensions_builder.eq.return_value = extensions_builder
+        extensions_builder.execute.return_value = MagicMock(data=[updated_row])
 
         # Configure versions table for insert
         versions_builder = MagicMock()
@@ -276,16 +276,16 @@ class TestUpdateSkill:
         versions_builder.execute.return_value = MagicMock(data=[{"id": "v3"}])
 
         def _table(name):
-            if name == "archon_skills":
-                return skills_builder
-            if name == "archon_skill_versions":
+            if name == "archon_extensions":
+                return extensions_builder
+            if name == "archon_extension_versions":
                 return versions_builder
             return MagicMock()
 
         mock_supabase.table.side_effect = _table
 
-        result = service.update_skill(
-            skill_id="s1",
+        result = service.update_extension(
+            extension_id="s1",
             content="# Updated content",
             new_version=3,
             updated_by="user-2",
@@ -295,8 +295,8 @@ class TestUpdateSkill:
         assert result["content"] == "# Updated content"
 
         # Verify update was called
-        skills_builder.update.assert_called_once()
-        update_data = skills_builder.update.call_args[0][0]
+        extensions_builder.update.assert_called_once()
+        update_data = extensions_builder.update.call_args[0][0]
         assert update_data["content"] == "# Updated content"
         assert update_data["current_version"] == 3
         assert "content_hash" in update_data
@@ -306,7 +306,7 @@ class TestUpdateSkill:
         versions_builder.insert.assert_called_once()
 
     def test_update_raises_on_empty_response(self, service, mock_supabase):
-        """update_skill should raise RuntimeError when update returns no data."""
+        """update_extension should raise RuntimeError when update returns no data."""
         builder = MagicMock()
         builder.update.return_value = builder
         builder.eq.return_value = builder
@@ -314,21 +314,21 @@ class TestUpdateSkill:
 
         mock_supabase.table.side_effect = lambda name: builder
 
-        with pytest.raises(RuntimeError, match="Failed to update skill"):
-            service.update_skill(
-                skill_id="nonexistent",
+        with pytest.raises(RuntimeError, match="Failed to update extension"):
+            service.update_extension(
+                extension_id="nonexistent",
                 content="# Content",
                 new_version=2,
                 updated_by="user-1",
             )
 
 
-# ── delete_skill ────────────────────────────────────────────────────────────
+# ── delete_extension ────────────────────────────────────────────────────────
 
 
-class TestDeleteSkill:
-    def test_deletes_skill_by_id(self, service, mock_supabase):
-        """delete_skill should issue a delete query filtered by skill ID."""
+class TestDeleteExtension:
+    def test_deletes_extension_by_id(self, service, mock_supabase):
+        """delete_extension should issue a delete query filtered by extension ID."""
         builder = MagicMock()
         builder.delete.return_value = builder
         builder.eq.return_value = builder
@@ -336,9 +336,9 @@ class TestDeleteSkill:
 
         mock_supabase.table.side_effect = lambda name: builder
 
-        service.delete_skill("s1")
+        service.delete_extension("s1")
 
-        mock_supabase.table.assert_called_with("archon_skills")
+        mock_supabase.table.assert_called_with("archon_extensions")
         builder.delete.assert_called_once()
         builder.eq.assert_called_once_with("id", "s1")
 
@@ -350,8 +350,8 @@ class TestGetVersions:
     def test_returns_version_history(self, service, mock_supabase):
         """get_versions should return version history ordered by version number descending."""
         versions_data = [
-            {"id": "v2", "skill_id": "s1", "version_number": 2, "content_hash": "abc123"},
-            {"id": "v1", "skill_id": "s1", "version_number": 1, "content_hash": "def456"},
+            {"id": "v2", "extension_id": "s1", "version_number": 2, "content_hash": "abc123"},
+            {"id": "v1", "extension_id": "s1", "version_number": 1, "content_hash": "def456"},
         ]
 
         builder = MagicMock()
@@ -368,8 +368,8 @@ class TestGetVersions:
         assert result[0]["version_number"] == 2
         assert result[1]["version_number"] == 1
 
-        mock_supabase.table.assert_called_with("archon_skill_versions")
-        builder.eq.assert_called_once_with("skill_id", "s1")
+        mock_supabase.table.assert_called_with("archon_extension_versions")
+        builder.eq.assert_called_once_with("extension_id", "s1")
         builder.order.assert_called_once_with("version_number", desc=True)
 
 
@@ -377,11 +377,11 @@ class TestGetVersions:
 
 
 class TestSaveProjectOverride:
-    def test_upserts_into_project_skills(self, service, mock_supabase):
-        """save_project_override should upsert into archon_project_skills."""
+    def test_upserts_into_project_extensions(self, service, mock_supabase):
+        """save_project_override should upsert into archon_project_extensions."""
         override_row = {
             "project_id": "proj-1",
-            "skill_id": "s1",
+            "extension_id": "s1",
             "custom_content": "# Custom instructions",
             "is_enabled": True,
         }
@@ -394,43 +394,43 @@ class TestSaveProjectOverride:
 
         result = service.save_project_override(
             project_id="proj-1",
-            skill_id="s1",
+            extension_id="s1",
             custom_content="# Custom instructions",
             is_enabled=True,
         )
 
         assert result["project_id"] == "proj-1"
-        assert result["skill_id"] == "s1"
+        assert result["extension_id"] == "s1"
 
-        mock_supabase.table.assert_called_with("archon_project_skills")
+        mock_supabase.table.assert_called_with("archon_project_extensions")
         builder.upsert.assert_called_once()
         upsert_data = builder.upsert.call_args[0][0]
         assert upsert_data["project_id"] == "proj-1"
-        assert upsert_data["skill_id"] == "s1"
+        assert upsert_data["extension_id"] == "s1"
         assert upsert_data["custom_content"] == "# Custom instructions"
         assert upsert_data["is_enabled"] is True
 
 
-# ── get_project_skills ──────────────────────────────────────────────────────
+# ── get_project_extensions ──────────────────────────────────────────────────
 
 
-class TestGetProjectSkills:
-    def test_returns_project_skills(self, service, mock_supabase):
-        """get_project_skills should return skills linked to a project."""
-        project_skills_data = [
-            {"project_id": "proj-1", "skill_id": "s1", "is_enabled": True, "custom_content": None},
-            {"project_id": "proj-1", "skill_id": "s2", "is_enabled": False, "custom_content": "# Override"},
+class TestGetProjectExtensions:
+    def test_returns_project_extensions(self, service, mock_supabase):
+        """get_project_extensions should return extensions linked to a project."""
+        project_extensions_data = [
+            {"project_id": "proj-1", "extension_id": "s1", "is_enabled": True, "custom_content": None},
+            {"project_id": "proj-1", "extension_id": "s2", "is_enabled": False, "custom_content": "# Override"},
         ]
 
         builder = MagicMock()
         builder.select.return_value = builder
         builder.eq.return_value = builder
-        builder.execute.return_value = MagicMock(data=project_skills_data)
+        builder.execute.return_value = MagicMock(data=project_extensions_data)
 
         mock_supabase.table.side_effect = lambda name: builder
 
-        result = service.get_project_skills("proj-1")
+        result = service.get_project_extensions("proj-1")
 
         assert len(result) == 2
-        mock_supabase.table.assert_called_with("archon_project_skills")
+        mock_supabase.table.assert_called_with("archon_project_extensions")
         builder.eq.assert_called_once_with("project_id", "proj-1")

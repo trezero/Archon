@@ -1,4 +1,4 @@
-"""Tests for SkillSyncService.
+"""Tests for ExtensionSyncService.
 
 Tests sync report computation (hash comparison, drift detection),
 install status management, and queue operations using mocked Supabase client.
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.server.services.skills.skill_sync_service import SkillSyncService
+from src.server.services.extensions.extension_sync_service import ExtensionSyncService
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -34,8 +34,8 @@ def mock_supabase():
 
 @pytest.fixture
 def service(mock_supabase):
-    """Create a SkillSyncService instance with mocked Supabase."""
-    return SkillSyncService(supabase_client=mock_supabase)
+    """Create an ExtensionSyncService instance with mocked Supabase."""
+    return ExtensionSyncService(supabase_client=mock_supabase)
 
 
 # ── compute_sync_report ─────────────────────────────────────────────────────
@@ -43,12 +43,12 @@ def service(mock_supabase):
 
 class TestComputeSyncReport:
     def test_in_sync_when_hashes_match(self, service):
-        """Skill with matching local and Archon hashes should be in_sync."""
-        local_skills = [{"name": "archon-memory", "content_hash": "aaa"}]
-        archon_skills = [{"id": "s1", "name": "archon-memory", "content_hash": "aaa", "content": "..."}]
-        system_skills = [{"skill_id": "s1", "status": "installed", "installed_content_hash": "aaa"}]
+        """Extension with matching local and Archon hashes should be in_sync."""
+        local_extensions = [{"name": "archon-memory", "content_hash": "aaa"}]
+        archon_extensions = [{"id": "s1", "name": "archon-memory", "content_hash": "aaa", "content": "..."}]
+        system_extensions = [{"extension_id": "s1", "status": "installed", "installed_content_hash": "aaa"}]
 
-        report = service.compute_sync_report(local_skills, archon_skills, system_skills)
+        report = service.compute_sync_report(local_extensions, archon_extensions, system_extensions)
 
         assert "archon-memory" in report["in_sync"]
         assert len(report["local_changes"]) == 0
@@ -57,12 +57,12 @@ class TestComputeSyncReport:
         assert len(report["unknown_local"]) == 0
 
     def test_detects_local_changes(self, service):
-        """Local skill with different hash than Archon should appear in local_changes."""
-        local_skills = [{"name": "archon-memory", "content_hash": "bbb"}]
-        archon_skills = [{"id": "s1", "name": "archon-memory", "content_hash": "aaa", "content": "..."}]
-        system_skills = [{"skill_id": "s1", "status": "installed", "installed_content_hash": "aaa"}]
+        """Local extension with different hash than Archon should appear in local_changes."""
+        local_extensions = [{"name": "archon-memory", "content_hash": "bbb"}]
+        archon_extensions = [{"id": "s1", "name": "archon-memory", "content_hash": "aaa", "content": "..."}]
+        system_extensions = [{"extension_id": "s1", "status": "installed", "installed_content_hash": "aaa"}]
 
-        report = service.compute_sync_report(local_skills, archon_skills, system_skills)
+        report = service.compute_sync_report(local_extensions, archon_extensions, system_extensions)
 
         assert len(report["local_changes"]) == 1
         assert report["local_changes"][0]["name"] == "archon-memory"
@@ -71,41 +71,41 @@ class TestComputeSyncReport:
         assert len(report["in_sync"]) == 0
 
     def test_detects_unknown_local(self, service):
-        """Local skill not in the Archon registry should appear in unknown_local."""
-        local_skills = [{"name": "new-skill", "content_hash": "xxx"}]
-        archon_skills = []
-        system_skills = []
+        """Local extension not in the Archon registry should appear in unknown_local."""
+        local_extensions = [{"name": "new-extension", "content_hash": "xxx"}]
+        archon_extensions = []
+        system_extensions = []
 
-        report = service.compute_sync_report(local_skills, archon_skills, system_skills)
+        report = service.compute_sync_report(local_extensions, archon_extensions, system_extensions)
 
         assert len(report["unknown_local"]) == 1
-        assert report["unknown_local"][0]["name"] == "new-skill"
+        assert report["unknown_local"][0]["name"] == "new-extension"
         assert report["unknown_local"][0]["content_hash"] == "xxx"
 
     def test_detects_pending_installs(self, service):
-        """Archon skill with pending_install status and no local copy should be pending_install."""
-        local_skills = []
-        archon_skills = [{"id": "s1", "name": "code-reviewer", "content_hash": "ccc", "content": "...content..."}]
-        system_skills = [{"skill_id": "s1", "status": "pending_install"}]
+        """Archon extension with pending_install status and no local copy should be pending_install."""
+        local_extensions = []
+        archon_extensions = [{"id": "s1", "name": "code-reviewer", "content_hash": "ccc", "content": "...content..."}]
+        system_extensions = [{"extension_id": "s1", "status": "pending_install"}]
 
-        report = service.compute_sync_report(local_skills, archon_skills, system_skills)
+        report = service.compute_sync_report(local_extensions, archon_extensions, system_extensions)
 
         assert len(report["pending_install"]) == 1
         assert report["pending_install"][0]["name"] == "code-reviewer"
-        assert report["pending_install"][0]["skill_id"] == "s1"
+        assert report["pending_install"][0]["extension_id"] == "s1"
         assert report["pending_install"][0]["content"] == "...content..."
 
     def test_detects_pending_removals(self, service):
-        """Local skill with pending_remove status in system_skills should be pending_remove."""
-        local_skills = [{"name": "old-skill", "content_hash": "ddd"}]
-        archon_skills = [{"id": "s2", "name": "old-skill", "content_hash": "ddd", "content": "..."}]
-        system_skills = [{"skill_id": "s2", "status": "pending_remove"}]
+        """Local extension with pending_remove status in system_extensions should be pending_remove."""
+        local_extensions = [{"name": "old-extension", "content_hash": "ddd"}]
+        archon_extensions = [{"id": "s2", "name": "old-extension", "content_hash": "ddd", "content": "..."}]
+        system_extensions = [{"extension_id": "s2", "status": "pending_remove"}]
 
-        report = service.compute_sync_report(local_skills, archon_skills, system_skills)
+        report = service.compute_sync_report(local_extensions, archon_extensions, system_extensions)
 
         assert len(report["pending_remove"]) == 1
-        assert report["pending_remove"][0]["name"] == "old-skill"
-        assert report["pending_remove"][0]["skill_id"] == "s2"
+        assert report["pending_remove"][0]["name"] == "old-extension"
+        assert report["pending_remove"][0]["extension_id"] == "s2"
         assert len(report["in_sync"]) == 0
 
     def test_empty_inputs_produce_empty_report(self, service):
@@ -118,72 +118,72 @@ class TestComputeSyncReport:
         assert report["pending_remove"] == []
         assert report["unknown_local"] == []
 
-    def test_multiple_skills_classified_correctly(self, service):
-        """Multiple skills in different states should each be classified correctly."""
-        local_skills = [
-            {"name": "skill-a", "content_hash": "aaa"},
-            {"name": "skill-b", "content_hash": "bbb_local"},
-            {"name": "skill-unknown", "content_hash": "uuu"},
+    def test_multiple_extensions_classified_correctly(self, service):
+        """Multiple extensions in different states should each be classified correctly."""
+        local_extensions = [
+            {"name": "extension-a", "content_hash": "aaa"},
+            {"name": "extension-b", "content_hash": "bbb_local"},
+            {"name": "extension-unknown", "content_hash": "uuu"},
         ]
-        archon_skills = [
-            {"id": "s1", "name": "skill-a", "content_hash": "aaa", "content": "..."},
-            {"id": "s2", "name": "skill-b", "content_hash": "bbb_archon", "content": "..."},
-            {"id": "s3", "name": "skill-pending", "content_hash": "ppp", "content": "pending content"},
+        archon_extensions = [
+            {"id": "s1", "name": "extension-a", "content_hash": "aaa", "content": "..."},
+            {"id": "s2", "name": "extension-b", "content_hash": "bbb_archon", "content": "..."},
+            {"id": "s3", "name": "extension-pending", "content_hash": "ppp", "content": "pending content"},
         ]
-        system_skills = [
-            {"skill_id": "s1", "status": "installed", "installed_content_hash": "aaa"},
-            {"skill_id": "s2", "status": "installed", "installed_content_hash": "bbb_archon"},
-            {"skill_id": "s3", "status": "pending_install"},
+        system_extensions = [
+            {"extension_id": "s1", "status": "installed", "installed_content_hash": "aaa"},
+            {"extension_id": "s2", "status": "installed", "installed_content_hash": "bbb_archon"},
+            {"extension_id": "s3", "status": "pending_install"},
         ]
 
-        report = service.compute_sync_report(local_skills, archon_skills, system_skills)
+        report = service.compute_sync_report(local_extensions, archon_extensions, system_extensions)
 
-        assert "skill-a" in report["in_sync"]
+        assert "extension-a" in report["in_sync"]
         assert len(report["local_changes"]) == 1
-        assert report["local_changes"][0]["name"] == "skill-b"
+        assert report["local_changes"][0]["name"] == "extension-b"
         assert len(report["unknown_local"]) == 1
-        assert report["unknown_local"][0]["name"] == "skill-unknown"
+        assert report["unknown_local"][0]["name"] == "extension-unknown"
         assert len(report["pending_install"]) == 1
-        assert report["pending_install"][0]["name"] == "skill-pending"
+        assert report["pending_install"][0]["name"] == "extension-pending"
 
     def test_pending_install_ignored_when_already_local(self, service):
-        """If a skill is already local, it should not appear in pending_install even with pending_install status."""
-        local_skills = [{"name": "already-here", "content_hash": "hhh"}]
-        archon_skills = [{"id": "s1", "name": "already-here", "content_hash": "hhh", "content": "..."}]
-        system_skills = [{"skill_id": "s1", "status": "pending_install"}]
+        """If an extension is already local, it should not appear in pending_install even with pending_install status."""
+        local_extensions = [{"name": "already-here", "content_hash": "hhh"}]
+        archon_extensions = [{"id": "s1", "name": "already-here", "content_hash": "hhh", "content": "..."}]
+        system_extensions = [{"extension_id": "s1", "status": "pending_install"}]
 
-        report = service.compute_sync_report(local_skills, archon_skills, system_skills)
+        report = service.compute_sync_report(local_extensions, archon_extensions, system_extensions)
 
         # It should be in_sync (hashes match), not pending_install
         assert "already-here" in report["in_sync"]
         assert len(report["pending_install"]) == 0
 
 
-# ── get_system_skills ────────────────────────────────────────────────────────
+# ── get_system_extensions ────────────────────────────────────────────────────
 
 
-class TestGetSystemSkills:
+class TestGetSystemExtensions:
     def test_returns_matching_records(self, service, mock_supabase):
-        """Should query archon_system_skills with system_id and project_id filters."""
-        system_skills_data = [
-            {"system_id": "sys-1", "project_id": "proj-1", "skill_id": "s1", "status": "installed"},
-            {"system_id": "sys-1", "project_id": "proj-1", "skill_id": "s2", "status": "pending_install"},
+        """Should query archon_system_extensions with system_id and project_id filters."""
+        system_extensions_data = [
+            {"system_id": "sys-1", "project_id": "proj-1", "extension_id": "s1", "status": "installed"},
+            {"system_id": "sys-1", "project_id": "proj-1", "extension_id": "s2", "status": "pending_install"},
         ]
 
         builder = MagicMock()
         builder.select.return_value = builder
         builder.eq.return_value = builder
-        builder.execute.return_value = MagicMock(data=system_skills_data)
+        builder.execute.return_value = MagicMock(data=system_extensions_data)
 
         mock_supabase.table.side_effect = lambda name: builder
 
-        result = service.get_system_skills("sys-1", "proj-1")
+        result = service.get_system_extensions("sys-1", "proj-1")
 
         assert len(result) == 2
-        mock_supabase.table.assert_called_with("archon_system_skills")
+        mock_supabase.table.assert_called_with("archon_system_extensions")
 
     def test_returns_empty_list_when_no_records(self, service, mock_supabase):
-        """Should return empty list when no system skills match."""
+        """Should return empty list when no system extensions match."""
         builder = MagicMock()
         builder.select.return_value = builder
         builder.eq.return_value = builder
@@ -191,7 +191,7 @@ class TestGetSystemSkills:
 
         mock_supabase.table.side_effect = lambda name: builder
 
-        result = service.get_system_skills("sys-1", "proj-1")
+        result = service.get_system_extensions("sys-1", "proj-1")
 
         assert result == []
 
@@ -201,10 +201,10 @@ class TestGetSystemSkills:
 
 class TestSetInstallStatus:
     def test_upserts_install_record(self, service, mock_supabase):
-        """Should upsert into archon_system_skills with correct data."""
+        """Should upsert into archon_system_extensions with correct data."""
         install_row = {
             "system_id": "sys-1",
-            "skill_id": "s1",
+            "extension_id": "s1",
             "project_id": "proj-1",
             "status": "installed",
             "installed_content_hash": "aaa",
@@ -220,7 +220,7 @@ class TestSetInstallStatus:
 
         result = service.set_install_status(
             system_id="sys-1",
-            skill_id="s1",
+            extension_id="s1",
             project_id="proj-1",
             status="installed",
             installed_content_hash="aaa",
@@ -230,11 +230,11 @@ class TestSetInstallStatus:
         assert result["status"] == "installed"
         assert result["installed_content_hash"] == "aaa"
 
-        mock_supabase.table.assert_called_with("archon_system_skills")
+        mock_supabase.table.assert_called_with("archon_system_extensions")
         builder.upsert.assert_called_once()
         upsert_data = builder.upsert.call_args[0][0]
         assert upsert_data["system_id"] == "sys-1"
-        assert upsert_data["skill_id"] == "s1"
+        assert upsert_data["extension_id"] == "s1"
         assert upsert_data["status"] == "installed"
 
     def test_raises_on_empty_response(self, service, mock_supabase):
@@ -248,7 +248,7 @@ class TestSetInstallStatus:
         with pytest.raises(RuntimeError, match="Failed to set install status"):
             service.set_install_status(
                 system_id="sys-1",
-                skill_id="s1",
+                extension_id="s1",
                 project_id="proj-1",
                 status="installed",
             )
@@ -268,7 +268,7 @@ class TestQueueInstall:
 
         count = service.queue_install(
             system_ids=["sys-1", "sys-2", "sys-3"],
-            skill_id="s1",
+            extension_id="s1",
             project_id="proj-1",
         )
 
@@ -286,7 +286,7 @@ class TestQueueRemove:
 
         count = service.queue_remove(
             system_ids=["sys-1", "sys-2"],
-            skill_id="s1",
+            extension_id="s1",
             project_id="proj-1",
         )
 
@@ -350,18 +350,18 @@ class TestGetProjectSystems:
         assert result[0]["name"] == "Dev Machine"
 
 
-# ── get_system_project_skills ────────────────────────────────────────────────
+# ── get_system_project_extensions ────────────────────────────────────────────
 
 
-class TestGetSystemProjectSkills:
-    def test_returns_skills_with_joined_data(self, service, mock_supabase):
-        """Should return system skills with joined archon_skills metadata."""
+class TestGetSystemProjectExtensions:
+    def test_returns_extensions_with_joined_data(self, service, mock_supabase):
+        """Should return system extensions with joined archon_extensions metadata."""
         query_data = [
             {
                 "system_id": "sys-1",
-                "skill_id": "s1",
+                "extension_id": "s1",
                 "status": "installed",
-                "archon_skills": {"id": "s1", "name": "archon-memory", "display_name": "Archon Memory"},
+                "archon_extensions": {"id": "s1", "name": "archon-memory", "display_name": "Archon Memory"},
             },
         ]
 
@@ -372,14 +372,14 @@ class TestGetSystemProjectSkills:
 
         mock_supabase.table.side_effect = lambda name: builder
 
-        result = service.get_system_project_skills("sys-1", "proj-1")
+        result = service.get_system_project_extensions("sys-1", "proj-1")
 
         assert len(result) == 1
-        assert result[0]["archon_skills"]["name"] == "archon-memory"
-        mock_supabase.table.assert_called_with("archon_system_skills")
+        assert result[0]["archon_extensions"]["name"] == "archon-memory"
+        mock_supabase.table.assert_called_with("archon_system_extensions")
 
     def test_returns_empty_list_when_no_data(self, service, mock_supabase):
-        """Should return empty list when no system project skills exist."""
+        """Should return empty list when no system project extensions exist."""
         builder = MagicMock()
         builder.select.return_value = builder
         builder.eq.return_value = builder
@@ -387,7 +387,7 @@ class TestGetSystemProjectSkills:
 
         mock_supabase.table.side_effect = lambda name: builder
 
-        result = service.get_system_project_skills("sys-1", "proj-1")
+        result = service.get_system_project_extensions("sys-1", "proj-1")
 
         assert result == []
 

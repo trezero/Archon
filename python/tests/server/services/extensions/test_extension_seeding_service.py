@@ -1,8 +1,8 @@
 """
-Unit tests for SkillSeedingService.
+Unit tests for ExtensionSeedingService.
 
 Tests upsert logic (create / skip / update) for bundled SKILL.md files,
-using tmp_path for a temporary skills directory and MagicMock for SkillService.
+using tmp_path for a temporary extensions directory and MagicMock for ExtensionService.
 """
 
 import textwrap
@@ -11,8 +11,8 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from src.server.services.skills.skill_seeding_service import SkillSeedingService
-from src.server.services.skills.skill_service import SkillService
+from src.server.services.extensions.extension_seeding_service import ExtensionSeedingService
+from src.server.services.extensions.extension_service import ExtensionService
 
 # ── Fixtures & Helpers ───────────────────────────────────────────────────────
 
@@ -37,32 +37,32 @@ def _make_skill_dir(base: Path, skill_name: str, content: str) -> Path:
 
 
 @pytest.fixture
-def mock_skill_service():
-    """Return a MagicMock standing in for SkillService."""
-    return MagicMock(spec=SkillService)
+def mock_extension_service():
+    """Return a MagicMock standing in for ExtensionService."""
+    return MagicMock(spec=ExtensionService)
 
 
 @pytest.fixture
-def service(mock_skill_service):
-    """Create a SkillSeedingService with the mocked SkillService."""
-    return SkillSeedingService(skill_service=mock_skill_service)
+def service(mock_extension_service):
+    """Create an ExtensionSeedingService with the mocked ExtensionService."""
+    return ExtensionSeedingService(extension_service=mock_extension_service)
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
 
 class TestSeedOneCreatePath:
-    def test_creates_new_skill_when_not_in_registry(self, service, mock_skill_service, tmp_path):
-        """When find_by_name returns None, create_skill is called with correct args."""
-        mock_skill_service.find_by_name.return_value = None
-        mock_skill_service.create_skill.return_value = {"id": "abc123", "name": "archon-memory"}
+    def test_creates_new_extension_when_not_in_registry(self, service, mock_extension_service, tmp_path):
+        """When find_by_name returns None, create_extension is called with correct args."""
+        mock_extension_service.find_by_name.return_value = None
+        mock_extension_service.create_extension.return_value = {"id": "abc123", "name": "archon-memory"}
 
         _make_skill_dir(tmp_path, "archon-memory", SAMPLE_SKILL_MD)
 
-        counts = service.seed_skills(tmp_path)
+        counts = service.seed_extensions(tmp_path)
 
-        mock_skill_service.find_by_name.assert_called_once_with("archon-memory")
-        mock_skill_service.create_skill.assert_called_once_with(
+        mock_extension_service.find_by_name.assert_called_once_with("archon-memory")
+        mock_extension_service.create_extension.assert_called_once_with(
             "archon-memory",
             "Manage long-term knowledge memory via Archon RAG.",
             SAMPLE_SKILL_MD,
@@ -72,10 +72,10 @@ class TestSeedOneCreatePath:
 
 
 class TestSeedOneSkipPath:
-    def test_skips_skill_when_hash_unchanged(self, service, mock_skill_service, tmp_path):
+    def test_skips_extension_when_hash_unchanged(self, service, mock_extension_service, tmp_path):
         """When the content hash matches the registry, neither create nor update is called."""
-        content_hash = SkillService.compute_content_hash(SAMPLE_SKILL_MD)
-        mock_skill_service.find_by_name.return_value = {
+        content_hash = ExtensionService.compute_content_hash(SAMPLE_SKILL_MD)
+        mock_extension_service.find_by_name.return_value = {
             "id": "abc123",
             "name": "archon-memory",
             "content_hash": content_hash,
@@ -84,53 +84,53 @@ class TestSeedOneSkipPath:
 
         _make_skill_dir(tmp_path, "archon-memory", SAMPLE_SKILL_MD)
 
-        counts = service.seed_skills(tmp_path)
+        counts = service.seed_extensions(tmp_path)
 
-        mock_skill_service.create_skill.assert_not_called()
-        mock_skill_service.update_skill.assert_not_called()
+        mock_extension_service.create_extension.assert_not_called()
+        mock_extension_service.update_extension.assert_not_called()
         assert counts == {"created": 0, "updated": 0, "skipped": 1, "errors": 0}
 
 
 class TestSeedOneUpdatePath:
-    def test_updates_skill_when_hash_changed(self, service, mock_skill_service, tmp_path):
-        """When the content hash differs, update_skill is called with new_version bumped by 1."""
-        mock_skill_service.find_by_name.return_value = {
+    def test_updates_extension_when_hash_changed(self, service, mock_extension_service, tmp_path):
+        """When the content hash differs, update_extension is called with new_version bumped by 1."""
+        mock_extension_service.find_by_name.return_value = {
             "id": "abc123",
             "name": "archon-memory",
             "content_hash": "old-hash-does-not-match",
             "current_version": 2,
         }
-        mock_skill_service.update_skill.return_value = {"id": "abc123"}
+        mock_extension_service.update_extension.return_value = {"id": "abc123"}
 
         _make_skill_dir(tmp_path, "archon-memory", SAMPLE_SKILL_MD)
 
-        counts = service.seed_skills(tmp_path)
+        counts = service.seed_extensions(tmp_path)
 
-        mock_skill_service.update_skill.assert_called_once_with(
+        mock_extension_service.update_extension.assert_called_once_with(
             "abc123",
             SAMPLE_SKILL_MD,
             new_version=3,
             updated_by="archon-seeder",
             description="Manage long-term knowledge memory via Archon RAG.",
         )
-        mock_skill_service.create_skill.assert_not_called()
+        mock_extension_service.create_extension.assert_not_called()
         assert counts == {"created": 0, "updated": 1, "skipped": 0, "errors": 0}
 
 
 class TestSeedSkipsDirectoryWithoutSkillMd:
-    def test_skips_directory_without_skill_md(self, service, mock_skill_service, tmp_path):
+    def test_skips_directory_without_skill_md(self, service, mock_extension_service, tmp_path):
         """A subdirectory that contains no SKILL.md is silently skipped."""
         empty_dir = tmp_path / "no-skill-here"
         empty_dir.mkdir()
 
-        counts = service.seed_skills(tmp_path)
+        counts = service.seed_extensions(tmp_path)
 
-        mock_skill_service.find_by_name.assert_not_called()
+        mock_extension_service.find_by_name.assert_not_called()
         assert counts == {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
 
 
 class TestSeedSkipsSkillWithNoName:
-    def test_skips_skill_with_no_name_in_frontmatter(self, service, mock_skill_service, tmp_path):
+    def test_skips_skill_with_no_name_in_frontmatter(self, service, mock_extension_service, tmp_path):
         """A SKILL.md that lacks a 'name' field in frontmatter is skipped (no DB call)."""
         no_name_md = textwrap.dedent("""\
             # Just a plain markdown file
@@ -139,17 +139,17 @@ class TestSeedSkipsSkillWithNoName:
         """)
         _make_skill_dir(tmp_path, "nameless-skill", no_name_md)
 
-        counts = service.seed_skills(tmp_path)
+        counts = service.seed_extensions(tmp_path)
 
-        mock_skill_service.find_by_name.assert_not_called()
+        mock_extension_service.find_by_name.assert_not_called()
         assert counts == {"created": 0, "updated": 0, "skipped": 1, "errors": 0}
 
 
 class TestSeedMultipleSkills:
-    def test_seeds_multiple_skills(self, service, mock_skill_service, tmp_path):
-        """All skills in subdirectories are processed; create_skill called once per new skill."""
-        mock_skill_service.find_by_name.return_value = None
-        mock_skill_service.create_skill.return_value = {"id": "new-id"}
+    def test_seeds_multiple_extensions(self, service, mock_extension_service, tmp_path):
+        """All skills in subdirectories are processed; create_extension called once per new extension."""
+        mock_extension_service.find_by_name.return_value = None
+        mock_extension_service.create_extension.return_value = {"id": "new-id"}
 
         for skill_name in ("skill-alpha", "skill-beta", "skill-gamma"):
             skill_md = textwrap.dedent(f"""\
@@ -162,14 +162,14 @@ class TestSeedMultipleSkills:
             """)
             _make_skill_dir(tmp_path, skill_name, skill_md)
 
-        counts = service.seed_skills(tmp_path)
+        counts = service.seed_extensions(tmp_path)
 
-        assert mock_skill_service.create_skill.call_count == 3
+        assert mock_extension_service.create_extension.call_count == 3
         assert counts == {"created": 3, "updated": 0, "skipped": 0, "errors": 0}
 
 
 class TestSeedContinuesOnError:
-    def test_continues_on_error_for_one_skill(self, service, mock_skill_service, tmp_path):
+    def test_continues_on_error_for_one_skill(self, service, mock_extension_service, tmp_path):
         """An error processing one skill is caught; remaining skills are still processed."""
         # Two skills: first raises, second succeeds
         call_count = 0
@@ -181,8 +181,8 @@ class TestSeedContinuesOnError:
                 raise RuntimeError("DB connection lost")
             return None
 
-        mock_skill_service.find_by_name.side_effect = find_by_name_side_effect
-        mock_skill_service.create_skill.return_value = {"id": "new-id"}
+        mock_extension_service.find_by_name.side_effect = find_by_name_side_effect
+        mock_extension_service.create_extension.return_value = {"id": "new-id"}
 
         for skill_name in ("skill-one", "skill-two"):
             skill_md = textwrap.dedent(f"""\
@@ -195,7 +195,7 @@ class TestSeedContinuesOnError:
             """)
             _make_skill_dir(tmp_path, skill_name, skill_md)
 
-        counts = service.seed_skills(tmp_path)
+        counts = service.seed_extensions(tmp_path)
 
         assert counts["errors"] == 1
         assert counts["created"] == 1
@@ -204,7 +204,7 @@ class TestSeedContinuesOnError:
 
 class TestDefaultDirResolvesCorrectly:
     def test_default_dir_resolves_correctly(self, service):
-        """default_skills_dir() should end with integrations/claude-code/skills."""
-        default_dir = service.default_skills_dir()
+        """default_extensions_dir() should end with integrations/claude-code/extensions."""
+        default_dir = service.default_extensions_dir()
         parts = default_dir.parts
-        assert parts[-3:] == ("integrations", "claude-code", "skills")
+        assert parts[-3:] == ("integrations", "claude-code", "extensions")

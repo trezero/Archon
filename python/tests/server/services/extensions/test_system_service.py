@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.server.services.skills import SystemService
+from src.server.services.extensions import SystemService
 
 
 @pytest.fixture
