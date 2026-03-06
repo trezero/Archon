@@ -161,6 +161,92 @@ else
 fi
 echo ""
 
+# ── Step 3.5: Install scope ──────────────────────────────────────────────────
+
+echo ""
+echo "Where should Archon tools be installed?"
+echo ""
+echo "  [1] This project only (recommended)"
+echo "      Installed to .claude/ in your project root."
+echo "      Customize per-project, changes stay isolated."
+echo ""
+echo "  [2] Global (all projects)"
+echo "      Installed to ~/.claude/ in your home directory."
+echo "      Same setup shared across all projects."
+echo ""
+read -p "Choice [1]: " install_scope
+install_scope="${install_scope:-1}"
+
+if [ "$install_scope" = "2" ]; then
+    INSTALL_DIR="$HOME/.claude"
+else
+    INSTALL_DIR=".claude"
+fi
+echo ""
+
+# ── Check for existing claude-mem plugin ────────────────────────────────────
+
+SKIP_PLUGIN_INSTALL=false
+if [ -d "$HOME/.claude/plugins/cache/thedotmack/claude-mem" ] || [ -d ".claude/plugins/claude-mem" ]; then
+    echo "Detected existing plugin: claude-mem"
+    echo "The archon-memory plugin replaces claude-mem with enhanced"
+    echo "features and Archon integration."
+    echo ""
+    echo "  [1] Remove claude-mem and install archon-memory (recommended)"
+    echo "  [2] Keep both (not recommended - duplicate hooks and tools)"
+    echo "  [3] Skip plugin installation"
+    echo ""
+    read -p "Choice [1]: " claude_mem_choice
+    claude_mem_choice="${claude_mem_choice:-1}"
+
+    if [ "$claude_mem_choice" = "1" ]; then
+        rm -rf "$HOME/.claude/plugins/cache/thedotmack/claude-mem"
+        rm -rf ".claude/plugins/claude-mem"
+        echo "✓ Removed claude-mem"
+    elif [ "$claude_mem_choice" = "3" ]; then
+        SKIP_PLUGIN_INSTALL=true
+    fi
+    echo ""
+fi
+
+# ── Install archon-memory plugin ─────────────────────────────────────────────
+
+if [ "$SKIP_PLUGIN_INSTALL" = "false" ]; then
+    echo "Installing archon-memory plugin..."
+    mkdir -p "$INSTALL_DIR/plugins/archon-memory"
+    if curl -sf "${ARCHON_MCP_URL}/archon-setup/plugin/archon-memory.tar.gz" | \
+        tar xz -C "$INSTALL_DIR/plugins/" 2>/dev/null; then
+        echo "      ✓ Plugin installed to $INSTALL_DIR/plugins/archon-memory/"
+    else
+        echo "      ⚠ Plugin download failed — install manually from Archon"
+    fi
+    echo ""
+fi
+
+# ── Write archon-config.json ─────────────────────────────────────────────────
+
+machine_fingerprint=$(python3 -c "import hashlib,socket,os; print(hashlib.md5((socket.gethostname()+str(os.getuid())).encode()).hexdigest()[:16])")
+
+cat > "$INSTALL_DIR/archon-config.json" << CONFIGEOF
+{
+  "archon_api_url": "$ARCHON_API_URL",
+  "archon_mcp_url": "$ARCHON_MCP_URL",
+  "project_id": "$PROJECT_ID",
+  "project_title": "$PROJECT_TITLE",
+  "machine_id": "$machine_fingerprint",
+  "install_scope": "$install_scope",
+  "installed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+CONFIGEOF
+echo "      ✓ Wrote $INSTALL_DIR/archon-config.json"
+echo ""
+
+# ── Update .gitignore ────────────────────────────────────────────────────────
+
+for entry in ".claude/plugins/" ".claude/archon-config.json" ".claude/archon-memory-buffer.jsonl"; do
+    grep -qxF "$entry" .gitignore 2>/dev/null || echo "$entry" >> .gitignore
+done
+
 # ── Step 4/4: Install /archon-setup command ──────────────────────────────────
 
 echo "[4/4] Installing /archon-setup command..."
@@ -200,6 +286,6 @@ echo "  Open Claude Code in this directory and run:"
 echo ""
 echo "    /archon-setup"
 echo ""
-echo "  This will register your system and install all project skills."
+echo "  This will sync extensions and project context."
 echo "══════════════════════════════════════"
 echo ""
