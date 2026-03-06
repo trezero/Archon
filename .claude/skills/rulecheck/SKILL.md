@@ -21,8 +21,10 @@ report its results when it completes. You do NOT do the scanning or fixing yours
 1. **Launch the rulecheck-agent** with the focus area (if any): `$ARGUMENTS`
 2. **Wait for it to complete** — do NOT poll, tail, or check on it. You will be
    notified automatically when it finishes.
-3. **Report the results** — summarize what was fixed, link the PR, mention any
-   remaining opportunities.
+3. **Report ONLY what the agent told you** — relay its final message verbatim
+   or summarize it. Do NOT search for PRs, read files, or fabricate results.
+   If the agent hit its context limit, say so. If it didn't produce a PR URL
+   in its output, don't go looking for one.
 
 ## Rules for You
 

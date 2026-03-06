@@ -199,12 +199,17 @@ After scanning, you'll have a list of violations. Group related ones:
 - "This module has logging events that don't follow the naming convention"
 - "These 5 files import from @archon/core with generic import *"
 
-**Fix ALL groups you found.** You have 500 turns — use them. A 6-line PR after
-15 minutes of scanning is a waste. You are very capable of fixing 20-50
-violations across multiple categories in a single run. Prioritize by impact
-but keep going through every group until there's nothing left to fix.
+Fix **2-3 groups** per run. A 6-line PR is too timid, but 50 files changed
+risks running out of context before you can commit and PR. Aim for 10-20
+files changed — enough to be meaningful, small enough to finish the full
+cycle (scan → fix → validate → commit → push → PR → memory).
 
-Skip a violation ONLY if:
+**Budget your context**: You must reserve enough turns for validation,
+committing, pushing, PR creation, and memory updates. If you've already
+edited 15+ files, STOP fixing and move to validation. An incomplete PR is
+worse than a smaller complete one.
+
+Skip a violation if:
 - It's already fixed in an open PR (Step 1)
 - Fixing it would change behavior, not just style
 - You're genuinely unsure if it's a violation
@@ -228,10 +233,6 @@ bun run validate
 If validation fails, fix the issues and run again. Iterate until it passes.
 
 ## Step 7: Write Summary + Create PR
-
-**IMPORTANT**: If you only found a handful of trivial fixes (< 10 lines changed),
-go back to Step 4 and scan harder. Read more files. Look for violations you missed.
-The codebase has thousands of lines — there is always more to find.
 
 Create the `.claude/archon/` directory if needed:
 ```bash
