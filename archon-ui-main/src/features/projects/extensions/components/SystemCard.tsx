@@ -1,7 +1,7 @@
-import type { SystemWithSkills } from "../types";
+import type { SystemWithExtensions } from "../types";
 
 interface SystemCardProps {
-  system: SystemWithSkills;
+  system: SystemWithExtensions;
   isSelected: boolean;
   onClick: () => void;
   onUnlink: (systemId: string) => void;
@@ -9,7 +9,7 @@ interface SystemCardProps {
 
 export function SystemCard({ system, isSelected, onClick, onUnlink }: SystemCardProps) {
   const isOnline = isRecentlyActive(system.last_seen_at);
-  const skillCount = system.skills?.length ?? 0;
+  const extensionCount = system.extensions?.length ?? 0;
 
   return (
     <div
@@ -25,7 +25,7 @@ export function SystemCard({ system, isSelected, onClick, onUnlink }: SystemCard
           <span className="font-medium text-sm text-white truncate">{system.name}</span>
         </div>
         <div className="mt-1 text-xs text-zinc-400">
-          {skillCount} skill{skillCount !== 1 ? "s" : ""}
+          {extensionCount} extension{extensionCount !== 1 ? "s" : ""}
           {system.hostname && ` · ${system.hostname}`}
         </div>
       </button>

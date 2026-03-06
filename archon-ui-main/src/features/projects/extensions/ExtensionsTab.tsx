@@ -1,47 +1,49 @@
 import { useState } from "react";
 import { SystemCard } from "./components/SystemCard";
-import { SystemSkillList } from "./components/SystemSkillList";
-import { useInstallSkill, useProjectSkills, useRemoveSkill, useUnlinkSystem } from "./hooks/useSkillQueries";
+import { SystemExtensionList } from "./components/SystemExtensionList";
+import { useInstallExtension, useProjectExtensions, useRemoveExtension, useUnlinkSystem } from "./hooks/useExtensionQueries";
 
-interface SkillsTabProps {
+interface ExtensionsTabProps {
   projectId: string;
 }
 
-export function SkillsTab({ projectId }: SkillsTabProps) {
-  const { data, isLoading, error } = useProjectSkills(projectId);
-  const installSkill = useInstallSkill();
-  const removeSkill = useRemoveSkill();
+export function ExtensionsTab({ projectId }: ExtensionsTabProps) {
+  const { data, isLoading, error } = useProjectExtensions(projectId);
+  const installExtension = useInstallExtension();
+  const removeExtension = useRemoveExtension();
   const unlinkSystem = useUnlinkSystem();
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
 
   if (isLoading) {
-    return <div className="flex items-center justify-center py-12 text-zinc-400">Loading skills...</div>;
+    return <div className="flex items-center justify-center py-12 text-zinc-400">Loading extensions...</div>;
   }
 
   if (error) {
     return (
-      <div className="flex items-center justify-center py-12 text-red-400">Failed to load skills: {error.message}</div>
+      <div className="flex items-center justify-center py-12 text-red-400">
+        Failed to load extensions: {error.message}
+      </div>
     );
   }
 
   const systems = data?.systems ?? [];
-  const allSkills = data?.all_skills ?? [];
+  const allExtensions = data?.all_extensions ?? [];
   const selectedSystem = systems.find((s) => s.id === selectedSystemId) ?? systems[0];
 
-  const handleInstall = (skillId: string) => {
+  const handleInstall = (extensionId: string) => {
     if (!selectedSystem) return;
-    installSkill.mutate({
+    installExtension.mutate({
       projectId,
-      skillId,
+      extensionId,
       systemIds: [selectedSystem.id],
     });
   };
 
-  const handleRemove = (skillId: string) => {
+  const handleRemove = (extensionId: string) => {
     if (!selectedSystem) return;
-    removeSkill.mutate({
+    removeExtension.mutate({
       projectId,
-      skillId,
+      extensionId,
       systemIds: [selectedSystem.id],
     });
   };
@@ -58,7 +60,7 @@ export function SkillsTab({ projectId }: SkillsTabProps) {
       <div className="flex flex-col items-center justify-center py-12 text-zinc-400 space-y-2">
         <p className="text-sm">No systems registered to this project yet.</p>
         <p className="text-xs text-zinc-500">
-          Systems are registered when they connect via the Archon MCP server and run a skill sync.
+          Systems are registered when they connect via the Archon MCP server and run an extension sync.
         </p>
       </div>
     );
@@ -93,9 +95,9 @@ export function SkillsTab({ projectId }: SkillsTabProps) {
               </div>
             </div>
 
-            <SystemSkillList
-              systemSkills={selectedSystem.skills}
-              allSkills={allSkills}
+            <SystemExtensionList
+              systemExtensions={selectedSystem.extensions}
+              allExtensions={allExtensions}
               onInstall={handleInstall}
               onRemove={handleRemove}
             />
