@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { getWorkflowRun } from '@/lib/api';
 import type {
   WorkflowState,
@@ -24,41 +25,58 @@ interface UseWorkflowStatusReturn {
 
 export function useWorkflowStatus(): UseWorkflowStatusReturn {
   const [workflows, setWorkflows] = useState<Map<string, WorkflowState>>(new Map());
+  const queryClient = useQueryClient();
 
-  const handleWorkflowStatus = useCallback((event: WorkflowStatusEvent): void => {
-    setWorkflows(prev => {
-      const next = new Map(prev);
-      const existing = next.get(event.runId);
+  const handleWorkflowStatus = useCallback(
+    (event: WorkflowStatusEvent): void => {
+      setWorkflows(prev => {
+        const next = new Map(prev);
+        const existing = next.get(event.runId);
 
-      if (!existing) {
-        // New workflow or first SSE event for a REST-loaded workflow.
-        // Set completedAt for terminal events so the UI immediately stops the timer.
-        // The REST re-fetch (triggered by terminal liveStatus) will correct startedAt
-        // from initialData, providing the authoritative elapsed duration.
-        const isTerminal =
-          event.status === 'completed' || event.status === 'failed' || event.status === 'cancelled';
-        next.set(event.runId, {
-          runId: event.runId,
-          workflowName: event.workflowName,
-          status: event.status,
-          steps: [],
-          artifacts: [],
-          isLoop: false,
-          startedAt: event.timestamp,
-          completedAt: isTerminal ? event.timestamp : undefined,
-          error: event.error,
-        });
-      } else {
-        next.set(event.runId, {
-          ...existing,
-          status: event.status,
-          error: event.error,
-          completedAt: event.status !== 'running' ? event.timestamp : undefined,
-        });
+        if (!existing) {
+          // New workflow or first SSE event for a REST-loaded workflow.
+          // Set completedAt for terminal events so the UI immediately stops the timer.
+          // The REST re-fetch (triggered by terminal liveStatus) will correct startedAt
+          // from initialData, providing the authoritative elapsed duration.
+          const isTerminal =
+            event.status === 'completed' ||
+            event.status === 'failed' ||
+            event.status === 'cancelled';
+          next.set(event.runId, {
+            runId: event.runId,
+            workflowName: event.workflowName,
+            status: event.status,
+            steps: [],
+            artifacts: [],
+            isLoop: false,
+            startedAt: event.timestamp,
+            completedAt: isTerminal ? event.timestamp : undefined,
+            error: event.error,
+          });
+        } else {
+          next.set(event.runId, {
+            ...existing,
+            status: event.status,
+            error: event.error,
+            completedAt: event.status !== 'running' ? event.timestamp : undefined,
+          });
+        }
+        return next;
+      });
+
+      // Invalidate React Query caches when workflow reaches terminal status
+      if (
+        event.status === 'completed' ||
+        event.status === 'failed' ||
+        event.status === 'cancelled'
+      ) {
+        void queryClient.invalidateQueries({ queryKey: ['workflow-runs'] });
+        void queryClient.invalidateQueries({ queryKey: ['workflowRuns'] });
+        void queryClient.invalidateQueries({ queryKey: ['conversations'] });
       }
-      return next;
-    });
-  }, []);
+    },
+    [queryClient]
+  );
 
   const handleWorkflowStep = useCallback((event: WorkflowStepEvent): void => {
     setWorkflows(prev => {
@@ -202,6 +220,10 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
                   }
                   return next;
                 });
+                // Invalidate React Query caches on terminal status from polling fallback
+                void queryClient.invalidateQueries({ queryKey: ['workflow-runs'] });
+                void queryClient.invalidateQueries({ queryKey: ['workflowRuns'] });
+                void queryClient.invalidateQueries({ queryKey: ['conversations'] });
               }
             })
             .catch((err: unknown) => {
@@ -231,7 +253,7 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
         pollingRef.current = null;
       }
     };
-  }, [hasRunning]);
+  }, [hasRunning, queryClient]);
 
   // Find the most recent running workflow
   let activeWorkflow: WorkflowState | null = null;
