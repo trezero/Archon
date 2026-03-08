@@ -67,6 +67,8 @@ class RegisterSystemRequest(BaseModel):
 class SyncSystemRequest(BaseModel):
     fingerprint: str
     system_name: str | None = None
+    hostname: str | None = None
+    os: str | None = None
     local_extensions: list[dict[str, Any]] = []
 
 
@@ -406,6 +408,8 @@ async def sync_system(project_id: str, request: SyncSystemRequest):
             system = system_service.register_system(
                 fingerprint=request.fingerprint,
                 name=name,
+                hostname=request.hostname,
+                os=request.os,
             )
             is_new = True
 

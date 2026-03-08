@@ -502,7 +502,7 @@ async def test_manage_extensions_bootstrap_basic(registered_tools, mock_context)
         assert data["extensions"][0]["name"] == "archon-memory"
         assert data["system"]["id"] == "sys-1"
         assert data["system"]["is_new"] is True
-        assert data["install_path"] == "~/.claude/extensions"
+        assert data["install_path"] == "~/.claude/skills"
         assert "Bootstrap complete" in data["message"]
 
 

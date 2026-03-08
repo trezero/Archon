@@ -189,6 +189,8 @@ def register_extension_tools(mcp: FastMCP):
         local_extensions: list | None = None,
         system_fingerprint: str | None = None,
         system_name: str | None = None,
+        hostname: str | None = None,
+        os: str | None = None,
         project_id: str | None = None,
         # For upload / validate
         extension_content: str | None = None,
@@ -203,8 +205,10 @@ def register_extension_tools(mcp: FastMCP):
         Args:
             action: "sync" | "upload" | "validate" | "install" | "remove" | "bootstrap"
             local_extensions: Array of local extension objects for sync (each with name, content_hash, version)
-            system_fingerprint: Unique fingerprint identifying this system (for sync)
-            system_name: Human-readable name for this system (for sync)
+            system_fingerprint: Unique fingerprint identifying this system (for sync/bootstrap)
+            system_name: Human-readable name for this system (for sync/bootstrap)
+            hostname: Machine hostname, e.g. output of `hostname` (for bootstrap)
+            os: Operating system name, e.g. output of `uname -s` (for bootstrap)
             project_id: Project ID for sync/install/remove context
             extension_content: Full extension file content (for upload/validate)
             extension_name: Extension name override (for upload, otherwise parsed from content)
@@ -220,6 +224,7 @@ def register_extension_tools(mcp: FastMCP):
             manage_extensions("install", extension_id="ext-1", project_id="proj-1", system_id="sys-1")
             manage_extensions("remove", extension_id="ext-1", project_id="proj-1", system_id="sys-1")
             manage_extensions("sync", local_extensions=[...], system_fingerprint="fp-abc", project_id="proj-1")
+            manage_extensions("bootstrap", system_fingerprint="fp-abc", system_name="my-machine", hostname="my-machine.local", os="Linux", project_id="proj-1")
         """
         try:
             api_url = get_api_url()
@@ -245,7 +250,7 @@ def register_extension_tools(mcp: FastMCP):
 
                 elif action == "bootstrap":
                     return await _handle_bootstrap(
-                        client, api_url, system_fingerprint, system_name, project_id
+                        client, api_url, system_fingerprint, system_name, hostname, os, project_id
                     )
 
                 else:
@@ -505,6 +510,8 @@ async def _handle_bootstrap(
     api_url: str,
     system_fingerprint: str | None,
     system_name: str | None,
+    hostname: str | None,
+    os: str | None,
     project_id: str | None,
 ) -> str:
     """Fetch all extensions with content and optionally register the system with a project."""
@@ -536,6 +543,10 @@ async def _handle_bootstrap(
         }
         if system_name:
             payload["system_name"] = system_name
+        if hostname:
+            payload["hostname"] = hostname
+        if os:
+            payload["os"] = os
 
         sync_response = await client.post(
             urljoin(api_url, f"/api/projects/{project_id}/sync"),
@@ -549,6 +560,6 @@ async def _handle_bootstrap(
         "success": True,
         "extensions": extensions,
         "system": system,
-        "install_path": "~/.claude/extensions",
+        "install_path": "~/.claude/skills",
         "message": f"Bootstrap complete: {len(extensions)} extension(s) ready to install",
     })

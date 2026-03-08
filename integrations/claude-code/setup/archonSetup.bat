@@ -18,8 +18,8 @@ where powershell >nul 2>&1 || (echo Error: PowerShell is required. & exit /b 1)
 
 :: ── Step 1/4: System name ──────────────────────────────────────────────────
 echo [1/4] System name
-set /p "SYSTEM_NAME=      Name for this machine [%COMPUTERNAME%]: "
-if "%SYSTEM_NAME%"=="" set "SYSTEM_NAME=%COMPUTERNAME%"
+set "SYSTEM_NAME=%COMPUTERNAME%"
+echo       Using: %SYSTEM_NAME%
 echo.
 
 :: ── Step 2/4: Project ─────────────────────────────────────────────────────

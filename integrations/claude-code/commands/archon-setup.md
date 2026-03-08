@@ -1,6 +1,6 @@
 # Archon Setup — Register This Machine
 
-Connect this machine to Archon: register it as a system, download all project skills, and install them to `~/.claude/skills/`.
+Connect this machine to Archon: register it as a system, download all project extensions, and install them to `~/.claude/skills/`.
 
 ## Phase 0: Health Check
 
@@ -19,16 +19,25 @@ Read `.claude/archon-state.json` if it exists. Extract:
 - `system_name` → `<system_name>` (may be absent)
 - `archon_project_id` → `<project_id>` (may be absent)
 
-## Phase 2: Compute Fingerprint (if missing)
+## Phase 2: Collect System Info and Compute Fingerprint
 
-If `<fingerprint>` was not in the state file:
+Always run these first to capture the current machine identity:
 
-Detect OS:
+```bash
+hostname
+```
+
+Store result as `<hostname>`.
+
 ```bash
 uname -s
 ```
 
-If output is `Darwin`:
+Store result as `<os>`.
+
+If `<fingerprint>` was not in the state file:
+
+If `<os>` is `Darwin`:
 ```bash
 echo -n "$(hostname)|$(whoami)|$(uname -s)" | shasum -a 256 | cut -d' ' -f1
 ```
@@ -44,10 +53,6 @@ Store result as `<fingerprint>`.
 
 If `<system_name>` was not in the state file:
 
-```bash
-hostname
-```
-
 Ask the user:
 > I'll register this machine as **`<hostname>`**. Press Enter to confirm or type a different name:
 
@@ -57,10 +62,12 @@ Store confirmed name as `<system_name>`.
 
 Call:
 ```
-manage_skills(
+manage_extensions(
     action="bootstrap",
     system_fingerprint="<fingerprint>",
     system_name="<system_name>",
+    hostname="<hostname>",
+    os="<os>",
     project_id="<project_id>"   ← omit if no project_id
 )
 ```
@@ -69,12 +76,12 @@ If the call fails, report the error and stop.
 
 Extract `<system_id>` from `response.system.id` if present, otherwise `"unknown"`.
 
-## Phase 5: Install Skills
+## Phase 5: Install Extensions
 
-For each skill in `response.skills`:
+For each extension in `response.extensions`:
 
 1. Create directory `~/.claude/skills/<name>/`
-2. Write skill content to `~/.claude/skills/<name>/SKILL.md` using the Write tool (not bash heredoc)
+2. Write extension content to `~/.claude/skills/<name>/SKILL.md` using the Write tool (not bash heredoc)
 
 ## Phase 6: Update State
 
@@ -94,11 +101,11 @@ Write merged object back to `.claude/archon-state.json`.
 ## Archon Setup Complete
 
 System: <system_name> (<system_id>)
-Skills installed: <N> → ~/.claude/skills/
-  - <list each skill name>
+Extensions installed: <N> → ~/.claude/skills/
+  - <list each extension name>
 Project: <project name if registered, else "No project linked">
 
-Restart Claude Code for the new skills to take effect.
+Restart Claude Code for the new extensions to take effect.
 ```
 
 If `response.system.is_new` is `true`, also print:
