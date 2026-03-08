@@ -9,7 +9,7 @@ export interface MaterializationRecord {
   original_urls: string[];
   synthesis_model: string | null;
   word_count: number;
-  status: "active" | "stale" | "archived";
+  status: "pending" | "active" | "stale" | "archived";
   access_count: number;
   last_accessed_at: string | null;
   materialized_at: string;

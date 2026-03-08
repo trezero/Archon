@@ -171,7 +171,7 @@ export const KnowledgeView = () => {
 
         {/* Toggle between Knowledge Items and Materialized list */}
         {showMaterialized ? (
-          <MaterializationList />
+          <MaterializationList projectId={projectFilter || undefined} />
         ) : (
           <KnowledgeList
             items={knowledgeItems}

@@ -132,6 +132,9 @@ class MaterializationService:
         Returns:
             MaterializationResult indicating success/failure and file details.
         """
+        # Normalize topic to prevent case-sensitive duplicates
+        topic = topic.strip().lower()
+
         # Step 1: Check for existing active or pending materialization
         existing = await self.check_existing(topic, project_id)
         if existing:
@@ -205,6 +208,7 @@ class MaterializationService:
                 "source_urls": source_urls,
                 "source_ids": source_ids,
                 "synthesis_model": synthesizer.model,
+                "materialization_id": pending_id,
             }
             full_content = f"---\n{yaml.dump(frontmatter, default_flow_style=False)}---\n\n{synthesized.content}"
 

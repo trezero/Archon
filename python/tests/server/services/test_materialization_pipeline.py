@@ -80,7 +80,7 @@ async def test_materialize_skips_when_already_exists(service):
     assert result.word_count == EXISTING_RECORD.word_count
     assert result.materialization_id == EXISTING_RECORD.id
 
-    service.check_existing.assert_awaited_once_with("React hooks", "proj-1")
+    service.check_existing.assert_awaited_once_with("react hooks", "proj-1")
     service.mark_accessed.assert_awaited_once_with("mat-existing")
 
 
@@ -226,7 +226,7 @@ async def test_materialize_full_pipeline_success(service, mock_supabase):
     assert result.summary == "A summary of the topic."
     assert result.materialization_id == "pending-id"
 
-    mock_indexer.generate_unique_filename.assert_called_once_with("/home/user/project", "Test topic")
+    mock_indexer.generate_unique_filename.assert_called_once_with("/home/user/project", "test topic")
     mock_indexer.write_materialized_file.assert_awaited_once()
     mock_indexer.update_index.assert_awaited_once_with("/home/user/project")
 

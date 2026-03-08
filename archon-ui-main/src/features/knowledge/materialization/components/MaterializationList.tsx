@@ -39,9 +39,11 @@ export const MaterializationList = ({ projectId, statusFilter }: Materialization
                 className={`text-xs px-2 py-0.5 rounded ${
                   item.status === "active"
                     ? "bg-green-900/50 text-green-400"
-                    : item.status === "stale"
-                      ? "bg-yellow-900/50 text-yellow-400"
-                      : "bg-gray-700 text-gray-400"
+                    : item.status === "pending"
+                      ? "bg-blue-900/50 text-blue-400"
+                      : item.status === "stale"
+                        ? "bg-yellow-900/50 text-yellow-400"
+                        : "bg-gray-700 text-gray-400"
                 }`}
               >
                 {item.status}
