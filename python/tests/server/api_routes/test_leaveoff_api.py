@@ -55,6 +55,7 @@ def test_upsert_leaveoff():
             machine_id="machine-abc",
             last_session_id="sess-1",
             metadata=None,
+            project_path=None,
         )
 
 

@@ -28,6 +28,7 @@ class LeaveOffService:
         machine_id: str | None = None,
         last_session_id: str | None = None,
         metadata: dict | None = None,
+        project_path: str | None = None,
     ) -> dict:
         """Atomic UPSERT using on_conflict='project_id'.
 

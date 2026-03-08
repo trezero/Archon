@@ -24,6 +24,7 @@ async def upsert_leaveoff(project_id: str, request: UpsertLeaveOffRequest) -> di
         machine_id=request.machine_id,
         last_session_id=request.last_session_id,
         metadata=request.metadata,
+        project_path=request.project_path,
     )
     return record
 
