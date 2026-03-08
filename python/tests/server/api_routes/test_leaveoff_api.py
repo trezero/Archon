@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-
 # ── PUT /api/projects/{project_id}/leaveoff ──────────────────────────────────
 
 
