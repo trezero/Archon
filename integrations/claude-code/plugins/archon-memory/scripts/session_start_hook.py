@@ -35,8 +35,30 @@ Until configured, smart_search / smart_outline / smart_unfold tools are still av
 </archon-setup-needed>"""
 
 
-def _format_context(sessions: list[dict], tasks: list[dict], knowledge: dict) -> str:
+def _format_context(sessions: list[dict], tasks: list[dict], knowledge: dict, leaveoff: dict | None = None) -> str:
     parts: list[str] = ["<archon-context>"]
+
+    # LeaveOff Point goes first — most important context
+    if leaveoff:
+        component = leaveoff.get("component", "Unknown")
+        updated = leaveoff.get("updated_at", "")[:10] if leaveoff.get("updated_at") else ""
+        content = leaveoff.get("content", "")
+        next_steps = leaveoff.get("next_steps", [])
+        references = leaveoff.get("references", [])
+
+        parts.append("\n## LeaveOff Point (Last Session State)")
+        parts.append(f"**Component:** {component}")
+        parts.append(f"**Updated:** {updated}")
+        if content:
+            parts.append(f"\n{content}")
+        if next_steps:
+            parts.append("\n### Next Steps")
+            for step in next_steps:
+                parts.append(f"- {step}")
+        if references:
+            parts.append("\n### References")
+            for ref in references:
+                parts.append(f"- {ref}")
 
     if sessions:
         parts.append("\n## Recent Sessions")
@@ -85,11 +107,12 @@ async def main() -> None:
 
     # Fetch context in parallel with a total timeout
     try:
-        sessions, tasks, knowledge = await asyncio.wait_for(
+        sessions, tasks, knowledge, leaveoff = await asyncio.wait_for(
             asyncio.gather(
                 client.get_recent_sessions(limit=5),
                 client.get_active_tasks(limit=10),
                 client.get_knowledge_status(),
+                client.get_leaveoff_point(),
                 return_exceptions=True,
             ),
             timeout=_TIMEOUT_SECONDS,
@@ -107,8 +130,10 @@ async def main() -> None:
         tasks = []
     if isinstance(knowledge, Exception):
         knowledge = {}
+    if isinstance(leaveoff, Exception):
+        leaveoff = None
 
-    print(_format_context(sessions, tasks, knowledge))  # type: ignore[arg-type]
+    print(_format_context(sessions, tasks, knowledge, leaveoff))  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":

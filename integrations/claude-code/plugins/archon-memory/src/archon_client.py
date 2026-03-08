@@ -111,3 +111,18 @@ class ArchonClient:
             return response.json()
         except Exception:
             return {}
+
+    async def get_leaveoff_point(self) -> dict | None:
+        """GET /api/projects/{id}/leaveoff. Returns the LeaveOff point or None."""
+        if not self.is_configured():
+            return None
+
+        url = f"{self.api_url}/api/projects/{self.project_id}/leaveoff"
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url)
+            if response.status_code >= 400:
+                return None
+            return response.json()
+        except Exception:
+            return None
