@@ -112,3 +112,27 @@ validation_commands:
 4. Look for "similar" not "same" - patterns often repeat with variations
 
 Remember: Your analysis directly determines implementation success. Be thorough, specific, and actionable.
+
+## Context Escalation Protocol
+
+When analyzing a topic or pattern in a project:
+
+1. **Check local context first:**
+   - Read `.archon/index.md` if it exists — this lists all materialized knowledge
+   - Search project source files and documentation for the topic
+   - Check CLAUDE.md and any docs/ directory
+
+2. **Escalate to Vector DB if local context is insufficient:**
+   - If the topic is not covered locally, or local docs are incomplete/outdated
+   - Call `materialize_knowledge` with the topic, project_id, and project_path
+   - This will search the global knowledge base, synthesize results, and write a Markdown file to `.archon/knowledge/`
+
+3. **Continue with enriched context:**
+   - Read the newly materialized file
+   - Incorporate the knowledge into your analysis
+   - The file persists for future sessions — no repeated searches needed
+
+Use your judgment on when to escalate. Good signals:
+- The topic involves external libraries, APIs, or patterns not in the source code
+- You're asked about best practices or conventions that aren't documented locally
+- The project references technologies you need deeper context on
