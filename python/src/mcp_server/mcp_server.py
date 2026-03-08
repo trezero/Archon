@@ -622,6 +622,23 @@ def register_modules():
         logger.error(f"✗ Failed to register materialization tools: {e}")
         logger.error(traceback.format_exc())
 
+    # LeaveOff Point Tools
+    try:
+        from src.mcp_server.features.leaveoff import register_leaveoff_tools
+
+        register_leaveoff_tools(mcp)
+        modules_registered += 1
+        logger.info("✓ LeaveOff Point module registered (HTTP-based)")
+    except ImportError as e:
+        logger.warning(f"⚠ LeaveOff Point module not available (optional): {e}")
+    except (SyntaxError, NameError, AttributeError) as e:
+        logger.error(f"✗ Code error in leaveoff tools - MUST FIX: {e}")
+        logger.error(traceback.format_exc())
+        raise
+    except Exception as e:
+        logger.error(f"✗ Failed to register leaveoff tools: {e}")
+        logger.error(traceback.format_exc())
+
     logger.info(f"📦 Total modules registered: {modules_registered}")
 
     if modules_registered == 0:
