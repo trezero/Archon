@@ -151,13 +151,15 @@ async function main(): Promise<void> {
   // Initialize web adapter (always enabled)
   // Note: Circular references between transport/persistence/workflowBridge are safe because:
   // - transport's cleanup callback references persistence/workflowBridge (declared after, but
-  //   only invoked from a 60s timer — well after all constructors complete)
+  //   only invoked from a grace period timer — well after all constructors complete)
   // - persistence's emitEvent closure references transport.emit (same lazy pattern)
   const transport = new SSETransport(conversationId => {
-    void persistence.clearConversation(conversationId).catch((e: unknown) => {
+    // Flush (not clear!) — the orchestrator/workflow may still be writing messages
+    // even though the SSE stream disconnected. Clearing the dbId mapping would cause
+    // all subsequent messages to be lost (never persisted to DB).
+    void persistence.flush(conversationId).catch((e: unknown) => {
       getLog().error({ conversationId, err: e }, 'transport_cleanup_flush_failed');
     });
-    workflowBridge.clearConversation(conversationId);
   });
   const persistence = new MessagePersistence((conversationId, event) =>
     transport.emit(conversationId, event)

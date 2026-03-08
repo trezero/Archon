@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { MessageList } from '@/components/chat/MessageList';
 import { useSSE } from '@/hooks/useSSE';
 import { getMessages } from '@/lib/api';
@@ -16,6 +16,8 @@ import type {
 interface WorkflowLogsProps {
   conversationId: string;
   startedAt?: number;
+  /** When true, enables REST polling to pick up newly-flushed messages. */
+  isRunning?: boolean;
   workflowHandlers?: {
     onWorkflowStep: (event: WorkflowStepEvent) => void;
     onWorkflowStatus: (event: WorkflowStatusEvent) => void;
@@ -31,9 +33,58 @@ interface WorkflowLogsProps {
 export function WorkflowLogs({
   conversationId,
   startedAt,
+  isRunning,
   workflowHandlers,
 }: WorkflowLogsProps): React.ReactElement {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  /** Hydrate rows from the REST API into ChatMessage state. */
+  const hydrateMessages = useCallback(
+    (rows: MessageResponse[]): void => {
+      if (rows.length === 0) return;
+      const hydrated: ChatMessage[] = rows.map(row => {
+        let meta: {
+          toolCalls?: {
+            name: string;
+            input: Record<string, unknown>;
+            duration?: number;
+          }[];
+          error?: ErrorDisplay;
+        } = {};
+        try {
+          meta = JSON.parse(row.metadata) as typeof meta;
+        } catch {
+          console.warn('[WorkflowLogs] Corrupted message metadata', { messageId: row.id });
+        }
+        return {
+          id: row.id,
+          role: row.role,
+          content: row.content,
+          toolCalls: meta.toolCalls?.map((tc, i) => ({
+            ...tc,
+            id: `${row.id}-tool-${String(i)}`,
+            startedAt: 0,
+            isExpanded: false,
+            duration: tc.duration ?? 0,
+          })),
+          error: meta.error,
+          timestamp: new Date(row.created_at).getTime(),
+          isStreaming: false,
+        };
+      });
+      const filtered = startedAt ? hydrated.filter(m => m.timestamp >= startedAt) : hydrated;
+      if (filtered.length === 0) return;
+      // Merge: DB is source of truth for persisted content.
+      // Preserve any SSE-only messages not yet flushed to DB.
+      setMessages(prev => {
+        if (prev.length === 0) return filtered;
+        const dbSigs = new Set(filtered.map(m => `${m.role}:${m.content}`));
+        const sseOnly = prev.filter(m => m.content && !dbSigs.has(`${m.role}:${m.content}`));
+        return [...filtered, ...sseOnly];
+      });
+    },
+    [startedAt]
+  );
 
   // Load historical messages on mount.
   // Uses a cancelled flag so StrictMode's unmount/remount cycle discards
@@ -42,55 +93,8 @@ export function WorkflowLogs({
     let cancelled = false;
     void getMessages(conversationId)
       .then((rows: MessageResponse[]) => {
-        if (cancelled || rows.length === 0) return;
-        const hydrated: ChatMessage[] = rows.map(row => {
-          let meta: {
-            toolCalls?: {
-              name: string;
-              input: Record<string, unknown>;
-              duration?: number;
-            }[];
-            error?: ErrorDisplay;
-          } = {};
-          try {
-            meta = JSON.parse(row.metadata) as typeof meta;
-          } catch {
-            console.warn('[WorkflowLogs] Corrupted message metadata', { messageId: row.id });
-          }
-          return {
-            id: row.id,
-            role: row.role,
-            content: row.content,
-            toolCalls: meta.toolCalls?.map((tc, i) => ({
-              ...tc,
-              id: `${row.id}-tool-${String(i)}`,
-              startedAt: 0,
-              isExpanded: false,
-              duration: tc.duration ?? 0,
-            })),
-            error: meta.error,
-            timestamp: new Date(row.created_at).getTime(),
-            isStreaming: false,
-          };
-        });
-        const filtered = startedAt ? hydrated.filter(m => m.timestamp >= startedAt) : hydrated;
-        // Merge history with any SSE messages that arrived during fetch
-        setMessages(prev => {
-          if (prev.length === 0) {
-            return filtered;
-          }
-          // Build dedup set for hydrated messages (role+content)
-          const hydratedSigs = new Set(filtered.map(m => `${m.role}:${m.content}`));
-          // Keep prev messages that are newer than history or still streaming,
-          // but exclude any that match a hydrated message by role+content (dedup)
-          const latestHistoryTs = Math.max(...filtered.map(m => m.timestamp));
-          const sseOnly = prev.filter(
-            m =>
-              (m.timestamp > latestHistoryTs || m.isStreaming) &&
-              !hydratedSigs.has(`${m.role}:${m.content}`)
-          );
-          return [...filtered, ...sseOnly];
-        });
+        if (cancelled) return;
+        hydrateMessages(rows);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -116,7 +120,41 @@ export function WorkflowLogs({
     return (): void => {
       cancelled = true;
     };
-  }, [conversationId, startedAt]);
+  }, [conversationId, startedAt, hydrateMessages]);
+
+  // Poll REST API while workflow is running to pick up eagerly-flushed messages.
+  // Worker conversations have no SSE subscriber during execution, so messages
+  // are flushed to DB via the eager 500ms debounce and picked up here.
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (isRunning && !pollingRef.current) {
+      pollingRef.current = setInterval(() => {
+        void getMessages(conversationId)
+          .then(hydrateMessages)
+          .catch((e: unknown) => {
+            console.warn('[WorkflowLogs] Polling fetch failed', {
+              conversationId,
+              error: e instanceof Error ? e.message : e,
+            });
+          });
+      }, 2_000);
+    } else if (!isRunning && pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+      // Final fetch to pick up any remaining messages after workflow completion
+      void getMessages(conversationId)
+        .then(hydrateMessages)
+        .catch(() => {
+          // Ignore — best-effort final fetch
+        });
+    }
+    return (): void => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [isRunning, conversationId, hydrateMessages]);
 
   const onText = useCallback((content: string): void => {
     setMessages(prev => {

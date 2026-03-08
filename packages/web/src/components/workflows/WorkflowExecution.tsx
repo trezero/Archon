@@ -146,6 +146,84 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       });
   }, [runId]);
 
+  // Re-fetch from REST when SSE reports a terminal status but initialData is stale.
+  // This covers two scenarios:
+  // 1. initialData hasn't loaded yet (null) when the completed event arrives
+  // 2. initialData was fetched while running but the workflow has since completed
+  // The re-fetch provides correct startedAt, completedAt, steps, and artifacts from the DB.
+  const liveStatus = workflows.get(runId)?.status;
+  useEffect(() => {
+    if (!liveStatus || !isTerminal(liveStatus)) return;
+    if (initialData && isTerminal(initialData.status)) return; // Already up to date
+    void getWorkflowRun(runId)
+      .then(data => {
+        if (data.run.worker_platform_id) {
+          setWorkerPlatformId(data.run.worker_platform_id);
+        }
+        if (data.run.parent_platform_id) {
+          setParentPlatformId(data.run.parent_platform_id);
+        }
+        const stepMap = new Map<
+          number,
+          {
+            index: number;
+            name: string;
+            status: 'running' | 'completed' | 'failed';
+            duration?: number;
+          }
+        >();
+        for (const e of data.events.filter(
+          ev => ev.event_type.startsWith('step_') || ev.event_type.startsWith('loop_iteration_')
+        )) {
+          const idx = e.step_index ?? 0;
+          const existing = stepMap.get(idx);
+          const status =
+            e.event_type === 'step_started' || e.event_type === 'loop_iteration_started'
+              ? ('running' as const)
+              : e.event_type === 'step_completed' || e.event_type === 'loop_iteration_completed'
+                ? ('completed' as const)
+                : ('failed' as const);
+          if (!existing || status !== 'running') {
+            stepMap.set(idx, {
+              index: idx,
+              name: e.step_name ?? `Step ${String(idx + 1)}`,
+              status,
+              duration: e.data.duration_ms as number | undefined,
+            });
+          }
+        }
+        setInitialData({
+          runId: data.run.id,
+          workflowName: data.run.workflow_name,
+          status: data.run.status,
+          steps: Array.from(stepMap.values()).sort((a, b) => a.index - b.index),
+          artifacts: data.events
+            .filter(e => e.event_type === 'workflow_artifact')
+            .map(e => {
+              const d = e.data;
+              return {
+                type: (d.artifactType as ArtifactType) ?? 'commit',
+                label: (d.label as string) ?? '',
+                url: d.url as string | undefined,
+                path: d.path as string | undefined,
+              };
+            })
+            .filter(a => a.label || a.url || a.path),
+          isLoop: data.events.some(ev => ev.event_type.startsWith('loop_iteration_')),
+          startedAt: new Date(ensureUtc(data.run.started_at)).getTime(),
+          completedAt: data.run.completed_at
+            ? new Date(ensureUtc(data.run.completed_at)).getTime()
+            : undefined,
+        });
+      })
+      .catch((err: unknown) => {
+        console.warn('[WorkflowExecution] Terminal re-fetch failed', {
+          runId,
+          error: err instanceof Error ? err.message : err,
+        });
+      });
+  }, [runId, liveStatus, initialData, workflows]);
+
   // Look up the workflow run associated with this worker conversation
   useEffect(() => {
     if (!workerPlatformId) return;
@@ -164,8 +242,12 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       });
   }, [workerPlatformId]);
 
-  // SSE leads by default; REST overrides only when it reports a terminal state
-  // that SSE has not yet reflected (prevents stale 'running' from lingering).
+  // Merge REST (initialData) and SSE (liveWorkflow) data.
+  // REST provides structural data (steps, startedAt, artifacts) from DB.
+  // SSE provides live status updates (status, completedAt, error).
+  // When a `running` SSE event is missed (no buffering), the first SSE event
+  // seen is `completed` — which creates liveWorkflow with steps:[] and
+  // startedAt=completionTime. We must preserve initialData's structure in that case.
   const liveWorkflow = workflows.get(runId);
   const workflow = ((): WorkflowState | null => {
     if (!liveWorkflow) return initialData;
@@ -178,7 +260,21 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       });
       return initialData;
     }
-    return liveWorkflow;
+    // Merge: use liveWorkflow's dynamic status but preserve initialData's
+    // structural data when liveWorkflow is sparse (missed earlier events).
+    return {
+      ...initialData,
+      status: liveWorkflow.status,
+      completedAt: liveWorkflow.completedAt ?? initialData.completedAt,
+      error: liveWorkflow.error ?? initialData.error,
+      // SSE accumulates steps/artifacts incrementally — prefer them when populated,
+      // otherwise fall back to the REST snapshot.
+      steps: liveWorkflow.steps.length > 0 ? liveWorkflow.steps : initialData.steps,
+      artifacts: liveWorkflow.artifacts.length > 0 ? liveWorkflow.artifacts : initialData.artifacts,
+      isLoop: liveWorkflow.isLoop || initialData.isLoop,
+      currentIteration: liveWorkflow.currentIteration ?? initialData.currentIteration,
+      maxIterations: liveWorkflow.maxIterations ?? initialData.maxIterations,
+    };
   })();
 
   // Force re-render every second while workflow is running (for live timer)
@@ -209,7 +305,16 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
     );
   }
 
-  const elapsed = Math.max(0, (workflow.completedAt ?? Date.now()) - workflow.startedAt);
+  // Only trust initialData.startedAt (from DB) for elapsed calculation.
+  // SSE's startedAt is unreliable when 'running' was missed and the first event
+  // is 'completed', which sets startedAt = completedAt = same Date.now().
+  // Show 0 until REST fetch provides the authoritative timestamp.
+  const startedAt = initialData?.startedAt ?? 0;
+  const completedAt =
+    initialData && isTerminal(initialData.status) && initialData.completedAt
+      ? initialData.completedAt
+      : (workflow.completedAt ?? (startedAt ? Date.now() : 0));
+  const elapsed = startedAt ? Math.max(0, completedAt - startedAt) : 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -275,6 +380,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
               <WorkflowLogs
                 conversationId={workerPlatformId}
                 startedAt={workflow.startedAt}
+                isRunning={workflow.status === 'running' || workflow.status === 'pending'}
                 workflowHandlers={workflowHandlers}
               />
             ) : (

@@ -13,9 +13,11 @@ export interface SSEWriter {
   readonly closed: boolean;
 }
 
+/** Grace period (ms) before firing onCleanup after stream removal. */
+const RECONNECT_GRACE_MS = 5_000;
+
 export class SSETransport {
   private streams = new Map<string, SSEWriter>();
-  private messageBuffer = new Map<string, string[]>();
   private cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private zombieReaperHandle: ReturnType<typeof setInterval> | null = null;
 
@@ -40,13 +42,6 @@ export class SSETransport {
       clearTimeout(pendingCleanup);
       this.cleanupTimers.delete(conversationId);
     }
-
-    // Flush buffered events
-    const buffered = this.messageBuffer.get(conversationId);
-    if (buffered) {
-      this.messageBuffer.delete(conversationId);
-      void this.flushBufferedMessages(conversationId, stream, buffered);
-    }
   }
 
   removeStream(conversationId: string, expectedStream?: SSEWriter): void {
@@ -60,8 +55,8 @@ export class SSETransport {
       if (current !== expectedStream) return;
     }
     this.streams.delete(conversationId);
-    // Schedule buffer cleanup after delay (allows reconnection without data loss)
-    this.scheduleCleanup(conversationId, 60_000);
+    // Schedule onCleanup after grace period (allows reconnection without losing persistence state)
+    this.scheduleCleanup(conversationId, RECONNECT_GRACE_MS);
   }
 
   /**
@@ -76,14 +71,7 @@ export class SSETransport {
       queuePosition,
       timestamp: Date.now(),
     });
-    const stream = this.streams.get(conversationId);
-    if (stream && !stream.closed) {
-      stream.writeSSE({ data: event }).catch((e: unknown) => {
-        getLog().warn({ conversationId, err: e }, 'sse_lock_event_write_failed');
-        this.bufferMessage(conversationId, event);
-        this.streams.delete(conversationId);
-      });
-    }
+    this.writeToStream(conversationId, event);
   }
 
   hasActiveStream(conversationId: string): boolean {
@@ -120,7 +108,6 @@ export class SSETransport {
       getLog().debug({ conversationId: id }, 'sse_stream_closed');
     }
     this.streams.clear();
-    this.messageBuffer.clear();
     for (const timer of this.cleanupTimers.values()) {
       clearTimeout(timer);
     }
@@ -135,14 +122,10 @@ export class SSETransport {
         await stream.writeSSE({ data: event });
       } catch (e: unknown) {
         getLog().warn({ conversationId, err: e }, 'sse_write_failed');
-        this.removeStream(conversationId);
-        this.bufferMessage(conversationId, event);
+        this.streams.delete(conversationId);
       }
-    } else {
-      if (stream?.closed) {
-        this.removeStream(conversationId);
-      }
-      this.bufferMessage(conversationId, event);
+    } else if (stream?.closed) {
+      this.streams.delete(conversationId);
     }
   }
 
@@ -150,45 +133,25 @@ export class SSETransport {
    * Emit a workflow event to the SSE stream for a conversation. Fire-and-forget.
    */
   emitWorkflowEvent(conversationId: string, event: string): void {
+    this.writeToStream(conversationId, event);
+  }
+
+  /**
+   * Write an event to the stream if one exists, no-op otherwise.
+   * Shared by emitLockEvent, emitWorkflowEvent, and any fire-and-forget path.
+   */
+  private writeToStream(conversationId: string, event: string): void {
     const stream = this.streams.get(conversationId);
     if (stream && !stream.closed) {
       stream.writeSSE({ data: event }).catch((e: unknown) => {
-        getLog().warn({ conversationId, err: e }, 'sse_workflow_event_write_failed');
-        this.bufferMessage(conversationId, event);
+        getLog().warn({ conversationId, err: e }, 'sse_write_failed');
         this.streams.delete(conversationId);
       });
     }
   }
 
   /**
-   * Flush buffered messages to a newly connected stream.
-   * Stops on first write failure and re-buffers the remaining messages.
-   */
-  private async flushBufferedMessages(
-    conversationId: string,
-    stream: SSEWriter,
-    messages: string[]
-  ): Promise<void> {
-    for (let i = 0; i < messages.length; i++) {
-      try {
-        await stream.writeSSE({ data: messages[i] });
-      } catch (e: unknown) {
-        getLog().warn(
-          { conversationId, err: e, flushed: i, remaining: messages.length - i },
-          'sse_flush_failed'
-        );
-        const remaining = messages.slice(i);
-        for (const msg of remaining) {
-          this.bufferMessage(conversationId, msg);
-        }
-        this.streams.delete(conversationId);
-        return;
-      }
-    }
-  }
-
-  /**
-   * Schedule cleanup of all buffers for a conversation after a delay.
+   * Schedule onCleanup callback after a delay.
    * If the client reconnects before the timer fires, the cleanup is cancelled.
    */
   private scheduleCleanup(conversationId: string, delayMs: number): void {
@@ -203,7 +166,6 @@ export class SSETransport {
         this.cleanupTimers.delete(conversationId);
         // Only clean up if stream is still absent (client didn't reconnect)
         if (!this.streams.has(conversationId)) {
-          this.messageBuffer.delete(conversationId);
           if (this.onCleanup) {
             this.onCleanup(conversationId);
           }
@@ -214,20 +176,5 @@ export class SSETransport {
     }, delayMs);
 
     this.cleanupTimers.set(conversationId, timer);
-  }
-
-  private bufferMessage(conversationId: string, event: string): void {
-    if (!this.messageBuffer.has(conversationId) && this.messageBuffer.size > 200) {
-      getLog().warn({ conversationId }, 'buffer_conversation_limit_exceeded');
-      return;
-    }
-    const buffer = this.messageBuffer.get(conversationId) ?? [];
-    buffer.push(event);
-    this.messageBuffer.set(conversationId, buffer);
-    // Cap buffer size to prevent memory leaks
-    if (buffer.length > 100) {
-      getLog().warn({ conversationId }, 'message_buffer_overflow');
-      buffer.shift();
-    }
   }
 }

@@ -30,6 +30,7 @@ interface AssistantBuffer {
 export class MessagePersistence {
   private assistantBuffer = new Map<string, AssistantBuffer>();
   private dbIdMap = new Map<string, string>(); // platform_conversation_id → DB UUID
+  private workerFlushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private emitEvent: (conversationId: string, event: string) => Promise<void>) {}
 
@@ -93,6 +94,30 @@ export class MessagePersistence {
         getLog().error({ conversationId, err: e }, 'buffer_overflow_flush_failed');
       });
     }
+
+    // Worker conversations have no live SSE subscriber — flush eagerly so the
+    // WorkflowLogs REST polling can pick up messages within ~500ms.
+    if (conversationId.startsWith('web-worker-')) {
+      this.scheduleWorkerFlush(conversationId);
+    }
+  }
+
+  /**
+   * Schedule a debounced flush for a worker conversation (~500ms).
+   * Resets on each new appendText so rapid-fire tokens coalesce into one flush.
+   */
+  private scheduleWorkerFlush(conversationId: string): void {
+    const existing = this.workerFlushTimers.get(conversationId);
+    if (existing) clearTimeout(existing);
+    this.workerFlushTimers.set(
+      conversationId,
+      setTimeout(() => {
+        this.workerFlushTimers.delete(conversationId);
+        this.flush(conversationId).catch((e: unknown) => {
+          getLog().error({ conversationId, err: e }, 'worker_eager_flush_failed');
+        });
+      }, 500)
+    );
   }
 
   appendToolCall(
@@ -117,6 +142,11 @@ export class MessagePersistence {
       startedAt: now,
     });
     this.assistantBuffer.set(conversationId, buf);
+
+    // Eager flush for worker conversations (same as appendText)
+    if (conversationId.startsWith('web-worker-')) {
+      this.scheduleWorkerFlush(conversationId);
+    }
   }
 
   /**
@@ -197,6 +227,12 @@ export class MessagePersistence {
   }
 
   async clearConversation(conversationId: string): Promise<void> {
+    // Cancel any pending worker flush timer
+    const timer = this.workerFlushTimers.get(conversationId);
+    if (timer) {
+      clearTimeout(timer);
+      this.workerFlushTimers.delete(conversationId);
+    }
     // Attempt to flush before clearing so buffered messages aren't lost
     await this.flush(conversationId).catch((e: unknown) => {
       getLog().error({ conversationId, err: e }, 'clear_conversation_flush_failed');
@@ -239,6 +275,8 @@ export class MessagePersistence {
   }
 
   clearAll(): void {
+    for (const timer of this.workerFlushTimers.values()) clearTimeout(timer);
+    this.workerFlushTimers.clear();
     this.assistantBuffer.clear();
     this.dbIdMap.clear();
   }

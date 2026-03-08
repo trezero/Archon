@@ -12,6 +12,8 @@ import type {
 interface UseWorkflowStatusReturn {
   workflows: Map<string, WorkflowState>;
   activeWorkflow: WorkflowState | null;
+  /** Inject a workflow from REST data (only if not already tracked via SSE). */
+  hydrateWorkflow: (state: WorkflowState) => void;
   handlers: {
     onWorkflowStep: (event: WorkflowStepEvent) => void;
     onWorkflowStatus: (event: WorkflowStatusEvent) => void;
@@ -29,7 +31,12 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
       const existing = next.get(event.runId);
 
       if (!existing) {
-        // New workflow or first SSE event for a REST-loaded workflow
+        // New workflow or first SSE event for a REST-loaded workflow.
+        // Set completedAt for terminal events so the UI immediately stops the timer.
+        // The REST re-fetch (triggered by terminal liveStatus) will correct startedAt
+        // from initialData, providing the authoritative elapsed duration.
+        const isTerminal =
+          event.status === 'completed' || event.status === 'failed' || event.status === 'cancelled';
         next.set(event.runId, {
           runId: event.runId,
           workflowName: event.workflowName,
@@ -38,7 +45,7 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
           artifacts: [],
           isLoop: false,
           startedAt: event.timestamp,
-          completedAt: event.status !== 'running' ? event.timestamp : undefined,
+          completedAt: isTerminal ? event.timestamp : undefined,
           error: event.error,
         });
       } else {
@@ -145,6 +152,15 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
     });
   }, []);
 
+  const hydrateWorkflow = useCallback((state: WorkflowState): void => {
+    setWorkflows(prev => {
+      if (prev.has(state.runId)) return prev; // SSE data already present — don't override
+      const next = new Map(prev);
+      next.set(state.runId, state);
+      return next;
+    });
+  }, []);
+
   // Poll for stuck workflows: if any workflow is "running" for >30s, check REST API.
   // Use a ref to read current workflows inside the interval to avoid recreating
   // the interval on every state change (which caused interval thrash + stale closures).
@@ -238,6 +254,7 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
   return {
     workflows,
     activeWorkflow,
+    hydrateWorkflow,
     handlers: {
       onWorkflowStep: handleWorkflowStep,
       onWorkflowStatus: handleWorkflowStatus,

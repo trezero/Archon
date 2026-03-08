@@ -14,6 +14,7 @@ import {
   listCodebases,
   getMessages,
   createConversation,
+  getWorkflowRunByWorker,
 } from '@/lib/api';
 import type { ConversationResponse, CodebaseResponse, MessageResponse } from '@/lib/api';
 import type {
@@ -43,7 +44,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   const [sending, setSending] = useState(false);
   const [hasSentMessage, setHasSentMessage] = useState(false);
   const messageIdCounter = useRef(0);
-  const { activeWorkflow, handlers: workflowHandlers } = useWorkflowStatus();
+  const { activeWorkflow, hydrateWorkflow, handlers: workflowHandlers } = useWorkflowStatus();
 
   // Sync messages to cache for persistence across navigation
   useEffect(() => {
@@ -105,33 +106,15 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             isStreaming: false,
           };
         });
-        // Merge history with any SSE messages that arrived during fetch
+        // REST is the source of truth for all completed messages.
+        // Keep any actively streaming messages (including empty thinking placeholders
+        // that show loading dots while waiting for the first AI response).
         setMessages(prev => {
           if (prev.length === 0) {
-            // No SSE messages arrived yet — use full history
             return hydrated;
           }
-          // Build dedup sets for hydrated messages.
-          // Use role+content as the primary key, and workflowResult.runId as a
-          // secondary key for workflow result messages (avoids duplicates when
-          // the SSE-received message and DB-persisted message have any content
-          // difference, e.g. trailing whitespace from text batching).
-          const hydratedSigs = new Set(hydrated.map(m => `${m.role}:${m.content}`));
-          const hydratedWorkflowRunIds = new Set(
-            hydrated.flatMap(m => (m.workflowResult?.runId ? [m.workflowResult.runId] : []))
-          );
-          // Keep prev messages that are either:
-          // 1. Newer than the latest history message (SSE messages during fetch), OR
-          // 2. Streaming/thinking indicators (no DB equivalent yet)
-          // But exclude any that match a hydrated message by role+content or workflowResult.runId (dedup).
-          const latestHistoryTs = Math.max(...hydrated.map(m => m.timestamp));
-          const sseOnly = prev.filter(
-            m =>
-              (m.timestamp > latestHistoryTs || m.isStreaming) &&
-              !hydratedSigs.has(`${m.role}:${m.content}`) &&
-              !(m.workflowResult?.runId && hydratedWorkflowRunIds.has(m.workflowResult.runId))
-          );
-          return [...hydrated, ...sseOnly];
+          const activeStreaming = prev.filter(m => m.isStreaming);
+          return [...hydrated, ...activeStreaming];
         });
         setHasSentMessage(true);
       })
@@ -160,6 +143,43 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       cancelled = true;
     };
   }, [conversationId, isNewChat]);
+
+  // Hydrate workflow status from message metadata when SSE events were missed.
+  // workflowDispatch metadata is persisted in DB messages — scan for it after
+  // loading history and fetch the workflow run status via REST.
+  useEffect(() => {
+    if (isNewChat) return;
+    const dispatches = messages
+      .map(m => m.workflowDispatch)
+      .filter((d): d is NonNullable<typeof d> => d != null);
+    if (dispatches.length === 0) return;
+    // Only hydrate the most recent dispatch (typical case: one active workflow per chat)
+    const latest = dispatches[dispatches.length - 1];
+    void getWorkflowRunByWorker(latest.workerConversationId)
+      .then(result => {
+        if (!result) return;
+        const run = result.run;
+        const ensureUtc = (ts: string): string => (ts.endsWith('Z') ? ts : ts + 'Z');
+        hydrateWorkflow({
+          runId: run.id,
+          workflowName: run.workflow_name,
+          status: run.status,
+          steps: [],
+          artifacts: [],
+          isLoop: false,
+          startedAt: new Date(ensureUtc(run.started_at)).getTime(),
+          completedAt: run.completed_at
+            ? new Date(ensureUtc(run.completed_at)).getTime()
+            : undefined,
+        });
+      })
+      .catch((err: unknown) => {
+        console.warn('[Chat] Failed to hydrate workflow status from message metadata', {
+          workerConversationId: latest.workerConversationId,
+          error: err instanceof Error ? err.message : err,
+        });
+      });
+  }, [messages, isNewChat, hydrateWorkflow]);
 
   // Share conversations cache with sidebar for title/context display
   const { data: conversations, isError: conversationsError } = useQuery<ConversationResponse[]>({
