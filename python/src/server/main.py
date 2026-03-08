@@ -33,6 +33,7 @@ from .api_routes.projects_api import router as projects_router
 from .api_routes.providers_api import router as providers_router
 from .api_routes.extensions_api import router as extensions_router
 from .api_routes.sessions_api import router as sessions_router
+from .api_routes.materialization_api import router as materialization_router
 from .api_routes.version_api import router as version_router
 
 # Import modular API routers
@@ -218,6 +219,7 @@ app.include_router(version_router)
 app.include_router(migration_router)
 app.include_router(extensions_router)
 app.include_router(sessions_router)
+app.include_router(materialization_router)
 
 
 # Root endpoint
