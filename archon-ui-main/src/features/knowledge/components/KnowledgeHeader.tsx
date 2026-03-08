@@ -3,7 +3,7 @@
  * Contains search, filters, and view controls
  */
 
-import { Asterisk, BookOpen, Briefcase, Grid, List, Plus, Search, Terminal } from "lucide-react";
+import { Asterisk, BookOpen, Briefcase, Grid, List, Plus, Search, Sparkles, Terminal } from "lucide-react";
 import { Button, Input, ToggleGroup, ToggleGroupItem } from "../../ui/primitives";
 import { cn } from "../../ui/primitives/styles";
 
@@ -20,6 +20,8 @@ interface KnowledgeHeaderProps {
   viewMode: "grid" | "table";
   onViewModeChange: (mode: "grid" | "table") => void;
   onAddKnowledge: () => void;
+  showMaterialized: boolean;
+  onShowMaterializedChange: (show: boolean) => void;
 }
 
 export const KnowledgeHeader: React.FC<KnowledgeHeaderProps> = ({
@@ -35,6 +37,8 @@ export const KnowledgeHeader: React.FC<KnowledgeHeaderProps> = ({
   viewMode,
   onViewModeChange,
   onAddKnowledge,
+  showMaterialized,
+  onShowMaterializedChange,
 }) => {
   return (
     <div className="flex flex-col gap-4 px-6 py-4 border-b border-white/10">
@@ -97,6 +101,23 @@ export const KnowledgeHeader: React.FC<KnowledgeHeaderProps> = ({
             <Briefcase className="w-4 h-4" aria-hidden="true" />
           </ToggleGroupItem>
         </ToggleGroup>
+
+        {/* Materialized toggle */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onShowMaterializedChange(!showMaterialized)}
+          title="Show materialized knowledge"
+          className={cn(
+            "px-3 h-8 border border-white/10 rounded",
+            showMaterialized
+              ? "bg-purple-500/20 text-purple-400 border-purple-500/30"
+              : "bg-white/5 text-gray-400 hover:text-white",
+          )}
+        >
+          <Sparkles className="w-4 h-4 mr-1.5" />
+          <span className="text-xs">Materialized</span>
+        </Button>
 
         {/* Project filter */}
         {projects.length > 0 && (

@@ -13,6 +13,7 @@ import { KnowledgeHeader } from "../components/KnowledgeHeader";
 import { KnowledgeList } from "../components/KnowledgeList";
 import { useKnowledgeSummaries } from "../hooks/useKnowledgeQueries";
 import { KnowledgeInspector } from "../inspector/components/KnowledgeInspector";
+import { MaterializationList } from "../materialization/components/MaterializationList";
 import type { KnowledgeItem, KnowledgeItemsFilter } from "../types";
 
 export const KnowledgeView = () => {
@@ -21,6 +22,7 @@ export const KnowledgeView = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "technical" | "business">("all");
   const [projectFilter, setProjectFilter] = useState("");
+  const [showMaterialized, setShowMaterialized] = useState(false);
 
   // Projects query for filter dropdown
   const { data: projectsData = [] } = useProjects();
@@ -147,6 +149,8 @@ export const KnowledgeView = () => {
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onAddKnowledge={handleAddKnowledge}
+        showMaterialized={showMaterialized}
+        onShowMaterializedChange={setShowMaterialized}
       />
 
       {/* Main Content */}
@@ -165,22 +169,26 @@ export const KnowledgeView = () => {
           </div>
         )}
 
-        {/* Knowledge Items List */}
-        <KnowledgeList
-          items={knowledgeItems}
-          viewMode={viewMode}
-          isLoading={isLoading}
-          error={error}
-          onRetry={refetch}
-          onViewDocument={handleViewDocument}
-          onViewCodeExamples={handleViewCodeExamples}
-          onDeleteSuccess={handleDeleteSuccess}
-          activeOperations={activeOperations}
-          onRefreshStarted={(progressId) => {
-            // Add the progress ID to track it
-            setActiveCrawlIds((prev) => [...prev, progressId]);
-          }}
-        />
+        {/* Toggle between Knowledge Items and Materialized list */}
+        {showMaterialized ? (
+          <MaterializationList />
+        ) : (
+          <KnowledgeList
+            items={knowledgeItems}
+            viewMode={viewMode}
+            isLoading={isLoading}
+            error={error}
+            onRetry={refetch}
+            onViewDocument={handleViewDocument}
+            onViewCodeExamples={handleViewCodeExamples}
+            onDeleteSuccess={handleDeleteSuccess}
+            activeOperations={activeOperations}
+            onRefreshStarted={(progressId) => {
+              // Add the progress ID to track it
+              setActiveCrawlIds((prev) => [...prev, progressId]);
+            }}
+          />
+        )}
       </div>
 
       {/* Dialogs */}
