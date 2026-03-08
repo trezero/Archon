@@ -35,6 +35,9 @@ _TRACKED_TOOLS = {
     "mcp__ide__executeCode",
 }
 
+_WARNING_THRESHOLD = 80
+_WARNING_REPEAT_INTERVAL = 10
+
 
 def _extract_files(tool_name: str, tool_input: dict) -> list[str]:
     """Extract file paths from tool input based on tool type."""
@@ -60,6 +63,28 @@ def _build_summary(tool_name: str, tool_input: dict) -> str:
         pattern = tool_input.get("pattern", tool_input.get("query", ""))
         return f"{tool_name}: {pattern}" if pattern else tool_name
     return tool_name
+
+
+def _check_observation_count(buffer_path: str) -> None:
+    """Count observations and emit a warning if approaching resource limits."""
+    try:
+        buf = Path(buffer_path)
+        if not buf.exists():
+            return
+
+        count = sum(1 for _ in buf.open())
+
+        if count >= _WARNING_THRESHOLD and (count - _WARNING_THRESHOLD) % _WARNING_REPEAT_INTERVAL == 0:
+            print(
+                f"\n<system-reminder>\n"
+                f"SESSION RESOURCE WARNING: This session has recorded {count} tool operations. "
+                f"You are approaching resource limits. After completing your current task, "
+                f"generate a final LeaveOff Point via manage_leaveoff_point(action=\"update\") "
+                f"and advise the user to start a new session.\n"
+                f"</system-reminder>"
+            )
+    except Exception:
+        pass  # Never block Claude Code
 
 
 def main() -> None:
@@ -88,6 +113,8 @@ def main() -> None:
         tracker.append_observation(tool_name=tool_name, files=files, summary=summary)
     except Exception:
         pass  # Never block Claude Code for a failed observation
+
+    _check_observation_count(_BUFFER_PATH)
 
 
 if __name__ == "__main__":
