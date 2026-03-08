@@ -64,6 +64,40 @@ When a process should continue despite failures, it must **skip the failed item 
 - When updating code, don't reference what is changing (avoid keywords like SIMPLIFIED, ENHANCED, LEGACY, CHANGED, REMOVED), instead focus on comments that document just the functionality of the code
 - When commenting on code in the codebase, only comment on the functionality and reasoning behind the code. Refrain from speaking to Archon being in "beta" or referencing anything else that comes from these global rules.
 
+## LeaveOff Point Protocol
+
+### After Every Coding Task
+After completing any coding task that adds, modifies, or removes functionality, you MUST
+update the LeaveOff Point before moving to the next task:
+
+1. Call `manage_leaveoff_point(action="update")` with:
+   - `content`: What was accomplished in this task (be specific about files changed and why)
+   - `component`: The architectural module or feature area (e.g., "Authentication Module")
+   - `next_steps`: Concrete, actionable items for the next session (not vague — include file paths)
+   - `references`: PRPs, design docs, or key files that informed this work
+
+2. This is NOT optional. Skipping this step means the next session starts with no context.
+
+### Session Resource Management (The 90% Rule)
+When you observe any of these signals, you are approaching resource limits:
+- The conversation has exceeded 80+ tool uses
+- You receive a system reminder about observation count
+- You sense the conversation has been running extensively
+
+Upon detecting these signals:
+1. **Stop active coding immediately** — do not start new tasks
+2. **Generate a final LeaveOff Point** via `manage_leaveoff_point(action="update")` with
+   comprehensive next_steps covering all remaining planned work
+3. **Advise the user**: "This session has reached its resource limit. The LeaveOff Point
+   has been saved. Please start a new session to continue — context will be restored
+   automatically."
+4. **Do not continue coding** after generating the final LeaveOff Point
+
+### Session Start
+At the beginning of every session, the LeaveOff Point is automatically loaded via the
+session start hook. You do not need to fetch it manually. Review the injected context
+and orient your work around the documented next steps.
+
 ## Development Commands
 
 ### Frontend (archon-ui-main/)
