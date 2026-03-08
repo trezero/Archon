@@ -69,7 +69,7 @@ class LeaveOffService:
         with open(file_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
 
-        logger.info("LeaveOffPoint.md written", path=file_path)
+        logger.info(f"LeaveOffPoint.md written | path={file_path}")
         return file_path
 
     async def upsert(
@@ -122,18 +122,13 @@ class LeaveOffService:
         if not result.data:
             raise RuntimeError(f"LeaveOff upsert returned no data for project {project_id}")
         record = result.data[0]
-        logger.info("LeaveOff point upserted", project_id=project_id, component=component)
+        logger.info(f"LeaveOff point upserted | project_id={project_id} | component={component}")
 
         if project_path:
             try:
                 self._write_file(project_path, record)
             except Exception:
-                logger.error(
-                    "Failed to write LeaveOffPoint.md",
-                    project_path=project_path,
-                    project_id=project_id,
-                    exc_info=True,
-                )
+                logger.error(f"Failed to write LeaveOffPoint.md | project_path={project_path} | project_id={project_id}", exc_info=True)
 
         return record
 
@@ -164,20 +159,15 @@ class LeaveOffService:
         result = self.supabase.table(TABLE).delete().eq("project_id", project_id).execute()
         deleted = bool(result.data)
         if deleted:
-            logger.info("LeaveOff point deleted", project_id=project_id)
+            logger.info(f"LeaveOff point deleted | project_id={project_id}")
 
         if project_path:
             file_path = os.path.join(project_path, KNOWLEDGE_DIR, FILENAME)
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
-                    logger.info("LeaveOffPoint.md removed", path=file_path)
+                    logger.info(f"LeaveOffPoint.md removed | path={file_path}")
             except Exception:
-                logger.error(
-                    "Failed to remove LeaveOffPoint.md",
-                    path=file_path,
-                    project_id=project_id,
-                    exc_info=True,
-                )
+                logger.error(f"Failed to remove LeaveOffPoint.md | path={file_path} | project_id={project_id}", exc_info=True)
 
         return deleted

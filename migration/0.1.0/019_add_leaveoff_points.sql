@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS archon_leaveoff_points (
     content         TEXT NOT NULL,
     component       TEXT,
     next_steps      TEXT[] NOT NULL DEFAULT '{}',
-    references      TEXT[] NOT NULL DEFAULT '{}',
+    "references"    TEXT[] NOT NULL DEFAULT '{}',
     metadata        JSONB NOT NULL DEFAULT '{}',
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
