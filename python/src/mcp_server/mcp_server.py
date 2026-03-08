@@ -605,6 +605,23 @@ def register_modules():
         logger.error(f"✗ Failed to register session tools: {e}")
         logger.error(traceback.format_exc())
 
+    # Materialization Tools
+    try:
+        from src.mcp_server.features.materialization import register_materialization_tools
+
+        register_materialization_tools(mcp)
+        modules_registered += 1
+        logger.info("✓ Materialization module registered (HTTP-based)")
+    except ImportError as e:
+        logger.warning(f"⚠ Materialization module not available (optional): {e}")
+    except (SyntaxError, NameError, AttributeError) as e:
+        logger.error(f"✗ Code error in materialization tools - MUST FIX: {e}")
+        logger.error(traceback.format_exc())
+        raise
+    except Exception as e:
+        logger.error(f"✗ Failed to register materialization tools: {e}")
+        logger.error(traceback.format_exc())
+
     logger.info(f"📦 Total modules registered: {modules_registered}")
 
     if modules_registered == 0:
