@@ -639,6 +639,23 @@ def register_modules():
         logger.error(f"✗ Failed to register leaveoff tools: {e}")
         logger.error(traceback.format_exc())
 
+    # Postman Integration Tools
+    try:
+        from src.mcp_server.features.postman import register_postman_tools
+
+        register_postman_tools(mcp)
+        modules_registered += 1
+        logger.info("✓ Postman integration module registered (HTTP-based)")
+    except ImportError as e:
+        logger.warning(f"⚠ Postman integration module not available (optional): {e}")
+    except (SyntaxError, NameError, AttributeError) as e:
+        logger.error(f"✗ Code error in postman tools - MUST FIX: {e}")
+        logger.error(traceback.format_exc())
+        raise
+    except Exception as e:
+        logger.error(f"✗ Failed to register postman tools: {e}")
+        logger.error(traceback.format_exc())
+
     logger.info(f"📦 Total modules registered: {modules_registered}")
 
     if modules_registered == 0:
