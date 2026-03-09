@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Moon, Sun, FileText, Layout, Bot, Settings, Palette, Flame, Monitor } from 'lucide-react';
+import { Moon, Sun, FileText, Layout, Bot, Settings, Palette, Flame, Monitor, Send } from 'lucide-react';
 import { Switch } from '@/features/ui/primitives/switch';
 import { Card } from '../ui/Card';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -18,12 +18,15 @@ export const FeaturesSection = () => {
     styleGuideEnabled,
     setStyleGuideEnabled: setStyleGuideContext,
     agentWorkOrdersEnabled,
-    setAgentWorkOrdersEnabled: setAgentWorkOrdersContext
+    setAgentWorkOrdersEnabled: setAgentWorkOrdersContext,
+    postmanSyncMode,
+    setPostmanSyncMode: setPostmanSyncModeContext
   } = useSettings();
   const isDarkMode = theme === 'dark';
   const [projectsEnabled, setProjectsEnabled] = useState(true);
   const [styleGuideEnabledLocal, setStyleGuideEnabledLocal] = useState(styleGuideEnabled);
   const [agentWorkOrdersEnabledLocal, setAgentWorkOrdersEnabledLocal] = useState(agentWorkOrdersEnabled);
+  const [postmanSyncModeLocal, setPostmanSyncModeLocal] = useState(postmanSyncMode);
 
   // Commented out for future release
   const [agUILibraryEnabled, setAgUILibraryEnabled] = useState(false);
@@ -47,6 +50,10 @@ export const FeaturesSection = () => {
   useEffect(() => {
     setAgentWorkOrdersEnabledLocal(agentWorkOrdersEnabled);
   }, [agentWorkOrdersEnabled]);
+
+  useEffect(() => {
+    setPostmanSyncModeLocal(postmanSyncMode);
+  }, [postmanSyncMode]);
 
   const loadSettings = async () => {
     try {
@@ -257,6 +264,32 @@ export const FeaturesSection = () => {
     }
   };
 
+  const handlePostmanSyncModeChange = async (newMode: string) => {
+    if (loading) return;
+
+    const previousMode = postmanSyncModeLocal;
+    try {
+      setLoading(true);
+      setPostmanSyncModeLocal(newMode);
+
+      await setPostmanSyncModeContext(newMode);
+
+      if (newMode === 'disabled') {
+        showToast('Postman Integration Disabled', 'warning');
+      } else if (newMode === 'git') {
+        showToast('Postman Mode: Git (Collections as Code)', 'success');
+      } else if (newMode === 'api') {
+        showToast('Postman Mode: API (Postman Cloud)', 'success');
+      }
+    } catch (error) {
+      console.error('Failed to update Postman sync mode:', error);
+      setPostmanSyncModeLocal(previousMode);
+      showToast('Failed to update Postman sync mode', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
@@ -428,6 +461,36 @@ export const FeaturesSection = () => {
                 icon={<Monitor className="w-5 h-5" />}
                 disabled={loading}
               />
+            </div>
+          </div>
+
+          {/* Postman Sync Mode Selector */}
+          <div className="flex items-center gap-4 p-4 rounded-xl bg-gradient-to-br from-amber-500/10 to-amber-600/5 backdrop-blur-sm border border-amber-500/20 shadow-lg">
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-gray-800 dark:text-white">
+                Postman Integration
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Sync API collections with Postman
+              </p>
+              {postmanSyncModeLocal === 'api' && (
+                <p className="text-xs text-amber-500 dark:text-amber-400 mt-1">
+                  Requires POSTMAN_API_KEY and POSTMAN_WORKSPACE_ID in API Keys
+                </p>
+              )}
+            </div>
+            <div className="flex-shrink-0 flex items-center gap-2">
+              <Send className="w-5 h-5 text-amber-400" />
+              <select
+                value={postmanSyncModeLocal}
+                onChange={(e) => handlePostmanSyncModeChange(e.target.value)}
+                disabled={loading}
+                className="rounded-lg border border-amber-500/30 bg-amber-500/10 text-gray-800 dark:text-white text-sm px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-500/50 disabled:opacity-50 cursor-pointer"
+              >
+                <option value="disabled">Disabled</option>
+                <option value="git">Git (Collections as Code)</option>
+                <option value="api">API (Postman Cloud)</option>
+              </select>
             </div>
           </div>
         </div>

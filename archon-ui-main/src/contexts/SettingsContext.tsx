@@ -8,6 +8,8 @@ interface SettingsContextType {
   setStyleGuideEnabled: (enabled: boolean) => Promise<void>;
   agentWorkOrdersEnabled: boolean;
   setAgentWorkOrdersEnabled: (enabled: boolean) => Promise<void>;
+  postmanSyncMode: string;
+  setPostmanSyncMode: (mode: string) => Promise<void>;
   loading: boolean;
   refreshSettings: () => Promise<void>;
 }
@@ -30,17 +32,19 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
   const [projectsEnabled, setProjectsEnabledState] = useState(true);
   const [styleGuideEnabled, setStyleGuideEnabledState] = useState(false);
   const [agentWorkOrdersEnabled, setAgentWorkOrdersEnabledState] = useState(false);
+  const [postmanSyncMode, setPostmanSyncModeState] = useState("disabled");
   const [loading, setLoading] = useState(true);
 
   const loadSettings = async () => {
     try {
       setLoading(true);
 
-      // Load Projects, Style Guide, and Agent Work Orders settings
-      const [projectsResponse, styleGuideResponse, agentWorkOrdersResponse] = await Promise.all([
+      // Load Projects, Style Guide, Agent Work Orders, and Postman Sync Mode settings
+      const [projectsResponse, styleGuideResponse, agentWorkOrdersResponse, postmanSyncModeResponse] = await Promise.all([
         credentialsService.getCredential('PROJECTS_ENABLED').catch(() => ({ value: undefined })),
         credentialsService.getCredential('STYLE_GUIDE_ENABLED').catch(() => ({ value: undefined })),
-        credentialsService.getCredential('AGENT_WORK_ORDERS_ENABLED').catch(() => ({ value: undefined }))
+        credentialsService.getCredential('AGENT_WORK_ORDERS_ENABLED').catch(() => ({ value: undefined })),
+        credentialsService.getCredential('POSTMAN_SYNC_MODE').catch(() => ({ value: undefined }))
       ]);
 
       if (projectsResponse.value !== undefined) {
@@ -61,11 +65,18 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
         setAgentWorkOrdersEnabledState(false); // Default to false
       }
 
+      if (postmanSyncModeResponse.value !== undefined) {
+        setPostmanSyncModeState(postmanSyncModeResponse.value);
+      } else {
+        setPostmanSyncModeState("disabled"); // Default to disabled
+      }
+
     } catch (error) {
       console.error('Failed to load settings:', error);
       setProjectsEnabledState(true);
       setStyleGuideEnabledState(false);
       setAgentWorkOrdersEnabledState(false);
+      setPostmanSyncModeState("disabled");
     } finally {
       setLoading(false);
     }
@@ -138,6 +149,25 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
     }
   };
 
+  const setPostmanSyncMode = async (mode: string) => {
+    const previousMode = postmanSyncMode;
+    try {
+      setPostmanSyncModeState(mode);
+
+      await credentialsService.createCredential({
+        key: 'POSTMAN_SYNC_MODE',
+        value: mode,
+        is_encrypted: false,
+        category: 'features',
+        description: 'Postman integration sync mode: api, git, or disabled'
+      });
+    } catch (error) {
+      console.error('Failed to update Postman sync mode:', error);
+      setPostmanSyncModeState(previousMode);
+      throw error;
+    }
+  };
+
   const refreshSettings = async () => {
     await loadSettings();
   };
@@ -149,6 +179,8 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
     setStyleGuideEnabled,
     agentWorkOrdersEnabled,
     setAgentWorkOrdersEnabled,
+    postmanSyncMode,
+    setPostmanSyncMode,
     loading,
     refreshSettings
   };
