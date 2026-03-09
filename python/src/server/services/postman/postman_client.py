@@ -2,18 +2,14 @@
 Postman API client with retry logic and error handling.
 """
 
-import os
-import warnings
-import subprocess
 import json
+import os
+import subprocess
+import warnings
 
 from .config import PostmanConfig
+from .exceptions import NetworkError, TimeoutError, create_exception_from_response
 from .retry_handler import RetryHandler
-from .exceptions import (
-    create_exception_from_response,
-    NetworkError,
-    TimeoutError
-)
 
 
 class PostmanClient:
@@ -53,7 +49,7 @@ class PostmanClient:
                 self.api_version = 'v10+'
             else:
                 self.api_version = 'v9-or-earlier'
-        except:
+        except Exception:
             self.api_version = 'unknown'
 
         # Warn if using old version
@@ -91,7 +87,8 @@ class PostmanClient:
                 "This client is optimized for Postman v10+ APIs. "
                 "Some features may not work correctly with older versions. "
                 "Please upgrade to Postman v10+ for best experience.",
-                UserWarning
+                UserWarning,
+                stacklevel=2,
             )
             self.api_version_warned = True
 
@@ -234,7 +231,7 @@ class PostmanClient:
                 )
                 raise NetworkError(message=error_msg) from e
             except Exception as e:
-                if isinstance(e, (NetworkError, TimeoutError)):
+                if isinstance(e, NetworkError | TimeoutError):
                     raise
                 raise NetworkError(message=f"Request failed: {str(e)}", original_error=e) from e
 
@@ -1020,7 +1017,7 @@ class PostmanClient:
             raise ValueError("At least one file must be provided in spec_data['files']")
 
         payload["files"] = []
-        for i, file_obj in enumerate(files):
+        for _i, file_obj in enumerate(files):
             file_entry = {
                 "path": file_obj["path"],
                 "content": file_obj["content"]

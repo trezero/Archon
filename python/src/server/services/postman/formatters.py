@@ -244,7 +244,7 @@ def format_monitor_run(run, index=None):
             finish_dt = datetime.fromisoformat(finished.replace('Z', '+00:00'))
             duration_seconds = (finish_dt - start_dt).total_seconds()
             duration = f"{duration_seconds:.1f}s"
-        except:
+        except (ValueError, TypeError, AttributeError):
             pass
 
     output.append(f"   Duration: {duration}")

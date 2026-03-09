@@ -65,7 +65,7 @@ async def get_postman_status():
         }
     except Exception as e:
         logfire.error(f"Error checking postman status | error={e}")
-        raise HTTPException(status_code=500, detail={"error": str(e)})
+        raise HTTPException(status_code=500, detail={"error": str(e)}) from None
 
 
 @router.post("/collections")
@@ -80,10 +80,10 @@ async def create_collection(request: CreateCollectionRequest):
         uid = await service.get_or_create_collection(request.project_name)
         return {"collection_uid": uid, "project_name": request.project_name}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail={"error": str(e)})
+        raise HTTPException(status_code=400, detail={"error": str(e)}) from None
     except Exception as e:
         logfire.error(f"Error creating collection | error={e}")
-        raise HTTPException(status_code=500, detail={"error": str(e)})
+        raise HTTPException(status_code=500, detail={"error": str(e)}) from None
 
 
 @router.post("/collections/{collection_uid}/requests")
@@ -98,10 +98,10 @@ async def upsert_request(collection_uid: str, body: UpsertRequestBody):
         await service.upsert_request(collection_uid, body.folder_name, body.request)
         return {"success": True, "folder": body.folder_name, "request_name": body.request.get("name")}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail={"error": str(e)})
+        raise HTTPException(status_code=400, detail={"error": str(e)}) from None
     except Exception as e:
         logfire.error(f"Error upserting request | error={e}")
-        raise HTTPException(status_code=500, detail={"error": str(e)})
+        raise HTTPException(status_code=500, detail={"error": str(e)}) from None
 
 
 @router.put("/environments/{env_name}")
@@ -116,10 +116,10 @@ async def upsert_environment(env_name: str, body: UpsertEnvironmentRequest):
         await service.upsert_environment(env_name, body.variables)
         return {"success": True, "environment": env_name}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail={"error": str(e)})
+        raise HTTPException(status_code=400, detail={"error": str(e)}) from None
     except Exception as e:
         logfire.error(f"Error upserting environment | error={e}")
-        raise HTTPException(status_code=500, detail={"error": str(e)})
+        raise HTTPException(status_code=500, detail={"error": str(e)}) from None
 
 
 @router.post("/environments/sync")
@@ -147,7 +147,7 @@ async def sync_environment(body: SyncEnvironmentRequest):
         await service.upsert_environment(env_name, variables)
         return {"success": True, "environment": env_name, "variables_count": len(variables)}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail={"error": str(e)})
+        raise HTTPException(status_code=400, detail={"error": str(e)}) from None
     except Exception as e:
         logfire.error(f"Error syncing environment | error={e}")
-        raise HTTPException(status_code=500, detail={"error": str(e)})
+        raise HTTPException(status_code=500, detail={"error": str(e)}) from None

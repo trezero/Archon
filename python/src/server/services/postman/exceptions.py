@@ -361,11 +361,11 @@ def create_exception_from_response(response, default_message="API request failed
         error_data = response.json()
         error_info = error_data.get('error', {})
         message = error_info.get('message', default_message)
-        error_name = error_info.get('name', '')
-    except:
+        error_name = error_info.get('name', '')  # noqa: F841
+    except Exception:
         error_data = None
         message = default_message
-        error_name = ''
+        error_name = ''  # noqa: F841
 
     # Map status codes to exceptions
     if status_code == 401:
@@ -404,7 +404,7 @@ def create_exception_from_response(response, default_message="API request failed
         if retry_after:
             try:
                 retry_after = int(retry_after)
-            except:
+            except (ValueError, TypeError):
                 retry_after = None
 
         return RateLimitError(
