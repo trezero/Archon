@@ -1,33 +1,42 @@
 import { Search } from 'lucide-react';
-import type { DashboardRunResponse, CodebaseResponse, HealthResponse } from '@/lib/api';
+import type { DashboardCounts, CodebaseResponse, HealthResponse } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
+type DateRange = 'today' | '7d' | '30d' | 'all';
+
 interface StatusSummaryBarProps {
-  runs: DashboardRunResponse[];
+  counts: DashboardCounts;
   activeFilter: string | null;
   onFilterChange: (status: string | null) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   projectFilter: string | null;
   onProjectFilterChange: (codebaseId: string | null) => void;
+  dateRange: DateRange;
+  onDateRangeChange: (range: DateRange) => void;
   codebases: CodebaseResponse[] | undefined;
   health: HealthResponse | undefined;
 }
 
 const STATUS_CHIPS = ['running', 'completed', 'failed', 'cancelled'] as const;
 
-function getStatusCount(runs: DashboardRunResponse[], status: string): number {
-  return runs.filter(r => r.status === status).length;
-}
+const DATE_RANGE_OPTIONS: { value: DateRange; label: string }[] = [
+  { value: 'today', label: 'Today' },
+  { value: '7d', label: 'Last 7 days' },
+  { value: '30d', label: 'Last 30 days' },
+  { value: 'all', label: 'All time' },
+];
 
 export function StatusSummaryBar({
-  runs,
+  counts,
   activeFilter,
   onFilterChange,
   searchQuery,
   onSearchChange,
   projectFilter,
   onProjectFilterChange,
+  dateRange,
+  onDateRangeChange,
   codebases,
   health,
 }: StatusSummaryBarProps): React.ReactElement {
@@ -46,10 +55,10 @@ export function StatusSummaryBar({
               : 'bg-surface-elevated text-text-secondary border border-border hover:border-text-tertiary'
           )}
         >
-          All: {String(runs.length)}
+          All: {String(counts.all)}
         </button>
         {STATUS_CHIPS.map(status => {
-          const count = getStatusCount(runs, status);
+          const count = counts[status];
           const isActive = activeFilter === status;
           return (
             <button
@@ -71,7 +80,7 @@ export function StatusSummaryBar({
         })}
       </div>
 
-      {/* Row 2: Project dropdown, search, capacity */}
+      {/* Row 2: Project dropdown, date range, search, capacity */}
       <div className="flex flex-wrap items-center gap-3">
         <select
           value={projectFilter ?? ''}
@@ -84,6 +93,20 @@ export function StatusSummaryBar({
           {codebases?.map(cb => (
             <option key={cb.id} value={cb.id}>
               {cb.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={dateRange}
+          onChange={(e): void => {
+            onDateRangeChange(e.target.value as DateRange);
+          }}
+          className="rounded-md border border-border bg-surface-elevated px-2 py-1.5 text-xs text-text-primary focus:border-primary focus:outline-none"
+        >
+          {DATE_RANGE_OPTIONS.map(opt => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
             </option>
           ))}
         </select>

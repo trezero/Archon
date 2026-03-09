@@ -205,20 +205,42 @@ export interface DashboardRunResponse extends Omit<
   parent_platform_id: string | null;
 }
 
+/** Status counts across all matching runs (ignoring status filter). */
+export interface DashboardCounts {
+  all: number;
+  running: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  pending: number;
+}
+
+/** Paginated dashboard runs response. */
+export interface DashboardRunsResult {
+  runs: DashboardRunResponse[];
+  total: number;
+  counts: DashboardCounts;
+}
+
 export async function listDashboardRuns(options?: {
   status?: WorkflowRunStatus;
   codebaseId?: string;
+  search?: string;
+  after?: string;
+  before?: string;
   limit?: number;
-}): Promise<DashboardRunResponse[]> {
+  offset?: number;
+}): Promise<DashboardRunsResult> {
   const params = new URLSearchParams();
   if (options?.status) params.set('status', options.status);
   if (options?.codebaseId) params.set('codebaseId', options.codebaseId);
+  if (options?.search) params.set('search', options.search);
+  if (options?.after) params.set('after', options.after);
+  if (options?.before) params.set('before', options.before);
   if (options?.limit) params.set('limit', String(options.limit));
+  if (options?.offset) params.set('offset', String(options.offset));
   const qs = params.toString();
-  const result = await fetchJSON<{ runs: DashboardRunResponse[] }>(
-    `/api/dashboard/runs${qs ? `?${qs}` : ''}`
-  );
-  return result.runs;
+  return fetchJSON<DashboardRunsResult>(`/api/dashboard/runs${qs ? `?${qs}` : ''}`);
 }
 
 export async function cancelWorkflowRun(

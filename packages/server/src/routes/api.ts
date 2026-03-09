@@ -544,6 +544,7 @@ export function registerApiRoutes(
   });
 
   // GET /api/dashboard/runs - Enriched workflow runs for Command Center
+  // Supports server-side search, status/date filtering, and offset pagination.
   app.get('/api/dashboard/runs', async c => {
     try {
       const rawStatus = c.req.query('status');
@@ -560,11 +561,24 @@ export function registerApiRoutes(
           ? (rawStatus as DashboardRunStatus)
           : undefined;
       const codebaseId = c.req.query('codebaseId') ?? undefined;
+      const search = c.req.query('search')?.trim() || undefined;
+      const after = c.req.query('after') ?? undefined;
+      const before = c.req.query('before') ?? undefined;
       const limitStr = c.req.query('limit');
       const limit = Math.min(Math.max(1, limitStr ? Number(limitStr) : 50), 200);
+      const offsetStr = c.req.query('offset');
+      const offset = Math.max(0, offsetStr ? Number(offsetStr) : 0);
 
-      const runs = await workflowDb.listDashboardRuns({ status, codebaseId, limit });
-      return c.json({ runs });
+      const result = await workflowDb.listDashboardRuns({
+        status,
+        codebaseId,
+        search,
+        after,
+        before,
+        limit,
+        offset,
+      });
+      return c.json(result);
     } catch (error) {
       getLog().error({ err: error }, 'list_dashboard_runs_failed');
       return c.json({ error: 'Failed to list dashboard runs' }, 500);
