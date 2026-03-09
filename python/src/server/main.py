@@ -35,6 +35,7 @@ from .api_routes.extensions_api import router as extensions_router
 from .api_routes.sessions_api import router as sessions_router
 from .api_routes.materialization_api import router as materialization_router
 from .api_routes.leaveoff_api import router as leaveoff_router
+from .api_routes.postman_api import router as postman_router
 from .api_routes.version_api import router as version_router
 
 # Import modular API routers
@@ -222,6 +223,7 @@ app.include_router(extensions_router)
 app.include_router(sessions_router)
 app.include_router(materialization_router)
 app.include_router(leaveoff_router)
+app.include_router(postman_router)
 
 
 # Root endpoint
