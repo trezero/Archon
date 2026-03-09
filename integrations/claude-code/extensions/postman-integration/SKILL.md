@@ -1,17 +1,215 @@
 ---
 name: postman-integration
-description: Use when suggesting API calls for testing, writing test plans, creating documentation that references API endpoints, or when the user mentions Postman. Generates and maintains Postman Collections as Code — human-readable YAML files committed directly to the repository.
+description: Use when suggesting API calls for testing, writing test plans, creating documentation that references API endpoints, or when the user mentions Postman. Maintains Postman collections in dual-mode — Cloud API sync via MCP tools or local Git YAML files — based on the configured POSTMAN_SYNC_MODE.
 ---
 
-# Postman Integration — Collections as Code
+# Postman Integration — Dual-Mode
 
-Maintain a Postman collection and environment as version-controlled YAML files in the repository. Every API endpoint suggested for testing becomes a `.request.yaml` file — replacing ad-hoc curl commands with an executable, diffable API test suite.
+Maintain a Postman collection and environment per project. Supports two sync modes:
 
-**Reference implementation:** `reference_repos/PostmanFastAPIDemo/postman/`
+- **`api`** — Claude calls `manage_postman()` MCP tools → Archon pushes to Postman Cloud
+- **`git`** — Claude writes `.request.yaml` files directly to the repo (Collections as Code)
+
+**Reference implementation (git mode):** `reference_repos/PostmanFastAPIDemo/postman/`
 
 ---
 
-## Directory Structure
+## Rule 0: Mode Check — ALWAYS DO THIS FIRST
+
+On first Postman-related action per session, call `find_postman()` with no parameters. It returns:
+
+```json
+{ "sync_mode": "api" | "git" | "disabled", ... }
+```
+
+**Branch all subsequent behavior on `sync_mode`:**
+- `api` → follow **API Mode Rules** (use MCP tools)
+- `git` → follow **Git Mode Rules** (write YAML files)
+- `disabled` → provide curl commands only, skip all Postman operations
+
+**Cache the mode for the session.** Do not re-check on every request.
+
+---
+
+## Shared Rules (Both Modes)
+
+### Rule 1: Always Add, Never Just Curl
+
+When suggesting an API call for testing:
+
+- **Add** the request to the Postman collection (via MCP tool or YAML file, per mode)
+- **Include** test scripts that verify status and capture IDs (see Rule 3)
+- **Tell the user** where it was added
+- **Also provide** the curl equivalent inline for quick terminal testing
+
+Never provide only a curl command without also adding to the collection.
+
+### Rule 2: Folder Naming — Framework-Agnostic
+
+Use the core resource name or domain grouping as the folder name. Derive from the controller/router file regardless of framework:
+
+| Source File | Folder Name |
+|-------------|-------------|
+| `projects_api.py` | `Projects` |
+| `users.controller.ts` | `Users` |
+| `AuthRouter.java` | `Auth` |
+| `handlers/orders.go` | `Orders` |
+| Health check endpoints | `Health` |
+
+### Rule 3: Test Script Patterns
+
+Every request gets test scripts. Use the same patterns in both modes:
+
+**Create (POST):**
+```javascript
+pm.test('Status is 201', function () {
+    pm.response.to.have.status(201);
+});
+
+pm.test('Response has ID', function () {
+    var json = pm.response.json();
+    pm.expect(json.id).to.be.a('string');
+    pm.collectionVariables.set('projectId', json.id);
+});
+```
+
+**List (GET array):**
+```javascript
+pm.test('Status is 200', function () {
+    pm.response.to.have.status(200);
+});
+
+pm.test('Returns array', function () {
+    pm.expect(pm.response.json()).to.be.an('array');
+});
+```
+
+**Read (GET single):**
+```javascript
+pm.test('Status is 200', function () {
+    pm.response.to.have.status(200);
+});
+
+pm.test('Returns expected resource', function () {
+    pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('projectId'));
+});
+```
+
+**Update (PUT/PATCH):**
+```javascript
+pm.test('Status is 200', function () {
+    pm.response.to.have.status(200);
+});
+```
+
+**Delete:**
+```javascript
+pm.test('Status is 200 or 204', function () {
+    pm.expect(pm.response.code).to.be.oneOf([200, 204]);
+});
+```
+
+**Error case (expected 404/400):**
+```javascript
+pm.test('Status is 404', function () {
+    pm.response.to.have.status(404);
+});
+```
+
+Captured variable names use camelCase: `projectId`, `taskId`, `sourceId`.
+
+### Rule 4: Documentation References (Contextual)
+
+**Test plans / user journeys** — per-step:
+
+> Step 3: Create a new project via `POST /api/projects`
+> *(Postman: `{Project}` → `Projects` → `Create Project`)*
+
+**Architecture docs / general docs** — single summary section:
+
+> ## API Testing
+> All endpoints are available in the Postman collection for this project.
+
+**Code comments** — no Postman references.
+
+### Rule 5: Prevent Duplicates
+
+- **API mode**: Call `find_postman(query="<Request Name>")` before adding. If it exists, update.
+- **Git mode**: Check if a `.request.yaml` with the same name exists. If the URL + method matches an existing file, update it.
+
+### Rule 6: Graceful Degradation
+
+When `sync_mode` is `disabled`:
+- Provide curl commands and documentation as normal
+- Do not prompt the user to configure Postman unless they ask
+- Do not create any Postman files or call any Postman MCP tools
+
+---
+
+## API Mode Rules
+
+When `sync_mode` is `api`, use the Archon MCP tools. Claude never possesses the API key — Archon handles all Postman API communication server-side.
+
+### Collection Initialization
+
+If the project has no Postman collection yet:
+
+```
+manage_postman(action="init_collection", project_id="...", project_name="Archon")
+```
+
+This creates the collection in Postman Cloud and stores the UID on the Archon project.
+
+### Adding Requests
+
+```
+manage_postman(
+    action="add_request",
+    project_id="...",
+    folder_name="Projects",
+    request={
+        "name": "Create Project",
+        "method": "POST",
+        "url": "{{base_url}}/api/projects",
+        "headers": {"Content-Type": "application/json"},
+        "body": {"name": "My Project", "description": "..."},
+        "description": "Creates a new Archon project",
+        "test_script": "pm.test('Status is 201', function() { pm.response.to.have.status(201); }); var json = pm.response.json(); pm.collectionVariables.set('projectId', json.id);"
+    }
+)
+```
+
+If no collection exists yet, `add_request` auto-calls `init_collection`.
+
+### Environment Management
+
+```
+manage_postman(
+    action="update_environment",
+    project_id="...",
+    system_name="WIN-DEV-01",
+    variables={"base_url": "http://172.16.1.230:8181", "supabase_url": "http://172.16.1.230:8000"}
+)
+```
+
+**Do not manually redact API keys or passwords** when passing them to `update_environment`. The Archon backend automatically detects sensitive keys and marks them as secret in Postman.
+
+### Collection Naming
+
+- Primary: Archon project name (e.g., `Archon`)
+- Fallback: Git repo name — just repo name, no owner prefix
+
+### Environment Naming
+
+Format: `{Project Name} - {System Name}` (e.g., `Archon - WIN-DEV-01`)
+
+---
+
+## Git Mode Rules
+
+When `sync_mode` is `git`, write Postman-compatible YAML files directly to the repository.
+
+### Directory Structure
 
 ```
 postman/
@@ -33,13 +231,11 @@ postman/
 
 **Project name**: Use the Archon project name if linked (from `.claude/archon-state.json`), otherwise `basename $(git rev-parse --show-toplevel)`. Never include the owner prefix.
 
----
-
-## Rule 1: Collection Initialization
+### Collection Initialization
 
 When `postman/collections/` does not exist and you are about to suggest testing an API call:
 
-1. Ask the user before creating the scaffold (unless they've already mentioned Postman)
+1. Ask the user before creating (unless they've already mentioned Postman)
 2. Create `postman/collections/{Project}/.resources/definition.yaml`:
 
 ```yaml
@@ -50,7 +246,7 @@ variables:
   baseUrl: "{{baseUrl}}"
 ```
 
-3. Create `postman/environments/{Project} - Local.environment.yaml` with variables derived from the project's `.env`:
+3. Create `postman/environments/{Project} - Local.environment.yaml`:
 
 ```yaml
 name: "{Project Name} - Local"
@@ -63,49 +259,37 @@ color: null
 
 4. Commit the scaffold.
 
-If `postman/collections/{Project}/` already exists, use it as-is.
-
----
-
-## Rule 2: Always Add, Never Just Curl
-
-When suggesting an API call for testing:
-
-- **Write** a `.request.yaml` file in the appropriate resource folder
-- **Include** an `afterResponse` test script (see Rule 4)
-- **Tell the user** where the file was written: *"Added to Postman collection: `postman/collections/{Project}/{Folder}/{Name}.request.yaml`"*
-- **Also provide** the curl equivalent inline for quick terminal testing
-
-Never provide only a curl command without also writing the YAML file.
-
----
-
-## Rule 3: Request File Content
-
-Every `.request.yaml` must include:
+### Request File Format
 
 ```yaml
 $kind: http-request
-name: {Descriptive Name}
-url: "{{baseUrl}}/api/{path}"
-method: GET
-description: {What this request does}
+name: Create Project
+url: "{{baseUrl}}/api/projects"
+method: POST
+description: Creates a new Archon project
 
 headers:
   Content-Type: application/json
 
-body:                          # For POST, PUT, PATCH only
+body:
   type: text
   content: |
     {
-      "field": "value"
+      "name": "My Project",
+      "description": "A new project"
     }
 
 scripts:
   - type: afterResponse
     code: |-
-      pm.test('Status is 200', function () {
-          pm.response.to.have.status(200);
+      pm.test('Status is 201', function () {
+          pm.response.to.have.status(201);
+      });
+
+      pm.test('Project has an ID', function () {
+          var json = pm.response.json();
+          pm.expect(json.id).to.be.a('string');
+          pm.collectionVariables.set('projectId', json.id);
       });
     language: text/javascript
 
@@ -118,122 +302,39 @@ order: 1000
 - `{{variableName}}` for all dynamic values — never hardcode IDs or tokens
 - `headers` when the request has a body
 - `order` for execution sequencing (increments of 1000)
+- `description` summarizing what the request does
 
----
+### Environment Files
 
-## Rule 4: Test Script Patterns
-
-Every request gets an `afterResponse` script. Match the pattern to the operation type:
-
-**Create (POST returning new resource):**
-```javascript
-pm.test('Status is 201', function () {
-    pm.response.to.have.status(201);
-});
-
-pm.test('Response has ID', function () {
-    var json = pm.response.json();
-    pm.expect(json.id).to.be.a('string');
-    pm.collectionVariables.set('projectId', json.id);
-});
+```yaml
+name: "{Project Name} - Local"
+values:
+  - key: baseUrl
+    value: http://localhost:8181
+    enabled: true
+  - key: supabaseUrl
+    value: http://localhost:8000
+    enabled: true
+  - key: supabaseKey
+    value: ""
+    enabled: true
+color: null
 ```
 
-**Read (GET returning single resource):**
-```javascript
-pm.test('Status is 200', function () {
-    pm.response.to.have.status(200);
-});
+When a request references variables not in the environment file, add them. Derive values from the project's `.env` when possible. Write empty strings for secrets — do not commit real credentials.
 
-pm.test('Returns expected resource', function () {
-    var json = pm.response.json();
-    pm.expect(json.id).to.eql(pm.collectionVariables.get('projectId'));
-});
-```
+### Folder Ordering
 
-**List (GET returning array):**
-```javascript
-pm.test('Status is 200', function () {
-    pm.response.to.have.status(200);
-});
-
-pm.test('Returns array', function () {
-    var json = pm.response.json();
-    pm.expect(json).to.be.an('array');
-});
-```
-
-**Update (PUT/PATCH):**
-```javascript
-pm.test('Status is 200', function () {
-    pm.response.to.have.status(200);
-});
-
-pm.test('Returns updated resource', function () {
-    var json = pm.response.json();
-    pm.expect(json.name).to.eql('Updated Name');
-});
-```
-
-**Delete:**
-```javascript
-pm.test('Status is 200 or 204', function () {
-    pm.expect(pm.response.code).to.be.oneOf([200, 204]);
-});
-```
-
-**Error case (expected 404/400):**
-```javascript
-pm.test('Status is 404', function () {
-    pm.response.to.have.status(404);
-});
-```
-
-Captured variable names use camelCase: `projectId`, `taskId`, `sourceId`.
-
----
-
-## Rule 5: Environment Management
-
-When a request references variables not yet in the environment file:
-
-1. Read `postman/environments/{Project} - Local.environment.yaml`
-2. Add the missing variable with a sensible default or empty string
-3. Write the updated file
-
-**Deriving values from `.env`:**
-
-| `.env` Key | Environment Variable | Example Value |
-|------------|---------------------|---------------|
-| Server port from config | `baseUrl` | `http://localhost:8181` |
-| `SUPABASE_URL` | `supabaseUrl` | `http://localhost:8000` |
-| `SUPABASE_SERVICE_KEY` | `supabaseKey` | (empty — user fills in) |
-
-**Sensitive values:** Write empty strings for secrets. Do not commit real credentials. Users populate them locally or add `postman/environments/*` to `.gitignore`.
-
----
-
-## Rule 6: Folder Organization & Ordering
-
-**Folder naming** — derive from controller/router file, framework-agnostic:
-
-| Source File | Folder Name |
-|-------------|-------------|
-| `projects_api.py` | `Projects` |
-| `users.controller.ts` | `Users` |
-| `AuthRouter.java` | `Auth` |
-| `handlers/orders.go` | `Orders` |
-| Health check endpoints | `Health` |
-
-**Folder ordering** — each folder gets `.resources/definition.yaml`:
+Each folder gets `.resources/definition.yaml`:
 
 ```yaml
 $kind: collection
 order: 2000
 ```
 
-Order logically: `Health` (1000) → domain folders alphabetically (2000, 3000...).
+Order: `Health` (1000) → domain folders alphabetically (2000, 3000...).
 
-**Request ordering** within folders — by typical workflow:
+**Request ordering** within folders:
 
 | Operation | Order |
 |-----------|-------|
@@ -243,66 +344,30 @@ Order logically: `Health` (1000) → domain folders alphabetically (2000, 3000..
 | Get by ID | 4000 |
 | Update | 5000 |
 | Delete | 6000 |
-| Error cases (404, 400) | 7000+ |
+| Error cases | 7000+ |
 
----
+### Collection Variables
 
-## Rule 7: Documentation References
-
-Match reference style to document type:
-
-**Test plans / user journeys** — per-step:
-
-> Step 3: Create a new project via `POST /api/projects`
-> *(Postman: `{Project}` → `Projects` → `Create Project`)*
-
-**Architecture docs / general docs** — single summary section:
-
-> ## API Testing
-> All endpoints are available as a Postman collection in `postman/collections/{Project}/`.
-> Run locally: `postman collection run postman/collections/{Project}/`
-
-**Code comments** — no Postman references.
-
----
-
-## Rule 8: Prevent Duplicates
-
-Before writing a new `.request.yaml`:
-
-1. Check if a file with the same name already exists in the target folder
-2. If it exists, **update** the existing file
-3. If the request name differs but the URL + method combination matches an existing file, update the existing file and rename if appropriate
-
----
-
-## Rule 9: Collection Variables for Request Chaining
-
-Define collection-level variables in `postman/collections/{Project}/.resources/definition.yaml`:
+Add variables to `postman/collections/{Project}/.resources/definition.yaml` whenever `afterResponse` scripts use `pm.collectionVariables.set()`:
 
 ```yaml
 variables:
   baseUrl: "{{baseUrl}}"
   projectId: ""
   taskId: ""
-  sourceId: ""
 ```
 
-Add new variables here whenever an `afterResponse` script uses `pm.collectionVariables.set()`. These variables are populated by test scripts at runtime and consumed by subsequent requests via `{{projectId}}`, `{{taskId}}`, etc.
+### Graceful Git Behavior
 
----
-
-## Rule 10: Graceful Behavior
-
-- Only apply these rules when working on a project with API endpoints
-- If the user explicitly asks for "just a curl command," provide only the curl
-- Don't create Postman files for one-off debugging requests unless asked
 - If `postman/` doesn't exist and the user hasn't mentioned Postman, ask before scaffolding
 - If `postman/` exists, always maintain it when suggesting API tests
+- If the user asks for "just a curl command," provide only the curl
 
 ---
 
-## Quick Reference: YAML Schema
+## Quick Reference
+
+### YAML Schema (Git Mode)
 
 | File Type | Path | Required Fields |
 |-----------|------|-----------------|
@@ -310,17 +375,21 @@ Add new variables here whenever an `afterResponse` script uses `pm.collectionVar
 | Folder definition | `{Folder}/.resources/definition.yaml` | `$kind`, `order` |
 | HTTP request | `{Folder}/{Name}.request.yaml` | `$kind`, `url`, `method`, `order` |
 | Environment | `environments/{Name}.environment.yaml` | `name`, `values` |
-| Globals | `globals/workspace.globals.yaml` | `name`, `values` |
 
-## CLI Execution
+### MCP Tools (API Mode)
+
+| Tool | Purpose |
+|------|---------|
+| `find_postman()` | Get sync mode, collection info, search for duplicates |
+| `manage_postman(action="init_collection")` | Create collection for project |
+| `manage_postman(action="add_request")` | Add/update request in collection |
+| `manage_postman(action="update_environment")` | Create/update environment |
+| `manage_postman(action="remove_request")` | Remove a request |
+| `manage_postman(action="sync_environment")` | Push .env to Postman environment |
+
+### CLI Execution (Git Mode)
 
 ```bash
-# Run full collection
 postman collection run postman/collections/{Project}/ \
   --environment postman/environments/{Project}\ -\ Local.environment.yaml
-
-# CI/CD (GitHub Actions)
-- uses: postmanlabs/postman-cli-action@v1
-  with:
-    command: collection run postman/collections/{Project}/
 ```

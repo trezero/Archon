@@ -1,126 +1,255 @@
-# Postman Integration Design — Collections as Code
+# Postman Integration Design — Dual-Mode
 
 **Date**: 2026-03-09
-**Status**: Approved (v2 — replaces API-based design)
-**Feature**: Automatic Postman collection and environment management via Git-native YAML files
+**Status**: Approved (v3 — dual-mode: API + Git YAML)
+**Feature**: Automatic Postman collection and environment management per Archon project
 
 ## Overview
 
-Automatically maintain a Postman collection and environment per project as human-readable YAML files committed directly to the repository — using Postman's "Collections as Code" workflow. Every API endpoint Claude suggests testing is captured as a `.request.yaml` file, replacing ad-hoc curl commands with a version-controlled, executable API test suite.
+Automatically maintain a Postman collection and environment per Archon project so that every API endpoint Claude suggests testing is captured as a reusable, executable Postman request — replacing ad-hoc curl commands with a living API test suite.
 
-### How It Works End-to-End
+**Two sync modes, one behavioral extension:**
 
-1. Claude is working in a project and suggests testing an API call
-2. Claude checks if `postman/collections/{Project Name}/` exists in the repo (or creates it)
-3. Claude writes a `.request.yaml` file in the appropriate resource folder
-4. Claude writes/updates the environment YAML with any needed variables
-5. The user opens Postman, which auto-syncs the YAML files from their local repo
-6. In documentation, Claude references the Postman collection contextually
+| Mode | How It Works | Requires |
+|------|-------------|----------|
+| `api` | Claude calls MCP tools → Archon backend pushes to Postman Cloud API | `POSTMAN_API_KEY`, `POSTMAN_WORKSPACE_ID` |
+| `git` | Claude writes `.request.yaml` files directly to the repo | Nothing — works offline |
+| `disabled` | No Postman integration (default) | Nothing |
 
-**No API keys. No backend services. No database changes. No MCP tools.**
+Users select their mode in Settings → Features section via `POSTMAN_SYNC_MODE`.
 
 ### What Users Get
 
-- A self-building Postman collection that grows alongside the codebase — in Git
-- Clean YAML diffs in pull requests showing exactly what API changes were made
-- Per-environment config files (local dev, CI, staging) committed to the repo
-- Test scripts that chain requests via collection variables
-- `postman collection run` CLI support for CI/CD pipelines
+- A self-building Postman collection that grows alongside the project
+- Test scripts that chain requests via captured variables
 - Consistent Postman references across all documentation
+- **API mode**: Cloud-synced collections visible to all team members, per-system environments
+- **Git mode**: Version-controlled YAML files, clean PR diffs, CI/CD via `postman collection run`
 
-### Why Collections as Code
+---
 
-| Concern | Old API-Based Design | Collections as Code |
-|---------|---------------------|---------------------|
-| API keys | Required PMAK key in Settings | None needed |
-| Backend code | PostmanService, API routes, MCP tools | None needed |
-| Database | New column on archon_projects | None needed |
-| Settings UI | Feature toggle + credential fields | None needed |
-| Session hook | .env sync to Postman API | None needed |
-| Collaboration | Shared workspace, API-pushed | Git — PRs, diffs, branches |
-| CI/CD | Requires API access | `postman collection run` on local files |
-| Offline | Requires internet | Works fully offline |
+## Architecture
 
-## Architecture: Purely Behavioral
+### Mode Dispatch
 
-The entire feature is a single behavioral extension (`SKILL.md`) distributed via the Archon extension registry. It instructs Claude on when and how to write Postman YAML files.
+The behavioral extension (SKILL.md) is the single entry point. On first use per session, Claude calls `find_postman()` with no params to get the current `sync_mode`. All subsequent behavior branches on that value:
 
-No backend services. No MCP tools. No database migrations. No frontend changes.
+```
+find_postman() → { sync_mode: "api" | "git" | "disabled" }
 
-### Reference Implementation
+if "api"      → use manage_postman() MCP tools (Archon backend → Postman Cloud API)
+if "git"      → write .request.yaml / .environment.yaml files directly to repo
+if "disabled" → provide curl commands only, skip Postman entirely
+```
 
-A complete working example lives in `reference_repos/PostmanFastAPIDemo/postman/` demonstrating the full Collections as Code pattern.
+### API Mode Architecture (Archon-Native MCP)
 
-## Directory Structure
+Port the Postman skill's core Python modules into the Archon backend. The agent never possesses the API key — it calls MCP tools, and Archon handles all Postman API communication server-side.
 
-Claude creates and maintains this structure at the repository root:
+**Key properties:**
+- **Zero client installation** — agent calls MCP tools, done
+- **Centralized keys** — `PostmanService` fetches `POSTMAN_API_KEY` from `archon_settings`
+- **Programmatic config** — bypass `os.environ`, inject credentials directly into `PostmanConfig`
+
+### Git Mode Architecture (Collections as Code)
+
+No backend needed. Claude writes Postman-compatible YAML files directly to the repository using the Write tool.
+
+**Key properties:**
+- **No API keys** — works fully offline
+- **Git-native** — diffs, PRs, branches
+- **CLI-runnable** — `postman collection run` in CI without accounts
+
+**Reference implementation:** `reference_repos/PostmanFastAPIDemo/postman/`
+
+---
+
+## Backend Services (API Mode Only)
+
+### Directory Structure
+
+```
+python/src/server/services/postman/
+├── __init__.py
+├── postman_service.py      # Orchestration layer
+├── postman_client.py       # Ported from skill (HTTP client, retries, proxy handling)
+├── config.py               # Ported from skill (modified for programmatic init)
+├── exceptions.py           # Ported from skill (custom error classes)
+├── formatters.py           # Ported from skill (output formatting)
+└── retry_handler.py        # Ported from skill (exponential backoff)
+```
+
+### PostmanService
+
+Thin orchestration layer that programmatically initializes `PostmanClient`:
+
+```python
+from .postman_client import PostmanClient
+from .config import PostmanConfig
+
+class PostmanService:
+    def __init__(self, api_key: str, workspace_id: str):
+        config = PostmanConfig()
+        config.api_key = api_key
+        config.workspace_id = workspace_id
+        config.headers["X-Api-Key"] = api_key
+        self.client = PostmanClient(config=config)
+```
+
+**Methods:**
+- `get_or_create_collection(project_name)` — Find by name or create, return UID
+- `upsert_request(collection_uid, folder_name, request_data)` — GET collection → find/create folder → append/update request → PUT collection
+- `upsert_environment(env_name, variables)` — Create or update workspace environment, leveraging auto-secret detection
+- `list_collection_structure(collection_uid)` — Return folder/request tree for dedup checking
+
+### Collection Update Mechanism
+
+Postman's API has no "append request" endpoint. The flow:
+
+1. `client.get_collection(uid)` → full JSON
+2. Find or create folder in `item[]` by name
+3. Append or update the request in that folder
+4. `client.update_collection(uid, modified_json)` → push entire object back
+
+This preserves any manual edits users make directly in Postman.
+
+### API Routes
+
+`python/src/server/api_routes/postman_api.py`
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `POST /api/postman/collections` | POST | Create/find collection for a project |
+| `POST /api/postman/collections/{uid}/requests` | POST | Upsert request into collection |
+| `PUT /api/postman/environments/{name}` | PUT | Upsert environment with auto-secrets |
+| `POST /api/postman/environments/sync` | POST | Sync `.env` from a system (called by session-start hook) |
+| `GET /api/postman/status` | GET | Check if Postman is configured and reachable |
+
+### Database Changes
+
+**New column on `archon_projects`:**
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `postman_collection_uid` | VARCHAR(255) | Cached Postman collection UID (API mode) |
+
+**Migration:** `migration/0.1.0/020_add_postman_collection_uid.sql`
+
+**Credentials in `archon_settings` (existing table):**
+
+| Key | Category | Encrypted | Purpose |
+|-----|----------|-----------|---------|
+| `POSTMAN_API_KEY` | `api_keys` | Yes | Postman API key — required for `api` mode only |
+| `POSTMAN_WORKSPACE_ID` | `api_keys` | No | Target workspace — required for `api` mode only |
+| `POSTMAN_SYNC_MODE` | `features` | No | Mode selector: `api`, `git`, or `disabled` (default: `disabled`) |
+
+---
+
+## MCP Tools
+
+### find_postman()
+
+Discovery and read operations. **Also returns `sync_mode` so Claude knows which method to use.**
+
+| Parameter | Type | Purpose |
+|-----------|------|---------|
+| `project_id` | str (optional) | Get collection info for a specific project |
+| `collection_uid` | str (optional) | Get full collection structure (folders + requests) |
+| `query` | str (optional) | Search requests by name across the collection |
+
+**Behaviors:**
+- No params → returns `{ sync_mode, configured, workspace_info }` — **Claude calls this first every session**
+- `project_id` → returns collection name, UID, folder list, request count, associated environments (API mode only)
+- `collection_uid` → returns full folder/request tree (API mode only)
+- `query` → searches request names for dedup checking (API mode only)
+
+**When `sync_mode` is `git` or `disabled`**, only the no-params call is meaningful. The response tells Claude the mode so it can branch behavior accordingly.
+
+### manage_postman()
+
+Write operations via Postman Cloud API. **Only functional in `api` mode.** Returns `{"status": "skipped", "reason": "sync_mode is not api"}` in other modes.
+
+| Action | Key Parameters | Purpose |
+|--------|---------------|---------|
+| `init_collection` | `project_id`, `project_name` (optional) | Create collection, store UID on project, create default environment |
+| `add_request` | `project_id`, `folder_name`, `request` (dict) | Upsert request into named folder |
+| `update_environment` | `project_id`, `system_name`, `variables` (dict) | Create/update `{Project} - {System}` environment |
+| `remove_request` | `project_id`, `folder_name`, `request_name` | Remove a specific request |
+| `sync_environment` | `project_id`, `env_file_content` (str) | Parse `.env` content and push as system-specific environment |
+
+**Request dict structure for `add_request`:**
+```python
+{
+    "name": "Create Project",
+    "method": "POST",
+    "url": "{{base_url}}/api/projects",
+    "headers": {"Content-Type": "application/json"},
+    "body": {"name": "My Project", "description": "..."},
+    "description": "Creates a new Archon project",
+    "test_script": "pm.environment.set('project_id', pm.response.json().id);"
+}
+```
+
+---
+
+## Session-Start Hook: Environment Sync (API Mode Only)
+
+The session-start hook runs as a plain Python script before the LLM loop — it calls REST endpoints, not MCP tools.
+
+**Flow:**
+1. Read `.claude/archon-state.json` → extract `system_name`, `archon_project_id`, Archon server URL
+2. Check sync mode: `GET /api/credentials/POSTMAN_SYNC_MODE`
+3. If `api`, read the project's local `.env` file
+4. Call `POST /api/postman/environments/sync` with `{project_id, system_name, env_file_content}`
+5. Archon backend parses `.env`, applies auto-secret detection, pushes to Postman API
+6. Runs silently — no output unless error
+
+In `git` mode, the hook skips Postman entirely — environment files are written by Claude during the session.
+
+---
+
+## Git Mode: Directory Structure & YAML Schemas
+
+### Directory Structure
 
 ```
 postman/
 ├── collections/
-│   └── {Project Name}/                           # One collection per project
+│   └── {Project Name}/
 │       ├── .resources/
-│       │   └── definition.yaml                   # Collection metadata + variables
-│       ├── {Resource Domain}/                    # Folder per API domain
+│       │   └── definition.yaml           # Collection metadata + variables
+│       ├── {Resource Domain}/
 │       │   ├── .resources/
-│       │   │   └── definition.yaml               # Folder metadata + ordering
-│       │   └── {Request Name}.request.yaml       # Individual HTTP request
-│       └── {Request Name}.request.yaml           # Top-level requests (if any)
+│       │   │   └── definition.yaml       # Folder ordering
+│       │   └── {Request Name}.request.yaml
+│       └── {Request Name}.request.yaml   # Top-level requests (if any)
 ├── environments/
-│   ├── {Project} - Local.environment.yaml        # Local dev environment
-│   ├── {Project} - CI.environment.yaml           # CI/CD environment (optional)
-│   └── {Project} - {Custom}.environment.yaml     # Additional environments as needed
+│   ├── {Project} - Local.environment.yaml
+│   └── {Project} - CI.environment.yaml   # Optional
 └── globals/
-    └── workspace.globals.yaml                    # Workspace-wide constants (optional)
+    └── workspace.globals.yaml            # Optional
 ```
 
-### Collection Naming
-
-- **Primary**: Archon project name (e.g., `Archon`)
-- **Fallback**: Git repo name — just the repo name, no owner prefix (`Archon` not `coleam00-Archon`)
-- **Derived from**: Archon project if linked, otherwise `basename $(git rev-parse --show-toplevel)`
-
-### Folder Naming — Framework-Agnostic
-
-Use the core resource name or domain grouping. Derive from the controller/router file name regardless of framework:
-
-| Source File | Folder Name |
-|-------------|-------------|
-| `projects_api.py` | `Projects` |
-| `users.controller.ts` | `Users` |
-| `AuthRouter.java` | `Auth` |
-| `handlers/orders.go` | `Orders` |
-| Health check endpoints | `Health` |
-
-## YAML File Schemas
-
 ### Collection Definition
-
-**Path**: `postman/collections/{Project}/.resources/definition.yaml`
 
 ```yaml
 $kind: collection
 description: >
   API collection for {Project Name}.
-  Auto-generated and maintained by Claude.
 variables:
   baseUrl: "{{baseUrl}}"
+  projectId: ""
+  taskId: ""
 ```
 
 ### Folder Definition
 
-**Path**: `postman/collections/{Project}/{Folder}/.resources/definition.yaml`
-
 ```yaml
 $kind: collection
-order: 1000
+order: 2000
 ```
 
-Folder ordering uses increments of 1000 (1000, 2000, 3000...) to allow insertion without renumbering.
-
 ### HTTP Request
-
-**Path**: `postman/collections/{Project}/{Folder}/{Request Name}.request.yaml`
 
 ```yaml
 $kind: http-request
@@ -159,8 +288,6 @@ order: 1000
 
 ### Environment
 
-**Path**: `postman/environments/{Project} - Local.environment.yaml`
-
 ```yaml
 name: "{Project Name} - Local"
 values:
@@ -176,180 +303,139 @@ values:
 color: null
 ```
 
-### Globals (Optional)
-
-**Path**: `postman/globals/workspace.globals.yaml`
-
-```yaml
-name: Globals
-values:
-  - key: contentType
-    value: application/json
-    enabled: true
-```
+---
 
 ## Behavioral Extension (SKILL.md)
 
-**Location**: `integrations/claude-code/extensions/postman-integration/SKILL.md`
+Location: `integrations/claude-code/extensions/postman-integration/SKILL.md`
 
-Auto-seeded into the extension registry on server start, distributed to all systems via `/archon-setup`.
+Auto-seeded into extension registry on server start, distributed via `/archon-setup`.
 
-### Rule 1: Collection Initialization
+The extension contains all rules for both modes. Claude checks the mode first via `find_postman()`, then follows the appropriate rules.
 
-When starting work on a project and `postman/collections/` does not exist, create the full scaffold:
+### Shared Rules (Both Modes)
 
-1. Create `postman/collections/{Project Name}/.resources/definition.yaml`
-2. Create `postman/environments/{Project Name} - Local.environment.yaml` with variables derived from the project's `.env` file
-3. Commit the scaffold
+- **Rule 1: Mode Check** — call `find_postman()` once per session to get `sync_mode`
+- **Rule 2: Always Add, Never Just Curl** — every API test gets a Postman entry
+- **Rule 3: Folder Naming** — framework-agnostic resource domain derivation
+- **Rule 4: Test Script Patterns** — status checks, response validation, variable capture
+- **Rule 5: Documentation References** — contextual per document type
+- **Rule 6: Prevent Duplicates** — check before adding
+- **Rule 7: Graceful Degradation** — skip silently when `disabled`
 
-If the collection directory already exists, use it as-is.
+### API Mode Rules
 
-### Rule 2: Always Add, Never Just Curl
+- Use `manage_postman("init_collection")` to create collections
+- Use `manage_postman("add_request")` to add requests
+- Use `manage_postman("update_environment")` for environment variables
+- Do not redact secrets — backend handles auto-secret detection
+- Use `find_postman(query=...)` for dedup checking
 
-When suggesting an API call for testing:
+### Git Mode Rules
 
-- **Do**: Write a `.request.yaml` file in the appropriate folder
-- **Do**: Include `afterResponse` test scripts that verify status and capture IDs
-- **Do**: Tell the user: *"This request has been added to the Postman collection at `postman/collections/{Project}/{Folder}/{Name}.request.yaml`"*
-- **Do**: Provide the curl equivalent inline as well (for quick terminal testing)
-- **Don't**: Provide only a curl command without also writing the YAML file
+- Write `.request.yaml` files using the Write tool
+- Create `postman/collections/{Project}/` scaffold if missing
+- Write `.environment.yaml` with empty strings for secrets
+- Maintain `order` values in increments of 1000
+- Add collection variables to `.resources/definition.yaml` when scripts use `pm.collectionVariables.set()`
 
-### Rule 3: Request File Content
+---
 
-Every `.request.yaml` must include:
+## Settings Integration
 
-- `$kind: http-request` (required by Postman)
-- `url` with `{{baseUrl}}` variable prefix (never hardcode host/port)
-- `method` (GET, POST, PUT, PATCH, DELETE)
-- `headers` when the request has a body (`Content-Type: application/json`)
-- `body` for POST/PUT/PATCH with `type: text` and JSON `content`
-- `scripts` with at least one `afterResponse` test (see Rule 4)
-- `order` for execution sequencing (increments of 1000)
-- `description` summarizing what the request does
+### Mode Selector (Features Section)
 
-Use `{{variableName}}` syntax for all dynamic values — never hardcode IDs, URLs, or tokens.
+Replaces a simple boolean toggle with a three-way selector:
 
-### Rule 4: Test Script Patterns
+| Setting | Key | Default | Values |
+|---------|-----|---------|--------|
+| Postman Sync Mode | `POSTMAN_SYNC_MODE` | `disabled` | `api`, `git`, `disabled` |
 
-Every request gets an `afterResponse` script that:
+- When `api`: shows validation warning if `POSTMAN_API_KEY` is not set
+- When `git`: no additional configuration needed
+- When `disabled`: all Postman operations skip silently
 
-1. **Verifies status code**: `pm.response.to.have.status(200)`
-2. **Validates response shape**: `pm.expect(json.field).to.be.a('string')`
-3. **Captures IDs from mutations**: `pm.collectionVariables.set('resourceId', json.id)`
+### API Keys (API Mode Only)
 
-Example for a create operation:
-```javascript
-pm.test('Status is 201', function () {
-    pm.response.to.have.status(201);
-});
+| Key | Category | Encrypted | Description |
+|-----|----------|-----------|-------------|
+| `POSTMAN_API_KEY` | `api_keys` | Yes | Required for `api` mode only |
+| `POSTMAN_WORKSPACE_ID` | `api_keys` | No | Required for `api` mode only |
 
-pm.test('Response has ID', function () {
-    var json = pm.response.json();
-    pm.expect(json.id).to.be.a('string');
-    pm.collectionVariables.set('projectId', json.id);
-});
-```
+### Frontend Changes
 
-Example for a list operation:
-```javascript
-pm.test('Status is 200', function () {
-    pm.response.to.have.status(200);
-});
+- `FeaturesSection.tsx` — add mode selector (dropdown or radio group instead of toggle)
+- `SettingsContext.tsx` — add `postmanSyncMode` state + setter (string, not boolean)
 
-pm.test('Returns array', function () {
-    var json = pm.response.json();
-    pm.expect(json).to.be.an('array');
-    pm.expect(json.length).to.be.above(0);
-});
-```
+### Backend Changes
 
-Captured variables use camelCase: `projectId`, `taskId`, `sourceId`.
+- Add `POSTMAN_SYNC_MODE` to `OPTIONAL_SETTINGS_WITH_DEFAULTS` in `settings_api.py` (default: `"disabled"`)
 
-### Rule 5: Environment Management
+---
 
-When writing requests that reference variables not yet in the environment file:
+## Collection & Environment Naming
 
-1. Read the existing `postman/environments/{Project} - Local.environment.yaml`
-2. Add the missing variable with a sensible default or empty string
-3. Write the updated file
+### Collection Name
 
-Derive environment values from the project's `.env` file when possible:
-- `SUPABASE_URL` → `supabaseUrl`
-- `SUPABASE_SERVICE_KEY` → `supabaseKey`
-- Server port from config → `baseUrl` as `http://localhost:{port}`
+- **Primary**: Archon project name (e.g., `Archon`)
+- **Fallback**: Git repo name — just repo name, no owner prefix
+- **API mode**: stored as `postman_collection_uid` on `archon_projects`
+- **Git mode**: directory name under `postman/collections/`
 
-**Sensitive values**: Write empty strings for secrets in the committed YAML. Add a comment noting the user should populate them locally. Users should add `postman/environments/*` to `.gitignore` if they prefer not to commit environment files, or use Postman's built-in secret variable handling.
+### Environment Naming
 
-### Rule 6: Folder Organization & Ordering
+- **API mode**: `{Project Name} - {System Name}` (e.g., `Archon - WIN-DEV-01`) — workspace-scoped in Postman Cloud
+- **Git mode**: `{Project Name} - Local.environment.yaml` — committed to repo, user populates secrets locally
 
-- Create one folder per API resource domain
-- Add `.resources/definition.yaml` to each folder with an `order` value
-- Order folders logically: `Health` (1000) → domain folders alphabetically (2000, 3000...)
-- Order requests within folders by typical workflow: list (1000) → create (2000) → get by ID (3000) → update (4000) → delete (5000) → error cases (6000+)
+---
 
-### Rule 7: Documentation References (Contextual)
+## Testing Strategy
 
-Match reference style to document type:
+### Backend Tests (API Mode)
 
-- **Test plans / user journeys** — per-step references:
-  > Step 3: Create a new project via `POST /api/projects`
-  > *(Postman: `{Project}` → `Projects` → `Create Project`)*
+**`tests/server/services/postman/test_postman_service.py`**
+- Mock `PostmanClient` — never call real Postman API
+- Test `get_or_create_collection`: creates when not found, returns existing when found
+- Test `upsert_request`: folder creation, request append, request update, full GET→modify→PUT cycle
+- Test `upsert_environment`: auto-secret detection passthrough, create vs update
+- Test `list_collection_structure`: correct folder/request tree parsing
 
-- **Architecture docs / general docs** — single summary section:
-  > ## API Testing
-  > All endpoints are available as a Postman collection in `postman/collections/{Project}/`.
-  > Run locally: `postman collection run postman/collections/{Project}/`
+**`tests/server/api_routes/test_postman_api.py`**
+- Test each endpoint with mocked `PostmanService`
+- Test 400 responses when Postman not configured
+- Test credential retrieval from `archon_settings`
 
-- **Code comments** — no Postman references
+**`tests/mcp_server/features/postman/test_postman_tools.py`**
+- Test `find_postman` returns correct `sync_mode` for each mode
+- Test `manage_postman` action routing and parameter validation
+- Test `manage_postman` returns `{"status": "skipped"}` when mode is not `api`
+- Test dedup check flow
 
-### Rule 8: Prevent Duplicates
+### Frontend Tests
 
-Before writing a new `.request.yaml`:
+- Mode selector saves `POSTMAN_SYNC_MODE` correctly
+- Validation warning when `api` selected but no API key
+- No warning when `git` selected
 
-1. Check if a file with the same name already exists in the target folder
-2. If it exists, **update** the existing file rather than creating a duplicate
-3. If the request name differs but the URL + method combination matches, update the existing file and rename if needed
+### Integration Testing (Manual)
 
-### Rule 9: Collection Variables for Request Chaining
+**API mode:**
+- Configure keys + set mode to `api` → verify connection
+- Init collection for a project → verify in Postman workspace
+- Add requests to different folders → verify structure
+- Push `.env` via session-start hook → verify environment with secrets
+- Add duplicate request → verify update instead of duplicate
 
-Define collection-level variables in `postman/collections/{Project}/.resources/definition.yaml` for any values that flow between requests:
+**Git mode:**
+- Set mode to `git` → verify `find_postman()` returns `sync_mode: "git"`
+- Ask Claude to test an API endpoint → verify YAML files created
+- Verify generated YAML opens correctly in Postman
+- Run `postman collection run` on generated collection
 
-```yaml
-variables:
-  baseUrl: "{{baseUrl}}"
-  projectId: ""
-  taskId: ""
-  sourceId: ""
-```
+**Disabled mode:**
+- Set mode to `disabled` → verify Claude provides curl only
 
-These are populated by `afterResponse` test scripts and consumed by subsequent requests via `{{projectId}}`, `{{taskId}}`, etc.
-
-### Rule 10: Graceful Behavior
-
-- The extension's rules only apply when the user is working on a project with API endpoints
-- If the user explicitly asks for "just a curl command," provide only the curl command
-- Don't create Postman files for one-off debugging requests or internal health checks unless asked
-- If `postman/` doesn't exist and the user hasn't mentioned Postman, ask before creating the scaffold
-
-## CI/CD Integration
-
-The Collections as Code format supports CLI-based test execution:
-
-```bash
-# Run full collection
-postman collection run postman/collections/{Project}/ \
-  --environment postman/environments/{Project}\ -\ Local.environment.yaml
-
-# GitHub Actions
-- name: Run API Tests
-  uses: postmanlabs/postman-cli-action@v1
-  with:
-    command: >
-      collection run postman/collections/{Project}/
-      --environment postman/environments/{Project}\ -\ CI.environment.yaml
-```
-
-This enables automated API testing in CI without any Postman account or API key.
+---
 
 ## File Change Summary
 
@@ -357,63 +443,44 @@ This enables automated API testing in CI without any Postman account or API key.
 
 | File | Purpose |
 |------|---------|
-| `integrations/claude-code/extensions/postman-integration/SKILL.md` | Behavioral extension with all 10 rules |
-
-### Files NOT Needed (Removed from Previous Design)
-
-| Previously Planned | Why Removed |
-|--------------------|-------------|
-| `python/src/server/services/postman/*` | No backend services — YAML files written directly |
-| `python/src/server/api_routes/postman_api.py` | No API routes needed |
-| `python/src/mcp_server/features/postman/*` | No MCP tools needed |
-| `migration/0.1.0/020_add_postman_collection_uid.sql` | No database changes |
-| `tests/server/services/postman/*` | No backend code to test |
-| `tests/server/api_routes/test_postman_api.py` | No API routes to test |
-| `tests/mcp_server/features/postman/*` | No MCP tools to test |
+| `python/src/server/services/postman/__init__.py` | Package init |
+| `python/src/server/services/postman/postman_service.py` | Orchestration layer |
+| `python/src/server/services/postman/postman_client.py` | Ported from skill |
+| `python/src/server/services/postman/config.py` | Ported, modified for programmatic init |
+| `python/src/server/services/postman/exceptions.py` | Ported from skill |
+| `python/src/server/services/postman/formatters.py` | Ported from skill |
+| `python/src/server/services/postman/retry_handler.py` | Ported from skill |
+| `python/src/server/api_routes/postman_api.py` | REST endpoints (API mode) |
+| `python/src/mcp_server/features/postman/__init__.py` | MCP feature init |
+| `python/src/mcp_server/features/postman/postman_tools.py` | MCP tools (find + manage) |
+| `integrations/claude-code/extensions/postman-integration/SKILL.md` | Behavioral extension (dual-mode) |
+| `migration/0.1.0/020_add_postman_collection_uid.sql` | Add column to archon_projects |
+| `tests/server/services/postman/test_postman_service.py` | Service tests |
+| `tests/server/api_routes/test_postman_api.py` | API route tests |
+| `tests/mcp_server/features/postman/test_postman_tools.py` | MCP tool tests |
 
 ### Modified Files
 
-None. The extension is auto-seeded from `integrations/claude-code/extensions/` on server start — no registration code changes needed.
+| File | Change |
+|------|--------|
+| `python/src/server/main.py` | Register `postman_router` |
+| `python/src/server/api_routes/settings_api.py` | Add `POSTMAN_SYNC_MODE` to defaults |
+| `python/src/mcp_server/mcp_server.py` | Register Postman MCP tools |
+| `archon-ui-main/src/components/settings/FeaturesSection.tsx` | Add mode selector |
+| `archon-ui-main/src/contexts/SettingsContext.tsx` | Add `postmanSyncMode` state |
+| `integrations/claude-code/plugins/archon-memory/hooks/session_start_hook.py` | Add `.env` sync (API mode only) |
 
-## Testing Strategy
-
-Since there is no backend code, testing focuses on the behavioral extension itself:
-
-### Extension Validation
-
-- Verify the SKILL.md passes Archon's extension validation (frontmatter, size, content checks)
-- Verify it seeds correctly into the extension registry on server start
-- Verify it distributes via `/archon-setup`
-
-### Manual Integration Testing
-
-1. Start a session in a project with no `postman/` directory
-2. Ask Claude to test an API endpoint → verify it creates the full scaffold
-3. Ask Claude to test another endpoint → verify it adds to the existing collection
-4. Ask Claude to test a duplicate endpoint → verify it updates, not duplicates
-5. Verify all generated YAML files are valid by opening them in Postman
-6. Run `postman collection run` on the generated collection → verify tests pass
-7. Ask Claude for a test plan → verify it includes Postman references per-step
-8. Ask Claude for architecture docs → verify single summary section
-
-### YAML Validation
-
-Generated files must:
-- Parse as valid YAML
-- Include required `$kind` field
-- Use `{{variable}}` syntax (not hardcoded values)
-- Have `afterResponse` test scripts on every request
-- Follow the ordering convention (increments of 1000)
+---
 
 ## Design Decisions Summary
 
-1. **Collections as Code** — YAML files in the repo, no Postman API needed
-2. **Purely behavioral** — one SKILL.md extension, no backend/frontend/database changes
-3. **Git-native** — collections are version-controlled, diffable, branch-able
-4. **Collection per project** — named after Archon project, fallback to repo name (no owner prefix)
-5. **Folders mirror resource domains** — framework-agnostic derivation from controller/router names
-6. **Test scripts on every request** — verify status, validate shape, capture IDs
-7. **Environment files per deployment target** — Local, CI, custom
-8. **Sensitive values left empty** — user populates locally, optionally gitignored
-9. **CLI-runnable** — `postman collection run` works in CI without accounts
-10. **Graceful behavior** — don't force Postman on users who don't want it
+1. **Dual-mode** — `api` for cloud sync, `git` for local YAML, `disabled` as default
+2. **Single behavioral extension** — one SKILL.md handles both modes via mode check
+3. **Mode dispatch via `find_postman()`** — returns `sync_mode` so Claude branches correctly
+4. **Archon-native MCP for API mode** — ported client, centralized keys, zero client installation
+5. **Collections as Code for Git mode** — human-readable YAML, no API keys, works offline
+6. **Collection per project** — named after Archon project, fallback to repo name (no owner prefix)
+7. **Folders mirror resource domains** — framework-agnostic derivation from controller/router names
+8. **Test scripts on every request** — verify status, validate shape, capture IDs
+9. **Session-start hook for API mode only** — pushes `.env` to Postman Cloud environments
+10. **Graceful degradation** — `disabled` mode skips silently, no user nagging
