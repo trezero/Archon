@@ -17,6 +17,7 @@ import {
   cloneRepository,
   registerRepository,
   ConversationNotFoundError,
+  generateAndSetTitle,
 } from '@archon/core';
 import { removeWorktree, toRepoPath, toWorktreePath } from '@archon/git';
 import {
@@ -507,6 +508,32 @@ export function registerApiRoutes(
       if (!/^[\w-]+$/.test(workflowName)) {
         return c.json({ error: 'Invalid workflow name' }, 400);
       }
+      // Persist user message and register DB ID (same as message endpoint)
+      let conv: Awaited<ReturnType<typeof conversationDb.findConversationByPlatformId>> = null;
+      try {
+        conv = await conversationDb.findConversationByPlatformId(conversationId);
+      } catch (e: unknown) {
+        getLog().error({ err: e, conversationId }, 'conversation_lookup_failed');
+      }
+      if (conv) {
+        try {
+          await messageDb.addMessage(conv.id, 'user', message);
+        } catch (e: unknown) {
+          getLog().error({ err: e, conversationId: conv.id }, 'message_persistence_failed');
+        }
+        webAdapter.setConversationDbId(conversationId, conv.id);
+        // Generate title for sidebar (fire-and-forget)
+        if (!conv.title) {
+          void generateAndSetTitle(
+            conv.id,
+            message,
+            conv.ai_assistant_type,
+            getArchonWorkspacesPath(),
+            workflowName
+          );
+        }
+      }
+
       const fullMessage = `/workflow run ${workflowName} ${message}`;
       const result = await dispatchToOrchestrator(conversationId, fullMessage);
       return c.json(result);

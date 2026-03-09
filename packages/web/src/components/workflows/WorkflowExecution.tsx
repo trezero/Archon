@@ -313,7 +313,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       </div>
 
       {/* Body: Step list + Logs */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden min-h-0">
         {/* Left panel: Step list */}
         <div className="w-64 border-r border-border overflow-auto">
           <StepProgress
@@ -324,12 +324,12 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
         </div>
 
         {/* Right panel: Logs + Artifacts */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-auto">
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
             {workerPlatformId ? (
               <WorkflowLogs
                 conversationId={workerPlatformId}
-                startedAt={workflow.startedAt}
+                startedAt={initialData?.startedAt}
                 isRunning={workflow.status === 'running' || workflow.status === 'pending'}
                 workflowHandlers={workflowHandlers}
               />

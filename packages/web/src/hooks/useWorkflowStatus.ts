@@ -224,6 +224,7 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
                 void queryClient.invalidateQueries({ queryKey: ['workflow-runs'] });
                 void queryClient.invalidateQueries({ queryKey: ['workflowRuns'] });
                 void queryClient.invalidateQueries({ queryKey: ['conversations'] });
+                void queryClient.invalidateQueries({ queryKey: ['workflowMessages'] });
               }
             })
             .catch((err: unknown) => {

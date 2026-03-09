@@ -120,11 +120,21 @@ function WorkflowResultCard({
 interface MessageListProps {
   messages: ChatMessage[];
   isStreaming: boolean;
+  /** When this value changes, force-scroll to bottom regardless of user scroll position. */
+  scrollTrigger?: number;
 }
 
-function MessageListRaw({ messages, isStreaming }: MessageListProps): React.ReactElement {
+function MessageListRaw({
+  messages,
+  isStreaming,
+  scrollTrigger,
+}: MessageListProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
-  const { isAtBottom, scrollToBottom } = useAutoScroll(containerRef, [messages, isStreaming]);
+  const { isAtBottom, scrollToBottom } = useAutoScroll(
+    containerRef,
+    [messages, isStreaming],
+    scrollTrigger
+  );
 
   if (messages.length === 0) {
     return (

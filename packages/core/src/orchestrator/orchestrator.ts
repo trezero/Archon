@@ -300,12 +300,33 @@ export async function dispatchBackgroundWorkflow(
     unsubscribeBridge = webAdapter.setupEventBridge(workerPlatformId, ctx.conversationId);
   }
 
-  // 6. Fire-and-forget: run workflow in background
+  // 6. Pre-create workflow run row so the UI can fetch it immediately.
+  // Without this, navigating to the execution page before executeWorkflow's
+  // async setup completes would 404 (row doesn't exist yet for 1-5 seconds).
+  const workflowDeps = createWorkflowDeps();
+  let preCreatedRun: Awaited<ReturnType<typeof workflowDeps.store.createWorkflowRun>> | undefined;
+  try {
+    preCreatedRun = await workflowDeps.store.createWorkflowRun({
+      workflow_name: workflow.name,
+      conversation_id: workerConv.id,
+      codebase_id: ctx.codebaseId,
+      user_message: ctx.originalMessage,
+      working_path: ctx.cwd,
+      metadata: ctx.issueContext ? { github_context: ctx.issueContext } : {},
+      parent_conversation_id: ctx.conversationDbId,
+    });
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err, workflowName: workflow.name }, 'pre_create_workflow_run_failed');
+    // Non-fatal: executeWorkflow will create its own row as fallback
+  }
+
+  // 7. Fire-and-forget: run workflow in background
   void (async (): Promise<void> => {
     try {
       try {
         const result = await executeWorkflow(
-          createWorkflowDeps(),
+          workflowDeps,
           ctx.platform,
           workerPlatformId,
           ctx.cwd,
@@ -315,7 +336,8 @@ export async function dispatchBackgroundWorkflow(
           ctx.codebaseId,
           ctx.issueContext,
           isolationContext,
-          ctx.conversationDbId
+          ctx.conversationDbId,
+          preCreatedRun
         );
         // Surface workflow output to parent conversation as a result card
         if (result.success && result.summary) {
