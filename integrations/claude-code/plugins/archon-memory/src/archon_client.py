@@ -126,3 +126,38 @@ class ArchonClient:
             return response.json()
         except Exception:
             return None
+
+    # ── Postman .env sync ─────────────────────────────────────────────────────
+
+    async def sync_postman_environment(self, system_name: str, env_content: str) -> bool:
+        """POST .env content to Postman environment sync endpoint. Returns True on success."""
+        if not self.is_configured():
+            return False
+
+        url = f"{self.api_url}/api/postman/environments/sync"
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json={
+                    "project_id": self.project_id,
+                    "system_name": system_name,
+                    "env_file_content": env_content,
+                })
+            return response.status_code < 400
+        except Exception:
+            return False
+
+    async def get_postman_sync_mode(self) -> str:
+        """GET the current Postman sync mode. Returns 'disabled' on error."""
+        if not self.is_configured():
+            return "disabled"
+
+        url = f"{self.api_url}/api/credentials/POSTMAN_SYNC_MODE"
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url)
+            if response.status_code >= 400:
+                return "disabled"
+            data = response.json()
+            return data.get("value", "disabled")
+        except Exception:
+            return "disabled"

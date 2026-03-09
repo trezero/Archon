@@ -10,6 +10,7 @@ Also flushes any stale buffer left by a previous crashed session.
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -134,6 +135,25 @@ async def main() -> None:
         leaveoff = None
 
     print(_format_context(sessions, tasks, knowledge, leaveoff))  # type: ignore[arg-type]
+
+    # Postman environment sync (API mode only, best-effort)
+    try:
+        postman_mode = await asyncio.wait_for(client.get_postman_sync_mode(), timeout=2.0)
+        if postman_mode == "api":
+            env_path = Path.cwd() / ".env"
+            if env_path.is_file():
+                env_content = env_path.read_text(encoding="utf-8")
+                state_path = Path.cwd() / ".claude" / "archon-state.json"
+                system_name = "default"
+                if state_path.is_file():
+                    state = json.loads(state_path.read_text(encoding="utf-8"))
+                    system_name = state.get("system_name", "default")
+                await asyncio.wait_for(
+                    client.sync_postman_environment(system_name, env_content),
+                    timeout=3.0,
+                )
+    except Exception:
+        pass  # Best-effort, don't block session start
 
 
 if __name__ == "__main__":
