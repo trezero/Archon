@@ -177,6 +177,9 @@ Write operations via Postman Cloud API. **Only functional in `api` mode.** Retur
 | `remove_request` | `project_id`, `folder_name`, `request_name` | Remove a specific request |
 | `sync_environment` | `project_id`, `env_file_content` (str) | Parse `.env` content and push as system-specific environment |
 
+| `import_from_git` | `project_id` | Read local `postman/` YAML files and push all requests/environments to Postman Cloud |
+| `export_to_git` | `project_id`, `collection_uid` | Pull collection from Postman Cloud and write YAML files to `postman/` directory |
+
 **Request dict structure for `add_request`:**
 ```python
 {

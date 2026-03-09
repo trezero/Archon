@@ -387,6 +387,15 @@ variables:
 | `manage_postman(action="remove_request")` | Remove a request |
 | `manage_postman(action="sync_environment")` | Push .env to Postman environment |
 
+### Cross-Mode Sync (MCP Tools)
+
+| Tool | Purpose |
+|------|---------|
+| `manage_postman(action="import_from_git")` | Read local `postman/` YAML files → push to Postman Cloud |
+| `manage_postman(action="export_to_git")` | Pull from Postman Cloud → write YAML files to `postman/` |
+
+Use these when the user wants to replicate their collection to the other mode, or when switching modes with existing data.
+
 ### CLI Execution (Git Mode)
 
 ```bash
