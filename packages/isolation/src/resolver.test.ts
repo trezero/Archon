@@ -279,6 +279,46 @@ describe('IsolationResolver', () => {
     }
   });
 
+  test('passes fromBranch hint when creating task isolation', async () => {
+    let capturedRequest: unknown;
+    const resolver = createResolver({
+      provider: {
+        ...makeMockProvider(),
+        create: async request => {
+          capturedRequest = request;
+          return {
+            id: '/worktrees/new-branch',
+            provider: 'worktree',
+            workingPath: '/worktrees/new-branch',
+            branchName: 'new-branch',
+            status: 'active',
+            createdAt: new Date(),
+            metadata: { adopted: false },
+          };
+        },
+      },
+    });
+
+    await resolver.resolve({
+      existingEnvId: null,
+      codebase: defaultCodebase,
+      hints: {
+        workflowType: 'task',
+        workflowId: 'test-adapters',
+        fromBranch: 'feature/extract-adapters',
+      },
+      platformType: 'web',
+    });
+
+    expect(capturedRequest).toEqual(
+      expect.objectContaining({
+        workflowType: 'task',
+        identifier: 'test-adapters',
+        fromBranch: 'feature/extract-adapters',
+      })
+    );
+  });
+
   test('limit reached, cleanup succeeds — returns created with autoCleanedCount', async () => {
     let countCalls = 0;
     const resolver = createResolver({

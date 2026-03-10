@@ -20,6 +20,8 @@ describe('CLI argument parsing', () => {
         cwd: { type: 'string', default: process.cwd() },
         help: { type: 'boolean', short: 'h' },
         branch: { type: 'string', short: 'b' },
+        from: { type: 'string' },
+        'from-branch': { type: 'string' },
         'no-worktree': { type: 'boolean' },
         spawn: { type: 'boolean' },
         quiet: { type: 'boolean', short: 'q' },
@@ -104,6 +106,48 @@ describe('CLI argument parsing', () => {
     it('should parse workflow run with only name (no message)', () => {
       const result = parseCliArgs(['workflow', 'run', 'assist']);
       expect(result.positionals).toEqual(['workflow', 'run', 'assist']);
+    });
+
+    it('should parse --from flag for workflow run', () => {
+      const result = parseCliArgs([
+        'workflow',
+        'run',
+        'assist',
+        '--branch',
+        'test-adapters',
+        '--from',
+        'feature/extract-adapters',
+      ]);
+      expect(result.values.from).toBe('feature/extract-adapters');
+    });
+
+    it('should parse --from-branch flag for workflow run', () => {
+      const result = parseCliArgs([
+        'workflow',
+        'run',
+        'assist',
+        '--branch',
+        'test-adapters',
+        '--from-branch',
+        'feature/extract-adapters',
+      ]);
+      expect(result.values['from-branch']).toBe('feature/extract-adapters');
+    });
+
+    it('--from takes precedence over --from-branch when both provided', () => {
+      const result = parseCliArgs([
+        'workflow',
+        'run',
+        'assist',
+        '--branch',
+        'test',
+        '--from',
+        'feature/primary',
+        '--from-branch',
+        'feature/secondary',
+      ]);
+      expect(result.values.from).toBe('feature/primary');
+      expect(result.values['from-branch']).toBe('feature/secondary');
     });
   });
 

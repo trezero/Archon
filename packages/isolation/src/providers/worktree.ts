@@ -550,7 +550,7 @@ export class WorktreeProvider implements IIsolationProvider {
       await this.createFromPR(request, worktreePath);
     } else {
       // For issues, tasks, threads: create new branch
-      await this.createNewBranch(repoPath, worktreePath, branchName);
+      await this.createNewBranch(request, repoPath, worktreePath, branchName);
     }
 
     // Copy git-ignored files based on repo config
@@ -830,6 +830,7 @@ export class WorktreeProvider implements IIsolationProvider {
    * Create worktree with new branch
    */
   private async createNewBranch(
+    request: IsolationRequest,
     repoPath: string,
     worktreePath: string,
     branchName: string
@@ -841,7 +842,16 @@ export class WorktreeProvider implements IIsolationProvider {
       // Try to create with new branch
       await execFileAsync(
         'git',
-        ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName],
+        [
+          '-C',
+          repoPath,
+          'worktree',
+          'add',
+          worktreePath,
+          '-b',
+          branchName,
+          ...(request.workflowType === 'task' && request.fromBranch ? [request.fromBranch] : []),
+        ],
         {
           timeout: 30000,
         }
@@ -850,6 +860,15 @@ export class WorktreeProvider implements IIsolationProvider {
       const err = error as Error & { stderr?: string };
       // Branch already exists - use existing branch
       if (err.stderr?.includes('already exists')) {
+        const taskFromBranch = request.workflowType === 'task' ? request.fromBranch : undefined;
+        if (taskFromBranch) {
+          // Branch already exists but caller specified an explicit start point.
+          // Adopting the existing branch would silently ignore the start point.
+          throw new Error(
+            `Branch "${branchName}" already exists. Cannot create it from "${taskFromBranch}". ` +
+              'Either choose a different --branch name or omit --from.'
+          );
+        }
         await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, branchName], {
           timeout: 30000,
         });

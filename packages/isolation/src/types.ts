@@ -69,6 +69,8 @@ export interface TaskIsolationRequest extends IsolationRequestBase {
   workflowType: 'task';
   /** Task identifier (will be slugified for branch name, max 50 chars) */
   identifier: string;
+  /** Optional branch to use as start point for new task branch creation */
+  fromBranch?: BranchName;
 }
 
 export type IsolationRequest =
@@ -192,6 +194,10 @@ export interface IsolationHints {
   prSha?: string;
   isForkPR?: boolean;
   prFetchFailed?: boolean;
+
+  // Task-specific
+  /** Start-point branch for new task worktree creation. Only consumed when workflowType === 'task'. */
+  fromBranch?: BranchName;
 
   // Cross-reference hints
   linkedIssues?: number[];

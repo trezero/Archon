@@ -31,7 +31,7 @@ function getLog(): ReturnType<typeof createLogger> {
  */
 export type WorkflowRunOptions =
   | { branchName?: undefined; noWorktree?: undefined } // No isolation
-  | { branchName: string; noWorktree?: boolean }; // With branch - worktree or direct checkout
+  | { branchName: string; fromBranch?: string; noWorktree?: boolean }; // With branch - worktree or direct checkout
 
 /**
  * Generate a unique conversation ID for CLI usage
@@ -220,6 +220,12 @@ export async function workflowRunCommand(
     }
 
     if (options.noWorktree) {
+      if (options.fromBranch) {
+        throw new Error(
+          '--from/--from-branch has no effect with --no-worktree. ' +
+            'Remove --from or drop --no-worktree.'
+        );
+      }
       // Checkout branch in cwd, no worktree
       getLog().info({ branch: options.branchName }, 'branch_checkout');
       await git.checkout(git.toRepoPath(cwd), git.toBranchName(options.branchName));
@@ -236,16 +242,32 @@ export async function workflowRunCommand(
       );
 
       if (existingEnv && (await provider.healthCheck(existingEnv.working_path))) {
+        if (options.fromBranch) {
+          getLog().warn(
+            { path: existingEnv.working_path, fromBranch: options.fromBranch },
+            'worktree.reuse_from_branch_ignored'
+          );
+          console.warn(
+            `Warning: Reusing existing worktree at ${existingEnv.working_path}. ` +
+              `--from ${options.fromBranch} was not applied (worktree already exists).`
+          );
+        }
         getLog().info({ path: existingEnv.working_path }, 'worktree_reused');
         workingCwd = existingEnv.working_path;
         isolationEnvId = existingEnv.id;
       } else {
         // Create new worktree
-        getLog().info({ branch: options.branchName }, 'worktree_creating');
+        getLog().info(
+          { branch: options.branchName, fromBranch: options.fromBranch },
+          'worktree_creating'
+        );
 
         const isolatedEnv = await provider.create({
           workflowType: 'task',
           identifier: options.branchName,
+          fromBranch: options.fromBranch?.trim()
+            ? git.toBranchName(options.fromBranch.trim())
+            : undefined,
           codebaseId: codebase.id,
           canonicalRepoPath: git.toRepoPath(codebase.default_cwd),
           description: `CLI workflow: ${workflowName}`,

@@ -22,6 +22,7 @@ import type {
   IsolationHints,
   IsolationEnvironmentRow,
   IsolationWorkflowType,
+  IsolationRequest,
   WorktreeStatusBreakdown,
   ResolveRequest,
 } from './types';
@@ -350,20 +351,29 @@ export class IsolationResolver {
         identifier: workflowId,
       };
 
-      const isolatedEnv = await this.provider.create(
-        workflowType === 'pr'
-          ? {
-              ...baseRequest,
-              workflowType: 'pr' as const,
-              prBranch: hints?.prBranch ?? toBranchName(`pr-${workflowId}`),
-              prSha: hints?.prSha,
-              isForkPR: hints?.isForkPR ?? false,
-            }
-          : {
-              ...baseRequest,
-              workflowType,
-            }
-      );
+      let isolationRequest: IsolationRequest;
+      if (workflowType === 'pr') {
+        isolationRequest = {
+          ...baseRequest,
+          workflowType: 'pr' as const,
+          prBranch: hints?.prBranch ?? toBranchName(`pr-${workflowId}`),
+          prSha: hints?.prSha,
+          isForkPR: hints?.isForkPR ?? false,
+        };
+      } else if (workflowType === 'task') {
+        isolationRequest = {
+          ...baseRequest,
+          workflowType: 'task' as const,
+          fromBranch: hints?.fromBranch,
+        };
+      } else {
+        isolationRequest = {
+          ...baseRequest,
+          workflowType,
+        };
+      }
+
+      const isolatedEnv = await this.provider.create(isolationRequest);
 
       // Create database record
       const env = await this.store.create({

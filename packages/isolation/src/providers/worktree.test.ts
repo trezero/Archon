@@ -214,6 +214,79 @@ describe('WorktreeProvider', () => {
       );
     });
 
+    test('creates task worktree from specified fromBranch', async () => {
+      const request: IsolationRequest = {
+        ...baseRequest,
+        workflowType: 'task',
+        identifier: 'test-adapters',
+        fromBranch: 'feature/extract-adapters',
+      };
+
+      await provider.create(request);
+
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining([
+          '-C',
+          '/workspace/repo',
+          'worktree',
+          'add',
+          expect.any(String),
+          '-b',
+          'task-test-adapters',
+          'feature/extract-adapters',
+        ]),
+        expect.any(Object)
+      );
+    });
+
+    test('throws when branch already exists and fromBranch is specified', async () => {
+      const alreadyExistsError = new Error('fatal: branch already exists') as Error & {
+        stderr: string;
+      };
+      alreadyExistsError.stderr = "fatal: a branch named 'task-test-adapters' already exists";
+
+      // First call (worktree add -b) fails with "already exists"
+      execSpy.mockRejectedValueOnce(alreadyExistsError);
+
+      const request: IsolationRequest = {
+        ...baseRequest,
+        workflowType: 'task',
+        identifier: 'test-adapters',
+        fromBranch: 'feature/extract-adapters',
+      };
+
+      await expect(provider.create(request)).rejects.toThrow(
+        'Branch "task-test-adapters" already exists. Cannot create it from "feature/extract-adapters".'
+      );
+    });
+
+    test('reuses existing branch when it already exists and no fromBranch', async () => {
+      const alreadyExistsError = new Error('fatal: branch already exists') as Error & {
+        stderr: string;
+      };
+      alreadyExistsError.stderr = "fatal: a branch named 'task-test-adapters' already exists";
+
+      // First call fails, second succeeds (fallback)
+      execSpy.mockRejectedValueOnce(alreadyExistsError);
+      execSpy.mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+      const request: IsolationRequest = {
+        ...baseRequest,
+        workflowType: 'task',
+        identifier: 'test-adapters',
+      };
+
+      await provider.create(request);
+
+      // Fallback call should not include a start-point
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        ['-C', '/workspace/repo', 'worktree', 'add', expect.any(String), 'task-test-adapters'],
+        expect.any(Object)
+      );
+    });
+
     test('creates worktree for same-repo PR (uses actual branch)', async () => {
       const request: IsolationRequest = {
         ...baseRequest,
