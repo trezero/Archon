@@ -6,9 +6,11 @@ labels: bug
 assignees: ''
 ---
 
-## Description
+## Summary
 
-A clear description of what the bug is.
+- What broke:
+- When it started (if known):
+- Severity: `blocker|major|minor|cosmetic`
 
 ## Steps to Reproduce
 
@@ -16,26 +18,47 @@ A clear description of what the bug is.
 2.
 3.
 
-## Expected Behavior
+## Expected vs Actual
 
-What you expected to happen.
+- **Expected**:
+- **Actual**:
 
-## Actual Behavior
+## User Flow
 
-What actually happened.
+```
+(Draw the flow that triggers the bug. Mark where it breaks with [X].)
+
+Example:
+  User                   Archon                   AI Client
+  ────                   ──────                   ─────────
+  sends /plan ─────────▶ routes to workflow
+                         creates worktree
+                         streams to AI ──────────▶ processes prompt
+                         [X] timeout waiting ◀──── no response
+  sees error ◀────────── sends error message
+```
 
 ## Environment
 
-- Node.js version:
-- Platform adapter: (Telegram / Slack / GitHub / Discord)
+- Platform: (Slack / Telegram / GitHub / Discord / Web / CLI)
+- Database: (SQLite / PostgreSQL)
+- Running in worktree? (`Yes/No`)
 - OS:
 
 ## Logs
 
 ```
-Paste relevant logs here
+Paste relevant logs here (redact any tokens/secrets)
 ```
 
-## Additional Context
+## Impact
 
-Any other context about the problem.
+- Affected workflows/commands:
+- Reproduction rate: Always / Intermittent / Once
+- Workaround available? If so, describe:
+- Data loss risk? (`Yes/No`)
+
+## Scope
+
+- Package(s) likely involved: `core|workflows|isolation|git|adapters|server|web|cli|paths`
+- Module (if known): e.g. `workflows:executor`, `adapters:slack`

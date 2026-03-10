@@ -1,13 +1,31 @@
 ---
 name: archon-dev
 description: |
-  Development workflow skill. Routes to specialized cookbooks for research,
-  planning, implementation, review, debugging, commits, and PRs.
-  Use when: developing features, writing PRDs, planning implementations,
-  reviewing code, debugging issues, making commits, or creating pull requests.
-  Triggers: "research", "investigate", "prd", "plan", "implement", "execute",
-            "review", "debug", "root cause", "commit", "pr", "pull request".
-  NOT for: Running Archon CLI workflows (use /archon instead).
+  The PRIMARY development workflow for the Archon project (remote-coding-agent).
+  Use this skill instead of any PRP skills when working on Archon code.
+  Routes to 10 specialized cookbooks based on what the user is trying to do:
+
+  RESEARCH    — "how does the orchestrator work?", "where is session state defined?",
+                "trace the workflow execution flow", "what is IWorkflowStore?"
+  INVESTIGATE — "should we use Drizzle or Prisma?", "what's the best way to add WebSockets?",
+                "can we migrate to Turso?", "how do other projects handle rate limiting?"
+  PRD         — "write a PRD for dark mode", "spec out the notification feature",
+                "product requirements for webhook retry"
+  PLAN        — "plan the auth refactor", "design the caching layer",
+                "create an implementation plan for #42"
+  IMPLEMENT   — "implement the plan", "execute .claude/archon/plans/auth.plan.md",
+                "build the feature from the plan", "code this up"
+  REVIEW      — "review PR #123", "review my changes", "code review the diff"
+  DEBUG       — "debug the failing test", "why is streaming broken?",
+                "root cause analysis on the timeout issue"
+  COMMIT      — "commit these changes", "commit the auth refactor"
+  PR          — "create a PR", "open a pull request for this branch"
+  ISSUE       — "report this to gh", "create a gh issue", "log it in github",
+                "file a bug for this", "create a feature request"
+
+  This skill triggers on ANY development task: researching, investigating,
+  planning, building, reviewing, debugging, committing, or shipping code.
+  NOT for: Running Archon CLI workflows in worktrees (use /archon instead).
 argument-hint: "[cookbook] [task description or issue number]"
 ---
 
@@ -32,7 +50,8 @@ Otherwise, match intent from keywords:
 
 | Intent | Keywords | Cookbook |
 |--------|----------|---------|
-| Explore codebase, answer questions | "research", "investigate", "explore", "how does", "what is", "trace" | [cookbooks/research.md](cookbooks/research.md) |
+| Codebase questions, document what exists | "research", "how does", "what is", "where is", "trace", "find" | [cookbooks/research.md](cookbooks/research.md) |
+| Strategic research, library eval, feasibility | "investigate", "should we", "can we", "compare", "evaluate", "feasibility", "best way to", "best approach" | [cookbooks/investigate.md](cookbooks/investigate.md) |
 | Write product requirements | "prd", "requirements", "spec", "product requirement" | [cookbooks/prd.md](cookbooks/prd.md) |
 | Create implementation plan | "plan", "design", "architect", "write a plan" | [cookbooks/plan.md](cookbooks/plan.md) |
 | Execute an existing plan | "implement", "execute", "build", "code this", path to `.plan.md` | [cookbooks/implement.md](cookbooks/implement.md) |
@@ -40,6 +59,7 @@ Otherwise, match intent from keywords:
 | Debug or root cause analysis | "debug", "rca", "root cause", "why is", "broken", "failing" | [cookbooks/debug.md](cookbooks/debug.md) |
 | Commit changes | "commit", "save changes", "stage" | [cookbooks/commit.md](cookbooks/commit.md) |
 | Create pull request | "pr", "pull request", "create pr", "open pr" | [cookbooks/pr.md](cookbooks/pr.md) |
+| Report to GitHub | "issue", "report to gh", "log in github", "file a bug", "feature request", "create issue", "gh issue" | [cookbooks/issue.md](cookbooks/issue.md) |
 
 **If ambiguous**: Ask the user which cookbook to use.
 
@@ -52,9 +72,12 @@ Otherwise, match intent from keywords:
 Cookbooks feed into each other. After completing one, suggest the next:
 
 ```
-research ──► prd ──► plan ──► implement ──► commit ──► pr
-                       ▲                       │
-debug ─────────────────┘         review ◄──────┘
+research ──► investigate ──► prd ──► plan ──► implement ──► commit ──► pr
+                              ▲                    │
+             debug ───────────┘      review ◄──────┘
+                 │
+                 ▼
+               issue ──► plan (if feature) or debug (if bug)
 ```
 
 ---

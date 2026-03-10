@@ -1,62 +1,200 @@
 # Plan Cookbook
 
-Detailed implementation plans with codebase intelligence. The most critical cookbook — plans drive everything downstream.
+Detailed implementation plans with codebase intelligence. The most critical cookbook — plans drive everything downstream. Creates a context-rich document that enables one-pass implementation success.
 
 **Input**: `$ARGUMENTS` — path to PRD, feature description, or GitHub issue number.
 
+**Core Principle**: PLAN ONLY — no code written. Codebase first, research second. Solutions must fit existing patterns before introducing new ones.
+
 ---
 
-## Phase 1: LOAD — Gather Context
+## Phase 0: DETECT — Input Type Resolution
 
-1. **If `$ARGUMENTS` is a file path** (`.prd.md` or `.md`): Read it as the source document
-2. **If `$ARGUMENTS` is a GitHub issue** (`#123`): Fetch with `gh issue view 123`
-3. **If `$ARGUMENTS` is a description**: Use it directly as the feature specification
+| Input Pattern | Type | Action |
+|---------------|------|--------|
+| Ends with `.prd.md` | PRD file | Parse PRD, select next phase |
+| Ends with `.md` and contains "Implementation Phases" | PRD file | Parse PRD, select next phase |
+| File path that exists | Document | Read and extract feature description |
+| `#123` or issue number | GitHub issue | Fetch with `gh issue view` |
+| Free-form text | Description | Use directly as feature input |
+
+### If PRD File Detected:
+
+1. **Read the PRD file**
+2. **Parse the Implementation Phases table** — find rows with `Status: pending`
+3. **Check dependencies** — only select phases whose dependencies are `complete`
+4. **Select the next actionable phase** — first pending phase with all dependencies complete
+5. **Report selection to user**:
+   ```
+   PRD: {prd file path}
+   Selected Phase: #{number} - {name}
+
+   {If parallel phases available:}
+   Note: Phase {X} can also run in parallel (in separate worktree).
+
+   Proceeding with Phase #{number}...
+   ```
+
+### If Free-form or Issue:
+Proceed directly to Phase 1.
+
+**CHECKPOINT**: Input type determined. If PRD: next phase selected and dependencies verified.
+
+---
+
+## Phase 1: PARSE — Feature Understanding
+
+1. **If file path**: Read it as the source document
+2. **If GitHub issue**: Fetch with `gh issue view {number}`
+3. **If description**: Use it directly
 4. **Always read CLAUDE.md** for project conventions, architecture, and constraints
 
-**CHECKPOINT**: You must understand WHAT to build and WHY before continuing.
+**Extract:**
+- Core problem being solved
+- User value and business impact
+- Feature type: NEW_CAPABILITY | ENHANCEMENT | REFACTOR | BUG_FIX
+- Complexity: LOW | MEDIUM | HIGH
+- Affected systems list
+
+**Formulate user story:**
+```
+As a {user type}
+I want to {action/goal}
+So that {benefit/value}
+```
+
+**GATE**: If requirements are AMBIGUOUS, STOP and ASK user for clarification before proceeding.
 
 ---
 
-## Phase 2: ANALYZE — Deep Codebase Intelligence
+## Phase 2: EXPLORE — Deep Codebase Intelligence
 
 Launch 2-3 agents in parallel using the Agent tool:
 
-### Agent 1: Pattern Finder (`codebase-pattern-finder`)
-**Always launch.** Write a detailed prompt asking it to find similar features already implemented, related type definitions, test patterns, and error handling patterns nearby. Request actual code snippets with file:line references — these become the "Patterns to Mirror" section.
+### Agent 1: Codebase Explorer (`Explore`)
+**Always launch.** Write a detailed prompt asking it to find:
+- Similar features already implemented with file:line references
+- Naming conventions with actual examples
+- Error handling and logging patterns
+- Type definitions and test patterns
+- Configuration and dependencies
 
-### Agent 2: Dependency Mapper (`Explore`)
-**Always launch.** Write a detailed prompt asking it to map the blast radius — all files that would need to change, import chains affected, test files covering the area, and configuration that might need updates.
+Request actual code snippets — these become the "Patterns to Mirror" section.
+
+### Agent 2: Codebase Analyst (`codebase-analyst`)
+**Always launch.** Write a detailed prompt asking it to:
+- Map the blast radius — all files that would need to change
+- Trace data flow through related components
+- Identify entry points and integration contracts
+- Document side effects and state changes
 
 ### Agent 3: Web Researcher (`web-researcher`)
-**Launch only if the feature involves external libraries or APIs.** Write a detailed prompt asking for version-specific docs, known gotchas, migration notes, and best practices.
+**Launch only if the feature involves external libraries or APIs.** Ask for version-specific docs (matching package.json versions), known gotchas, migration notes.
+
+### Merge Agent Results
+
+Combine findings into a unified discovery table:
+
+| Category | File:Lines | Pattern Description | Code Snippet |
+|----------|-----------|---------------------|--------------|
+| NAMING | `path:10-15` | camelCase functions | `export function createThing()` |
+| ERRORS | `path:5-20` | Custom error classes | `class ThingNotFoundError` |
+| TESTS | `path:1-30` | describe/it blocks | `describe("service", () => {` |
+
+**CHECKPOINT**: Both agents completed. At least 3 similar implementations found. Code snippets are actual (copy-pasted, not invented).
 
 ---
 
-## Phase 3: DRAFT — Write the Plan
+## Phase 3: RESEARCH — External Documentation
 
-After agents return, synthesize findings into the plan template below.
+**ONLY AFTER Phase 2** — solutions must fit existing codebase patterns first.
 
-**Critical rules:**
-- Every file path must be verified (agents can hallucinate paths)
-- "Patterns to Mirror" must contain ACTUAL code from the codebase, not invented examples
-- "Mandatory Reading" lists files the implementer MUST read before starting
-- Tasks must be atomic — each independently verifiable
-- Validation commands must be dynamically detected (no hardcoded runners)
+If web researcher was launched, format findings:
+
+```markdown
+- [Library Docs v{version}](https://url#specific-section)
+  - KEY_INSIGHT: {what we learned}
+  - APPLIES_TO: {which task/file}
+  - GOTCHA: {pitfall and how to avoid}
+```
+
+**CHECKPOINT**: URLs include specific section anchors. Versions match package.json.
 
 ---
 
-## Phase 4: VALIDATE — Check Completeness
+## Phase 4: DESIGN — UX Transformation
+
+**Create ASCII diagrams showing user experience before and after:**
+
+```
+╔════════════════════════════════════════════════╗
+║                  BEFORE STATE                  ║
+╠════════════════════════════════════════════════╣
+║   USER_FLOW: [current step-by-step]            ║
+║   PAIN_POINT: [what's missing or broken]       ║
+║   DATA_FLOW: [how data moves currently]        ║
+╚════════════════════════════════════════════════╝
+
+╔════════════════════════════════════════════════╗
+║                  AFTER STATE                   ║
+╠════════════════════════════════════════════════╣
+║   USER_FLOW: [new step-by-step]                ║
+║   VALUE_ADD: [what user gains]                 ║
+║   DATA_FLOW: [how data moves after]            ║
+╚════════════════════════════════════════════════╝
+```
+
+**Document interaction changes:**
+
+| Location | Before | After | User Impact |
+|----------|--------|-------|-------------|
+| {path/component} | {old behavior} | {new behavior} | {what changes} |
+
+**CHECKPOINT**: Before state is accurate. After state shows all new capabilities.
+
+---
+
+## Phase 5: ARCHITECT — Strategic Design
+
+For complex features with multiple integration points, optionally launch a second `codebase-analyst` agent to trace architecture around specific integration points from Phase 2.
+
+**Analyze deeply:**
+- ARCHITECTURE_FIT: How does this integrate with existing architecture?
+- EXECUTION_ORDER: What must happen first → second → third?
+- FAILURE_MODES: Edge cases, race conditions, error scenarios?
+- SECURITY: Attack vectors? Data exposure? Auth/authz?
+
+**Decide and document:**
+
+```markdown
+APPROACH_CHOSEN: [description]
+RATIONALE: [why this over alternatives — reference codebase patterns]
+
+ALTERNATIVES_REJECTED:
+- [Alternative 1]: Rejected because [reason]
+- [Alternative 2]: Rejected because [reason]
+
+NOT_BUILDING (explicit scope limits):
+- [Item 1 — out of scope and why]
+- [Item 2 — out of scope and why]
+```
+
+---
+
+## Phase 6: VALIDATE — Check Completeness
 
 Before saving, verify:
-- [ ] Every file in "Files to Change" actually exists (for UPDATE/DELETE) or its parent directory exists (for CREATE)
+- [ ] Every file in "Files to Change" actually exists (for UPDATE/DELETE) or parent directory exists (for CREATE)
 - [ ] Every pattern cited in "Patterns to Mirror" matches the actual codebase
 - [ ] Every task has a clear validation step
 - [ ] Acceptance criteria are testable, not vague
 - [ ] No circular dependencies between tasks
 
+**NO_PRIOR_KNOWLEDGE_TEST**: Could an agent unfamiliar with this codebase implement using ONLY the plan? If not, add more context.
+
 ---
 
-## Phase 5: WRITE — Save Artifact
+## Phase 7: WRITE — Save Artifact
 
 Save to `.claude/archon/plans/{slug}.plan.md` where `{slug}` is a kebab-case feature name.
 
@@ -93,11 +231,39 @@ So that {benefit}
 
 | Field | Value |
 |-------|-------|
-| Type | FEATURE / REFACTOR / BUGFIX / ENHANCEMENT |
+| Type | NEW_CAPABILITY / ENHANCEMENT / REFACTOR / BUG_FIX |
 | Complexity | LOW / MEDIUM / HIGH |
 | Systems Affected | {packages, modules, or areas} |
 | Dependencies | {what must exist first} |
 | Estimated Tasks | {number} |
+| Confidence | {1-10}/10 — {rationale for one-pass implementation success} |
+
+---
+
+## UX Design
+
+### Before State
+```
+{ASCII diagram — current user experience with data flows}
+```
+
+### After State
+```
+{ASCII diagram — new user experience with data flows}
+```
+
+### Interaction Changes
+
+| Location | Before | After | User Impact |
+|----------|--------|-------|-------------|
+| {path/component} | {old behavior} | {new behavior} | {what changes for user} |
+
+---
+
+## NOT Building (Scope Limits)
+
+- {Item 1 — explicitly out of scope and why}
+- {Item 2 — explicitly out of scope and why}
 
 ---
 
@@ -111,15 +277,15 @@ So that {benefit}
 | P1 | `{path}` | {range} | {reason — e.g., "Types to IMPORT"} |
 | P2 | `{path}` | {range} | {reason — e.g., "Tests to EXTEND"} |
 
+**External Documentation:**
+
+| Source | Section | Why Needed |
+|--------|---------|------------|
+| [Lib Docs v{version}](url#anchor) | {section name} | {specific reason} |
+
 ## Patterns to Mirror
 
 **Copy these patterns from the existing codebase.**
-
-**{PATTERN_NAME}:**
-\`\`\`{language}
-// SOURCE: {file}:{lines}
-{actual code snippet from the codebase}
-\`\`\`
 
 **{PATTERN_NAME}:**
 \`\`\`{language}
@@ -139,16 +305,36 @@ So that {benefit}
 
 ## Step-by-Step Tasks
 
+Execute in order. Each task is atomic and independently verifiable.
+
 ### Task 1: {ACTION} `{file path}`
 
 **Action**: CREATE / UPDATE / DELETE
 **Details**: {Exact changes with code snippets where helpful}
 **Mirror**: `{source file}:{lines}` — follow this pattern
+**Imports**: {specific imports needed}
+**Gotcha**: {known issue to avoid}
 **Validate**: `{specific command to verify this task}`
 
 ### Task 2: {ACTION} `{file path}`
 
 ...
+
+---
+
+## Testing Strategy
+
+### Tests to Write
+
+| Test File | Test Cases | Validates |
+|-----------|-----------|-----------|
+| `{path}` | {cases} | {what} |
+
+### Edge Cases Checklist
+
+- [ ] {edge case 1}
+- [ ] {edge case 2}
+- [ ] {feature-specific edge case}
 
 ---
 
@@ -162,11 +348,12 @@ So that {benefit}
 
 **Levels:**
 
-1. **Type check**: `{runner} run type-check` (or equivalent from package.json)
+1. **Type check**: `{runner} run type-check`
 2. **Lint**: `{runner} run lint`
 3. **Unit tests**: `{runner} run test` (or specific test file)
 4. **Full validation**: `{runner} run validate` (if available)
-5. **Manual verification**: {specific curl, CLI, or browser commands}
+5. **Database validation**: {if schema changes — verify tables, indexes}
+6. **Manual verification**: {specific curl, CLI, or browser commands}
 
 ## Acceptance Criteria
 
@@ -184,14 +371,38 @@ So that {benefit}
 
 ---
 
-## Phase 6: REPORT — Present and Suggest Next Step
+## Phase 8: REPORT — Present and Suggest Next Step
 
-Summarize the plan in 5-7 bullet points:
-- What will change
-- How many tasks
-- Key risks
-- Estimated complexity
+Summarize the plan:
 
-Link to the artifact.
+```markdown
+## Plan Created
 
-**Next step**: `/archon-dev implement .claude/archon/plans/{slug}.plan.md`
+**File**: `.claude/archon/plans/{slug}.plan.md`
+
+{If from PRD:}
+**Source PRD**: `{prd-file-path}`
+**Phase**: #{number} - {phase name}
+
+**Summary**: {2-3 sentence feature overview}
+**Complexity**: {LOW/MEDIUM/HIGH} — {rationale}
+**Confidence**: {1-10}/10 for one-pass implementation
+
+**Scope**:
+- {N} files to CREATE
+- {M} files to UPDATE
+- {K} total tasks
+
+**Key Patterns**: {top 2-3 from codebase with file:line}
+**UX**: BEFORE: {one-line} → AFTER: {one-line}
+**Risks**: {primary risk}: {mitigation}
+
+{If parallel phases available:}
+**Parallel Opportunity**: Phase {X} can run concurrently in a separate worktree.
+
+**Next Step**: `/archon-dev implement .claude/archon/plans/{slug}.plan.md`
+```
+
+**If input was from a PRD file**, also update the PRD:
+1. Change the phase's Status from `pending` to `in-progress`
+2. Add the plan file path to the Plan column

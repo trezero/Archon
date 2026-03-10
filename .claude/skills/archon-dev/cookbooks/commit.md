@@ -1,8 +1,8 @@
 # Commit Cookbook
 
-Analyze changes and create well-structured commits. Acts on git directly — no artifact file.
+Analyze changes and create well-structured commits. Supports natural language file targeting. Acts on git directly — no artifact file.
 
-**Input**: `$ARGUMENTS` — optional commit message hint, or omit for auto-analysis.
+**Input**: `$ARGUMENTS` — optional target description and/or commit message hint, or omit for auto-analysis.
 
 ---
 
@@ -18,7 +18,28 @@ Run in parallel:
 
 ---
 
-## Phase 2: CLASSIFY — Determine Commit Type
+## Phase 2: TARGET — Determine What to Stage
+
+If `$ARGUMENTS` contains a target description, interpret it:
+
+| Input | Action |
+|-------|--------|
+| (blank) | Stage all relevant changes (but respect safety checks) |
+| `staged` | Use current staging as-is |
+| `*.ts` / `typescript files` | `git add "*.ts"` |
+| `files in src/X` | `git add src/X/` |
+| `except tests` | Add all, then `git reset *test* *spec*` |
+| `only new files` | Add only untracked files |
+| `the X changes` | Interpret from diff context |
+
+**Safety checks** (automatic, no user prompt needed):
+- `.env` or credentials files → NEVER stage, skip silently
+- Large binaries → skip and note in output
+- Generated files → include if they're part of the build
+
+---
+
+## Phase 3: CLASSIFY — Determine Commit Type
 
 Based on the changes, classify:
 
@@ -35,7 +56,7 @@ Based on the changes, classify:
 
 ---
 
-## Phase 3: GROUP — Split if Needed
+## Phase 4: GROUP — Split if Needed
 
 If changes span multiple unrelated concerns, split into multiple commits.
 
@@ -46,7 +67,7 @@ For each logical group:
 
 ---
 
-## Phase 4: DRAFT — Write Commit Message
+## Phase 5: DRAFT — Write Commit Message
 
 Follow conventional commit format:
 
@@ -68,14 +89,9 @@ If `$ARGUMENTS` contains a message hint, use it as the basis.
 
 ---
 
-## Phase 5: EXECUTE — Stage and Commit
+## Phase 6: EXECUTE — Stage and Commit
 
-**Safety checks** (automatic, no user prompt needed):
-- `.env` or credentials files → NEVER stage, skip silently
-- Large binaries → skip and note in output
-- Generated files → include if they're part of the build
-
-1. Stage specific files (NEVER use `git add -A` or `git add .`)
+1. Stage specific files (NEVER use `git add -A` or `git add .` unless targeting all changes)
 2. Create the commit using a HEREDOC for the message:
 
 ```bash
@@ -98,3 +114,14 @@ Report:
 - Commit hash(es) created
 - Files committed
 - Suggest next step: `/archon-dev pr` to create a pull request
+
+### Examples
+
+```
+/archon-dev commit                          # All changes
+/archon-dev commit typescript files         # *.ts only
+/archon-dev commit except package-lock      # Exclude specific
+/archon-dev commit only the new files       # Untracked only
+/archon-dev commit staged                   # Already-staged only
+/archon-dev commit the auth refactor        # Context-based targeting
+```
