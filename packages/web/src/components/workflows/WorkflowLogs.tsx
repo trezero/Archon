@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MessageList } from '@/components/chat/MessageList';
 import { useSSE } from '@/hooks/useSSE';
 import { getMessages } from '@/lib/api';
@@ -71,16 +71,42 @@ export function WorkflowLogs({
   workflowHandlers,
 }: WorkflowLogsProps): React.ReactElement {
   const [sseMessages, setSseMessages] = useState<ChatMessage[]>([]);
+  const queryClient = useQueryClient();
+  const prevIsRunningRef = useRef(isRunning);
+  const [gracePolling, setGracePolling] = useState(false);
+  const [scrollTrigger, setScrollTrigger] = useState(0);
 
-  // Poll for messages from DB — 3s while running, disabled when terminal
+  // Poll for messages from DB — 3s while running (or during grace period), disabled when terminal.
+  // staleTime: 0 ensures post-completion navigation always fetches fresh data on mount.
   const { data: queryMessages } = useQuery({
     queryKey: ['workflowMessages', conversationId],
     queryFn: async (): Promise<ChatMessage[]> => {
       const rows = await getMessages(conversationId);
       return hydrateMessages(rows, startedAt);
     },
-    refetchInterval: isRunning ? 3000 : false,
+    refetchInterval: isRunning || gracePolling ? 3000 : false,
+    staleTime: 0,
   });
+
+  // When workflow transitions from running → terminal, keep polling for 6 more seconds
+  // (2 extra cycles) to catch late DB flushes, then do a final invalidation.
+  // Also force-scroll to bottom so the user sees the final output.
+  useEffect(() => {
+    if (prevIsRunningRef.current && !isRunning) {
+      setGracePolling(true);
+      setScrollTrigger(prev => prev + 1);
+      const timer = setTimeout(() => {
+        setGracePolling(false);
+        void queryClient.invalidateQueries({ queryKey: ['workflowMessages', conversationId] });
+        setScrollTrigger(prev => prev + 1);
+      }, 6000);
+      return (): void => {
+        clearTimeout(timer);
+      };
+    }
+    prevIsRunningRef.current = isRunning;
+    return undefined;
+  }, [isRunning, conversationId, queryClient]);
 
   // Merge DB messages (canonical) with SSE-only messages (live streaming)
   const messages = useMemo((): ChatMessage[] => {
@@ -89,12 +115,11 @@ export function WorkflowLogs({
     if (dbMessages.length === 0) return sseMessages;
 
     const dbSigs = new Set(dbMessages.map(m => `${m.role}:${m.content}`));
-    const latestDbTs = Math.max(...dbMessages.map(m => m.timestamp));
-    // Keep SSE messages that are still streaming or newer than latest DB message,
-    // but exclude any that match a DB message by role+content (dedup)
-    const uniqueSse = sseMessages.filter(
-      m => (m.timestamp > latestDbTs || m.isStreaming) && !dbSigs.has(`${m.role}:${m.content}`)
-    );
+    // Keep SSE messages whose content hasn't appeared in DB yet (canonical dedup).
+    // Previous logic also required timestamp > latestDbTs || isStreaming, but that
+    // caused a flash: onLockChange sets isStreaming=false before DB flushes the
+    // final message, so the SSE copy vanished for ~3s until the next DB poll.
+    const uniqueSse = sseMessages.filter(m => !dbSigs.has(`${m.role}:${m.content}`));
     return [...dbMessages, ...uniqueSse];
   }, [queryMessages, sseMessages]);
 
@@ -216,7 +241,43 @@ export function WorkflowLogs({
     ...workflowHandlers,
   });
 
-  const isStreaming = messages.some(m => m.isStreaming);
+  // If workflow is running but no message is currently streaming,
+  // append a thinking placeholder so the three pulsing dots appear at the bottom.
+  const displayMessages = useMemo((): ChatMessage[] => {
+    if (!isRunning) return messages;
+    const hasActiveStream = messages.some(m => m.isStreaming);
+    if (hasActiveStream) return messages;
+    return [
+      ...messages,
+      {
+        id: 'workflow-thinking',
+        role: 'assistant' as const,
+        content: '',
+        timestamp: Date.now(),
+        isStreaming: true,
+      },
+    ];
+  }, [messages, isRunning]);
 
-  return <MessageList messages={messages} isStreaming={isStreaming} />;
+  const isStreaming = displayMessages.some(m => m.isStreaming);
+
+  // Show loading indicator while waiting for first messages
+  if (displayMessages.length === 0 && (isRunning || queryMessages === undefined)) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-text-tertiary">
+          <span className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+          <p className="text-sm">Loading workflow logs...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <MessageList
+      messages={displayMessages}
+      isStreaming={isStreaming}
+      scrollTrigger={scrollTrigger}
+    />
+  );
 }

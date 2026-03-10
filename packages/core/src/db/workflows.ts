@@ -325,6 +325,157 @@ export async function cancelWorkflowRun(id: string): Promise<void> {
 }
 
 /**
+ * Enriched workflow run with joined data for the dashboard Command Center.
+ */
+export interface DashboardWorkflowRun extends WorkflowRun {
+  codebase_name: string | null;
+  platform_type: string | null;
+  worker_platform_id: string | null;
+  parent_platform_id: string | null;
+}
+
+/** Options for listing dashboard runs with server-side search, filtering, and pagination. */
+export interface ListDashboardRunsOptions {
+  status?: WorkflowRunStatus;
+  codebaseId?: string;
+  search?: string;
+  after?: string;
+  before?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** Response envelope for paginated dashboard runs. */
+export interface DashboardRunsResult {
+  runs: DashboardWorkflowRun[];
+  total: number;
+  counts: {
+    all: number;
+    running: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+    pending: number;
+  };
+}
+
+/**
+ * Build WHERE clauses shared between the list and count queries.
+ * Returns the clauses array and values array (mutated in place).
+ */
+function buildDashboardWhereClauses(
+  options: ListDashboardRunsOptions | undefined,
+  values: unknown[]
+): string[] {
+  const whereClauses: string[] = [];
+
+  if (options?.status) {
+    values.push(options.status);
+    whereClauses.push(`r.status = $${String(values.length)}`);
+  }
+  if (options?.codebaseId) {
+    values.push(options.codebaseId);
+    whereClauses.push(`r.codebase_id = $${String(values.length)}`);
+  }
+  if (options?.search) {
+    const pattern = `%${options.search}%`;
+    values.push(pattern, pattern);
+    whereClauses.push(
+      `(r.workflow_name LIKE $${String(values.length - 1)} OR r.user_message LIKE $${String(values.length)})`
+    );
+  }
+  if (options?.after) {
+    values.push(options.after);
+    whereClauses.push(`r.started_at >= $${String(values.length)}`);
+  }
+  if (options?.before) {
+    values.push(options.before);
+    whereClauses.push(`r.started_at < $${String(values.length)}`);
+  }
+
+  return whereClauses;
+}
+
+/**
+ * List workflow runs with enriched JOINs for the dashboard Command Center.
+ * Supports server-side search, status/date filtering, and offset-based pagination.
+ * Returns runs, total matching count, and per-status counts for the filter bar.
+ */
+export async function listDashboardRuns(
+  options?: ListDashboardRunsOptions
+): Promise<DashboardRunsResult> {
+  // Build shared WHERE for both queries
+  const listValues: unknown[] = [];
+  const whereClauses = buildDashboardWhereClauses(options, listValues);
+
+  const limit = options?.limit ?? 50;
+  const offset = options?.offset ?? 0;
+  listValues.push(limit);
+  const limitParam = `$${String(listValues.length)}`;
+  listValues.push(offset);
+  const offsetParam = `$${String(listValues.length)}`;
+
+  const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+  // Build count query with the same base filters MINUS the status filter.
+  // This lets us compute per-status counts across the full filtered set.
+  const countValues: unknown[] = [];
+  const countWhereClauses = buildDashboardWhereClauses(
+    options ? { ...options, status: undefined } : undefined,
+    countValues
+  );
+  const countWhereStr =
+    countWhereClauses.length > 0 ? `WHERE ${countWhereClauses.join(' AND ')}` : '';
+
+  try {
+    const [listResult, countResult] = await Promise.all([
+      pool.query<DashboardWorkflowRun>(
+        `SELECT r.*,
+                c.platform_type,
+                c.platform_conversation_id AS worker_platform_id,
+                pc.platform_conversation_id AS parent_platform_id,
+                cb.name AS codebase_name
+         FROM remote_agent_workflow_runs r
+         LEFT JOIN remote_agent_conversations c ON r.conversation_id = c.id
+         LEFT JOIN remote_agent_conversations pc ON r.parent_conversation_id = pc.id
+         LEFT JOIN remote_agent_codebases cb ON r.codebase_id = cb.id
+         ${whereStr}
+         ORDER BY r.started_at DESC
+         LIMIT ${limitParam} OFFSET ${offsetParam}`,
+        listValues
+      ),
+      pool.query<{ status: string; cnt: string }>(
+        `SELECT r.status, COUNT(*) AS cnt
+         FROM remote_agent_workflow_runs r
+         ${countWhereStr}
+         GROUP BY r.status`,
+        countValues
+      ),
+    ]);
+
+    const counts = { all: 0, running: 0, completed: 0, failed: 0, cancelled: 0, pending: 0 };
+    for (const row of countResult.rows) {
+      const n = Number(row.cnt);
+      counts.all += n;
+      if (row.status in counts) {
+        counts[row.status as keyof Omit<typeof counts, 'all'>] = n;
+      }
+    }
+
+    // Total for the current filter (with status applied)
+    const total = options?.status
+      ? (counts[options.status as keyof typeof counts] ?? 0)
+      : counts.all;
+
+    return { runs: [...listResult.rows], total, counts };
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err }, 'list_dashboard_runs_failed');
+    throw new Error(`Failed to list dashboard runs: ${err.message}`);
+  }
+}
+
+/**
  * List workflow runs with optional filters.
  */
 export async function listWorkflowRuns(options?: {

@@ -17,6 +17,7 @@ import {
   cloneRepository,
   registerRepository,
   ConversationNotFoundError,
+  generateAndSetTitle,
 } from '@archon/core';
 import { removeWorktree, toRepoPath, toWorktreePath } from '@archon/git';
 import {
@@ -507,6 +508,32 @@ export function registerApiRoutes(
       if (!/^[\w-]+$/.test(workflowName)) {
         return c.json({ error: 'Invalid workflow name' }, 400);
       }
+      // Persist user message and register DB ID (same as message endpoint)
+      let conv: Awaited<ReturnType<typeof conversationDb.findConversationByPlatformId>> = null;
+      try {
+        conv = await conversationDb.findConversationByPlatformId(conversationId);
+      } catch (e: unknown) {
+        getLog().error({ err: e, conversationId }, 'conversation_lookup_failed');
+      }
+      if (conv) {
+        try {
+          await messageDb.addMessage(conv.id, 'user', message);
+        } catch (e: unknown) {
+          getLog().error({ err: e, conversationId: conv.id }, 'message_persistence_failed');
+        }
+        webAdapter.setConversationDbId(conversationId, conv.id);
+        // Generate title for sidebar (fire-and-forget)
+        if (!conv.title) {
+          void generateAndSetTitle(
+            conv.id,
+            message,
+            conv.ai_assistant_type,
+            getArchonWorkspacesPath(),
+            workflowName
+          );
+        }
+      }
+
       const fullMessage = `/workflow run ${workflowName} ${message}`;
       const result = await dispatchToOrchestrator(conversationId, fullMessage);
       return c.json(result);
@@ -516,20 +543,81 @@ export function registerApiRoutes(
     }
   });
 
+  // GET /api/dashboard/runs - Enriched workflow runs for Command Center
+  // Supports server-side search, status/date filtering, and offset pagination.
+  app.get('/api/dashboard/runs', async c => {
+    try {
+      const rawStatus = c.req.query('status');
+      const dashboardValidStatuses = [
+        'pending',
+        'running',
+        'completed',
+        'failed',
+        'cancelled',
+      ] as const;
+      type DashboardRunStatus = (typeof dashboardValidStatuses)[number];
+      const status: DashboardRunStatus | undefined =
+        rawStatus && (dashboardValidStatuses as readonly string[]).includes(rawStatus)
+          ? (rawStatus as DashboardRunStatus)
+          : undefined;
+      const codebaseId = c.req.query('codebaseId') ?? undefined;
+      const search = c.req.query('search')?.trim() || undefined;
+      const after = c.req.query('after') ?? undefined;
+      const before = c.req.query('before') ?? undefined;
+      const limitRaw = Number(c.req.query('limit'));
+      const limit = Number.isNaN(limitRaw) ? 50 : Math.min(Math.max(1, limitRaw), 200);
+      const offsetRaw = Number(c.req.query('offset'));
+      const offset = Number.isNaN(offsetRaw) ? 0 : Math.max(0, offsetRaw);
+
+      const result = await workflowDb.listDashboardRuns({
+        status,
+        codebaseId,
+        search,
+        after,
+        before,
+        limit,
+        offset,
+      });
+      return c.json(result);
+    } catch (error) {
+      getLog().error({ err: error }, 'list_dashboard_runs_failed');
+      return c.json({ error: 'Failed to list dashboard runs' }, 500);
+    }
+  });
+
+  // POST /api/workflows/runs/:runId/cancel - Cancel a workflow run
+  app.post('/api/workflows/runs/:runId/cancel', async c => {
+    try {
+      const runId = c.req.param('runId');
+      const run = await workflowDb.getWorkflowRun(runId);
+      if (!run) {
+        return c.json({ error: 'Workflow run not found' }, 404);
+      }
+      if (run.status !== 'running' && run.status !== 'pending') {
+        return c.json({ error: `Cannot cancel workflow in '${run.status}' status` }, 400);
+      }
+      await workflowDb.cancelWorkflowRun(runId);
+      return c.json({ success: true, message: `Cancelled workflow: ${run.workflow_name}` });
+    } catch (error) {
+      getLog().error({ err: error }, 'cancel_workflow_run_api_failed');
+      return c.json({ error: 'Failed to cancel workflow run' }, 500);
+    }
+  });
+
   // GET /api/workflows/runs - List workflow runs
   app.get('/api/workflows/runs', async c => {
     try {
       const conversationId = c.req.query('conversationId') ?? undefined;
       const rawStatus = c.req.query('status');
-      const validStatuses = ['pending', 'running', 'completed', 'failed'] as const;
+      const validStatuses = ['pending', 'running', 'completed', 'failed', 'cancelled'] as const;
       type WorkflowRunStatus = (typeof validStatuses)[number];
       const status: WorkflowRunStatus | undefined =
         rawStatus && (validStatuses as readonly string[]).includes(rawStatus)
           ? (rawStatus as WorkflowRunStatus)
           : undefined;
       const codebaseId = c.req.query('codebaseId') ?? undefined;
-      const limitStr = c.req.query('limit');
-      const limit = Math.min(Math.max(1, limitStr ? Number(limitStr) : 50), 200);
+      const limitRaw = Number(c.req.query('limit'));
+      const limit = Number.isNaN(limitRaw) ? 50 : Math.min(Math.max(1, limitRaw), 200);
 
       const runs = await workflowDb.listWorkflowRuns({
         conversationId,

@@ -1,6 +1,7 @@
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { listConversations } from '@/lib/api';
+import { listConversations, listWorkflowRuns } from '@/lib/api';
 import type { CodebaseResponse } from '@/lib/api';
 import { ConversationItem } from '@/components/conversations/ConversationItem';
 import { useProject } from '@/contexts/ProjectContext';
@@ -20,6 +21,25 @@ export function AllConversationsView({
     queryFn: () => listConversations(),
     refetchInterval: 10_000,
   });
+
+  const { data: runs } = useQuery({
+    queryKey: ['workflow-runs-status'],
+    queryFn: () => listWorkflowRuns({ limit: 50 }),
+    refetchInterval: 10_000,
+  });
+
+  const conversationStatusMap = useMemo((): Map<string, 'running' | 'failed'> => {
+    const map = new Map<string, 'running' | 'failed'>();
+    if (!runs) return map;
+    for (const run of runs) {
+      if (run.status === 'running') {
+        map.set(run.conversation_id, 'running');
+      } else if (run.status === 'failed' && !map.has(run.conversation_id)) {
+        map.set(run.conversation_id, 'failed');
+      }
+    }
+    return map;
+  }, [runs]);
 
   const codebaseMap = new Map<string, CodebaseResponse>();
   if (codebases) {
@@ -58,6 +78,7 @@ export function AllConversationsView({
                 key={conv.id}
                 conversation={conv}
                 projectName={conv.codebase_id ? codebaseMap.get(conv.codebase_id)?.name : undefined}
+                status={conversationStatusMap.get(conv.id) ?? 'idle'}
               />
             ))
           ) : (

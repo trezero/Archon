@@ -1611,7 +1611,8 @@ export async function executeWorkflow(
     prSha?: string;
     prBranch?: string;
   },
-  parentConversationId?: string
+  parentConversationId?: string,
+  preCreatedRun?: WorkflowRun
 ): Promise<WorkflowExecutionResult> {
   // Load config once for the entire workflow execution
   const config = await deps.loadConfig(cwd);
@@ -1689,21 +1690,33 @@ export async function executeWorkflow(
     getLog().debug({ configuredCommandFolder }, 'command_folder_configured');
   }
 
+  // Resume detection and concurrent-run checks (skip when run was pre-created by caller)
+  let resumeFromStepIndex: number | undefined;
+  let workflowRun: WorkflowRun | undefined = preCreatedRun;
+
+  if (preCreatedRun) {
+    getLog().info(
+      { workflowRunId: preCreatedRun.id, workflowName: workflow.name },
+      'workflow_using_pre_created_run'
+    );
+  }
+
   // Check for concurrent workflow execution with staleness detection
   let activeWorkflow;
-  try {
-    activeWorkflow = await deps.store.getActiveWorkflowRun(conversationDbId);
-  } catch (error) {
-    const err = error as Error;
-    getLog().error({ err, conversationId }, 'db_active_workflow_check_failed');
-    // Do NOT proceed when we can't verify safety - block workflow execution
-    await sendCriticalMessage(
-      platform,
-      conversationId,
-      '❌ **Workflow blocked**: Unable to verify if another workflow is running (database error). Please try again in a moment.'
-    );
-    return { success: false, error: 'Database error checking for active workflow' };
-  }
+  if (!preCreatedRun)
+    try {
+      activeWorkflow = await deps.store.getActiveWorkflowRun(conversationDbId);
+    } catch (error) {
+      const err = error as Error;
+      getLog().error({ err, conversationId }, 'db_active_workflow_check_failed');
+      // Do NOT proceed when we can't verify safety - block workflow execution
+      await sendCriticalMessage(
+        platform,
+        conversationId,
+        '❌ **Workflow blocked**: Unable to verify if another workflow is running (database error). Please try again in a moment.'
+      );
+      return { success: false, error: 'Database error checking for active workflow' };
+    }
   if (activeWorkflow) {
     // Check staleness based on last activity, not start time
     const lastActivity = activeWorkflow.last_activity_at ?? activeWorkflow.started_at;
@@ -1745,55 +1758,55 @@ export async function executeWorkflow(
   }
 
   // Resume detection: check for prior failed run on same workflow + worktree
-  let resumeFromStepIndex: number | undefined;
-  let workflowRun: WorkflowRun | undefined;
-
-  // Step 1: Find prior failed run — non-critical, fall through on DB error
-  let resumableRun: Awaited<ReturnType<typeof deps.store.findResumableRun>> = null;
-  try {
-    resumableRun = await deps.store.findResumableRun(workflow.name, cwd, conversationDbId);
-  } catch (error) {
-    const err = error as Error;
-    getLog().warn({ err, workflowName: workflow.name, cwd }, 'workflow_resume_check_failed');
-    // Non-critical: fall through to create a new run; notify user so they know resume was skipped
-    // (workflowName is already captured in the warn log above for correlation)
-    await safeSendMessage(
-      platform,
-      conversationId,
-      '⚠️ Could not check for a prior run to resume (database error). Starting a fresh run instead.'
-    );
-  }
-
-  // Step 2: Activate the resume — propagate as error if this fails (resume detected but couldn't activate)
-  if (resumableRun && resumableRun.current_step_index > 0) {
+  // (skipped when run was pre-created by caller — background dispatches use fresh conversations)
+  if (!preCreatedRun) {
+    // Step 1: Find prior failed run — non-critical, fall through on DB error
+    let resumableRun: Awaited<ReturnType<typeof deps.store.findResumableRun>> = null;
     try {
-      workflowRun = await deps.store.resumeWorkflowRun(resumableRun.id);
-      resumeFromStepIndex = resumableRun.current_step_index;
-      getLog().info({ workflowRunId: workflowRun.id, resumeFromStepIndex }, 'workflow_resuming');
+      resumableRun = await deps.store.findResumableRun(workflow.name, cwd, conversationDbId);
+    } catch (error) {
+      const err = error as Error;
+      getLog().warn({ err, workflowName: workflow.name, cwd }, 'workflow_resume_check_failed');
+      // Non-critical: fall through to create a new run; notify user so they know resume was skipped
+      // (workflowName is already captured in the warn log above for correlation)
       await safeSendMessage(
         platform,
         conversationId,
-        `▶️ **Resuming** \`${workflow.name}\` from step ${String(resumeFromStepIndex + 1)} — skipping ${String(resumeFromStepIndex)} already-completed step(s).\n\nNote: AI session context from prior steps is not restored. Steps that depend on prior context may need to re-read artifacts.`
+        '⚠️ Could not check for a prior run to resume (database error). Starting a fresh run instead.'
       );
-    } catch (error) {
-      const err = error as Error;
-      getLog().error(
-        { err, workflowName: workflow.name, resumableRunId: resumableRun.id },
-        'workflow_resume_activate_failed'
-      );
-      await sendCriticalMessage(
-        platform,
-        conversationId,
-        '❌ **Workflow failed**: Found a prior run to resume but could not activate it (database error). Please try again later.'
-      );
-      return { success: false, error: 'Database error resuming workflow run' };
     }
-  } else if (resumableRun) {
-    // Found a prior failed run but no steps completed (current_step_index=0) — not worth resuming
-    getLog().info(
-      { workflowRunId: resumableRun.id, currentStepIndex: resumableRun.current_step_index },
-      'workflow_resume_skipped_no_completed_steps'
-    );
+
+    // Step 2: Activate the resume — propagate as error if this fails (resume detected but couldn't activate)
+    if (resumableRun && resumableRun.current_step_index > 0) {
+      try {
+        workflowRun = await deps.store.resumeWorkflowRun(resumableRun.id);
+        resumeFromStepIndex = resumableRun.current_step_index;
+        getLog().info({ workflowRunId: workflowRun.id, resumeFromStepIndex }, 'workflow_resuming');
+        await safeSendMessage(
+          platform,
+          conversationId,
+          `▶️ **Resuming** \`${workflow.name}\` from step ${String(resumeFromStepIndex + 1)} — skipping ${String(resumeFromStepIndex)} already-completed step(s).\n\nNote: AI session context from prior steps is not restored. Steps that depend on prior context may need to re-read artifacts.`
+        );
+      } catch (error) {
+        const err = error as Error;
+        getLog().error(
+          { err, workflowName: workflow.name, resumableRunId: resumableRun.id },
+          'workflow_resume_activate_failed'
+        );
+        await sendCriticalMessage(
+          platform,
+          conversationId,
+          '❌ **Workflow failed**: Found a prior run to resume but could not activate it (database error). Please try again later.'
+        );
+        return { success: false, error: 'Database error resuming workflow run' };
+      }
+    } else if (resumableRun) {
+      // Found a prior failed run but no steps completed (current_step_index=0) — not worth resuming
+      getLog().info(
+        { workflowRunId: resumableRun.id, currentStepIndex: resumableRun.current_step_index },
+        'workflow_resume_skipped_no_completed_steps'
+      );
+    }
   }
 
   if (!workflowRun) {

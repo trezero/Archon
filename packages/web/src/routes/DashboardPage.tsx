@@ -1,102 +1,179 @@
-import { useMemo } from 'react';
-import { Link, useNavigate } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
-import { MessageSquare, PlayCircle, Plus, Workflow, Activity } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router';
+import { Workflow } from 'lucide-react';
 import {
-  listConversations,
-  listWorkflowRuns,
+  listDashboardRuns,
+  cancelWorkflowRun,
+  listCodebases,
   getHealth,
-  type ConversationResponse,
-  type WorkflowRunResponse,
+  type DashboardCounts,
 } from '@/lib/api';
-import { useProject } from '@/contexts/ProjectContext';
+import type { WorkflowRunStatus } from '@/lib/types';
+import { StatusSummaryBar } from '@/components/dashboard/StatusSummaryBar';
+import { WorkflowRunCard } from '@/components/dashboard/WorkflowRunCard';
+import { WorkflowHistoryTable } from '@/components/dashboard/WorkflowHistoryTable';
 
-function formatTime(dateStr: string | null): string {
-  if (!dateStr) return '';
-  const d = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
-  return d.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+const DEFAULT_PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
-const STATUS_COLORS: Record<string, string> = {
-  running: 'bg-primary',
-  completed: 'bg-success',
-  failed: 'bg-destructive',
-  pending: 'bg-text-tertiary',
-  cancelled: 'bg-text-tertiary',
-};
+/** Date range presets. "all" means no date filter. */
+type DateRange = 'today' | '7d' | '30d' | 'all';
 
-function StatsCard({
-  label,
-  value,
-  icon,
-}: {
-  label: string;
-  value: string | number;
-  icon: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <div className="rounded-lg border border-border bg-surface p-4">
-      <div className="flex items-center gap-3">
-        {icon}
-        <div>
-          <p className="text-2xl font-semibold text-text-primary">{value}</p>
-          <p className="text-xs text-text-secondary">{label}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ConversationRow({ conv }: { conv: ConversationResponse }): React.ReactElement {
-  const title = conv.title ?? 'Untitled conversation';
-  return (
-    <Link
-      to={`/chat/${encodeURIComponent(conv.platform_conversation_id)}`}
-      className="flex items-center gap-3 rounded-md px-3 py-2 hover:bg-surface-elevated transition-colors"
-    >
-      <MessageSquare className="h-4 w-4 shrink-0 text-text-tertiary" />
-      <span className="truncate text-sm text-text-primary">{title}</span>
-      <span className="ml-auto shrink-0 text-xs text-text-tertiary">
-        {formatTime(conv.last_activity_at)}
-      </span>
-    </Link>
-  );
-}
-
-function WorkflowRunRow({ run }: { run: WorkflowRunResponse }): React.ReactElement {
-  return (
-    <Link
-      to={`/workflows/runs/${encodeURIComponent(run.id)}`}
-      className="flex items-center gap-3 rounded-md px-3 py-2 hover:bg-surface-elevated transition-colors"
-    >
-      <div
-        className={`h-2 w-2 shrink-0 rounded-full ${STATUS_COLORS[run.status] ?? 'bg-text-tertiary'}`}
-      />
-      <span className="truncate text-sm text-text-primary">{run.workflow_name}</span>
-      <span className="ml-auto shrink-0 text-xs text-text-tertiary">
-        {formatTime(run.started_at)}
-      </span>
-    </Link>
-  );
+function getDateBounds(range: DateRange): { after?: string; before?: string } {
+  if (range === 'all') return {};
+  const now = new Date();
+  const start = new Date(now);
+  if (range === 'today') {
+    start.setHours(0, 0, 0, 0);
+  } else if (range === '7d') {
+    start.setDate(start.getDate() - 7);
+  } else if (range === '30d') {
+    start.setDate(start.getDate() - 30);
+  }
+  return { after: start.toISOString() };
 }
 
 export function DashboardPage(): React.ReactElement {
-  const navigate = useNavigate();
-  const { selectedProjectId: savedProjectId } = useProject();
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const { data: conversations, isLoading: loadingConvs } = useQuery({
-    queryKey: ['conversations', { codebaseId: savedProjectId ?? 'all' }],
-    queryFn: () => listConversations(savedProjectId ?? undefined),
+  // Hydrate filter state from URL (supports bookmarkable views)
+  const statusFilter = searchParams.get('status') ?? null;
+  const searchQuery = searchParams.get('q') ?? '';
+  const projectFilter = searchParams.get('project') ?? null;
+  const dateRange: DateRange = (searchParams.get('range') as DateRange) ?? 'all';
+  const page = Math.max(0, Number(searchParams.get('page') ?? '0'));
+  const pageSizeParam = Number(searchParams.get('pageSize') ?? '0');
+  const pageSize = PAGE_SIZE_OPTIONS.includes(pageSizeParam as (typeof PAGE_SIZE_OPTIONS)[number])
+    ? pageSizeParam
+    : DEFAULT_PAGE_SIZE;
+
+  // Debounced search: type instantly in the input, but delay the server request
+  const [searchInput, setSearchInput] = useState(searchQuery);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Sync searchInput when URL changes externally (e.g., back/forward)
+  useEffect(() => {
+    setSearchInput(searchParams.get('q') ?? '');
+  }, [searchParams]);
+
+  /** Helper to update URL params (replaces history entry to avoid back-spam). */
+  const updateParams = useCallback(
+    (updates: Record<string, string | null>) => {
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          for (const [k, v] of Object.entries(updates)) {
+            if (v === null || v === '' || v === '0' || v === 'all') {
+              next.delete(k);
+            } else {
+              next.set(k, v);
+            }
+          }
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
+
+  const setStatusFilter = useCallback(
+    (status: string | null) => {
+      updateParams({ status, page: null });
+    },
+    [updateParams]
+  );
+  const setProjectFilter = useCallback(
+    (project: string | null) => {
+      updateParams({ project, page: null });
+    },
+    [updateParams]
+  );
+  const setDateRange = useCallback(
+    (range: DateRange) => {
+      updateParams({ range, page: null });
+    },
+    [updateParams]
+  );
+  const setPage = useCallback(
+    (p: number) => {
+      updateParams({ page: p === 0 ? null : String(p) });
+    },
+    [updateParams]
+  );
+
+  const setPageSize = useCallback(
+    (size: number) => {
+      updateParams({
+        pageSize: size === DEFAULT_PAGE_SIZE ? null : String(size),
+        page: null,
+      });
+    },
+    [updateParams]
+  );
+
+  const handleSearchChange = useCallback(
+    (value: string) => {
+      setSearchInput(value);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        updateParams({ q: value || null, page: null });
+      }, 300);
+    },
+    [updateParams]
+  );
+
+  // Compute date bounds from range preset
+  const dateBounds = useMemo(() => getDateBounds(dateRange), [dateRange]);
+
+  // Server-side fetch with all filters
+  const {
+    data: dashboardData,
+    isLoading,
+    isError,
+    error: fetchError,
+    dataUpdatedAt,
+  } = useQuery({
+    queryKey: [
+      'dashboardRuns',
+      {
+        status: statusFilter,
+        codebaseId: projectFilter,
+        search: searchQuery,
+        dateRange,
+        page,
+        pageSize,
+      },
+    ],
+    queryFn: () =>
+      listDashboardRuns({
+        status: (statusFilter as WorkflowRunStatus) ?? undefined,
+        codebaseId: projectFilter ?? undefined,
+        search: searchQuery || undefined,
+        after: dateBounds.after,
+        before: dateBounds.before,
+        limit: pageSize,
+        offset: page * pageSize,
+      }),
+    refetchInterval: 5_000,
   });
 
-  const { data: workflowRuns, isLoading: loadingRuns } = useQuery({
-    queryKey: ['workflowRuns', { codebaseId: savedProjectId ?? 'all' }],
-    queryFn: () => listWorkflowRuns({ codebaseId: savedProjectId ?? undefined, limit: 10 }),
+  const runs = dashboardData?.runs ?? [];
+  const total = dashboardData?.total ?? 0;
+  const counts: DashboardCounts = dashboardData?.counts ?? {
+    all: 0,
+    running: 0,
+    completed: 0,
+    failed: 0,
+    cancelled: 0,
+    pending: 0,
+  };
+
+  const { data: codebases } = useQuery({
+    queryKey: ['codebases'],
+    queryFn: () => listCodebases(),
   });
 
   const { data: health } = useQuery({
@@ -105,107 +182,154 @@ export function DashboardPage(): React.ReactElement {
     refetchInterval: 30_000,
   });
 
-  const runningCount = useMemo(
-    () => workflowRuns?.filter(r => r.status === 'running').length ?? 0,
-    [workflowRuns]
+  // Split into active and history (from server-filtered results)
+  const activeRuns = useMemo(
+    () => runs.filter(r => r.status === 'running' || r.status === 'pending'),
+    [runs]
   );
 
-  const recentConversations = (conversations ?? []).slice(0, 10);
-  const recentRuns = (workflowRuns ?? []).slice(0, 10);
-  const isLoading = loadingConvs || loadingRuns;
+  const historyRuns = useMemo(
+    () =>
+      runs.filter(
+        r => r.status === 'completed' || r.status === 'failed' || r.status === 'cancelled'
+      ),
+    [runs]
+  );
 
-  const handleNewChat = (): void => {
-    navigate('/chat');
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  const handleCancel = async (runId: string): Promise<void> => {
+    try {
+      setCancelError(null);
+      await cancelWorkflowRun(runId);
+      void queryClient.invalidateQueries({ queryKey: ['dashboardRuns'] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to cancel workflow';
+      setCancelError(message);
+    }
   };
 
+  const totalPages = Math.ceil(total / pageSize);
+  const hasMore = page + 1 < totalPages;
+
   return (
-    <div className="flex flex-1 flex-col">
-      <div className="flex-1 overflow-auto p-6">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <StatsCard
-            label="Running Workflows"
-            value={runningCount}
-            icon={<Workflow className="h-5 w-5 text-primary" />}
-          />
-          <StatsCard
-            label="Conversations"
-            value={conversations?.length ?? 0}
-            icon={<MessageSquare className="h-5 w-5 text-primary" />}
-          />
-          <StatsCard
-            label="System Status"
-            value={health?.status === 'ok' ? 'Healthy' : 'Unknown'}
-            icon={<Activity className="h-5 w-5 text-success" />}
-          />
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex-1 overflow-auto p-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold text-text-primary">Mission Control</h1>
+          {dataUpdatedAt > 0 && (
+            <span className="text-xs text-text-tertiary">
+              Last updated {new Date(dataUpdatedAt).toLocaleTimeString()}
+            </span>
+          )}
         </div>
+
+        {/* Status Summary Bar — receives real server counts */}
+        <StatusSummaryBar
+          counts={counts}
+          activeFilter={statusFilter}
+          onFilterChange={setStatusFilter}
+          searchQuery={searchInput}
+          onSearchChange={handleSearchChange}
+          projectFilter={projectFilter}
+          onProjectFilterChange={setProjectFilter}
+          dateRange={dateRange}
+          onDateRangeChange={setDateRange}
+          codebases={codebases}
+          health={health}
+        />
+
+        {cancelError && (
+          <div className="rounded-md border border-error/30 bg-error/5 px-4 py-3 text-sm text-error">
+            {cancelError}
+          </div>
+        )}
 
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <span className="text-sm text-text-tertiary">Loading...</span>
           </div>
-        ) : recentConversations.length === 0 && recentRuns.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-4 py-16">
-            <MessageSquare className="h-10 w-10 text-text-tertiary" />
-            <p className="text-sm text-text-tertiary">No conversations yet</p>
-            <button
-              onClick={handleNewChat}
-              className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              <Plus className="h-4 w-4" />
-              New Chat
-            </button>
+        ) : isError ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-16">
+            <p className="text-sm text-error">
+              Failed to load workflow runs
+              {fetchError instanceof Error ? `: ${fetchError.message}` : ''}
+            </p>
+          </div>
+        ) : runs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-16">
+            <Workflow className="h-10 w-10 text-text-tertiary" />
+            <p className="text-sm text-text-tertiary">No workflow runs found</p>
           </div>
         ) : (
-          <div className="grid gap-6 lg:grid-cols-2">
-            {/* Recent Conversations */}
-            <section>
-              <div className="mb-2 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-text-secondary">Recent Conversations</h2>
-                <button
-                  onClick={handleNewChat}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-secondary hover:bg-surface-elevated hover:text-text-primary transition-colors"
+          <>
+            {/* Active Workflows */}
+            {activeRuns.length > 0 && (
+              <section>
+                <h2 className="mb-3 text-sm font-semibold text-text-secondary">Active Workflows</h2>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {activeRuns.map(run => (
+                    <WorkflowRunCard key={run.id} run={run} onCancel={handleCancel} />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* History */}
+            {historyRuns.length > 0 && (
+              <section>
+                <h2 className="mb-3 text-sm font-semibold text-text-secondary">History</h2>
+                <WorkflowHistoryTable runs={historyRuns} />
+              </section>
+            )}
+
+            {/* Pagination */}
+            <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-text-tertiary">
+                  Showing {String(page * pageSize + 1)}&ndash;
+                  {String(Math.min((page + 1) * pageSize, total))} of {String(total)} runs
+                </span>
+                <select
+                  value={pageSize}
+                  onChange={(e): void => {
+                    setPageSize(Number(e.target.value));
+                  }}
+                  className="rounded-md border border-border bg-surface-elevated px-2 py-1 text-xs text-text-primary focus:border-primary focus:outline-none"
                 >
-                  <Plus className="h-3.5 w-3.5" />
-                  New
+                  {PAGE_SIZE_OPTIONS.map(size => (
+                    <option key={size} value={size}>
+                      {String(size)} per page
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(): void => {
+                    setPage(page - 1);
+                  }}
+                  disabled={page === 0}
+                  className="rounded-md border border-border bg-surface-elevated px-3 py-1 text-xs text-text-secondary transition-colors hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <span className="text-xs text-text-tertiary">
+                  Page {String(page + 1)} of {String(Math.max(1, totalPages))}
+                </span>
+                <button
+                  onClick={(): void => {
+                    setPage(page + 1);
+                  }}
+                  disabled={!hasMore}
+                  className="rounded-md border border-border bg-surface-elevated px-3 py-1 text-xs text-text-secondary transition-colors hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
                 </button>
               </div>
-              <div className="rounded-lg border border-border bg-surface">
-                {recentConversations.length > 0 ? (
-                  <div className="divide-y divide-border">
-                    {recentConversations.map(conv => (
-                      <ConversationRow key={conv.id} conv={conv} />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center py-8">
-                    <span className="text-xs text-text-tertiary">No conversations</span>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            {/* Recent Workflow Runs */}
-            <section>
-              <div className="mb-2 flex items-center">
-                <h2 className="text-sm font-semibold text-text-secondary">Recent Workflow Runs</h2>
-              </div>
-              <div className="rounded-lg border border-border bg-surface">
-                {recentRuns.length > 0 ? (
-                  <div className="divide-y divide-border">
-                    {recentRuns.map(run => (
-                      <WorkflowRunRow key={run.id} run={run} />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 justify-center py-8">
-                    <PlayCircle className="h-4 w-4 text-text-tertiary" />
-                    <span className="text-xs text-text-tertiary">No workflow runs</span>
-                  </div>
-                )}
-              </div>
-            </section>
-          </div>
+            </div>
+          </>
         )}
       </div>
     </div>

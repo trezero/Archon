@@ -122,7 +122,12 @@ export class SSETransport {
         await stream.writeSSE({ data: event });
       } catch (e: unknown) {
         getLog().warn({ conversationId, err: e }, 'web.sse_write_failed');
+        // Remove and close the stream so the browser's EventSource detects
+        // the disconnect and auto-reconnects with a fresh connection.
         this.streams.delete(conversationId);
+        stream.close().catch((_: unknown) => {
+          /* stream already closing */
+        });
       }
     } else if (stream?.closed) {
       this.streams.delete(conversationId);
@@ -146,6 +151,9 @@ export class SSETransport {
       stream.writeSSE({ data: event }).catch((e: unknown) => {
         getLog().warn({ conversationId, err: e }, 'web.sse_write_failed');
         this.streams.delete(conversationId);
+        stream.close().catch((_: unknown) => {
+          /* stream already closing */
+        });
       });
     }
   }
