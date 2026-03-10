@@ -129,7 +129,11 @@ export function DashboardPage(): React.ReactElement {
   const dateBounds = useMemo(() => getDateBounds(dateRange), [dateRange]);
 
   // Server-side fetch with all filters
-  const { data: dashboardData, isLoading } = useQuery({
+  const {
+    data: dashboardData,
+    isLoading,
+    dataUpdatedAt,
+  } = useQuery({
     queryKey: [
       'dashboardRuns',
       {
@@ -204,9 +208,9 @@ export function DashboardPage(): React.ReactElement {
         {/* Header */}
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-semibold text-text-primary">Mission Control</h1>
-          {dashboardData && (
+          {dataUpdatedAt > 0 && (
             <span className="text-xs text-text-tertiary">
-              Last updated {new Date().toLocaleTimeString()}
+              Last updated {new Date(dataUpdatedAt).toLocaleTimeString()}
             </span>
           )}
         </div>

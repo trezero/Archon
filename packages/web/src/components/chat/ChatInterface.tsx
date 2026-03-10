@@ -366,6 +366,24 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     }
   }, []);
 
+  // Safety net: when the active workflow transitions to terminal status, ensure
+  // locked state is cleared and streaming messages are finalized. Handles cases
+  // where conversation_lock:false and workflow_status:completed SSE events were
+  // lost (e.g., user navigated away during workflow execution and came back).
+  const prevWorkflowStatusRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const status = activeWorkflow?.status;
+    const prevStatus = prevWorkflowStatusRef.current;
+    prevWorkflowStatusRef.current = status;
+    if (
+      status &&
+      status !== prevStatus &&
+      (status === 'completed' || status === 'failed' || status === 'cancelled')
+    ) {
+      onLockChange(false);
+    }
+  }, [activeWorkflow?.status, onLockChange]);
+
   const onSessionInfo = useCallback((_sessionId: string, _cost?: number): void => {
     // Session info can be stored for display later
   }, []);

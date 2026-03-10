@@ -2,32 +2,10 @@ import { Link } from 'react-router';
 import { Globe, Terminal, Hash, Send, GitBranch } from 'lucide-react';
 import type { DashboardRunResponse } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { formatDuration, formatStarted } from '@/lib/format';
 
 interface WorkflowHistoryTableProps {
   runs: DashboardRunResponse[];
-}
-
-function ensureUtc(timestamp: string): string {
-  return timestamp.endsWith('Z') ? timestamp : timestamp + 'Z';
-}
-
-function formatDuration(startedAt: string, completedAt: string | null): string {
-  const start = new Date(ensureUtc(startedAt)).getTime();
-  const end = completedAt ? new Date(ensureUtc(completedAt)).getTime() : Date.now();
-  const ms = end - start;
-  if (ms < 1000) return `${String(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
-}
-
-function formatStarted(startedAt: string): string {
-  const d = new Date(ensureUtc(startedAt));
-  return d.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 const STATUS_DOT_COLORS: Record<string, string> = {
@@ -87,12 +65,17 @@ export function WorkflowHistoryTable({ runs }: WorkflowHistoryTableProps): React
               <td className="px-3 py-2">
                 <Link
                   to={`/workflows/runs/${run.id}`}
-                  className="text-text-primary hover:text-primary truncate block max-w-[200px]"
+                  className="text-text-primary hover:text-primary truncate block"
                 >
                   {run.workflow_name}
                 </Link>
+                {run.user_message && (
+                  <p className="text-[11px] text-text-tertiary truncate max-w-[300px]">
+                    {run.user_message}
+                  </p>
+                )}
               </td>
-              <td className="px-3 py-2 text-text-secondary truncate max-w-[150px]">
+              <td className="px-3 py-2 text-text-secondary truncate">
                 {run.codebase_name ?? '\u2014'}
               </td>
               <td className="px-3 py-2">

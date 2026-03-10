@@ -13,23 +13,11 @@ import {
 } from 'lucide-react';
 import type { DashboardRunResponse } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { formatDuration } from '@/lib/format';
 
 interface WorkflowRunCardProps {
   run: DashboardRunResponse;
   onCancel: (runId: string) => void;
-}
-
-function ensureUtc(timestamp: string): string {
-  return timestamp.endsWith('Z') ? timestamp : timestamp + 'Z';
-}
-
-function formatDuration(startedAt: string, completedAt: string | null): string {
-  const start = new Date(ensureUtc(startedAt)).getTime();
-  const end = completedAt ? new Date(ensureUtc(completedAt)).getTime() : Date.now();
-  const ms = end - start;
-  if (ms < 1000) return `${String(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
 }
 
 const PLATFORM_ICONS: Record<string, React.ReactElement> = {
@@ -144,7 +132,9 @@ export function WorkflowRunCard({ run, onCancel }: WorkflowRunCardProps): React.
         )}
         <button
           onClick={(): void => {
-            onCancel(run.id);
+            if (window.confirm(`Cancel workflow "${run.workflow_name}"?`)) {
+              onCancel(run.id);
+            }
           }}
           className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-error/80 hover:bg-error/10 hover:text-error transition-colors ml-auto"
         >

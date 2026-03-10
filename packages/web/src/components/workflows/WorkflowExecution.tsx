@@ -305,7 +305,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
               className="flex items-center gap-1 text-xs text-primary hover:text-accent-bright transition-colors"
               title="View workflow run details"
             >
-              <span>View Run</span>
+              <span>Run Details</span>
             </button>
           )}
           <span className="text-xs text-text-secondary">{formatDuration(elapsed)}</span>

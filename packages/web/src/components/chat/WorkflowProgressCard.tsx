@@ -75,7 +75,9 @@ export function WorkflowProgressCard({
           <span className="text-[10px] text-text-secondary">
             {workflow.isLoop
               ? `Iter ${String(workflow.currentIteration ?? 0)}`
-              : `${String(completedSteps)}/${String(totalSteps)}`}
+              : totalSteps > 0
+                ? `${String(completedSteps)}/${String(totalSteps)}`
+                : ''}
           </span>
           <span className="text-[10px] text-text-tertiary">{formatDuration(elapsed)}</span>
           {workflow.stale && workflow.status === 'running' && (
@@ -129,11 +131,11 @@ export function WorkflowProgressCard({
               Iteration {String(workflow.currentIteration ?? 0)}
               {workflow.maxIterations ? `/${String(workflow.maxIterations)}` : ''}
             </span>
-          ) : (
+          ) : totalSteps > 0 ? (
             <span>
               {String(completedSteps)}/{String(totalSteps)} steps
             </span>
-          )}
+          ) : null}
           <span>{formatDuration(elapsed)}</span>
         </div>
       </div>
