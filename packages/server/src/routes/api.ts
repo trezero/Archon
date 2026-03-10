@@ -564,10 +564,10 @@ export function registerApiRoutes(
       const search = c.req.query('search')?.trim() || undefined;
       const after = c.req.query('after') ?? undefined;
       const before = c.req.query('before') ?? undefined;
-      const limitStr = c.req.query('limit');
-      const limit = Math.min(Math.max(1, limitStr ? Number(limitStr) : 50), 200);
-      const offsetStr = c.req.query('offset');
-      const offset = Math.max(0, offsetStr ? Number(offsetStr) : 0);
+      const limitRaw = Number(c.req.query('limit'));
+      const limit = Number.isNaN(limitRaw) ? 50 : Math.min(Math.max(1, limitRaw), 200);
+      const offsetRaw = Number(c.req.query('offset'));
+      const offset = Number.isNaN(offsetRaw) ? 0 : Math.max(0, offsetRaw);
 
       const result = await workflowDb.listDashboardRuns({
         status,
@@ -616,8 +616,8 @@ export function registerApiRoutes(
           ? (rawStatus as WorkflowRunStatus)
           : undefined;
       const codebaseId = c.req.query('codebaseId') ?? undefined;
-      const limitStr = c.req.query('limit');
-      const limit = Math.min(Math.max(1, limitStr ? Number(limitStr) : 50), 200);
+      const limitRaw = Number(c.req.query('limit'));
+      const limit = Number.isNaN(limitRaw) ? 50 : Math.min(Math.max(1, limitRaw), 200);
 
       const runs = await workflowDb.listWorkflowRuns({
         conversationId,

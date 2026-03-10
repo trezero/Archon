@@ -111,7 +111,7 @@ export function WorkflowRunCard({ run, onCancel }: WorkflowRunCardProps): React.
         {chatId && (
           <button
             onClick={(): void => {
-              navigate(`/chat/${chatId}`);
+              navigate(`/chat/${encodeURIComponent(chatId)}`);
             }}
             className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-secondary hover:bg-surface-elevated hover:text-text-primary transition-colors"
           >

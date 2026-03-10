@@ -132,6 +132,8 @@ export function DashboardPage(): React.ReactElement {
   const {
     data: dashboardData,
     isLoading,
+    isError,
+    error: fetchError,
     dataUpdatedAt,
   } = useQuery({
     queryKey: [
@@ -194,9 +196,17 @@ export function DashboardPage(): React.ReactElement {
     [runs]
   );
 
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
   const handleCancel = async (runId: string): Promise<void> => {
-    await cancelWorkflowRun(runId);
-    void queryClient.invalidateQueries({ queryKey: ['dashboardRuns'] });
+    try {
+      setCancelError(null);
+      await cancelWorkflowRun(runId);
+      void queryClient.invalidateQueries({ queryKey: ['dashboardRuns'] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to cancel workflow';
+      setCancelError(message);
+    }
   };
 
   const totalPages = Math.ceil(total / pageSize);
@@ -230,9 +240,22 @@ export function DashboardPage(): React.ReactElement {
           health={health}
         />
 
+        {cancelError && (
+          <div className="rounded-md border border-error/30 bg-error/5 px-4 py-3 text-sm text-error">
+            {cancelError}
+          </div>
+        )}
+
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <span className="text-sm text-text-tertiary">Loading...</span>
+          </div>
+        ) : isError ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-16">
+            <p className="text-sm text-error">
+              Failed to load workflow runs
+              {fetchError instanceof Error ? `: ${fetchError.message}` : ''}
+            </p>
           </div>
         ) : runs.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16">
