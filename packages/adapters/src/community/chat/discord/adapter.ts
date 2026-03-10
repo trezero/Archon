@@ -49,12 +49,12 @@ export class DiscordAdapter implements IPlatformAdapter {
     // Parse Discord user whitelist (optional - empty = open access)
     this.allowedUserIds = parseAllowedUserIds(process.env.DISCORD_ALLOWED_USER_IDS);
     if (this.allowedUserIds.length > 0) {
-      getLog().info({ userCount: this.allowedUserIds.length }, 'whitelist_enabled');
+      getLog().info({ userCount: this.allowedUserIds.length }, 'discord.whitelist_enabled');
     } else {
-      getLog().info('whitelist_disabled');
+      getLog().info('discord.whitelist_disabled');
     }
 
-    getLog().info({ mode }, 'adapter_initialized');
+    getLog().info({ mode }, 'discord.adapter_initialized');
   }
 
   /**
@@ -66,18 +66,18 @@ export class DiscordAdapter implements IPlatformAdapter {
     message: string,
     _metadata?: MessageMetadata
   ): Promise<void> {
-    getLog().debug({ channelId, messageLength: message.length }, 'send_message');
+    getLog().debug({ channelId, messageLength: message.length }, 'discord.send_message');
 
     const channel = await this.client.channels.fetch(channelId);
     if (!channel?.isSendable()) {
-      getLog().error({ channelId }, 'invalid_or_non_sendable_channel');
+      getLog().error({ channelId }, 'discord.invalid_or_non_sendable_channel');
       return;
     }
 
     if (message.length <= MAX_LENGTH) {
       await channel.send(message);
     } else {
-      getLog().debug({ messageLength: message.length }, 'message_splitting');
+      getLog().debug({ messageLength: message.length }, 'discord.message_splitting');
       const chunks = splitIntoParagraphChunks(message, MAX_LENGTH - 100);
 
       for (const chunk of chunks) {
@@ -155,7 +155,10 @@ export class DiscordAdapter implements IPlatformAdapter {
         return `${author}: ${msg.content}`;
       });
     } catch (error) {
-      getLog().error({ err: error, channelId: message.channel.id }, 'thread_history_fetch_failed');
+      getLog().error(
+        { err: error, channelId: message.channel.id },
+        'discord.thread_history_fetch_failed'
+      );
       return [];
     }
   }
@@ -237,7 +240,7 @@ export class DiscordAdapter implements IPlatformAdapter {
       const content = this.stripBotMention(message);
       const threadName = this.generateThreadName(content);
 
-      getLog().info({ threadName, messageId: message.id }, 'thread_creating');
+      getLog().info({ threadName, messageId: message.id }, 'discord.thread_creating');
 
       const thread = await message.startThread({
         name: threadName,
@@ -245,11 +248,11 @@ export class DiscordAdapter implements IPlatformAdapter {
         reason: 'Bot response thread',
       });
 
-      getLog().info({ threadId: thread.id }, 'thread_created');
+      getLog().info({ threadId: thread.id }, 'discord.thread_created');
       return thread.id;
     } catch (error) {
       const err = error as Error;
-      getLog().error({ err }, 'thread_creation_failed');
+      getLog().error({ err }, 'discord.thread_creation_failed');
       // Fall back to channel ID if thread creation fails
       return message.channelId;
     }
@@ -296,7 +299,7 @@ export class DiscordAdapter implements IPlatformAdapter {
       if (!isDiscordUserAuthorized(userId, this.allowedUserIds)) {
         // Log unauthorized attempt (mask user ID for privacy)
         const maskedId = userId ? `${userId.slice(0, 4)}***` : 'unknown';
-        getLog().info({ maskedUserId: maskedId }, 'unauthorized_message');
+        getLog().info({ maskedUserId: maskedId }, 'discord.unauthorized_message');
         return; // Silent rejection
       }
 
@@ -308,12 +311,12 @@ export class DiscordAdapter implements IPlatformAdapter {
 
     // Log when ready
     this.client.once(Events.ClientReady, readyClient => {
-      getLog().info({ tag: readyClient.user.tag }, 'bot_logged_in');
+      getLog().info({ tag: readyClient.user.tag }, 'discord.bot_logged_in');
     });
 
     // Login with stored token
     await this.client.login(this.token);
-    getLog().info('bot_started');
+    getLog().info('discord.bot_started');
   }
 
   /**
@@ -321,6 +324,6 @@ export class DiscordAdapter implements IPlatformAdapter {
    */
   stop(): void {
     void this.client.destroy();
-    getLog().info('bot_stopped');
+    getLog().info('discord.bot_stopped');
   }
 }

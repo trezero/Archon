@@ -53,6 +53,6 @@ export function splitIntoParagraphChunks(message: string, maxLength: number): st
     }
   }
 
-  getLog().debug({ chunkCount: finalChunks.length }, 'message_split_completed');
+  getLog().debug({ chunkCount: finalChunks.length }, 'message.split_completed');
   return finalChunks;
 }

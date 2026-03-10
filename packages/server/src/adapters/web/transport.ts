@@ -31,7 +31,7 @@ export class SSETransport {
     const existing = this.streams.get(conversationId);
     if (existing && !existing.closed) {
       existing.close().catch((e: unknown) => {
-        getLog().warn({ conversationId, err: e }, 'sse_write_failed');
+        getLog().warn({ conversationId, err: e }, 'web.sse_write_failed');
       });
     }
     this.streams.set(conversationId, stream);
@@ -89,7 +89,7 @@ export class SSETransport {
       }
     }, 300_000);
 
-    getLog().info('adapter_ready');
+    getLog().info('web.adapter_ready');
   }
 
   stop(): void {
@@ -102,17 +102,17 @@ export class SSETransport {
     for (const [id, stream] of this.streams) {
       if (!stream.closed) {
         stream.close().catch((e: unknown) => {
-          getLog().warn({ conversationId: id, err: e }, 'sse_close_failed');
+          getLog().warn({ conversationId: id, err: e }, 'web.sse_close_failed');
         });
       }
-      getLog().debug({ conversationId: id }, 'sse_stream_closed');
+      getLog().debug({ conversationId: id }, 'web.sse_stream_closed');
     }
     this.streams.clear();
     for (const timer of this.cleanupTimers.values()) {
       clearTimeout(timer);
     }
     this.cleanupTimers.clear();
-    getLog().info('adapter_stopped');
+    getLog().info('web.adapter_stopped');
   }
 
   async emit(conversationId: string, event: string): Promise<void> {
@@ -121,7 +121,7 @@ export class SSETransport {
       try {
         await stream.writeSSE({ data: event });
       } catch (e: unknown) {
-        getLog().warn({ conversationId, err: e }, 'sse_write_failed');
+        getLog().warn({ conversationId, err: e }, 'web.sse_write_failed');
         this.streams.delete(conversationId);
       }
     } else if (stream?.closed) {
@@ -144,7 +144,7 @@ export class SSETransport {
     const stream = this.streams.get(conversationId);
     if (stream && !stream.closed) {
       stream.writeSSE({ data: event }).catch((e: unknown) => {
-        getLog().warn({ conversationId, err: e }, 'sse_write_failed');
+        getLog().warn({ conversationId, err: e }, 'web.sse_write_failed');
         this.streams.delete(conversationId);
       });
     }
@@ -171,7 +171,7 @@ export class SSETransport {
           }
         }
       } catch (e: unknown) {
-        getLog().warn({ conversationId, err: e }, 'cleanup_timer_failed');
+        getLog().warn({ conversationId, err: e }, 'web.cleanup_timer_failed');
       }
     }, delayMs);
 

@@ -43,12 +43,12 @@ export class MessagePersistence {
 
   appendText(conversationId: string, message: string, metadata?: MessageMetadata): void {
     if (metadata?.category === 'tool_call_formatted') {
-      getLog().debug({ conversationId }, 'persistence_skip_tool_call_formatted');
+      getLog().debug({ conversationId }, 'web.persistence_skip_tool_call_formatted');
       return;
     }
 
     if (metadata?.category === 'isolation_context') {
-      getLog().debug({ conversationId }, 'persistence_skip_isolation_context');
+      getLog().debug({ conversationId }, 'web.persistence_skip_isolation_context');
       return;
     }
 
@@ -89,9 +89,12 @@ export class MessagePersistence {
 
     // Prevent unbounded buffer growth — force flush if too many segments
     if (buf.segments.length > 50) {
-      getLog().warn({ conversationId, segments: buf.segments.length }, 'assistant_buffer_overflow');
+      getLog().warn(
+        { conversationId, segments: buf.segments.length },
+        'web.assistant_buffer_overflow'
+      );
       this.flush(conversationId).catch((e: unknown) => {
-        getLog().error({ conversationId, err: e }, 'buffer_overflow_flush_failed');
+        getLog().error({ conversationId, err: e }, 'web.buffer_overflow_flush_failed');
       });
     }
 
@@ -114,7 +117,7 @@ export class MessagePersistence {
       setTimeout(() => {
         this.workerFlushTimers.delete(conversationId);
         this.flush(conversationId).catch((e: unknown) => {
-          getLog().error({ conversationId, err: e }, 'worker_eager_flush_failed');
+          getLog().error({ conversationId, err: e }, 'web.worker_eager_flush_failed');
         });
       }, 500)
     );
@@ -165,7 +168,7 @@ export class MessagePersistence {
     if (!dbId) {
       getLog().warn(
         { conversationId, segmentCount: buf.segments.length },
-        'assistant_persist_no_db_id'
+        'web.assistant_persist_no_db_id'
       );
       // Keep buffer — dbId may arrive later (e.g., race with conversation creation)
       return;
@@ -201,7 +204,7 @@ export class MessagePersistence {
         await addMessage(dbId, 'assistant', seg.content, metadata);
       }
     } catch (e: unknown) {
-      getLog().error({ conversationId, err: e }, 'message_persistence_failed');
+      getLog().error({ conversationId, err: e }, 'web.message_persistence_failed');
       void this.emitEvent(
         conversationId,
         JSON.stringify({
@@ -235,7 +238,7 @@ export class MessagePersistence {
     }
     // Attempt to flush before clearing so buffered messages aren't lost
     await this.flush(conversationId).catch((e: unknown) => {
-      getLog().error({ conversationId, err: e }, 'clear_conversation_flush_failed');
+      getLog().error({ conversationId, err: e }, 'web.clear_conversation_flush_failed');
     });
     this.assistantBuffer.delete(conversationId);
     this.dbIdMap.delete(conversationId);
@@ -247,9 +250,9 @@ export class MessagePersistence {
   async flushAll(): Promise<void> {
     const ids = [...this.assistantBuffer.keys()];
     if (ids.length === 0) return;
-    getLog().info({ count: ids.length }, 'flush_all_started');
+    getLog().info({ count: ids.length }, 'web.flush_all_started');
     await Promise.allSettled(ids.map(id => this.flush(id)));
-    getLog().info({ count: ids.length }, 'flush_all_completed');
+    getLog().info({ count: ids.length }, 'web.flush_all_completed');
   }
 
   private periodicFlushTimer: ReturnType<typeof setInterval> | undefined;
@@ -262,7 +265,7 @@ export class MessagePersistence {
     if (this.periodicFlushTimer) return;
     this.periodicFlushTimer = setInterval(() => {
       this.flushAll().catch((e: unknown) => {
-        getLog().error({ err: e }, 'periodic_flush_failed');
+        getLog().error({ err: e }, 'web.periodic_flush_failed');
       });
     }, 30_000);
   }

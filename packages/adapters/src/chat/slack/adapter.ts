@@ -37,12 +37,12 @@ export class SlackAdapter implements IPlatformAdapter {
     // Parse Slack user whitelist (optional - empty = open access)
     this.allowedUserIds = parseAllowedUserIds(process.env.SLACK_ALLOWED_USER_IDS);
     if (this.allowedUserIds.length > 0) {
-      getLog().info({ userCount: this.allowedUserIds.length }, 'whitelist_enabled');
+      getLog().info({ userCount: this.allowedUserIds.length }, 'slack.whitelist_enabled');
     } else {
-      getLog().info('whitelist_disabled');
+      getLog().info('slack.whitelist_disabled');
     }
 
-    getLog().info({ mode }, 'adapter_initialized');
+    getLog().info({ mode }, 'slack.adapter_initialized');
   }
 
   /**
@@ -55,7 +55,7 @@ export class SlackAdapter implements IPlatformAdapter {
     message: string,
     _metadata?: MessageMetadata
   ): Promise<void> {
-    getLog().debug({ channelId, messageLength: message.length }, 'send_message');
+    getLog().debug({ channelId, messageLength: message.length }, 'slack.send_message');
 
     // Parse channelId - may include thread_ts as "channel:thread_ts"
     const [channel, threadTs] = channelId.includes(':')
@@ -67,7 +67,7 @@ export class SlackAdapter implements IPlatformAdapter {
       await this.sendWithMarkdownBlock(channel, message, threadTs);
     } else {
       // Long message: split by paragraphs
-      getLog().debug({ messageLength: message.length }, 'message_splitting');
+      getLog().debug({ messageLength: message.length }, 'slack.message_splitting');
       const chunks = splitIntoParagraphChunks(message, MAX_MARKDOWN_BLOCK_LENGTH - 500);
 
       for (const chunk of chunks) {
@@ -98,11 +98,11 @@ export class SlackAdapter implements IPlatformAdapter {
         // Fallback text for notifications/accessibility
         text: message.substring(0, 150) + (message.length > 150 ? '...' : ''),
       });
-      getLog().debug({ messageLength: message.length }, 'markdown_block_sent');
+      getLog().debug({ messageLength: message.length }, 'slack.markdown_block_sent');
     } catch (error) {
       // Fallback to plain text
       const err = error as Error;
-      getLog().warn({ err, channel, threadTs }, 'markdown_block_failed_fallback_plain_text');
+      getLog().warn({ err, channel, threadTs }, 'slack.markdown_block_failed');
       await this.app.client.chat.postMessage({
         channel,
         thread_ts: threadTs,
@@ -177,7 +177,7 @@ export class SlackAdapter implements IPlatformAdapter {
         return `${author}: ${msg.text ?? ''}`;
       });
     } catch (error) {
-      getLog().error({ err: error }, 'thread_history_fetch_failed');
+      getLog().error({ err: error }, 'slack.thread_history_fetch_failed');
       return [];
     }
   }
@@ -248,7 +248,7 @@ export class SlackAdapter implements IPlatformAdapter {
       const userId = event.user;
       if (!isSlackUserAuthorized(userId, this.allowedUserIds)) {
         const maskedId = userId ? `${userId.slice(0, 4)}***` : 'unknown';
-        getLog().info({ maskedUserId: maskedId }, 'unauthorized_message');
+        getLog().info({ maskedUserId: maskedId }, 'slack.unauthorized_message');
         return;
       }
 
@@ -284,7 +284,7 @@ export class SlackAdapter implements IPlatformAdapter {
       const userId = 'user' in event ? event.user : undefined;
       if (!isSlackUserAuthorized(userId, this.allowedUserIds)) {
         const maskedId = userId ? `${userId.slice(0, 4)}***` : 'unknown';
-        getLog().info({ maskedUserId: maskedId }, 'unauthorized_dm');
+        getLog().info({ maskedUserId: maskedId }, 'slack.unauthorized_dm');
         return;
       }
 
@@ -301,7 +301,7 @@ export class SlackAdapter implements IPlatformAdapter {
     });
 
     await this.app.start();
-    getLog().info('bot_started');
+    getLog().info('slack.bot_started');
   }
 
   /**
@@ -309,6 +309,6 @@ export class SlackAdapter implements IPlatformAdapter {
    */
   stop(): void {
     void this.app.stop();
-    getLog().info('bot_stopped');
+    getLog().info('slack.bot_stopped');
   }
 }
