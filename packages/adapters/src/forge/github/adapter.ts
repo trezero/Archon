@@ -595,7 +595,7 @@ export class GitHubAdapter implements IPlatformAdapter {
 
     try {
       await onConversationClosed('github', conversationId, { merged });
-      getLog().info({ conversationId }, 'isolation_cleanup_complete');
+      getLog().info({ conversationId }, 'isolation_cleanup_completed');
     } catch (error) {
       const err = error as Error;
       // Log full context for debugging - cleanup failures shouldn't break user flow

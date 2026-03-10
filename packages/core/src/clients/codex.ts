@@ -6,7 +6,7 @@
  * dynamic import workaround that was needed for CommonJS/Node.js.
  */
 import { Codex } from '@openai/codex-sdk';
-import { type AssistantRequestOptions, IAssistantClient, MessageChunk, TokenUsage } from '../types';
+import type { AssistantRequestOptions, IAssistantClient, MessageChunk, TokenUsage } from '../types';
 import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */

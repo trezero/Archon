@@ -1107,7 +1107,7 @@ async function executeParallelBlock(
 
   getLog().info(
     { succeeded: results.filter(r => r.result.success).length, total: results.length },
-    'parallel_block_complete'
+    'parallel_block_completed'
   );
   return results;
 }

@@ -14,7 +14,7 @@
  * - Not set: Auto-detect - use tokens if present in env, otherwise global auth
  */
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
-import { type AssistantRequestOptions, IAssistantClient, MessageChunk, TokenUsage } from '../types';
+import type { AssistantRequestOptions, IAssistantClient, MessageChunk, TokenUsage } from '../types';
 import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
