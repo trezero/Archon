@@ -4,7 +4,7 @@
  */
 import { readFile, writeFile, readdir, access, rm } from 'fs/promises';
 import { join, basename, resolve, relative } from 'path';
-import { Conversation, CommandResult, ConversationNotFoundError } from '../types';
+import { type Conversation, type CommandResult, ConversationNotFoundError } from '../types';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
