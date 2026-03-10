@@ -26,5 +26,8 @@ UAT/
 
 .DS_Store
 
+# Postman exported collections/environments (available via Archon UI or Postman app)
+/postman/
+
 # Local release notes testing
 release-notes-*.md

@@ -17,7 +17,14 @@ interface CustomCredential {
   showValue?: boolean; // Track per-credential visibility
   isNew?: boolean; // Track if this is a new unsaved credential
   isFromBackend?: boolean; // Track if credential came from backend (write-only once encrypted)
+  isSystemKey?: boolean; // Key name is locked and cannot be renamed or deleted
 }
+
+// System keys whose names are locked constants — only the value is user-editable
+const SYSTEM_KEYS: Array<{ key: string; defaultEncrypted: boolean; description: string }> = [
+  { key: 'POSTMAN_API_KEY', defaultEncrypted: true, description: 'Postman API key for cloud sync' },
+  { key: 'POSTMAN_WORKSPACE_ID', defaultEncrypted: false, description: 'Postman workspace ID for collection management' },
+];
 
 export const APIKeysSection = () => {
   const [customCredentials, setCustomCredentials] = useState<CustomCredential[]>([]);
@@ -41,35 +48,65 @@ export const APIKeysSection = () => {
   const loadCredentials = async () => {
     try {
       setLoading(true);
-      
-      // Load all credentials
+
       const allCredentials = await credentialsService.getAllCredentials();
-      
-      // Filter to only show API keys (credentials that end with _KEY or _API)
+      const systemKeyNames = new Set(SYSTEM_KEYS.map(k => k.key));
+
+      // System key rows — always present, name is locked
+      const systemCredentials: CustomCredential[] = SYSTEM_KEYS.map(sysKey => {
+        const existing = allCredentials.find(c => c.key === sysKey.key);
+        if (existing) {
+          return {
+            key: existing.key,
+            value: existing.value || '',
+            description: existing.description || sysKey.description,
+            originalValue: existing.value || '',
+            originalKey: existing.key,
+            hasChanges: false,
+            is_encrypted: existing.is_encrypted ?? sysKey.defaultEncrypted,
+            showValue: false,
+            isNew: false,
+            isFromBackend: true,
+            isSystemKey: true,
+          };
+        }
+        return {
+          key: sysKey.key,
+          value: '',
+          description: sysKey.description,
+          originalValue: '',
+          originalKey: sysKey.key,
+          hasChanges: false,
+          is_encrypted: sysKey.defaultEncrypted,
+          showValue: true,
+          isNew: true,
+          isFromBackend: false,
+          isSystemKey: true,
+        };
+      });
+
+      // User-defined api key rows (excluding system keys)
       const apiKeys = allCredentials.filter(cred => {
+        if (systemKeyNames.has(cred.key)) return false;
         const key = cred.key.toUpperCase();
         return key.includes('_KEY') || key.includes('_API') || key.includes('API_');
       });
-      
-      // Convert to UI format
-      const uiCredentials = apiKeys.map(cred => {
-        const isEncryptedFromBackend = cred.is_encrypted && cred.value === '[ENCRYPTED]';
-        
-        return {
-          key: cred.key,
-          value: cred.value || '',
-          description: cred.description || '',
-          originalValue: cred.value || '',
-          originalKey: cred.key, // Track original key for updates
-          hasChanges: false,
-          is_encrypted: cred.is_encrypted || false,
-          showValue: false,
-          isNew: false,
-          isFromBackend: !cred.isNew, // Mark as from backend unless it's a new credential
-        };
-      });
-      
-      setCustomCredentials(uiCredentials);
+
+      const uiCredentials: CustomCredential[] = apiKeys.map(cred => ({
+        key: cred.key,
+        value: cred.value || '',
+        description: cred.description || '',
+        originalValue: cred.value || '',
+        originalKey: cred.key,
+        hasChanges: false,
+        is_encrypted: cred.is_encrypted || false,
+        showValue: false,
+        isNew: false,
+        isFromBackend: !cred.isNew,
+        isSystemKey: false,
+      }));
+
+      setCustomCredentials([...systemCredentials, ...uiCredentials]);
     } catch (err) {
       console.error('Failed to load credentials:', err);
       showToast('Failed to load credentials', 'error');
@@ -96,6 +133,7 @@ export const APIKeysSection = () => {
 
   const updateCredential = (index: number, field: keyof CustomCredential, value: any) => {
     setCustomCredentials(customCredentials.map((cred, i) => {
+      if (i === index && field === 'key' && cred.isSystemKey) return cred; // name is locked
       if (i === index) {
         const updated = { ...cred, [field]: value };
         // Mark as changed if value differs from original
@@ -134,7 +172,12 @@ export const APIKeysSection = () => {
 
   const deleteCredential = async (index: number) => {
     const cred = customCredentials[index];
-    
+
+    if (cred.isSystemKey) {
+      showToast(`${cred.key} is a system key and cannot be deleted`, 'warning');
+      return;
+    }
+
     if (cred.isNew) {
       // Just remove from UI if it's not saved yet
       setCustomCredentials(customCredentials.filter((_, i) => i !== index));
@@ -247,14 +290,21 @@ export const APIKeysSection = () => {
                 className="grid grid-cols-[240px_1fr_40px] gap-4 items-center"
               >
                 {/* Key name column */}
-                <div className="flex items-center">
-                  <input
-                    type="text"
-                    value={cred.key}
-                    onChange={(e) => updateCredential(index, 'key', e.target.value)}
-                    placeholder="Enter key name"
-                    className="w-full px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-sm font-mono"
-                  />
+                <div className="flex items-center gap-1.5">
+                  {cred.isSystemKey ? (
+                    <div className="flex items-center gap-1.5 w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-sm font-mono text-gray-500 dark:text-gray-400 cursor-not-allowed select-none">
+                      <Lock className="w-3 h-3 flex-shrink-0 text-pink-400 dark:text-pink-500" />
+                      <span className="truncate">{cred.key}</span>
+                    </div>
+                  ) : (
+                    <input
+                      type="text"
+                      value={cred.key}
+                      onChange={(e) => updateCredential(index, 'key', e.target.value)}
+                      placeholder="Enter key name"
+                      className="w-full px-3 py-2 rounded-md bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-sm font-mono"
+                    />
+                  )}
                 </div>
 
                 {/* Value column with encryption toggle */}
@@ -329,13 +379,15 @@ export const APIKeysSection = () => {
 
                 {/* Actions column */}
                 <div className="flex items-center justify-center">
-                  <button
-                    onClick={() => deleteCredential(index)}
-                    className="p-1 rounded text-gray-400 hover:text-red-600 transition-colors"
-                    title="Delete credential"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {!cred.isSystemKey && (
+                    <button
+                      onClick={() => deleteCredential(index)}
+                      className="p-1 rounded text-gray-400 hover:text-red-600 transition-colors"
+                      title="Delete credential"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
