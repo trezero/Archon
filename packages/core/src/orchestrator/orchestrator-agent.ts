@@ -501,7 +501,7 @@ export async function handleMessage(
       );
     }
 
-    getLog().debug({ conversationId }, 'orchestrator_message_complete');
+    getLog().debug({ conversationId }, 'orchestrator_message_completed');
   } catch (error) {
     const err = toError(error);
     getLog().error({ err, conversationId }, 'orchestrator_message_failed');

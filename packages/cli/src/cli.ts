@@ -90,6 +90,7 @@ Commands:
 Options:
   --cwd <path>               Override working directory (default: current directory)
   --branch, -b <name>        Create worktree for branch (or reuse existing)
+  --from, --from-branch <name> Create new branch from specific start point
   --no-worktree              Run on branch directly without worktree isolation
   --spawn                    Open setup wizard in a new terminal window (for setup command)
   --quiet, -q                Reduce log verbosity to warnings and errors only
@@ -141,6 +142,8 @@ async function main(): Promise<number> {
         cwd: { type: 'string', default: process.cwd() },
         help: { type: 'boolean', short: 'h' },
         branch: { type: 'string', short: 'b' },
+        from: { type: 'string' },
+        'from-branch': { type: 'string' },
         'no-worktree': { type: 'boolean' },
         spawn: { type: 'boolean' },
         quiet: { type: 'boolean', short: 'q' },
@@ -160,6 +163,8 @@ async function main(): Promise<number> {
   const cwdValue = values.cwd;
   const cwd = resolve(typeof cwdValue === 'string' ? cwdValue : process.cwd());
   const branchName = values.branch as string | undefined;
+  const fromBranch =
+    (values.from as string | undefined) ?? (values['from-branch'] as string | undefined);
   const noWorktree = values['no-worktree'] as boolean | undefined;
   const spawnFlag = values.spawn as boolean | undefined;
 
@@ -241,8 +246,12 @@ async function main(): Promise<number> {
               return 1;
             }
             const userMessage = positionals.slice(3).join(' ') || '';
+            if (fromBranch !== undefined && branchName === undefined) {
+              console.error('Error: --from/--from-branch requires --branch to be specified.');
+              return 1;
+            }
             // Conditionally construct options to satisfy discriminated union
-            const options = branchName !== undefined ? { branchName, noWorktree } : {};
+            const options = branchName !== undefined ? { branchName, fromBranch, noWorktree } : {};
             await workflowRunCommand(effectiveCwd, workflowName, userMessage, options);
             break;
           }

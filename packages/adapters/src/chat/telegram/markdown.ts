@@ -44,7 +44,7 @@ export function convertToTelegramMarkdown(markdown: string): string {
 
     return result;
   } catch (error) {
-    getLog().warn({ err: error }, 'conversion_failed');
+    getLog().warn({ err: error }, 'telegram.markdown_conversion_failed');
     return escapeMarkdownV2(markdown);
   }
 }

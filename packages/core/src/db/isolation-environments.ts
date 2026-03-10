@@ -98,7 +98,7 @@ export async function create(env: CreateEnvironmentParams): Promise<IsolationEnv
 
   getLog().debug(
     { envId: result.rows[0].id, codebaseId: env.codebase_id, branch: env.branch_name },
-    'isolation_env_created'
+    'db.isolation_env_create_completed'
   );
   return result.rows[0];
 }
@@ -117,7 +117,7 @@ export async function updateStatus(id: string, status: 'active' | 'destroyed'): 
       `Failed to update isolation environment status: no environment found with id '${id}'`
     );
   }
-  getLog().debug({ envId: id, status }, 'isolation_env_status_updated');
+  getLog().debug({ envId: id, status }, 'db.isolation_env_status_update_completed');
 }
 
 /**

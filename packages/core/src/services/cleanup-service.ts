@@ -333,7 +333,7 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
       skipped: report.skipped.length,
       errors: report.errors.length,
     },
-    'cleanup_complete'
+    'cleanup_completed'
   );
 
   return report;

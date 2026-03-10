@@ -933,7 +933,7 @@ export async function discoverWorkflows(
   const workflows = Array.from(workflowsByFile.values());
   getLog().info(
     { count: workflows.length, errorCount: allErrors.length },
-    'workflows_discovery_complete'
+    'workflows_discovery_completed'
   );
   return { workflows, errors: allErrors };
 }

@@ -22,8 +22,18 @@ mock.module('@archon/paths', () => ({
 // Mock @archon/isolation (getIsolationProvider moved here from @archon/core)
 mock.module('@archon/isolation', () => ({
   getIsolationProvider: mock(() => ({
-    createEnvironment: mock(() => Promise.resolve({ cwd: '/test/path' })),
-    cleanupEnvironment: mock(() => Promise.resolve()),
+    create: mock(() =>
+      Promise.resolve({
+        provider: 'worktree',
+        id: '/test/path',
+        workingPath: '/test/path',
+        branchName: 'test-branch',
+        status: 'active',
+        createdAt: new Date(),
+        metadata: { adopted: false },
+      })
+    ),
+    healthCheck: mock(() => Promise.resolve(true)),
   })),
 }));
 
@@ -51,6 +61,8 @@ mock.module('@archon/git', () => ({
   findRepoRoot: mock(() => Promise.resolve(null)),
   getRemoteUrl: mock(() => Promise.resolve(null)),
   checkout: mock(() => Promise.resolve()),
+  toRepoPath: mock((path: string) => path),
+  toBranchName: mock((branch: string) => branch),
 }));
 
 mock.module('@archon/core/db/conversations', () => ({
@@ -62,6 +74,11 @@ mock.module('@archon/core/db/conversations', () => ({
 
 mock.module('@archon/core/db/codebases', () => ({
   findCodebaseByDefaultCwd: mock(() => Promise.resolve(null)),
+}));
+
+mock.module('@archon/core/db/isolation-environments', () => ({
+  findActiveByWorkflow: mock(() => Promise.resolve(null)),
+  create: mock(() => Promise.resolve({ id: 'iso-123' })),
 }));
 
 describe('workflowListCommand', () => {
@@ -252,6 +269,48 @@ describe('workflowRunCommand', () => {
 
     await expect(workflowRunCommand('/test/path', 'assist', 'hello')).rejects.toThrow(
       'Workflow failed: Step failed: assist'
+    );
+  });
+
+  it('passes fromBranch into isolation task request', async () => {
+    const { discoverWorkflowsWithConfig, executeWorkflow } = await import('@archon/workflows');
+    const conversationDb = await import('@archon/core/db/conversations');
+    const codebaseDb = await import('@archon/core/db/codebases');
+    const isolation = await import('@archon/isolation');
+
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [{ name: 'assist', description: 'Help', steps: [] }],
+      errors: [],
+    });
+    (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'conv-123',
+    });
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'cb-123',
+      default_cwd: '/test/path',
+    });
+    (conversationDb.updateConversation as ReturnType<typeof mock>).mockResolvedValueOnce(undefined);
+    (executeWorkflow as ReturnType<typeof mock>).mockResolvedValueOnce({
+      success: true,
+      workflowRunId: 'run-123',
+    });
+
+    await workflowRunCommand('/test/path', 'assist', 'hello', {
+      branchName: 'test-adapters',
+      fromBranch: 'feature/extract-adapters',
+    });
+
+    const getIsolationProviderMock = isolation.getIsolationProvider as ReturnType<typeof mock>;
+    const provider = getIsolationProviderMock.mock.results.at(-1)?.value as
+      | { create: ReturnType<typeof mock> }
+      | undefined;
+
+    expect(provider?.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowType: 'task',
+        identifier: 'test-adapters',
+        fromBranch: 'feature/extract-adapters',
+      })
     );
   });
 });

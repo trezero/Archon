@@ -100,7 +100,7 @@ packages/cli/
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ archon workflow run <name> [message] [--branch X] [--no-worktree]│
+│ archon workflow run <name> [message] [--branch X] [--from X] [--no-worktree]│
 └─────────────────────────────────┬───────────────────────────────┘
                                   │
                                   ▼
@@ -277,8 +277,8 @@ When `--branch` is provided:
 
 1. **Lookup:** `isolationDb.findActiveByWorkflow(codebaseId, 'task', branchName)`
 2. **Health check:** `provider.healthCheck(path)` on existing
-3. **Reuse:** If found and healthy
-4. **Create:** If not found or unhealthy
+3. **Reuse:** If found and healthy (warns if `--from` was specified but not applied)
+4. **Create:** If not found or unhealthy — passes `fromBranch` to provider if specified via `--from`
 
 Worktrees stored at: `~/.archon/worktrees/<repo>/<branch-slug>/`
 

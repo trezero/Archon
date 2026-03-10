@@ -83,7 +83,10 @@ export async function getOrCreateConversation(
       inheritedCodebaseId = parent.rows[0].codebase_id;
       inheritedCwd = parent.rows[0].cwd;
       assistantType = parent.rows[0].ai_assistant_type;
-      getLog().debug({ inheritedCodebaseId, inheritedCwd }, 'inheriting_parent_context');
+      getLog().debug(
+        { inheritedCodebaseId, inheritedCwd },
+        'db.conversation_parent_context_inherited'
+      );
     }
   }
 
@@ -150,7 +153,7 @@ export async function updateConversation(
   );
 
   if (result.rowCount === 0) {
-    getLog().error({ conversationId: id, fields, updates }, 'update_conversation_not_found');
+    getLog().error({ conversationId: id, fields, updates }, 'db.conversation_update_not_found');
     throw new ConversationNotFoundError(id);
   }
 }

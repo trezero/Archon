@@ -150,7 +150,7 @@ export async function transitionSession(
     const newSession = newResult.rows[0];
     getLog().debug(
       { conversationId, reason, parentSessionId: current?.id, newSessionId: newSession.id },
-      'session_transitioned'
+      'db.session_transition_completed'
     );
     return newSession;
   });
