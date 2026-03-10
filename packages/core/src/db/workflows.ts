@@ -35,7 +35,7 @@ export async function createWorkflowRun(data: {
       // with empty context variables ($CONTEXT, $EXTERNAL_CONTEXT, $ISSUE_CONTEXT).
       getLog().error(
         { err, metadataKeys: Object.keys(data.metadata) },
-        'metadata_serialize_failed_critical'
+        'db.workflow_run_metadata_serialize_failed'
       );
       throw new Error(
         `Failed to serialize workflow metadata: ${err.message}. ` +
@@ -46,7 +46,7 @@ export async function createWorkflowRun(data: {
     // Non-critical metadata: fall back to empty object and log warning
     getLog().warn(
       { err, metadataKeys: data.metadata ? Object.keys(data.metadata) : [] },
-      'metadata_serialize_fallback'
+      'db.workflow_run_metadata_serialize_fallback'
     );
     metadataJson = '{}';
   }
@@ -76,7 +76,7 @@ export async function createWorkflowRun(data: {
     return row;
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'create_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_create_failed');
     throw new Error(`Failed to create workflow run: ${err.message}`);
   }
 }
@@ -90,7 +90,7 @@ export async function getWorkflowRun(id: string): Promise<WorkflowRun | null> {
     return result.rows[0] || null;
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'get_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_get_failed');
     throw new Error(`Failed to get workflow run: ${err.message}`);
   }
 }
@@ -104,7 +104,7 @@ export async function getWorkflowRunStatus(id: string): Promise<string | null> {
     return result.rows[0]?.status ?? null;
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'get_workflow_run_status_failed');
+    getLog().error({ err }, 'db.workflow_run_get_status_failed');
     throw new Error(`Failed to get workflow run status: ${err.message}`);
   }
 }
@@ -120,7 +120,7 @@ export async function getActiveWorkflowRun(conversationId: string): Promise<Work
     return result.rows[0] || null;
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'get_active_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_get_active_failed');
     throw new Error(`Failed to get active workflow run: ${err.message}`);
   }
 }
@@ -144,7 +144,7 @@ export async function findResumableRun(
     return result.rows[0] ?? null;
   } catch (error) {
     const err = error as Error;
-    getLog().warn({ err, workflowName, workingPath }, 'find_resumable_run_failed');
+    getLog().warn({ err, workflowName, workingPath }, 'db.workflow_run_find_resumable_failed');
     throw new Error(`Failed to find resumable run: ${err.message}`);
   }
 }
@@ -165,13 +165,13 @@ export async function resumeWorkflowRun(id: string): Promise<WorkflowRun> {
     );
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err, workflowRunId: id }, 'resume_workflow_run_failed');
+    getLog().error({ err, workflowRunId: id }, 'db.workflow_run_resume_failed');
     throw new Error(`Failed to resume workflow run: ${err.message}`);
   }
 
   if (updateResult.rowCount === 0) {
     // Logical race: run was deleted or already activated between find and resume
-    getLog().warn({ workflowRunId: id }, 'resume_workflow_run_not_found');
+    getLog().warn({ workflowRunId: id }, 'db.workflow_run_resume_not_found');
     throw new Error(`Workflow run not found (id: ${id})`);
   }
 
@@ -183,13 +183,13 @@ export async function resumeWorkflowRun(id: string): Promise<WorkflowRun> {
     );
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err, workflowRunId: id }, 'resume_workflow_run_select_failed');
+    getLog().error({ err, workflowRunId: id }, 'db.workflow_run_resume_select_failed');
     throw new Error(`Failed to read workflow run after update: ${err.message}`);
   }
 
   const row = selectResult.rows[0];
   if (!row) {
-    getLog().error({ workflowRunId: id }, 'resume_workflow_run_vanished');
+    getLog().error({ workflowRunId: id }, 'db.workflow_run_resume_vanished');
     throw new Error(`Workflow run vanished after update (id: ${id})`);
   }
   return row;
@@ -213,7 +213,7 @@ export async function getWorkflowRunByWorkerPlatformId(
     return result.rows[0] || null;
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'get_workflow_run_by_worker_platform_id_failed');
+    getLog().error({ err }, 'db.workflow_run_get_by_worker_platform_id_failed');
     throw new Error(`Failed to get workflow run by worker platform ID: ${err.message}`);
   }
 }
@@ -271,7 +271,7 @@ export async function updateWorkflowRun(
     );
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'update_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_update_failed');
     throw new Error(`Failed to update workflow run: ${err.message}`);
   }
 }
@@ -287,7 +287,7 @@ export async function completeWorkflowRun(id: string): Promise<void> {
     );
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'complete_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_complete_failed');
     throw new Error(`Failed to complete workflow run: ${err.message}`);
   }
 }
@@ -303,7 +303,7 @@ export async function failWorkflowRun(id: string, error: string): Promise<void> 
     );
   } catch (dbError) {
     const err = dbError as Error;
-    getLog().error({ err }, 'fail_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_mark_failed_error');
     throw new Error(`Failed to fail workflow run: ${err.message}`);
   }
 }
@@ -319,7 +319,7 @@ export async function cancelWorkflowRun(id: string): Promise<void> {
     );
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'cancel_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_cancel_failed');
     throw new Error(`Failed to cancel workflow run: ${err.message}`);
   }
 }
@@ -365,7 +365,7 @@ export async function listWorkflowRuns(options?: {
     return [...result.rows];
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'list_workflow_runs_failed');
+    getLog().error({ err }, 'db.workflow_run_list_failed');
     throw new Error(`Failed to list workflow runs: ${err.message}`);
   }
 }
@@ -385,7 +385,7 @@ export async function updateWorkflowRunParent(
     );
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err, runId, parentConversationId }, 'update_workflow_run_parent_failed');
+    getLog().error({ err, runId, parentConversationId }, 'db.workflow_run_update_parent_failed');
     // Non-critical — don't throw
   }
 }
@@ -431,13 +431,13 @@ export async function failStaleWorkflowRuns(
     if (count > 0) {
       getLog().info(
         { count, thresholdMinutes: staleThresholdMinutes },
-        'stale_runs.cleanup_completed'
+        'db.stale_workflow_runs_cleanup_completed'
       );
     }
     return { count };
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'stale_runs.cleanup_failed');
+    getLog().error({ err }, 'db.stale_workflow_runs_cleanup_failed');
     throw new Error(`Failed to clean up stale workflow runs: ${err.message}`);
   }
 }

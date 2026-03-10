@@ -86,7 +86,7 @@ export class SqliteAdapter implements IDatabase {
       }
     } catch (error) {
       const err = error as Error;
-      getLog().error({ err, sql: convertedSql, params }, 'query_error');
+      getLog().error({ err, sql: convertedSql, params }, 'db.sqlite_query_failed');
       throw error;
     }
   }
@@ -103,7 +103,7 @@ export class SqliteAdapter implements IDatabase {
       try {
         await this.query('ROLLBACK');
       } catch (rollbackError) {
-        getLog().error({ err: rollbackError as Error }, 'transaction_rollback_failed');
+        getLog().error({ err: rollbackError as Error }, 'db.sqlite_transaction_rollback_failed');
       }
       throw e;
     }
@@ -159,7 +159,7 @@ export class SqliteAdapter implements IDatabase {
         this.db.run('ALTER TABLE remote_agent_conversations ADD COLUMN hidden INTEGER DEFAULT 0');
       }
     } catch (e: unknown) {
-      getLog().warn({ err: e as Error }, 'migration_conversations_columns_failed');
+      getLog().warn({ err: e as Error }, 'db.sqlite_migration_conversations_columns_failed');
     }
 
     // Workflow runs columns
@@ -179,7 +179,7 @@ export class SqliteAdapter implements IDatabase {
         this.db.run('ALTER TABLE remote_agent_workflow_runs ADD COLUMN working_path TEXT');
       }
     } catch (e: unknown) {
-      getLog().warn({ err: e as Error }, 'migration_workflow_runs_columns_failed');
+      getLog().warn({ err: e as Error }, 'db.sqlite_migration_workflow_runs_columns_failed');
     }
 
     // Sessions columns
@@ -193,7 +193,7 @@ export class SqliteAdapter implements IDatabase {
         this.db.run('ALTER TABLE remote_agent_sessions ADD COLUMN ended_reason TEXT');
       }
     } catch (e: unknown) {
-      getLog().warn({ err: e as Error }, 'session_columns_migration_failed');
+      getLog().warn({ err: e as Error }, 'db.sqlite_migration_session_columns_failed');
     }
   }
 
@@ -343,7 +343,7 @@ export class SqliteAdapter implements IDatabase {
       CREATE INDEX IF NOT EXISTS idx_sessions_conversation_started
         ON remote_agent_sessions(conversation_id, started_at DESC);
     `);
-    getLog().info('schema_initialized');
+    getLog().info('db.sqlite_schema_initialized');
   }
 }
 

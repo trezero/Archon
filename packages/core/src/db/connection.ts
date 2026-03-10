@@ -33,12 +33,12 @@ export function getDatabase(): IDatabase {
   }
 
   if (process.env.DATABASE_URL) {
-    getLog().info('using_postgresql');
+    getLog().info('db.connection_postgresql_selected');
     database = new PostgresAdapter(process.env.DATABASE_URL);
     dialect = postgresDialect;
   } else {
     const dbPath = join(getArchonHome(), 'archon.db');
-    getLog().info({ dbPath }, 'using_sqlite');
+    getLog().info({ dbPath }, 'db.connection_sqlite_selected');
     database = new SqliteAdapter(dbPath);
     dialect = sqliteDialect;
   }

@@ -1116,6 +1116,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
             return { success: true, message: msg };
           } catch (error) {
             const err = error as Error;
+            getLog().error({ err, mainPath }, 'cmd.worktree_list_failed');
             return { success: false, message: `Failed to list worktrees: ${err.message}` };
           }
         }
@@ -1259,6 +1260,10 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
             return { success: true, message: msg.trim() };
           } catch (error) {
             const err = error as Error;
+            getLog().error(
+              { err, cleanupType, codebaseId: conversation.codebase_id },
+              'cmd.worktree_cleanup_failed'
+            );
             return { success: false, message: `Failed to cleanup: ${err.message}` };
           }
         }

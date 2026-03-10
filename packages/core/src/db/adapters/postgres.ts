@@ -26,7 +26,10 @@ export class PostgresAdapter implements IDatabase {
     });
 
     this.pool.on('error', err => {
-      getLog().fatal({ err, code: (err as NodeJS.ErrnoException).code }, 'pool_connection_error');
+      getLog().fatal(
+        { err, code: (err as NodeJS.ErrnoException).code },
+        'db.postgres_pool_connection_failed'
+      );
       // Pool-level errors indicate infrastructure problems (DB unreachable, auth failed, etc.)
       // We don't throw here as this is an event handler, but the error is now properly logged
       // with enough context to diagnose. Individual queries will fail with their own errors.
@@ -62,7 +65,7 @@ export class PostgresAdapter implements IDatabase {
       try {
         await client.query('ROLLBACK');
       } catch (rollbackError) {
-        getLog().error({ err: rollbackError as Error }, 'transaction_rollback_failed');
+        getLog().error({ err: rollbackError as Error }, 'db.postgres_transaction_rollback_failed');
       }
       throw e;
     } finally {
