@@ -313,6 +313,57 @@ describe('workflowRunCommand', () => {
       })
     );
   });
+
+  it('throws when --branch is used with --no-worktree', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows');
+    const conversationDb = await import('@archon/core/db/conversations');
+    const codebaseDb = await import('@archon/core/db/codebases');
+
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [{ name: 'assist', description: 'Help', steps: [] }],
+      errors: [],
+    });
+    (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'conv-123',
+    });
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'cb-123',
+      default_cwd: '/test/path',
+    });
+
+    await expect(
+      workflowRunCommand('/test/path', 'assist', 'hello', {
+        branchName: 'test-branch',
+        noWorktree: true,
+      })
+    ).rejects.toThrow('--branch and --no-worktree are mutually exclusive');
+  });
+
+  it('throws when --from-branch is used with --no-worktree', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows');
+    const conversationDb = await import('@archon/core/db/conversations');
+    const codebaseDb = await import('@archon/core/db/codebases');
+
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [{ name: 'assist', description: 'Help', steps: [] }],
+      errors: [],
+    });
+    (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'conv-123',
+    });
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'cb-123',
+      default_cwd: '/test/path',
+    });
+
+    await expect(
+      workflowRunCommand('/test/path', 'assist', 'hello', {
+        branchName: 'test-branch',
+        fromBranch: 'main',
+        noWorktree: true,
+      })
+    ).rejects.toThrow('--from/--from-branch has no effect with --no-worktree');
+  });
 });
 
 describe('workflowStatusCommand', () => {

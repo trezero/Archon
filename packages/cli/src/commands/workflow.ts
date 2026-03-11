@@ -221,15 +221,22 @@ export async function workflowRunCommand(
 
     if (options.noWorktree) {
       if (options.fromBranch) {
+        getLog().warn(
+          { branchName: options.branchName, fromBranch: options.fromBranch },
+          'workflow.branch_flag_conflict'
+        );
         throw new Error(
           '--from/--from-branch has no effect with --no-worktree. ' +
             'Remove --from or drop --no-worktree.'
         );
       }
-      // Checkout branch in cwd, no worktree
-      getLog().info({ branch: options.branchName }, 'branch_checkout');
-      await git.checkout(git.toRepoPath(cwd), git.toBranchName(options.branchName));
-      workingCwd = cwd;
+      getLog().warn({ branchName: options.branchName }, 'workflow.branch_no_worktree_conflict');
+      throw new Error(
+        '--branch and --no-worktree are mutually exclusive.\n' +
+          '  --branch creates an isolated worktree (safe).\n' +
+          '  --no-worktree checks out directly in your repo (no isolation).\n' +
+          'Use one or the other.'
+      );
     } else {
       // Create or reuse worktree
       const provider = getIsolationProvider();

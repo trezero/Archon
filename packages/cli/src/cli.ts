@@ -250,6 +250,15 @@ async function main(): Promise<number> {
               console.error('Error: --from/--from-branch requires --branch to be specified.');
               return 1;
             }
+            if (branchName !== undefined && noWorktree) {
+              console.error(
+                'Error: --branch and --no-worktree are mutually exclusive.\n' +
+                  '  --branch creates an isolated worktree (safe).\n' +
+                  '  --no-worktree checks out directly in your repo (no isolation).\n' +
+                  'Use one or the other.'
+              );
+              return 1;
+            }
             // Conditionally construct options to satisfy discriminated union
             const options = branchName !== undefined ? { branchName, fromBranch, noWorktree } : {};
             await workflowRunCommand(effectiveCwd, workflowName, userMessage, options);
