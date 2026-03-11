@@ -107,13 +107,15 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           };
         });
         // REST is the source of truth for all completed messages.
-        // Keep any actively streaming messages (including empty thinking placeholders
-        // that show loading dots while waiting for the first AI response).
+        // Keep actively streaming messages that have content (AI is generating).
+        // Discard empty thinking placeholders — if the server already persisted
+        // messages, any empty placeholder is stale (its lock-release event was
+        // consumed on a previous mount or lost during navigation).
         setMessages(prev => {
           if (prev.length === 0) {
             return hydrated;
           }
-          const activeStreaming = prev.filter(m => m.isStreaming);
+          const activeStreaming = prev.filter(m => m.isStreaming && m.content);
           return [...hydrated, ...activeStreaming];
         });
         setHasSentMessage(true);
