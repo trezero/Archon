@@ -8,7 +8,16 @@ function getLog(): ReturnType<typeof createLogger> {
   return cachedLog;
 }
 
+/** Info returned when a tool call is finalized (so the adapter can emit tool_result SSE). */
+export interface FinalizedToolInfo {
+  toolCallId: string;
+  name: string;
+  duration: number;
+}
+
 interface BufferedToolCall {
+  /** Unique ID within this conversation (conversationId-tool-N) */
+  toolCallId: string;
   name: string;
   input: Record<string, unknown>;
   startedAt: number;
@@ -30,6 +39,8 @@ interface AssistantBuffer {
 export class MessagePersistence {
   private assistantBuffer = new Map<string, AssistantBuffer>();
   private dbIdMap = new Map<string, string>(); // platform_conversation_id → DB UUID
+  /** Per-conversation incrementing counter for unique tool call IDs */
+  private toolCallCounter = new Map<string, number>();
 
   constructor(private emitEvent: (conversationId: string, event: string) => Promise<void>) {}
 
@@ -98,7 +109,7 @@ export class MessagePersistence {
   appendToolCall(
     conversationId: string,
     tool: { name: string; input: Record<string, unknown> }
-  ): void {
+  ): { newToolCallId: string; finalized?: FinalizedToolInfo } {
     // Buffer tool call for persistence (add to current segment)
     const buf = this.assistantBuffer.get(conversationId) ?? { segments: [] };
     if (buf.segments.length === 0) {
@@ -107,16 +118,28 @@ export class MessagePersistence {
     const lastSeg = buf.segments[buf.segments.length - 1];
     // Finalize duration on previous running tool (agent moved on to next tool)
     const now = Date.now();
+    let finalized: FinalizedToolInfo | undefined;
     const prevTool = lastSeg.toolCalls[lastSeg.toolCalls.length - 1];
     if (prevTool && prevTool.duration === undefined) {
       prevTool.duration = now - prevTool.startedAt;
+      finalized = {
+        toolCallId: prevTool.toolCallId,
+        name: prevTool.name,
+        duration: prevTool.duration,
+      };
     }
+    // Generate unique tool call ID
+    const counter = (this.toolCallCounter.get(conversationId) ?? 0) + 1;
+    this.toolCallCounter.set(conversationId, counter);
+    const newToolCallId = `${conversationId}-tool-${String(counter)}`;
     lastSeg.toolCalls.push({
+      toolCallId: newToolCallId,
       name: tool.name,
       input: tool.input,
       startedAt: now,
     });
     this.assistantBuffer.set(conversationId, buf);
+    return { newToolCallId, finalized };
   }
 
   /**
@@ -194,6 +217,26 @@ export class MessagePersistence {
   }
 
   /**
+   * Finalize all running tools in the buffer for a conversation.
+   * Returns info for each finalized tool so the adapter can emit tool_result SSE events.
+   */
+  finalizeRunningTools(conversationId: string): FinalizedToolInfo[] {
+    const buf = this.assistantBuffer.get(conversationId);
+    if (!buf) return [];
+    const now = Date.now();
+    const finalized: FinalizedToolInfo[] = [];
+    for (const seg of buf.segments) {
+      for (const tc of seg.toolCalls) {
+        if (tc.duration === undefined) {
+          tc.duration = now - tc.startedAt;
+          finalized.push({ toolCallId: tc.toolCallId, name: tc.name, duration: tc.duration });
+        }
+      }
+    }
+    return finalized;
+  }
+
+  /**
    * Remove the last segment from the persistence buffer.
    * Called when emitRetract fires so retracted text doesn't get written to DB.
    */
@@ -213,6 +256,7 @@ export class MessagePersistence {
     });
     this.assistantBuffer.delete(conversationId);
     this.dbIdMap.delete(conversationId);
+    this.toolCallCounter.delete(conversationId);
   }
 
   /**
@@ -251,5 +295,6 @@ export class MessagePersistence {
   clearAll(): void {
     this.assistantBuffer.clear();
     this.dbIdMap.clear();
+    this.toolCallCounter.clear();
   }
 }

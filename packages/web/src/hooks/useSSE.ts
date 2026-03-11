@@ -30,8 +30,8 @@ function parseSSEEvent(raw: string): SSEEvent | null {
 
 interface SSEHandlers {
   onText: (content: string, workflowResult?: { workflowName: string; runId: string }) => void;
-  onToolCall: (name: string, input: Record<string, unknown>) => void;
-  onToolResult: (name: string, output: string, duration: number) => void;
+  onToolCall: (name: string, input: Record<string, unknown>, toolCallId?: string) => void;
+  onToolResult: (name: string, output: string, duration: number, toolCallId?: string) => void;
   onError: (error: ErrorDisplay) => void;
   onLockChange: (locked: boolean, queuePosition?: number) => void;
   onSessionInfo: (sessionId: string, cost?: number) => void;
@@ -134,7 +134,7 @@ export function useSSE(
               }
               flushText();
             }
-            h.onToolCall(data.name, data.input);
+            h.onToolCall(data.name, data.input, data.toolCallId);
             break;
           case 'tool_result':
             // Flush buffered text before tool result too
@@ -145,7 +145,7 @@ export function useSSE(
               }
               flushText();
             }
-            h.onToolResult(data.name, data.output, data.duration);
+            h.onToolResult(data.name, data.output, data.duration, data.toolCallId);
             break;
           case 'error':
             h.onError({

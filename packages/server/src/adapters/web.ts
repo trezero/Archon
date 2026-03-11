@@ -82,13 +82,27 @@ export class WebAdapter implements IWebPlatformAdapter {
     let event: string;
 
     if (chunk.type === 'tool' && chunk.toolName) {
-      this.persistence.appendToolCall(conversationId, {
+      const { newToolCallId, finalized } = this.persistence.appendToolCall(conversationId, {
         name: chunk.toolName,
         input: chunk.toolInput ?? {},
       });
 
+      // Emit tool_result for the previous tool that was just finalized
+      if (finalized) {
+        const resultEvent = JSON.stringify({
+          type: 'tool_result',
+          toolCallId: finalized.toolCallId,
+          name: finalized.name,
+          output: '',
+          duration: finalized.duration,
+          timestamp: Date.now(),
+        });
+        await this.transport.emit(conversationId, resultEvent);
+      }
+
       event = JSON.stringify({
         type: 'tool_call',
+        toolCallId: newToolCallId,
         name: chunk.toolName,
         input: chunk.toolInput ?? {},
         timestamp: Date.now(),
@@ -145,6 +159,21 @@ export class WebAdapter implements IWebPlatformAdapter {
    */
   emitLockEvent(conversationId: string, locked: boolean, queuePosition?: number): void {
     if (!locked) {
+      // Finalize all running tools and emit tool_result for each before lock release
+      const finalized = this.persistence.finalizeRunningTools(conversationId);
+      for (const tool of finalized) {
+        const resultEvent = JSON.stringify({
+          type: 'tool_result',
+          toolCallId: tool.toolCallId,
+          name: tool.name,
+          output: '',
+          duration: tool.duration,
+          timestamp: Date.now(),
+        });
+        this.transport.emit(conversationId, resultEvent).catch((e: unknown) => {
+          getLog().error({ conversationId, err: e }, 'tool_result_emit_failed');
+        });
+      }
       this.persistence.flush(conversationId).catch((e: unknown) => {
         getLog().error({ conversationId, err: e }, 'lock_release_flush_failed');
       });

@@ -288,47 +288,73 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     []
   );
 
-  const onToolCall = useCallback((name: string, input: Record<string, unknown>): void => {
-    setMessages(prev => {
-      const last = prev[prev.length - 1];
-      if (last?.role === 'assistant') {
-        const now = Date.now();
-        // Mark any previous running tools as complete (agent moved on)
-        const updatedExistingTools = (last.toolCalls ?? []).map(tc =>
-          !tc.output && tc.duration === undefined ? { ...tc, duration: now - tc.startedAt } : tc
-        );
-        const newTool: ToolCallDisplay = {
-          id: `${last.id}-tool-${String(updatedExistingTools.length)}`,
-          name,
-          input,
-          startedAt: now,
-          isExpanded: false,
-        };
-        return [
-          ...prev.slice(0, -1),
-          {
-            ...last,
-            isStreaming: false,
-            toolCalls: [...updatedExistingTools, newTool],
-          },
-        ];
-      }
-      return prev;
-    });
-  }, []);
+  const onToolCall = useCallback(
+    (name: string, input: Record<string, unknown>, toolCallId?: string): void => {
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.role === 'assistant') {
+          const now = Date.now();
+          // Mark any previous running tools as complete (agent moved on)
+          const updatedExistingTools = (last.toolCalls ?? []).map(tc =>
+            !tc.output && tc.duration === undefined ? { ...tc, duration: now - tc.startedAt } : tc
+          );
+          const newTool: ToolCallDisplay = {
+            id: toolCallId ?? `${last.id}-tool-${String(updatedExistingTools.length)}`,
+            name,
+            input,
+            startedAt: now,
+            isExpanded: false,
+          };
+          return [
+            ...prev.slice(0, -1),
+            {
+              ...last,
+              isStreaming: false,
+              toolCalls: [...updatedExistingTools, newTool],
+            },
+          ];
+        }
+        return prev;
+      });
+    },
+    []
+  );
 
-  const onToolResult = useCallback((name: string, output: string, duration: number): void => {
-    setMessages(prev => {
-      const last = prev[prev.length - 1];
-      if (last?.role === 'assistant' && last.toolCalls) {
-        const updatedTools = last.toolCalls.map(tc =>
-          tc.name === name && !tc.output ? { ...tc, output, duration } : tc
-        );
-        return [...prev.slice(0, -1), { ...last, toolCalls: updatedTools }];
-      }
-      return prev;
-    });
-  }, []);
+  const onToolResult = useCallback(
+    (name: string, output: string, duration: number, toolCallId?: string): void => {
+      setMessages(prev => {
+        // Search all messages (not just last) — tool_result may arrive after a text message
+        let targetIdx = -1;
+        for (let i = prev.length - 1; i >= 0; i--) {
+          if (prev[i].role === 'assistant' && prev[i].toolCalls?.length) {
+            // Match by toolCallId if available, otherwise fall back to name-based matching
+            const hasMatch = prev[i].toolCalls?.some(
+              tc =>
+                (toolCallId ? tc.id === toolCallId : tc.name === name) && tc.duration === undefined
+            );
+            if (hasMatch) {
+              targetIdx = i;
+              break;
+            }
+          }
+        }
+        if (targetIdx === -1) return prev;
+        const msg = prev[targetIdx];
+        const updatedTools = msg.toolCalls?.map(tc => {
+          if (toolCallId ? tc.id === toolCallId : tc.name === name && tc.duration === undefined) {
+            return { ...tc, output: output || tc.output, duration };
+          }
+          return tc;
+        });
+        return [
+          ...prev.slice(0, targetIdx),
+          { ...msg, toolCalls: updatedTools },
+          ...prev.slice(targetIdx + 1),
+        ];
+      });
+    },
+    []
+  );
 
   const onError = useCallback((error: ErrorDisplay): void => {
     setMessages(prev => {
