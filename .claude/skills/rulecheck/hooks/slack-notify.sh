@@ -10,7 +10,10 @@
 
 INPUT=$(cat)
 
-SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/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}"
+if [ -z "$SLACK_WEBHOOK_URL" ]; then
+  # No webhook configured — skip notification silently
+  exit 0
+fi
 
 # Extract the last assistant message from the stop event
 LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null)
