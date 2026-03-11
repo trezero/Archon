@@ -545,13 +545,17 @@ async function handleStreamMode(
     if (msg.type === 'assistant' && msg.content) {
       if (!commandDetected) {
         allMessages.push(msg.content);
-        await platform.sendMessage(conversationId, msg.content);
         const accumulated = allMessages.join('');
+        // Check for orchestrator commands BEFORE streaming to frontend.
+        // If detected, suppress this chunk and all future chunks — the full
+        // response will be parsed post-loop and the command dispatched there.
         if (
           /^\/invoke-workflow\s/m.test(accumulated) ||
           /^\/register-project\s/m.test(accumulated)
         ) {
           commandDetected = true;
+        } else {
+          await platform.sendMessage(conversationId, msg.content);
         }
       }
     } else if (msg.type === 'tool' && msg.toolName) {

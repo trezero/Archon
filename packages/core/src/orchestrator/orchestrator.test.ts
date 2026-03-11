@@ -755,8 +755,103 @@ describe('orchestrator-agent handleMessage', () => {
 
       // Should dispatch the workflow
       expect(mockValidateAndResolveIsolation).toHaveBeenCalled();
-      // Extra assistant message should NOT have been sent to platform
+      // The /invoke-workflow chunk itself should NOT be streamed to the frontend
+      expect(platform.sendMessage).not.toHaveBeenCalledWith(
+        'chat-456',
+        '/invoke-workflow fix-bug --project test-project'
+      );
+      // Subsequent chunks should also NOT be sent
       expect(platform.sendMessage).not.toHaveBeenCalledWith('chat-456', 'This should not appear');
+    });
+
+    test('streams prefix text but not the /invoke-workflow chunk', async () => {
+      mockListCodebases.mockResolvedValue([mockCodebase]);
+      mockDiscoverWorkflows.mockResolvedValue({ workflows: testWorkflows, errors: [] });
+      mockFindWorkflow.mockImplementation(
+        (name: string, workflows: readonly WorkflowDefinition[]) =>
+          workflows.find(w => w.name === name)
+      );
+
+      mockClient.sendQuery.mockImplementation(async function* () {
+        // First chunk: user-visible explanation text - should be streamed
+        yield { type: 'assistant', content: "I'll help with that." };
+        // Second chunk: the command - should NOT be streamed
+        yield {
+          type: 'assistant',
+          content: '\n/invoke-workflow fix-bug --project test-project',
+        };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'fix the bug');
+
+      // Prefix text streamed to platform
+      expect(platform.sendMessage).toHaveBeenCalledWith('chat-456', "I'll help with that.");
+      // Command chunk NOT sent
+      expect(platform.sendMessage).not.toHaveBeenCalledWith(
+        'chat-456',
+        '\n/invoke-workflow fix-bug --project test-project'
+      );
+      // Workflow should be dispatched
+      expect(mockValidateAndResolveIsolation).toHaveBeenCalled();
+    });
+
+    test('suppresses /register-project chunk in stream mode', async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockListCodebases.mockResolvedValue([]);
+      mockCreateCodebase.mockResolvedValue({
+        id: 'new-id',
+        name: 'my-app',
+        default_cwd: '/home/user/my-app',
+      });
+
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield {
+          type: 'assistant',
+          content: '/register-project my-app /home/user/my-app',
+        };
+        yield { type: 'assistant', content: 'This should not appear' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'set up my app');
+
+      // The /register-project chunk itself should NOT be streamed
+      expect(platform.sendMessage).not.toHaveBeenCalledWith(
+        'chat-456',
+        '/register-project my-app /home/user/my-app'
+      );
+      // Subsequent chunks should also NOT be sent
+      expect(platform.sendMessage).not.toHaveBeenCalledWith('chat-456', 'This should not appear');
+    });
+
+    test('sends partial command text when command is split across chunks', async () => {
+      mockListCodebases.mockResolvedValue([mockCodebase]);
+      mockDiscoverWorkflows.mockResolvedValue({ workflows: testWorkflows, errors: [] });
+      mockFindWorkflow.mockImplementation(
+        (name: string, workflows: readonly WorkflowDefinition[]) =>
+          workflows.find(w => w.name === name)
+      );
+
+      mockClient.sendQuery.mockImplementation(async function* () {
+        // Chunk 1: partial command — does not match regex yet, so it IS sent
+        yield { type: 'assistant', content: '/invoke-work' };
+        // Chunk 2: completes the command — accumulated string matches, NOT sent
+        yield { type: 'assistant', content: 'flow fix-bug --project test-project' };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'fix the bug');
+
+      // Partial chunk is sent (pre-existing behavior: detection fires on accumulated text)
+      expect(platform.sendMessage).toHaveBeenCalledWith('chat-456', '/invoke-work');
+      // Completing chunk is NOT sent
+      expect(platform.sendMessage).not.toHaveBeenCalledWith(
+        'chat-456',
+        'flow fix-bug --project test-project'
+      );
+      // Workflow is still dispatched
+      expect(mockValidateAndResolveIsolation).toHaveBeenCalled();
     });
   });
 
