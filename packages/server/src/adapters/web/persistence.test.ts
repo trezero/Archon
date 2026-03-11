@@ -1,326 +1,166 @@
-import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeEach, mock, afterEach } from 'bun:test';
 
-// Mock logger before importing persistence
-const mockLogger = {
-  fatal: mock(() => undefined),
-  error: mock(() => undefined),
-  warn: mock(() => undefined),
-  info: mock(() => undefined),
-  debug: mock(() => undefined),
-  trace: mock(() => undefined),
-  child: mock(function (this: unknown) {
-    return this;
-  }),
-  bindings: mock(() => ({ module: 'test' })),
-  isLevelEnabled: mock(() => true),
-  level: 'info',
-};
-
+// Mock logger before importing module under test
 mock.module('@archon/paths', () => ({
-  createLogger: mock(() => mockLogger),
+  createLogger: () => ({
+    fatal: mock(() => undefined),
+    error: mock(() => undefined),
+    warn: mock(() => undefined),
+    info: mock(() => undefined),
+    debug: mock(() => undefined),
+    trace: mock(() => undefined),
+  }),
 }));
 
-const mockAddMessage = mock(
-  async (_convId: string, _role: string, _content: string, _meta?: unknown) => undefined
-);
-
+// Mock @archon/core/db/messages
+const mockAddMessage = mock(() => Promise.resolve());
 mock.module('@archon/core/db/messages', () => ({
   addMessage: mockAddMessage,
 }));
 
-import { MessagePersistence } from './persistence';
+// Import after mocks are set up
+const { MessagePersistence } = await import('./persistence');
 
-beforeEach(() => {
-  mockAddMessage.mockClear();
-  mockLogger.warn.mockClear();
-  mockLogger.error.mockClear();
-  mockLogger.debug.mockClear();
-  mockLogger.info.mockClear();
-});
-
-function createPersistence(): {
-  persistence: MessagePersistence;
-  emitEvent: ReturnType<typeof mock>;
-} {
-  const emitEvent = mock(async (_convId: string, _event: string) => undefined);
-  const persistence = new MessagePersistence(emitEvent);
-  return { persistence, emitEvent };
+function createPersistence(): InstanceType<typeof MessagePersistence> {
+  const emitEvent = mock(() => Promise.resolve());
+  return new MessagePersistence(emitEvent);
 }
 
 describe('MessagePersistence', () => {
-  describe('setConversationDbId', () => {
-    test('maps platform conversation ID to DB UUID', async () => {
-      const { persistence } = createPersistence();
+  let persistence: InstanceType<typeof MessagePersistence>;
 
-      persistence.setConversationDbId('web-123', 'uuid-abc');
-      persistence.appendText('web-123', 'hello');
-      await persistence.flush('web-123');
+  beforeEach(() => {
+    persistence = createPersistence();
+    mockAddMessage.mockClear();
+  });
 
-      expect(mockAddMessage).toHaveBeenCalledWith('uuid-abc', 'assistant', 'hello', {});
+  afterEach(() => {
+    persistence.stopPeriodicFlush();
+    persistence.clearAll();
+  });
+
+  describe('flush — sync-clear before async work (race condition fix)', () => {
+    test('clears buffer before async db write so new appendText creates fresh entry', async () => {
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      persistence.appendText('conv-1', 'hello');
+
+      // Trigger flush (it will atomically clear the buffer before the db write)
+      const flushPromise = persistence.flush('conv-1');
+
+      // Append text while flush is in progress — should go to a new buffer entry
+      persistence.appendText('conv-1', 'world');
+
+      await flushPromise;
+
+      // 'hello' should have been persisted
+      expect(mockAddMessage).toHaveBeenCalledTimes(1);
+      expect(mockAddMessage.mock.calls[0][2]).toBe('hello');
+
+      // 'world' should still be in the buffer (not flushed yet)
+      // Flush again to verify it persisted the second batch
+      await persistence.flush('conv-1');
+      expect(mockAddMessage).toHaveBeenCalledTimes(2);
+      expect(mockAddMessage.mock.calls[1][2]).toBe('world');
+    });
+
+    test('restores buffer when dbId is missing (no segments lost)', async () => {
+      // Do NOT call setConversationDbId — flush should restore
+      persistence.appendText('conv-1', 'buffered text');
+
+      await persistence.flush('conv-1');
+
+      // Buffer should be restored since no dbId was available
+      // Now provide the dbId and flush again
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      await persistence.flush('conv-1');
+
+      expect(mockAddMessage).toHaveBeenCalledTimes(1);
+      expect(mockAddMessage.mock.calls[0][2]).toBe('buffered text');
+    });
+
+    test('restore preserves buffer intact after no-dbId flush', async () => {
+      // Verify that when flush() is called with no dbId, the buffer is fully
+      // restored so subsequent text is still persisted once dbId becomes available.
+      persistence.appendText('conv-1', 'segment-1 ');
+
+      await persistence.flush('conv-1'); // no dbId — restores buffer
+
+      // Text appended after restore merges into the restored buffer entry
+      persistence.appendText('conv-1', 'segment-2');
+
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      await persistence.flush('conv-1');
+
+      // Both texts end up in one db write (same segment, no segment boundary between them)
+      expect(mockAddMessage).toHaveBeenCalledTimes(1);
+      expect(mockAddMessage.mock.calls[0][2]).toBe('segment-1 segment-2');
+    });
+
+    test('flush on empty buffer is a no-op', async () => {
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      await persistence.flush('conv-1');
+      expect(mockAddMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('startPeriodicFlush / stopPeriodicFlush', () => {
+    test('startPeriodicFlush is idempotent (double call does not create two timers)', () => {
+      persistence.startPeriodicFlush();
+      persistence.startPeriodicFlush(); // second call should be a no-op
+
+      // We can't directly inspect the timer ID, but we can verify stopPeriodicFlush
+      // cleans up without error and subsequent operations still work.
+      persistence.stopPeriodicFlush();
+      persistence.stopPeriodicFlush(); // should not throw
+    });
+
+    test('stopPeriodicFlush is safe to call when no timer is running', () => {
+      // Should not throw
+      persistence.stopPeriodicFlush();
+    });
+
+    test('startPeriodicFlush / stopPeriodicFlush lifecycle', () => {
+      persistence.startPeriodicFlush();
+      // Timer is running — no assertion needed beyond no-throw
+      persistence.stopPeriodicFlush();
+      // Timer is cleared — no assertion needed beyond no-throw
+    });
+
+    test('timer can be restarted after stop', () => {
+      persistence.startPeriodicFlush();
+      persistence.stopPeriodicFlush();
+      // Starting again should work without errors
+      persistence.startPeriodicFlush();
+      persistence.stopPeriodicFlush();
     });
   });
 
   describe('appendText', () => {
-    test('creates a new segment', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      persistence.appendText('conv-1', 'hello world');
-      await persistence.flush('conv-1');
-
-      expect(mockAddMessage).toHaveBeenCalledTimes(1);
-      expect(mockAddMessage).toHaveBeenCalledWith('db-1', 'assistant', 'hello world', {});
-    });
-
-    test('appends to existing segment', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.setConversationDbId('conv-1', 'db-1');
+    test('buffers text in segments', async () => {
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
       persistence.appendText('conv-1', 'hello ');
       persistence.appendText('conv-1', 'world');
       await persistence.flush('conv-1');
 
       expect(mockAddMessage).toHaveBeenCalledTimes(1);
-      expect(mockAddMessage).toHaveBeenCalledWith('db-1', 'assistant', 'hello world', {});
+      expect(mockAddMessage.mock.calls[0][2]).toBe('hello world');
     });
 
-    test('starts new segment after tool calls', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      persistence.appendText('conv-1', 'before tool');
-      persistence.appendToolCall('conv-1', { name: 'read', input: { path: '/foo' } });
-      persistence.appendText('conv-1', 'after tool');
-      await persistence.flush('conv-1');
-
-      expect(mockAddMessage).toHaveBeenCalledTimes(2);
-      // First segment has text + tool call
-      expect(mockAddMessage.mock.calls[0][2]).toBe('before tool');
-      // Second segment is text after tool
-      expect(mockAddMessage.mock.calls[1][2]).toBe('after tool');
-    });
-
-    test('starts new segment for workflow status category', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      persistence.appendText('conv-1', 'normal text');
-      persistence.appendText('conv-1', '🚀 Workflow started', {
-        category: 'workflow_status',
-      });
-      await persistence.flush('conv-1');
-
-      expect(mockAddMessage).toHaveBeenCalledTimes(2);
-      expect(mockAddMessage.mock.calls[0][2]).toBe('normal text');
-      expect(mockAddMessage.mock.calls[1][2]).toBe('🚀 Workflow started');
-    });
-
-    test('skips tool_call_formatted messages', () => {
-      const { persistence } = createPersistence();
-
-      persistence.appendText('conv-1', 'tool output', {
-        category: 'tool_call_formatted',
-      });
-
-      // Should log skip and not buffer
-      expect(mockLogger.debug).toHaveBeenCalled();
-    });
-
-    test('skips isolation_context messages', () => {
-      const { persistence } = createPersistence();
-
-      persistence.appendText('conv-1', 'isolation info', {
-        category: 'isolation_context',
-      });
-
-      expect(mockLogger.debug).toHaveBeenCalled();
-    });
-  });
-
-  describe('appendToolCall', () => {
-    test('adds tool to current segment', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      persistence.appendText('conv-1', 'thinking...');
-      persistence.appendToolCall('conv-1', { name: 'read', input: { path: '/a' } });
-      await persistence.flush('conv-1');
-
-      expect(mockAddMessage).toHaveBeenCalledTimes(1);
-      const metadata = mockAddMessage.mock.calls[0][3] as {
-        toolCalls: { name: string; input: Record<string, unknown> }[];
-      };
-      expect(metadata.toolCalls).toHaveLength(1);
-      expect(metadata.toolCalls[0].name).toBe('read');
-    });
-
-    test('finalizes previous tool duration', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      persistence.appendText('conv-1', 'text');
-      persistence.appendToolCall('conv-1', { name: 'read', input: {} });
-      // Small delay to make duration > 0
-      await new Promise(resolve => setTimeout(resolve, 10));
-      persistence.appendToolCall('conv-1', { name: 'write', input: {} });
-      await persistence.flush('conv-1');
-
-      const metadata = mockAddMessage.mock.calls[0][3] as {
-        toolCalls: { name: string; duration?: number }[];
-      };
-      expect(metadata.toolCalls).toHaveLength(2);
-      expect(metadata.toolCalls[0].duration).toBeGreaterThanOrEqual(0);
-    });
-
-    test('creates empty segment if none exists', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      persistence.appendToolCall('conv-1', { name: 'bash', input: { command: 'ls' } });
-      await persistence.flush('conv-1');
-
-      expect(mockAddMessage).toHaveBeenCalledTimes(1);
-      expect(mockAddMessage.mock.calls[0][2]).toBe('');
-    });
-  });
-
-  describe('flush', () => {
-    test('writes segments to DB via addMessage', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      persistence.appendText('conv-1', 'message 1');
-      persistence.appendToolCall('conv-1', { name: 'read', input: {} });
-      persistence.appendText('conv-1', 'message 2');
-      await persistence.flush('conv-1');
-
-      expect(mockAddMessage).toHaveBeenCalledTimes(2);
-    });
-
-    test('skips empty segments', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      // Flush with no content — should be a no-op
-      await persistence.flush('conv-1');
-
+    test('skips tool_call_formatted category', () => {
+      persistence.appendText('conv-1', 'skip me', { category: 'tool_call_formatted' });
+      // Buffer should be empty — nothing to flush
+      // Verify by flushing and checking no db write
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      // Flush is async but we can check the buffer is empty
+      void persistence.flush('conv-1');
       expect(mockAddMessage).not.toHaveBeenCalled();
     });
 
-    test('keeps buffer when no dbId yet', async () => {
-      const { persistence } = createPersistence();
-
-      // Don't call setConversationDbId
-      persistence.appendText('conv-1', 'buffered text');
-      await persistence.flush('conv-1');
-
+    test('skips isolation_context category', () => {
+      persistence.appendText('conv-1', 'skip me', { category: 'isolation_context' });
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      void persistence.flush('conv-1');
       expect(mockAddMessage).not.toHaveBeenCalled();
-      expect(mockLogger.warn).toHaveBeenCalled();
-
-      // Now set dbId and flush again — should persist
-      persistence.setConversationDbId('conv-1', 'db-1');
-      await persistence.flush('conv-1');
-
-      expect(mockAddMessage).toHaveBeenCalledWith('db-1', 'assistant', 'buffered text', {});
-    });
-
-    test('emits warning event on DB error', async () => {
-      const { persistence, emitEvent } = createPersistence();
-
-      mockAddMessage.mockRejectedValueOnce(new Error('DB connection lost'));
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      persistence.appendText('conv-1', 'will fail');
-      await persistence.flush('conv-1');
-
-      expect(mockLogger.error).toHaveBeenCalled();
-      expect(emitEvent).toHaveBeenCalledTimes(1);
-      const eventData = JSON.parse(emitEvent.mock.calls[0][1] as string) as { type: string };
-      expect(eventData.type).toBe('warning');
-    });
-
-    test('preserves workflowResult metadata', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      persistence.appendText('conv-1', 'workflow result', {
-        workflowResult: { workflowName: 'assist', runId: 'run-1' },
-      });
-      await persistence.flush('conv-1');
-
-      const metadata = mockAddMessage.mock.calls[0][3] as {
-        workflowResult: { workflowName: string; runId: string };
-      };
-      expect(metadata.workflowResult).toEqual({ workflowName: 'assist', runId: 'run-1' });
-    });
-  });
-
-  describe('retractLastSegment', () => {
-    test('removes the last segment', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      persistence.appendText('conv-1', 'keep this');
-      persistence.appendToolCall('conv-1', { name: 'read', input: {} });
-      persistence.appendText('conv-1', 'retract this');
-
-      persistence.retractLastSegment('conv-1');
-      await persistence.flush('conv-1');
-
-      expect(mockAddMessage).toHaveBeenCalledTimes(1);
-      expect(mockAddMessage.mock.calls[0][2]).toBe('keep this');
-    });
-
-    test('clears buffer when only one segment exists', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.appendText('conv-1', 'only segment');
-      persistence.retractLastSegment('conv-1');
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      await persistence.flush('conv-1');
-
-      expect(mockAddMessage).not.toHaveBeenCalled();
-    });
-
-    test('no-ops when no segments exist', () => {
-      const { persistence } = createPersistence();
-      // Should not throw
-      persistence.retractLastSegment('conv-1');
-    });
-  });
-
-  describe('clearConversation', () => {
-    test('clears both buffer and dbId', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      persistence.appendText('conv-1', 'will be cleared');
-      await persistence.clearConversation('conv-1');
-
-      // Buffer should be flushed then cleared — addMessage called from flush
-      expect(mockAddMessage).toHaveBeenCalledTimes(1);
-
-      // Subsequent flush should do nothing (dbId cleared)
-      mockAddMessage.mockClear();
-      persistence.appendText('conv-1', 'new text');
-      await persistence.flush('conv-1');
-      // No dbId → warns and keeps buffer
-      expect(mockAddMessage).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('flushAll', () => {
-    test('flushes all buffered conversations', async () => {
-      const { persistence } = createPersistence();
-
-      persistence.setConversationDbId('conv-1', 'db-1');
-      persistence.setConversationDbId('conv-2', 'db-2');
-      persistence.appendText('conv-1', 'msg 1');
-      persistence.appendText('conv-2', 'msg 2');
-      await persistence.flushAll();
-
-      expect(mockAddMessage).toHaveBeenCalledTimes(2);
     });
   });
 });

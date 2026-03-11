@@ -2112,6 +2112,7 @@ export async function executeWorkflow(
           undefined,
           { category: 'workflow_status', segment: 'new' }
         );
+        lastActivityUpdate.delete(workflowRun.id);
         return { success: false, workflowRunId: workflowRun.id, error: 'Workflow cancelled' };
       }
 
@@ -2216,6 +2217,7 @@ export async function executeWorkflow(
               );
             });
           emitter.unregisterRun(workflowRun.id);
+          lastActivityUpdate.delete(workflowRun.id);
 
           // Record failure in database (non-critical - log but don't prevent user notification)
           try {
@@ -2364,6 +2366,7 @@ export async function executeWorkflow(
               );
             });
           emitter.unregisterRun(workflowRun.id);
+          lastActivityUpdate.delete(workflowRun.id);
 
           // Record failure in database (non-critical - log but don't prevent user notification)
           try {
