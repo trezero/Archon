@@ -128,9 +128,11 @@ export class WebAdapter implements IWebPlatformAdapter {
   async start(): Promise<void> {
     this.workflowBridge.start();
     this.transport.start();
+    this.persistence.startPeriodicFlush();
   }
 
   async stop(): Promise<void> {
+    this.persistence.stopPeriodicFlush();
     await this.persistence.flushAll();
     this.transport.stop();
     this.workflowBridge.stop();

@@ -1,6 +1,6 @@
 import { Component } from 'react';
 import type { ReactNode, ErrorInfo } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from '@/components/layout/Layout';
 import { ProjectProvider } from '@/contexts/ProjectContext';
@@ -82,6 +82,7 @@ export function App(): React.ReactElement {
                 <Route path="/workflows" element={<WorkflowsPage />} />
                 <Route path="/workflows/builder" element={<WorkflowBuilderPage />} />
                 <Route path="/workflows/runs/:runId" element={<WorkflowExecutionPage />} />
+                <Route path="/workflows/runs" element={<Navigate to="/workflows" replace />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Route>
             </Routes>

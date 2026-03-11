@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { MessageSquare } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -9,6 +9,7 @@ import { ArtifactSummary } from './ArtifactSummary';
 import { useWorkflowStatus } from '@/hooks/useWorkflowStatus';
 import { getWorkflowRun, getWorkflowRunByWorker, getCodebase } from '@/lib/api';
 import type { WorkflowState, ArtifactType, WorkflowRunStatus } from '@/lib/types';
+import type { WorkflowEventResponse } from '@/lib/api';
 
 function ensureUtc(timestamp: string): string {
   return timestamp.endsWith('Z') ? timestamp : timestamp + 'Z';
@@ -25,6 +26,7 @@ interface WorkflowRunQueryData {
   workerPlatformId: string | null;
   parentPlatformId: string | null;
   codebaseId: string | null;
+  events: WorkflowEventResponse[];
 }
 
 interface WorkflowExecutionProps {
@@ -130,6 +132,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
         workerPlatformId: data.run.worker_platform_id ?? null,
         parentPlatformId: data.run.parent_platform_id ?? null,
         codebaseId: data.run.codebase_id ?? null,
+        events: data.events,
       };
     },
     refetchInterval: (query): number | false => {
@@ -239,6 +242,60 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
     };
   }, [workflow?.status]);
 
+  // Compute formatted log lines for the selected step from DB events
+  const stepLogLines = useMemo((): string[] => {
+    const events = queryData?.events ?? [];
+    const stepEvents = events.filter(e => e.step_index === selectedStep);
+    if (stepEvents.length === 0) return [];
+
+    return stepEvents.map(e => {
+      const ts = new Date(e.created_at).toLocaleTimeString();
+      switch (e.event_type) {
+        case 'step_started':
+          return `[${ts}] Step started: ${e.step_name ?? `step ${String(selectedStep + 1)}`}`;
+        case 'step_completed': {
+          const dur = e.data.duration_ms as number | undefined;
+          const durStr = dur !== undefined ? ` (${String(Math.round(dur / 100) / 10)}s)` : '';
+          return `[${ts}] Step completed${durStr}`;
+        }
+        case 'step_failed':
+          return `[${ts}] Step failed: ${(e.data.error as string | undefined) ?? 'Unknown error'}`;
+        case 'step_skipped_prior_success':
+          return `[${ts}] Step skipped (already completed in prior run)`;
+        case 'parallel_agent_started':
+          return `[${ts}] Agent ${String((e.data.agentIndex as number) + 1)}/${String(e.data.totalAgents)}: ${e.step_name ?? 'parallel agent'} started`;
+        case 'parallel_agent_completed': {
+          const dur = e.data.duration_ms as number | undefined;
+          const durStr = dur !== undefined ? ` (${String(Math.round(dur / 100) / 10)}s)` : '';
+          return `[${ts}] Agent ${String((e.data.agentIndex as number) + 1)}/${String(e.data.totalAgents)}: ${e.step_name ?? 'parallel agent'} completed${durStr}`;
+        }
+        case 'parallel_agent_failed':
+          return `[${ts}] Agent ${String((e.data.agentIndex as number) + 1)}/${String(e.data.totalAgents)}: ${e.step_name ?? 'parallel agent'} failed: ${(e.data.error as string | undefined) ?? 'Unknown error'}`;
+        case 'loop_iteration_started':
+          return `[${ts}] Iteration ${String(e.data.iteration)}/${String((e.data.maxIterations as number | undefined) ?? '?')} started`;
+        case 'loop_iteration_completed': {
+          const dur = e.data.duration_ms as number | undefined;
+          const durStr = dur !== undefined ? ` (${String(Math.round(dur / 100) / 10)}s)` : '';
+          return `[${ts}] Iteration ${String(e.data.iteration)} completed${durStr}`;
+        }
+        case 'loop_iteration_failed':
+          return `[${ts}] Iteration ${String(e.data.iteration)} failed: ${(e.data.error as string | undefined) ?? 'Unknown error'}`;
+        // TODO: node_* events have step_index=null so they won't appear in stepLogLines
+        // until DAG-aware log filtering is added (node selection by step_name, not step_index).
+        case 'node_started':
+          return `[${ts}] Node started: ${e.step_name ?? 'node'}`;
+        case 'node_completed':
+          return `[${ts}] Node completed: ${e.step_name ?? 'node'}`;
+        case 'node_failed':
+          return `[${ts}] Node failed: ${e.step_name ?? 'node'}: ${(e.data.error as string | undefined) ?? 'Unknown error'}`;
+        case 'node_skipped':
+          return `[${ts}] Node skipped: ${e.step_name ?? 'node'}`;
+        default:
+          return `[${ts}] ${e.event_type}${e.step_name ? `: ${e.step_name}` : ''}`;
+      }
+    });
+  }, [queryData?.events, selectedStep]);
+
   if (error) {
     return (
       <div className="flex items-center justify-center h-full text-error">
@@ -334,7 +391,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
                 workflowHandlers={workflowHandlers}
               />
             ) : (
-              <StepLogs runId={runId} stepIndex={selectedStep} />
+              <StepLogs runId={runId} stepIndex={selectedStep} lines={stepLogLines} />
             )}
           </div>
           {workflow.status !== 'running' &&

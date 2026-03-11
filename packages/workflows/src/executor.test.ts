@@ -3710,7 +3710,7 @@ describe('Workflow Executor', () => {
     });
 
     describe('activity update failure tracking', () => {
-      it('should warn user after 5 consecutive activity update failures', async () => {
+      it('should warn user after consecutive activity update failures', async () => {
         // Make activity updates fail
         (mockStore.updateWorkflowActivity as ReturnType<typeof mock>).mockRejectedValue(
           new Error('DB connection lost')
@@ -3718,7 +3718,14 @@ describe('Workflow Executor', () => {
 
         (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
 
-        // Generate enough messages to trigger 5+ activity update failures
+        // Advance Date.now() by 11s per token so each message bypasses the 10s throttle
+        let fakeNow = Date.now();
+        const dateNowSpy = spyOn(Date, 'now').mockImplementation(() => {
+          fakeNow += 11_000;
+          return fakeNow;
+        });
+
+        // Generate enough messages to trigger 3+ activity update failures (ACTIVITY_WARNING_THRESHOLD)
         mockSendQuery.mockImplementation(function* () {
           yield { type: 'assistant', content: 'Msg 1' };
           yield { type: 'assistant', content: 'Msg 2' };
@@ -3742,6 +3749,8 @@ describe('Workflow Executor', () => {
           'User message',
           'db-conv-id'
         );
+
+        dateNowSpy.mockRestore();
 
         // Verify the degradation warning was sent
         const sendCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;

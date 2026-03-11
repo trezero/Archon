@@ -100,7 +100,7 @@ export async function sendMessage(
   conversationId: string,
   message: string
 ): Promise<{ accepted: boolean; status: string }> {
-  return fetchJSON(`/api/conversations/${conversationId}/message`, {
+  return fetchJSON(`/api/conversations/${encodeURIComponent(conversationId)}/message`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message }),

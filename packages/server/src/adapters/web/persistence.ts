@@ -30,7 +30,6 @@ interface AssistantBuffer {
 export class MessagePersistence {
   private assistantBuffer = new Map<string, AssistantBuffer>();
   private dbIdMap = new Map<string, string>(); // platform_conversation_id → DB UUID
-  private workerFlushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private emitEvent: (conversationId: string, event: string) => Promise<void>) {}
 
@@ -43,12 +42,12 @@ export class MessagePersistence {
 
   appendText(conversationId: string, message: string, metadata?: MessageMetadata): void {
     if (metadata?.category === 'tool_call_formatted') {
-      getLog().debug({ conversationId }, 'web.persistence_skip_tool_call_formatted');
+      getLog().debug({ conversationId }, 'persistence_skip_tool_call_formatted');
       return;
     }
 
     if (metadata?.category === 'isolation_context') {
-      getLog().debug({ conversationId }, 'web.persistence_skip_isolation_context');
+      getLog().debug({ conversationId }, 'persistence_skip_isolation_context');
       return;
     }
 
@@ -89,38 +88,11 @@ export class MessagePersistence {
 
     // Prevent unbounded buffer growth — force flush if too many segments
     if (buf.segments.length > 50) {
-      getLog().warn(
-        { conversationId, segments: buf.segments.length },
-        'web.assistant_buffer_overflow'
-      );
+      getLog().warn({ conversationId, segments: buf.segments.length }, 'assistant_buffer_overflow');
       this.flush(conversationId).catch((e: unknown) => {
-        getLog().error({ conversationId, err: e }, 'web.buffer_overflow_flush_failed');
+        getLog().error({ conversationId, err: e }, 'buffer_overflow_flush_failed');
       });
     }
-
-    // Worker conversations have no live SSE subscriber — flush eagerly so the
-    // WorkflowLogs REST polling can pick up messages within ~500ms.
-    if (conversationId.startsWith('web-worker-')) {
-      this.scheduleWorkerFlush(conversationId);
-    }
-  }
-
-  /**
-   * Schedule a debounced flush for a worker conversation (~500ms).
-   * Resets on each new appendText so rapid-fire tokens coalesce into one flush.
-   */
-  private scheduleWorkerFlush(conversationId: string): void {
-    const existing = this.workerFlushTimers.get(conversationId);
-    if (existing) clearTimeout(existing);
-    this.workerFlushTimers.set(
-      conversationId,
-      setTimeout(() => {
-        this.workerFlushTimers.delete(conversationId);
-        this.flush(conversationId).catch((e: unknown) => {
-          getLog().error({ conversationId, err: e }, 'web.worker_eager_flush_failed');
-        });
-      }, 500)
-    );
   }
 
   appendToolCall(
@@ -145,11 +117,6 @@ export class MessagePersistence {
       startedAt: now,
     });
     this.assistantBuffer.set(conversationId, buf);
-
-    // Eager flush for worker conversations (same as appendText)
-    if (conversationId.startsWith('web-worker-')) {
-      this.scheduleWorkerFlush(conversationId);
-    }
   }
 
   /**
@@ -158,24 +125,34 @@ export class MessagePersistence {
    * structure as the live streaming view (text+tools interleaving).
    */
   async flush(conversationId: string): Promise<void> {
+    // Snapshot and clear the buffer synchronously before any async work.
+    // This prevents a race where concurrent appendText calls push segments
+    // onto the same buf reference that is mid-flush: once the map entry is
+    // cleared here, new appendText calls create a fresh buffer entry and
+    // those segments won't be dropped when this flush completes.
     const buf = this.assistantBuffer.get(conversationId);
     if (!buf || buf.segments.length === 0) {
       this.assistantBuffer.delete(conversationId);
       return;
     }
+    this.assistantBuffer.delete(conversationId);
 
     const dbId = this.dbIdMap.get(conversationId);
     if (!dbId) {
       getLog().warn(
         { conversationId, segmentCount: buf.segments.length },
-        'web.assistant_persist_no_db_id'
+        'assistant_persist_no_db_id'
       );
-      // Keep buffer — dbId may arrive later (e.g., race with conversation creation)
+      // Restore buffer — dbId may arrive later (e.g., race with conversation creation).
+      // Merge with any segments that arrived since we cleared the map above.
+      const existing = this.assistantBuffer.get(conversationId);
+      if (existing) {
+        existing.segments.unshift(...buf.segments);
+      } else {
+        this.assistantBuffer.set(conversationId, buf);
+      }
       return;
     }
-
-    // Safe to delete now — we have dbId and will persist
-    this.assistantBuffer.delete(conversationId);
 
     // Finalize any remaining tool durations (last tool in each segment)
     const now = Date.now();
@@ -204,7 +181,7 @@ export class MessagePersistence {
         await addMessage(dbId, 'assistant', seg.content, metadata);
       }
     } catch (e: unknown) {
-      getLog().error({ conversationId, err: e }, 'web.message_persistence_failed');
+      getLog().error({ conversationId, err: e }, 'message_persistence_failed');
       void this.emitEvent(
         conversationId,
         JSON.stringify({
@@ -230,15 +207,9 @@ export class MessagePersistence {
   }
 
   async clearConversation(conversationId: string): Promise<void> {
-    // Cancel any pending worker flush timer
-    const timer = this.workerFlushTimers.get(conversationId);
-    if (timer) {
-      clearTimeout(timer);
-      this.workerFlushTimers.delete(conversationId);
-    }
     // Attempt to flush before clearing so buffered messages aren't lost
     await this.flush(conversationId).catch((e: unknown) => {
-      getLog().error({ conversationId, err: e }, 'web.clear_conversation_flush_failed');
+      getLog().error({ conversationId, err: e }, 'clear_conversation_flush_failed');
     });
     this.assistantBuffer.delete(conversationId);
     this.dbIdMap.delete(conversationId);
@@ -250,9 +221,9 @@ export class MessagePersistence {
   async flushAll(): Promise<void> {
     const ids = [...this.assistantBuffer.keys()];
     if (ids.length === 0) return;
-    getLog().info({ count: ids.length }, 'web.flush_all_started');
+    getLog().info({ count: ids.length }, 'flush_all_started');
     await Promise.allSettled(ids.map(id => this.flush(id)));
-    getLog().info({ count: ids.length }, 'web.flush_all_completed');
+    getLog().info({ count: ids.length }, 'flush_all_completed');
   }
 
   private periodicFlushTimer: ReturnType<typeof setInterval> | undefined;
@@ -265,7 +236,7 @@ export class MessagePersistence {
     if (this.periodicFlushTimer) return;
     this.periodicFlushTimer = setInterval(() => {
       this.flushAll().catch((e: unknown) => {
-        getLog().error({ err: e }, 'web.periodic_flush_failed');
+        getLog().error({ err: e }, 'periodic_flush_failed');
       });
     }, 30_000);
   }
@@ -278,8 +249,6 @@ export class MessagePersistence {
   }
 
   clearAll(): void {
-    for (const timer of this.workerFlushTimers.values()) clearTimeout(timer);
-    this.workerFlushTimers.clear();
     this.assistantBuffer.clear();
     this.dbIdMap.clear();
   }

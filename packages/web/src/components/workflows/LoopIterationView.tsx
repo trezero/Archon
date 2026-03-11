@@ -11,7 +11,9 @@ function formatDuration(ms: number): string {
 }
 
 export function LoopIterationView({ workflow }: LoopIterationViewProps): React.ReactElement {
-  const elapsed = (workflow.completedAt ?? Date.now()) - workflow.startedAt;
+  const elapsed = workflow.startedAt
+    ? (workflow.completedAt ?? Date.now()) - workflow.startedAt
+    : 0;
   const current = workflow.currentIteration ?? 0;
   const max = workflow.maxIterations;
 

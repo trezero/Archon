@@ -53,7 +53,9 @@ export function WorkflowProgressCard({
 
   const completedSteps = workflow.steps.filter(s => s.status === 'completed').length;
   const totalSteps = workflow.steps.length;
-  const elapsed = Math.max(0, (workflow.completedAt ?? Date.now()) - workflow.startedAt);
+  const elapsed = workflow.startedAt
+    ? Math.max(0, (workflow.completedAt ?? Date.now()) - workflow.startedAt)
+    : 0;
 
   const handleViewFullScreen = (): void => {
     if (onViewFullScreen) {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { Header } from '@/components/layout/Header';
@@ -144,18 +144,26 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     };
   }, [conversationId, isNewChat]);
 
+  // Memoize dispatch IDs as a joined string so the hydration effect only re-fires
+  // when a new workflow is dispatched, not on every streaming token.
+  const workflowDispatchIds = useMemo(
+    () =>
+      messages
+        .map(m => m.workflowDispatch?.workerConversationId)
+        .filter((id): id is string => Boolean(id))
+        .join(','),
+    [messages]
+  );
+
   // Hydrate workflow status from message metadata when SSE events were missed.
   // workflowDispatch metadata is persisted in DB messages — scan for it after
   // loading history and fetch the workflow run status via REST.
   useEffect(() => {
-    if (isNewChat) return;
-    const dispatches = messages
-      .map(m => m.workflowDispatch)
-      .filter((d): d is NonNullable<typeof d> => d != null);
-    if (dispatches.length === 0) return;
+    if (isNewChat || !workflowDispatchIds) return;
+    const ids = workflowDispatchIds.split(',');
     // Only hydrate the most recent dispatch (typical case: one active workflow per chat)
-    const latest = dispatches[dispatches.length - 1];
-    void getWorkflowRunByWorker(latest.workerConversationId)
+    const latestId = ids[ids.length - 1];
+    void getWorkflowRunByWorker(latestId)
       .then(result => {
         if (!result) return;
         const run = result.run;
@@ -175,11 +183,11 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       })
       .catch((err: unknown) => {
         console.warn('[Chat] Failed to hydrate workflow status from message metadata', {
-          workerConversationId: latest.workerConversationId,
+          workerConversationId: latestId,
           error: err instanceof Error ? err.message : err,
         });
       });
-  }, [messages, isNewChat, hydrateWorkflow]);
+  }, [workflowDispatchIds, isNewChat, hydrateWorkflow]);
 
   // Share conversations cache with sidebar for title/context display
   const { data: conversations, isError: conversationsError } = useQuery<ConversationResponse[]>({

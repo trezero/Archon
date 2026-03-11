@@ -55,6 +55,10 @@ function getLog(): ReturnType<typeof createLogger> {
   return cachedLog;
 }
 
+/** Throttle guard: tracks last updateWorkflowActivity call time per run ID (ms since epoch) */
+const lastActivityUpdate = new Map<string, number>();
+const ACTIVITY_UPDATE_INTERVAL_MS = 10_000;
+
 /** Context for platform message sending */
 interface SendMessageContext {
   workflowId?: string;
@@ -753,29 +757,36 @@ async function executeStepInternal(
       resumeSessionId,
       stepOptions
     )) {
-      // Update activity timestamp with failure tracking
-      try {
-        await deps.store.updateWorkflowActivity(workflowRun.id);
-        activityUpdateFailures = 0;
-      } catch (error) {
-        activityUpdateFailures++;
-        getLog().warn(
-          {
-            err: error as Error,
-            workflowRunId: workflowRun.id,
-            consecutiveFailures: activityUpdateFailures,
-          },
-          'activity_update_failed'
-        );
-        if (activityUpdateFailures >= ACTIVITY_WARNING_THRESHOLD && !activityWarningShown) {
-          activityWarningShown = true;
-          await safeSendMessage(
-            platform,
-            conversationId,
-            '⚠️ Workflow health monitoring degraded. Staleness detection may be unreliable.',
-            messageContext,
-            unknownErrorTracker
+      // Update activity timestamp with failure tracking (throttled to once per 10s)
+      const activityNow = Date.now();
+      if (
+        activityNow - (lastActivityUpdate.get(workflowRun.id) ?? 0) >
+        ACTIVITY_UPDATE_INTERVAL_MS
+      ) {
+        try {
+          lastActivityUpdate.set(workflowRun.id, activityNow);
+          await deps.store.updateWorkflowActivity(workflowRun.id);
+          activityUpdateFailures = 0;
+        } catch (error) {
+          activityUpdateFailures++;
+          getLog().warn(
+            {
+              err: error as Error,
+              workflowRunId: workflowRun.id,
+              consecutiveFailures: activityUpdateFailures,
+            },
+            'activity_update_failed'
           );
+          if (activityUpdateFailures >= ACTIVITY_WARNING_THRESHOLD && !activityWarningShown) {
+            activityWarningShown = true;
+            await safeSendMessage(
+              platform,
+              conversationId,
+              '⚠️ Workflow health monitoring degraded. Staleness detection may be unreliable.',
+              messageContext,
+              unknownErrorTracker
+            );
+          }
         }
       }
 
@@ -1316,29 +1327,36 @@ async function executeLoopWorkflow(
         resumeSessionId,
         iterationOptions
       )) {
-        // Update activity timestamp with failure tracking
-        try {
-          await deps.store.updateWorkflowActivity(workflowRun.id);
-          activityUpdateFailures = 0;
-        } catch (error) {
-          activityUpdateFailures++;
-          getLog().warn(
-            {
-              err: error as Error,
-              workflowRunId: workflowRun.id,
-              consecutiveFailures: activityUpdateFailures,
-            },
-            'activity_update_failed'
-          );
-          if (activityUpdateFailures >= ACTIVITY_WARNING_THRESHOLD && !activityWarningShown) {
-            activityWarningShown = true;
-            await safeSendMessage(
-              platform,
-              conversationId,
-              '⚠️ Workflow health monitoring degraded. Staleness detection may be unreliable.',
-              workflowContext,
-              unknownErrorTracker
+        // Update activity timestamp with failure tracking (throttled to once per 10s)
+        const activityNow = Date.now();
+        if (
+          activityNow - (lastActivityUpdate.get(workflowRun.id) ?? 0) >
+          ACTIVITY_UPDATE_INTERVAL_MS
+        ) {
+          try {
+            lastActivityUpdate.set(workflowRun.id, activityNow);
+            await deps.store.updateWorkflowActivity(workflowRun.id);
+            activityUpdateFailures = 0;
+          } catch (error) {
+            activityUpdateFailures++;
+            getLog().warn(
+              {
+                err: error as Error,
+                workflowRunId: workflowRun.id,
+                consecutiveFailures: activityUpdateFailures,
+              },
+              'activity_update_failed'
             );
+            if (activityUpdateFailures >= ACTIVITY_WARNING_THRESHOLD && !activityWarningShown) {
+              activityWarningShown = true;
+              await safeSendMessage(
+                platform,
+                conversationId,
+                '⚠️ Workflow health monitoring degraded. Staleness detection may be unreliable.',
+                workflowContext,
+                unknownErrorTracker
+              );
+            }
           }
         }
 
@@ -2443,6 +2461,7 @@ export async function executeWorkflow(
           'workflow_event_persist_failed'
         );
       });
+    lastActivityUpdate.delete(workflowRun.id);
     emitter.unregisterRun(workflowRun.id);
 
     // Safety net: Commit any artifacts created during workflow but not yet committed
@@ -2504,6 +2523,7 @@ export async function executeWorkflow(
           'workflow_event_persist_failed'
         );
       });
+    lastActivityUpdate.delete(workflowRun.id);
     emitter.unregisterRun(workflowRun.id);
 
     // Notify user about the failure

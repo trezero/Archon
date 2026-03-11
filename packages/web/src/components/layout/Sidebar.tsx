@@ -124,9 +124,10 @@ export function Sidebar(): React.ReactElement {
     setAddLoading(true);
     setAddError(null);
 
-    // Detect: starts with / or ~ → local path; otherwise → URL
-    const input =
-      trimmed.startsWith('/') || trimmed.startsWith('~') ? { path: trimmed } : { url: trimmed };
+    // Detect: starts with / or ~ or Windows drive letter → local path; otherwise → URL
+    const isLocalPath =
+      trimmed.startsWith('/') || trimmed.startsWith('~') || /^[A-Za-z]:[/\\]/.test(trimmed);
+    const input = isLocalPath ? { path: trimmed } : { url: trimmed };
 
     void addCodebase(input)
       .then(codebase => {
