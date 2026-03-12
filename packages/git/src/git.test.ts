@@ -1530,12 +1530,53 @@ branch refs/heads/feature/auth
       const result = await git.syncRepository('/workspace/repo', 'main');
 
       expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe('unknown');
+      }
       // reset should NOT have been called
       const resetCalls = execSpy.mock.calls.filter((call: unknown[]) => {
         const args = call[1] as string[];
         return args.includes('reset');
       });
       expect(resetCalls).toHaveLength(0);
+    });
+
+    test('returns not_a_repo error when fetch fails with "not a git repository"', async () => {
+      const error = new Error('Command failed') as Error & { stderr?: string };
+      error.stderr = 'fatal: not a git repository (or any parent up to mount point /)';
+      execSpy.mockRejectedValue(error);
+
+      const result = await git.syncRepository('/workspace/repo', 'main');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe('not_a_repo');
+        if (result.error.code === 'not_a_repo') {
+          expect(result.error.path).toBe('/workspace/repo');
+        }
+      }
+    });
+
+    test('returns permission_denied error when fetch fails with "authentication failed"', async () => {
+      execSpy.mockRejectedValue(new Error('fatal: Authentication failed for repository'));
+
+      const result = await git.syncRepository('/workspace/repo', 'main');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe('permission_denied');
+      }
+    });
+
+    test('returns no_space error when fetch fails with "no space"', async () => {
+      execSpy.mockRejectedValue(new Error('error: no space left on device'));
+
+      const result = await git.syncRepository('/workspace/repo', 'main');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe('no_space');
+      }
     });
 
     test('returns branch_not_found for invalid branch in reset', async () => {

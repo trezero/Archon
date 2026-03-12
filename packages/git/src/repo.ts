@@ -180,8 +180,19 @@ export async function syncRepository(
   try {
     await execFileAsync('git', ['fetch', 'origin'], { cwd: repoPath, timeout: 60000 });
   } catch (error) {
-    const err = error as Error;
+    const err = error as Error & { stderr?: string };
+    const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
     getLog().error({ err, repoPath, branch }, 'sync_repository_fetch_failed');
+
+    if (errorText.includes('not a git repository')) {
+      return { ok: false, error: { code: 'not_a_repo', path: repoPath } };
+    }
+    if (errorText.includes('authentication failed') || errorText.includes('could not read')) {
+      return { ok: false, error: { code: 'permission_denied', path: repoPath } };
+    }
+    if (errorText.includes('no space')) {
+      return { ok: false, error: { code: 'no_space', path: repoPath } };
+    }
     return { ok: false, error: { code: 'unknown', message: `Fetch failed: ${err.message}` } };
   }
 
