@@ -23,3 +23,10 @@ export function formatStarted(startedAt: string): string {
     minute: '2-digit',
   });
 }
+
+/** Format a duration in milliseconds as a human-readable string (e.g., "1.2s", "3.5m"). */
+export function formatDurationMs(ms: number): string {
+  if (ms < 1000) return `${String(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60000).toFixed(1)}m`;
+}

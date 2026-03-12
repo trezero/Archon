@@ -8,12 +8,9 @@ import { WorkflowLogs } from './WorkflowLogs';
 import { ArtifactSummary } from './ArtifactSummary';
 import { useWorkflowStatus } from '@/hooks/useWorkflowStatus';
 import { getWorkflowRun, getWorkflowRunByWorker, getCodebase } from '@/lib/api';
+import { ensureUtc, formatDurationMs } from '@/lib/format';
 import type { WorkflowState, ArtifactType, WorkflowRunStatus } from '@/lib/types';
 import type { WorkflowEventResponse } from '@/lib/api';
-
-function ensureUtc(timestamp: string): string {
-  return timestamp.endsWith('Z') ? timestamp : timestamp + 'Z';
-}
 
 const TERMINAL_STATUSES: readonly WorkflowRunStatus[] = ['completed', 'failed', 'cancelled'];
 
@@ -48,12 +45,6 @@ function StatusBadge({ status }: { status: string }): React.ReactElement {
       {status}
     </span>
   );
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${String(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
 }
 
 export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.ReactElement {
@@ -365,7 +356,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
               <span>Run Details</span>
             </button>
           )}
-          <span className="text-xs text-text-secondary">{formatDuration(elapsed)}</span>
+          <span className="text-xs text-text-secondary">{formatDurationMs(elapsed)}</span>
         </div>
       </div>
 

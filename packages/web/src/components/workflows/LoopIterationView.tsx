@@ -1,13 +1,8 @@
+import { formatDurationMs } from '@/lib/format';
 import type { WorkflowState } from '@/lib/types';
 
 interface LoopIterationViewProps {
   workflow: WorkflowState;
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${String(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
 }
 
 export function LoopIterationView({ workflow }: LoopIterationViewProps): React.ReactElement {
@@ -25,7 +20,7 @@ export function LoopIterationView({ workflow }: LoopIterationViewProps): React.R
           Iteration {String(current)}
           {max ? ` of ${String(max)}` : ''}
         </span>
-        <span className="text-xs text-text-secondary">{formatDuration(elapsed)}</span>
+        <span className="text-xs text-text-secondary">{formatDurationMs(elapsed)}</span>
       </div>
 
       {/* Progress bar */}
