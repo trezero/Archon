@@ -140,6 +140,14 @@ export class WebAdapter implements IWebPlatformAdapter {
   }
 
   async start(): Promise<void> {
+    this.workflowBridge.setStepTransitionCallback((workerConversationId: string) => {
+      this.persistence.flush(workerConversationId).catch((e: unknown) => {
+        getLog().error(
+          { conversationId: workerConversationId, err: e },
+          'step_transition_flush_failed'
+        );
+      });
+    });
     this.workflowBridge.start();
     this.transport.start();
     this.persistence.startPeriodicFlush();

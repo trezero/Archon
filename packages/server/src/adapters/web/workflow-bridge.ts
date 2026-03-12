@@ -168,8 +168,18 @@ export function mapWorkflowEvent(event: WorkflowEmitterEvent): string | null {
 export class WorkflowEventBridge {
   private unsubscribeWorkflowEvents: (() => void) | null = null;
   private outputCallbacks = new Map<string, (text: string) => void>();
+  private onStepTransition: ((workerConversationId: string) => void) | null = null;
 
   constructor(private transport: SSETransport) {}
+
+  /**
+   * Register a callback that fires on step transitions (completed/failed).
+   * Used by WebAdapter to flush worker conversation buffers so workflow logs
+   * are persisted promptly instead of waiting for the 30s periodic flush.
+   */
+  setStepTransitionCallback(cb: (workerConversationId: string) => void): void {
+    this.onStepTransition = cb;
+  }
 
   /**
    * Subscribe to WorkflowEventEmitter and forward events to SSE streams.
@@ -209,6 +219,19 @@ export class WorkflowEventBridge {
         if (sseEvent) {
           // Send to parent's stream (not worker's)
           this.transport.emitWorkflowEvent(parentConversationId, sseEvent);
+        }
+        // Flush worker conversation buffer on step transitions so workflow logs
+        // are available via REST immediately, not after the 30s periodic flush.
+        if (
+          this.onStepTransition &&
+          (event.type === 'step_completed' ||
+            event.type === 'step_failed' ||
+            event.type === 'loop_iteration_completed' ||
+            event.type === 'loop_iteration_failed' ||
+            event.type === 'node_completed' ||
+            event.type === 'node_failed')
+        ) {
+          this.onStepTransition(workerConversationId);
         }
       }
     );

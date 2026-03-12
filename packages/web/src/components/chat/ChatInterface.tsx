@@ -23,7 +23,12 @@ import type {
   ErrorDisplay,
   WorkflowDispatchEvent,
 } from '@/lib/types';
-import { getCachedMessages, setCachedMessages } from '@/lib/message-cache';
+import {
+  getCachedMessages,
+  setCachedMessages,
+  isSendInFlight,
+  setSendInFlight,
+} from '@/lib/message-cache';
 import { useProject } from '@/contexts/ProjectContext';
 
 interface ChatInterfaceProps {
@@ -108,14 +113,18 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         });
         // REST is the source of truth for all completed messages.
         // Keep actively streaming messages that have content (AI is generating).
-        // Discard empty thinking placeholders — if the server already persisted
-        // messages, any empty placeholder is stale (its lock-release event was
-        // consumed on a previous mount or lost during navigation).
+        // Discard empty thinking placeholders ONLY if we're not currently sending —
+        // a send in progress means the placeholder was just created for the current
+        // request and should be preserved until the first SSE text event arrives.
+        // Uses a module-level flag (isSendInFlight) rather than a component ref
+        // because navigate() after new-chat creation causes a full remount, and
+        // refs don't survive across mount boundaries.
         setMessages(prev => {
           if (prev.length === 0) {
             return hydrated;
           }
-          const activeStreaming = prev.filter(m => m.isStreaming && m.content);
+          const sendActive = isSendInFlight();
+          const activeStreaming = prev.filter(m => m.isStreaming && (m.content || sendActive));
           return [...hydrated, ...activeStreaming];
         });
         setHasSentMessage(true);
@@ -217,6 +226,9 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
 
   const onText = useCallback(
     (content: string, workflowResult?: { workflowName: string; runId: string }): void => {
+      // First AI text received — the thinking placeholder is about to gain content,
+      // so the hydration merge no longer needs the sendInFlight guard.
+      setSendInFlight(false);
       setMessages(prev => {
         const last = prev[prev.length - 1];
         // Workflow status messages (🚀 start, ✅ complete) should always be their own message
@@ -379,6 +391,8 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     setLocked(isLocked);
     setQueuePosition(position);
     if (!isLocked) {
+      // Lock released — processing is done, clear the sendInFlight guard
+      setSendInFlight(false);
       const now = Date.now();
       // Mark ALL streaming messages as complete and all running tools as finished
       setMessages(prev =>
@@ -502,6 +516,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         isStreaming: true,
       };
       setMessages(prev => [...prev, userMsg, thinkingMsg]);
+      setSendInFlight(true);
       setSending(true);
       setHasSentMessage(true);
 
@@ -525,6 +540,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             classification: 'transient',
             suggestedActions: ['Retry'],
           });
+          setSendInFlight(false);
           setSending(false);
           return;
         }
@@ -542,6 +558,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         }
       } catch (error) {
         console.error('[Chat] Failed to send message', { error });
+        setSendInFlight(false);
         onError({
           message: 'Failed to send message. Please try again.',
           classification: 'transient',
@@ -583,7 +600,12 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       <LockIndicator locked={locked && hasSentMessage} queuePosition={queuePosition} />
       <MessageInput
         onSend={handleSend}
-        disabled={sending || (currentConv != null && currentConv.platform_type !== 'web')}
+        disabled={
+          sending ||
+          locked ||
+          isStreaming ||
+          (currentConv != null && currentConv.platform_type !== 'web')
+        }
         disabledReason={
           currentConv != null && currentConv.platform_type !== 'web'
             ? 'Continuing chats from other platforms in the Web UI is coming soon'
