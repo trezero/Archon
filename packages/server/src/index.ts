@@ -7,6 +7,7 @@
 // Uses dotenv with explicit path so it works from any CWD (worktrees, packages/server/, etc.)
 import { config } from 'dotenv';
 import { resolve } from 'path';
+import { existsSync } from 'fs';
 
 // Resolve from this file's location: packages/server/src/ → ../../.. → repo root
 const envPath = resolve(import.meta.dir, '..', '..', '..', '.env');
@@ -16,6 +17,18 @@ if (dotenvResult.error) {
   // Use console.error since logger depends on env vars (LOG_LEVEL)
   console.error(`Failed to load .env from ${envPath}: ${dotenvResult.error.message}`);
   console.error('Hint: Copy .env.example to .env and configure your credentials.');
+}
+
+// Load ~/.archon/.env for infrastructure config (DATABASE_URL).
+// The CLI loads this file with override: true, so both CLI and server
+// resolve DATABASE_URL from the same source. We only override DATABASE_URL
+// (not PORT, LOG_LEVEL, etc.) to avoid stomping on server-specific config.
+const globalEnvPath = resolve(process.env.HOME ?? '~', '.archon', '.env');
+if (existsSync(globalEnvPath)) {
+  const globalResult = config({ path: globalEnvPath, processEnv: {} });
+  if (globalResult.parsed?.DATABASE_URL) {
+    process.env.DATABASE_URL = globalResult.parsed.DATABASE_URL;
+  }
 }
 
 import { Hono } from 'hono';
