@@ -534,7 +534,7 @@ export class WorktreeProvider implements IIsolationProvider {
       return null;
     });
 
-    await this.syncWorkspaceBeforeCreate(repoPath, worktreeConfig?.baseBranch);
+    const baseBranch = await this.syncWorkspaceBeforeCreate(repoPath, worktreeConfig?.baseBranch);
 
     const worktreeBase = getWorktreeBase(repoPath);
 
@@ -550,7 +550,7 @@ export class WorktreeProvider implements IIsolationProvider {
       await this.createFromPR(request, worktreePath);
     } else {
       // For issues, tasks, threads: create new branch
-      await this.createNewBranch(request, repoPath, worktreePath, branchName);
+      await this.createNewBranch(request, repoPath, worktreePath, branchName, baseBranch);
     }
 
     // Copy git-ignored files based on repo config
@@ -566,33 +566,30 @@ export class WorktreeProvider implements IIsolationProvider {
    *   error if the branch doesn't exist - no silent fallback to default.
    * - If configuredBaseBranch is omitted: Auto-detects the default branch via git.
    *
-   * Non-fatal cases (log and continue):
-   * - Network errors, timeouts (offline mode)
-   * - Uncommitted changes in workspace (skip sync to prevent data loss)
+   * All sync failures are fatal — creating a worktree from an unknown
+   * start-point risks branching from the wrong commit.
    *
-   * Fatal cases (throw to user):
-   * - Configured base branch doesn't exist (user configuration error)
-   * - Permission denied
-   * - Not a git repository
+   * Error classification (for user-facing messages):
+   * - Permission denied → file permission hint
+   * - Not a git repository → workspace integrity hint
+   * - Configured base branch missing → config fix hint
+   * - Network errors, timeouts → connectivity hint
    */
   private async syncWorkspaceBeforeCreate(
     repoPath: RepoPath,
     configuredBaseBranch?: string
-  ): Promise<void> {
+  ): Promise<string> {
     try {
       getLog().debug(
         { repoPath, branch: configuredBaseBranch ?? 'auto-detect' },
         'workspace_sync_starting'
       );
-      const { branch, synced } = await syncWorkspace(
+      const { branch } = await syncWorkspace(
         repoPath,
         configuredBaseBranch ? toBranchName(configuredBaseBranch) : undefined
       );
-      if (synced) {
-        getLog().debug({ repoPath, branch }, 'workspace_synced');
-      } else {
-        getLog().debug({ repoPath }, 'workspace_sync_skipped');
-      }
+      getLog().debug({ repoPath, branch }, 'workspace_synced');
+      return branch;
     } catch (error) {
       const err = error as Error & { code?: string };
       const errorMessage = err.message.toLowerCase();
@@ -612,8 +609,11 @@ export class WorktreeProvider implements IIsolationProvider {
         // Configured branch errors are fatal - user needs to fix their config
         throw err;
       } else {
-        // Network errors, timeouts, etc. - truly non-fatal
-        getLog().warn({ err: error, repoPath }, 'workspace_sync_failed');
+        // Network errors, timeouts — cannot guarantee correct start-point
+        throw new Error(
+          `Failed to fetch base branch from origin: ${err.message}. ` +
+            'Check your network connection and try again.'
+        );
       }
     }
   }
@@ -833,25 +833,23 @@ export class WorktreeProvider implements IIsolationProvider {
     request: IsolationRequest,
     repoPath: string,
     worktreePath: string,
-    branchName: string
+    branchName: string,
+    baseBranch: string
   ): Promise<void> {
     // Clean up any orphan directory before creating worktree
     await this.cleanOrphanDirectoryIfExists(worktreePath);
+
+    // Determine start-point: explicit fromBranch overrides base branch
+    const startPoint =
+      request.workflowType === 'task' && request.fromBranch
+        ? request.fromBranch
+        : `origin/${baseBranch}`;
 
     try {
       // Try to create with new branch
       await execFileAsync(
         'git',
-        [
-          '-C',
-          repoPath,
-          'worktree',
-          'add',
-          worktreePath,
-          '-b',
-          branchName,
-          ...(request.workflowType === 'task' && request.fromBranch ? [request.fromBranch] : []),
-        ],
+        ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName, startPoint],
         {
           timeout: 30000,
         }

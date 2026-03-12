@@ -198,7 +198,7 @@ describe('WorktreeProvider', () => {
       expect(env.workingPath).toContain('issue-42');
       expect(env.status).toBe('active');
 
-      // Verify git worktree add was called with -b flag
+      // Verify git worktree add was called with -b flag and origin/main as start-point
       expect(execSpy).toHaveBeenCalledWith(
         'git',
         expect.arrayContaining([
@@ -209,9 +209,27 @@ describe('WorktreeProvider', () => {
           expect.any(String),
           '-b',
           'issue-42',
+          'origin/main',
         ]),
         expect.any(Object)
       );
+    });
+
+    test('does not run git checkout or reset --hard on canonical repo', async () => {
+      worktreeExistsSpy.mockResolvedValue(false);
+      await provider.create(baseRequest);
+
+      const checkoutCalls = execSpy.mock.calls.filter((call: unknown[]) => {
+        const args = call[1] as string[];
+        return args.includes('checkout') && !args.includes('-b');
+      });
+      const resetCalls = execSpy.mock.calls.filter((call: unknown[]) => {
+        const args = call[1] as string[];
+        return args.includes('reset') && args.includes('--hard');
+      });
+
+      expect(checkoutCalls).toHaveLength(0);
+      expect(resetCalls).toHaveLength(0);
     });
 
     test('creates task worktree from specified fromBranch', async () => {
@@ -1759,6 +1777,29 @@ describe('WorktreeProvider', () => {
       expect(getDefaultBranchSpy).not.toHaveBeenCalled();
     });
 
+    test('uses resolved base branch as worktree start-point', async () => {
+      worktreeExistsSpy.mockResolvedValue(false);
+      syncWorkspaceSpy.mockResolvedValue({ branch: 'develop', synced: true });
+
+      const configLoader: RepoConfigLoader = async () => ({ baseBranch: 'develop' });
+      provider = new WorktreeProvider(configLoader);
+
+      await provider.create(baseRequest);
+
+      expect(execSpy).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining([
+          'worktree',
+          'add',
+          expect.any(String),
+          '-b',
+          'issue-42',
+          'origin/develop',
+        ]),
+        expect.any(Object)
+      );
+    });
+
     test('syncs workspace before creating worktree using repo default', async () => {
       // Ensure worktree doesn't exist
       worktreeExistsSpy.mockResolvedValue(false);
@@ -1786,32 +1827,13 @@ describe('WorktreeProvider', () => {
       expect(getDefaultBranchSpy).not.toHaveBeenCalled();
     });
 
-    test('continues worktree creation when sync fails (non-fatal)', async () => {
-      // Mock sync to fail
+    test('throws when sync fails with network error', async () => {
       syncWorkspaceSpy.mockRejectedValue(new Error('Network error'));
-
-      // Ensure worktree doesn't exist
       worktreeExistsSpy.mockResolvedValue(false);
 
-      // Should NOT throw - sync is non-fatal
-      const env = await provider.create(baseRequest);
-
-      expect(env.workingPath).toContain('issue-42');
-      expect(env.status).toBe('active');
-    });
-
-    test('continues worktree creation when sync is skipped due to uncommitted changes', async () => {
-      // Mock sync to return false (skipped due to uncommitted changes)
-      syncWorkspaceSpy.mockResolvedValue({ branch: 'main', synced: false });
-
-      // Ensure worktree doesn't exist
-      worktreeExistsSpy.mockResolvedValue(false);
-
-      // Should NOT throw - sync skip is non-fatal
-      const env = await provider.create(baseRequest);
-
-      expect(env.workingPath).toContain('issue-42');
-      expect(env.status).toBe('active');
+      await expect(provider.create(baseRequest)).rejects.toThrow(
+        'Failed to fetch base branch from origin'
+      );
     });
 
     test('continues worktree creation when repo config fails to load', async () => {
@@ -1849,15 +1871,13 @@ describe('WorktreeProvider', () => {
       );
     });
 
-    test('continues worktree creation when network error occurs (non-fatal)', async () => {
+    test('throws when network timeout occurs during sync', async () => {
       worktreeExistsSpy.mockResolvedValue(false);
       syncWorkspaceSpy.mockRejectedValue(new Error('Network timeout'));
 
-      // Network errors are non-fatal
-      const env = await provider.create(baseRequest);
-
-      expect(env.workingPath).toContain('issue-42');
-      expect(env.status).toBe('active');
+      await expect(provider.create(baseRequest)).rejects.toThrow(
+        'Failed to fetch base branch from origin'
+      );
     });
   });
 
