@@ -122,6 +122,21 @@ export function registerApiRoutes(
     }
   });
 
+  // GET /api/conversations/:id - Get single conversation by platform conversation ID
+  app.get('/api/conversations/:id', async c => {
+    const platformId = c.req.param('id');
+    try {
+      const conv = await conversationDb.findConversationByPlatformId(platformId);
+      if (!conv) {
+        return apiError(c, 404, 'Conversation not found');
+      }
+      return c.json(conv);
+    } catch (error) {
+      getLog().error({ err: error, platformId }, 'get_conversation_failed');
+      return apiError(c, 500, 'Failed to get conversation');
+    }
+  });
+
   // POST /api/conversations - Create new conversation
   app.post('/api/conversations', async c => {
     try {
@@ -153,12 +168,21 @@ export function registerApiRoutes(
 
   // PATCH /api/conversations/:id - Update conversation (title)
   app.patch('/api/conversations/:id', async c => {
-    const id = c.req.param('id');
+    const platformId = c.req.param('id');
+    let body: { title?: unknown };
     try {
-      const body: { title?: unknown } = await c.req.json();
+      body = await c.req.json();
+    } catch {
+      return apiError(c, 400, 'Invalid JSON in request body');
+    }
+    try {
+      const conv = await conversationDb.findConversationByPlatformId(platformId);
+      if (!conv) {
+        return apiError(c, 404, 'Conversation not found');
+      }
       if (typeof body.title === 'string') {
         const title = body.title.slice(0, 255);
-        await conversationDb.updateConversationTitle(id, title);
+        await conversationDb.updateConversationTitle(conv.id, title);
       }
       return c.json({ success: true });
     } catch (error) {
@@ -172,9 +196,13 @@ export function registerApiRoutes(
 
   // DELETE /api/conversations/:id - Soft delete
   app.delete('/api/conversations/:id', async c => {
-    const id = c.req.param('id');
+    const platformId = c.req.param('id');
     try {
-      await conversationDb.softDeleteConversation(id);
+      const conv = await conversationDb.findConversationByPlatformId(platformId);
+      if (!conv) {
+        return apiError(c, 404, 'Conversation not found');
+      }
+      await conversationDb.softDeleteConversation(conv.id);
       return c.json({ success: true });
     } catch (error) {
       if (error instanceof ConversationNotFoundError) {
