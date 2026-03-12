@@ -1260,18 +1260,19 @@ export async function executeDagWorkflow(
     );
   }
   await logWorkflowComplete(logDir, workflowRun.id);
+  const duration = Date.now() - dagStartTime;
   const emitter = getWorkflowEventEmitter();
   emitter.emit({
     type: 'workflow_completed',
     runId: workflowRun.id,
     workflowName: workflow.name,
-    duration: Date.now() - dagStartTime,
+    duration,
   });
   deps.store
     .createWorkflowEvent({
       workflow_run_id: workflowRun.id,
       event_type: 'workflow_completed',
-      data: { duration_ms: Date.now() - dagStartTime },
+      data: { duration_ms: duration },
     })
     .catch((err: Error) => {
       getLog().error(
