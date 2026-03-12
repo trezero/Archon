@@ -163,4 +163,52 @@ describe('MessagePersistence', () => {
       expect(mockAddMessage).not.toHaveBeenCalled();
     });
   });
+
+  describe('retractLastSegment', () => {
+    test('removes last segment when it has no tool calls', async () => {
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      persistence.appendText('conv-1', 'first segment');
+      persistence.appendText('conv-1', 'second segment', { segment: 'new' });
+
+      persistence.retractLastSegment('conv-1');
+      await persistence.flush('conv-1');
+
+      expect(mockAddMessage).toHaveBeenCalledTimes(1);
+      expect(mockAddMessage.mock.calls[0][2]).toBe('first segment');
+    });
+
+    test('clears text content but preserves tool calls when segment has tool calls', async () => {
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      persistence.appendText('conv-1', 'routing text');
+      persistence.appendToolCall('conv-1', { name: 'bash', input: { command: 'ls' } });
+
+      // Retract should only clear text, not the tool call
+      persistence.retractLastSegment('conv-1');
+      await persistence.flush('conv-1');
+
+      // DB write should happen (because tool call is preserved)
+      expect(mockAddMessage).toHaveBeenCalledTimes(1);
+      // Content should be empty string (text retracted)
+      expect(mockAddMessage.mock.calls[0][2]).toBe('');
+      // Tool calls should still be persisted
+      const metadata = mockAddMessage.mock.calls[0][3] as { toolCalls?: { name: string }[] };
+      expect(metadata?.toolCalls).toHaveLength(1);
+      expect(metadata?.toolCalls?.[0]?.name).toBe('bash');
+    });
+
+    test('retract on empty buffer is a no-op', () => {
+      // Should not throw
+      persistence.retractLastSegment('nonexistent-conv');
+    });
+
+    test('retract empty segment removes it entirely', async () => {
+      persistence.appendText('conv-1', 'some text');
+      // No tool calls — retract removes the segment
+      persistence.retractLastSegment('conv-1');
+      // Buffer should be empty — nothing persisted
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      await persistence.flush('conv-1');
+      expect(mockAddMessage).not.toHaveBeenCalled();
+    });
+  });
 });

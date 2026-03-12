@@ -243,9 +243,15 @@ export class MessagePersistence {
   retractLastSegment(conversationId: string): void {
     const buf = this.assistantBuffer.get(conversationId);
     if (!buf || buf.segments.length === 0) return;
-    buf.segments.pop();
-    if (buf.segments.length === 0) {
-      this.assistantBuffer.delete(conversationId);
+    const lastSeg = buf.segments[buf.segments.length - 1];
+    if (lastSeg.toolCalls.length > 0) {
+      // Preserve tool call records — only clear the text content
+      lastSeg.content = '';
+    } else {
+      buf.segments.pop();
+      if (buf.segments.length === 0) {
+        this.assistantBuffer.delete(conversationId);
+      }
     }
   }
 

@@ -98,7 +98,7 @@ export function registerApiRoutes(
           getLog().error({ err: sseError, conversationId }, 'sse_error_emit_failed');
         }
       } finally {
-        webAdapter.emitLockEvent(conversationId, false);
+        await webAdapter.emitLockEvent(conversationId, false);
       }
     });
 

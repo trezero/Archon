@@ -155,6 +155,8 @@ export class SSETransport {
           /* stream already closing */
         });
       });
+    } else {
+      getLog().debug({ conversationId }, 'sse_event_dropped_no_stream');
     }
   }
 

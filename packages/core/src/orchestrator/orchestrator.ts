@@ -380,7 +380,7 @@ export async function dispatchBackgroundWorkflow(
         }
         if (webAdapter) {
           webAdapter.removeOutputCallback(workerPlatformId);
-          webAdapter.emitLockEvent(workerPlatformId, false);
+          await webAdapter.emitLockEvent(workerPlatformId, false);
         }
       }
     } catch (outerError) {
