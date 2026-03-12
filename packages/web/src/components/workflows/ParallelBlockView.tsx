@@ -27,6 +27,7 @@ function formatDuration(ms: number): string {
 }
 
 function overallStatus(agents: ParallelAgentState[]): string {
+  if (agents.length === 0) return 'pending';
   if (agents.some(a => a.status === 'failed')) return 'failed';
   if (agents.some(a => a.status === 'running')) return 'running';
   if (agents.every(a => a.status === 'completed')) return 'completed';
