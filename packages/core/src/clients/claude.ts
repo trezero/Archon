@@ -301,12 +301,16 @@ export class ClaudeClient implements IAssistantClient {
             const resultMsg = msg as {
               session_id?: string;
               usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+              structured_output?: unknown;
             };
             const tokens = normalizeClaudeUsage(resultMsg.usage);
             yield {
               type: 'result',
               sessionId: resultMsg.session_id,
               ...(tokens ? { tokens } : {}),
+              ...(resultMsg.structured_output !== undefined
+                ? { structuredOutput: resultMsg.structured_output }
+                : {}),
             };
           }
         }

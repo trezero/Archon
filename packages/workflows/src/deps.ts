@@ -25,7 +25,7 @@ export type WorkflowMessageChunk =
   | { type: 'assistant'; content: string }
   | { type: 'system'; content: string }
   | { type: 'thinking'; content: string }
-  | { type: 'result'; sessionId?: string; tokens?: WorkflowTokenUsage }
+  | { type: 'result'; sessionId?: string; tokens?: WorkflowTokenUsage; structuredOutput?: unknown }
   | { type: 'tool'; toolName: string; toolInput?: Record<string, unknown> }
   | { type: 'workflow_dispatch'; workerConversationId: string; workflowName: string };
 

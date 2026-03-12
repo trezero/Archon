@@ -635,6 +635,7 @@ async function executeNodeInternal(
   const streamingMode = platform.getStreamingMode();
 
   let nodeOutputText = ''; // Always accumulate regardless of streaming mode
+  let structuredOutput: unknown;
   let newSessionId: string | undefined;
   let nodeTokens: WorkflowTokenUsage | undefined;
   const batchMessages: string[] = [];
@@ -645,7 +646,10 @@ async function executeNodeInternal(
       try {
         await deps.store.updateWorkflowActivity(workflowRun.id);
       } catch (e) {
-        getLog().warn({ err: e as Error, workflowRunId: workflowRun.id }, 'activity_update_failed');
+        getLog().warn(
+          { err: e as Error, workflowRunId: workflowRun.id },
+          'dag.activity_update_failed'
+        );
       }
 
       if (msg.type === 'assistant' && msg.content) {
@@ -667,11 +671,46 @@ async function executeNodeInternal(
       } else if (msg.type === 'result') {
         if (msg.sessionId) newSessionId = msg.sessionId;
         if (msg.tokens) nodeTokens = msg.tokens;
+        if (msg.structuredOutput !== undefined) structuredOutput = msg.structuredOutput;
+      }
+    }
+
+    // When output_format is set and the SDK returned structured_output,
+    // use it instead of the concatenated assistant text (which includes prose)
+    if (nodeOptions?.outputFormat) {
+      if (structuredOutput !== undefined) {
+        try {
+          nodeOutputText =
+            typeof structuredOutput === 'string'
+              ? structuredOutput
+              : JSON.stringify(structuredOutput);
+        } catch (serializeErr) {
+          const err = serializeErr as Error;
+          throw new Error(
+            `Node '${node.id}': failed to serialize structured_output to JSON: ${err.message}`
+          );
+        }
+        getLog().debug({ nodeId: node.id, streamingMode }, 'dag.structured_output_override');
+      } else {
+        getLog().warn(
+          { nodeId: node.id, workflowRunId: workflowRun.id },
+          'dag.structured_output_missing'
+        );
+        await safeSendMessage(
+          platform,
+          conversationId,
+          `Warning: Node '${node.id}' requested output_format but the SDK did not return structured output. Downstream conditions may not evaluate correctly.`,
+          nodeContext
+        );
       }
     }
 
     if (streamingMode === 'batch' && batchMessages.length > 0) {
-      await safeSendMessage(platform, conversationId, batchMessages.join('\n\n'), nodeContext);
+      const batchContent =
+        structuredOutput !== undefined && nodeOptions?.outputFormat
+          ? nodeOutputText
+          : batchMessages.join('\n\n');
+      await safeSendMessage(platform, conversationId, batchContent, nodeContext);
     }
 
     const duration = Date.now() - nodeStartTime;

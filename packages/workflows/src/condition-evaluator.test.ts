@@ -95,4 +95,16 @@ describe('evaluateCondition', () => {
     const outputs = new Map([['n', makeOutput(JSON.stringify({ valid: true }))]]);
     expect(evaluateCondition("$n.output.valid == 'true'", outputs).result).toBe(true);
   });
+
+  it('dot notation: works with clean structured output (simulates output_format fix)', () => {
+    // After the fix, output_format nodes store clean JSON (from SDK structured_output)
+    // instead of mixed prose+JSON
+    const cleanJson = JSON.stringify({ run_code_review: 'true', run_tests: 'false' });
+    const outputs = new Map([['classify', makeOutput(cleanJson)]]);
+    expect(evaluateCondition("$classify.output.run_code_review == 'true'", outputs).result).toBe(
+      true
+    );
+    expect(evaluateCondition("$classify.output.run_tests == 'true'", outputs).result).toBe(false);
+    expect(evaluateCondition("$classify.output.run_tests == 'false'", outputs).result).toBe(true);
+  });
 });

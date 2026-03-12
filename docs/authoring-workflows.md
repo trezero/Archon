@@ -372,7 +372,7 @@ Variable substitution order:
 
 ### `output_format` for Structured JSON
 
-Use `output_format` to enforce JSON output from a Claude node. This uses the Claude Agent SDK's `outputFormat` option with a JSON Schema:
+Use `output_format` to enforce JSON output from a Claude node. The schema is passed to the Claude Agent SDK's `outputFormat` option; the SDK's `structured_output` result is used directly as the node's output (rather than the streamed text), ensuring clean JSON for `when:` conditions and `$nodeId.output` substitution:
 
 ```yaml
 nodes:

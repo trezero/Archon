@@ -1019,3 +1019,182 @@ describe('executeDagWorkflow -- bash nodes', () => {
     expect(mockSendQueryDag.mock.calls.length).toBe(1);
   });
 });
+
+describe('executeDagWorkflow -- output_format structured output', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-output-fmt-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'classify.md'), 'Classify this: $USER_MESSAGE');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+  });
+
+  afterEach(async () => {
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('uses structuredOutput from result when output_format is set', async () => {
+    const structuredJson = { run_code_review: 'true', run_tests: 'false' };
+
+    // Mock yields prose + JSON as assistant text, then result with structuredOutput
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'Let me analyze the PR scope...\n' };
+      yield { type: 'assistant', content: JSON.stringify(structuredJson) };
+      yield { type: 'result', sessionId: 'sid-1', structuredOutput: structuredJson };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('output-fmt-run', {
+      user_message: 'classify this PR',
+    });
+
+    const nodes: DagNode[] = [
+      {
+        id: 'classify',
+        command: 'classify',
+        output_format: {
+          type: 'object',
+          properties: {
+            run_code_review: { type: 'string', enum: ['true', 'false'] },
+            run_tests: { type: 'string', enum: ['true', 'false'] },
+          },
+        },
+      },
+      {
+        id: 'review',
+        prompt: 'Review the code',
+        depends_on: ['classify'],
+        when: "$classify.output.run_code_review == 'true'",
+      },
+      {
+        id: 'test',
+        prompt: 'Run tests',
+        depends_on: ['classify'],
+        when: "$classify.output.run_tests == 'true'",
+      },
+    ];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-output-fmt',
+      testDir,
+      { name: 'output-fmt-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // The review node's when condition should evaluate to true (run_code_review == 'true')
+    // The test node's when condition should evaluate to false (run_tests == 'false', not 'true')
+    // So sendQuery should be called for classify + review = 2 times (not 3)
+    expect(mockSendQueryDag.mock.calls.length).toBe(2);
+  });
+
+  it('does NOT override nodeOutputText with structuredOutput when output_format is absent', async () => {
+    // Even if the SDK returns structuredOutput, nodes without output_format use concatenated text
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'prose analysis text' };
+      yield { type: 'result', sessionId: 'sid-no-fmt', structuredOutput: { type: 'BUG' } };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('no-output-fmt-run', {
+      user_message: 'test guard',
+    });
+
+    const nodes: DagNode[] = [
+      { id: 'a', command: 'classify' },
+      {
+        id: 'b',
+        prompt: 'Got: $a.output',
+        depends_on: ['a'],
+      },
+    ];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-no-fmt',
+      testDir,
+      { name: 'no-fmt-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    expect(mockSendQueryDag.mock.calls.length).toBe(2);
+
+    // Second node's prompt should contain the concatenated prose, not the JSON
+    const secondCallPrompt = mockSendQueryDag.mock.calls[1][0] as string;
+    expect(secondCallPrompt).toContain('prose analysis text');
+    expect(secondCallPrompt).not.toContain('"type"');
+  });
+
+  it('falls back to concatenated text when structuredOutput is absent', async () => {
+    // Mock without structuredOutput on result — backward compatible
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'plain text response' };
+      yield { type: 'result', sessionId: 'sid-2' };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('no-structured-run', {
+      user_message: 'test fallback',
+    });
+
+    const nodes: DagNode[] = [
+      { id: 'a', command: 'classify' },
+      {
+        id: 'b',
+        prompt: 'Use output: $a.output',
+        depends_on: ['a'],
+      },
+    ];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-fallback',
+      testDir,
+      { name: 'fallback-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // Both nodes should execute (no output_format, no when conditions)
+    expect(mockSendQueryDag.mock.calls.length).toBe(2);
+
+    // Second node's prompt should contain the concatenated text from node a
+    const secondCallPrompt = mockSendQueryDag.mock.calls[1][0] as string;
+    expect(secondCallPrompt).toContain('plain text response');
+  });
+});

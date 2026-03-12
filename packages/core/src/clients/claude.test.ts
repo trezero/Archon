@@ -102,6 +102,46 @@ describe('ClaudeClient', () => {
       expect(chunks[0]).toEqual({ type: 'result', sessionId: 'session-123-abc' });
     });
 
+    test('yields result with structuredOutput when SDK result has structured_output', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield {
+          type: 'result',
+          session_id: 'sid-structured',
+          structured_output: { type: 'BUG', severity: 'high' },
+        };
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test prompt', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toEqual({
+        type: 'result',
+        sessionId: 'sid-structured',
+        structuredOutput: { type: 'BUG', severity: 'high' },
+      });
+    });
+
+    test('yields result without structuredOutput when SDK result has no structured_output', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield {
+          type: 'result',
+          session_id: 'sid-plain',
+        };
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test prompt', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toMatchObject({ type: 'result', sessionId: 'sid-plain' });
+      expect(chunks[0]).not.toHaveProperty('structuredOutput');
+    });
+
     test('handles multiple content blocks in one message', async () => {
       mockQuery.mockImplementation(async function* () {
         yield {
