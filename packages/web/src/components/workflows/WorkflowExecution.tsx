@@ -64,6 +64,13 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
   const [codebaseName, setCodebaseName] = useState<string | null>(null);
   const [workerRunId, setWorkerRunId] = useState<string | null>(null);
 
+  // Reset local state when navigating to a different workflow run
+  useEffect(() => {
+    setSelectedStep(0);
+    setCodebaseName(null);
+    setWorkerRunId(null);
+  }, [runId]);
+
   // Fetch workflow run data with polling while running
   const { data: queryData, error: queryError } = useQuery({
     queryKey: ['workflowRun', runId],
@@ -329,7 +336,11 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
         <button
           onClick={(): void => {
-            navigate(-1);
+            if (window.history.length > 1) {
+              navigate(-1);
+            } else {
+              navigate('/workflows');
+            }
           }}
           className="text-text-secondary hover:text-text-primary transition-colors text-sm"
           title="Back"
