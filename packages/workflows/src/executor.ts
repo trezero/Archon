@@ -47,6 +47,7 @@ import { parseValidationResults } from './validation-parser';
 import { getWorkflowEventEmitter } from './event-emitter';
 import { isClaudeModel, isModelCompatible } from './model-validation';
 import { isValidCommandName } from './command-validation';
+import { withIdleTimeout, STEP_IDLE_TIMEOUT_MS } from './utils/idle-timeout';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -739,10 +740,19 @@ async function executeStepInternal(
     }
   }
 
-  // Merge abort signal into options
+  // Create per-step abort controller — wraps the workflow-level signal so we can
+  // independently abort on idle timeout without cancelling the entire workflow
+  const stepAbortController = new AbortController();
   if (abortSignal) {
-    stepOptions = { ...stepOptions, abortSignal };
+    abortSignal.addEventListener(
+      'abort',
+      () => {
+        stepAbortController.abort();
+      },
+      { once: true }
+    );
   }
+  stepOptions = { ...stepOptions, abortSignal: stepAbortController.signal };
 
   try {
     const assistantMessages: string[] = [];
@@ -750,12 +760,19 @@ async function executeStepInternal(
     const unknownErrorTracker: UnknownErrorTracker = { count: 0 };
     let activityUpdateFailures = 0;
     let activityWarningShown = false;
+    let idleTimedOut = false;
 
-    for await (const msg of aiClient.sendQuery(
-      substitutedPrompt,
-      cwd,
-      resumeSessionId,
-      stepOptions
+    for await (const msg of withIdleTimeout(
+      aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId, stepOptions),
+      STEP_IDLE_TIMEOUT_MS,
+      () => {
+        idleTimedOut = true;
+        getLog().warn(
+          { stepId, commandName, timeoutMs: STEP_IDLE_TIMEOUT_MS },
+          'step_idle_timeout_reached'
+        );
+        stepAbortController.abort();
+      }
     )) {
       // Update activity timestamp with failure tracking (throttled to once per 10s)
       const activityNow = Date.now();
@@ -827,6 +844,26 @@ async function executeStepInternal(
         if (msg.sessionId) newSessionId = msg.sessionId;
         if (msg.tokens) stepTokens = msg.tokens;
       }
+    }
+
+    // If the step completed via idle timeout, log and notify user
+    if (idleTimedOut) {
+      getLog().warn(
+        {
+          stepId,
+          commandName,
+          messagesReceived: assistantMessages.length,
+          timeoutMs: STEP_IDLE_TIMEOUT_MS,
+        },
+        'step_completed_via_idle_timeout'
+      );
+      await safeSendMessage(
+        platform,
+        conversationId,
+        `⚠️ Step \`${commandName}\` completed via idle timeout (no output for ${String(STEP_IDLE_TIMEOUT_MS / 60000)} min). The AI likely finished but the subprocess didn't exit cleanly.`,
+        messageContext,
+        unknownErrorTracker
+      );
     }
 
     // Batch mode: send accumulated messages - track failures
@@ -1318,14 +1355,35 @@ async function executeLoopWorkflow(
       let activityUpdateFailures = 0;
       let activityWarningShown = false;
 
-      // Merge abort signal into options for this iteration
-      const iterationOptions = abortSignal ? { ...resolvedOptions, abortSignal } : resolvedOptions;
+      // Create per-iteration abort controller — wraps the workflow-level signal so we can
+      // independently abort on idle timeout without cancelling the entire workflow
+      const iterationAbortController = new AbortController();
+      if (abortSignal) {
+        abortSignal.addEventListener(
+          'abort',
+          () => {
+            iterationAbortController.abort();
+          },
+          { once: true }
+        );
+      }
+      const iterationOptions: WorkflowAssistantOptions | undefined = {
+        ...resolvedOptions,
+        abortSignal: iterationAbortController.signal,
+      };
+      let iterationIdleTimedOut = false;
 
-      for await (const msg of aiClient.sendQuery(
-        substitutedPrompt,
-        cwd,
-        resumeSessionId,
-        iterationOptions
+      for await (const msg of withIdleTimeout(
+        aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId, iterationOptions),
+        STEP_IDLE_TIMEOUT_MS,
+        () => {
+          iterationIdleTimedOut = true;
+          getLog().warn(
+            { iteration: i, workflowName: workflow.name, timeoutMs: STEP_IDLE_TIMEOUT_MS },
+            'loop_iteration_idle_timeout_reached'
+          );
+          iterationAbortController.abort();
+        }
       )) {
         // Update activity timestamp with failure tracking (throttled to once per 10s)
         const activityNow = Date.now();
@@ -1394,6 +1452,21 @@ async function executeLoopWorkflow(
         } else if (msg.type === 'result' && msg.sessionId) {
           currentSessionId = msg.sessionId;
         }
+      }
+
+      // If the iteration completed via idle timeout, log and notify user
+      if (iterationIdleTimedOut) {
+        getLog().warn(
+          { iteration: i, workflowName: workflow.name, timeoutMs: STEP_IDLE_TIMEOUT_MS },
+          'loop_iteration_completed_via_idle_timeout'
+        );
+        await safeSendMessage(
+          platform,
+          conversationId,
+          `⚠️ Iteration ${String(i)} completed via idle timeout (no output for ${String(STEP_IDLE_TIMEOUT_MS / 60000)} min). The AI likely finished but the subprocess didn't exit cleanly.`,
+          workflowContext,
+          unknownErrorTracker
+        );
       }
 
       // Batch mode: send accumulated messages - track failures

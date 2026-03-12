@@ -45,6 +45,7 @@ import {
 } from './logger';
 import { isValidCommandName } from './command-validation';
 import type { LoadCommandResult } from './types';
+import { withIdleTimeout, STEP_IDLE_TIMEOUT_MS } from './utils/idle-timeout';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -640,8 +641,27 @@ async function executeNodeInternal(
   let nodeTokens: WorkflowTokenUsage | undefined;
   const batchMessages: string[] = [];
 
+  // Create per-node abort controller for idle timeout cleanup
+  const nodeAbortController = new AbortController();
+  const nodeOptionsWithAbort: WorkflowAssistantOptions | undefined = {
+    ...nodeOptions,
+    abortSignal: nodeAbortController.signal,
+  };
+  let nodeIdleTimedOut = false;
+
   try {
-    for await (const msg of aiClient.sendQuery(finalPrompt, cwd, resumeSessionId, nodeOptions)) {
+    for await (const msg of withIdleTimeout(
+      aiClient.sendQuery(finalPrompt, cwd, resumeSessionId, nodeOptionsWithAbort),
+      STEP_IDLE_TIMEOUT_MS,
+      () => {
+        nodeIdleTimedOut = true;
+        getLog().warn(
+          { nodeId: node.id, timeoutMs: STEP_IDLE_TIMEOUT_MS },
+          'dag_node_idle_timeout_reached'
+        );
+        nodeAbortController.abort();
+      }
+    )) {
       // Update activity timestamp
       try {
         await deps.store.updateWorkflowActivity(workflowRun.id);
@@ -703,6 +723,20 @@ async function executeNodeInternal(
           nodeContext
         );
       }
+    }
+
+    // If the node completed via idle timeout, log it
+    if (nodeIdleTimedOut) {
+      getLog().warn(
+        { nodeId: node.id, timeoutMs: STEP_IDLE_TIMEOUT_MS },
+        'dag_node_completed_via_idle_timeout'
+      );
+      await safeSendMessage(
+        platform,
+        conversationId,
+        `⚠️ Node \`${node.id}\` completed via idle timeout (no output for ${String(STEP_IDLE_TIMEOUT_MS / 60000)} min). The AI likely finished but the subprocess didn't exit cleanly.`,
+        nodeContext
+      );
     }
 
     if (streamingMode === 'batch' && batchMessages.length > 0) {
