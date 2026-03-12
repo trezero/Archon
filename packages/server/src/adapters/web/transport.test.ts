@@ -251,8 +251,16 @@ describe('SSETransport', () => {
     test('start logs adapter_ready', () => {
       const transport = new SSETransport();
       transport.start();
-      expect(mockLogger.info).toHaveBeenCalledWith('adapter_ready');
+      expect(mockLogger.info).toHaveBeenCalledWith('web.adapter_ready');
       transport.stop();
+    });
+
+    test('stop logs adapter_stopped', () => {
+      const transport = new SSETransport();
+      transport.start();
+      mockLogger.info.mockClear();
+      transport.stop();
+      expect(mockLogger.info).toHaveBeenCalledWith('web.adapter_stopped');
     });
 
     test('stop closes all streams and clears state', () => {

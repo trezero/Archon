@@ -89,7 +89,7 @@ export class SSETransport {
       }
     }, 300_000);
 
-    getLog().info('adapter_ready');
+    getLog().info('web.adapter_ready');
   }
 
   stop(): void {
@@ -112,7 +112,7 @@ export class SSETransport {
       clearTimeout(timer);
     }
     this.cleanupTimers.clear();
-    getLog().info('adapter_stopped');
+    getLog().info('web.adapter_stopped');
   }
 
   async emit(conversationId: string, event: string): Promise<void> {
