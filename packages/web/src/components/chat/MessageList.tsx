@@ -46,6 +46,8 @@ function WorkflowDispatchInline({
       <span className="text-success text-xs shrink-0">&#x2713;</span>
     ) : status === 'failed' ? (
       <span className="text-error text-xs shrink-0">&#x2717;</span>
+    ) : status === 'cancelled' ? (
+      <span className="text-text-secondary text-xs shrink-0">&#x2715;</span>
     ) : (
       <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent shrink-0" />
     );
