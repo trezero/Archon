@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { listCodebases } from '@/lib/api';
 import type { CodebaseResponse } from '@/lib/api';
@@ -29,7 +29,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }): Re
     refetchInterval: 30_000,
   });
 
-  const setSelectedProjectId = (id: string | null): void => {
+  const setSelectedProjectId = useCallback((id: string | null): void => {
     setSelectedProjectIdRaw(id);
     try {
       if (id) {
@@ -41,7 +41,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }): Re
       // localStorage unavailable (e.g. Safari private browsing, quota exceeded)
       // in-memory state already updated above; persistence is best-effort
     }
-  };
+  }, []); // setSelectedProjectIdRaw is stable (useState setter)
 
   // Clear stale selection if the project no longer exists
   useEffect(() => {
@@ -49,7 +49,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }): Re
     if (selectedProjectId && !codebases.some(cb => cb.id === selectedProjectId)) {
       setSelectedProjectId(null);
     }
-  }, [codebases, selectedProjectId]);
+  }, [codebases, selectedProjectId, setSelectedProjectId]);
 
   return (
     <projectContext.Provider
