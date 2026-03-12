@@ -648,6 +648,7 @@ async function executeStepInternal(
   resolvedOptions: WorkflowAssistantOptions | undefined,
   artifactsDir: string, // External artifacts directory
   logDir: string, // External log directory
+  totalSteps: number, // Total steps in the workflow (for step_completed/step_failed events)
   baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
   currentSessionId?: string,
   configuredCommandFolder?: string,
@@ -911,6 +912,7 @@ async function executeStepInternal(
       runId: workflowRun.id,
       stepIndex,
       stepName: commandName,
+      totalSteps,
       duration: Date.now() - stepStartTime,
     });
     deps.store
@@ -947,6 +949,7 @@ async function executeStepInternal(
       runId: workflowRun.id,
       stepIndex: stepIdx,
       stepName: commandName,
+      totalSteps,
       error: err.message,
     });
     deps.store
@@ -1034,6 +1037,7 @@ async function executeParallelBlock(
   resolvedOptions: WorkflowAssistantOptions | undefined,
   artifactsDir: string,
   logDir: string,
+  totalSteps: number, // Total steps in the workflow (forwarded to executeStepInternal)
   baseBranch: string, // Resolved base branch for $BASE_BRANCH substitution
   configuredCommandFolder?: string,
   issueContext?: string,
@@ -1093,6 +1097,7 @@ async function executeParallelBlock(
         resolvedOptions,
         artifactsDir,
         logDir,
+        totalSteps,
         baseBranch,
         undefined, // Always fresh session for parallel (no resume)
         configuredCommandFolder,
@@ -2247,6 +2252,7 @@ export async function executeWorkflow(
           resolvedOptions,
           artifactsDir,
           logDir,
+          steps.length,
           baseBranch,
           configuredCommandFolder,
           issueContext,
@@ -2328,6 +2334,7 @@ export async function executeWorkflow(
           runId: workflowRun.id,
           stepIndex: i,
           stepName: `parallel(${stepCommands.join(', ')})`,
+          totalSteps: steps.length,
           duration: 0, // Duration tracked per-agent, not per-block
         });
         deps.store
@@ -2406,6 +2413,7 @@ export async function executeWorkflow(
           resolvedOptions,
           artifactsDir,
           logDir,
+          steps.length,
           baseBranch,
           resumeSessionId,
           configuredCommandFolder,

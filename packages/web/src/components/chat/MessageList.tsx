@@ -26,7 +26,7 @@ function WorkflowDispatchInline({
     queryFn: () => getWorkflowRunByWorker(workerConversationId),
     refetchInterval: (query): number | false => {
       const status = query.state.data?.run.status;
-      if (status === 'completed' || status === 'failed') return false;
+      if (status === 'completed' || status === 'failed' || status === 'cancelled') return false;
       return 3000;
     },
   });
