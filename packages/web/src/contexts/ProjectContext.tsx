@@ -15,9 +15,13 @@ interface ProjectContextValue {
 const projectContext = createContext<ProjectContextValue | null>(null);
 
 export function ProjectProvider({ children }: { children: React.ReactNode }): React.ReactElement {
-  const [selectedProjectId, setSelectedProjectIdRaw] = useState<string | null>(() =>
-    localStorage.getItem(PROJECT_STORAGE_KEY)
-  );
+  const [selectedProjectId, setSelectedProjectIdRaw] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(PROJECT_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
 
   const { data: codebases, isLoading: isLoadingCodebases } = useQuery({
     queryKey: ['codebases'],
@@ -27,10 +31,15 @@ export function ProjectProvider({ children }: { children: React.ReactNode }): Re
 
   const setSelectedProjectId = (id: string | null): void => {
     setSelectedProjectIdRaw(id);
-    if (id) {
-      localStorage.setItem(PROJECT_STORAGE_KEY, id);
-    } else {
-      localStorage.removeItem(PROJECT_STORAGE_KEY);
+    try {
+      if (id) {
+        localStorage.setItem(PROJECT_STORAGE_KEY, id);
+      } else {
+        localStorage.removeItem(PROJECT_STORAGE_KEY);
+      }
+    } catch {
+      // localStorage unavailable (e.g. Safari private browsing, quota exceeded)
+      // in-memory state already updated above; persistence is best-effort
     }
   };
 
