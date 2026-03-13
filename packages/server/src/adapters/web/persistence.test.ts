@@ -201,7 +201,7 @@ describe('MessagePersistence', () => {
       persistence.retractLastSegment('nonexistent-conv');
     });
 
-    test('retract empty segment removes it entirely', async () => {
+    test('retract text-only segment (no tool calls) removes it entirely', async () => {
       persistence.appendText('conv-1', 'some text');
       // No tool calls — retract removes the segment
       persistence.retractLastSegment('conv-1');

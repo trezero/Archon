@@ -103,6 +103,12 @@ export function registerApiRoutes(
     });
 
     if (result.status === 'queued-conversation' || result.status === 'queued-capacity') {
+      // Intentionally fire-and-forget: the lock-acquire signal (locked: true) is sent
+      // optimistically so the UI shows a queued state immediately. It is not awaited
+      // because we want the HTTP response to return before the SSE write completes.
+      // The lock-release signal (locked: false) IS awaited inside the task callback
+      // above to guarantee ordering — all tool results and flush must precede the
+      // release event on the SSE stream.
       webAdapter.emitLockEvent(conversationId, true);
     }
 

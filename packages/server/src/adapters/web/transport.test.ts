@@ -205,29 +205,6 @@ describe('SSETransport', () => {
     });
   });
 
-  describe('emitLockEvent', () => {
-    test('writes lock event to active stream', () => {
-      const transport = new SSETransport();
-      const stream = createMockStream();
-
-      transport.registerStream('conv-1', stream);
-      transport.emitLockEvent('conv-1', true, 2);
-
-      expect(stream.writeSSE).toHaveBeenCalledTimes(1);
-      const callArg = (stream.writeSSE as ReturnType<typeof mock>).mock.calls[0][0] as {
-        data: string;
-      };
-      const parsed = JSON.parse(callArg.data) as {
-        type: string;
-        locked: boolean;
-        queuePosition: number;
-      };
-      expect(parsed.type).toBe('conversation_lock');
-      expect(parsed.locked).toBe(true);
-      expect(parsed.queuePosition).toBe(2);
-    });
-  });
-
   describe('hasActiveStream', () => {
     test('returns false when no stream registered', () => {
       const transport = new SSETransport();
