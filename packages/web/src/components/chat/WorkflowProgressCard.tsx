@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { LoopIterationView } from '@/components/workflows/LoopIterationView';
+import { StatusIcon } from '@/components/workflows/StatusIcon';
+import { formatDurationMs } from '@/lib/format';
 import type { WorkflowState } from '@/lib/types';
 
 interface WorkflowProgressCardProps {
@@ -8,29 +10,6 @@ interface WorkflowProgressCardProps {
   onCancel?: () => void;
   compact?: boolean;
   onViewFullScreen?: () => void;
-}
-
-function StatusIcon({ status }: { status: string }): React.ReactElement {
-  switch (status) {
-    case 'completed':
-      return <span className="text-success">&#x2713;</span>;
-    case 'running':
-      return (
-        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-      );
-    case 'failed':
-      return <span className="text-error">&#x2717;</span>;
-    case 'cancelled':
-      return <span className="text-text-secondary">&#x2715;</span>;
-    default:
-      return <span className="text-text-secondary">&#x25CB;</span>;
-  }
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${String(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
 }
 
 export function WorkflowProgressCard({
@@ -83,7 +62,7 @@ export function WorkflowProgressCard({
                 ? `${String(completedSteps)}/${String(totalSteps)}`
                 : ''}
           </span>
-          <span className="text-[10px] text-text-tertiary">{formatDuration(elapsed)}</span>
+          <span className="text-[10px] text-text-tertiary">{formatDurationMs(elapsed)}</span>
           {workflow.stale && workflow.status === 'running' && (
             <span
               className="text-[10px] text-yellow-400"
@@ -142,7 +121,7 @@ export function WorkflowProgressCard({
               {String(completedSteps)}/{String(totalSteps)} steps
             </span>
           ) : null}
-          <span>{formatDuration(elapsed)}</span>
+          <span>{formatDurationMs(elapsed)}</span>
         </div>
       </div>
 
@@ -158,7 +137,9 @@ export function WorkflowProgressCard({
                 {step.name}
               </span>
               {step.duration !== undefined && (
-                <span className="ml-auto text-text-secondary">{formatDuration(step.duration)}</span>
+                <span className="ml-auto text-text-secondary">
+                  {formatDurationMs(step.duration)}
+                </span>
               )}
             </div>
           ))}
