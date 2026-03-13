@@ -320,31 +320,49 @@ async function loadCommandPrompt(
 }
 
 /**
+ * Single-quote a string for safe inline shell use.
+ * Replaces each ' with '\'' (end quote, literal single-quote, re-open quote).
+ */
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/**
  * Substitute $node_id.output and $node_id.output.field references in a prompt.
  * Called AFTER the standard substituteWorkflowVariables pass.
+ *
+ * @param escapedForBash - When true, wraps substituted values in single quotes so
+ *   they are safe to embed in bash scripts passed to `bash -c`. Set true only for
+ *   bash node script substitution; AI/command prompt substitution should use false.
  */
 export function substituteNodeOutputRefs(
   prompt: string,
-  nodeOutputs: Map<string, NodeOutput>
+  nodeOutputs: Map<string, NodeOutput>,
+  escapedForBash = false
 ): string {
   return prompt.replace(
     /\$([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?/g,
     (_match, nodeId: string, field: string | undefined) => {
       const nodeOutput = nodeOutputs.get(nodeId);
-      if (!nodeOutput) return '';
-      if (!field) return nodeOutput.output;
+      if (!nodeOutput) return escapedForBash ? "''" : '';
+      if (!field) {
+        return escapedForBash ? shellQuote(nodeOutput.output) : nodeOutput.output;
+      }
       try {
         const parsed = JSON.parse(nodeOutput.output) as Record<string, unknown>;
         const value = parsed[field];
-        if (typeof value === 'string') return value;
+        if (typeof value === 'string') return escapedForBash ? shellQuote(value) : value;
+        // numbers and booleans from JSON.parse are shell-safe without quoting:
+        // JSON disallows NaN/Infinity, so String(number) contains only digits, sign, and '.'.
+        // String(boolean) is 'true' or 'false' — no shell metacharacters.
         if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-        return ''; // objects, null, undefined, symbol, bigint → empty
+        return escapedForBash ? "''" : ''; // objects, null, undefined, symbol, bigint → empty
       } catch {
         getLog().warn(
           { nodeId, field, outputPreview: nodeOutput.output.slice(0, 100) },
           'dag_node_output_ref_json_parse_failed'
         );
-        return '';
+        return escapedForBash ? "''" : '';
       }
     }
   );
@@ -866,7 +884,7 @@ async function executeBashNode(
     baseBranch,
     issueContext
   );
-  const finalScript = substituteNodeOutputRefs(substitutedScript, nodeOutputs);
+  const finalScript = substituteNodeOutputRefs(substitutedScript, nodeOutputs, true);
 
   const timeout = node.timeout ?? BASH_DEFAULT_TIMEOUT;
 

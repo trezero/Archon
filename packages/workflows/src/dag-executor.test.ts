@@ -670,6 +670,71 @@ describe('substituteNodeOutputRefs', () => {
   });
 });
 
+describe('substituteNodeOutputRefs -- shell escaping', () => {
+  it('does not escape by default (AI prompt substitution)', () => {
+    const outputs = new Map([['a', makeOutput('completed', 'hello; rm -rf /')]]);
+    expect(substituteNodeOutputRefs('Result: $a.output', outputs)).toBe('Result: hello; rm -rf /');
+  });
+
+  it('shell-quotes output when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', 'hello world')]]);
+    expect(substituteNodeOutputRefs('echo $a.output', outputs, true)).toBe("echo 'hello world'");
+  });
+
+  it('escapes shell metacharacters when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', 'hello; rm -rf /')]]);
+    expect(substituteNodeOutputRefs('echo $a.output', outputs, true)).toBe(
+      "echo 'hello; rm -rf /'"
+    );
+  });
+
+  it('escapes single quotes inside output when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', "it's alive")]]);
+    expect(substituteNodeOutputRefs('echo $a.output', outputs, true)).toBe("echo 'it'\\''s alive'");
+  });
+
+  it('missing ref becomes empty string when escapedForBash=true', () => {
+    const outputs = new Map<string, NodeOutput>();
+    expect(substituteNodeOutputRefs('echo $missing.output', outputs, true)).toBe("echo ''");
+  });
+
+  it('JSON field escapes shell metacharacters when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', JSON.stringify({ cmd: 'foo; bar' }))]]);
+    expect(substituteNodeOutputRefs('echo $a.output.cmd', outputs, true)).toBe("echo 'foo; bar'");
+  });
+
+  it('numeric JSON field is not quoted (safe as-is)', () => {
+    const outputs = new Map([['a', makeOutput('completed', JSON.stringify({ count: 42 }))]]);
+    expect(substituteNodeOutputRefs('exit $a.output.count', outputs, true)).toBe('exit 42');
+  });
+
+  it('boolean JSON field is not quoted (safe as-is)', () => {
+    const outputs = new Map([['a', makeOutput('completed', JSON.stringify({ ok: true }))]]);
+    expect(substituteNodeOutputRefs('[ $a.output.ok ]', outputs, true)).toBe('[ true ]');
+  });
+
+  it('empty string output becomes quoted empty string when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', '')]]);
+    expect(substituteNodeOutputRefs('echo $a.output', outputs, true)).toBe("echo ''");
+  });
+
+  it('embedded newline in output is safe when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', 'hello\nworld')]]);
+    // Single-quoted bash strings can contain literal newlines safely
+    expect(substituteNodeOutputRefs('echo $a.output', outputs, true)).toBe("echo 'hello\nworld'");
+  });
+
+  it('object JSON field becomes quoted empty string when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', JSON.stringify({ nested: { x: 1 } }))]]);
+    expect(substituteNodeOutputRefs('echo $a.output.nested', outputs, true)).toBe("echo ''");
+  });
+
+  it('dot notation on invalid JSON returns quoted empty string when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', 'not-json')]]);
+    expect(substituteNodeOutputRefs('$a.output.field', outputs, true)).toBe("''");
+  });
+});
+
 describe('checkTriggerRule -- missing upstream treated as failed', () => {
   it('none_failed_min_one_success: skips when all deps skipped (no success)', () => {
     const n = node('implement', ['a', 'b'], { trigger_rule: 'none_failed_min_one_success' });
@@ -1017,6 +1082,53 @@ describe('executeDagWorkflow -- bash nodes', () => {
 
     // AI client called only for the AI node, not the bash node
     expect(mockSendQueryDag.mock.calls.length).toBe(1);
+  });
+
+  it('bash node output with shell metacharacters does not inject into downstream bash script', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('bash-injection-run-id', {
+      workflow_name: 'bash-injection-test',
+      conversation_id: 'conv-injection',
+      user_message: 'test',
+    });
+
+    // upstream: outputs a value containing shell metacharacters
+    // downstream: embeds $upstream.output literally in a bash script
+    // If injection were present, the semicolon would split into two commands and INJECTED would print
+    const nodes: DagNode[] = [
+      { id: 'upstream', bash: 'printf "%s" "safe; echo INJECTED"' },
+      {
+        id: 'downstream',
+        bash: 'result=$upstream.output; echo "got: $result"',
+        depends_on: ['upstream'],
+      },
+    ];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-injection',
+      testDir,
+      { name: 'bash-injection-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // No AI calls
+    expect(mockSendQueryDag.mock.calls.length).toBe(0);
+
+    // The downstream node ran without injection: stdout should contain the literal value, not a separate INJECTED line
+    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
+    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
+    // 'INJECTED' as a standalone result of injection must not appear
+    const injectedMessage = messages.find((m: string) => m === 'INJECTED');
+    expect(injectedMessage).toBeUndefined();
   });
 });
 
