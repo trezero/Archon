@@ -1923,5 +1923,18 @@ describe('WorktreeProvider', () => {
       expect(path).toContain('repo');
       expect(path).toContain('issue-42');
     });
+
+    test('getWorktreePath throws when repoPath has fewer than 2 segments', () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/repo', // only one segment
+        workflowType: 'issue',
+        identifier: '42',
+      };
+      const branchName = provider.generateBranchName(request);
+      expect(() => provider.getWorktreePath(request, branchName)).toThrow(
+        'Cannot extract owner/repo from path "/repo"'
+      );
+    });
   });
 });

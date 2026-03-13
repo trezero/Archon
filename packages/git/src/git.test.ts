@@ -306,6 +306,37 @@ describe('git utilities', () => {
     });
   });
 
+  describe('extractOwnerRepo', () => {
+    test('extracts owner and repo from a multi-segment path', () => {
+      const result = git.extractOwnerRepo(git.toRepoPath('/home/user/owner/repo'));
+      expect(result).toEqual({ owner: 'owner', repo: 'repo' });
+    });
+
+    test('extracts owner and repo from exactly 2-segment path', () => {
+      const result = git.extractOwnerRepo(git.toRepoPath('/owner/repo'));
+      expect(result).toEqual({ owner: 'owner', repo: 'repo' });
+    });
+
+    test('extracts owner and repo from Windows-style path', () => {
+      const result = git.extractOwnerRepo(
+        'C:\\Users\\dev\\owner\\repo' as ReturnType<typeof git.toRepoPath>
+      );
+      expect(result).toEqual({ owner: 'owner', repo: 'repo' });
+    });
+
+    test('throws when repoPath has fewer than 2 segments', () => {
+      expect(() => git.extractOwnerRepo(git.toRepoPath('/repo'))).toThrow(
+        'Cannot extract owner/repo from path "/repo"'
+      );
+    });
+
+    test('throws when repoPath is empty', () => {
+      expect(() => git.extractOwnerRepo('' as ReturnType<typeof git.toRepoPath>)).toThrow(
+        'Cannot extract owner/repo from path ""'
+      );
+    });
+  });
+
   describe('worktreeExists', () => {
     test('returns true when path and .git exist', async () => {
       await realMkdir(join(testDir, 'worktree-test'), { recursive: true });
@@ -739,6 +770,15 @@ branch refs/heads/feature/auth
         return args.includes('add');
       });
       expect(createCalls).toHaveLength(0);
+    });
+
+    test('throws when repoPath has fewer than 2 segments', async () => {
+      const repoPath = '/repo'; // only one segment after split
+      const issueNumber = 42;
+
+      await expect(git.createWorktreeForIssue(repoPath, issueNumber, false)).rejects.toThrow(
+        'Cannot extract owner/repo from path "/repo"'
+      );
     });
   });
 

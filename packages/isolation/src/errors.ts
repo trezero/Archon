@@ -51,6 +51,12 @@ export function classifyIsolationError(err: Error): string {
       pattern: 'not a git repository',
       message: '**Error:** Target path is not a valid git repository.',
     },
+    {
+      pattern: 'cannot extract owner/repo',
+      message:
+        '**Error:** Repository path is too short to extract owner and repo name. ' +
+        'Re-register the codebase with a full path (e.g. `/home/user/owner/repo`).',
+    },
   ];
 
   for (const { pattern, message } of errorPatterns) {

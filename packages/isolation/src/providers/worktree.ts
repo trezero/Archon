@@ -11,6 +11,7 @@ import { join } from 'path';
 import { createLogger } from '@archon/paths';
 import {
   execFileAsync,
+  extractOwnerRepo,
   findWorktreeByBranch,
   getCanonicalRepoPath,
   getWorktreeBase,
@@ -929,8 +930,7 @@ export class WorktreeProvider implements IIsolationProvider {
    * Used for legacy global worktree base layout where owner/repo must be appended.
    */
   private extractOwnerRepo(repoPath: string): { owner: string; repo: string } {
-    const parts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
-    return { owner: parts[parts.length - 2], repo: parts[parts.length - 1] };
+    return extractOwnerRepo(toRepoPath(repoPath));
   }
 
   /**
