@@ -105,6 +105,8 @@ interface IsolatedEnvironmentBase {
    * For accurate timestamps, store in database.
    */
   createdAt: Date;
+  /** Non-fatal warnings to surface to the user after successful creation */
+  warnings?: string[];
 }
 
 export interface WorktreeEnvironment extends IsolatedEnvironmentBase {
@@ -285,7 +287,13 @@ export type ResolutionMethod =
   | { type: 'created'; autoCleanedCount?: number };
 
 export type IsolationResolution =
-  | { status: 'resolved'; env: IsolationEnvironmentRow; cwd: string; method: ResolutionMethod }
+  | {
+      status: 'resolved';
+      env: IsolationEnvironmentRow;
+      cwd: string;
+      method: ResolutionMethod;
+      warnings?: string[];
+    }
   | { status: 'stale_cleaned'; previousEnvId: string }
   | { status: 'none'; cwd: string }
   | { status: 'blocked'; reason: IsolationBlockReason; userMessage: string };

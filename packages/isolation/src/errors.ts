@@ -57,6 +57,11 @@ export function classifyIsolationError(err: Error): string {
         '**Error:** Repository path is too short to extract owner and repo name. ' +
         'Re-register the codebase with a full path (e.g. `/home/user/owner/repo`).',
     },
+    {
+      pattern: 'branch not found',
+      message:
+        '**Error:** Branch not found. The requested branch may have been deleted or not yet pushed.',
+    },
   ];
 
   for (const { pattern, message } of errorPatterns) {
@@ -66,6 +71,30 @@ export function classifyIsolationError(err: Error): string {
   }
 
   return `**Error:** Could not create isolated workspace (${err.message}).`;
+}
+
+/**
+ * Returns true if the error is a known infrastructure failure that should
+ * produce a user-facing "blocked" message rather than a crash.
+ *
+ * Unknown errors (programming bugs, unexpected failures) should propagate
+ * so they are visible as crashes rather than silent workspace failures.
+ */
+export function isKnownIsolationError(err: Error): boolean {
+  const stderr = (err as Error & { stderr?: string }).stderr ?? '';
+  const errorLower = `${err.message} ${stderr}`.toLowerCase();
+
+  const knownPatterns = [
+    'permission denied',
+    'eacces',
+    'timeout',
+    'no space left',
+    'enospc',
+    'not a git repository',
+    'branch not found',
+  ];
+
+  return knownPatterns.some(pattern => errorLower.includes(pattern));
 }
 
 /**

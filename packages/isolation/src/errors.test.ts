@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import {
   classifyIsolationError,
   formatWorktreeLimitMessage,
+  isKnownIsolationError,
   IsolationBlockedError,
 } from './errors';
 import type { WorktreeStatusBreakdown } from './types';
@@ -60,6 +61,50 @@ describe('classifyIsolationError', () => {
   test('handles missing stderr gracefully', () => {
     const result = classifyIsolationError(new Error('unknown error'));
     expect(result).toContain('Could not create isolated workspace');
+  });
+});
+
+describe('isKnownIsolationError', () => {
+  test('identifies permission denied as known', () => {
+    expect(isKnownIsolationError(new Error('permission denied'))).toBe(true);
+  });
+
+  test('identifies eacces as known', () => {
+    expect(isKnownIsolationError(new Error('EACCES: access denied'))).toBe(true);
+  });
+
+  test('identifies timeout as known', () => {
+    expect(isKnownIsolationError(new Error('timeout after 30s'))).toBe(true);
+  });
+
+  test('identifies no space left as known', () => {
+    expect(isKnownIsolationError(new Error('No space left on device'))).toBe(true);
+  });
+
+  test('identifies enospc as known', () => {
+    expect(isKnownIsolationError(new Error('ENOSPC: write failed'))).toBe(true);
+  });
+
+  test('identifies not a git repository as known', () => {
+    expect(isKnownIsolationError(new Error('fatal: not a git repository'))).toBe(true);
+  });
+
+  test('identifies branch not found as known', () => {
+    expect(isKnownIsolationError(new Error('branch not found'))).toBe(true);
+  });
+
+  test('returns false for unknown errors', () => {
+    expect(isKnownIsolationError(new TypeError('cannot read property of null'))).toBe(false);
+  });
+
+  test('returns false for generic unexpected errors', () => {
+    expect(isKnownIsolationError(new Error('something unexpected'))).toBe(false);
+  });
+
+  test('checks stderr when message does not match', () => {
+    const err = new Error('Command failed') as Error & { stderr: string };
+    err.stderr = 'error: permission denied';
+    expect(isKnownIsolationError(err)).toBe(true);
   });
 });
 

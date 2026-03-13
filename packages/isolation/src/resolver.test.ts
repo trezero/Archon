@@ -566,6 +566,165 @@ describe('IsolationResolver', () => {
     }
   });
 
+  // --- Unknown error propagation tests ---
+
+  test('unknown error from provider.create() propagates instead of returning blocked', async () => {
+    const unexpectedError = new TypeError('cannot read property of null');
+    const resolver = createResolver({
+      provider: {
+        ...makeMockProvider(),
+        create: async () => {
+          throw unexpectedError;
+        },
+      },
+    });
+
+    await expect(
+      resolver.resolve({
+        existingEnvId: null,
+        codebase: defaultCodebase,
+        hints: { workflowType: 'issue', workflowId: '600' },
+        platformType: 'web',
+      })
+    ).rejects.toThrow(TypeError);
+  });
+
+  test('known infrastructure error from provider.create() returns blocked', async () => {
+    const resolver = createResolver({
+      provider: {
+        ...makeMockProvider(),
+        create: async () => {
+          throw new Error('permission denied');
+        },
+      },
+    });
+
+    const result = await resolver.resolve({
+      existingEnvId: null,
+      codebase: defaultCodebase,
+      hints: { workflowType: 'issue', workflowId: '601' },
+      platformType: 'web',
+    });
+
+    expect(result.status).toBe('blocked');
+    if (result.status === 'blocked') {
+      expect(result.reason).toBe('creation_failed');
+    }
+  });
+
+  test('store.create() failure triggers orphan worktree cleanup and rethrows', async () => {
+    let destroyCalled = false;
+    let destroyCalledWithForce = false;
+
+    const resolver = createResolver({
+      provider: {
+        ...makeMockProvider(),
+        destroy: async (_envId, options) => {
+          destroyCalled = true;
+          destroyCalledWithForce = options?.force === true;
+          return {
+            worktreeRemoved: true,
+            branchDeleted: null,
+            remoteBranchDeleted: null,
+            directoryClean: true,
+            warnings: [],
+          };
+        },
+      },
+      store: makeMockStore({
+        create: async () => {
+          throw new Error('DB constraint violation');
+        },
+      }),
+    });
+
+    await expect(
+      resolver.resolve({
+        existingEnvId: null,
+        codebase: defaultCodebase,
+        hints: { workflowType: 'issue', workflowId: '602' },
+        platformType: 'web',
+      })
+    ).rejects.toThrow('DB constraint violation');
+
+    expect(destroyCalled).toBe(true);
+    expect(destroyCalledWithForce).toBe(true);
+  });
+
+  test('store.create() failure still rethrows when orphan cleanup also fails', async () => {
+    const resolver = createResolver({
+      provider: {
+        ...makeMockProvider(),
+        destroy: async () => {
+          throw new Error('cleanup failed');
+        },
+      },
+      store: makeMockStore({
+        create: async () => {
+          throw new Error('DB constraint violation');
+        },
+      }),
+    });
+
+    // Should rethrow the original store error, not the cleanup error
+    await expect(
+      resolver.resolve({
+        existingEnvId: null,
+        codebase: defaultCodebase,
+        hints: { workflowType: 'issue', workflowId: '603' },
+        platformType: 'web',
+      })
+    ).rejects.toThrow('DB constraint violation');
+  });
+
+  // --- Warnings propagation tests ---
+
+  test('warnings from provider.create() are propagated in resolved result', async () => {
+    const resolver = createResolver({
+      provider: {
+        ...makeMockProvider(),
+        create: async (): Promise<IsolatedEnvironment> => ({
+          id: '/worktrees/new-branch',
+          provider: 'worktree',
+          workingPath: '/worktrees/new-branch',
+          branchName: 'new-branch',
+          status: 'active',
+          createdAt: new Date(),
+          metadata: { adopted: false },
+          warnings: ['Config file could not be loaded — copyFiles not applied.'],
+        }),
+      },
+    });
+
+    const result = await resolver.resolve({
+      existingEnvId: null,
+      codebase: defaultCodebase,
+      hints: { workflowType: 'issue', workflowId: '700' },
+      platformType: 'web',
+    });
+
+    expect(result.status).toBe('resolved');
+    if (result.status === 'resolved') {
+      expect(result.warnings).toEqual(['Config file could not be loaded — copyFiles not applied.']);
+    }
+  });
+
+  test('resolved result has no warnings when provider.create() returns none', async () => {
+    const resolver = createResolver();
+
+    const result = await resolver.resolve({
+      existingEnvId: null,
+      codebase: defaultCodebase,
+      hints: { workflowType: 'issue', workflowId: '701' },
+      platformType: 'web',
+    });
+
+    expect(result.status).toBe('resolved');
+    if (result.status === 'resolved') {
+      expect(result.warnings).toBeUndefined();
+    }
+  });
+
   // --- Constructor validation tests ---
 
   test('throws on zero maxWorktreesPerCodebase', () => {

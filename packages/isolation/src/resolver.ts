@@ -27,7 +27,11 @@ import type {
   ResolveRequest,
 } from './types';
 import type { IIsolationStore } from './store';
-import { classifyIsolationError, formatWorktreeLimitMessage } from './errors';
+import {
+  classifyIsolationError,
+  isKnownIsolationError,
+  formatWorktreeLimitMessage,
+} from './errors';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -324,8 +328,9 @@ export class IsolationResolver {
     try {
       await this.store.updateStatus(envId, 'destroyed');
     } catch (cleanupError) {
+      const err = cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError));
       getLog().error(
-        { err: cleanupError as Error, isolationEnvId: envId },
+        { err, errorType: err.constructor.name, isolationEnvId: envId },
         'isolation_cleanup_failed'
       );
     }
@@ -343,68 +348,54 @@ export class IsolationResolver {
     platformType: string,
     autoCleanedCount?: number
   ): Promise<IsolationResolution> {
+    // Construct request based on workflow type
+    const baseRequest = {
+      codebaseId: codebase.id,
+      canonicalRepoPath: canonicalPath,
+      identifier: workflowId,
+    };
+
+    let isolationRequest: IsolationRequest;
+    if (workflowType === 'pr') {
+      isolationRequest = {
+        ...baseRequest,
+        workflowType: 'pr' as const,
+        prBranch: hints?.prBranch ?? toBranchName(`pr-${workflowId}`),
+        prSha: hints?.prSha,
+        isForkPR: hints?.isForkPR ?? false,
+      };
+    } else if (workflowType === 'task') {
+      isolationRequest = {
+        ...baseRequest,
+        workflowType: 'task' as const,
+        fromBranch: hints?.fromBranch,
+      };
+    } else {
+      isolationRequest = {
+        ...baseRequest,
+        workflowType,
+      };
+    }
+
+    let isolatedEnv: Awaited<ReturnType<typeof this.provider.create>>;
     try {
-      // Construct request based on workflow type
-      const baseRequest = {
-        codebaseId: codebase.id,
-        canonicalRepoPath: canonicalPath,
-        identifier: workflowId,
-      };
-
-      let isolationRequest: IsolationRequest;
-      if (workflowType === 'pr') {
-        isolationRequest = {
-          ...baseRequest,
-          workflowType: 'pr' as const,
-          prBranch: hints?.prBranch ?? toBranchName(`pr-${workflowId}`),
-          prSha: hints?.prSha,
-          isForkPR: hints?.isForkPR ?? false,
-        };
-      } else if (workflowType === 'task') {
-        isolationRequest = {
-          ...baseRequest,
-          workflowType: 'task' as const,
-          fromBranch: hints?.fromBranch,
-        };
-      } else {
-        isolationRequest = {
-          ...baseRequest,
-          workflowType,
-        };
-      }
-
-      const isolatedEnv = await this.provider.create(isolationRequest);
-
-      // Create database record
-      const env = await this.store.create({
-        codebase_id: codebase.id,
-        workflow_type: workflowType,
-        workflow_id: workflowId,
-        working_path: isolatedEnv.workingPath,
-        branch_name: isolatedEnv.branchName,
-        created_by_platform: platformType,
-        metadata: {
-          related_issues: hints?.linkedIssues ?? [],
-          related_prs: hints?.linkedPRs ?? [],
-        },
-      });
-
-      return {
-        status: 'resolved',
-        env,
-        cwd: env.working_path,
-        method: { type: 'created', autoCleanedCount },
-      };
+      isolatedEnv = await this.provider.create(isolationRequest);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      const userMessage = classifyIsolationError(err);
 
+      if (!isKnownIsolationError(err)) {
+        // Unknown errors (programming bugs, unexpected failures) should propagate
+        // so they appear in logs as crashes, not as silent "workspace blocked" messages.
+        throw err;
+      }
+
+      const userMessage = classifyIsolationError(err);
       getLog().error(
         {
           err,
+          errorType: err.constructor.name,
           codebaseId: codebase.id,
           codebaseName: codebase.name,
-          defaultCwd: codebase.defaultCwd,
         },
         'isolation_creation_failed'
       );
@@ -417,5 +408,70 @@ export class IsolationResolver {
           ' Execution blocked to prevent changes to shared codebase. Please resolve the issue and try again.',
       };
     }
+
+    // provider.create() succeeded — worktree exists on disk.
+    // If store.create() fails, we must clean up the orphaned worktree.
+    let env: IsolationEnvironmentRow;
+    try {
+      env = await this.store.create({
+        codebase_id: codebase.id,
+        workflow_type: workflowType,
+        workflow_id: workflowId,
+        working_path: isolatedEnv.workingPath,
+        branch_name: isolatedEnv.branchName,
+        created_by_platform: platformType,
+        metadata: {
+          related_issues: hints?.linkedIssues ?? [],
+          related_prs: hints?.linkedPRs ?? [],
+        },
+      });
+    } catch (storeError) {
+      const err = storeError instanceof Error ? storeError : new Error(String(storeError));
+      getLog().error(
+        {
+          err,
+          errorType: err.constructor.name,
+          worktreePath: isolatedEnv.workingPath,
+          codebaseId: codebase.id,
+        },
+        'isolation_store_create_failed'
+      );
+
+      // Clean up the orphaned worktree — best-effort, don't mask the original error
+      try {
+        await this.provider.destroy(isolatedEnv.workingPath, {
+          canonicalRepoPath: canonicalPath,
+          branchName: isolatedEnv.branchName,
+          force: true,
+        });
+        getLog().info(
+          { worktreePath: isolatedEnv.workingPath },
+          'isolation_orphan_cleanup_completed'
+        );
+      } catch (cleanupError) {
+        const cleanupErr =
+          cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError));
+        getLog().error(
+          {
+            err: cleanupErr,
+            errorType: cleanupErr.constructor.name,
+            worktreePath: isolatedEnv.workingPath,
+          },
+          'isolation_orphan_cleanup_failed'
+        );
+      }
+
+      throw err; // Re-throw original store error — this is an unexpected failure
+    }
+
+    return {
+      status: 'resolved',
+      env,
+      cwd: env.working_path,
+      method: { type: 'created', autoCleanedCount },
+      ...(isolatedEnv.warnings && isolatedEnv.warnings.length > 0
+        ? { warnings: isolatedEnv.warnings }
+        : {}),
+    };
   }
 }

@@ -159,6 +159,14 @@ export async function validateAndResolveIsolation(
           `Cleaned up ${String(result.method.autoCleanedCount)} merged worktree(s) to make room.`
         );
       }
+      // Surface any non-fatal warnings from environment creation
+      if (result.warnings && result.warnings.length > 0) {
+        for (const warning of result.warnings) {
+          await platform.sendMessage(conversationId, `Warning: ${warning}`).catch(e => {
+            getLog().error({ err: toError(e), conversationId }, 'isolation_warning_send_failed');
+          });
+        }
+      }
       return {
         status: result.method.type === 'existing' ? 'existing' : 'new',
         cwd: result.cwd,

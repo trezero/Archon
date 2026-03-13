@@ -65,7 +65,7 @@ export class WorktreeProvider implements IIsolationProvider {
     }
 
     // Create new worktree
-    await this.createWorktree(request, worktreePath, branchName);
+    const { warnings } = await this.createWorktree(request, worktreePath, branchName);
 
     return {
       id: envId,
@@ -75,6 +75,7 @@ export class WorktreeProvider implements IIsolationProvider {
       status: 'active',
       createdAt: new Date(),
       metadata: { adopted: false, request },
+      ...(warnings.length > 0 ? { warnings } : {}),
     };
   }
 
@@ -521,13 +522,14 @@ export class WorktreeProvider implements IIsolationProvider {
   }
 
   /**
-   * Create the actual worktree
+   * Create the actual worktree.
+   * Returns warnings that should be surfaced to the user (non-fatal issues).
    */
   private async createWorktree(
     request: IsolationRequest,
     worktreePath: string,
     branchName: string
-  ): Promise<void> {
+  ): Promise<{ warnings: string[] }> {
     const repoPath = request.canonicalRepoPath;
 
     const worktreeConfig = await this.loadConfig(repoPath).catch(error => {
@@ -555,7 +557,19 @@ export class WorktreeProvider implements IIsolationProvider {
     }
 
     // Copy git-ignored files based on repo config
-    await this.copyConfiguredFiles(repoPath, worktreePath, worktreeConfig);
+    const { configLoadFailed } = await this.copyConfiguredFiles(
+      repoPath,
+      worktreePath,
+      worktreeConfig
+    );
+
+    const warnings: string[] = [];
+    if (configLoadFailed) {
+      warnings.push(
+        'Config file could not be loaded — copyFiles configuration was not applied. Check your .archon/config.yaml for syntax errors.'
+      );
+    }
+    return { warnings };
   }
 
   /**
@@ -620,18 +634,22 @@ export class WorktreeProvider implements IIsolationProvider {
   }
 
   /**
-   * Copy git-ignored files to worktree based on repo config
+   * Copy git-ignored files to worktree based on repo config.
+   * Returns `configLoadFailed: true` when no config was provided and the
+   * internal fallback load of the config fails — so the caller can surface
+   * a warning without blocking worktree creation.
    */
   private async copyConfiguredFiles(
     canonicalRepoPath: string,
     worktreePath: string,
     worktreeConfig?: { baseBranch?: string; copyFiles?: string[] } | null
-  ): Promise<void> {
+  ): Promise<{ configLoadFailed: boolean }> {
     // Default files to always copy
     const defaultCopyFiles = ['.archon'];
 
-    // Load user config - log errors but don't fail worktree creation
+    // Load user config - log errors and set configLoadFailed, but don't fail worktree creation
     let userCopyFiles: string[] = [];
+    let configLoadFailed = false;
     if (worktreeConfig) {
       userCopyFiles = worktreeConfig.copyFiles ?? [];
     } else {
@@ -641,8 +659,13 @@ export class WorktreeProvider implements IIsolationProvider {
         userCopyFiles = loadedConfig?.copyFiles ?? [];
       } catch (error) {
         // Config errors are more serious - log as error, not warning
-        getLog().error({ err: error, canonicalRepoPath }, 'repo_config_load_failed');
-        // Don't return - still copy default files even if config fails
+        const err = error instanceof Error ? error : new Error(String(error));
+        getLog().error(
+          { err, errorType: err.constructor.name, canonicalRepoPath },
+          'repo_config_load_failed'
+        );
+        configLoadFailed = true;
+        // Continue with default files only — worktree is still usable
       }
     }
 
@@ -650,7 +673,7 @@ export class WorktreeProvider implements IIsolationProvider {
     const copyFiles = [...new Set([...defaultCopyFiles, ...userCopyFiles])];
 
     if (copyFiles.length === 0) {
-      return;
+      return { configLoadFailed };
     }
 
     // Copy files - errors are handled inside copyWorktreeFiles, but wrap in
@@ -672,6 +695,8 @@ export class WorktreeProvider implements IIsolationProvider {
       // but guard against unexpected errors
       getLog().error({ err: error, worktreePath }, 'worktree_file_copy_failed');
     }
+
+    return { configLoadFailed };
   }
 
   /**
