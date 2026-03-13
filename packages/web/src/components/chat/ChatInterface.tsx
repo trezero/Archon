@@ -138,7 +138,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         setMessages(prev => [
           ...prev,
           {
-            id: 'error-load-history',
+            id: `error-load-history-${String(Date.now())}`,
             role: 'assistant' as const,
             content: '',
             error: {
@@ -558,13 +558,13 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         }
       } catch (error) {
         console.error('[Chat] Failed to send message', { error });
-        setSendInFlight(false);
         onError({
           message: 'Failed to send message. Please try again.',
           classification: 'transient',
           suggestedActions: ['Retry'],
         });
       } finally {
+        setSendInFlight(false);
         setSending(false);
       }
     },
