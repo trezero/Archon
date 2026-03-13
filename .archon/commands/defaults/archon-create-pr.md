@@ -12,6 +12,35 @@ argument-hint: [base-branch] (default: auto-detected from config or repo)
 
 ---
 
+## Pre-flight: Check for Existing PRs
+
+Extract the issue number from the current branch name or context (e.g., `fix/issue-580` → `580`).
+
+```bash
+BRANCH=$(git branch --show-current)
+ISSUE_NUM=$(echo "$BRANCH" | grep -oE '[0-9]+' | tail -1)
+```
+
+If an issue number was found, search for open PRs that already reference it:
+
+```bash
+gh pr list \
+  --search "Fixes #${ISSUE_NUM} OR Closes #${ISSUE_NUM}" \
+  --state open \
+  --json number,url,headRefName
+```
+
+**If a matching PR is returned**: stop here, report the existing PR URL, and do **not** proceed to Phase 2 or Phase 3.
+
+```
+Existing PR found for issue #${ISSUE_NUM}: [url]
+Skipping PR creation.
+```
+
+**If no match is found** (or no issue number could be extracted): continue to Phase 1.
+
+---
+
 ## Phase 1: Gather Context
 
 ### 1.1 Check Git State

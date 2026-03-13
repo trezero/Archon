@@ -761,14 +761,15 @@ async function executeStepInternal(
     let activityUpdateFailures = 0;
     let activityWarningShown = false;
     let idleTimedOut = false;
+    const effectiveIdleTimeout = stepDef.idle_timeout ?? STEP_IDLE_TIMEOUT_MS;
 
     for await (const msg of withIdleTimeout(
       aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId, stepOptions),
-      STEP_IDLE_TIMEOUT_MS,
+      effectiveIdleTimeout,
       () => {
         idleTimedOut = true;
         getLog().warn(
-          { stepId, commandName, timeoutMs: STEP_IDLE_TIMEOUT_MS },
+          { stepId, commandName, timeoutMs: effectiveIdleTimeout },
           'step_idle_timeout_reached'
         );
         stepAbortController.abort();
@@ -853,14 +854,14 @@ async function executeStepInternal(
           stepId,
           commandName,
           messagesReceived: assistantMessages.length,
-          timeoutMs: STEP_IDLE_TIMEOUT_MS,
+          timeoutMs: effectiveIdleTimeout,
         },
         'step_completed_via_idle_timeout'
       );
       await safeSendMessage(
         platform,
         conversationId,
-        `⚠️ Step \`${commandName}\` completed via idle timeout (no output for ${String(STEP_IDLE_TIMEOUT_MS / 60000)} min). The AI likely finished but the subprocess didn't exit cleanly.`,
+        `⚠️ Step \`${commandName}\` completed via idle timeout (no output for ${String(effectiveIdleTimeout / 60000)} min). The AI likely finished but the subprocess didn't exit cleanly.`,
         messageContext,
         unknownErrorTracker
       );
@@ -1703,7 +1704,8 @@ export async function executeWorkflow(
     prBranch?: string;
   },
   parentConversationId?: string,
-  preCreatedRun?: WorkflowRun
+  preCreatedRun?: WorkflowRun,
+  startFromStep?: number
 ): Promise<WorkflowExecutionResult> {
   // Load config once for the entire workflow execution
   const config = await deps.loadConfig(cwd);
@@ -1787,9 +1789,14 @@ export async function executeWorkflow(
 
   if (preCreatedRun) {
     getLog().info(
-      { workflowRunId: preCreatedRun.id, workflowName: workflow.name },
+      { workflowRunId: preCreatedRun.id, workflowName: workflow.name, startFromStep },
       'workflow_using_pre_created_run'
     );
+    // When caller provides both a pre-created run and an explicit start step, apply it directly.
+    // This supports CLI --resume which finds the failed run externally and passes its step index.
+    if (startFromStep !== undefined && startFromStep >= 0) {
+      resumeFromStepIndex = startFromStep;
+    }
   }
 
   // Check for concurrent workflow execution with staleness detection

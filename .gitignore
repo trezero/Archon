@@ -68,9 +68,15 @@ Thumbs.db
 .test-repo-url
 .test-issue-number
 
-# Test SQLite databases
+# Test SQLite databases and WAL/journal files
 *.test*.db
 .test-*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Defensive: literal 'undefined' directories from env var bugs
+undefined/
 
 coverage
 

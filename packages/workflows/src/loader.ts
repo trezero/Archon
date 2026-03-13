@@ -123,6 +123,20 @@ function parseSingleStep(s: unknown, indexPath: string, errors: string[]): Singl
     );
   }
 
+  // Parse idle_timeout (finite positive number or undefined)
+  if (step.idle_timeout !== undefined) {
+    if (
+      typeof step.idle_timeout === 'number' &&
+      step.idle_timeout > 0 &&
+      isFinite(step.idle_timeout)
+    ) {
+      result.idle_timeout = step.idle_timeout;
+    } else {
+      errors.push(`Step ${indexPath}: 'idle_timeout' must be a finite positive number (ms)`);
+      return null;
+    }
+  }
+
   return result;
 }
 
@@ -248,10 +262,26 @@ function parseDagNode(
       }
     }
 
+    // Parse idle_timeout (finite positive number or undefined)
+    let idleTimeout: number | undefined;
+    if (raw.idle_timeout !== undefined) {
+      if (
+        typeof raw.idle_timeout === 'number' &&
+        raw.idle_timeout > 0 &&
+        isFinite(raw.idle_timeout)
+      ) {
+        idleTimeout = raw.idle_timeout;
+      } else {
+        errors.push(`Node '${id}': 'idle_timeout' must be a finite positive number (ms)`);
+        return null;
+      }
+    }
+
     return {
       id,
       bash: String(raw.bash).trim(),
       ...(timeout !== undefined ? { timeout } : {}),
+      ...(idleTimeout !== undefined ? { idle_timeout: idleTimeout } : {}),
       ...(dependsOn.length > 0 ? { depends_on: dependsOn } : {}),
       ...(whenStr !== undefined ? { when: whenStr } : {}),
       ...(triggerRule ? { trigger_rule: triggerRule } : {}),
@@ -268,8 +298,24 @@ function parseDagNode(
     return null;
   }
 
+  // Parse idle_timeout for AI nodes (finite positive number or undefined)
+  let aiIdleTimeout: number | undefined;
+  if (raw.idle_timeout !== undefined) {
+    if (
+      typeof raw.idle_timeout === 'number' &&
+      raw.idle_timeout > 0 &&
+      isFinite(raw.idle_timeout)
+    ) {
+      aiIdleTimeout = raw.idle_timeout;
+    } else {
+      errors.push(`Node '${id}': 'idle_timeout' must be a finite positive number (ms)`);
+      return null;
+    }
+  }
+
   const errorsBeforeToolFields = errors.length;
   const baseFields = {
+    ...(aiIdleTimeout !== undefined ? { idle_timeout: aiIdleTimeout } : {}),
     ...(dependsOn.length > 0 ? { depends_on: dependsOn } : {}),
     ...(whenStr !== undefined ? { when: whenStr } : {}),
     ...(triggerRule ? { trigger_rule: triggerRule } : {}),

@@ -94,6 +94,7 @@ Options:
   --branch, -b <name>        Create worktree for branch (or reuse existing)
   --from, --from-branch <name> Create new branch from specific start point
   --no-worktree              Run on branch directly without worktree isolation
+  --resume                   Resume the most recent failed run of the workflow (mutually exclusive with --branch)
   --spawn                    Open setup wizard in a new terminal window (for setup command)
   --quiet, -q                Reduce log verbosity to warnings and errors only
   --verbose, -v              Show debug-level output
@@ -148,6 +149,7 @@ async function main(): Promise<number> {
         from: { type: 'string' },
         'from-branch': { type: 'string' },
         'no-worktree': { type: 'boolean' },
+        resume: { type: 'boolean' },
         spawn: { type: 'boolean' },
         quiet: { type: 'boolean', short: 'q' },
         verbose: { type: 'boolean', short: 'v' },
@@ -170,6 +172,7 @@ async function main(): Promise<number> {
   const fromBranch =
     (values.from as string | undefined) ?? (values['from-branch'] as string | undefined);
   const noWorktree = values['no-worktree'] as boolean | undefined;
+  const resumeFlag = values.resume as boolean | undefined;
   const spawnFlag = values.spawn as boolean | undefined;
   const jsonFlag = values.json as boolean | undefined;
 
@@ -264,8 +267,19 @@ async function main(): Promise<number> {
               );
               return 1;
             }
+            if (resumeFlag && branchName !== undefined) {
+              console.error(
+                'Error: --resume and --branch are mutually exclusive.\n' +
+                  '  --resume reuses the existing worktree from the failed run.\n' +
+                  '  Remove --branch when using --resume.'
+              );
+              return 1;
+            }
             // Conditionally construct options to satisfy discriminated union
-            const options = branchName !== undefined ? { branchName, fromBranch, noWorktree } : {};
+            const options =
+              branchName !== undefined
+                ? { branchName, fromBranch, noWorktree }
+                : { resume: resumeFlag };
             await workflowRunCommand(effectiveCwd, workflowName, userMessage, options);
             break;
           }

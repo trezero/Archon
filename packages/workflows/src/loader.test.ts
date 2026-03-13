@@ -1553,6 +1553,140 @@ nodes:
       expect(result.errors[0].error).toMatch(/timeout.*positive/i);
     });
 
+    it('should parse idle_timeout on command node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'idle-timeout.yaml'),
+        `
+name: idle-timeout
+description: Node with idle timeout
+nodes:
+  - id: long-running
+    command: my-cmd
+    idle_timeout: 1800000
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (!isDagWorkflow(wf)) return;
+      expect(wf.nodes[0].idle_timeout).toBe(1800000);
+    });
+
+    it('should parse idle_timeout on prompt node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'idle-timeout-prompt.yaml'),
+        `
+name: idle-timeout-prompt
+description: Prompt node with idle timeout
+nodes:
+  - id: long-prompt
+    prompt: "do something slow"
+    idle_timeout: 600000
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (!isDagWorkflow(wf)) return;
+      expect(wf.nodes[0].idle_timeout).toBe(600000);
+    });
+
+    it('should parse idle_timeout on bash node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'idle-timeout-bash.yaml'),
+        `
+name: idle-timeout-bash
+description: Bash node with idle timeout
+nodes:
+  - id: slow-bash
+    bash: "sleep 100"
+    idle_timeout: 900000
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (!isDagWorkflow(wf)) return;
+      if (isBashNode(wf.nodes[0])) {
+        expect(wf.nodes[0].idle_timeout).toBe(900000);
+      }
+    });
+
+    it('should reject invalid idle_timeout (negative)', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-idle-timeout.yaml'),
+        `
+name: bad-idle-timeout
+description: Invalid idle timeout
+nodes:
+  - id: bad
+    command: my-cmd
+    idle_timeout: -1
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/idle_timeout.*positive/i);
+    });
+
+    it('should reject invalid idle_timeout (string)', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'string-idle-timeout.yaml'),
+        `
+name: string-idle-timeout
+description: String idle timeout
+nodes:
+  - id: bad
+    prompt: "do something"
+    idle_timeout: "slow"
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/idle_timeout.*positive/i);
+    });
+
+    it('should reject invalid idle_timeout (Infinity)', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'inf-idle-timeout.yaml'),
+        `
+name: inf-idle-timeout
+description: Infinity idle timeout
+nodes:
+  - id: bad
+    prompt: "do something"
+    idle_timeout: .inf
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/idle_timeout.*finite.*positive/i);
+    });
+
     it('should ignore AI-specific fields on bash nodes (parses successfully, fields stripped)', async () => {
       const workflowDir = join(testDir, '.archon', 'workflows');
       await mkdir(workflowDir, { recursive: true });

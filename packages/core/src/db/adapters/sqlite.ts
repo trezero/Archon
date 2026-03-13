@@ -42,8 +42,11 @@ export class SqliteAdapter implements IDatabase {
   }
 
   async query<T>(sql: string, params?: unknown[]): Promise<QueryResult<T>> {
-    // Convert $1, $2, etc. to ? placeholders
-    const convertedSql = this.convertPlaceholders(sql);
+    // Convert $1, $2, etc. to ? placeholders and reorder params to match
+    const { sql: convertedSql, params: reorderedParams } = this.convertPlaceholders(
+      sql,
+      params ?? []
+    );
 
     try {
       // Determine if this is a SELECT or mutation
@@ -51,7 +54,7 @@ export class SqliteAdapter implements IDatabase {
       const isSelect = trimmedSql.startsWith('SELECT') || trimmedSql.startsWith('WITH');
 
       // Cast params to SQLite's expected type
-      const sqliteParams = (params ?? []) as SQLQueryBindings[];
+      const sqliteParams = reorderedParams as SQLQueryBindings[];
 
       if (isSelect) {
         const stmt = this.db.prepare(convertedSql);
@@ -114,15 +117,32 @@ export class SqliteAdapter implements IDatabase {
   }
 
   /**
-   * Convert PostgreSQL $1, $2 placeholders to SQLite ? placeholders
+   * Convert PostgreSQL $1, $2 placeholders to SQLite ? placeholders.
+   *
+   * PostgreSQL uses explicit indices ($1, $2) so params can appear in any order
+   * in SQL. SQLite uses positional ? — so params must be reordered to match the
+   * left-to-right order of placeholders in the SQL string.
+   *
+   * Example: SQL has "$2 ... $1" with params [id, json] →
+   *   converted SQL: "? ... ?" with reordered params [json, id]
    */
-  private convertPlaceholders(sql: string): string {
-    // Replace $1, $2, etc. with ?
-    // Also handle ::jsonb casts (remove them for SQLite)
-    return sql
-      .replace(/\$\d+/g, '?')
+  private convertPlaceholders(sql: string, params: unknown[]): { sql: string; params: unknown[] } {
+    // Collect $N placeholders in order of appearance
+    const placeholderOrder: number[] = [];
+    const convertedSql = sql
+      .replace(/\$(\d+)/g, (_match, indexStr: string) => {
+        placeholderOrder.push(Number(indexStr));
+        return '?';
+      })
       .replace(/::jsonb/g, '')
       .replace(/::INTERVAL/g, '');
+
+    // Reorder params to match the positional order of ? in the SQL.
+    // $N is 1-based, so $1 → params[0], $2 → params[1], etc.
+    const reordered =
+      placeholderOrder.length > 0 ? placeholderOrder.map(idx => params[idx - 1]) : params;
+
+    return { sql: convertedSql, params: reordered };
   }
 
   /**
@@ -359,18 +379,20 @@ export const sqliteDialect: SqlDialect = {
     return "datetime('now')";
   },
 
-  jsonMerge(column: string, _paramIndex: number): string {
+  jsonMerge(column: string, paramIndex: number): string {
     // SQLite json_patch: merges two JSON objects
-    return `json_patch(${column}, ?)`;
+    // Use $N placeholder (not raw ?) so convertPlaceholders can reorder params correctly
+    return `json_patch(${column}, $${String(paramIndex)})`;
   },
 
-  jsonArrayContains(column: string, path: string, _paramIndex: number): string {
+  jsonArrayContains(column: string, path: string, paramIndex: number): string {
     // SQLite: check if JSON array contains value using instr
-    return `instr(json_extract(${column}, '$.${path}'), ?) > 0`;
+    // Use $N placeholder for consistent param ordering
+    return `instr(json_extract(${column}, '$.${path}'), $${String(paramIndex)}) > 0`;
   },
 
-  nowMinusDays(_paramIndex: number): string {
-    return "datetime('now', '-' || ? || ' days')";
+  nowMinusDays(paramIndex: number): string {
+    return `datetime('now', '-' || $${String(paramIndex)} || ' days')`;
   },
 
   daysSince(column: string): string {

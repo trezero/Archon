@@ -60,6 +60,13 @@ export function getArchonHome(): string {
 
   const envHome = process.env.ARCHON_HOME;
   if (envHome) {
+    if (envHome === 'undefined') {
+      throw new Error(
+        'ARCHON_HOME is set to the literal string "undefined". ' +
+          'This indicates a bug where an undefined value was coerced to a string. ' +
+          'Unset ARCHON_HOME or provide a valid path.'
+      );
+    }
     return expandTilde(envHome);
   }
 

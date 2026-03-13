@@ -669,15 +669,16 @@ async function executeNodeInternal(
     abortSignal: nodeAbortController.signal,
   };
   let nodeIdleTimedOut = false;
+  const effectiveIdleTimeout = node.idle_timeout ?? STEP_IDLE_TIMEOUT_MS;
 
   try {
     for await (const msg of withIdleTimeout(
       aiClient.sendQuery(finalPrompt, cwd, resumeSessionId, nodeOptionsWithAbort),
-      STEP_IDLE_TIMEOUT_MS,
+      effectiveIdleTimeout,
       () => {
         nodeIdleTimedOut = true;
         getLog().warn(
-          { nodeId: node.id, timeoutMs: STEP_IDLE_TIMEOUT_MS },
+          { nodeId: node.id, timeoutMs: effectiveIdleTimeout },
           'dag_node_idle_timeout_reached'
         );
         nodeAbortController.abort();
@@ -749,13 +750,13 @@ async function executeNodeInternal(
     // If the node completed via idle timeout, log it
     if (nodeIdleTimedOut) {
       getLog().warn(
-        { nodeId: node.id, timeoutMs: STEP_IDLE_TIMEOUT_MS },
+        { nodeId: node.id, timeoutMs: effectiveIdleTimeout },
         'dag_node_completed_via_idle_timeout'
       );
       await safeSendMessage(
         platform,
         conversationId,
-        `⚠️ Node \`${node.id}\` completed via idle timeout (no output for ${String(STEP_IDLE_TIMEOUT_MS / 60000)} min). The AI likely finished but the subprocess didn't exit cleanly.`,
+        `⚠️ Node \`${node.id}\` completed via idle timeout (no output for ${String(effectiveIdleTimeout / 60000)} min). The AI likely finished but the subprocess didn't exit cleanly.`,
         nodeContext
       );
     }

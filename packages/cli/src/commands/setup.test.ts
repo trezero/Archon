@@ -56,7 +56,11 @@ describe('setup command', () => {
 
       expect(result).toBeNull();
 
-      process.env.ARCHON_HOME = originalHome;
+      if (originalHome === undefined) {
+        delete process.env.ARCHON_HOME;
+      } else {
+        process.env.ARCHON_HOME = originalHome;
+      }
     });
 
     it('should detect existing configuration values', () => {
@@ -91,7 +95,11 @@ CODEX_ACCOUNT_ID=account1
       expect(result?.platforms.discord).toBe(false);
       expect(result?.hasDatabase).toBe(false);
 
-      process.env.ARCHON_HOME = originalHome;
+      if (originalHome === undefined) {
+        delete process.env.ARCHON_HOME;
+      } else {
+        process.env.ARCHON_HOME = originalHome;
+      }
     });
 
     it('should detect PostgreSQL database configuration', () => {
@@ -109,7 +117,11 @@ CODEX_ACCOUNT_ID=account1
       expect(result).not.toBeNull();
       expect(result?.hasDatabase).toBe(true);
 
-      process.env.ARCHON_HOME = originalHome;
+      if (originalHome === undefined) {
+        delete process.env.ARCHON_HOME;
+      } else {
+        process.env.ARCHON_HOME = originalHome;
+      }
     });
   });
 

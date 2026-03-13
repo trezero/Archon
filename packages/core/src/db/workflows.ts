@@ -2,6 +2,7 @@
  * Database operations for workflow runs
  */
 import { pool, getDialect } from './connection';
+import type { IDatabase } from './adapters/types';
 import type { WorkflowRun, WorkflowRunStatus } from '@archon/workflows';
 import { createLogger } from '@archon/paths';
 
@@ -146,6 +147,34 @@ export async function findResumableRun(
     const err = error as Error;
     getLog().warn({ err, workflowName, workingPath }, 'db.workflow_run_find_resumable_failed');
     throw new Error(`Failed to find resumable run: ${err.message}`);
+  }
+}
+
+/**
+ * Find the most recent failed workflow run by workflow name and codebase.
+ * Used by the CLI `--resume` flag to locate a prior failed run regardless of conversation ID,
+ * since CLI re-runs always generate fresh conversation IDs.
+ */
+export async function findLastFailedRun(
+  db: IDatabase,
+  workflowName: string,
+  codebaseId: string
+): Promise<WorkflowRun | null> {
+  try {
+    const result = await db.query<WorkflowRun>(
+      `SELECT * FROM remote_agent_workflow_runs
+       WHERE workflow_name = $1
+         AND codebase_id = $2
+         AND status = 'failed'
+       ORDER BY started_at DESC
+       LIMIT 1`,
+      [workflowName, codebaseId]
+    );
+    return result.rows[0] ?? null;
+  } catch (error) {
+    const err = error as Error;
+    getLog().warn({ err, workflowName, codebaseId }, 'db.workflow_run_find_last_failed_run_failed');
+    throw new Error(`Failed to find last failed run: ${err.message}`);
   }
 }
 

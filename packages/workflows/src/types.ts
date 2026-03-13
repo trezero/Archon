@@ -35,6 +35,9 @@ export interface SingleStep {
    * Claude only — Codex steps emit a warning and ignore this field.
    */
   denied_tools?: string[];
+  /** Per-step idle timeout override in milliseconds. Overrides the default 5-minute idle timeout.
+   *  Useful for long-running steps (e.g., E2E tests with server startup + browser automation). */
+  idle_timeout?: number;
 }
 
 /**
@@ -183,6 +186,9 @@ export interface DagNodeBase {
    * Claude only — Codex nodes emit a warning and ignore this field.
    */
   denied_tools?: string[];
+  /** Per-node idle timeout override in milliseconds. Overrides the default 5-minute idle timeout.
+   *  Useful for long-running nodes (e.g., E2E tests with server startup + browser automation). */
+  idle_timeout?: number;
 }
 
 /** DAG node that runs a named command from .archon/commands/ */
