@@ -50,9 +50,21 @@ List workflows available in target directory.
 
 ```bash
 archon workflow list --cwd /path/to/repo
+
+# Machine-readable output for scripting
+archon workflow list --cwd /path/to/repo --json
 ```
 
 Discovers workflows from `.archon/workflows/` (recursive) plus bundled defaults.
+
+**Flags:**
+
+| Flag | Effect |
+|------|--------|
+| `--cwd <path>` | Target directory (required for most use cases) |
+| `--json` | Output machine-readable JSON instead of formatted text |
+
+With `--json`, outputs `{ "workflows": [...], "errors": [...] }`. Optional fields (`provider`, `model`, `modelReasoningEffort`, `webSearchMode`) are omitted when not set on a workflow.
 
 ### `workflow run <name> [message]`
 

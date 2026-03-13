@@ -154,6 +154,9 @@ Run workflows directly from the command line without needing the server. Workflo
 # List available workflows (requires git repo)
 bun run cli workflow list
 
+# Machine-readable JSON output
+bun run cli workflow list --json
+
 # Run a workflow
 bun run cli workflow run assist "What does the orchestrator do?"
 

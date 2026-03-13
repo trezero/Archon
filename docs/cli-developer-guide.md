@@ -68,31 +68,33 @@ packages/cli/
 ## `workflow list` Flow
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ archon workflow list                                            │
-└─────────────────────────────────┬───────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ workflow.ts:31-41  workflowListCommand(cwd)                     │
-└─────────────────────────────────┬───────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ @archon/workflows discoverWorkflows(cwd)                        │
-│ - Loads bundled defaults                                        │
-│ - Searches .archon/workflows/ recursively                       │
-│ - Merges (repo overrides defaults by name)                      │
-└─────────────────────────────────┬───────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ workflow.ts:46-67  Print workflow list to stdout                │
-│                    name, description, type, step count          │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ archon workflow list [--json]                                    │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ workflow.ts  workflowListCommand(cwd, json?)                     │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ @archon/workflows discoverWorkflows(cwd)                         │
+│ - Loads bundled defaults                                         │
+│ - Searches .archon/workflows/ recursively                        │
+│ - Merges (repo overrides defaults by name)                       │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+               ┌───────────────┴───────────────┐
+               │ json=true                     │ json=false
+               ▼                               ▼
+┌──────────────────────────┐   ┌───────────────────────────────────┐
+│ JSON output to stdout    │   │ Human-readable list to stdout     │
+│ { workflows, errors }    │   │ name, description, type, options  │
+└──────────────────────────┘   └───────────────────────────────────┘
 ```
 
-**Code:** `packages/cli/src/commands/workflow.ts:31-67`
+**Code:** `packages/cli/src/commands/workflow.ts`
 
 ---
 

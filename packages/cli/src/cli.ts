@@ -95,6 +95,7 @@ Options:
   --spawn                    Open setup wizard in a new terminal window (for setup command)
   --quiet, -q                Reduce log verbosity to warnings and errors only
   --verbose, -v              Show debug-level output
+  --json                     Output machine-readable JSON (for workflow list)
 
 Examples:
   archon chat "What does the orchestrator do?"
@@ -148,6 +149,7 @@ async function main(): Promise<number> {
         spawn: { type: 'boolean' },
         quiet: { type: 'boolean', short: 'q' },
         verbose: { type: 'boolean', short: 'v' },
+        json: { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false, // Allow unknown flags to pass through
@@ -167,6 +169,7 @@ async function main(): Promise<number> {
     (values.from as string | undefined) ?? (values['from-branch'] as string | undefined);
   const noWorktree = values['no-worktree'] as boolean | undefined;
   const spawnFlag = values.spawn as boolean | undefined;
+  const jsonFlag = values.json as boolean | undefined;
 
   // Handle help flag
   if (values.help) {
@@ -236,7 +239,7 @@ async function main(): Promise<number> {
       case 'workflow':
         switch (subcommand) {
           case 'list':
-            await workflowListCommand(effectiveCwd);
+            await workflowListCommand(effectiveCwd, jsonFlag);
             break;
 
           case 'run': {
