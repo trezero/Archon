@@ -139,9 +139,24 @@ export function registerApiRoutes(
 
   // POST /api/conversations - Create new conversation
   app.post('/api/conversations', async c => {
+    let body: { codebaseId?: unknown; conversationId?: unknown };
     try {
-      const body: { codebaseId?: unknown } = await c.req.json();
+      body = await c.req.json();
+    } catch {
+      return apiError(c, 400, 'Invalid JSON in request body');
+    }
+
+    try {
       const codebaseId = typeof body.codebaseId === 'string' ? body.codebaseId : undefined;
+
+      if (body.conversationId !== undefined) {
+        return apiError(
+          c,
+          400,
+          'conversationId is not accepted',
+          'Conversation IDs are auto-generated; do not provide conversationId in the request body'
+        );
+      }
 
       // Validate codebase exists if provided
       if (codebaseId) {

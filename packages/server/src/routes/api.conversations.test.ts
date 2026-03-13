@@ -256,3 +256,52 @@ describe('PATCH /api/conversations/:id', () => {
     expect(lastCall[1].length).toBe(255);
   });
 });
+
+describe('POST /api/conversations', () => {
+  const mockWebAdapter = {
+    setConversationDbId: mock((_platformId: string, _dbId: string) => {}),
+  } as unknown as WebAdapter;
+
+  test('creates conversation and returns auto-generated conversationId', async () => {
+    const app = new Hono();
+    registerApiRoutes(app, mockWebAdapter, {} as ConversationLockManager);
+
+    const response = await app.request('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { conversationId: string; id: string };
+    expect(body.conversationId).toBe('web-test-abc');
+    expect(body.id).toBe('internal-uuid-123');
+  });
+
+  test('returns 400 if conversationId is provided in request body', async () => {
+    const app = new Hono();
+    registerApiRoutes(app, mockWebAdapter, {} as ConversationLockManager);
+
+    const response = await app.request('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: 'my-custom-id' }),
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('conversationId');
+  });
+
+  test('returns 400 for malformed JSON body', async () => {
+    const app = new Hono();
+    registerApiRoutes(app, mockWebAdapter, {} as ConversationLockManager);
+
+    const response = await app.request('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not valid json{',
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('Invalid JSON');
+  });
+});
