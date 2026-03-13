@@ -2,7 +2,8 @@
  * Database operations for sessions
  */
 import { pool, getDialect, getDatabase } from './connection';
-import type { Session } from '../types';
+import type { Session, SessionMetadata } from '../types';
+import { sessionMetadataSchema } from '../types';
 import type { TransitionTrigger } from '../state/session-transitions';
 import { createLogger } from '@archon/paths';
 
@@ -78,10 +79,8 @@ export async function deactivateSession(id: string, reason: TransitionTrigger): 
   }
 }
 
-export async function updateSessionMetadata(
-  id: string,
-  metadata: Record<string, unknown>
-): Promise<void> {
+export async function updateSessionMetadata(id: string, metadata: SessionMetadata): Promise<void> {
+  sessionMetadataSchema.parse(metadata); // throws ZodError if invalid
   const dialect = getDialect();
   const result = await pool.query(
     `UPDATE remote_agent_sessions SET metadata = ${dialect.jsonMerge('metadata', 1)} WHERE id = $2`,

@@ -26,13 +26,14 @@
     "build": "echo 'No build needed - Bun runs TypeScript directly'"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.45",
     "@archon/git": "workspace:*",
     "@archon/isolation": "workspace:*",
     "@archon/paths": "workspace:*",
     "@archon/workflows": "workspace:*",
-    "@anthropic-ai/claude-agent-sdk": "^0.2.45",
     "@openai/codex-sdk": "^0.104.0",
-    "pg": "^8.11.0"
+    "pg": "^8.11.0",
+    "zod": "^3"
   },
   "devDependencies": {
     "@types/pg": "^8.11.0"

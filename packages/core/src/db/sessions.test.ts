@@ -1,6 +1,7 @@
 import { mock, describe, test, expect, beforeEach } from 'bun:test';
+import { ZodError } from 'zod';
 import { createQueryResult, mockPostgresDialect } from '../test/mocks/database';
-import { Session } from '../types';
+import { Session, SessionMetadata, sessionMetadataSchema } from '../types';
 
 const mockQuery = mock(() => Promise.resolve(createQueryResult([])));
 const mockWithTransaction = mock(
@@ -256,6 +257,22 @@ describe('sessions', () => {
       const error = await updateSessionMetadata('non-existent', { key: 'value' }).catch(e => e);
       expect(error).toBeInstanceOf(SessionNotFoundError);
       expect(error.message).toBe('Session not found: non-existent');
+    });
+
+    test('throws ZodError when metadata has invalid types', async () => {
+      const error = await updateSessionMetadata('session-123', {
+        lastCommand: 123,
+      } as unknown as SessionMetadata).catch(e => e);
+      expect(error).toBeInstanceOf(ZodError);
+      expect(mockQuery).not.toHaveBeenCalled(); // validation fires before DB
+    });
+
+    test('allows and preserves unknown keys via passthrough', () => {
+      const result = sessionMetadataSchema.parse({
+        lastCommand: 'plan',
+        unknownField: 'preserved',
+      });
+      expect((result as Record<string, unknown>).unknownField).toBe('preserved');
     });
   });
 

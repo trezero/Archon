@@ -3,6 +3,7 @@
  */
 import type { TransitionTrigger } from '../state/session-transitions';
 import type { WorkflowDefinition } from '@archon/workflows';
+import { z } from 'zod';
 
 /**
  * Custom error for when a conversation is not found during update operations
@@ -51,6 +52,14 @@ export interface Codebase {
   updated_at: Date;
 }
 
+export const sessionMetadataSchema = z
+  .object({
+    lastCommand: z.string().optional(),
+  })
+  .passthrough();
+
+export type SessionMetadata = z.infer<typeof sessionMetadataSchema>;
+
 export interface Session {
   id: string;
   conversation_id: string;
@@ -58,7 +67,7 @@ export interface Session {
   ai_assistant_type: string;
   assistant_session_id: string | null;
   active: boolean;
-  metadata: Record<string, unknown>;
+  metadata: SessionMetadata;
   started_at: Date;
   ended_at: Date | null;
   // Audit trail fields (added in migration 010)
