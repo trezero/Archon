@@ -317,7 +317,8 @@ function parseDagNode(
 }
 
 /**
- * Validate DAG structure: unique IDs, depends_on references exist, no cycles.
+ * Validate DAG structure: unique IDs, depends_on references exist, no cycles,
+ * and $nodeId.output refs in when:/prompt: fields point to known nodes.
  * Returns error message or null if valid.
  */
 function validateDagStructure(nodes: DagNode[]): string | null {
@@ -368,6 +369,24 @@ function validateDagStructure(nodes: DagNode[]): string | null {
   if (visited < nodes.length) {
     const cycleNodes = nodes.filter(n => (inDegree.get(n.id) ?? 0) > 0).map(n => n.id);
     return `Cycle detected among nodes: ${cycleNodes.join(', ')}`;
+  }
+
+  // Check $nodeId.output references in when: and prompt: fields
+  const outputRefPattern = /\$([a-zA-Z_][a-zA-Z0-9_-]*)\.output/g;
+  for (const node of nodes) {
+    const sources: string[] = [];
+    if (node.when) sources.push(node.when);
+    if ('prompt' in node && typeof node.prompt === 'string') sources.push(node.prompt);
+    for (const source of sources) {
+      let m: RegExpExecArray | null;
+      outputRefPattern.lastIndex = 0; // reset stateful g-flag regex before each new source string
+      while ((m = outputRefPattern.exec(source)) !== null) {
+        const refNodeId = m[1];
+        if (refNodeId !== undefined && !ids.has(refNodeId)) {
+          return `Node '${node.id}' references unknown node '$${refNodeId}.output'`;
+        }
+      }
+    }
   }
 
   return null; // valid

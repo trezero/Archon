@@ -654,9 +654,15 @@ describe('substituteNodeOutputRefs', () => {
     expect(substituteNodeOutputRefs('Result: $a.output', outputs)).toBe('Result: hello');
   });
 
-  it('unknown node ref resolves to empty string', () => {
+  it('unknown node ref resolves to empty string and logs a warning', () => {
+    mockLogFn.mockClear();
     const outputs = new Map<string, NodeOutput>();
     expect(substituteNodeOutputRefs('Result: $missing.output', outputs)).toBe('Result: ');
+    const warnCalls = mockLogFn.mock.calls.filter(
+      (call: unknown[]) => call[1] === 'dag_node_output_ref_unknown_node'
+    );
+    expect(warnCalls.length).toBe(1);
+    expect(warnCalls[0][0]).toEqual(expect.objectContaining({ nodeId: 'missing' }));
   });
 
   it('dot notation extracts JSON field', () => {

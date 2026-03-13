@@ -1,4 +1,23 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, mock } from 'bun:test';
+
+// --- Mock logger (MUST come before imports of modules under test) ---
+
+const mockLogFn = mock(() => {});
+const mockLogger = {
+  info: mockLogFn,
+  warn: mockLogFn,
+  error: mockLogFn,
+  debug: mockLogFn,
+  trace: mockLogFn,
+  fatal: mockLogFn,
+  child: mock(() => mockLogger),
+};
+mock.module('@archon/paths', () => ({
+  createLogger: mock(() => mockLogger),
+}));
+
+// --- Imports (after mocks) ---
+
 import { evaluateCondition } from './condition-evaluator';
 import type { NodeOutput } from './types';
 
@@ -44,10 +63,16 @@ describe('evaluateCondition', () => {
     expect(evaluateCondition("$classify.output.type == 'BUG'", outputs).result).toBe(false);
   });
 
-  it('unknown node: treats missing node output as empty string', () => {
+  it('unknown node: treats missing node output as empty string and warns', () => {
+    mockLogFn.mockClear();
     const outputs = new Map<string, NodeOutput>();
     expect(evaluateCondition("$missing.output == ''", outputs).result).toBe(true);
     expect(evaluateCondition("$missing.output == 'BUG'", outputs).result).toBe(false);
+    const warnCalls = mockLogFn.mock.calls.filter(
+      (call: unknown[]) => call[1] === 'condition_output_ref_unknown_node'
+    );
+    expect(warnCalls.length).toBe(2);
+    expect(warnCalls[0][0]).toEqual(expect.objectContaining({ nodeId: 'missing' }));
   });
 
   it('failed node: output is empty string, conditions evaluate accordingly', () => {

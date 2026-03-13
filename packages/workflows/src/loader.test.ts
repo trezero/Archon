@@ -1584,4 +1584,129 @@ nodes:
       expect(node.model).toBeUndefined();
     });
   });
+
+  describe('DAG output ref validation', () => {
+    it('should reject a workflow where when: references an unknown node output', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-when-ref.yaml'),
+        `
+name: bad-when-ref
+description: Unknown output ref in when
+nodes:
+  - id: classify
+    prompt: "Classify the input"
+  - id: implement
+    prompt: "Implement the fix"
+    depends_on: [classify]
+    when: "$clasify.output == 'BUG'"
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/unknown node/i);
+      expect(result.errors[0].error).toContain('clasify');
+    });
+
+    it('should reject a workflow where prompt: references an unknown node output', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-prompt-ref.yaml'),
+        `
+name: bad-prompt-ref
+description: Unknown output ref in prompt
+nodes:
+  - id: analyze
+    prompt: "Analyze the code"
+  - id: fix
+    prompt: "Fix this: $analyize.output"
+    depends_on: [analyze]
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/unknown node/i);
+      expect(result.errors[0].error).toContain('analyize');
+    });
+
+    it('should accept a workflow where output refs use valid existing node IDs', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'valid-refs.yaml'),
+        `
+name: valid-refs
+description: Valid output refs
+nodes:
+  - id: classify
+    prompt: "Classify the input"
+  - id: implement
+    prompt: "Fix this: $classify.output"
+    depends_on: [classify]
+    when: "$classify.output == 'BUG'"
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      expect(result.workflows).toHaveLength(1);
+    });
+
+    it('should accept a workflow where a node has both when: and prompt: with valid refs', async () => {
+      // Exercises the lastIndex = 0 reset across multiple sources per node
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'multi-source.yaml'),
+        `
+name: multi-source
+description: Node with both when and prompt refs
+nodes:
+  - id: step1
+    prompt: "Do step 1"
+  - id: step2
+    prompt: "Based on $step1.output, do step 2"
+    depends_on: [step1]
+    when: "$step1.output == 'go'"
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      expect(result.workflows).toHaveLength(1);
+    });
+
+    it('should not validate bash: script $nodeId.output refs at load time', async () => {
+      // bash: nodes are intentionally excluded from load-time validation
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bash-unknown-ref.yaml'),
+        `
+name: bash-unknown-ref
+description: Bash node with unknown output ref (not validated at load time)
+nodes:
+  - id: step1
+    prompt: "Do step 1"
+  - id: step2
+    bash: "echo $typo.output"
+    depends_on: [step1]
+`
+      );
+
+      // Should parse without error — bash: refs are validated at runtime only
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      expect(result.workflows).toHaveLength(1);
+    });
+  });
 });

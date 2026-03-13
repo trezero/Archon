@@ -342,9 +342,12 @@ export function substituteNodeOutputRefs(
 ): string {
   return prompt.replace(
     /\$([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?/g,
-    (_match, nodeId: string, field: string | undefined) => {
+    (match, nodeId: string, field: string | undefined) => {
       const nodeOutput = nodeOutputs.get(nodeId);
-      if (!nodeOutput) return escapedForBash ? "''" : '';
+      if (!nodeOutput) {
+        getLog().warn({ nodeId, match }, 'dag_node_output_ref_unknown_node');
+        return escapedForBash ? "''" : '';
+      }
       if (!field) {
         return escapedForBash ? shellQuote(nodeOutput.output) : nodeOutput.output;
       }

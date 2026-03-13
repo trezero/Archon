@@ -21,7 +21,8 @@ function getLog(): ReturnType<typeof createLogger> {
 
 /**
  * Resolve a `$nodeId.output` or `$nodeId.output.field` reference to a string value.
- * Returns empty string if the node output is not found or JSON parse fails.
+ * Returns empty string if the node output is not found (logs warn), if the output is
+ * empty/falsy (silent), or if JSON field access fails (logs warn).
  */
 function resolveOutputRef(
   nodeId: string,
@@ -29,7 +30,11 @@ function resolveOutputRef(
   nodeOutputs: Map<string, NodeOutput>
 ): string {
   const nodeOutput = nodeOutputs.get(nodeId);
-  if (!nodeOutput?.output) return '';
+  if (!nodeOutput) {
+    getLog().warn({ nodeId }, 'condition_output_ref_unknown_node');
+    return '';
+  }
+  if (!nodeOutput.output) return '';
 
   if (!field) return nodeOutput.output;
 
