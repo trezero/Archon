@@ -14,7 +14,7 @@ export type ModelReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhig
 export type WebSearchMode = 'disabled' | 'cached' | 'live';
 
 export type WorkflowRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 export type ArtifactType = 'pr' | 'commit' | 'file_created' | 'file_modified' | 'branch';
 
 /**

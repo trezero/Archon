@@ -8,6 +8,7 @@ import type {
   WorkflowArtifactEvent,
   WorkflowDispatchEvent,
   WorkflowOutputPreviewEvent,
+  DagNodeEvent,
 } from '@/lib/types';
 import { SSE_BASE_URL } from '@/lib/api';
 
@@ -39,6 +40,7 @@ interface SSEHandlers {
   onWorkflowStatus?: (event: WorkflowStatusEvent) => void;
   onParallelAgent?: (event: ParallelAgentEvent) => void;
   onWorkflowArtifact?: (event: WorkflowArtifactEvent) => void;
+  onDagNode?: (event: DagNodeEvent) => void;
   onWorkflowDispatch?: (event: WorkflowDispatchEvent) => void;
   onWorkflowOutputPreview?: (event: WorkflowOutputPreviewEvent) => void;
   onWarning?: (message: string) => void;
@@ -188,6 +190,9 @@ export function useSSE(
             break;
           case 'workflow_artifact':
             h.onWorkflowArtifact?.(data);
+            break;
+          case 'dag_node':
+            h.onDagNode?.(data);
             break;
           case 'workflow_dispatch':
             // Flush buffered text before dispatch events to ensure the dispatch

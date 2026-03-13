@@ -17,6 +17,8 @@ function StatusIcon({ status }: { status: string }): React.ReactElement {
       );
     case 'failed':
       return <span className="text-error text-sm">&#x2717;</span>;
+    case 'skipped':
+      return <span className="text-text-secondary text-sm">&#x2014;</span>;
     default:
       return <span className="text-text-secondary text-sm">&#x25CB;</span>;
   }

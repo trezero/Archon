@@ -184,6 +184,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           workflowName: run.workflow_name,
           status: run.status,
           steps: [],
+          dagNodes: [],
           artifacts: [],
           isLoop: false,
           startedAt: new Date(ensureUtc(run.started_at)).getTime(),

@@ -111,6 +111,10 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
             }
             return Array.from(stepMap.values()).sort((a, b) => a.index - b.index);
           })(),
+          // TODO: REST hydration does not yet reconstruct dagNodes from stored
+          // node_* events. Users viewing completed DAG runs will see no node history
+          // until a DagNodeProgress component + REST parsing path is added.
+          dagNodes: [],
           artifacts: data.events
             .filter(e => e.event_type === 'workflow_artifact')
             .map(e => {
@@ -220,9 +224,10 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       status: liveWorkflow.status,
       completedAt: liveWorkflow.completedAt ?? initialData.completedAt,
       error: liveWorkflow.error ?? initialData.error,
-      // SSE accumulates steps/artifacts incrementally — prefer them when populated,
+      // SSE accumulates steps/artifacts/dagNodes incrementally — prefer them when populated,
       // otherwise fall back to the REST snapshot.
       steps: liveWorkflow.steps.length > 0 ? liveWorkflow.steps : initialData.steps,
+      dagNodes: liveWorkflow.dagNodes.length > 0 ? liveWorkflow.dagNodes : initialData.dagNodes,
       artifacts: liveWorkflow.artifacts.length > 0 ? liveWorkflow.artifacts : initialData.artifacts,
       isLoop: liveWorkflow.isLoop || initialData.isLoop,
       currentIteration: liveWorkflow.currentIteration ?? initialData.currentIteration,

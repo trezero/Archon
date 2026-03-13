@@ -4,10 +4,12 @@ import { getWorkflowRun } from '@/lib/api';
 import type {
   WorkflowState,
   WorkflowStepState,
+  DagNodeState,
   WorkflowStepEvent,
   WorkflowStatusEvent,
   ParallelAgentEvent,
   WorkflowArtifactEvent,
+  DagNodeEvent,
 } from '@/lib/types';
 
 interface UseWorkflowStatusReturn {
@@ -20,6 +22,7 @@ interface UseWorkflowStatusReturn {
     onWorkflowStatus: (event: WorkflowStatusEvent) => void;
     onParallelAgent: (event: ParallelAgentEvent) => void;
     onWorkflowArtifact: (event: WorkflowArtifactEvent) => void;
+    onDagNode: (event: DagNodeEvent) => void;
   };
 }
 
@@ -47,6 +50,7 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
             workflowName: event.workflowName,
             status: event.status,
             steps: [],
+            dagNodes: [],
             artifacts: [],
             isLoop: false,
             startedAt: event.timestamp,
@@ -166,6 +170,35 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
           },
         ],
       });
+      return next;
+    });
+  }, []);
+
+  const handleDagNode = useCallback((event: DagNodeEvent): void => {
+    setWorkflows(prev => {
+      const next = new Map(prev);
+      const wf = next.get(event.runId);
+      if (!wf) return prev;
+
+      const dagNodes = [...wf.dagNodes];
+      const existingIdx = dagNodes.findIndex(n => n.nodeId === event.nodeId);
+
+      const nodeState: DagNodeState = {
+        nodeId: event.nodeId,
+        name: event.name,
+        status: event.status,
+        duration: event.duration,
+        error: event.error,
+        reason: event.reason,
+      };
+
+      if (existingIdx >= 0) {
+        dagNodes[existingIdx] = nodeState;
+      } else {
+        dagNodes.push(nodeState);
+      }
+
+      next.set(event.runId, { ...wf, dagNodes });
       return next;
     });
   }, []);
@@ -320,6 +353,7 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
       onWorkflowStatus: handleWorkflowStatus,
       onParallelAgent: handleParallelAgent,
       onWorkflowArtifact: handleWorkflowArtifact,
+      onDagNode: handleDagNode,
     },
   };
 }
