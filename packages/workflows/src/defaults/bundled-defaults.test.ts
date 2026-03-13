@@ -89,13 +89,18 @@ describe('bundled-defaults', () => {
         'archon-sync-pr-with-main',
         'archon-synthesize-review',
         'archon-test-coverage-agent',
+        'archon-validate-pr-code-review-feature',
+        'archon-validate-pr-code-review-main',
+        'archon-validate-pr-e2e-feature',
+        'archon-validate-pr-e2e-main',
+        'archon-validate-pr-report',
       ];
 
       for (const cmd of expectedCommands) {
         expect(BUNDLED_COMMANDS).toHaveProperty(cmd);
       }
 
-      expect(Object.keys(BUNDLED_COMMANDS)).toHaveLength(16);
+      expect(Object.keys(BUNDLED_COMMANDS)).toHaveLength(21);
     });
 
     it('should have non-empty content for all commands', () => {
@@ -140,13 +145,14 @@ describe('bundled-defaults', () => {
         'archon-resolve-conflicts',
         'archon-smart-pr-review',
         'archon-test-loop',
+        'archon-validate-pr',
       ];
 
       for (const wf of expectedWorkflows) {
         expect(BUNDLED_WORKFLOWS).toHaveProperty(wf);
       }
 
-      expect(Object.keys(BUNDLED_WORKFLOWS)).toHaveLength(9);
+      expect(Object.keys(BUNDLED_WORKFLOWS)).toHaveLength(10);
     });
 
     it('should have non-empty content for all workflows', () => {
