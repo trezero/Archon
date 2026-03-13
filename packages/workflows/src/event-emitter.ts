@@ -61,6 +61,7 @@ interface StepCompletedEvent {
   runId: string;
   stepIndex: number;
   stepName: string;
+  totalSteps: number;
   duration: number;
 }
 
@@ -69,6 +70,7 @@ interface StepFailedEvent {
   runId: string;
   stepIndex: number;
   stepName: string;
+  totalSteps: number;
   error: string;
 }
 

@@ -20,6 +20,8 @@ function StatusIcon({ status }: { status: string }): React.ReactElement {
       );
     case 'failed':
       return <span className="text-error">&#x2717;</span>;
+    case 'cancelled':
+      return <span className="text-text-secondary">&#x2715;</span>;
     default:
       return <span className="text-text-secondary">&#x25CB;</span>;
   }
@@ -123,7 +125,9 @@ export function WorkflowProgressCard({
               ? 'Running'
               : workflow.status === 'completed'
                 ? 'Completed'
-                : 'Failed'}{' '}
+                : workflow.status === 'cancelled'
+                  ? 'Cancelled'
+                  : 'Failed'}{' '}
             {workflow.workflowName}
           </span>
         </div>

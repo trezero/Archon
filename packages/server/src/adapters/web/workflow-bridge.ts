@@ -44,7 +44,7 @@ export function mapWorkflowEvent(event: WorkflowEmitterEvent): string | null {
         type: 'workflow_step',
         runId: event.runId,
         step: event.stepIndex,
-        total: 0,
+        total: event.totalSteps,
         name: event.stepName,
         status: 'completed',
         duration: event.duration,
@@ -56,7 +56,7 @@ export function mapWorkflowEvent(event: WorkflowEmitterEvent): string | null {
         type: 'workflow_step',
         runId: event.runId,
         step: event.stepIndex,
-        total: 0,
+        total: event.totalSteps,
         name: event.stepName,
         status: 'failed',
         timestamp: Date.now(),
@@ -100,6 +100,8 @@ export function mapWorkflowEvent(event: WorkflowEmitterEvent): string | null {
         type: 'workflow_step',
         runId: event.runId,
         step: event.iteration - 1,
+        // total: 0 intentionally — maxIterations is not carried by loop_iteration_completed/failed events.
+        // useWorkflowStatus.ts guards against 0 by preserving the prior wf.maxIterations value.
         total: 0,
         name: `iteration-${String(event.iteration)}`,
         status: 'completed',
@@ -113,6 +115,8 @@ export function mapWorkflowEvent(event: WorkflowEmitterEvent): string | null {
         type: 'workflow_step',
         runId: event.runId,
         step: event.iteration - 1,
+        // total: 0 intentionally — maxIterations is not carried by loop_iteration_completed/failed events.
+        // useWorkflowStatus.ts guards against 0 by preserving the prior wf.maxIterations value.
         total: 0,
         name: `iteration-${String(event.iteration)}`,
         status: 'failed',
