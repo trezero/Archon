@@ -59,21 +59,6 @@ export class SSETransport {
     this.scheduleCleanup(conversationId, RECONNECT_GRACE_MS);
   }
 
-  /**
-   * Emit a lock event to the SSE stream for a conversation.
-   * Called by API routes based on acquireLock() return status.
-   */
-  emitLockEvent(conversationId: string, locked: boolean, queuePosition?: number): void {
-    const event = JSON.stringify({
-      type: 'conversation_lock',
-      conversationId,
-      locked,
-      queuePosition,
-      timestamp: Date.now(),
-    });
-    this.writeToStream(conversationId, event);
-  }
-
   hasActiveStream(conversationId: string): boolean {
     const stream = this.streams.get(conversationId);
     return stream !== undefined && !stream.closed;
@@ -131,6 +116,9 @@ export class SSETransport {
       }
     } else if (stream?.closed) {
       this.streams.delete(conversationId);
+      getLog().debug({ conversationId }, 'sse_event_dropped_no_stream');
+    } else {
+      getLog().debug({ conversationId }, 'sse_event_dropped_no_stream');
     }
   }
 
@@ -143,7 +131,7 @@ export class SSETransport {
 
   /**
    * Write an event to the stream if one exists, no-op otherwise.
-   * Shared by emitLockEvent, emitWorkflowEvent, and any fire-and-forget path.
+   * Used by emitWorkflowEvent and any other fire-and-forget path.
    */
   private writeToStream(conversationId: string, event: string): void {
     const stream = this.streams.get(conversationId);
@@ -155,6 +143,8 @@ export class SSETransport {
           /* stream already closing */
         });
       });
+    } else {
+      getLog().debug({ conversationId }, 'sse_event_dropped_no_stream');
     }
   }
 

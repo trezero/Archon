@@ -159,7 +159,7 @@ export interface IWebPlatformAdapter extends IPlatformAdapter {
   sendStructuredEvent(conversationId: string, event: MessageChunk): Promise<void>;
   setConversationDbId(platformConversationId: string, dbId: string): void;
   setupEventBridge(workerConversationId: string, parentConversationId: string): () => void;
-  emitLockEvent(conversationId: string, locked: boolean, queuePosition?: number): void;
+  emitLockEvent(conversationId: string, locked: boolean, queuePosition?: number): Promise<void>;
   registerOutputCallback(conversationId: string, callback: (text: string) => void): void;
   removeOutputCallback(conversationId: string): void;
 }

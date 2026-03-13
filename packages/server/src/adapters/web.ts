@@ -165,7 +165,11 @@ export class WebAdapter implements IWebPlatformAdapter {
    * Emit a lock event to the SSE stream for a conversation.
    * Called by API routes based on acquireLock() return status.
    */
-  emitLockEvent(conversationId: string, locked: boolean, queuePosition?: number): void {
+  async emitLockEvent(
+    conversationId: string,
+    locked: boolean,
+    queuePosition?: number
+  ): Promise<void> {
     if (!locked) {
       // Finalize all running tools and emit tool_result for each before lock release
       const finalized = this.persistence.finalizeRunningTools(conversationId);
@@ -178,15 +182,21 @@ export class WebAdapter implements IWebPlatformAdapter {
           duration: tool.duration,
           timestamp: Date.now(),
         });
-        this.transport.emit(conversationId, resultEvent).catch((e: unknown) => {
-          getLog().error({ conversationId, err: e }, 'tool_result_emit_failed');
-        });
+        await this.transport.emit(conversationId, resultEvent);
       }
-      this.persistence.flush(conversationId).catch((e: unknown) => {
+      await this.persistence.flush(conversationId).catch((e: unknown) => {
         getLog().error({ conversationId, err: e }, 'lock_release_flush_failed');
       });
     }
-    this.transport.emitLockEvent(conversationId, locked, queuePosition);
+    // Use transport.emit() directly so the lock event is fully awaited and ordered after tool_results
+    const lockEvent = JSON.stringify({
+      type: 'conversation_lock',
+      conversationId,
+      locked,
+      queuePosition,
+      timestamp: Date.now(),
+    });
+    await this.transport.emit(conversationId, lockEvent);
   }
 
   hasActiveStream(conversationId: string): boolean {
