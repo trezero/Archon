@@ -78,8 +78,9 @@ function WorkflowResultCard({
 
   const lines = content.split('\n');
   const isTruncatable = content.length > 500 || lines.length > 8;
+  const previewText = lines.slice(0, 8).join('\n').slice(0, 500);
   const preview = isTruncatable
-    ? lines.slice(0, 8).join('\n').slice(0, 500) + (content.length > 500 ? '...' : '')
+    ? previewText + (previewText.length < content.length ? '...' : '')
     : content;
 
   const displayContent = expanded || !isTruncatable ? content : preview;
