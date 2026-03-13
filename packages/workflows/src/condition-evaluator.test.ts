@@ -56,10 +56,10 @@ describe('evaluateCondition', () => {
     expect(evaluateCondition("$classify.output == 'BUG'", outputs).result).toBe(false);
   });
 
-  it('invalid expression: defaults to true (fail open) with parsed: false', () => {
+  it('invalid expression: defaults to false (fail-closed) with parsed: false', () => {
     const outputs = new Map<string, NodeOutput>();
     const res = evaluateCondition('not a valid condition', outputs);
-    expect(res.result).toBe(true);
+    expect(res.result).toBe(false);
     expect(res.parsed).toBe(false);
   });
 

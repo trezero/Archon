@@ -7,7 +7,7 @@
  *   "$nodeId.output.field == 'VALUE'"   (JSON dot notation for output_format nodes)
  *
  * Returns true = run this node, false = skip it.
- * Invalid/unparseable expressions default to true (fail open = run the node).
+ * Invalid/unparseable expressions default to false (fail-closed = skip the node).
  */
 import type { NodeOutput } from './types';
 import { createLogger } from '@archon/paths';
@@ -55,7 +55,7 @@ function resolveOutputRef(
  * @param expr - The when: expression string e.g. "$classify.output.type == 'BUG'"
  * @param nodeOutputs - Map of nodeId → NodeOutput for all settled upstream nodes (completed, failed, or skipped)
  * @returns `{ result: boolean; parsed: boolean }` — result is true to run the node, false to skip;
- *   parsed is false when the expression could not be parsed (fail-open: result defaults to true)
+ *   parsed is false when the expression could not be parsed (fail-closed: result defaults to false)
  */
 export function evaluateCondition(
   expr: string,
@@ -70,16 +70,16 @@ export function evaluateCondition(
   const match = pattern.exec(trimmed);
 
   if (!match) {
-    getLog().warn({ expr }, 'condition_parse_failed_defaulting_to_true');
-    return { result: true, parsed: false }; // Fail open — run the node rather than silently skip
+    getLog().debug({ expr }, 'condition_parse_failed');
+    return { result: false, parsed: false }; // Fail-closed — skip the node on unparseable expression
   }
 
   const [, nodeId, field, operator, expected] = match;
 
   // Undefined check: TypeScript can't narrow these from regex match
   if (nodeId === undefined || operator === undefined || expected === undefined) {
-    getLog().warn({ expr }, 'condition_parse_unexpected_undefined');
-    return { result: true, parsed: false };
+    getLog().debug({ expr }, 'condition_parse_unexpected_undefined');
+    return { result: false, parsed: false };
   }
 
   const actual = resolveOutputRef(nodeId, field, nodeOutputs);

@@ -158,7 +158,7 @@ interface NodeSkippedEvent {
   runId: string;
   nodeId: string;
   nodeName: string;
-  reason: 'when_condition' | 'trigger_rule';
+  reason: 'when_condition' | 'when_condition_parse_error' | 'trigger_rule';
 }
 
 export type WorkflowEmitterEvent =

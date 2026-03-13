@@ -1310,3 +1310,128 @@ describe('executeDagWorkflow -- output_format structured output', () => {
     expect(secondCallPrompt).toContain('plain text response');
   });
 });
+
+describe('executeDagWorkflow -- when condition parse errors (fail-closed)', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-parse-err-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'Do something for $USER_MESSAGE');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'AI response' };
+      yield { type: 'result', sessionId: 'sess-parse-err' };
+    });
+  });
+
+  afterEach(async () => {
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('skips node (does not run it) when when: expression is unparseable', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('parse-err-skip-run');
+
+    const nodes: DagNode[] = [
+      { id: 'unconditional', command: 'my-cmd' },
+      // Single = is not valid syntax — will fail to parse
+      {
+        id: 'guarded',
+        command: 'my-cmd',
+        depends_on: ['unconditional'],
+        when: "$unconditional.output = 'yes'",
+      },
+    ];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-parse-err-skip',
+      testDir,
+      { name: 'parse-err-skip-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // Only the unconditional node should have triggered an AI call.
+    // The guarded node must be skipped (fail-closed), not executed.
+    expect(mockSendQueryDag.mock.calls.length).toBe(1);
+  });
+
+  it('sends a platform warning message naming the node and stating it was skipped', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('parse-err-warn-run');
+
+    const nodes: DagNode[] = [{ id: 'gate', command: 'my-cmd', when: 'not a valid condition' }];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-parse-err-warn',
+      testDir,
+      { name: 'parse-warn-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
+    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
+    const warning = messages.find(m => m.includes('gate') && m.includes('skipped'));
+    expect(warning).toBeDefined();
+    // Must NOT indicate the node ran (the old fail-open behavior)
+    expect(warning).not.toMatch(/node ran/i);
+  });
+
+  it('workflow completes without throwing when all nodes are skipped via parse error', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('parse-err-all-skip-run');
+
+    const nodes: DagNode[] = [{ id: 'only', command: 'my-cmd', when: 'bad expression' }];
+
+    await expect(
+      executeDagWorkflow(
+        mockDeps,
+        platform,
+        'conv-all-skipped',
+        testDir,
+        { name: 'all-skipped-test', nodes },
+        workflowRun,
+        'claude',
+        undefined,
+        join(testDir, 'artifacts'),
+        join(testDir, 'logs'),
+        'main',
+        minimalConfig
+      )
+    ).resolves.toBeUndefined();
+  });
+});
