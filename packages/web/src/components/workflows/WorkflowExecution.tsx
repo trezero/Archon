@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { MessageSquare } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -63,6 +63,16 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
   const [selectedStep, setSelectedStep] = useState(0);
   const [codebaseName, setCodebaseName] = useState<string | null>(null);
   const [workerRunId, setWorkerRunId] = useState<string | null>(null);
+  // Track which codebaseId we've already fetched to avoid stale re-fetches during runId transitions
+  const fetchedCodebaseIdRef = useRef<string | null>(null);
+
+  // Reset local state when navigating to a different workflow run
+  useEffect(() => {
+    setSelectedStep(0);
+    setCodebaseName(null);
+    setWorkerRunId(null);
+    fetchedCodebaseIdRef.current = null;
+  }, [runId]);
 
   // Fetch workflow run data with polling while running
   const { data: queryData, error: queryError } = useQuery({
@@ -159,7 +169,8 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
   // Fetch codebase name when run data becomes available
   const codebaseId = queryData?.codebaseId ?? null;
   useEffect(() => {
-    if (!codebaseId || codebaseName) return;
+    if (!codebaseId || fetchedCodebaseIdRef.current === codebaseId) return;
+    fetchedCodebaseIdRef.current = codebaseId;
     void getCodebase(codebaseId)
       .then(cb => {
         setCodebaseName(cb.name);
@@ -170,7 +181,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
           error: err instanceof Error ? err.message : err,
         });
       });
-  }, [codebaseId, codebaseName]);
+  }, [codebaseId]);
 
   // When SSE reports a terminal status but React Query data is still stale,
   // invalidate the cache to trigger an immediate re-fetch with correct data.
@@ -334,7 +345,11 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
         <button
           onClick={(): void => {
-            navigate(-1);
+            if (window.history.length > 1) {
+              navigate(-1);
+            } else {
+              navigate('/workflows');
+            }
           }}
           className="text-text-secondary hover:text-text-primary transition-colors text-sm"
           title="Back"
