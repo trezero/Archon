@@ -50,6 +50,12 @@ export interface WorkflowAssistantOptions {
   disallowedTools?: string[];
   outputFormat?: { type: 'json_schema'; schema: Record<string, unknown> };
   abortSignal?: AbortSignal;
+  /**
+   * When false (default), skips writing session transcript to ~/.claude/projects/.
+   * Claude Agent SDK v0.2.74+. The SDK default is true, but Archon overrides it to false
+   * to avoid disk pollution. Set to true only when session persistence is explicitly needed.
+   */
+  persistSession?: boolean;
 }
 
 // ---------------------------------------------------------------------------

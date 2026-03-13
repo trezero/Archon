@@ -190,6 +190,44 @@ describe('ClaudeClient', () => {
       });
     });
 
+    test('passes persistSession: false to SDK by default', async () => {
+      mockQuery.mockImplementation(async function* () {
+        // Empty generator
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of client.sendQuery('test', '/workspace')) {
+        // consume
+      }
+
+      expect(mockQuery).toHaveBeenCalledWith({
+        prompt: 'test',
+        options: expect.objectContaining({
+          persistSession: false,
+        }),
+      });
+    });
+
+    test('passes persistSession: true when explicitly requested', async () => {
+      mockQuery.mockImplementation(async function* () {
+        // Empty generator
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of client.sendQuery('test', '/workspace', undefined, {
+        persistSession: true,
+      })) {
+        // consume
+      }
+
+      expect(mockQuery).toHaveBeenCalledWith({
+        prompt: 'test',
+        options: expect.objectContaining({
+          persistSession: true,
+        }),
+      });
+    });
+
     test('passes resume option when resumeSessionId provided', async () => {
       mockQuery.mockImplementation(async function* () {
         // Empty generator

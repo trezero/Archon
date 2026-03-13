@@ -245,6 +245,12 @@ export class ClaudeClient implements IAssistantClient {
         ...(requestOptions?.outputFormat !== undefined
           ? { outputFormat: requestOptions.outputFormat }
           : {}),
+        // Skip writing session transcripts to ~/.claude/projects/ — Archon manages its own
+        // session persistence. persistSession: false reduces disk I/O and keeps the session
+        // directory clean. Claude Agent SDK v0.2.74+.
+        ...(requestOptions?.persistSession !== undefined
+          ? { persistSession: requestOptions.persistSession }
+          : { persistSession: false }),
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         systemPrompt: { type: 'preset', preset: 'claude_code' },

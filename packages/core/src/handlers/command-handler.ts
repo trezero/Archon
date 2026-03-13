@@ -934,7 +934,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
         const codebase = await codebaseDb.findCodebaseByDefaultCwd(targetPath);
 
         // If current conversation uses this codebase, unlink it
-        if (codebase && conversation.codebase_id === codebase.id) {
+        if (conversation.codebase_id === codebase?.id) {
           try {
             await db.updateConversation(conversation.id, { codebase_id: null, cwd: null });
           } catch (updateError) {

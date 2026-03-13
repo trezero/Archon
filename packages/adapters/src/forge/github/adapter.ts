@@ -719,7 +719,7 @@ ${userComment}`;
     }
     // Secondary: Check comment author (works with dedicated bot account)
     const commentAuthor = event.comment?.user?.login;
-    if (commentAuthor && commentAuthor.toLowerCase() === this.botMention.toLowerCase()) {
+    if (commentAuthor?.toLowerCase() === this.botMention.toLowerCase()) {
       getLog().debug({ commentAuthor }, 'ignoring_own_comment');
       return;
     }

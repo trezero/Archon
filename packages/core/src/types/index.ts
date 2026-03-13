@@ -223,6 +223,12 @@ export interface AssistantRequestOptions {
    * When aborted, the AI client should terminate the subprocess/query gracefully.
    */
   abortSignal?: AbortSignal;
+  /**
+   * When false (default), skips writing session transcript to ~/.claude/projects/.
+   * Claude Agent SDK v0.2.74+. The SDK default is true, but Archon overrides it to false
+   * to avoid disk pollution. Set to true only when session persistence is explicitly needed.
+   */
+  persistSession?: boolean;
 }
 
 /**
