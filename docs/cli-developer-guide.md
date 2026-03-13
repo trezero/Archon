@@ -58,8 +58,8 @@ packages/cli/
 **Code:** `packages/cli/src/cli.ts:106-259`
 
 **Git repository check:**
-- Commands `workflow` and `isolation` require running from a git repository
-- Commands `version` and `help` bypass this check
+- Commands `workflow`, `isolation`, and `complete` require running from a git repository
+- Commands `version`, `help`, `setup`, and `chat` bypass this check
 - When in a subdirectory, automatically resolves to repository root
 - Exit code 1 if not in a git repository
 

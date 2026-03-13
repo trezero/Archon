@@ -179,6 +179,10 @@ bun run cli isolation cleanup 14  # Custom days
 # Clean up environments with branches merged into main (also deletes remote branches)
 bun run cli isolation cleanup --merged
 
+# Complete branch lifecycle (remove worktree + local/remote branches)
+bun run cli complete <branch-name>
+bun run cli complete <branch-name> --force  # Skip uncommitted-changes check
+
 # Show version
 bun run cli version
 ```

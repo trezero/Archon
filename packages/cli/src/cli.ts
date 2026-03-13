@@ -51,6 +51,7 @@ import {
   isolationListCommand,
   isolationCleanupCommand,
   isolationCleanupMergedCommand,
+  isolationCompleteCommand,
 } from './commands/isolation';
 import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
@@ -84,6 +85,7 @@ Commands:
   isolation list             List all active worktrees/environments
   isolation cleanup [days]   Remove stale environments (default: 7 days)
   isolation cleanup --merged Remove environments with branches merged into main
+  complete <branch> [...]    Complete branch lifecycle (remove worktree + branches)
   version                    Show version info
   help                       Show this help message
 
@@ -311,6 +313,17 @@ async function main(): Promise<number> {
             return 1;
         }
         break;
+
+      case 'complete': {
+        const branches = positionals.slice(1);
+        if (branches.length === 0) {
+          console.error('Usage: archon complete <branch-name> [branch2 ...]');
+          return 1;
+        }
+        const forceFlag = args.includes('--force');
+        await isolationCompleteCommand(branches, { force: forceFlag, deleteRemote: true });
+        break;
+      }
 
       default:
         if (command === undefined) {

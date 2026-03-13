@@ -211,6 +211,26 @@ export async function findStaleEnvironments(
 }
 
 /**
+ * Find an active isolation environment by branch name.
+ * Returns the environment row joined with its codebase's default_cwd,
+ * or null if no active environment matches.
+ */
+export async function findActiveByBranchName(
+  branchName: string
+): Promise<(IsolationEnvironmentRow & { codebase_default_cwd: string }) | null> {
+  const result = await pool.query<IsolationEnvironmentRow & { codebase_default_cwd: string }>(
+    `SELECT e.*, c.default_cwd as codebase_default_cwd
+     FROM remote_agent_isolation_environments e
+     JOIN remote_agent_codebases c ON e.codebase_id = c.id
+     WHERE e.branch_name = $1 AND e.status = 'active'
+     ORDER BY e.created_at DESC
+     LIMIT 1`,
+    [branchName]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
  * List all active environments with their codebase info (for cleanup)
  */
 export async function listAllActiveWithCodebase(): Promise<

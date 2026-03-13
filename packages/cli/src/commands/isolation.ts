@@ -1,11 +1,11 @@
 /**
- * Isolation commands - list and cleanup worktrees
+ * Isolation commands - list, cleanup, and complete worktrees
  */
 import * as isolationDb from '@archon/core/db/isolation-environments';
 import { createLogger } from '@archon/paths';
-import { toRepoPath, toBranchName } from '@archon/git';
+import { toRepoPath, toBranchName, hasUncommittedChanges, toWorktreePath } from '@archon/git';
 import { getIsolationProvider } from '@archon/isolation';
-import { cleanupMergedWorktrees } from '@archon/core/services/cleanup-service';
+import { cleanupMergedWorktrees, removeEnvironment } from '@archon/core/services/cleanup-service';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -151,6 +151,65 @@ export async function isolationCleanupMergedCommand(): Promise<void> {
   console.log(
     `\nMerged cleanup complete: ${String(totalCleaned)} cleaned, ${String(totalSkipped)} skipped`
   );
+}
+
+/**
+ * Complete branch lifecycle — remove worktree, local branch, remote branch, mark DB as destroyed
+ */
+export async function isolationCompleteCommand(
+  branchNames: string[],
+  options: { force?: boolean; deleteRemote?: boolean }
+): Promise<void> {
+  let completed = 0;
+  let failed = 0;
+  let notFound = 0;
+
+  for (const branch of branchNames) {
+    let env: Awaited<ReturnType<typeof isolationDb.findActiveByBranchName>>;
+    try {
+      env = await isolationDb.findActiveByBranchName(branch);
+    } catch (error) {
+      const err = error as Error;
+      getLog().error({ err, branch }, 'isolation.lookup_failed');
+      console.error(`  Failed: ${branch} — DB lookup error: ${err.message}`);
+      failed++;
+      continue;
+    }
+
+    if (!env) {
+      console.log(`  Not found: ${branch} (no active isolation environment)`);
+      notFound++;
+      continue;
+    }
+
+    // Explicitly check for uncommitted changes before calling removeEnvironment,
+    // which silently returns (no throw, no DB update) when the path has changes
+    // and force is not set. This surfaces the issue to the user as a blocked failure.
+    if (!options.force) {
+      const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
+      if (hasChanges) {
+        console.error(`  Blocked: ${branch} has uncommitted changes. Use --force to override.`);
+        failed++;
+        continue;
+      }
+    }
+
+    try {
+      await removeEnvironment(env.id, {
+        force: options.force,
+        deleteRemoteBranch: options.deleteRemote ?? true,
+      });
+      console.log(`  Completed: ${branch}`);
+      completed++;
+    } catch (error) {
+      const err = error as Error;
+      getLog().warn({ err, branch, envId: env.id }, 'isolation.complete_failed');
+      console.error(`  Failed: ${branch} — ${err.message}`);
+      failed++;
+    }
+  }
+
+  console.log(`\nComplete: ${completed} completed, ${failed} failed, ${notFound} not found`);
 }
 
 /**

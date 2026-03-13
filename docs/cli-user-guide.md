@@ -121,6 +121,25 @@ archon isolation cleanup 14
 archon isolation cleanup --merged
 ```
 
+### `complete <branch> [branch2 ...]`
+
+Remove a branch's worktree, local branch, and remote branch, and mark its isolation
+environment as destroyed.
+
+```bash
+archon complete feature-auth
+archon complete feature-auth --force  # bypass uncommitted-changes check
+```
+
+**Flags:**
+
+| Flag | Effect |
+|------|--------|
+| `--force` | Skip uncommitted-changes guard |
+
+Use this after a PR is merged and you no longer need the worktree or branches. Accepts
+multiple branch names in one call.
+
 ### `version`
 
 Show version, build type, and database info.
