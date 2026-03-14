@@ -54,6 +54,10 @@ function getLog(): ReturnType<typeof createLogger> {
   return cachedLog;
 }
 
+/** Throttle state for activity updates + cancel checks inside streaming loops */
+const lastNodeActivityUpdate = new Map<string, number>();
+const NODE_ACTIVITY_UPDATE_INTERVAL_MS = 10_000;
+
 /** Context for platform message sending */
 interface SendMessageContext {
   workflowId?: string;
@@ -721,14 +725,37 @@ async function executeNodeInternal(
         nodeAbortController.abort();
       }
     )) {
-      // Update activity timestamp
-      try {
-        await deps.store.updateWorkflowActivity(workflowRun.id);
-      } catch (e) {
-        getLog().warn(
-          { err: e as Error, workflowRunId: workflowRun.id },
-          'dag.activity_update_failed'
-        );
+      // Update activity timestamp + check cancel (throttled to once per 10s)
+      const activityNow = Date.now();
+      const nodeKey = `${workflowRun.id}:${node.id}`;
+      if (
+        activityNow - (lastNodeActivityUpdate.get(nodeKey) ?? 0) >
+        NODE_ACTIVITY_UPDATE_INTERVAL_MS
+      ) {
+        lastNodeActivityUpdate.set(nodeKey, activityNow);
+        try {
+          await deps.store.updateWorkflowActivity(workflowRun.id);
+        } catch (e) {
+          getLog().warn(
+            { err: e as Error, workflowRunId: workflowRun.id },
+            'dag.activity_update_failed'
+          );
+        }
+
+        // Check for cancellation during node streaming (not just between layers)
+        try {
+          const streamStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
+          if (streamStatus === 'cancelled') {
+            getLog().info(
+              { workflowRunId: workflowRun.id, nodeId: node.id },
+              'dag.cancel_detected_during_streaming'
+            );
+            nodeAbortController.abort();
+            break;
+          }
+        } catch (cancelCheckErr) {
+          getLog().warn({ err: cancelCheckErr as Error }, 'dag.cancel_check_failed');
+        }
       }
 
       if (msg.type === 'assistant' && msg.content) {
@@ -798,6 +825,42 @@ async function executeNodeInternal(
       );
     }
 
+    // If cancelled during streaming (not idle timeout), return as failed with cancel reason
+    if (nodeAbortController.signal.aborted && !nodeIdleTimedOut) {
+      const duration = Date.now() - nodeStartTime;
+      getLog().info(
+        { nodeId: node.id, durationMs: duration },
+        'dag_node_cancelled_during_streaming'
+      );
+
+      deps.store
+        .createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'node_failed',
+          step_name: node.id,
+          data: { error: 'Cancelled by user', duration_ms: duration },
+        })
+        .catch((err: Error) => {
+          getLog().error(
+            { err, workflowRunId: workflowRun.id, eventType: 'node_failed' },
+            'workflow_event_persist_failed'
+          );
+        });
+
+      emitter.emit({
+        type: 'node_failed',
+        runId: workflowRun.id,
+        nodeId: node.id,
+        nodeName: node.command ?? node.id,
+        error: 'Cancelled by user',
+      });
+
+      // Clean up throttle entry
+      lastNodeActivityUpdate.delete(`${workflowRun.id}:${node.id}`);
+
+      return { state: 'failed', output: nodeOutputText, error: 'Cancelled by user' };
+    }
+
     if (streamingMode === 'batch' && batchMessages.length > 0) {
       const batchContent =
         structuredOutput !== undefined && nodeOptions?.outputFormat
@@ -835,9 +898,22 @@ async function executeNodeInternal(
       duration,
     });
 
+    // Clean up throttle entry on completion
+    lastNodeActivityUpdate.delete(`${workflowRun.id}:${node.id}`);
+
     return { state: 'completed', output: nodeOutputText, sessionId: newSessionId };
   } catch (error) {
     const err = error as Error;
+
+    // Clean up throttle entry on failure
+    lastNodeActivityUpdate.delete(`${workflowRun.id}:${node.id}`);
+
+    // If the abort was triggered by user cancel (not idle timeout), classify as cancel
+    if (nodeAbortController.signal.aborted && !nodeIdleTimedOut) {
+      getLog().info({ nodeId: node.id }, 'dag_node_cancelled_via_abort');
+      return { state: 'failed', output: nodeOutputText, error: 'Cancelled by user' };
+    }
+
     getLog().error({ err, nodeId: node.id }, 'dag_node_failed');
     await logNodeError(logDir, workflowRun.id, node.id, err.message);
 
@@ -1323,6 +1399,27 @@ export async function executeDagWorkflow(
 
     if (layerHadFailure) {
       getLog().warn({ layerIdx, nodeCount: layer.length }, 'dag_layer_had_failures');
+    }
+
+    // Check for cancellation between DAG layers
+    try {
+      const dagStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
+      if (dagStatus === 'cancelled') {
+        getLog().info(
+          { workflowRunId: workflowRun.id, layerIdx, totalLayers: layers.length },
+          'dag.cancel_detected_between_layers'
+        );
+        await safeSendMessage(
+          platform,
+          conversationId,
+          `⚠️ **Workflow cancelled**: DAG execution stopped after layer ${String(layerIdx + 1)}/${String(layers.length)}`,
+          { workflowId: workflowRun.id }
+        );
+        break;
+      }
+    } catch (cancelErr) {
+      // Non-fatal — cancel check failure should not crash the workflow
+      getLog().warn({ err: cancelErr as Error }, 'dag.cancel_check_failed');
     }
   }
 

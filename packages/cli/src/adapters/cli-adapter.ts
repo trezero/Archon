@@ -38,7 +38,7 @@ export class CLIAdapter implements IPlatformAdapter {
   async sendMessage(
     _conversationId: string,
     message: string,
-    _metadata?: MessageMetadata
+    metadata?: MessageMetadata
   ): Promise<void> {
     // Output to stdout
     console.log(message);
@@ -46,7 +46,18 @@ export class CLIAdapter implements IPlatformAdapter {
     // Persist assistant message for Web UI history
     if (this.conversationDbId) {
       try {
-        await messageDb.addMessage(this.conversationDbId, 'assistant', message);
+        // Build persistence metadata from MessageMetadata (mirror web adapter pattern)
+        const persistMeta: Record<string, unknown> = {};
+        if (metadata?.category) persistMeta.category = metadata.category;
+        if (metadata?.workflowDispatch) persistMeta.workflowDispatch = metadata.workflowDispatch;
+        if (metadata?.workflowResult) persistMeta.workflowResult = metadata.workflowResult;
+
+        await messageDb.addMessage(
+          this.conversationDbId,
+          'assistant',
+          message,
+          Object.keys(persistMeta).length > 0 ? persistMeta : undefined
+        );
       } catch (error) {
         getLog().warn(
           { err: error as Error, conversationDbId: this.conversationDbId },

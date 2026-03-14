@@ -707,11 +707,20 @@ export function registerApiRoutes(
       }
       const events = await workflowEventDb.listWorkflowEvents(runId);
 
-      // Look up worker conversation to get its platform_conversation_id for SSE/messages
+      // Look up the run's conversation platform ID.
+      // For web runs (parent_conversation_id set): conversation_id is the worker conversation → set worker_platform_id
+      // For CLI runs (no parent): conversation_id is the single conversation → set conversation_platform_id only
       let workerPlatformId: string | undefined;
+      let conversationPlatformId: string | undefined;
       if (run.conversation_id) {
         const conv = await conversationDb.getConversationById(run.conversation_id);
-        workerPlatformId = conv?.platform_conversation_id;
+        if (run.parent_conversation_id) {
+          // Web run: conversation_id points to the worker conversation
+          workerPlatformId = conv?.platform_conversation_id;
+        } else {
+          // CLI run: conversation_id is the only conversation (no worker/parent split)
+          conversationPlatformId = conv?.platform_conversation_id;
+        }
       }
 
       // Look up parent conversation to get its platform_conversation_id for navigation
@@ -722,7 +731,12 @@ export function registerApiRoutes(
       }
 
       return c.json({
-        run: { ...run, worker_platform_id: workerPlatformId, parent_platform_id: parentPlatformId },
+        run: {
+          ...run,
+          worker_platform_id: workerPlatformId,
+          parent_platform_id: parentPlatformId,
+          conversation_platform_id: conversationPlatformId ?? null,
+        },
         events,
       });
     } catch (error) {

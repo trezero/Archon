@@ -96,7 +96,12 @@ describe('CLIAdapter', () => {
       adapter.setConversationDbId('conv-db-123');
       await adapter.sendMessage('conv-id', 'Hello from AI');
       expect(consoleSpy).toHaveBeenCalledWith('Hello from AI');
-      expect(mockAddMessage).toHaveBeenCalledWith('conv-db-123', 'assistant', 'Hello from AI');
+      expect(mockAddMessage).toHaveBeenCalledWith(
+        'conv-db-123',
+        'assistant',
+        'Hello from AI',
+        undefined
+      );
     });
 
     it('does NOT persist when conversationDbId is not set', async () => {
@@ -111,6 +116,40 @@ describe('CLIAdapter', () => {
       await expect(adapter.sendMessage('conv-id', 'Hello')).resolves.toBeUndefined();
       expect(consoleSpy).toHaveBeenCalledWith('Hello');
       expect(mockLogger.warn).toHaveBeenCalled();
+    });
+
+    it('persists category and workflowResult metadata when provided', async () => {
+      adapter.setConversationDbId('conv-123');
+      await adapter.sendMessage('conv-id', 'Hello', {
+        category: 'workflow_status',
+        workflowResult: { workflowName: 'test', runId: 'run-1' },
+      });
+      expect(mockAddMessage).toHaveBeenCalledWith('conv-123', 'assistant', 'Hello', {
+        category: 'workflow_status',
+        workflowResult: { workflowName: 'test', runId: 'run-1' },
+      });
+    });
+
+    it('persists workflowDispatch metadata', async () => {
+      adapter.setConversationDbId('conv-123');
+      await adapter.sendMessage('conv-id', 'Dispatching...', {
+        workflowDispatch: { workerConversationId: 'worker-1', workflowName: 'assist' },
+      });
+      expect(mockAddMessage).toHaveBeenCalledWith('conv-123', 'assistant', 'Dispatching...', {
+        workflowDispatch: { workerConversationId: 'worker-1', workflowName: 'assist' },
+      });
+    });
+
+    it('omits metadata parameter when only non-persistent fields present', async () => {
+      adapter.setConversationDbId('conv-123');
+      await adapter.sendMessage('conv-id', 'Hello', { segment: 'new' });
+      expect(mockAddMessage).toHaveBeenCalledWith('conv-123', 'assistant', 'Hello', undefined);
+    });
+
+    it('omits metadata parameter when metadata is undefined', async () => {
+      adapter.setConversationDbId('conv-123');
+      await adapter.sendMessage('conv-id', 'Hello');
+      expect(mockAddMessage).toHaveBeenCalledWith('conv-123', 'assistant', 'Hello', undefined);
     });
   });
 

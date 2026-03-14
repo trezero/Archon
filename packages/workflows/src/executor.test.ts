@@ -4500,3 +4500,58 @@ describe('app defaults command loading', () => {
     });
   });
 });
+
+describe('cancel detection during streaming', () => {
+  let testDir: string;
+  let getDefaultBranchSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `cancel-test-${String(Date.now())}`);
+    await mkdir(testDir, { recursive: true });
+    // Create a .archon/commands directory so the executor finds the command
+    await mkdir(join(testDir, '.archon', 'commands'), { recursive: true });
+    await writeFile(join(testDir, '.archon', 'commands', 'test-step.md'), 'Test step prompt');
+    await writeFile(join(testDir, '.archon', 'commands', 'test-no-false-cancel.md'), 'Test prompt');
+    // Mock getDefaultBranch since testDir is not a real git repo
+    getDefaultBranchSpy = spyOn(gitUtils, 'getDefaultBranch').mockResolvedValue('main');
+    mockSendQuery.mockClear();
+    mockLogger.info.mockClear();
+  });
+
+  afterEach(async () => {
+    getDefaultBranchSpy.mockRestore();
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it('does not classify errors with "aborted" in message as user cancel without abort signal', async () => {
+    // An error with "aborted" in the message but NO abort signal should NOT
+    // be classified as a user cancel — it should go through normal error handling
+    mockSendQuery.mockImplementation(function* () {
+      throw new Error('transaction aborted: deadlock detected');
+    });
+
+    const localStore = createMockStore();
+    const localPlatform = createMockPlatform();
+    const localDeps = createMockDeps({ store: localStore });
+
+    const result = await executeWorkflow(
+      localDeps,
+      localPlatform,
+      'conv-123',
+      testDir,
+      {
+        name: 'test-no-false-cancel',
+        description: 'Test',
+        steps: [{ command: 'test-no-false-cancel' }],
+      },
+      'User message',
+      'db-conv-id'
+    );
+
+    expect(result.success).toBe(false);
+    // The error should NOT say "Step cancelled by user"
+    expect(result.error).not.toContain('cancelled by user');
+    // It should contain the original error message
+    expect(result.error).toContain('transaction aborted');
+  });
+});

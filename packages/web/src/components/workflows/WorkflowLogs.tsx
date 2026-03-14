@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MessageList } from '@/components/chat/MessageList';
 import { useSSE } from '@/hooks/useSSE';
 import { getMessages } from '@/lib/api';
+import { formatDurationMs } from '@/lib/format';
 import type { MessageResponse } from '@/lib/api';
 import type {
   ChatMessage,
@@ -24,6 +25,7 @@ interface WorkflowLogsProps {
     onParallelAgent: (event: ParallelAgentEvent) => void;
     onWorkflowArtifact: (event: WorkflowArtifactEvent) => void;
   };
+  currentlyExecuting?: { nodeName: string; startedAt: number } | null;
 }
 
 function hydrateMessages(rows: MessageResponse[], startedAt?: number): ChatMessage[] {
@@ -69,12 +71,25 @@ export function WorkflowLogs({
   startedAt,
   isRunning,
   workflowHandlers,
+  currentlyExecuting,
 }: WorkflowLogsProps): React.ReactElement {
   const [sseMessages, setSseMessages] = useState<ChatMessage[]>([]);
   const queryClient = useQueryClient();
   const prevIsRunningRef = useRef(isRunning);
   const [gracePolling, setGracePolling] = useState(false);
   const [scrollTrigger, setScrollTrigger] = useState(0);
+
+  // Tick timer for live elapsed display on "currently executing" indicator
+  const [, setExecTick] = useState(0);
+  useEffect(() => {
+    if (!isRunning || !currentlyExecuting) return;
+    const interval = setInterval(() => {
+      setExecTick(t => t + 1);
+    }, 1000);
+    return (): void => {
+      clearInterval(interval);
+    };
+  }, [isRunning, currentlyExecuting]);
 
   // Poll for messages from DB — 3s while running (or during grace period), disabled when terminal.
   // staleTime: 0 ensures post-completion navigation always fetches fresh data on mount.
@@ -274,10 +289,22 @@ export function WorkflowLogs({
   }
 
   return (
-    <MessageList
-      messages={displayMessages}
-      isStreaming={isStreaming}
-      scrollTrigger={scrollTrigger}
-    />
+    <div className="flex flex-col flex-1 overflow-hidden min-h-0">
+      {isRunning && currentlyExecuting && (
+        <div className="px-4 py-2 bg-surface-secondary border-b border-border flex items-center gap-2 text-sm shrink-0">
+          <span className="inline-block w-2 h-2 rounded-full bg-accent animate-pulse" />
+          <span className="text-text-secondary">Currently executing:</span>
+          <span className="font-medium text-text-primary">{currentlyExecuting.nodeName}</span>
+          <span className="text-text-tertiary text-xs">
+            ({formatDurationMs(Date.now() - currentlyExecuting.startedAt)})
+          </span>
+        </div>
+      )}
+      <MessageList
+        messages={displayMessages}
+        isStreaming={isStreaming}
+        scrollTrigger={scrollTrigger}
+      />
+    </div>
   );
 }
