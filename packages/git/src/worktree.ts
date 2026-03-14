@@ -31,7 +31,7 @@ export function getWorktreeBase(repoPath: RepoPath): string {
   if (repoPath.startsWith(workspacesPath)) {
     // Extract owner/repo from the path
     const relative = repoPath.substring(workspacesPath.length + 1);
-    const parts = relative.split('/').filter(p => p.length > 0);
+    const parts = relative.split(/[/\\]/).filter(p => p.length > 0);
     if (parts.length >= 2) {
       return getProjectWorktreesPath(parts[0], parts[1]);
     }
@@ -51,7 +51,7 @@ export function isProjectScopedWorktreeBase(repoPath: RepoPath): boolean {
   const workspacesPath = getArchonWorkspacesPath();
   if (!repoPath.startsWith(workspacesPath)) return false;
   const relative = repoPath.substring(workspacesPath.length + 1);
-  const parts = relative.split('/').filter(p => p.length > 0);
+  const parts = relative.split(/[/\\]/).filter(p => p.length > 0);
   return parts.length >= 2;
 }
 

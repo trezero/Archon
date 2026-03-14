@@ -8,6 +8,11 @@ import type { RepoConfig } from '../config/config-types';
 import type { CopyFileEntry } from '@archon/isolation';
 import { createMockLogger } from '../test/mocks/logger';
 
+/** Normalize path separators to forward slashes for cross-platform comparison */
+function normPath(p: string): string {
+  return p.replace(/\\/g, '/');
+}
+
 const mockLogger = createMockLogger();
 mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
@@ -68,7 +73,7 @@ describe('syncArchonToWorktree', () => {
     const result = await syncArchonToWorktree('/worktree/path');
 
     expect(result).toBe(false);
-    expect(statSpy).toHaveBeenCalledWith('/canonical/repo/.archon');
+    expect(normPath(statSpy.mock.calls[0][0] as string)).toBe('/canonical/repo/.archon');
     expect(copyWorktreeFilesSpy).not.toHaveBeenCalled();
     // Should not log warning for ENOENT (expected case)
     expect(mockLogger.warn).not.toHaveBeenCalled();
@@ -86,7 +91,7 @@ describe('syncArchonToWorktree', () => {
     expect(mockLogger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         context: 'canonical',
-        path: '/canonical/repo/.archon',
+        path: expect.stringMatching(/canonical[/\\]repo[/\\]\.archon/),
         code: 'EACCES',
       }),
       'stat_failed'
@@ -101,10 +106,11 @@ describe('syncArchonToWorktree', () => {
     getCanonicalRepoPathSpy.mockResolvedValue('/canonical/repo');
 
     statSpy.mockImplementation((path: string) => {
-      if (path === '/canonical/repo/.archon') {
+      const p = normPath(path);
+      if (p === '/canonical/repo/.archon') {
         return Promise.resolve({ mtime: canonicalMtime } as Stats);
       }
-      if (path === '/worktree/path/.archon') {
+      if (p === '/worktree/path/.archon') {
         return Promise.resolve({ mtime: worktreeMtime } as Stats);
       }
       return Promise.reject(new Error('Unexpected path'));
@@ -124,10 +130,11 @@ describe('syncArchonToWorktree', () => {
     getCanonicalRepoPathSpy.mockResolvedValue('/canonical/repo');
 
     statSpy.mockImplementation((path: string) => {
-      if (path === '/canonical/repo/.archon') {
+      const p = normPath(path);
+      if (p === '/canonical/repo/.archon') {
         return Promise.resolve({ mtime: canonicalMtime } as Stats);
       }
-      if (path === '/worktree/path/.archon') {
+      if (p === '/worktree/path/.archon') {
         return Promise.resolve({ mtime: worktreeMtime } as Stats);
       }
       return Promise.reject(new Error('Unexpected path'));
@@ -142,13 +149,14 @@ describe('syncArchonToWorktree', () => {
     const result = await syncArchonToWorktree('/worktree/path');
 
     expect(result).toBe(true);
-    expect(copyWorktreeFilesSpy).toHaveBeenCalledWith('/canonical/repo', '/worktree/path', [
-      '.archon',
-      '.env',
-    ]);
+    expect(copyWorktreeFilesSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/canonical[/\\]repo$/),
+      expect.stringMatching(/worktree[/\\]path$/),
+      ['.archon', '.env']
+    );
     expect(mockLogger.info).toHaveBeenCalledWith(
       expect.objectContaining({
-        canonicalRepo: '/canonical/repo',
+        canonicalRepo: expect.stringMatching(/canonical[/\\]repo$/),
         worktree: '/worktree/path',
         filesCopied: 1,
       }),
@@ -163,10 +171,11 @@ describe('syncArchonToWorktree', () => {
     getCanonicalRepoPathSpy.mockResolvedValue('/canonical/repo');
 
     statSpy.mockImplementation((path: string) => {
-      if (path === '/canonical/repo/.archon') {
+      const p = normPath(path);
+      if (p === '/canonical/repo/.archon') {
         return Promise.resolve({ mtime: canonicalMtime } as Stats);
       }
-      if (path === '/worktree/path/.archon') {
+      if (p === '/worktree/path/.archon') {
         return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
       }
       return Promise.reject(new Error('Unexpected path'));
@@ -181,9 +190,11 @@ describe('syncArchonToWorktree', () => {
     const result = await syncArchonToWorktree('/worktree/path');
 
     expect(result).toBe(true);
-    expect(copyWorktreeFilesSpy).toHaveBeenCalledWith('/canonical/repo', '/worktree/path', [
-      '.archon',
-    ]);
+    expect(copyWorktreeFilesSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/canonical[/\\]repo$/),
+      '/worktree/path',
+      ['.archon']
+    );
   });
 
   test('logs warning and returns false for non-ENOENT worktree stat error', async () => {
@@ -193,10 +204,11 @@ describe('syncArchonToWorktree', () => {
     getCanonicalRepoPathSpy.mockResolvedValue('/canonical/repo');
 
     statSpy.mockImplementation((path: string) => {
-      if (path === '/canonical/repo/.archon') {
+      const p = normPath(path);
+      if (p === '/canonical/repo/.archon') {
         return Promise.resolve({ mtime: canonicalMtime } as Stats);
       }
-      if (path === '/worktree/path/.archon') {
+      if (p === '/worktree/path/.archon') {
         return Promise.reject(Object.assign(new Error('Permission denied'), { code: 'EACCES' }));
       }
       return Promise.reject(new Error('Unexpected path'));
@@ -209,7 +221,7 @@ describe('syncArchonToWorktree', () => {
     expect(mockLogger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         context: 'worktree',
-        path: '/worktree/path/.archon',
+        path: expect.stringMatching(/worktree[/\\]path[/\\]\.archon/),
         code: 'EACCES',
       }),
       'stat_failed'
@@ -232,10 +244,11 @@ describe('syncArchonToWorktree', () => {
     getCanonicalRepoPathSpy.mockResolvedValue('/canonical/repo');
 
     statSpy.mockImplementation((path: string) => {
-      if (path === '/canonical/repo/.archon') {
+      const p = normPath(path);
+      if (p === '/canonical/repo/.archon') {
         return Promise.resolve({ mtime: canonicalMtime } as Stats);
       }
-      if (path === '/worktree/path/.archon') {
+      if (p === '/worktree/path/.archon') {
         return Promise.resolve({ mtime: worktreeMtime } as Stats);
       }
       return Promise.reject(new Error('Unexpected path'));
@@ -250,9 +263,11 @@ describe('syncArchonToWorktree', () => {
     const result = await syncArchonToWorktree('/worktree/path');
 
     expect(result).toBe(true);
-    expect(copyWorktreeFilesSpy).toHaveBeenCalledWith('/canonical/repo', '/worktree/path', [
-      '.archon',
-    ]);
+    expect(copyWorktreeFilesSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/canonical[/\\]repo$/),
+      '/worktree/path',
+      ['.archon']
+    );
   });
 
   test('defaults to [".archon"] when config loading fails and logs warning', async () => {
@@ -263,10 +278,11 @@ describe('syncArchonToWorktree', () => {
     getCanonicalRepoPathSpy.mockResolvedValue('/canonical/repo');
 
     statSpy.mockImplementation((path: string) => {
-      if (path === '/canonical/repo/.archon') {
+      const p = normPath(path);
+      if (p === '/canonical/repo/.archon') {
         return Promise.resolve({ mtime: canonicalMtime } as Stats);
       }
-      if (path === '/worktree/path/.archon') {
+      if (p === '/worktree/path/.archon') {
         return Promise.resolve({ mtime: worktreeMtime } as Stats);
       }
       return Promise.reject(new Error('Unexpected path'));
@@ -279,12 +295,14 @@ describe('syncArchonToWorktree', () => {
     const result = await syncArchonToWorktree('/worktree/path');
 
     expect(result).toBe(true);
-    expect(copyWorktreeFilesSpy).toHaveBeenCalledWith('/canonical/repo', '/worktree/path', [
-      '.archon',
-    ]);
+    expect(copyWorktreeFilesSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/canonical[/\\]repo$/),
+      '/worktree/path',
+      ['.archon']
+    );
     expect(mockLogger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
-        canonicalRepoPath: '/canonical/repo',
+        canonicalRepoPath: expect.stringMatching(/canonical[/\\]repo$/),
       }),
       'repo_config_load_failed_using_default'
     );
@@ -298,10 +316,11 @@ describe('syncArchonToWorktree', () => {
     getCanonicalRepoPathSpy.mockResolvedValue('/canonical/repo');
 
     statSpy.mockImplementation((path: string) => {
-      if (path === '/canonical/repo/.archon') {
+      const p = normPath(path);
+      if (p === '/canonical/repo/.archon') {
         return Promise.resolve({ mtime: canonicalMtime } as Stats);
       }
-      if (path === '/worktree/path/.archon') {
+      if (p === '/worktree/path/.archon') {
         return Promise.resolve({ mtime: worktreeMtime } as Stats);
       }
       return Promise.reject(new Error('Unexpected path'));
@@ -317,11 +336,11 @@ describe('syncArchonToWorktree', () => {
 
     expect(result).toBe(true);
     // .archon is prepended to preserve user's copyFiles while ensuring .archon is synced
-    expect(copyWorktreeFilesSpy).toHaveBeenCalledWith('/canonical/repo', '/worktree/path', [
-      '.archon',
-      '.env',
-      '.vscode',
-    ]);
+    expect(copyWorktreeFilesSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/canonical[/\\]repo$/),
+      '/worktree/path',
+      ['.archon', '.env', '.vscode']
+    );
   });
 
   test('handles sync errors gracefully without throwing', async () => {
@@ -332,10 +351,11 @@ describe('syncArchonToWorktree', () => {
     getCanonicalRepoPathSpy.mockResolvedValue('/canonical/repo');
 
     statSpy.mockImplementation((path: string) => {
-      if (path === '/canonical/repo/.archon') {
+      const p = normPath(path);
+      if (p === '/canonical/repo/.archon') {
         return Promise.resolve({ mtime: canonicalMtime } as Stats);
       }
-      if (path === '/worktree/path/.archon') {
+      if (p === '/worktree/path/.archon') {
         return Promise.resolve({ mtime: worktreeMtime } as Stats);
       }
       return Promise.reject(new Error('Unexpected path'));

@@ -1710,13 +1710,16 @@ describe('WorktreeProvider', () => {
       const env = await provider.create(request);
 
       // Verify orphan directory was removed (path uses actual branch name for same-repo PRs)
-      expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('feature/auth'), {
+      // On Windows, path separators are backslashes, so normalize before checking
+      const rmPath = (rmSpy.mock.calls[0]?.[0] as string) ?? '';
+      expect(rmPath.replace(/\\/g, '/')).toContain('feature/auth');
+      expect(rmSpy).toHaveBeenCalledWith(expect.any(String), {
         recursive: true,
         force: true,
       });
 
       // Verify worktree was created with actual branch name
-      expect(env.workingPath).toContain('feature/auth');
+      expect(env.workingPath.replace(/\\/g, '/')).toContain('feature/auth');
     });
 
     test('cleans directory when git worktree remove fails with "not a working tree"', async () => {

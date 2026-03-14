@@ -248,7 +248,7 @@ export function resolveProjectRootFromCwd(cwd: string): string | null {
 
   // Path after workspaces/: "owner/repo/..." or "owner/repo"
   const relative = cwd.substring(workspacesPath.length + 1); // +1 for trailing slash
-  const parts = relative.split('/').filter(p => p.length > 0);
+  const parts = relative.split(/[/\\]/).filter(p => p.length > 0);
   if (parts.length < 2) return null;
 
   return join(workspacesPath, parts[0], parts[1]);

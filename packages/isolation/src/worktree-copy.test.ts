@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test';
 import * as fs from 'fs/promises';
 import type { Stats } from 'fs';
+import { join } from 'path';
 
 import {
   parseCopyFileEntry,
@@ -163,7 +164,7 @@ describe('worktree-copy', () => {
       });
 
       expect(result).toBe(true);
-      expect(copyFileSpy).toHaveBeenCalledWith('/repo/.env', '/worktree/.env');
+      expect(copyFileSpy).toHaveBeenCalledWith(join('/repo', '.env'), join('/worktree', '.env'));
     });
 
     test('copies directory recursively', async () => {
@@ -175,9 +176,11 @@ describe('worktree-copy', () => {
       });
 
       expect(result).toBe(true);
-      expect(cpSpy).toHaveBeenCalledWith('/repo/data/fixtures', '/worktree/data/fixtures', {
-        recursive: true,
-      });
+      expect(cpSpy).toHaveBeenCalledWith(
+        join('/repo', 'data', 'fixtures'),
+        join('/worktree', 'data', 'fixtures'),
+        { recursive: true }
+      );
     });
 
     test('creates destination directory before copying', async () => {
@@ -188,7 +191,9 @@ describe('worktree-copy', () => {
         destination: 'nested/path/.env',
       });
 
-      expect(mkdirSpy).toHaveBeenCalledWith('/worktree/nested/path', { recursive: true });
+      expect(mkdirSpy).toHaveBeenCalledWith(join('/worktree', 'nested', 'path'), {
+        recursive: true,
+      });
     });
 
     test('returns false when source does not exist (ENOENT)', async () => {
@@ -226,7 +231,10 @@ describe('worktree-copy', () => {
       });
 
       expect(result).toBe(true);
-      expect(copyFileSpy).toHaveBeenCalledWith('/repo/.env.example', '/worktree/.env');
+      expect(copyFileSpy).toHaveBeenCalledWith(
+        join('/repo', '.env.example'),
+        join('/worktree', '.env')
+      );
     });
 
     // Path traversal tests

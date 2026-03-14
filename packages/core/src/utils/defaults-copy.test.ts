@@ -4,6 +4,11 @@ import type { Dirent } from 'fs';
 import * as configLoader from '../config/config-loader';
 import { createMockLogger } from '../test/mocks/logger';
 
+/** Normalize path separators to forward slashes for cross-platform comparison */
+function normPath(p: string): string {
+  return p.replace(/\\/g, '/');
+}
+
 const mockLogger = createMockLogger();
 const mockGetDefaultCommandsPath = mock(() => '/app/.archon/commands/defaults');
 const mockGetDefaultWorkflowsPath = mock(() => '/app/.archon/workflows/defaults');
@@ -68,10 +73,10 @@ describe('defaults-copy', () => {
     test('copies commands when target has none', async () => {
       // Target has no .archon/commands/ (access throws)
       accessSpy.mockImplementation(async path => {
-        if (String(path).includes('target/.archon/commands')) {
+        if (normPath(String(path)).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
-        if (String(path).includes('target/.archon/workflows')) {
+        if (normPath(String(path)).includes('target/.archon/workflows')) {
           throw new Error('ENOENT');
         }
         // Source defaults exist
@@ -96,10 +101,10 @@ describe('defaults-copy', () => {
     test('skips if target already has commands directory', async () => {
       // Target already has .archon/commands/ (access succeeds)
       accessSpy.mockImplementation(async path => {
-        if (String(path).includes('target/.archon/commands')) {
+        if (normPath(String(path)).includes('target/.archon/commands')) {
           return; // Exists
         }
-        if (String(path).includes('target/.archon/workflows')) {
+        if (normPath(String(path)).includes('target/.archon/workflows')) {
           throw new Error('ENOENT');
         }
         return;
@@ -153,10 +158,10 @@ describe('defaults-copy', () => {
 
     test('only copies .md files for commands', async () => {
       accessSpy.mockImplementation(async path => {
-        if (String(path).includes('target/.archon/commands')) {
+        if (normPath(String(path)).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
-        if (String(path).includes('target/.archon/workflows')) {
+        if (normPath(String(path)).includes('target/.archon/workflows')) {
           throw new Error('ENOENT');
         }
         return;
@@ -180,10 +185,10 @@ describe('defaults-copy', () => {
 
     test('only copies .yaml/.yml files for workflows', async () => {
       accessSpy.mockImplementation(async path => {
-        if (String(path).includes('target/.archon/commands')) {
+        if (normPath(String(path)).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
-        if (String(path).includes('target/.archon/workflows')) {
+        if (normPath(String(path)).includes('target/.archon/workflows')) {
           throw new Error('ENOENT');
         }
         return;
@@ -207,10 +212,10 @@ describe('defaults-copy', () => {
 
     test('creates target directories before copying', async () => {
       accessSpy.mockImplementation(async path => {
-        if (String(path).includes('target/.archon/commands')) {
+        if (normPath(String(path)).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
-        if (String(path).includes('target/.archon/workflows')) {
+        if (normPath(String(path)).includes('target/.archon/workflows')) {
           throw new Error('ENOENT');
         }
         return;
@@ -225,15 +230,18 @@ describe('defaults-copy', () => {
 
       await copyDefaultsToRepo('/target');
 
-      expect(mkdirSpy).toHaveBeenCalledWith('/target/.archon/commands', { recursive: true });
+      expect(mkdirSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/target[/\\]\.archon[/\\]commands$/),
+        { recursive: true }
+      );
     });
 
     test('handles file copy errors gracefully and tracks failures', async () => {
       accessSpy.mockImplementation(async path => {
-        if (String(path).includes('target/.archon/commands')) {
+        if (normPath(String(path)).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
-        if (String(path).includes('target/.archon/workflows')) {
+        if (normPath(String(path)).includes('target/.archon/workflows')) {
           throw new Error('ENOENT');
         }
         return;
@@ -261,10 +269,10 @@ describe('defaults-copy', () => {
 
     test('handles mkdir failure gracefully', async () => {
       accessSpy.mockImplementation(async path => {
-        if (String(path).includes('target/.archon/commands')) {
+        if (normPath(String(path)).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
-        if (String(path).includes('target/.archon/workflows')) {
+        if (normPath(String(path)).includes('target/.archon/workflows')) {
           throw new Error('ENOENT');
         }
         return;
@@ -290,10 +298,10 @@ describe('defaults-copy', () => {
 
     test('copies both commands and workflows in same call', async () => {
       accessSpy.mockImplementation(async path => {
-        if (String(path).includes('target/.archon/commands')) {
+        if (normPath(String(path)).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
-        if (String(path).includes('target/.archon/workflows')) {
+        if (normPath(String(path)).includes('target/.archon/workflows')) {
           throw new Error('ENOENT');
         }
         return;
@@ -327,10 +335,10 @@ describe('defaults-copy', () => {
 
     test('does not create directory when no files to copy', async () => {
       accessSpy.mockImplementation(async path => {
-        if (String(path).includes('target/.archon/commands')) {
+        if (normPath(String(path)).includes('target/.archon/commands')) {
           throw new Error('ENOENT');
         }
-        if (String(path).includes('target/.archon/workflows')) {
+        if (normPath(String(path)).includes('target/.archon/workflows')) {
           throw new Error('ENOENT');
         }
         return;

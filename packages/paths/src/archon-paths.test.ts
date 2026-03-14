@@ -1,4 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+
+const isWindows = process.platform === 'win32';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import { mkdir, rm, writeFile, lstat, readlink } from 'fs/promises';
@@ -346,7 +348,9 @@ describe('archon-paths', () => {
 
     test('works in Docker', () => {
       process.env.ARCHON_DOCKER = 'true';
-      expect(getProjectRoot('acme', 'widget')).toBe('/.archon/workspaces/acme/widget');
+      expect(getProjectRoot('acme', 'widget')).toBe(
+        join('/', '.archon', 'workspaces', 'acme', 'widget')
+      );
     });
   });
 
@@ -453,9 +457,11 @@ describe('archon-paths', () => {
     test('works with ARCHON_HOME override', () => {
       delete process.env.WORKSPACE_PATH;
       delete process.env.ARCHON_DOCKER;
-      process.env.ARCHON_HOME = '/custom/archon';
-      const cwd = '/custom/archon/workspaces/acme/widget/source';
-      expect(resolveProjectRootFromCwd(cwd)).toBe('/custom/archon/workspaces/acme/widget');
+      process.env.ARCHON_HOME = join('/', 'custom', 'archon');
+      const cwd = join('/', 'custom', 'archon', 'workspaces', 'acme', 'widget', 'source');
+      expect(resolveProjectRootFromCwd(cwd)).toBe(
+        join('/', 'custom', 'archon', 'workspaces', 'acme', 'widget')
+      );
     });
   });
 });
@@ -564,7 +570,7 @@ describe('createProjectSourceSymlink', () => {
     await rm(tempTarget, { recursive: true, force: true });
   });
 
-  test('creates a symlink pointing to the target', async () => {
+  test.skipIf(isWindows)('creates a symlink pointing to the target', async () => {
     await ensureProjectStructure('acme', 'widget');
     await createProjectSourceSymlink('acme', 'widget', tempTarget);
 
@@ -574,7 +580,7 @@ describe('createProjectSourceSymlink', () => {
     expect(await readlink(linkPath)).toBe(tempTarget);
   });
 
-  test('is a no-op if symlink already points to same target', async () => {
+  test.skipIf(isWindows)('is a no-op if symlink already points to same target', async () => {
     await ensureProjectStructure('acme', 'widget');
     await createProjectSourceSymlink('acme', 'widget', tempTarget);
     // Call again - should not throw
@@ -584,7 +590,7 @@ describe('createProjectSourceSymlink', () => {
     expect(await readlink(linkPath)).toBe(tempTarget);
   });
 
-  test('throws when symlink points to a different target', async () => {
+  test.skipIf(isWindows)('throws when symlink points to a different target', async () => {
     await ensureProjectStructure('acme', 'widget');
     await createProjectSourceSymlink('acme', 'widget', tempTarget);
 
@@ -600,34 +606,40 @@ describe('createProjectSourceSymlink', () => {
     }
   });
 
-  test('is a no-op when real directory with contents exists (clone case)', async () => {
-    await ensureProjectStructure('acme', 'widget');
+  test.skipIf(isWindows)(
+    'is a no-op when real directory with contents exists (clone case)',
+    async () => {
+      await ensureProjectStructure('acme', 'widget');
 
-    // Put a file in the source dir to simulate a clone
-    const sourcePath = getProjectSourcePath('acme', 'widget');
-    await writeFile(join(sourcePath, 'README.md'), '# Hello');
+      // Put a file in the source dir to simulate a clone
+      const sourcePath = getProjectSourcePath('acme', 'widget');
+      await writeFile(join(sourcePath, 'README.md'), '# Hello');
 
-    // Should not overwrite the directory with a symlink
-    await createProjectSourceSymlink('acme', 'widget', tempTarget);
+      // Should not overwrite the directory with a symlink
+      await createProjectSourceSymlink('acme', 'widget', tempTarget);
 
-    const stats = await lstat(sourcePath);
-    expect(stats.isDirectory()).toBe(true);
-    expect(stats.isSymbolicLink()).toBe(false);
-  });
+      const stats = await lstat(sourcePath);
+      expect(stats.isDirectory()).toBe(true);
+      expect(stats.isSymbolicLink()).toBe(false);
+    }
+  );
 
-  test('replaces empty directory with symlink (ensureProjectStructure case)', async () => {
-    await ensureProjectStructure('acme', 'widget');
+  test.skipIf(isWindows)(
+    'replaces empty directory with symlink (ensureProjectStructure case)',
+    async () => {
+      await ensureProjectStructure('acme', 'widget');
 
-    // source/ is empty from ensureProjectStructure
-    await createProjectSourceSymlink('acme', 'widget', tempTarget);
+      // source/ is empty from ensureProjectStructure
+      await createProjectSourceSymlink('acme', 'widget', tempTarget);
 
-    const linkPath = getProjectSourcePath('acme', 'widget');
-    const stats = await lstat(linkPath);
-    expect(stats.isSymbolicLink()).toBe(true);
-    expect(await readlink(linkPath)).toBe(tempTarget);
-  });
+      const linkPath = getProjectSourcePath('acme', 'widget');
+      const stats = await lstat(linkPath);
+      expect(stats.isSymbolicLink()).toBe(true);
+      expect(await readlink(linkPath)).toBe(tempTarget);
+    }
+  );
 
-  test('creates symlink when source path does not exist', async () => {
+  test.skipIf(isWindows)('creates symlink when source path does not exist', async () => {
     // Only create the parent, not the source dir itself
     const projectRoot = getProjectRoot('acme', 'widget');
     await mkdir(projectRoot, { recursive: true });
