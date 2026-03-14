@@ -317,7 +317,7 @@ echo
 
 # ── Update .gitignore ────────────────────────────────────────────────────────
 
-for entry in ".claude/plugins/" ".claude/archon-config.json" ".claude/archon-memory-buffer.jsonl"; do
+for entry in ".claude/plugins/" ".claude/skills/" ".claude/archon-config.json" ".claude/archon-state.json" ".claude/archon-memory-buffer.jsonl"; do
   grep -qxF "$entry" .gitignore 2>/dev/null || echo "$entry" >> .gitignore
 done
 ui_success "Updated .gitignore with Archon local paths."

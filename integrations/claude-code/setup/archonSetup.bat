@@ -238,7 +238,7 @@ echo       ^✓ Wrote !INSTALL_DIR!\archon-config.json
 echo.
 
 :: ── Update .gitignore ────────────────────────────────────────────────────────
-for %%G in (".claude/plugins/" ".claude/archon-config.json" ".claude/archon-memory-buffer.jsonl") do (
+for %%G in (".claude/plugins/" ".claude/skills/" ".claude/archon-config.json" ".claude/archon-state.json" ".claude/archon-memory-buffer.jsonl") do (
     findstr /x /c:"%%~G" .gitignore >nul 2>&1 || echo %%~G>>.gitignore
 )
 

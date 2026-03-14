@@ -1,11 +1,11 @@
 ---
 name: archon-bootstrap
-description: Bootstrap Archon extensions onto this machine. Fetches all extensions from the Archon registry and installs them to ~/.claude/skills/, registers this system, and links it to the current project. Run once on any new machine to set up Archon integration. Use when the user says "bootstrap archon", "install archon extensions", "set up archon", or "run archon bootstrap".
+description: Bootstrap Archon extensions onto this machine. Fetches all extensions from the Archon registry and installs them locally, registers this system, and links it to the current project. Run once on any new machine to set up Archon integration. Use when the user says "bootstrap archon", "install archon extensions", "set up archon", or "run archon bootstrap".
 ---
 
 # Archon Bootstrap
 
-Bootstrap Archon extensions onto this machine by fetching all extensions from the Archon registry, installing them to `~/.claude/skills/` (extension definition files), registering this system, and optionally linking it to the current project.
+Bootstrap Archon extensions onto this machine by fetching all extensions from the Archon registry, installing them locally (extension definition files), registering this system, and optionally linking it to the current project.
 
 ## Phase 0: Health Check
 
@@ -53,13 +53,20 @@ Ask the user:
 
 Store the confirmed name as `<system_name>`.
 
-## Phase 3: Read Project Context
+## Phase 3: Read Project Context and Determine Install Scope
 
 Read `.claude/archon-state.json` if it exists.
 
 Extract the value of `archon_project_id` if present and store it as `<project_id>`.
 
 If the file does not exist or the key is absent, `<project_id>` is omitted from the next step.
+
+Read `.claude/archon-config.json` if it exists (fall back to `~/.claude/archon-config.json`). Extract:
+- `install_scope` → `<install_scope>` (may be absent)
+
+Determine `<install_dir>`:
+- If `<install_scope>` is `"project"` → `.claude`
+- If `<install_scope>` is `"global"` or absent → `~/.claude`
 
 ## Phase 4: Call Bootstrap MCP Tool
 
@@ -82,8 +89,8 @@ Extract `<system_id>` from `response.system.id` (if `response.system` is present
 
 For each extension object in `response.extensions`:
 
-1. Create the directory `~/.claude/skills/<name>/`
-2. Write the extension content to `~/.claude/skills/<name>/SKILL.md` (extension definition file)
+1. Create the directory `<install_dir>/skills/<name>/`
+2. Write the extension content to `<install_dir>/skills/<name>/SKILL.md` (extension definition file)
 
 Use the Write tool (not a bash heredoc) to write each file.
 
@@ -109,7 +116,7 @@ Print the following summary:
 ## Archon Bootstrap Complete
 
 **System:** <system_name> (<system_id>)
-**Extensions installed:** <N> → ~/.claude/skills/ (extension definition files)
+**Extensions installed:** <N> → <install_dir>/skills/ (extension definition files)
   - <list each extension name>
 **Project:** <project_title if registered> — or "No project linked"
 

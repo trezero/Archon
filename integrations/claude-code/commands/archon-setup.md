@@ -1,6 +1,6 @@
 # Archon Setup — Register This Machine
 
-Connect this machine to Archon: register it as a system, download all project extensions, and install them to `~/.claude/skills/`.
+Connect this machine to Archon: register it as a system, download all project extensions, and install them locally.
 
 ## Phase 0: Health Check
 
@@ -12,12 +12,19 @@ Archon server is not reachable. Ensure the MCP is connected.
 ```
 Stop.
 
-## Phase 1: Load Existing State
+## Phase 1: Load Existing State and Determine Install Scope
 
 Read `.claude/archon-state.json` if it exists. Extract:
 - `system_fingerprint` → `<fingerprint>` (may be absent)
 - `system_name` → `<system_name>` (may be absent)
 - `archon_project_id` → `<project_id>` (may be absent)
+
+Read `.claude/archon-config.json` if it exists (fall back to `~/.claude/archon-config.json`). Extract:
+- `install_scope` → `<install_scope>` (may be absent)
+
+Determine `<install_dir>`:
+- If `<install_scope>` is `"project"` → `.claude`
+- If `<install_scope>` is `"global"` or absent → `~/.claude`
 
 ## Phase 2: Collect System Info and Compute Fingerprint
 
@@ -80,8 +87,8 @@ Extract `<system_id>` from `response.system.id` if present, otherwise `"unknown"
 
 For each extension in `response.extensions`:
 
-1. Create directory `~/.claude/skills/<name>/`
-2. Write extension content to `~/.claude/skills/<name>/SKILL.md` using the Write tool (not bash heredoc)
+1. Create directory `<install_dir>/skills/<name>/`
+2. Write extension content to `<install_dir>/skills/<name>/SKILL.md` using the Write tool (not bash heredoc)
 
 ## Phase 6: Update State
 
@@ -101,7 +108,7 @@ Write merged object back to `.claude/archon-state.json`.
 ## Archon Setup Complete
 
 System: <system_name> (<system_id>)
-Extensions installed: <N> → ~/.claude/skills/
+Extensions installed: <N> → <install_dir>/skills/
   - <list each extension name>
 Project: <project name if registered, else "No project linked">
 

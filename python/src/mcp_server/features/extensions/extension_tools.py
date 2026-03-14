@@ -560,6 +560,5 @@ async def _handle_bootstrap(
         "success": True,
         "extensions": extensions,
         "system": system,
-        "install_path": "~/.claude/skills",
         "message": f"Bootstrap complete: {len(extensions)} extension(s) ready to install",
     })

@@ -42,19 +42,28 @@ Store as `system_fingerprint`.
 
 ## Phase 1: Scan Local Extensions
 
-### 1a. Find all extension definition files
+### 1a. Determine install scope
+
+Read `.claude/archon-config.json` if it exists (fall back to `~/.claude/archon-config.json`). Extract:
+- `install_scope` → `<install_scope>` (may be absent)
+
+Determine `<install_dir>`:
+- If `<install_scope>` is `"project"` → `.claude`
+- If `<install_scope>` is `"global"` or absent → `~/.claude`
+
+### 1b. Find all extension definition files
 
 Scan these directories for SKILL.md extension definition files:
-- `.claude/skills/` (user-installed extensions)
+- `<install_dir>/skills/` (user-installed extensions)
 - `integrations/claude-code/extensions/` (repo extensions, if in Archon repo)
 - Any directory listed in `.claude/archon-state.json` under `extension_directories`
 
 ```
-Glob: .claude/skills/**/SKILL.md
+Glob: <install_dir>/skills/**/SKILL.md
 Glob: integrations/claude-code/extensions/**/SKILL.md
 ```
 
-### 1b. Parse each extension
+### 1c. Parse each extension
 
 For each extension definition file found:
 1. Read the file content
@@ -117,13 +126,13 @@ manage_extensions(
 ### 3a. Install pending extensions
 
 For each item in `pending_install`:
-1. Write the `content` to `.claude/skills/<name>/SKILL.md` (extension definition file)
+1. Write the `content` to `<install_dir>/skills/<name>/SKILL.md` (extension definition file)
 2. Report: "Installed extension: <name>"
 
 ### 3b. Remove pending extensions
 
 For each item in `pending_remove`:
-1. Delete `.claude/skills/<name>/SKILL.md` (extension definition file)
+1. Delete `<install_dir>/skills/<name>/SKILL.md` (extension definition file)
 2. Report: "Removed extension: <name>"
 
 ### 3c. Resolve local changes
@@ -223,7 +232,9 @@ If last_extension_sync is missing or older than 24h:
 
 ### Extension File Locations
 
-- **Installed extensions:** `.claude/skills/<name>/SKILL.md` (extension definition file)
+- **Installed extensions:** `<install_dir>/skills/<name>/SKILL.md` (extension definition file)
+  - Project scope (`install_scope: "project"`): `.claude/skills/`
+  - Global scope (`install_scope: "global"`): `~/.claude/skills/`
 - **Repo extensions:** `integrations/claude-code/extensions/<name>/SKILL.md`
 - Extensions are identified by their frontmatter `name` field, not directory name
 
