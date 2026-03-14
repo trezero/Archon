@@ -3,6 +3,8 @@ import { mkdir, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
+const isWindows = process.platform === 'win32';
+
 // Inline mock logger to suppress noisy output during tests
 const mockLogger = {
   fatal: mock(() => undefined),
@@ -1388,26 +1390,29 @@ steps:
       expect(result.errors[0].error).toContain('empty');
     });
 
-    it('should report directory read errors for non-ENOENT failures', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
+    it.skipIf(isWindows)(
+      'should report directory read errors for non-ENOENT failures',
+      async () => {
+        const workflowDir = join(testDir, '.archon', 'workflows');
+        await mkdir(workflowDir, { recursive: true });
 
-      // Create a file where a directory is expected (causes ENOTDIR on readdir)
-      await writeFile(join(workflowDir, 'not-a-dir'), 'file content');
+        // Create a file where a directory is expected (causes ENOTDIR on readdir)
+        await writeFile(join(workflowDir, 'not-a-dir'), 'file content');
 
-      // Create a YAML file that references the fake dir as a subdirectory
-      // The loader recurses into directories, so create a setup that triggers readdir error
-      // Simplest: create a workflow dir, then a symlink to nowhere
-      const brokenLink = join(workflowDir, 'broken-subdir');
-      const { symlink } = await import('fs/promises');
-      await symlink('/nonexistent/path', brokenLink);
+        // Create a YAML file that references the fake dir as a subdirectory
+        // The loader recurses into directories, so create a setup that triggers readdir error
+        // Simplest: create a workflow dir, then a symlink to nowhere
+        const brokenLink = join(workflowDir, 'broken-subdir');
+        const { symlink } = await import('fs/promises');
+        await symlink('/nonexistent/path', brokenLink);
 
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+        const result = await discoverWorkflows(testDir, { loadDefaults: false });
 
-      // The symlink stat will fail, producing a read_error
-      const readErrors = result.errors.filter(e => e.errorType === 'read_error');
-      expect(readErrors.length).toBeGreaterThanOrEqual(1);
-    });
+        // The symlink stat will fail, producing a read_error
+        const readErrors = result.errors.filter(e => e.errorType === 'read_error');
+        expect(readErrors.length).toBeGreaterThanOrEqual(1);
+      }
+    );
   });
 
   describe('bash node parsing', () => {

@@ -250,10 +250,12 @@ describe('git utilities', () => {
     test('returns project-scoped path with ARCHON_HOME override', () => {
       delete process.env.WORKSPACE_PATH;
       delete process.env.ARCHON_DOCKER;
-      process.env.ARCHON_HOME = '/custom/archon';
-      const repoPath = '/custom/archon/workspaces/acme/widget/source';
+      process.env.ARCHON_HOME = join('/', 'custom', 'archon');
+      const repoPath = join('/', 'custom', 'archon', 'workspaces', 'acme', 'widget', 'source');
       const result = git.getWorktreeBase(repoPath);
-      expect(result).toBe('/custom/archon/workspaces/acme/widget/worktrees');
+      expect(result).toBe(
+        join('/', 'custom', 'archon', 'workspaces', 'acme', 'widget', 'worktrees')
+      );
     });
   });
 
