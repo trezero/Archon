@@ -19,6 +19,16 @@ import type {
 } from '@/lib/types';
 import type { WorkflowEventResponse } from '@/lib/api';
 
+/** Tool call event extracted from workflow_events for display in WorkflowLogs. */
+export interface ToolEvent {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+  stepName?: string;
+  stepIndex?: number;
+  createdAt: string;
+}
+
 const TERMINAL_STATUSES: readonly WorkflowRunStatus[] = ['completed', 'failed', 'cancelled'];
 
 function isTerminal(status: WorkflowRunStatus): boolean {
@@ -192,6 +202,20 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       ? queryError.message
       : String(queryError)
     : null;
+
+  // Extract tool_called events from workflow events for WorkflowLogs
+  const toolEvents = useMemo((): ToolEvent[] => {
+    return (queryData?.events ?? [])
+      .filter(ev => ev.event_type === 'tool_called')
+      .map(ev => ({
+        id: ev.id,
+        name: ev.data.tool_name as string,
+        input: (ev.data.tool_input as Record<string, unknown>) ?? {},
+        stepName: ev.step_name ?? undefined,
+        stepIndex: ev.step_index ?? undefined,
+        createdAt: ev.created_at,
+      }));
+  }, [queryData?.events]);
 
   // Fetch codebase name when run data becomes available
   const codebaseId = queryData?.codebaseId ?? null;
@@ -493,6 +517,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
                 isRunning={workflow.status === 'running' || workflow.status === 'pending'}
                 workflowHandlers={workflowHandlers}
                 currentlyExecuting={currentlyExecuting}
+                toolEvents={toolEvents}
               />
             ) : conversationPlatformId ? (
               <WorkflowLogs
@@ -501,6 +526,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
                 isRunning={workflow.status === 'running' || workflow.status === 'pending'}
                 workflowHandlers={workflowHandlers}
                 currentlyExecuting={currentlyExecuting}
+                toolEvents={toolEvents}
               />
             ) : (
               <StepLogs runId={runId} stepIndex={selectedStep} lines={stepLogLines} />

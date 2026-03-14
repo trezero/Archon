@@ -1686,6 +1686,94 @@ describe('Workflow Executor', () => {
     });
   });
 
+  describe('tool_called event persistence', () => {
+    it('should persist tool_called event for sequential steps in batch mode', async () => {
+      (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('batch');
+
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'Checking file...' };
+        yield { type: 'tool', toolName: 'read_file', toolInput: { path: '/tmp/test.ts' } };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
+        'User message',
+        'db-conv-id'
+      );
+
+      const eventCalls = (mockStore.createWorkflowEvent as ReturnType<typeof mock>).mock.calls;
+      const toolCalledEvents = eventCalls.filter(
+        (call: unknown[]) => (call[0] as Record<string, unknown>).event_type === 'tool_called'
+      );
+      expect(toolCalledEvents.length).toBe(1);
+      const eventData = toolCalledEvents[0][0] as Record<string, unknown>;
+      expect((eventData.data as Record<string, unknown>).tool_name).toBe('read_file');
+      expect((eventData.data as Record<string, unknown>).tool_input).toEqual({
+        path: '/tmp/test.ts',
+      });
+    });
+
+    it('should persist tool_called event for sequential steps in stream mode', async () => {
+      (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
+
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'Checking file...' };
+        yield { type: 'tool', toolName: 'Bash', toolInput: { command: 'ls -la' } };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
+        'User message',
+        'db-conv-id'
+      );
+
+      const eventCalls = (mockStore.createWorkflowEvent as ReturnType<typeof mock>).mock.calls;
+      const toolCalledEvents = eventCalls.filter(
+        (call: unknown[]) => (call[0] as Record<string, unknown>).event_type === 'tool_called'
+      );
+      expect(toolCalledEvents.length).toBe(1);
+      const eventData = toolCalledEvents[0][0] as Record<string, unknown>;
+      expect((eventData.data as Record<string, unknown>).tool_name).toBe('Bash');
+    });
+
+    it('should continue workflow execution when tool_called event persistence fails', async () => {
+      (mockStore.createWorkflowEvent as ReturnType<typeof mock>).mockRejectedValue(
+        new Error('DB connection lost')
+      );
+
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'Working...' };
+        yield { type: 'tool', toolName: 'read_file', toolInput: { path: '/tmp/test.ts' } };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        { name: 'test-workflow', description: 'Test', steps: [{ command: 'command-one' }] },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Workflow should still complete despite event persistence failure
+      expect(
+        (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+      ).toBeGreaterThan(0);
+    });
+  });
+
   describe('platform message error handling', () => {
     it('should continue workflow when platform.sendMessage fails', async () => {
       // Mock sendMessage to throw an error

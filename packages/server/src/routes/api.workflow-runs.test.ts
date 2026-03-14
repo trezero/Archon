@@ -259,6 +259,15 @@ const MOCK_EVENTS: MockWorkflowEvent[] = [
     data: { duration_ms: 1234 },
     created_at: NOW,
   },
+  {
+    id: 'evt-3',
+    workflow_run_id: 'run-uuid-1',
+    event_type: 'tool_called',
+    step_index: 0,
+    step_name: 'plan',
+    data: { tool_name: 'Read', tool_input: { file_path: '/tmp/test.ts' } },
+    created_at: NOW,
+  },
 ];
 
 const MOCK_CONV = {
@@ -706,8 +715,9 @@ describe('GET /api/workflows/runs/:runId', () => {
     expect(body.run.id).toBe('run-uuid-1');
     expect(body.run.workflow_name).toBe('deploy');
     expect(Array.isArray(body.events)).toBe(true);
-    expect(body.events.length).toBe(2);
+    expect(body.events.length).toBe(3);
     expect(body.events[0]?.event_type).toBe('step_started');
+    expect(body.events[2]?.event_type).toBe('tool_called');
   });
 
   test('returns 404 when run not found', async () => {

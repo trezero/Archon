@@ -16,6 +16,14 @@ function getLog(): ReturnType<typeof createLogger> {
 }
 
 export class WebAdapter implements IWebPlatformAdapter {
+  /** Per-conversation tool call counter for unique SSE tool IDs */
+  private toolCallCounter = new Map<string, number>();
+  /** Per-conversation last tool start time for duration tracking */
+  private lastToolStart = new Map<
+    string,
+    { toolCallId: string; name: string; startedAt: number }
+  >();
+
   constructor(
     private transport: SSETransport,
     private persistence: MessagePersistence,
@@ -82,30 +90,36 @@ export class WebAdapter implements IWebPlatformAdapter {
     let event: string;
 
     if (chunk.type === 'tool' && chunk.toolName) {
-      const { newToolCallId, finalized } = this.persistence.appendToolCall(conversationId, {
-        name: chunk.toolName,
-        input: chunk.toolInput ?? {},
-      });
+      const now = Date.now();
 
-      // Emit tool_result for the previous tool that was just finalized
-      if (finalized) {
+      // Finalize previous tool's duration (agent moved on to next tool)
+      const prev = this.lastToolStart.get(conversationId);
+      if (prev) {
         const resultEvent = JSON.stringify({
           type: 'tool_result',
-          toolCallId: finalized.toolCallId,
-          name: finalized.name,
+          toolCallId: prev.toolCallId,
+          name: prev.name,
           output: '',
-          duration: finalized.duration,
-          timestamp: Date.now(),
+          duration: now - prev.startedAt,
+          timestamp: now,
         });
         await this.transport.emit(conversationId, resultEvent);
       }
 
+      // Generate unique tool call ID for SSE
+      const counter = (this.toolCallCounter.get(conversationId) ?? 0) + 1;
+      this.toolCallCounter.set(conversationId, counter);
+      const toolCallId = `${conversationId}-tool-${String(counter)}`;
+
+      // Track this tool's start for duration computation
+      this.lastToolStart.set(conversationId, { toolCallId, name: chunk.toolName, startedAt: now });
+
       event = JSON.stringify({
         type: 'tool_call',
-        toolCallId: newToolCallId,
+        toolCallId,
         name: chunk.toolName,
         input: chunk.toolInput ?? {},
-        timestamp: Date.now(),
+        timestamp: now,
       });
     } else if (chunk.type === 'result' && chunk.sessionId) {
       event = JSON.stringify({
@@ -159,6 +173,8 @@ export class WebAdapter implements IWebPlatformAdapter {
     this.transport.stop();
     this.workflowBridge.stop();
     this.persistence.clearAll();
+    this.toolCallCounter.clear();
+    this.lastToolStart.clear();
   }
 
   /**
@@ -171,18 +187,20 @@ export class WebAdapter implements IWebPlatformAdapter {
     queuePosition?: number
   ): Promise<void> {
     if (!locked) {
-      // Finalize all running tools and emit tool_result for each before lock release
-      const finalized = this.persistence.finalizeRunningTools(conversationId);
-      for (const tool of finalized) {
+      // Finalize the last running tool and emit tool_result before lock release
+      const prev = this.lastToolStart.get(conversationId);
+      if (prev) {
+        const now = Date.now();
         const resultEvent = JSON.stringify({
           type: 'tool_result',
-          toolCallId: tool.toolCallId,
-          name: tool.name,
+          toolCallId: prev.toolCallId,
+          name: prev.name,
           output: '',
-          duration: tool.duration,
-          timestamp: Date.now(),
+          duration: now - prev.startedAt,
+          timestamp: now,
         });
         await this.transport.emit(conversationId, resultEvent);
+        this.lastToolStart.delete(conversationId);
       }
       await this.persistence.flush(conversationId).catch((e: unknown) => {
         getLog().error({ conversationId, err: e }, 'lock_release_flush_failed');

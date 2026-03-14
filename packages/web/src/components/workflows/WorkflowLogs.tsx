@@ -14,6 +14,7 @@ import type {
   ParallelAgentEvent,
   WorkflowArtifactEvent,
 } from '@/lib/types';
+import type { ToolEvent } from './WorkflowExecution';
 
 interface WorkflowLogsProps {
   conversationId: string;
@@ -26,16 +27,16 @@ interface WorkflowLogsProps {
     onWorkflowArtifact: (event: WorkflowArtifactEvent) => void;
   };
   currentlyExecuting?: { nodeName: string; startedAt: number } | null;
+  toolEvents?: ToolEvent[];
 }
 
-function hydrateMessages(rows: MessageResponse[], startedAt?: number): ChatMessage[] {
+function hydrateMessages(
+  rows: MessageResponse[],
+  startedAt?: number,
+  toolEvents?: ToolEvent[]
+): ChatMessage[] {
   const hydrated: ChatMessage[] = rows.map(row => {
     let meta: {
-      toolCalls?: {
-        name: string;
-        input: Record<string, unknown>;
-        duration?: number;
-      }[];
       error?: ErrorDisplay;
     } = {};
     try {
@@ -47,19 +48,44 @@ function hydrateMessages(rows: MessageResponse[], startedAt?: number): ChatMessa
       id: row.id,
       role: row.role,
       content: row.content,
-      toolCalls: meta.toolCalls?.map((tc, i) => ({
-        ...tc,
-        id: `${row.id}-tool-${String(i)}`,
-        startedAt: 0,
-        isExpanded: false,
-        duration: tc.duration ?? 0,
-      })),
       error: meta.error,
       timestamp: new Date(row.created_at).getTime(),
       isStreaming: false,
     };
   });
-  return startedAt ? hydrated.filter(m => m.timestamp >= startedAt) : hydrated;
+
+  const filtered = startedAt ? hydrated.filter(m => m.timestamp >= startedAt) : hydrated;
+
+  // Attach tool events from workflow_events table to their nearest preceding assistant message
+  if (toolEvents && toolEvents.length > 0) {
+    const assistantMsgs = filtered.filter(m => m.role === 'assistant');
+    for (const te of toolEvents) {
+      const teTimestamp = new Date(te.createdAt).getTime();
+      // Find the last assistant message that started before this tool event
+      let target: ChatMessage | undefined;
+      for (const m of assistantMsgs) {
+        if (m.timestamp <= teTimestamp) target = m;
+        else break;
+      }
+      if (!target) target = assistantMsgs[0];
+      if (target) {
+        if (!target.toolCalls) target.toolCalls = [];
+        // Dedup by event ID
+        if (!target.toolCalls.some(tc => tc.id === te.id)) {
+          target.toolCalls.push({
+            id: te.id,
+            name: te.name,
+            input: te.input,
+            startedAt: teTimestamp,
+            isExpanded: false,
+            duration: 0,
+          });
+        }
+      }
+    }
+  }
+
+  return filtered;
 }
 
 /**
@@ -72,6 +98,7 @@ export function WorkflowLogs({
   isRunning,
   workflowHandlers,
   currentlyExecuting,
+  toolEvents,
 }: WorkflowLogsProps): React.ReactElement {
   const [sseMessages, setSseMessages] = useState<ChatMessage[]>([]);
   const queryClient = useQueryClient();
@@ -94,10 +121,10 @@ export function WorkflowLogs({
   // Poll for messages from DB — 3s while running (or during grace period), disabled when terminal.
   // staleTime: 0 ensures post-completion navigation always fetches fresh data on mount.
   const { data: queryMessages } = useQuery({
-    queryKey: ['workflowMessages', conversationId],
+    queryKey: ['workflowMessages', conversationId, toolEvents?.length ?? 0],
     queryFn: async (): Promise<ChatMessage[]> => {
       const rows = await getMessages(conversationId);
-      return hydrateMessages(rows, startedAt);
+      return hydrateMessages(rows, startedAt, toolEvents);
     },
     refetchInterval: isRunning || gracePolling ? 3000 : false,
     staleTime: 0,

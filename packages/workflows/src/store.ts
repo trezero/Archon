@@ -24,7 +24,8 @@ export type WorkflowEventType =
   | 'parallel_agent_failed'
   | 'loop_iteration_started'
   | 'loop_iteration_completed'
-  | 'loop_iteration_failed';
+  | 'loop_iteration_failed'
+  | 'tool_called';
 
 export interface IWorkflowStore {
   // Run lifecycle

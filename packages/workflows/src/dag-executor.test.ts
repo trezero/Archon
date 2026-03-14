@@ -1618,3 +1618,72 @@ describe('executeDagWorkflow -- node-level retry for transient errors', () => {
     expect(retryMessages.length).toBeGreaterThan(0);
   }, 60_000);
 });
+
+describe('executeDagWorkflow -- tool_called event persistence', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-tool-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'My command prompt for $USER_MESSAGE');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+  });
+
+  afterEach(async () => {
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('should persist tool_called event during DAG node execution', async () => {
+    const mockStore = createMockStore();
+    const mockDeps = createMockDeps(mockStore);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'Reading file...' };
+      yield { type: 'tool', toolName: 'read_file', toolInput: { path: '/tmp/test.ts' } };
+      yield { type: 'result', sessionId: 'dag-session-id' };
+    });
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'tool-test-dag',
+        nodes: [node('my-cmd')],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    const eventCalls = (mockStore.createWorkflowEvent as ReturnType<typeof mock>).mock.calls;
+    const toolCalledEvents = eventCalls.filter(
+      (call: unknown[]) => (call[0] as Record<string, unknown>).event_type === 'tool_called'
+    );
+    expect(toolCalledEvents.length).toBe(1);
+    const eventData = toolCalledEvents[0][0] as Record<string, unknown>;
+    expect(eventData.step_name).toBe('my-cmd');
+    expect((eventData.data as Record<string, unknown>).tool_name).toBe('read_file');
+    expect((eventData.data as Record<string, unknown>).tool_input).toEqual({
+      path: '/tmp/test.ts',
+    });
+  });
+});

@@ -862,6 +862,25 @@ async function executeStepInternal(
         }
         const toolInput = normalizeToolInput(msg.toolName, msg.toolInput);
         await logTool(logDir, workflowRun.id, msg.toolName, toolInput);
+
+        // Persist tool_called event for ALL adapters (fire-and-forget)
+        deps.store
+          .createWorkflowEvent({
+            workflow_run_id: workflowRun.id,
+            event_type: 'tool_called',
+            step_index: Number(stepId.split('.')[0]),
+            step_name: commandName,
+            data: {
+              tool_name: msg.toolName,
+              tool_input: toolInput,
+            },
+          })
+          .catch((err: Error) => {
+            getLog().error(
+              { err, workflowRunId: workflowRun.id, eventType: 'tool_called' },
+              'workflow_event_persist_failed'
+            );
+          });
       } else if (msg.type === 'result') {
         if (msg.sessionId) newSessionId = msg.sessionId;
         if (msg.tokens) stepTokens = msg.tokens;
@@ -1683,6 +1702,25 @@ async function executeLoopWorkflow(
           }
           const toolInput = normalizeToolInput(msg.toolName, msg.toolInput);
           await logTool(logDir, workflowRun.id, msg.toolName, toolInput);
+
+          // Persist tool_called event for ALL adapters (fire-and-forget)
+          deps.store
+            .createWorkflowEvent({
+              workflow_run_id: workflowRun.id,
+              event_type: 'tool_called',
+              step_index: i - 1,
+              step_name: `iteration-${String(i)}`,
+              data: {
+                tool_name: msg.toolName,
+                tool_input: toolInput,
+              },
+            })
+            .catch((err: Error) => {
+              getLog().error(
+                { err, workflowRunId: workflowRun.id, eventType: 'tool_called' },
+                'workflow_event_persist_failed'
+              );
+            });
         } else if (msg.type === 'result' && msg.sessionId) {
           currentSessionId = msg.sessionId;
         }
