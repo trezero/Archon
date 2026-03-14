@@ -819,8 +819,9 @@ async function executeStepInternal(
             stepAbortController.abort();
             break;
           }
-        } catch {
+        } catch (cancelCheckErr) {
           // Non-fatal — cancel check failure should not crash the workflow
+          getLog().warn({ err: cancelCheckErr as Error }, 'workflow.cancel_check_failed');
         }
       }
 
@@ -881,6 +882,41 @@ async function executeStepInternal(
         messageContext,
         unknownErrorTracker
       );
+    }
+
+    // If the streaming loop exited because of a cancel (abort+break),
+    // return failure instead of falling through to step_completed.
+    if (stepAbortController.signal.aborted) {
+      const cancelStepIdx = Number(stepId.split('.')[0]);
+      getLog().info({ workflowRunId: workflowRun.id, commandName }, 'step_cancelled_by_user');
+      const emitter = getWorkflowEventEmitter();
+      emitter.emit({
+        type: 'step_failed',
+        runId: workflowRun.id,
+        stepIndex: cancelStepIdx,
+        stepName: commandName,
+        totalSteps,
+        error: 'Step cancelled by user',
+      });
+      deps.store
+        .createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'step_failed',
+          step_index: cancelStepIdx,
+          step_name: commandName,
+          data: { error: 'Step cancelled by user' },
+        })
+        .catch((eventErr: Error) => {
+          getLog().error(
+            { err: eventErr, workflowRunId: workflowRun.id, eventType: 'step_failed' },
+            'workflow_event_persist_failed'
+          );
+        });
+      return {
+        commandName,
+        success: false,
+        error: 'Step cancelled by user',
+      };
     }
 
     // Batch mode: send accumulated messages - track failures
@@ -955,10 +991,8 @@ async function executeStepInternal(
   } catch (error) {
     const err = error as Error;
 
-    // Check if this was a user-initiated cancellation (abort from cancel check)
-    const lowerMsg = err.message.toLowerCase();
-    const isCancelled = lowerMsg.includes('aborted') || lowerMsg.includes('cancelled');
-    if (isCancelled) {
+    // Check if this was a user-initiated cancellation (abort signal fired by cancel check)
+    if (stepAbortController.signal.aborted) {
       getLog().info({ workflowRunId: workflowRun.id, commandName }, 'step_cancelled_by_user');
       const cancelStepIdx = Number(stepId.split('.')[0]);
       const emitter = getWorkflowEventEmitter();

@@ -331,7 +331,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
     }
 
     return null;
-  }, [queryData?.events, workflow?.status, workflow?.steps, workflow?.startedAt, workflow]);
+  }, [queryData?.events, workflow?.status, workflow?.steps, workflow?.startedAt]);
 
   // Compute formatted log lines for the selected step from DB events
   const stepLogLines = useMemo((): string[] => {
