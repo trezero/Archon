@@ -364,13 +364,13 @@ describe('ClaudeClient', () => {
       }
     });
 
-    test('classifies exit code errors as crash and retries', async () => {
+    test('classifies exit code errors as crash and retries up to 3 times', async () => {
       const error = new Error('process exited with code 1');
       mockQuery.mockImplementation(async function* () {
         throw error;
       });
 
-      const consumeGenerator = async () => {
+      const consumeGenerator = async (): Promise<void> => {
         for await (const _ of client.sendQuery('test', '/workspace')) {
           // consume
         }
@@ -378,9 +378,33 @@ describe('ClaudeClient', () => {
 
       // Crash errors get retried then enriched
       await expect(consumeGenerator()).rejects.toThrow(/Claude Code crash/);
-      // Should have been called twice (initial + 1 retry)
-      expect(mockQuery).toHaveBeenCalledTimes(2);
-    });
+      // Should have been called 4 times (initial + 3 retries)
+      expect(mockQuery).toHaveBeenCalledTimes(4);
+    }, 30_000);
+
+    test('recovers from transient crash on retry', async () => {
+      let callCount = 0;
+      mockQuery.mockImplementation(async function* () {
+        callCount++;
+        if (callCount <= 2) {
+          throw new Error('process exited with code 1');
+        }
+        yield {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'Recovered!' }] },
+        };
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      // Should succeed on the 3rd attempt
+      expect(callCount).toBe(3);
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toEqual({ type: 'assistant', content: 'Recovered!' });
+    }, 30_000);
 
     test('classifies auth errors as fatal (no retry)', async () => {
       const error = new Error('unauthorized');
@@ -415,6 +439,36 @@ describe('ClaudeClient', () => {
       // Unknown errors are not retried
       expect(mockQuery).toHaveBeenCalledTimes(1);
     });
+
+    test('captures all stderr output for diagnostics', async () => {
+      // When the subprocess crashes, the enriched error should include all stderr,
+      // not just lines matching error keywords
+      mockQuery.mockImplementation(async function* (args: {
+        options: { stderr?: (data: string) => void };
+      }) {
+        // Simulate non-error stderr output followed by crash
+        if (args.options.stderr) {
+          args.options.stderr('Spawning Claude Code process: node cli.js');
+          args.options.stderr('AJV validation: schema loaded');
+          args.options.stderr('startup diagnostic: ready');
+        }
+        throw new Error('process exited with code 1');
+      });
+
+      const consumeGenerator = async (): Promise<void> => {
+        for await (const _ of client.sendQuery('test', '/workspace')) {
+          // consume
+        }
+      };
+
+      // Use rejects so assertions always execute — prevents vacuous pass when mock doesn't throw
+      const err = await consumeGenerator().catch((e: unknown) => e as Error);
+      expect(err).toBeInstanceOf(Error);
+      // The error should contain stderr context from ALL captured lines
+      expect(err.message).toContain('stderr:');
+      expect(err.message).toContain('AJV validation');
+      expect(err.message).toContain('startup diagnostic');
+    }, 30_000);
 
     test('ignores empty text blocks', async () => {
       mockQuery.mockImplementation(async function* () {

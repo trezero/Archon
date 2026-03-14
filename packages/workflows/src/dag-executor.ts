@@ -103,6 +103,43 @@ function classifyError(error: Error): ErrorType {
   return 'UNKNOWN';
 }
 
+/** Default DAG node retry for TRANSIENT errors */
+const DEFAULT_NODE_MAX_RETRIES = 2;
+const DEFAULT_NODE_RETRY_DELAY_MS = 3000;
+
+/**
+ * Get effective retry config for a DAG node.
+ */
+function getEffectiveNodeRetryConfig(node: DagNode): {
+  maxRetries: number;
+  delayMs: number;
+  onError: 'transient' | 'all';
+} {
+  if ('retry' in node && node.retry) {
+    return {
+      maxRetries: node.retry.max_attempts,
+      delayMs: node.retry.delay_ms ?? DEFAULT_NODE_RETRY_DELAY_MS,
+      onError: node.retry.on_error ?? 'transient',
+    };
+  }
+  return {
+    maxRetries: DEFAULT_NODE_MAX_RETRIES,
+    delayMs: DEFAULT_NODE_RETRY_DELAY_MS,
+    onError: 'transient',
+  };
+}
+
+/**
+ * Check if a NodeOutput failure is transient by delegating to classifyError.
+ * FATAL patterns (auth, permission, credits) take priority over TRANSIENT patterns,
+ * matching the same precedence rules as classifyError(). This prevents an error
+ * message that contains both a FATAL substring and a TRANSIENT substring (e.g.
+ * "unauthorized: process exited with code 1") from being silently retried.
+ */
+function isTransientNodeError(errorMessage: string): boolean {
+  return classifyError(new Error(errorMessage)) === 'TRANSIENT';
+}
+
 /**
  * Safely send a message to the platform without crashing on failure.
  * Returns true if message was sent successfully, false otherwise.
@@ -1163,24 +1200,67 @@ export async function executeDagWorkflow(
           const isFresh = isParallelLayer || node.context === 'fresh';
           const resumeSessionId = isFresh ? undefined : lastSequentialSessionId;
 
-          // 6. Execute
-          const output = await executeNodeInternal(
-            deps,
-            platform,
-            conversationId,
-            cwd,
-            workflowRun,
-            node,
-            provider,
-            nodeOptions,
-            artifactsDir,
-            logDir,
-            baseBranch,
-            nodeOutputs,
-            resumeSessionId,
-            configuredCommandFolder,
-            issueContext
-          );
+          // 6. Execute with retry for transient failures
+          const retryConfig = getEffectiveNodeRetryConfig(node);
+          let output: NodeOutput = { state: 'failed', output: '', error: 'Node did not execute' };
+
+          for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt++) {
+            output = await executeNodeInternal(
+              deps,
+              platform,
+              conversationId,
+              cwd,
+              workflowRun,
+              node,
+              provider,
+              nodeOptions,
+              artifactsDir,
+              logDir,
+              baseBranch,
+              nodeOutputs,
+              // Don't resume session on retry — start fresh
+              attempt > 0 ? undefined : resumeSessionId,
+              configuredCommandFolder,
+              issueContext
+            );
+
+            if (output.state !== 'failed') break;
+
+            // Check if retryable.
+            // FATAL errors (auth, permissions, credit balance) are never retried even when on_error:all.
+            const isFatal = output.error
+              ? classifyError(new Error(output.error)) === 'FATAL'
+              : false;
+            const isTransient = output.error ? isTransientNodeError(output.error) : false;
+            const shouldRetry =
+              !isFatal &&
+              (retryConfig.onError === 'all' ||
+                (retryConfig.onError === 'transient' && isTransient));
+
+            if (!shouldRetry || attempt >= retryConfig.maxRetries) break;
+
+            const delayMs = retryConfig.delayMs * Math.pow(2, attempt);
+            getLog().warn(
+              {
+                nodeId: node.id,
+                attempt: attempt + 1,
+                maxRetries: retryConfig.maxRetries,
+                delayMs,
+                error: output.error,
+              },
+              'dag_node_transient_retry'
+            );
+
+            const errorKind = isTransient ? 'transient error' : 'error';
+            await safeSendMessage(
+              platform,
+              conversationId,
+              `⚠️ Node \`${node.id}\` failed with ${errorKind} (attempt ${String(attempt + 1)}/${String(retryConfig.maxRetries + 1)}). Retrying in ${String(Math.round(delayMs / 1000))}s...`,
+              { workflowId: workflowRun.id, nodeName: node.id }
+            );
+
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+          }
 
           return { nodeId: node.id, output };
         } catch (error) {

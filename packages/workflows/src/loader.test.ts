@@ -1843,4 +1843,246 @@ nodes:
       expect(result.workflows).toHaveLength(1);
     });
   });
+
+  describe('retry config parsing', () => {
+    it('should parse valid retry config on sequential step', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'retry-step.yaml'),
+        `
+name: retry-step
+description: Step with retry config
+steps:
+  - command: my-cmd
+    retry:
+      max_attempts: 3
+      delay_ms: 5000
+      on_error: transient
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      expect(wf.steps).toBeDefined();
+      if (wf.steps) {
+        const step = wf.steps[0];
+        if (!Array.isArray(step)) {
+          expect(step.retry).toEqual({
+            max_attempts: 3,
+            delay_ms: 5000,
+            on_error: 'transient',
+          });
+        }
+      }
+    });
+
+    it('should parse retry config on DAG command node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'retry-dag.yaml'),
+        `
+name: retry-dag
+description: DAG node with retry
+nodes:
+  - id: sync
+    command: sync-cmd
+    retry:
+      max_attempts: 2
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (isDagWorkflow(wf)) {
+        expect(wf.nodes[0].retry).toEqual({ max_attempts: 2 });
+      }
+    });
+
+    it('should parse retry config on DAG bash node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'retry-bash.yaml'),
+        `
+name: retry-bash
+description: Bash node with retry
+nodes:
+  - id: deploy
+    bash: "npm run deploy"
+    retry:
+      max_attempts: 1
+      delay_ms: 2000
+      on_error: all
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (isDagWorkflow(wf)) {
+        if (isBashNode(wf.nodes[0])) {
+          expect(wf.nodes[0].retry).toEqual({
+            max_attempts: 1,
+            delay_ms: 2000,
+            on_error: 'all',
+          });
+        }
+      }
+    });
+
+    it('should parse retry config on DAG prompt node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'retry-prompt.yaml'),
+        `
+name: retry-prompt
+description: Prompt node with retry config
+nodes:
+  - id: summarise
+    prompt: "Summarise the changes"
+    retry:
+      max_attempts: 2
+      delay_ms: 4000
+      on_error: transient
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      expect(isDagWorkflow(wf)).toBe(true);
+      if (isDagWorkflow(wf)) {
+        expect(wf.nodes[0].retry).toEqual({
+          max_attempts: 2,
+          delay_ms: 4000,
+          on_error: 'transient',
+        });
+      }
+    });
+
+    it('should reject retry with missing max_attempts', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-retry.yaml'),
+        `
+name: bad-retry
+description: Missing required field
+steps:
+  - command: my-cmd
+    retry:
+      delay_ms: 5000
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/max_attempts.*required/i);
+    });
+
+    it('should reject retry with max_attempts out of range', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-retry-range.yaml'),
+        `
+name: bad-retry-range
+description: max_attempts too high
+steps:
+  - command: my-cmd
+    retry:
+      max_attempts: 10
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/max_attempts.*between 1 and 5/i);
+    });
+
+    it('should reject retry with invalid on_error value', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-retry-onerror.yaml'),
+        `
+name: bad-retry-onerror
+description: Invalid on_error value
+steps:
+  - command: my-cmd
+    retry:
+      max_attempts: 2
+      on_error: always
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/on_error.*transient.*all/i);
+    });
+
+    it('should reject retry with delay_ms out of range', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-retry-delay.yaml'),
+        `
+name: bad-retry-delay
+description: delay_ms too low
+steps:
+  - command: my-cmd
+    retry:
+      max_attempts: 2
+      delay_ms: 100
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/delay_ms.*1000.*60000/i);
+    });
+
+    it('should use defaults when retry fields are omitted', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'retry-defaults.yaml'),
+        `
+name: retry-defaults
+description: Minimal retry config
+steps:
+  - command: my-cmd
+    retry:
+      max_attempts: 1
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (wf.steps) {
+        const step = wf.steps[0];
+        if (!Array.isArray(step)) {
+          expect(step.retry).toEqual({ max_attempts: 1 });
+          // delay_ms and on_error should be undefined (defaults applied at runtime)
+          expect(step.retry?.delay_ms).toBeUndefined();
+          expect(step.retry?.on_error).toBeUndefined();
+        }
+      }
+    });
+  });
 });

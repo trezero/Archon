@@ -158,6 +158,7 @@ steps:
 | `clearContext` | boolean | `false` | Start fresh session for this step |
 | `allowed_tools` | string[] | — | Whitelist of built-in tools available to this step. `[]` disables all built-in tools. Claude only — Codex steps emit a warning and ignore this field |
 | `denied_tools` | string[] | — | Blacklist of built-in tools to remove from this step. Claude only — Codex steps emit a warning and ignore this field |
+| `retry` | object | — | Per-step retry configuration. See [Retry Configuration](#retry-configuration). Omit to use the automatic default (2 retries, 3 s base delay, transient errors only) |
 
 ### When to Use `clearContext: true`
 
@@ -326,6 +327,7 @@ nodes:
 | `model` | string | inherited | Per-node model override |
 | `allowed_tools` | string[] | — | Whitelist of built-in tools for this node. `[]` disables all built-in tools (MCP-only mode). Claude only — Codex nodes emit a warning and ignore this field |
 | `denied_tools` | string[] | — | Blacklist of built-in tools to remove from this node. Applied after `allowed_tools` if both are set. Claude only — Codex nodes emit a warning and ignore this field |
+| `retry` | object | — | Per-node retry configuration. See [Retry Configuration](#retry-configuration). Omit to use the automatic default (2 retries, 3 s base delay, transient errors only) |
 
 ### `trigger_rule` Values
 
@@ -427,6 +429,85 @@ steps:
 - If both are set, `denied_tools` is applied after `allowed_tools`
 - `undefined` (field absent) and `[]` have different semantics — absent means use default tool set, `[]` means no tools
 - Claude only — Codex nodes/steps emit a warning and continue (Codex doesn't support per-call tool restrictions)
+
+---
+
+## Retry Configuration
+
+Every step and DAG node automatically retries on **transient** errors (SDK subprocess crashes, rate limits, network timeouts) using a default configuration: **2 retries**, **3 s base delay** with exponential backoff. You will see a platform notification before each retry attempt.
+
+To opt out or customise, add a `retry:` block:
+
+```yaml
+# Step-based workflow
+steps:
+  - command: flaky-step
+    retry:
+      max_attempts: 3      # Total attempts including the first (1–5)
+      delay_ms: 5000       # Base delay before first retry in ms (1000–60000, default: 3000)
+      on_error: transient  # 'transient' (default) | 'all'
+
+  - command: no-retry-step
+    retry:
+      max_attempts: 1      # Effectively disables retry
+```
+
+```yaml
+# DAG-based workflow
+nodes:
+  - id: flaky-node
+    command: flaky-command
+    retry:
+      max_attempts: 3
+      delay_ms: 5000
+      on_error: transient
+
+  - id: aggressive-retry
+    prompt: "Summarise the output"
+    retry:
+      max_attempts: 4
+      on_error: all        # Retry even non-transient errors (use with caution)
+```
+
+### Retry Fields
+
+| Field | Type | Default | Constraints | Description |
+|-------|------|---------|-------------|-------------|
+| `max_attempts` | number | `3` | 1–5 | Total attempts including the first. `1` disables retry |
+| `delay_ms` | number | `3000` | 1000–60000 | Base delay in ms before the first retry. Doubles each attempt (exponential backoff) |
+| `on_error` | `'transient'` \| `'all'` | `'transient'` | — | Which errors trigger a retry. `'transient'` = SDK crashes, rate limits, network timeouts only. `'all'` = any error including unknown errors (FATAL errors such as auth failures are never retried regardless) |
+
+### Error Classification
+
+Archon classifies errors into three buckets before deciding whether to retry:
+
+| Class | Examples | Retried by default? |
+|-------|----------|---------------------|
+| **FATAL** | Auth failure, permission denied, credit balance exhausted | ❌ Never (even with `on_error: all`) |
+| **TRANSIENT** | Process crashed (`exited with code`), rate limit, network timeout | ✅ Yes |
+| **UNKNOWN** | Unrecognised error messages | ❌ No (unless `on_error: all`) |
+
+### Retry Notifications
+
+Before each retry the platform receives a message like:
+
+```
+⚠️ Step `step-name` failed with transient error (attempt 1/3). Retrying in 3s...
+```
+
+### Two-Layer Retry Stack
+
+Archon uses two independent retry layers:
+
+```
+SDK subprocess retry (claude.ts)  — 3 total attempts, 2 s base backoff
+    ↓ only if all SDK retries exhausted
+Step/node retry (executor / dag-executor)  — default 2 retries, 3 s base backoff
+    ↓ only if all step retries exhausted
+Workflow fails → user can --resume
+```
+
+This means a single transient crash may trigger up to **3 SDK retries** before a single step retry attempt is consumed.
 
 ---
 
@@ -990,4 +1071,5 @@ Before deploying a workflow:
 7. **DAG branching** - `when:` conditions and `trigger_rule` control which nodes run
 8. **`output_format`** - Enforce structured JSON output from Claude nodes for reliable branching
 9. **`allowed_tools` / `denied_tools`** - Restrict which tools a node or step can use (Claude only, enforced at SDK level)
-10. **Test thoroughly** - Each command, the artifact flow, and edge cases
+10. **`retry:`** - All steps/nodes auto-retry transient errors (default: 2 retries, 3 s backoff); configure per-step with `retry:` block
+11. **Test thoroughly** - Each command, the artifact flow, and edge cases

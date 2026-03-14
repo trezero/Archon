@@ -9,6 +9,7 @@ import type {
   WorkflowLoadResult,
   LoopConfig,
   SingleStep,
+  StepRetryConfig,
   WorkflowStep,
   DagNode,
 } from './types';
@@ -81,6 +82,63 @@ function parseToolList(
 }
 
 /**
+ * Parse and validate a retry config object.
+ * Returns the validated config, undefined if not present, or null if validation failed.
+ */
+function parseRetryConfig(
+  raw: unknown,
+  context: string,
+  errors: string[]
+): StepRetryConfig | undefined | null {
+  if (raw === undefined) return undefined;
+
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    errors.push(
+      `${context}: 'retry' must be an object with { max_attempts, delay_ms?, on_error? }`
+    );
+    return null;
+  }
+
+  const obj = raw as Record<string, unknown>;
+
+  // max_attempts is required
+  if (obj.max_attempts === undefined) {
+    errors.push(`${context}: 'retry.max_attempts' is required`);
+    return null;
+  }
+  if (typeof obj.max_attempts !== 'number' || !Number.isInteger(obj.max_attempts)) {
+    errors.push(`${context}: 'retry.max_attempts' must be an integer`);
+    return null;
+  }
+  if (obj.max_attempts < 1 || obj.max_attempts > 5) {
+    errors.push(`${context}: 'retry.max_attempts' must be between 1 and 5`);
+    return null;
+  }
+
+  const result: StepRetryConfig = { max_attempts: obj.max_attempts };
+
+  // delay_ms is optional
+  if (obj.delay_ms !== undefined) {
+    if (typeof obj.delay_ms !== 'number' || obj.delay_ms < 1000 || obj.delay_ms > 60000) {
+      errors.push(`${context}: 'retry.delay_ms' must be a number between 1000 and 60000`);
+      return null;
+    }
+    result.delay_ms = obj.delay_ms;
+  }
+
+  // on_error is optional
+  if (obj.on_error !== undefined) {
+    if (obj.on_error !== 'transient' && obj.on_error !== 'all') {
+      errors.push(`${context}: 'retry.on_error' must be 'transient' or 'all'`);
+      return null;
+    }
+    result.on_error = obj.on_error;
+  }
+
+  return result;
+}
+
+/**
  * Parse a single step (helper for parseStep)
  * @param errors - Array to collect validation errors for aggregated reporting
  */
@@ -136,6 +194,11 @@ function parseSingleStep(s: unknown, indexPath: string, errors: string[]): Singl
       return null;
     }
   }
+
+  // Parse retry config
+  const retryConfig = parseRetryConfig(step.retry, `Step ${indexPath}`, errors);
+  if (retryConfig === null && step.retry !== undefined) return null; // validation failed
+  if (retryConfig) result.retry = retryConfig;
 
   return result;
 }
@@ -277,6 +340,10 @@ function parseDagNode(
       }
     }
 
+    // Parse retry for bash nodes
+    const bashRetry = parseRetryConfig(raw.retry, `Node '${id}'`, errors);
+    if (bashRetry === null && raw.retry !== undefined) return null;
+
     return {
       id,
       bash: String(raw.bash).trim(),
@@ -285,6 +352,7 @@ function parseDagNode(
       ...(dependsOn.length > 0 ? { depends_on: dependsOn } : {}),
       ...(whenStr !== undefined ? { when: whenStr } : {}),
       ...(triggerRule ? { trigger_rule: triggerRule } : {}),
+      ...(bashRetry ? { retry: bashRetry } : {}),
     };
   }
 
@@ -313,9 +381,14 @@ function parseDagNode(
     }
   }
 
+  // Parse retry for AI nodes
+  const aiRetry = parseRetryConfig(raw.retry, `Node '${id}'`, errors);
+  if (aiRetry === null && raw.retry !== undefined) return null;
+
   const errorsBeforeToolFields = errors.length;
   const baseFields = {
     ...(aiIdleTimeout !== undefined ? { idle_timeout: aiIdleTimeout } : {}),
+    ...(aiRetry ? { retry: aiRetry } : {}),
     ...(dependsOn.length > 0 ? { depends_on: dependsOn } : {}),
     ...(whenStr !== undefined ? { when: whenStr } : {}),
     ...(triggerRule ? { trigger_rule: triggerRule } : {}),
