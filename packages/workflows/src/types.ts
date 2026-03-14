@@ -18,6 +18,24 @@ export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed' 
 export type ArtifactType = 'pr' | 'commit' | 'file_created' | 'file_modified' | 'branch';
 
 /**
+ * Retry configuration for steps and DAG nodes.
+ * When present, the executor retries the step/node on TRANSIENT errors
+ * with exponential backoff before failing the workflow.
+ */
+export interface StepRetryConfig {
+  /** Maximum number of retry attempts (not including the initial attempt).
+   *  Must be >= 1 and <= 5. Default: 2 when retry is enabled. */
+  max_attempts: number;
+  /** Initial delay between retries in milliseconds. Doubled on each attempt.
+   *  Must be >= 1000 and <= 60000. Default: 3000. */
+  delay_ms?: number;
+  /** Which error types trigger a retry. Default: 'transient'.
+   *  - 'transient': Only retry TRANSIENT errors (rate limits, crashes, network issues)
+   *  - 'all': Retry all errors (including UNKNOWN — use with caution) */
+  on_error?: 'transient' | 'all';
+}
+
+/**
  * A single step with a command
  */
 export interface SingleStep {
@@ -38,6 +56,9 @@ export interface SingleStep {
   /** Per-step idle timeout override in milliseconds. Overrides the default 5-minute idle timeout.
    *  Useful for long-running steps (e.g., E2E tests with server startup + browser automation). */
   idle_timeout?: number;
+  /** Retry configuration for transient failures. When present, the executor retries
+   *  the step instead of immediately failing the workflow. */
+  retry?: StepRetryConfig;
 }
 
 /**
@@ -189,6 +210,9 @@ export interface DagNodeBase {
   /** Per-node idle timeout override in milliseconds. Overrides the default 5-minute idle timeout.
    *  Useful for long-running nodes (e.g., E2E tests with server startup + browser automation). */
   idle_timeout?: number;
+  /** Retry configuration for transient failures. When present, the DAG executor retries
+   *  the node instead of marking it failed immediately. */
+  retry?: StepRetryConfig;
 }
 
 /** DAG node that runs a named command from .archon/commands/ */

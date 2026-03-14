@@ -70,6 +70,10 @@ interface SendMessageContext {
 /** Result of error classification */
 type ErrorType = 'TRANSIENT' | 'FATAL' | 'UNKNOWN';
 
+/** Default step-level retry for TRANSIENT errors when no per-step retry config is set */
+const DEFAULT_STEP_MAX_RETRIES = 2;
+const DEFAULT_STEP_RETRY_DELAY_MS = 3000;
+
 /** Fatal error patterns - authentication/authorization issues that won't resolve with retry */
 const FATAL_PATTERNS = [
   'unauthorized',
@@ -1001,6 +1005,138 @@ async function executeStepInternal(
 }
 
 /**
+ * Determine the effective retry config for a step.
+ * Steps with explicit retry config use those values; steps without use defaults
+ * for TRANSIENT errors only.
+ */
+function getEffectiveRetryConfig(step: SingleStep): {
+  maxRetries: number;
+  delayMs: number;
+  onError: 'transient' | 'all';
+} {
+  if (step.retry) {
+    return {
+      maxRetries: step.retry.max_attempts,
+      delayMs: step.retry.delay_ms ?? DEFAULT_STEP_RETRY_DELAY_MS,
+      onError: step.retry.on_error ?? 'transient',
+    };
+  }
+  // Default: retry TRANSIENT errors with standard backoff
+  return {
+    maxRetries: DEFAULT_STEP_MAX_RETRIES,
+    delayMs: DEFAULT_STEP_RETRY_DELAY_MS,
+    onError: 'transient',
+  };
+}
+
+/**
+ * Check if a failed StepResult error is transient by re-classifying the error message.
+ * The error message from executeStepInternal contains classification hints
+ * (e.g., "Claude Code crash:", "Hint: Temporary error").
+ */
+function isTransientStepError(errorMessage: string): boolean {
+  const lower = errorMessage.toLowerCase();
+  return TRANSIENT_PATTERNS.some(p => lower.includes(p));
+}
+
+/**
+ * Execute a step with retry logic for transient failures.
+ * Wraps executeStepInternal with exponential backoff retry on TRANSIENT errors.
+ */
+async function executeStepWithRetry(
+  deps: WorkflowDeps,
+  platform: IWorkflowPlatform,
+  conversationId: string,
+  cwd: string,
+  workflowRun: WorkflowRun,
+  step: SingleStep,
+  stepId: string,
+  resolvedProvider: 'claude' | 'codex',
+  resolvedModel: string | undefined,
+  resolvedOptions: WorkflowAssistantOptions | undefined,
+  artifactsDir: string,
+  logDir: string,
+  totalSteps: number,
+  baseBranch: string,
+  resumeSessionId: string | undefined,
+  configuredCommandFolder: string | undefined,
+  issueContext: string | undefined,
+  abortSignal: AbortSignal | undefined
+): Promise<StepResult> {
+  const retryConfig = getEffectiveRetryConfig(step);
+
+  for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt++) {
+    const result = await executeStepInternal(
+      deps,
+      platform,
+      conversationId,
+      cwd,
+      workflowRun,
+      step,
+      stepId,
+      resolvedProvider,
+      resolvedModel,
+      resolvedOptions,
+      artifactsDir,
+      logDir,
+      totalSteps,
+      baseBranch,
+      // Don't resume session on retry — start fresh to avoid partial state
+      attempt > 0 ? undefined : resumeSessionId,
+      configuredCommandFolder,
+      issueContext,
+      abortSignal
+    );
+
+    if (result.success) return result;
+
+    // Check if the error is retryable
+    const isTransient = isTransientStepError(result.error);
+    const shouldRetry =
+      retryConfig.onError === 'all' || (retryConfig.onError === 'transient' && isTransient);
+
+    if (!shouldRetry || attempt >= retryConfig.maxRetries) {
+      return result; // Not retryable or exhausted retries
+    }
+
+    // Retry with exponential backoff
+    const delayMs = retryConfig.delayMs * Math.pow(2, attempt);
+    getLog().warn(
+      {
+        commandName: step.command,
+        attempt: attempt + 1,
+        maxRetries: retryConfig.maxRetries,
+        delayMs,
+        error: result.error,
+      },
+      'step_transient_retry'
+    );
+
+    await safeSendMessage(
+      platform,
+      conversationId,
+      `⚠️ Step \`${step.command}\` failed with transient error (attempt ${String(attempt + 1)}/${String(retryConfig.maxRetries + 1)}). Retrying in ${String(Math.round(delayMs / 1000))}s...`
+    );
+
+    await delay(delayMs);
+
+    // Re-emit step_started for the retry
+    const emitter = getWorkflowEventEmitter();
+    const stepIdx = Number(stepId.split('.')[0]);
+    emitter.emit({
+      type: 'step_started',
+      runId: workflowRun.id,
+      stepIndex: stepIdx,
+      stepName: step.command,
+      totalSteps,
+    });
+  }
+
+  // Should not reach here — defensive return
+  return { commandName: step.command, success: false, error: 'Step retry exhausted' };
+}
+
+/**
  * Parallel step result interface
  */
 interface ParallelStepResult {
@@ -1085,7 +1221,7 @@ async function executeParallelBlock(
 
       // Each parallel step is an independent agent
       // clearContext is always effectively true (fresh session)
-      const result = await executeStepInternal(
+      const result = await executeStepWithRetry(
         deps,
         platform,
         conversationId,
@@ -2407,7 +2543,7 @@ export async function executeWorkflow(
             );
           });
 
-        const result = await executeStepInternal(
+        const result = await executeStepWithRetry(
           deps,
           platform,
           conversationId,

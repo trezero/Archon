@@ -1453,7 +1453,7 @@ describe('Workflow Executor', () => {
           (call[1] as string).includes('wait')
       );
       expect(hintMessages.length).toBeGreaterThan(0);
-    });
+    }, 60_000);
 
     it('should include auth hint for 401 errors', async () => {
       // Mock AI client to throw auth error
@@ -1539,7 +1539,7 @@ describe('Workflow Executor', () => {
           typeof call[1] === 'string' && (call[1] as string).includes('Network issue')
       );
       expect(hintMessages.length).toBeGreaterThan(0);
-    });
+    }, 60_000);
 
     it('should fail workflow when AI throws on first step', async () => {
       // Mock AI client to throw immediately
@@ -1639,9 +1639,10 @@ describe('Workflow Executor', () => {
       // Verify error was logged to JSONL file
       const events = await parseLogEvents(testDir);
       const errorEvents = events.filter(e => e.type === 'workflow_error');
-      expect(errorEvents).toHaveLength(1);
+      // With step-level retry, error may be logged multiple times (once per attempt)
+      expect(errorEvents.length).toBeGreaterThanOrEqual(1);
       expect((errorEvents[0] as { error: string }).error).toContain('Request timeout after 60s');
-    });
+    }, 60_000);
 
     it('should handle AI errors that occur after partial response', async () => {
       // Mock AI to yield partial response then throw
@@ -3152,70 +3153,75 @@ describe('Workflow Executor', () => {
       ).toBeGreaterThan(0);
     });
 
-    it('should report all failures when multiple parallel steps fail', async () => {
-      // Mock AI client to fail on all parallel steps
-      mockSendQuery.mockImplementation(function* (prompt: string) {
-        if (prompt.includes('Parallel step A')) {
-          throw new Error('Step A: Connection timeout');
-        }
-        if (prompt.includes('Parallel step B')) {
-          throw new Error('Step B: Rate limit exceeded');
-        }
-        if (prompt.includes('Parallel step C')) {
-          throw new Error('Step C: Authentication failed');
-        }
-        yield { type: 'assistant', content: 'Response' };
-        yield { type: 'result', sessionId: 'session-id' };
-      });
+    it(
+      'should report all failures when multiple parallel steps fail',
+      { timeout: 60_000 },
+      async () => {
+        // Mock AI client to fail on all parallel steps
+        mockSendQuery.mockImplementation(function* (prompt: string) {
+          if (prompt.includes('Parallel step A')) {
+            throw new Error('Step A: Connection timeout');
+          }
+          if (prompt.includes('Parallel step B')) {
+            throw new Error('Step B: Rate limit exceeded');
+          }
+          if (prompt.includes('Parallel step C')) {
+            throw new Error('Step C: Authentication failed');
+          }
+          yield { type: 'assistant', content: 'Response' };
+          yield { type: 'result', sessionId: 'session-id' };
+        });
 
-      const parallelWorkflow: WorkflowDefinition = {
-        name: 'all-fail-test',
-        description: 'Test all parallel steps failing',
-        steps: [
-          {
-            parallel: [
-              { command: 'parallel-a' },
-              { command: 'parallel-b' },
-              { command: 'parallel-c' },
-            ],
-          },
-        ],
-      };
+        const parallelWorkflow: WorkflowDefinition = {
+          name: 'all-fail-test',
+          description: 'Test all parallel steps failing',
+          steps: [
+            {
+              parallel: [
+                { command: 'parallel-a' },
+                { command: 'parallel-b' },
+                { command: 'parallel-c' },
+              ],
+            },
+          ],
+        };
 
-      await executeWorkflow(
-        mockDeps,
-        mockPlatform,
-        'conv-123',
-        testDir,
-        parallelWorkflow,
-        'Run parallel',
-        'db-conv-id'
-      );
+        await executeWorkflow(
+          mockDeps,
+          mockPlatform,
+          'conv-123',
+          testDir,
+          parallelWorkflow,
+          'Run parallel',
+          'db-conv-id'
+        );
 
-      // Workflow should fail
-      expect(
-        (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
-      ).toBeGreaterThan(0);
+        // Workflow should fail
+        expect(
+          (mockStore.failWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+        ).toBeGreaterThan(0);
 
-      // Should send failure message containing ALL errors
-      const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
-      const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1]);
-      const failureMessage = messages.find(
-        (m: string) => typeof m === 'string' && m.includes('**Workflow failed** in parallel block')
-      );
+        // Should send failure message containing ALL errors
+        const sendMessage = mockPlatform.sendMessage as ReturnType<typeof mock>;
+        const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1]);
+        const failureMessage = messages.find(
+          (m: string) =>
+            typeof m === 'string' && m.includes('**Workflow failed** in parallel block')
+        );
 
-      expect(failureMessage).toBeDefined();
-      // All three errors should be reported
-      expect(failureMessage).toContain('parallel-a');
-      expect(failureMessage).toContain('parallel-b');
-      expect(failureMessage).toContain('parallel-c');
+        expect(failureMessage).toBeDefined();
+        // All three errors should be reported
+        expect(failureMessage).toContain('parallel-a');
+        expect(failureMessage).toContain('parallel-b');
+        expect(failureMessage).toContain('parallel-c');
 
-      // Reset mock
-      mockSendQuery.mockImplementation(function* () {
-        yield { type: 'assistant', content: 'AI response' };
-        yield { type: 'result', sessionId: 'new-session-id' };
-      });
-    });
+        // Reset mock
+        mockSendQuery.mockImplementation(function* () {
+          yield { type: 'assistant', content: 'AI response' };
+          yield { type: 'result', sessionId: 'new-session-id' };
+        });
+      }
+    );
 
     it('should execute step-only workflow unchanged (backward compatibility)', async () => {
       // Create sequential-only workflow (no parallel blocks)
@@ -3804,6 +3810,124 @@ describe('Workflow Executor', () => {
         expect(droppedWarningAttempts.length).toBeGreaterThan(0);
       });
     });
+  });
+
+  describe('step-level retry for transient errors', () => {
+    it('should retry a step on transient error and succeed', async () => {
+      let callCount = 0;
+      mockSendQuery.mockImplementation(function* () {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error('Claude Code crash: process exited with code 1');
+        }
+        yield { type: 'assistant', content: 'Recovered on retry' };
+        yield { type: 'result', sessionId: 'retry-session' };
+      });
+
+      const result = await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'retry-test',
+          description: 'Test step retry',
+          steps: [{ command: 'command-one', clearContext: false }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should succeed after retry
+      expect(result.success).toBe(true);
+      // Step was called at least twice (first fails, second succeeds)
+      expect(callCount).toBeGreaterThanOrEqual(2);
+    }, 60_000);
+
+    it('should fail workflow after exhausting step retries', async () => {
+      mockSendQuery.mockImplementation(function* () {
+        throw new Error('Claude Code crash: process exited with code 1');
+      });
+
+      const result = await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'retry-exhaust',
+          description: 'Test retry exhaustion',
+          steps: [{ command: 'command-one', clearContext: false }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Should fail after exhausting all retries
+      expect(result.success).toBe(false);
+      // Verify failure was recorded in DB
+      expect(getWorkflowStatusUpdates('failed')).toHaveLength(1);
+    }, 60_000);
+
+    it('should not retry on fatal errors', async () => {
+      let callCount = 0;
+      mockSendQuery.mockImplementation(function* () {
+        callCount++;
+        throw new Error('Claude Code auth error: unauthorized');
+      });
+
+      const result = await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'no-retry-fatal',
+          description: 'Fatal errors should not retry',
+          steps: [{ command: 'command-one', clearContext: false }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      expect(result.success).toBe(false);
+      // Fatal error: not classified as TRANSIENT, so step retry does not re-run
+      expect(callCount).toBe(1);
+    });
+
+    it('should send retry notification to user', async () => {
+      let callCount = 0;
+      mockSendQuery.mockImplementation(function* () {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error('Claude Code crash: process exited with code 1');
+        }
+        yield { type: 'assistant', content: 'OK' };
+        yield { type: 'result', sessionId: 'ok' };
+      });
+
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'retry-notify',
+          description: 'Retry notifications',
+          steps: [{ command: 'command-one', clearContext: false }],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      // Check that a retry notification was sent
+      const sendCalls = (mockPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const retryCalls = sendCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' && (call[1] as string).includes('transient error')
+      );
+      expect(retryCalls.length).toBeGreaterThan(0);
+    }, 60_000);
   });
 });
 

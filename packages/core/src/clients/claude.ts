@@ -157,8 +157,11 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
   return baseEnv;
 }
 
-/** Max retries for transient subprocess failures */
-const MAX_SUBPROCESS_RETRIES = 1;
+/** Max retries for transient subprocess failures (3 = 4 total attempts).
+ *  SDK subprocess crashes (exit code 1) are often intermittent — AJV schema validation
+ *  regressions, stale HTTP/2 connections, and other transient SDK issues typically
+ *  succeed on retry 3 or 4. See: anthropics/claude-code#22973, claude-code-action#853 */
+const MAX_SUBPROCESS_RETRIES = 3;
 
 /** Delay between retries in milliseconds */
 const RETRY_BASE_DELAY_MS = 2000;
@@ -197,7 +200,7 @@ function classifySubprocessError(
 export class ClaudeClient implements IAssistantClient {
   /**
    * Send a query to Claude and stream responses.
-   * Includes retry logic for transient failures (1 retry with backoff).
+   * Includes retry logic for transient failures (up to 3 retries with exponential backoff).
    * Enriches errors with stderr context and classification.
    */
   async *sendQuery(
@@ -259,6 +262,10 @@ export class ClaudeClient implements IAssistantClient {
           const output = data.trim();
           if (!output) return;
 
+          // Always capture stderr for diagnostics — previous filtering discarded
+          // useful SDK startup output, leaving stderrContext empty on crashes.
+          stderrLines.push(output);
+
           const isError =
             output.toLowerCase().includes('error') ||
             output.toLowerCase().includes('fatal') ||
@@ -273,7 +280,6 @@ export class ClaudeClient implements IAssistantClient {
             output.includes('--permission-mode');
 
           if (isError && !isInfoMessage) {
-            stderrLines.push(output);
             getLog().error({ stderr: output }, 'subprocess_error');
           }
         },
