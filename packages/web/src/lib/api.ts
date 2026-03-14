@@ -163,6 +163,7 @@ export interface WorkflowRunResponse {
   last_activity_at: string | null;
   worker_platform_id?: string;
   parent_platform_id?: string;
+  conversation_platform_id?: string;
 }
 
 export interface WorkflowEventResponse {

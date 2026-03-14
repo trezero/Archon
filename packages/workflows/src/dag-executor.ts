@@ -1244,6 +1244,27 @@ export async function executeDagWorkflow(
     if (layerHadFailure) {
       getLog().warn({ layerIdx, nodeCount: layer.length }, 'dag_layer_had_failures');
     }
+
+    // Check for cancellation between DAG layers
+    try {
+      const dagStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
+      if (dagStatus === 'cancelled') {
+        getLog().info(
+          { workflowRunId: workflowRun.id, layerIdx, totalLayers: layers.length },
+          'dag.cancel_detected_between_layers'
+        );
+        await safeSendMessage(
+          platform,
+          conversationId,
+          `⚠️ **Workflow cancelled**: DAG execution stopped after layer ${String(layerIdx + 1)}/${String(layers.length)}`,
+          { workflowId: workflowRun.id }
+        );
+        break;
+      }
+    } catch (cancelErr) {
+      // Non-fatal — cancel check failure should not crash the workflow
+      getLog().warn({ err: cancelErr as Error }, 'dag.cancel_check_failed');
+    }
   }
 
   // Determine workflow success: at least one node completed (not all failed/skipped)

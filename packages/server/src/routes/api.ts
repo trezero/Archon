@@ -709,9 +709,11 @@ export function registerApiRoutes(
 
       // Look up worker conversation to get its platform_conversation_id for SSE/messages
       let workerPlatformId: string | undefined;
+      let conversationPlatformId: string | undefined;
       if (run.conversation_id) {
         const conv = await conversationDb.getConversationById(run.conversation_id);
         workerPlatformId = conv?.platform_conversation_id;
+        conversationPlatformId = conv?.platform_conversation_id;
       }
 
       // Look up parent conversation to get its platform_conversation_id for navigation
@@ -722,7 +724,12 @@ export function registerApiRoutes(
       }
 
       return c.json({
-        run: { ...run, worker_platform_id: workerPlatformId, parent_platform_id: parentPlatformId },
+        run: {
+          ...run,
+          worker_platform_id: workerPlatformId,
+          parent_platform_id: parentPlatformId,
+          conversation_platform_id: conversationPlatformId ?? null,
+        },
         events,
       });
     } catch (error) {

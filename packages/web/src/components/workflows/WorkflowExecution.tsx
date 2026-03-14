@@ -3,13 +3,20 @@ import { useNavigate } from 'react-router';
 import { MessageSquare } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { StepProgress } from './StepProgress';
+import { DagNodeProgress } from './DagNodeProgress';
 import { StepLogs } from './StepLogs';
 import { WorkflowLogs } from './WorkflowLogs';
 import { ArtifactSummary } from './ArtifactSummary';
 import { useWorkflowStatus } from '@/hooks/useWorkflowStatus';
 import { getWorkflowRun, getWorkflowRunByWorker, getCodebase } from '@/lib/api';
 import { ensureUtc, formatDurationMs } from '@/lib/format';
-import type { WorkflowState, ArtifactType, WorkflowRunStatus } from '@/lib/types';
+import type {
+  WorkflowState,
+  ArtifactType,
+  WorkflowRunStatus,
+  DagNodeState,
+  WorkflowStepStatus,
+} from '@/lib/types';
 import type { WorkflowEventResponse } from '@/lib/api';
 
 const TERMINAL_STATUSES: readonly WorkflowRunStatus[] = ['completed', 'failed', 'cancelled'];
@@ -22,6 +29,7 @@ interface WorkflowRunQueryData {
   workflowState: WorkflowState;
   workerPlatformId: string | null;
   parentPlatformId: string | null;
+  conversationPlatformId: string | null;
   codebaseId: string | null;
   events: WorkflowEventResponse[];
 }
@@ -52,6 +60,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
   const queryClient = useQueryClient();
   const { workflows, handlers: workflowHandlers } = useWorkflowStatus();
   const [selectedStep, setSelectedStep] = useState(0);
+  const [selectedDagNode, setSelectedDagNode] = useState<string | null>(null);
   const [codebaseName, setCodebaseName] = useState<string | null>(null);
   const [workerRunId, setWorkerRunId] = useState<string | null>(null);
   // Track which codebaseId we've already fetched to avoid stale re-fetches during runId transitions
@@ -60,6 +69,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
   // Reset local state when navigating to a different workflow run
   useEffect(() => {
     setSelectedStep(0);
+    setSelectedDagNode(null);
     setCodebaseName(null);
     setWorkerRunId(null);
     fetchedCodebaseIdRef.current = null;
@@ -112,10 +122,34 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
             }
             return Array.from(stepMap.values()).sort((a, b) => a.index - b.index);
           })(),
-          // TODO: REST hydration does not yet reconstruct dagNodes from stored
-          // node_* events. Users viewing completed DAG runs will see no node history
-          // until a DagNodeProgress component + REST parsing path is added.
-          dagNodes: [],
+          dagNodes: ((): DagNodeState[] => {
+            const nodeMap = new Map<string, DagNodeState>();
+            for (const e of data.events.filter(ev => ev.event_type.startsWith('node_'))) {
+              const nodeId = e.step_name ?? (e.data.nodeId as string) ?? '';
+              if (!nodeId) continue;
+              const status =
+                e.event_type === 'node_started'
+                  ? 'running'
+                  : e.event_type === 'node_completed'
+                    ? 'completed'
+                    : e.event_type === 'node_failed'
+                      ? 'failed'
+                      : 'skipped';
+              const existing = nodeMap.get(nodeId);
+              // Keep the latest non-running status (completed/failed/skipped override running)
+              if (!existing || status !== 'running') {
+                nodeMap.set(nodeId, {
+                  nodeId,
+                  name: nodeId,
+                  status: status as WorkflowStepStatus,
+                  duration: e.data.duration_ms as number | undefined,
+                  error: e.data.error as string | undefined,
+                  reason: e.data.reason as 'when_condition' | 'trigger_rule' | undefined,
+                });
+              }
+            }
+            return Array.from(nodeMap.values());
+          })(),
           artifacts: data.events
             .filter(e => e.event_type === 'workflow_artifact')
             .map(e => {
@@ -136,6 +170,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
         },
         workerPlatformId: data.run.worker_platform_id ?? null,
         parentPlatformId: data.run.parent_platform_id ?? null,
+        conversationPlatformId: data.run.conversation_platform_id ?? null,
         codebaseId: data.run.codebase_id ?? null,
         events: data.events,
       };
@@ -151,6 +186,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
   const initialData = queryData?.workflowState ?? null;
   const workerPlatformId = queryData?.workerPlatformId ?? null;
   const parentPlatformId = queryData?.parentPlatformId ?? null;
+  const conversationPlatformId = queryData?.conversationPlatformId ?? null;
   const error = queryError
     ? queryError instanceof Error
       ? queryError.message
@@ -248,6 +284,54 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       clearInterval(interval);
     };
   }, [workflow?.status]);
+
+  // Derive the currently executing node/step from events data
+  const currentlyExecuting = useMemo((): { nodeName: string; startedAt: number } | null => {
+    if (!queryData?.events || workflow?.status !== 'running') return null;
+    const events = queryData.events;
+
+    // Find nodes that started but haven't completed/failed/skipped
+    const startedNodes = new Set<string>();
+    const completedNodes = new Set<string>();
+
+    for (const e of events) {
+      const nodeId = e.step_name ?? '';
+      if (e.event_type === 'node_started') startedNodes.add(nodeId);
+      if (
+        e.event_type === 'node_completed' ||
+        e.event_type === 'node_failed' ||
+        e.event_type === 'node_skipped'
+      ) {
+        completedNodes.add(nodeId);
+      }
+    }
+
+    // Find the first started-but-not-completed node
+    for (const nodeId of startedNodes) {
+      if (!completedNodes.has(nodeId)) {
+        const startEvent = events.find(
+          e => e.event_type === 'node_started' && e.step_name === nodeId
+        );
+        if (startEvent) {
+          return {
+            nodeName: nodeId,
+            startedAt: new Date(startEvent.created_at).getTime(),
+          };
+        }
+      }
+    }
+
+    // Fallback for sequential workflows: check step events
+    if (workflow) {
+      for (const step of workflow.steps) {
+        if (step.status === 'running') {
+          return { nodeName: step.name, startedAt: workflow.startedAt };
+        }
+      }
+    }
+
+    return null;
+  }, [queryData?.events, workflow?.status, workflow?.steps, workflow?.startedAt, workflow]);
 
   // Compute formatted log lines for the selected step from DB events
   const stepLogLines = useMemo((): string[] => {
@@ -382,13 +466,21 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
 
       {/* Body: Step list + Logs */}
       <div className="flex flex-1 overflow-hidden min-h-0">
-        {/* Left panel: Step list */}
+        {/* Left panel: Step list or DAG nodes */}
         <div className="w-64 border-r border-border overflow-auto">
-          <StepProgress
-            steps={workflow.steps}
-            activeStepIndex={selectedStep}
-            onStepClick={setSelectedStep}
-          />
+          {workflow.dagNodes.length > 0 ? (
+            <DagNodeProgress
+              nodes={workflow.dagNodes}
+              activeNodeId={selectedDagNode}
+              onNodeClick={setSelectedDagNode}
+            />
+          ) : (
+            <StepProgress
+              steps={workflow.steps}
+              activeStepIndex={selectedStep}
+              onStepClick={setSelectedStep}
+            />
+          )}
         </div>
 
         {/* Right panel: Logs + Artifacts */}
@@ -400,6 +492,15 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
                 startedAt={initialData?.startedAt}
                 isRunning={workflow.status === 'running' || workflow.status === 'pending'}
                 workflowHandlers={workflowHandlers}
+                currentlyExecuting={currentlyExecuting}
+              />
+            ) : conversationPlatformId ? (
+              <WorkflowLogs
+                conversationId={conversationPlatformId}
+                startedAt={initialData?.startedAt}
+                isRunning={workflow.status === 'running' || workflow.status === 'pending'}
+                workflowHandlers={workflowHandlers}
+                currentlyExecuting={currentlyExecuting}
               />
             ) : (
               <StepLogs runId={runId} stepIndex={selectedStep} lines={stepLogLines} />

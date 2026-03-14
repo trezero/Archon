@@ -456,6 +456,22 @@ export async function workflowRunCommand(
     workflowName
   );
 
+  // Register cleanup handlers for graceful termination
+  const cleanup = async (signal: string): Promise<void> => {
+    getLog().info({ conversationId: conversation.id, signal }, 'workflow.process_terminating');
+    try {
+      const activeRun = await workflowDb.getActiveWorkflowRun(conversation.id);
+      if (activeRun) {
+        await workflowDb.failWorkflowRun(activeRun.id, `Process terminated (${signal})`);
+      }
+    } catch (err) {
+      getLog().error({ err: err as Error }, 'workflow.termination_cleanup_failed');
+    }
+    process.exit(1);
+  };
+  process.on('SIGTERM', () => void cleanup('SIGTERM'));
+  process.on('SIGINT', () => void cleanup('SIGINT'));
+
   // Execute workflow with workingCwd (may be worktree path)
   const result = await executeWorkflow(
     createWorkflowDeps(),

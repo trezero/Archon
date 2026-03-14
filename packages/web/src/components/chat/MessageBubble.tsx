@@ -66,6 +66,18 @@ const MARKDOWN_COMPONENTS = {
   ),
 };
 
+/** Detect if a string is a complete JSON object/array */
+function isJsonString(str: string): boolean {
+  const trimmed = str.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false;
+  try {
+    JSON.parse(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 interface MessageBubbleProps {
   message: ChatMessage;
 }
@@ -101,13 +113,26 @@ function MessageBubbleRaw({ message }: MessageBubbleProps): React.ReactElement {
                 />
               </div>
             )}
-            <ReactMarkdown
-              remarkPlugins={REMARK_PLUGINS}
-              rehypePlugins={REHYPE_PLUGINS}
-              components={MARKDOWN_COMPONENTS}
-            >
-              {message.content}
-            </ReactMarkdown>
+            {isJsonString(message.content) ? (
+              <details className="group">
+                <summary className="cursor-pointer text-sm text-text-secondary hover:text-text-primary">
+                  <span className="text-xs bg-surface-secondary rounded px-1.5 py-0.5 font-mono">
+                    JSON output
+                  </span>
+                </summary>
+                <pre className="mt-2 text-xs bg-surface-inset rounded p-3 overflow-x-auto">
+                  {JSON.stringify(JSON.parse(message.content.trim()) as unknown, null, 2)}
+                </pre>
+              </details>
+            ) : (
+              <ReactMarkdown
+                remarkPlugins={REMARK_PLUGINS}
+                rehypePlugins={REHYPE_PLUGINS}
+                components={MARKDOWN_COMPONENTS}
+              >
+                {message.content}
+              </ReactMarkdown>
+            )}
             {message.isStreaming && message.content && (
               <span className="inline-block h-4 w-0.5 animate-pulse bg-primary align-text-bottom" />
             )}
