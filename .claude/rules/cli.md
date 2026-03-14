@@ -60,7 +60,7 @@ Worktree-aware: same hash-based algorithm as server (3190–4089 range). Running
 
 ## CLIAdapter
 
-The `CLIAdapter` implements `IWorkflowPlatform` (not the full `IPlatformAdapter`). It streams output to stdout. `getStreamingMode()` returns `'stream'`. No auth needed — CLI is local only.
+The `CLIAdapter` implements `IPlatformAdapter`. It streams output to stdout. `getStreamingMode()` defaults to `'batch'` (configurable via constructor options). No auth needed — CLI is local only.
 
 ## Architecture
 

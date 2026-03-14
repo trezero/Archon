@@ -30,7 +30,7 @@ You will analyze four key artifacts:
 
 **Plan Command:**
 Read this to understand the planning process:
-`.claude/commands/core_piv_loop/plan-feature.md`
+`.claude/commands/plan-feature.md`
 
 **Generated Plan:**
 Read this to understand what the agent was SUPPOSED to do:
@@ -38,7 +38,7 @@ Plan file: $1
 
 **Execute Command:**
 Read this to understand the execution process:
-`.claude/commands/core_piv_loop/execute.md`
+`.claude/commands/execute.md`
 
 **Execution Report:**
 Read this to understand what the agent ACTUALLY did and why:
@@ -166,7 +166,7 @@ Based on analysis, recommend specific actions:
 
 - [ ] `/[command-name]` for [manual process repeated 3+ times]
 
-**Update Execute Command ($3):**
+**Update Execute Command:**
 
 - [ ] Add [validation step] to execution checklist
 
