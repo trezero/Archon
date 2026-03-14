@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -20,19 +20,24 @@ export function WorkflowList(): React.ReactElement {
   const [runMessage, setRunMessage] = useState('');
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const { codebases, selectedProjectId } = useProject();
+  const [localProjectId, setLocalProjectId] = useState<string | null>(selectedProjectId);
 
-  const {
-    selectedProjectId: projectId,
-    setSelectedProjectId: setProjectId,
-    codebases,
-  } = useProject();
+  // If the locally-selected project is deleted from the global list, fall back to the
+  // current global selection so the user isn't silently running on a stale project ID.
+  useEffect(() => {
+    if (!localProjectId || !codebases) return;
+    if (!codebases.some(cb => cb.id === localProjectId)) {
+      setLocalProjectId(selectedProjectId);
+    }
+  }, [codebases, localProjectId, selectedProjectId]);
 
   const handleRun = async (workflowName: string): Promise<void> => {
     if (!runMessage.trim() || running) return;
     setRunning(true);
     setRunError(null);
     try {
-      const { conversationId } = await createConversation(projectId ?? undefined);
+      const { conversationId } = await createConversation(localProjectId ?? undefined);
       await runWorkflow(workflowName, conversationId, runMessage.trim());
       setRunMessage('');
       setSelectedWorkflow(null);
@@ -126,9 +131,9 @@ export function WorkflowList(): React.ReactElement {
                     <div className="flex items-center gap-2 mb-2">
                       <label className="text-xs text-text-secondary shrink-0">Run on</label>
                       <select
-                        value={projectId ?? ''}
+                        value={localProjectId ?? ''}
                         onChange={(e): void => {
-                          setProjectId(e.target.value || null);
+                          setLocalProjectId(e.target.value || null);
                         }}
                         className="flex-1 min-w-0 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
                       >

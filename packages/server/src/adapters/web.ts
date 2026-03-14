@@ -3,9 +3,17 @@
  * Bridge between the orchestrator and the React frontend via Server-Sent Events.
  */
 import type { IWebPlatformAdapter, MessageChunk, MessageMetadata } from '@archon/core';
+import { createLogger } from '@archon/paths';
 import { MessagePersistence } from './web/persistence';
 import { SSETransport, type SSEWriter } from './web/transport';
 import { WorkflowEventBridge } from './web/workflow-bridge';
+
+/** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('adapter.web');
+  return cachedLog;
+}
 
 export class WebAdapter implements IWebPlatformAdapter {
   constructor(
@@ -64,7 +72,9 @@ export class WebAdapter implements IWebPlatformAdapter {
     // Workflow result arrives after the parent lock is released (background dispatch),
     // so it would never be flushed. Force persistence flush for these messages.
     if (metadata?.category === 'workflow_result') {
-      void this.persistence.flush(conversationId);
+      this.persistence.flush(conversationId).catch((e: unknown) => {
+        getLog().error({ conversationId, err: e }, 'workflow_result_flush_failed');
+      });
     }
   }
 
@@ -72,13 +82,27 @@ export class WebAdapter implements IWebPlatformAdapter {
     let event: string;
 
     if (chunk.type === 'tool' && chunk.toolName) {
-      this.persistence.appendToolCall(conversationId, {
+      const { newToolCallId, finalized } = this.persistence.appendToolCall(conversationId, {
         name: chunk.toolName,
         input: chunk.toolInput ?? {},
       });
 
+      // Emit tool_result for the previous tool that was just finalized
+      if (finalized) {
+        const resultEvent = JSON.stringify({
+          type: 'tool_result',
+          toolCallId: finalized.toolCallId,
+          name: finalized.name,
+          output: '',
+          duration: finalized.duration,
+          timestamp: Date.now(),
+        });
+        await this.transport.emit(conversationId, resultEvent);
+      }
+
       event = JSON.stringify({
         type: 'tool_call',
+        toolCallId: newToolCallId,
         name: chunk.toolName,
         input: chunk.toolInput ?? {},
         timestamp: Date.now(),
@@ -116,11 +140,22 @@ export class WebAdapter implements IWebPlatformAdapter {
   }
 
   async start(): Promise<void> {
+    this.workflowBridge.setStepTransitionCallback((workerConversationId: string) => {
+      this.persistence.flush(workerConversationId).catch((e: unknown) => {
+        getLog().error(
+          { conversationId: workerConversationId, err: e },
+          'step_transition_flush_failed'
+        );
+      });
+    });
     this.workflowBridge.start();
     this.transport.start();
+    this.persistence.startPeriodicFlush();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
+    this.persistence.stopPeriodicFlush();
+    await this.persistence.flushAll();
     this.transport.stop();
     this.workflowBridge.stop();
     this.persistence.clearAll();
@@ -130,11 +165,38 @@ export class WebAdapter implements IWebPlatformAdapter {
    * Emit a lock event to the SSE stream for a conversation.
    * Called by API routes based on acquireLock() return status.
    */
-  emitLockEvent(conversationId: string, locked: boolean, queuePosition?: number): void {
+  async emitLockEvent(
+    conversationId: string,
+    locked: boolean,
+    queuePosition?: number
+  ): Promise<void> {
     if (!locked) {
-      void this.persistence.flush(conversationId);
+      // Finalize all running tools and emit tool_result for each before lock release
+      const finalized = this.persistence.finalizeRunningTools(conversationId);
+      for (const tool of finalized) {
+        const resultEvent = JSON.stringify({
+          type: 'tool_result',
+          toolCallId: tool.toolCallId,
+          name: tool.name,
+          output: '',
+          duration: tool.duration,
+          timestamp: Date.now(),
+        });
+        await this.transport.emit(conversationId, resultEvent);
+      }
+      await this.persistence.flush(conversationId).catch((e: unknown) => {
+        getLog().error({ conversationId, err: e }, 'lock_release_flush_failed');
+      });
     }
-    this.transport.emitLockEvent(conversationId, locked, queuePosition);
+    // Use transport.emit() directly so the lock event is fully awaited and ordered after tool_results
+    const lockEvent = JSON.stringify({
+      type: 'conversation_lock',
+      conversationId,
+      locked,
+      queuePosition,
+      timestamp: Date.now(),
+    });
+    await this.transport.emit(conversationId, lockEvent);
   }
 
   hasActiveStream(conversationId: string): boolean {

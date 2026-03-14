@@ -2,6 +2,7 @@
  * Database operations for workflow runs
  */
 import { pool, getDialect } from './connection';
+import type { IDatabase } from './adapters/types';
 import type { WorkflowRun, WorkflowRunStatus } from '@archon/workflows';
 import { createLogger } from '@archon/paths';
 
@@ -35,7 +36,7 @@ export async function createWorkflowRun(data: {
       // with empty context variables ($CONTEXT, $EXTERNAL_CONTEXT, $ISSUE_CONTEXT).
       getLog().error(
         { err, metadataKeys: Object.keys(data.metadata) },
-        'metadata_serialize_failed_critical'
+        'db.workflow_run_metadata_serialize_failed'
       );
       throw new Error(
         `Failed to serialize workflow metadata: ${err.message}. ` +
@@ -46,7 +47,7 @@ export async function createWorkflowRun(data: {
     // Non-critical metadata: fall back to empty object and log warning
     getLog().warn(
       { err, metadataKeys: data.metadata ? Object.keys(data.metadata) : [] },
-      'metadata_serialize_fallback'
+      'db.workflow_run_metadata_serialize_fallback'
     );
     metadataJson = '{}';
   }
@@ -76,7 +77,7 @@ export async function createWorkflowRun(data: {
     return row;
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'create_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_create_failed');
     throw new Error(`Failed to create workflow run: ${err.message}`);
   }
 }
@@ -90,7 +91,7 @@ export async function getWorkflowRun(id: string): Promise<WorkflowRun | null> {
     return result.rows[0] || null;
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'get_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_get_failed');
     throw new Error(`Failed to get workflow run: ${err.message}`);
   }
 }
@@ -104,7 +105,7 @@ export async function getWorkflowRunStatus(id: string): Promise<string | null> {
     return result.rows[0]?.status ?? null;
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'get_workflow_run_status_failed');
+    getLog().error({ err }, 'db.workflow_run_get_status_failed');
     throw new Error(`Failed to get workflow run status: ${err.message}`);
   }
 }
@@ -120,7 +121,7 @@ export async function getActiveWorkflowRun(conversationId: string): Promise<Work
     return result.rows[0] || null;
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'get_active_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_get_active_failed');
     throw new Error(`Failed to get active workflow run: ${err.message}`);
   }
 }
@@ -144,8 +145,36 @@ export async function findResumableRun(
     return result.rows[0] ?? null;
   } catch (error) {
     const err = error as Error;
-    getLog().warn({ err, workflowName, workingPath }, 'find_resumable_run_failed');
+    getLog().warn({ err, workflowName, workingPath }, 'db.workflow_run_find_resumable_failed');
     throw new Error(`Failed to find resumable run: ${err.message}`);
+  }
+}
+
+/**
+ * Find the most recent failed workflow run by workflow name and codebase.
+ * Used by the CLI `--resume` flag to locate a prior failed run regardless of conversation ID,
+ * since CLI re-runs always generate fresh conversation IDs.
+ */
+export async function findLastFailedRun(
+  db: IDatabase,
+  workflowName: string,
+  codebaseId: string
+): Promise<WorkflowRun | null> {
+  try {
+    const result = await db.query<WorkflowRun>(
+      `SELECT * FROM remote_agent_workflow_runs
+       WHERE workflow_name = $1
+         AND codebase_id = $2
+         AND status = 'failed'
+       ORDER BY started_at DESC
+       LIMIT 1`,
+      [workflowName, codebaseId]
+    );
+    return result.rows[0] ?? null;
+  } catch (error) {
+    const err = error as Error;
+    getLog().warn({ err, workflowName, codebaseId }, 'db.workflow_run_find_last_failed_run_failed');
+    throw new Error(`Failed to find last failed run: ${err.message}`);
   }
 }
 
@@ -165,13 +194,13 @@ export async function resumeWorkflowRun(id: string): Promise<WorkflowRun> {
     );
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err, workflowRunId: id }, 'resume_workflow_run_failed');
+    getLog().error({ err, workflowRunId: id }, 'db.workflow_run_resume_failed');
     throw new Error(`Failed to resume workflow run: ${err.message}`);
   }
 
   if (updateResult.rowCount === 0) {
     // Logical race: run was deleted or already activated between find and resume
-    getLog().warn({ workflowRunId: id }, 'resume_workflow_run_not_found');
+    getLog().warn({ workflowRunId: id }, 'db.workflow_run_resume_not_found');
     throw new Error(`Workflow run not found (id: ${id})`);
   }
 
@@ -183,13 +212,13 @@ export async function resumeWorkflowRun(id: string): Promise<WorkflowRun> {
     );
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err, workflowRunId: id }, 'resume_workflow_run_select_failed');
+    getLog().error({ err, workflowRunId: id }, 'db.workflow_run_resume_select_failed');
     throw new Error(`Failed to read workflow run after update: ${err.message}`);
   }
 
   const row = selectResult.rows[0];
   if (!row) {
-    getLog().error({ workflowRunId: id }, 'resume_workflow_run_vanished');
+    getLog().error({ workflowRunId: id }, 'db.workflow_run_resume_vanished');
     throw new Error(`Workflow run vanished after update (id: ${id})`);
   }
   return row;
@@ -213,7 +242,7 @@ export async function getWorkflowRunByWorkerPlatformId(
     return result.rows[0] || null;
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'get_workflow_run_by_worker_platform_id_failed');
+    getLog().error({ err }, 'db.workflow_run_get_by_worker_platform_id_failed');
     throw new Error(`Failed to get workflow run by worker platform ID: ${err.message}`);
   }
 }
@@ -271,7 +300,7 @@ export async function updateWorkflowRun(
     );
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'update_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_update_failed');
     throw new Error(`Failed to update workflow run: ${err.message}`);
   }
 }
@@ -287,7 +316,7 @@ export async function completeWorkflowRun(id: string): Promise<void> {
     );
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'complete_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_complete_failed');
     throw new Error(`Failed to complete workflow run: ${err.message}`);
   }
 }
@@ -303,7 +332,7 @@ export async function failWorkflowRun(id: string, error: string): Promise<void> 
     );
   } catch (dbError) {
     const err = dbError as Error;
-    getLog().error({ err }, 'fail_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_mark_failed_error');
     throw new Error(`Failed to fail workflow run: ${err.message}`);
   }
 }
@@ -319,8 +348,159 @@ export async function cancelWorkflowRun(id: string): Promise<void> {
     );
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'cancel_workflow_run_failed');
+    getLog().error({ err }, 'db.workflow_run_cancel_failed');
     throw new Error(`Failed to cancel workflow run: ${err.message}`);
+  }
+}
+
+/**
+ * Enriched workflow run with joined data for the dashboard Command Center.
+ */
+export interface DashboardWorkflowRun extends WorkflowRun {
+  codebase_name: string | null;
+  platform_type: string | null;
+  worker_platform_id: string | null;
+  parent_platform_id: string | null;
+}
+
+/** Options for listing dashboard runs with server-side search, filtering, and pagination. */
+export interface ListDashboardRunsOptions {
+  status?: WorkflowRunStatus;
+  codebaseId?: string;
+  search?: string;
+  after?: string;
+  before?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** Response envelope for paginated dashboard runs. */
+export interface DashboardRunsResult {
+  runs: DashboardWorkflowRun[];
+  total: number;
+  counts: {
+    all: number;
+    running: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+    pending: number;
+  };
+}
+
+/**
+ * Build WHERE clauses shared between the list and count queries.
+ * Returns the clauses array and values array (mutated in place).
+ */
+function buildDashboardWhereClauses(
+  options: ListDashboardRunsOptions | undefined,
+  values: unknown[]
+): string[] {
+  const whereClauses: string[] = [];
+
+  if (options?.status) {
+    values.push(options.status);
+    whereClauses.push(`r.status = $${String(values.length)}`);
+  }
+  if (options?.codebaseId) {
+    values.push(options.codebaseId);
+    whereClauses.push(`r.codebase_id = $${String(values.length)}`);
+  }
+  if (options?.search) {
+    const pattern = `%${options.search}%`;
+    values.push(pattern, pattern);
+    whereClauses.push(
+      `(r.workflow_name LIKE $${String(values.length - 1)} OR r.user_message LIKE $${String(values.length)})`
+    );
+  }
+  if (options?.after) {
+    values.push(options.after);
+    whereClauses.push(`r.started_at >= $${String(values.length)}`);
+  }
+  if (options?.before) {
+    values.push(options.before);
+    whereClauses.push(`r.started_at < $${String(values.length)}`);
+  }
+
+  return whereClauses;
+}
+
+/**
+ * List workflow runs with enriched JOINs for the dashboard Command Center.
+ * Supports server-side search, status/date filtering, and offset-based pagination.
+ * Returns runs, total matching count, and per-status counts for the filter bar.
+ */
+export async function listDashboardRuns(
+  options?: ListDashboardRunsOptions
+): Promise<DashboardRunsResult> {
+  // Build shared WHERE for both queries
+  const listValues: unknown[] = [];
+  const whereClauses = buildDashboardWhereClauses(options, listValues);
+
+  const limit = options?.limit ?? 50;
+  const offset = options?.offset ?? 0;
+  listValues.push(limit);
+  const limitParam = `$${String(listValues.length)}`;
+  listValues.push(offset);
+  const offsetParam = `$${String(listValues.length)}`;
+
+  const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+  // Build count query with the same base filters MINUS the status filter.
+  // This lets us compute per-status counts across the full filtered set.
+  const countValues: unknown[] = [];
+  const countWhereClauses = buildDashboardWhereClauses(
+    options ? { ...options, status: undefined } : undefined,
+    countValues
+  );
+  const countWhereStr =
+    countWhereClauses.length > 0 ? `WHERE ${countWhereClauses.join(' AND ')}` : '';
+
+  try {
+    const [listResult, countResult] = await Promise.all([
+      pool.query<DashboardWorkflowRun>(
+        `SELECT r.*,
+                c.platform_type,
+                c.platform_conversation_id AS worker_platform_id,
+                pc.platform_conversation_id AS parent_platform_id,
+                cb.name AS codebase_name
+         FROM remote_agent_workflow_runs r
+         LEFT JOIN remote_agent_conversations c ON r.conversation_id = c.id
+         LEFT JOIN remote_agent_conversations pc ON r.parent_conversation_id = pc.id
+         LEFT JOIN remote_agent_codebases cb ON r.codebase_id = cb.id
+         ${whereStr}
+         ORDER BY r.started_at DESC
+         LIMIT ${limitParam} OFFSET ${offsetParam}`,
+        listValues
+      ),
+      pool.query<{ status: string; cnt: string }>(
+        `SELECT r.status, COUNT(*) AS cnt
+         FROM remote_agent_workflow_runs r
+         ${countWhereStr}
+         GROUP BY r.status`,
+        countValues
+      ),
+    ]);
+
+    const counts = { all: 0, running: 0, completed: 0, failed: 0, cancelled: 0, pending: 0 };
+    for (const row of countResult.rows) {
+      const n = Number(row.cnt);
+      counts.all += n;
+      if (row.status in counts) {
+        counts[row.status as keyof Omit<typeof counts, 'all'>] = n;
+      }
+    }
+
+    // Total for the current filter (with status applied)
+    const total = options?.status
+      ? (counts[options.status as keyof typeof counts] ?? 0)
+      : counts.all;
+
+    return { runs: [...listResult.rows], total, counts };
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err }, 'list_dashboard_runs_failed');
+    throw new Error(`Failed to list dashboard runs: ${err.message}`);
   }
 }
 
@@ -365,7 +545,7 @@ export async function listWorkflowRuns(options?: {
     return [...result.rows];
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'list_workflow_runs_failed');
+    getLog().error({ err }, 'db.workflow_run_list_failed');
     throw new Error(`Failed to list workflow runs: ${err.message}`);
   }
 }
@@ -385,7 +565,7 @@ export async function updateWorkflowRunParent(
     );
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err, runId, parentConversationId }, 'update_workflow_run_parent_failed');
+    getLog().error({ err, runId, parentConversationId }, 'db.workflow_run_update_parent_failed');
     // Non-critical — don't throw
   }
 }
@@ -431,13 +611,13 @@ export async function failStaleWorkflowRuns(
     if (count > 0) {
       getLog().info(
         { count, thresholdMinutes: staleThresholdMinutes },
-        'stale_runs.cleanup_completed'
+        'db.stale_workflow_runs_cleanup_completed'
       );
     }
     return { count };
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'stale_runs.cleanup_failed');
+    getLog().error({ err }, 'db.stale_workflow_runs_cleanup_failed');
     throw new Error(`Failed to clean up stale workflow runs: ${err.message}`);
   }
 }

@@ -9,6 +9,7 @@ import type {
   WorkflowLoadResult,
   LoopConfig,
   SingleStep,
+  StepRetryConfig,
   WorkflowStep,
   DagNode,
 } from './types';
@@ -81,6 +82,63 @@ function parseToolList(
 }
 
 /**
+ * Parse and validate a retry config object.
+ * Returns the validated config, undefined if not present, or null if validation failed.
+ */
+function parseRetryConfig(
+  raw: unknown,
+  context: string,
+  errors: string[]
+): StepRetryConfig | undefined | null {
+  if (raw === undefined) return undefined;
+
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    errors.push(
+      `${context}: 'retry' must be an object with { max_attempts, delay_ms?, on_error? }`
+    );
+    return null;
+  }
+
+  const obj = raw as Record<string, unknown>;
+
+  // max_attempts is required
+  if (obj.max_attempts === undefined) {
+    errors.push(`${context}: 'retry.max_attempts' is required`);
+    return null;
+  }
+  if (typeof obj.max_attempts !== 'number' || !Number.isInteger(obj.max_attempts)) {
+    errors.push(`${context}: 'retry.max_attempts' must be an integer`);
+    return null;
+  }
+  if (obj.max_attempts < 1 || obj.max_attempts > 5) {
+    errors.push(`${context}: 'retry.max_attempts' must be between 1 and 5`);
+    return null;
+  }
+
+  const result: StepRetryConfig = { max_attempts: obj.max_attempts };
+
+  // delay_ms is optional
+  if (obj.delay_ms !== undefined) {
+    if (typeof obj.delay_ms !== 'number' || obj.delay_ms < 1000 || obj.delay_ms > 60000) {
+      errors.push(`${context}: 'retry.delay_ms' must be a number between 1000 and 60000`);
+      return null;
+    }
+    result.delay_ms = obj.delay_ms;
+  }
+
+  // on_error is optional
+  if (obj.on_error !== undefined) {
+    if (obj.on_error !== 'transient' && obj.on_error !== 'all') {
+      errors.push(`${context}: 'retry.on_error' must be 'transient' or 'all'`);
+      return null;
+    }
+    result.on_error = obj.on_error;
+  }
+
+  return result;
+}
+
+/**
  * Parse a single step (helper for parseStep)
  * @param errors - Array to collect validation errors for aggregated reporting
  */
@@ -122,6 +180,25 @@ function parseSingleStep(s: unknown, indexPath: string, errors: string[]): Singl
       'tool_restrictions_denied_tools_on_empty_allowed_tools_ignored'
     );
   }
+
+  // Parse idle_timeout (finite positive number or undefined)
+  if (step.idle_timeout !== undefined) {
+    if (
+      typeof step.idle_timeout === 'number' &&
+      step.idle_timeout > 0 &&
+      isFinite(step.idle_timeout)
+    ) {
+      result.idle_timeout = step.idle_timeout;
+    } else {
+      errors.push(`Step ${indexPath}: 'idle_timeout' must be a finite positive number (ms)`);
+      return null;
+    }
+  }
+
+  // Parse retry config
+  const retryConfig = parseRetryConfig(step.retry, `Step ${indexPath}`, errors);
+  if (retryConfig === null && step.retry !== undefined) return null; // validation failed
+  if (retryConfig) result.retry = retryConfig;
 
   return result;
 }
@@ -248,13 +325,34 @@ function parseDagNode(
       }
     }
 
+    // Parse idle_timeout (finite positive number or undefined)
+    let idleTimeout: number | undefined;
+    if (raw.idle_timeout !== undefined) {
+      if (
+        typeof raw.idle_timeout === 'number' &&
+        raw.idle_timeout > 0 &&
+        isFinite(raw.idle_timeout)
+      ) {
+        idleTimeout = raw.idle_timeout;
+      } else {
+        errors.push(`Node '${id}': 'idle_timeout' must be a finite positive number (ms)`);
+        return null;
+      }
+    }
+
+    // Parse retry for bash nodes
+    const bashRetry = parseRetryConfig(raw.retry, `Node '${id}'`, errors);
+    if (bashRetry === null && raw.retry !== undefined) return null;
+
     return {
       id,
       bash: String(raw.bash).trim(),
       ...(timeout !== undefined ? { timeout } : {}),
+      ...(idleTimeout !== undefined ? { idle_timeout: idleTimeout } : {}),
       ...(dependsOn.length > 0 ? { depends_on: dependsOn } : {}),
       ...(whenStr !== undefined ? { when: whenStr } : {}),
       ...(triggerRule ? { trigger_rule: triggerRule } : {}),
+      ...(bashRetry ? { retry: bashRetry } : {}),
     };
   }
 
@@ -268,8 +366,29 @@ function parseDagNode(
     return null;
   }
 
+  // Parse idle_timeout for AI nodes (finite positive number or undefined)
+  let aiIdleTimeout: number | undefined;
+  if (raw.idle_timeout !== undefined) {
+    if (
+      typeof raw.idle_timeout === 'number' &&
+      raw.idle_timeout > 0 &&
+      isFinite(raw.idle_timeout)
+    ) {
+      aiIdleTimeout = raw.idle_timeout;
+    } else {
+      errors.push(`Node '${id}': 'idle_timeout' must be a finite positive number (ms)`);
+      return null;
+    }
+  }
+
+  // Parse retry for AI nodes
+  const aiRetry = parseRetryConfig(raw.retry, `Node '${id}'`, errors);
+  if (aiRetry === null && raw.retry !== undefined) return null;
+
   const errorsBeforeToolFields = errors.length;
   const baseFields = {
+    ...(aiIdleTimeout !== undefined ? { idle_timeout: aiIdleTimeout } : {}),
+    ...(aiRetry ? { retry: aiRetry } : {}),
     ...(dependsOn.length > 0 ? { depends_on: dependsOn } : {}),
     ...(whenStr !== undefined ? { when: whenStr } : {}),
     ...(triggerRule ? { trigger_rule: triggerRule } : {}),
@@ -317,7 +436,8 @@ function parseDagNode(
 }
 
 /**
- * Validate DAG structure: unique IDs, depends_on references exist, no cycles.
+ * Validate DAG structure: unique IDs, depends_on references exist, no cycles,
+ * and $nodeId.output refs in when:/prompt: fields point to known nodes.
  * Returns error message or null if valid.
  */
 function validateDagStructure(nodes: DagNode[]): string | null {
@@ -368,6 +488,24 @@ function validateDagStructure(nodes: DagNode[]): string | null {
   if (visited < nodes.length) {
     const cycleNodes = nodes.filter(n => (inDegree.get(n.id) ?? 0) > 0).map(n => n.id);
     return `Cycle detected among nodes: ${cycleNodes.join(', ')}`;
+  }
+
+  // Check $nodeId.output references in when: and prompt: fields
+  const outputRefPattern = /\$([a-zA-Z_][a-zA-Z0-9_-]*)\.output/g;
+  for (const node of nodes) {
+    const sources: string[] = [];
+    if (node.when) sources.push(node.when);
+    if ('prompt' in node && typeof node.prompt === 'string') sources.push(node.prompt);
+    for (const source of sources) {
+      let m: RegExpExecArray | null;
+      outputRefPattern.lastIndex = 0; // reset stateful g-flag regex before each new source string
+      while ((m = outputRefPattern.exec(source)) !== null) {
+        const refNodeId = m[1];
+        if (refNodeId !== undefined && !ids.has(refNodeId)) {
+          return `Node '${node.id}' references unknown node '$${refNodeId}.output'`;
+        }
+      }
+    }
   }
 
   return null; // valid
@@ -933,7 +1071,7 @@ export async function discoverWorkflows(
   const workflows = Array.from(workflowsByFile.values());
   getLog().info(
     { count: workflows.length, errorCount: allErrors.length },
-    'workflows_discovery_complete'
+    'workflows_discovery_completed'
   );
   return { workflows, errors: allErrors };
 }

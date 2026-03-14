@@ -1,22 +1,37 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { MessageSquare } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { StepProgress } from './StepProgress';
+import { DagNodeProgress } from './DagNodeProgress';
 import { StepLogs } from './StepLogs';
 import { WorkflowLogs } from './WorkflowLogs';
 import { ArtifactSummary } from './ArtifactSummary';
 import { useWorkflowStatus } from '@/hooks/useWorkflowStatus';
 import { getWorkflowRun, getWorkflowRunByWorker, getCodebase } from '@/lib/api';
-import type { WorkflowState, ArtifactType, WorkflowRunStatus } from '@/lib/types';
-
-function ensureUtc(timestamp: string): string {
-  return timestamp.endsWith('Z') ? timestamp : timestamp + 'Z';
-}
+import { ensureUtc, formatDurationMs } from '@/lib/format';
+import type {
+  WorkflowState,
+  ArtifactType,
+  WorkflowRunStatus,
+  DagNodeState,
+  WorkflowStepStatus,
+} from '@/lib/types';
+import type { WorkflowEventResponse } from '@/lib/api';
 
 const TERMINAL_STATUSES: readonly WorkflowRunStatus[] = ['completed', 'failed', 'cancelled'];
 
 function isTerminal(status: WorkflowRunStatus): boolean {
   return TERMINAL_STATUSES.includes(status);
+}
+
+interface WorkflowRunQueryData {
+  workflowState: WorkflowState;
+  workerPlatformId: string | null;
+  parentPlatformId: string | null;
+  conversationPlatformId: string | null;
+  codebaseId: string | null;
+  events: WorkflowEventResponse[];
 }
 
 interface WorkflowExecutionProps {
@@ -40,34 +55,33 @@ function StatusBadge({ status }: { status: string }): React.ReactElement {
   );
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${String(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
-}
-
 export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.ReactElement {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { workflows, handlers: workflowHandlers } = useWorkflowStatus();
   const [selectedStep, setSelectedStep] = useState(0);
-  const [initialData, setInitialData] = useState<WorkflowState | null>(null);
-  const [workerPlatformId, setWorkerPlatformId] = useState<string | null>(null);
-  const [parentPlatformId, setParentPlatformId] = useState<string | null>(null);
+  const [selectedDagNode, setSelectedDagNode] = useState<string | null>(null);
   const [codebaseName, setCodebaseName] = useState<string | null>(null);
   const [workerRunId, setWorkerRunId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Track which codebaseId we've already fetched to avoid stale re-fetches during runId transitions
+  const fetchedCodebaseIdRef = useRef<string | null>(null);
 
-  // Fetch initial data
+  // Reset local state when navigating to a different workflow run
   useEffect(() => {
-    getWorkflowRun(runId)
-      .then(data => {
-        if (data.run.worker_platform_id) {
-          setWorkerPlatformId(data.run.worker_platform_id);
-        }
-        if (data.run.parent_platform_id) {
-          setParentPlatformId(data.run.parent_platform_id);
-        }
-        setInitialData({
+    setSelectedStep(0);
+    setSelectedDagNode(null);
+    setCodebaseName(null);
+    setWorkerRunId(null);
+    fetchedCodebaseIdRef.current = null;
+  }, [runId]);
+
+  // Fetch workflow run data with polling while running
+  const { data: queryData, error: queryError } = useQuery({
+    queryKey: ['workflowRun', runId],
+    queryFn: async (): Promise<WorkflowRunQueryData> => {
+      const data = await getWorkflowRun(runId);
+      return {
+        workflowState: {
           runId: data.run.id,
           workflowName: data.run.workflow_name,
           status: data.run.status,
@@ -108,6 +122,34 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
             }
             return Array.from(stepMap.values()).sort((a, b) => a.index - b.index);
           })(),
+          dagNodes: ((): DagNodeState[] => {
+            const nodeMap = new Map<string, DagNodeState>();
+            for (const e of data.events.filter(ev => ev.event_type.startsWith('node_'))) {
+              const nodeId = e.step_name ?? (e.data.nodeId as string) ?? '';
+              if (!nodeId) continue;
+              const status =
+                e.event_type === 'node_started'
+                  ? 'running'
+                  : e.event_type === 'node_completed'
+                    ? 'completed'
+                    : e.event_type === 'node_failed'
+                      ? 'failed'
+                      : 'skipped';
+              const existing = nodeMap.get(nodeId);
+              // Keep the latest non-running status (completed/failed/skipped override running)
+              if (!existing || status !== 'running') {
+                nodeMap.set(nodeId, {
+                  nodeId,
+                  name: nodeId,
+                  status: status as WorkflowStepStatus,
+                  duration: e.data.duration_ms as number | undefined,
+                  error: e.data.error as string | undefined,
+                  reason: e.data.reason as 'when_condition' | 'trigger_rule' | undefined,
+                });
+              }
+            }
+            return Array.from(nodeMap.values());
+          })(),
           artifacts: data.events
             .filter(e => e.event_type === 'workflow_artifact')
             .map(e => {
@@ -125,26 +167,57 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
           completedAt: data.run.completed_at
             ? new Date(ensureUtc(data.run.completed_at)).getTime()
             : undefined,
-        });
-        if (data.run.codebase_id) {
-          getCodebase(data.run.codebase_id)
-            .then(cb => {
-              setCodebaseName(cb.name);
-            })
-            .catch((err: unknown) => {
-              console.warn('[WorkflowExecution] Failed to load codebase name', {
-                codebaseId: data.run.codebase_id,
-                error: err instanceof Error ? err.message : err,
-              });
-            });
-        }
+        },
+        workerPlatformId: data.run.worker_platform_id ?? null,
+        parentPlatformId: data.run.parent_platform_id ?? null,
+        conversationPlatformId: data.run.conversation_platform_id ?? null,
+        codebaseId: data.run.codebase_id ?? null,
+        events: data.events,
+      };
+    },
+    refetchInterval: (query): number | false => {
+      const status = query.state.data?.workflowState.status;
+      if (status && isTerminal(status)) return false;
+      return 3000;
+    },
+    staleTime: 0,
+  });
+
+  const initialData = queryData?.workflowState ?? null;
+  const workerPlatformId = queryData?.workerPlatformId ?? null;
+  const parentPlatformId = queryData?.parentPlatformId ?? null;
+  const conversationPlatformId = queryData?.conversationPlatformId ?? null;
+  const error = queryError
+    ? queryError instanceof Error
+      ? queryError.message
+      : String(queryError)
+    : null;
+
+  // Fetch codebase name when run data becomes available
+  const codebaseId = queryData?.codebaseId ?? null;
+  useEffect(() => {
+    if (!codebaseId || fetchedCodebaseIdRef.current === codebaseId) return;
+    fetchedCodebaseIdRef.current = codebaseId;
+    void getCodebase(codebaseId)
+      .then(cb => {
+        setCodebaseName(cb.name);
       })
       .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error('[WorkflowExecution] Failed to load workflow run', { runId, error: message });
-        setError(message);
+        console.warn('[WorkflowExecution] Failed to load codebase name', {
+          codebaseId,
+          error: err instanceof Error ? err.message : err,
+        });
       });
-  }, [runId]);
+  }, [codebaseId]);
+
+  // When SSE reports a terminal status but React Query data is still stale,
+  // invalidate the cache to trigger an immediate re-fetch with correct data.
+  const liveStatus = workflows.get(runId)?.status;
+  useEffect(() => {
+    if (!liveStatus || !isTerminal(liveStatus)) return;
+    if (initialData && isTerminal(initialData.status)) return; // Already up to date
+    void queryClient.invalidateQueries({ queryKey: ['workflowRun', runId] });
+  }, [runId, liveStatus, initialData, queryClient]);
 
   // Look up the workflow run associated with this worker conversation
   useEffect(() => {
@@ -164,8 +237,12 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       });
   }, [workerPlatformId]);
 
-  // SSE leads by default; REST overrides only when it reports a terminal state
-  // that SSE has not yet reflected (prevents stale 'running' from lingering).
+  // Merge REST (initialData) and SSE (liveWorkflow) data.
+  // REST provides structural data (steps, startedAt, artifacts) from DB.
+  // SSE provides live status updates (status, completedAt, error).
+  // When a `running` SSE event is missed (no buffering), the first SSE event
+  // seen is `completed` — which creates liveWorkflow with steps:[] and
+  // startedAt=completionTime. We must preserve initialData's structure in that case.
   const liveWorkflow = workflows.get(runId);
   const workflow = ((): WorkflowState | null => {
     if (!liveWorkflow) return initialData;
@@ -178,7 +255,22 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       });
       return initialData;
     }
-    return liveWorkflow;
+    // Merge: use liveWorkflow's dynamic status but preserve initialData's
+    // structural data when liveWorkflow is sparse (missed earlier events).
+    return {
+      ...initialData,
+      status: liveWorkflow.status,
+      completedAt: liveWorkflow.completedAt ?? initialData.completedAt,
+      error: liveWorkflow.error ?? initialData.error,
+      // SSE accumulates steps/artifacts/dagNodes incrementally — prefer them when populated,
+      // otherwise fall back to the REST snapshot.
+      steps: liveWorkflow.steps.length > 0 ? liveWorkflow.steps : initialData.steps,
+      dagNodes: liveWorkflow.dagNodes.length > 0 ? liveWorkflow.dagNodes : initialData.dagNodes,
+      artifacts: liveWorkflow.artifacts.length > 0 ? liveWorkflow.artifacts : initialData.artifacts,
+      isLoop: liveWorkflow.isLoop || initialData.isLoop,
+      currentIteration: liveWorkflow.currentIteration ?? initialData.currentIteration,
+      maxIterations: liveWorkflow.maxIterations ?? initialData.maxIterations,
+    };
   })();
 
   // Force re-render every second while workflow is running (for live timer)
@@ -192,6 +284,108 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       clearInterval(interval);
     };
   }, [workflow?.status]);
+
+  // Derive the currently executing node/step from events data
+  const currentlyExecuting = useMemo((): { nodeName: string; startedAt: number } | null => {
+    if (!queryData?.events || workflow?.status !== 'running') return null;
+    const events = queryData.events;
+
+    // Find nodes that started but haven't completed/failed/skipped
+    const startedNodes = new Set<string>();
+    const completedNodes = new Set<string>();
+
+    for (const e of events) {
+      const nodeId = e.step_name ?? '';
+      if (e.event_type === 'node_started') startedNodes.add(nodeId);
+      if (
+        e.event_type === 'node_completed' ||
+        e.event_type === 'node_failed' ||
+        e.event_type === 'node_skipped'
+      ) {
+        completedNodes.add(nodeId);
+      }
+    }
+
+    // Find the first started-but-not-completed node
+    for (const nodeId of startedNodes) {
+      if (!completedNodes.has(nodeId)) {
+        const startEvent = events.find(
+          e => e.event_type === 'node_started' && e.step_name === nodeId
+        );
+        if (startEvent) {
+          return {
+            nodeName: nodeId,
+            startedAt: new Date(ensureUtc(startEvent.created_at)).getTime(),
+          };
+        }
+      }
+    }
+
+    // Fallback for sequential workflows: check step events
+    if (workflow) {
+      for (const step of workflow.steps) {
+        if (step.status === 'running') {
+          return { nodeName: step.name, startedAt: workflow.startedAt };
+        }
+      }
+    }
+
+    return null;
+  }, [queryData?.events, workflow?.status, workflow?.steps, workflow?.startedAt]);
+
+  // Compute formatted log lines for the selected step from DB events
+  const stepLogLines = useMemo((): string[] => {
+    const events = queryData?.events ?? [];
+    const stepEvents = events.filter(e => e.step_index === selectedStep);
+    if (stepEvents.length === 0) return [];
+
+    return stepEvents.map(e => {
+      const ts = new Date(e.created_at).toLocaleTimeString();
+      switch (e.event_type) {
+        case 'step_started':
+          return `[${ts}] Step started: ${e.step_name ?? `step ${String(selectedStep + 1)}`}`;
+        case 'step_completed': {
+          const dur = e.data.duration_ms as number | undefined;
+          const durStr = dur !== undefined ? ` (${String(Math.round(dur / 100) / 10)}s)` : '';
+          return `[${ts}] Step completed${durStr}`;
+        }
+        case 'step_failed':
+          return `[${ts}] Step failed: ${(e.data.error as string | undefined) ?? 'Unknown error'}`;
+        case 'step_skipped_prior_success':
+          return `[${ts}] Step skipped (already completed in prior run)`;
+        case 'parallel_agent_started':
+          return `[${ts}] Agent ${String((e.data.agentIndex as number) + 1)}/${String(e.data.totalAgents)}: ${e.step_name ?? 'parallel agent'} started`;
+        case 'parallel_agent_completed': {
+          const dur = e.data.duration_ms as number | undefined;
+          const durStr = dur !== undefined ? ` (${String(Math.round(dur / 100) / 10)}s)` : '';
+          return `[${ts}] Agent ${String((e.data.agentIndex as number) + 1)}/${String(e.data.totalAgents)}: ${e.step_name ?? 'parallel agent'} completed${durStr}`;
+        }
+        case 'parallel_agent_failed':
+          return `[${ts}] Agent ${String((e.data.agentIndex as number) + 1)}/${String(e.data.totalAgents)}: ${e.step_name ?? 'parallel agent'} failed: ${(e.data.error as string | undefined) ?? 'Unknown error'}`;
+        case 'loop_iteration_started':
+          return `[${ts}] Iteration ${String(e.data.iteration)}/${String((e.data.maxIterations as number | undefined) ?? '?')} started`;
+        case 'loop_iteration_completed': {
+          const dur = e.data.duration_ms as number | undefined;
+          const durStr = dur !== undefined ? ` (${String(Math.round(dur / 100) / 10)}s)` : '';
+          return `[${ts}] Iteration ${String(e.data.iteration)} completed${durStr}`;
+        }
+        case 'loop_iteration_failed':
+          return `[${ts}] Iteration ${String(e.data.iteration)} failed: ${(e.data.error as string | undefined) ?? 'Unknown error'}`;
+        // TODO: node_* events have step_index=null so they won't appear in stepLogLines
+        // until DAG-aware log filtering is added (node selection by step_name, not step_index).
+        case 'node_started':
+          return `[${ts}] Node started: ${e.step_name ?? 'node'}`;
+        case 'node_completed':
+          return `[${ts}] Node completed: ${e.step_name ?? 'node'}`;
+        case 'node_failed':
+          return `[${ts}] Node failed: ${e.step_name ?? 'node'}: ${(e.data.error as string | undefined) ?? 'Unknown error'}`;
+        case 'node_skipped':
+          return `[${ts}] Node skipped: ${e.step_name ?? 'node'}`;
+        default:
+          return `[${ts}] ${e.event_type}${e.step_name ? `: ${e.step_name}` : ''}`;
+      }
+    });
+  }, [queryData?.events, selectedStep]);
 
   if (error) {
     return (
@@ -209,7 +403,16 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
     );
   }
 
-  const elapsed = Math.max(0, (workflow.completedAt ?? Date.now()) - workflow.startedAt);
+  // Only trust initialData.startedAt (from DB) for elapsed calculation.
+  // SSE's startedAt is unreliable when 'running' was missed and the first event
+  // is 'completed', which sets startedAt = completedAt = same Date.now().
+  // Show 0 until REST fetch provides the authoritative timestamp.
+  const startedAt = initialData?.startedAt ?? 0;
+  const completedAt =
+    initialData && isTerminal(initialData.status) && initialData.completedAt
+      ? initialData.completedAt
+      : (workflow.completedAt ?? (startedAt ? Date.now() : 0));
+  const elapsed = startedAt ? Math.max(0, completedAt - startedAt) : 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -217,7 +420,11 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
         <button
           onClick={(): void => {
-            navigate(-1);
+            if (window.history.length > 1) {
+              navigate(-1);
+            } else {
+              navigate('/workflows');
+            }
           }}
           className="text-text-secondary hover:text-text-primary transition-colors text-sm"
           title="Back"
@@ -250,35 +457,53 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
               className="flex items-center gap-1 text-xs text-primary hover:text-accent-bright transition-colors"
               title="View workflow run details"
             >
-              <span>View Run</span>
+              <span>Run Details</span>
             </button>
           )}
-          <span className="text-xs text-text-secondary">{formatDuration(elapsed)}</span>
+          <span className="text-xs text-text-secondary">{formatDurationMs(elapsed)}</span>
         </div>
       </div>
 
       {/* Body: Step list + Logs */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left panel: Step list */}
+      <div className="flex flex-1 overflow-hidden min-h-0">
+        {/* Left panel: Step list or DAG nodes */}
         <div className="w-64 border-r border-border overflow-auto">
-          <StepProgress
-            steps={workflow.steps}
-            activeStepIndex={selectedStep}
-            onStepClick={setSelectedStep}
-          />
+          {workflow.dagNodes.length > 0 ? (
+            <DagNodeProgress
+              nodes={workflow.dagNodes}
+              activeNodeId={selectedDagNode}
+              onNodeClick={setSelectedDagNode}
+            />
+          ) : (
+            <StepProgress
+              steps={workflow.steps}
+              activeStepIndex={selectedStep}
+              onStepClick={setSelectedStep}
+            />
+          )}
         </div>
 
         {/* Right panel: Logs + Artifacts */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-auto">
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
             {workerPlatformId ? (
               <WorkflowLogs
                 conversationId={workerPlatformId}
-                startedAt={workflow.startedAt}
+                startedAt={initialData?.startedAt}
+                isRunning={workflow.status === 'running' || workflow.status === 'pending'}
                 workflowHandlers={workflowHandlers}
+                currentlyExecuting={currentlyExecuting}
+              />
+            ) : conversationPlatformId ? (
+              <WorkflowLogs
+                conversationId={conversationPlatformId}
+                startedAt={initialData?.startedAt}
+                isRunning={workflow.status === 'running' || workflow.status === 'pending'}
+                workflowHandlers={workflowHandlers}
+                currentlyExecuting={currentlyExecuting}
               />
             ) : (
-              <StepLogs runId={runId} stepIndex={selectedStep} />
+              <StepLogs runId={runId} stepIndex={selectedStep} lines={stepLogLines} />
             )}
           </div>
           {workflow.status !== 'running' &&

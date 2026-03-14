@@ -50,9 +50,21 @@ List workflows available in target directory.
 
 ```bash
 archon workflow list --cwd /path/to/repo
+
+# Machine-readable output for scripting
+archon workflow list --cwd /path/to/repo --json
 ```
 
 Discovers workflows from `.archon/workflows/` (recursive) plus bundled defaults.
+
+**Flags:**
+
+| Flag | Effect |
+|------|--------|
+| `--cwd <path>` | Target directory (required for most use cases) |
+| `--json` | Output machine-readable JSON instead of formatted text |
+
+With `--json`, outputs `{ "workflows": [...], "errors": [...] }`. Optional fields (`provider`, `model`, `modelReasoningEffort`, `webSearchMode`) are omitted when not set on a workflow.
 
 ### `workflow run <name> [message]`
 
@@ -72,6 +84,7 @@ archon workflow run plan --cwd /path/to/repo --branch feature-x "Add caching"
 |------|--------|
 | `--cwd <path>` | Target directory (required for most use cases) |
 | `--branch <name>` | Create/reuse worktree for branch |
+| `--from <branch>`, `--from-branch <branch>` | Start point for new branch when using `--branch` |
 | `--no-worktree` | Checkout branch directly (no worktree) |
 
 **With `--branch`:**
@@ -107,6 +120,25 @@ archon isolation cleanup 14
 # Remove environments with branches merged into main (also deletes remote branches)
 archon isolation cleanup --merged
 ```
+
+### `complete <branch> [branch2 ...]`
+
+Remove a branch's worktree, local branch, and remote branch, and mark its isolation
+environment as destroyed.
+
+```bash
+archon complete feature-auth
+archon complete feature-auth --force  # bypass uncommitted-changes check
+```
+
+**Flags:**
+
+| Flag | Effect |
+|------|--------|
+| `--force` | Skip uncommitted-changes guard |
+
+Use this after a PR is merged and you no longer need the worktree or branches. Accepts
+multiple branch names in one call.
 
 ### `version`
 
@@ -155,6 +187,9 @@ archon workflow run plan --cwd ~/projects/my-app "Add rate limiting to the API"
 
 # Implement on isolated branch
 archon workflow run implement --cwd ~/projects/my-app --branch feature-rate-limit "Add rate limiting"
+
+# Branch from a specific source branch instead of main
+archon workflow run implement --cwd ~/projects/my-app --branch test-adapters --from feature/extract-adapters "Test adapter changes"
 
 # Check worktrees after work session
 archon isolation list

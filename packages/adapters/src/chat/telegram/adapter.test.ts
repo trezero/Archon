@@ -124,5 +124,114 @@ describe('TelegramAdapter', () => {
       // Should still send successfully via sendFormattedChunk fallback
       expect(mockSendMessage).toHaveBeenCalled();
     });
+
+    test('should send each paragraph-split chunk independently', async () => {
+      // Two large paragraphs (double-newline separated) that together exceed MAX_LENGTH.
+      // splitIntoParagraphChunks breaks them apart so each chunk is under the limit.
+      const para1 = 'A'.repeat(3000);
+      const para2 = 'B'.repeat(3000);
+      const message = `${para1}\n\n${para2}`;
+
+      await adapter.sendMessage('55555', message);
+
+      // Two separate sendMessage calls — one per paragraph chunk
+      expect(mockSendMessage).toHaveBeenCalledTimes(2);
+      // First call has parse_mode: MarkdownV2
+      expect(mockSendMessage).toHaveBeenNthCalledWith(
+        1,
+        55555,
+        expect.any(String),
+        expect.objectContaining({ parse_mode: 'MarkdownV2' })
+      );
+      expect(mockSendMessage).toHaveBeenNthCalledWith(
+        2,
+        55555,
+        expect.any(String),
+        expect.objectContaining({ parse_mode: 'MarkdownV2' })
+      );
+    });
+
+    test('should fall back to plain text and use line-based batching when MarkdownV2 fails on chunk', async () => {
+      // First MarkdownV2 attempt fails; second call is plain-text fallback
+      mockSendMessage
+        .mockRejectedValueOnce(new Error("Bad Request: can't parse entities"))
+        .mockResolvedValueOnce(undefined);
+
+      await adapter.sendMessage('77777', 'plain fallback text');
+
+      // 2 calls: 1 failed MarkdownV2 + 1 plain text fallback
+      expect(mockSendMessage).toHaveBeenCalledTimes(2);
+      // Second call has no parse_mode (plain text)
+      const secondCall = mockSendMessage.mock.calls[1];
+      expect(secondCall.length).toBe(2); // (id, text) — no options object
+    });
+  });
+
+  describe('getConversationId', () => {
+    test('should return chat.id as string for private chat', () => {
+      const adapter = new TelegramAdapter('fake-token-for-testing');
+      const ctx = {
+        chat: { id: 12345 },
+      } as unknown as import('telegraf').Context;
+
+      expect(adapter.getConversationId(ctx)).toBe('12345');
+    });
+
+    test('should return chat.id as string for group chat', () => {
+      const adapter = new TelegramAdapter('fake-token-for-testing');
+      const ctx = {
+        chat: { id: -987654321 },
+      } as unknown as import('telegraf').Context;
+
+      expect(adapter.getConversationId(ctx)).toBe('-987654321');
+    });
+
+    test('should return chat.id as string for supergroup', () => {
+      const adapter = new TelegramAdapter('fake-token-for-testing');
+      const ctx = {
+        chat: { id: -1001234567890 },
+      } as unknown as import('telegraf').Context;
+
+      expect(adapter.getConversationId(ctx)).toBe('-1001234567890');
+    });
+
+    test('should throw when ctx.chat is undefined', () => {
+      const adapter = new TelegramAdapter('fake-token-for-testing');
+      const ctx = {
+        chat: undefined,
+      } as unknown as import('telegraf').Context;
+
+      expect(() => adapter.getConversationId(ctx)).toThrow('No chat in context');
+    });
+
+    test('should throw when ctx.chat is null', () => {
+      const adapter = new TelegramAdapter('fake-token-for-testing');
+      const ctx = {
+        chat: null,
+      } as unknown as import('telegraf').Context;
+
+      expect(() => adapter.getConversationId(ctx)).toThrow('No chat in context');
+    });
+  });
+
+  describe('ensureThread', () => {
+    test('should return the original conversation ID unchanged', async () => {
+      const adapter = new TelegramAdapter('fake-token-for-testing');
+      const result = await adapter.ensureThread('12345');
+      expect(result).toBe('12345');
+    });
+
+    test('should return original ID even when messageContext is supplied', async () => {
+      const adapter = new TelegramAdapter('fake-token-for-testing');
+      const result = await adapter.ensureThread('99999', { some: 'context' });
+      expect(result).toBe('99999');
+    });
+  });
+
+  describe('platform type and streaming mode', () => {
+    test('should return telegram as platform type', () => {
+      const adapter = new TelegramAdapter('fake-token-for-testing');
+      expect(adapter.getPlatformType()).toBe('telegram');
+    });
   });
 });

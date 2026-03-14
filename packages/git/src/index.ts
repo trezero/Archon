@@ -15,6 +15,7 @@ export { execFileAsync, mkdirAsync } from './exec';
 
 // Worktree operations
 export {
+  extractOwnerRepo,
   getWorktreeBase,
   isProjectScopedWorktreeBase,
   worktreeExists,

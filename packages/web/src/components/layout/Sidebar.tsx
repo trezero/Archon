@@ -9,8 +9,9 @@ import {
   ChevronDown,
   FolderGit2,
   MessageSquarePlus,
+  LayoutDashboard,
 } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
@@ -20,7 +21,7 @@ import { ProjectDetail } from '@/components/sidebar/ProjectDetail';
 import { AllConversationsView } from '@/components/sidebar/AllConversationsView';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useProject } from '@/contexts/ProjectContext';
-import { addCodebase } from '@/lib/api';
+import { addCodebase, listWorkflowRuns } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const SIDEBAR_MIN = 240;
@@ -123,9 +124,10 @@ export function Sidebar(): React.ReactElement {
     setAddLoading(true);
     setAddError(null);
 
-    // Detect: starts with / or ~ → local path; otherwise → URL
-    const input =
-      trimmed.startsWith('/') || trimmed.startsWith('~') ? { path: trimmed } : { url: trimmed };
+    // Detect: starts with / or ~ or Windows drive letter → local path; otherwise → URL
+    const isLocalPath =
+      trimmed.startsWith('/') || trimmed.startsWith('~') || /^[A-Za-z]:[/\\]/.test(trimmed);
+    const input = isLocalPath ? { path: trimmed } : { url: trimmed };
 
     void addCodebase(input)
       .then(codebase => {
@@ -171,6 +173,13 @@ export function Sidebar(): React.ReactElement {
     setSelectedProjectId(null);
     navigate('/chat');
   }, [navigate, setSelectedProjectId]);
+
+  const { data: runningRuns } = useQuery({
+    queryKey: ['workflowRuns', { status: 'running' }],
+    queryFn: () => listWorkflowRuns({ status: 'running', limit: 1 }),
+    refetchInterval: 10_000,
+  });
+  const hasRunning = (runningRuns?.length ?? 0) > 0;
 
   useKeyboardShortcuts(shortcuts);
 
@@ -321,6 +330,13 @@ export function Sidebar(): React.ReactElement {
 
       {/* Navigation */}
       <nav className="flex flex-col gap-1 p-2">
+        <NavLink to="/" end className={navLinkClass}>
+          <LayoutDashboard className="h-4 w-4" />
+          Mission Control
+          {hasRunning && (
+            <span className="ml-auto flex h-2 w-2 rounded-full bg-primary animate-pulse" />
+          )}
+        </NavLink>
         <NavLink to="/workflows" end className={navLinkClass}>
           <Workflow className="h-4 w-4" />
           Workflows

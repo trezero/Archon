@@ -944,6 +944,19 @@ describe('GitHubAdapter', () => {
       expect(mockCreateComment).toHaveBeenCalledTimes(2);
     });
 
+    test('should retry on transient status errors', async () => {
+      const transientError = Object.assign(new Error('Gateway failure'), { status: 502 });
+      const mockCreateComment = mock()
+        .mockRejectedValueOnce(transientError) // First attempt fails
+        .mockResolvedValueOnce({ data: {} }); // Second attempt succeeds
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+
+      await testAdapter.sendMessage('owner/repo#123', 'test message');
+
+      // Should have retried once for structured 502 status
+      expect(mockCreateComment).toHaveBeenCalledTimes(2);
+    });
+
     test('should not retry on non-retryable errors', async () => {
       const mockCreateComment = mock().mockRejectedValue(new Error('Bad credentials'));
       const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
@@ -951,6 +964,20 @@ describe('GitHubAdapter', () => {
       // Should throw immediately without retry
       await expect(testAdapter.sendMessage('owner/repo#123', 'test message')).rejects.toThrow(
         'Bad credentials'
+      );
+
+      // Should only have tried once (no retry for auth errors)
+      expect(mockCreateComment).toHaveBeenCalledTimes(1);
+    });
+
+    test('should not retry on auth status errors', async () => {
+      const authError = Object.assign(new Error('Unauthorized'), { status: 401 });
+      const mockCreateComment = mock().mockRejectedValue(authError);
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+
+      // Should throw immediately without retry
+      await expect(testAdapter.sendMessage('owner/repo#123', 'test message')).rejects.toThrow(
+        'Unauthorized'
       );
 
       // Should only have tried once (no retry for auth errors)

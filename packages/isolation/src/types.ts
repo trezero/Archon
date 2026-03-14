@@ -69,6 +69,8 @@ export interface TaskIsolationRequest extends IsolationRequestBase {
   workflowType: 'task';
   /** Task identifier (will be slugified for branch name, max 50 chars) */
   identifier: string;
+  /** Optional branch to use as start point for new task branch creation */
+  fromBranch?: BranchName;
 }
 
 export type IsolationRequest =
@@ -103,6 +105,8 @@ interface IsolatedEnvironmentBase {
    * For accurate timestamps, store in database.
    */
   createdAt: Date;
+  /** Non-fatal warnings to surface to the user after successful creation */
+  warnings?: string[];
 }
 
 export interface WorktreeEnvironment extends IsolatedEnvironmentBase {
@@ -193,6 +197,10 @@ export interface IsolationHints {
   isForkPR?: boolean;
   prFetchFailed?: boolean;
 
+  // Task-specific
+  /** Start-point branch for new task worktree creation. Only consumed when workflowType === 'task'. */
+  fromBranch?: BranchName;
+
   // Cross-reference hints
   linkedIssues?: number[];
   linkedPRs?: number[];
@@ -279,7 +287,13 @@ export type ResolutionMethod =
   | { type: 'created'; autoCleanedCount?: number };
 
 export type IsolationResolution =
-  | { status: 'resolved'; env: IsolationEnvironmentRow; cwd: string; method: ResolutionMethod }
+  | {
+      status: 'resolved';
+      env: IsolationEnvironmentRow;
+      cwd: string;
+      method: ResolutionMethod;
+      warnings?: string[];
+    }
   | { status: 'stale_cleaned'; previousEnvId: string }
   | { status: 'none'; cwd: string }
   | { status: 'blocked'; reason: IsolationBlockReason; userMessage: string };

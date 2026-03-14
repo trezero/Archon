@@ -31,7 +31,7 @@ export function getWorktreeBase(repoPath: RepoPath): string {
   if (repoPath.startsWith(workspacesPath)) {
     // Extract owner/repo from the path
     const relative = repoPath.substring(workspacesPath.length + 1);
-    const parts = relative.split('/').filter(p => p.length > 0);
+    const parts = relative.split(/[/\\]/).filter(p => p.length > 0);
     if (parts.length >= 2) {
       return getProjectWorktreesPath(parts[0], parts[1]);
     }
@@ -51,7 +51,7 @@ export function isProjectScopedWorktreeBase(repoPath: RepoPath): boolean {
   const workspacesPath = getArchonWorkspacesPath();
   if (!repoPath.startsWith(workspacesPath)) return false;
   const relative = repoPath.substring(workspacesPath.length + 1);
-  const parts = relative.split('/').filter(p => p.length > 0);
+  const parts = relative.split(/[/\\]/).filter(p => p.length > 0);
   return parts.length >= 2;
 }
 
@@ -222,6 +222,20 @@ export async function getCanonicalRepoPath(path: string): Promise<RepoPath> {
 }
 
 /**
+ * Extract owner and repo name from the last two segments of a repository path.
+ * Throws if the path has fewer than 2 non-empty segments.
+ */
+export function extractOwnerRepo(repoPath: RepoPath): { owner: string; repo: string } {
+  const parts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
+  if (parts.length < 2) {
+    throw new Error(
+      `Cannot extract owner/repo from path "${repoPath}": expected at least 2 path segments`
+    );
+  }
+  return { owner: parts[parts.length - 2], repo: parts[parts.length - 1] };
+}
+
+/**
  * Create a git worktree for an issue or PR.
  * Returns the worktree path.
  *
@@ -249,9 +263,7 @@ export async function createWorktreeForIssue(
     worktreePath = toWorktreePath(join(worktreeBase, branchName));
   } else {
     // Legacy global: extract owner/repo from the last two path segments to avoid collisions
-    const pathParts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
-    const repoName = pathParts[pathParts.length - 1];
-    const ownerName = pathParts[pathParts.length - 2];
+    const { owner: ownerName, repo: repoName } = extractOwnerRepo(repoPath);
     worktreePath = toWorktreePath(join(worktreeBase, ownerName, repoName, branchName));
   }
 

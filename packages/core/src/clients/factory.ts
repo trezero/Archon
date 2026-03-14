@@ -4,7 +4,7 @@
  * Dynamically instantiates the appropriate AI assistant client based on type string.
  * Supports Claude and Codex assistants.
  */
-import { IAssistantClient } from '../types';
+import type { IAssistantClient } from '../types';
 import { ClaudeClient } from './claude';
 import { CodexClient } from './codex';
 import { createLogger } from '@archon/paths';

@@ -75,9 +75,11 @@ mock.module('../db/conversations', () => ({
 // Mock sessions DB
 const mockGetActiveSession = mock(() => Promise.resolve(null));
 const mockDeactivateSession = mock(() => Promise.resolve());
+const mockDeleteOldSessions = mock(() => Promise.resolve(0));
 mock.module('../db/sessions', () => ({
   getActiveSession: mockGetActiveSession,
   deactivateSession: mockDeactivateSession,
+  deleteOldSessions: mockDeleteOldSessions,
 }));
 
 // Mock codebases DB
@@ -97,6 +99,7 @@ import {
   removeEnvironment,
   onConversationClosed,
   MAX_WORKTREES_PER_CODEBASE,
+  SESSION_RETENTION_DAYS,
 } from './cleanup-service';
 
 describe('cleanup-service', () => {
@@ -366,6 +369,7 @@ describe('runScheduledCleanup', () => {
     mockGetConversationsUsingEnv.mockClear();
     mockGetById.mockClear();
     mockGetCodebase.mockClear();
+    mockDeleteOldSessions.mockClear();
     // Reset defaults
     mockHasUncommittedChanges.mockResolvedValue(false);
     mockWorktreeExists.mockResolvedValue(false);
@@ -628,6 +632,50 @@ describe('runScheduledCleanup', () => {
     // Both should be marked as destroyed since paths are missing
     expect(report.removed).toContain('env-error (path missing)');
     expect(report.removed).toContain('env-good (path missing)');
+  });
+
+  test('deletes old sessions during scheduled cleanup', async () => {
+    mockListAllActiveWithCodebase.mockResolvedValueOnce([]);
+    mockDeleteOldSessions.mockResolvedValueOnce(5);
+
+    const report = await runScheduledCleanup();
+
+    expect(mockDeleteOldSessions).toHaveBeenCalledWith(SESSION_RETENTION_DAYS);
+    expect(report.sessionsDeleted).toBe(5);
+  });
+
+  test('reports zero when no old sessions to delete', async () => {
+    mockListAllActiveWithCodebase.mockResolvedValueOnce([]);
+    mockDeleteOldSessions.mockResolvedValueOnce(0);
+
+    const report = await runScheduledCleanup();
+
+    expect(mockDeleteOldSessions).toHaveBeenCalledWith(SESSION_RETENTION_DAYS);
+    expect(report.sessionsDeleted).toBe(0);
+  });
+
+  test('records error when session cleanup fails', async () => {
+    mockListAllActiveWithCodebase.mockResolvedValueOnce([]);
+    mockDeleteOldSessions.mockRejectedValueOnce(new Error('database locked'));
+
+    const report = await runScheduledCleanup();
+
+    expect(report.sessionsDeleted).toBe(0);
+    expect(report.errors).toContainEqual({
+      id: 'session-cleanup',
+      error: 'database locked',
+    });
+  });
+});
+
+describe('SESSION_RETENTION_DAYS', () => {
+  test('exports configuration constant', () => {
+    expect(typeof SESSION_RETENTION_DAYS).toBe('number');
+    expect(SESSION_RETENTION_DAYS).toBeGreaterThan(0);
+  });
+
+  test('has default value of 30', () => {
+    expect(SESSION_RETENTION_DAYS).toBe(30);
   });
 });
 

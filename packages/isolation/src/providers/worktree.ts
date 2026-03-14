@@ -11,6 +11,7 @@ import { join } from 'path';
 import { createLogger } from '@archon/paths';
 import {
   execFileAsync,
+  extractOwnerRepo,
   findWorktreeByBranch,
   getCanonicalRepoPath,
   getWorktreeBase,
@@ -64,7 +65,7 @@ export class WorktreeProvider implements IIsolationProvider {
     }
 
     // Create new worktree
-    await this.createWorktree(request, worktreePath, branchName);
+    const { warnings } = await this.createWorktree(request, worktreePath, branchName);
 
     return {
       id: envId,
@@ -74,6 +75,7 @@ export class WorktreeProvider implements IIsolationProvider {
       status: 'active',
       createdAt: new Date(),
       metadata: { adopted: false, request },
+      ...(warnings.length > 0 ? { warnings } : {}),
     };
   }
 
@@ -520,13 +522,14 @@ export class WorktreeProvider implements IIsolationProvider {
   }
 
   /**
-   * Create the actual worktree
+   * Create the actual worktree.
+   * Returns warnings that should be surfaced to the user (non-fatal issues).
    */
   private async createWorktree(
     request: IsolationRequest,
     worktreePath: string,
     branchName: string
-  ): Promise<void> {
+  ): Promise<{ warnings: string[] }> {
     const repoPath = request.canonicalRepoPath;
 
     const worktreeConfig = await this.loadConfig(repoPath).catch(error => {
@@ -534,7 +537,7 @@ export class WorktreeProvider implements IIsolationProvider {
       return null;
     });
 
-    await this.syncWorkspaceBeforeCreate(repoPath, worktreeConfig?.baseBranch);
+    const baseBranch = await this.syncWorkspaceBeforeCreate(repoPath, worktreeConfig?.baseBranch);
 
     const worktreeBase = getWorktreeBase(repoPath);
 
@@ -550,11 +553,23 @@ export class WorktreeProvider implements IIsolationProvider {
       await this.createFromPR(request, worktreePath);
     } else {
       // For issues, tasks, threads: create new branch
-      await this.createNewBranch(repoPath, worktreePath, branchName);
+      await this.createNewBranch(request, repoPath, worktreePath, branchName, baseBranch);
     }
 
     // Copy git-ignored files based on repo config
-    await this.copyConfiguredFiles(repoPath, worktreePath, worktreeConfig);
+    const { configLoadFailed } = await this.copyConfiguredFiles(
+      repoPath,
+      worktreePath,
+      worktreeConfig
+    );
+
+    const warnings: string[] = [];
+    if (configLoadFailed) {
+      warnings.push(
+        'Config file could not be loaded — copyFiles configuration was not applied. Check your .archon/config.yaml for syntax errors.'
+      );
+    }
+    return { warnings };
   }
 
   /**
@@ -566,33 +581,30 @@ export class WorktreeProvider implements IIsolationProvider {
    *   error if the branch doesn't exist - no silent fallback to default.
    * - If configuredBaseBranch is omitted: Auto-detects the default branch via git.
    *
-   * Non-fatal cases (log and continue):
-   * - Network errors, timeouts (offline mode)
-   * - Uncommitted changes in workspace (skip sync to prevent data loss)
+   * All sync failures are fatal — creating a worktree from an unknown
+   * start-point risks branching from the wrong commit.
    *
-   * Fatal cases (throw to user):
-   * - Configured base branch doesn't exist (user configuration error)
-   * - Permission denied
-   * - Not a git repository
+   * Error classification (for user-facing messages):
+   * - Permission denied → file permission hint
+   * - Not a git repository → workspace integrity hint
+   * - Configured base branch missing → config fix hint
+   * - Network errors, timeouts → connectivity hint
    */
   private async syncWorkspaceBeforeCreate(
     repoPath: RepoPath,
     configuredBaseBranch?: string
-  ): Promise<void> {
+  ): Promise<string> {
     try {
       getLog().debug(
         { repoPath, branch: configuredBaseBranch ?? 'auto-detect' },
         'workspace_sync_starting'
       );
-      const { branch, synced } = await syncWorkspace(
+      const { branch } = await syncWorkspace(
         repoPath,
         configuredBaseBranch ? toBranchName(configuredBaseBranch) : undefined
       );
-      if (synced) {
-        getLog().debug({ repoPath, branch }, 'workspace_synced');
-      } else {
-        getLog().debug({ repoPath }, 'workspace_sync_skipped');
-      }
+      getLog().debug({ repoPath, branch }, 'workspace_synced');
+      return branch;
     } catch (error) {
       const err = error as Error & { code?: string };
       const errorMessage = err.message.toLowerCase();
@@ -612,25 +624,32 @@ export class WorktreeProvider implements IIsolationProvider {
         // Configured branch errors are fatal - user needs to fix their config
         throw err;
       } else {
-        // Network errors, timeouts, etc. - truly non-fatal
-        getLog().warn({ err: error, repoPath }, 'workspace_sync_failed');
+        // Network errors, timeouts — cannot guarantee correct start-point
+        throw new Error(
+          `Failed to fetch base branch from origin: ${err.message}. ` +
+            'Check your network connection and try again.'
+        );
       }
     }
   }
 
   /**
-   * Copy git-ignored files to worktree based on repo config
+   * Copy git-ignored files to worktree based on repo config.
+   * Returns `configLoadFailed: true` when no config was provided and the
+   * internal fallback load of the config fails — so the caller can surface
+   * a warning without blocking worktree creation.
    */
   private async copyConfiguredFiles(
     canonicalRepoPath: string,
     worktreePath: string,
     worktreeConfig?: { baseBranch?: string; copyFiles?: string[] } | null
-  ): Promise<void> {
+  ): Promise<{ configLoadFailed: boolean }> {
     // Default files to always copy
     const defaultCopyFiles = ['.archon'];
 
-    // Load user config - log errors but don't fail worktree creation
+    // Load user config - log errors and set configLoadFailed, but don't fail worktree creation
     let userCopyFiles: string[] = [];
+    let configLoadFailed = false;
     if (worktreeConfig) {
       userCopyFiles = worktreeConfig.copyFiles ?? [];
     } else {
@@ -640,8 +659,13 @@ export class WorktreeProvider implements IIsolationProvider {
         userCopyFiles = loadedConfig?.copyFiles ?? [];
       } catch (error) {
         // Config errors are more serious - log as error, not warning
-        getLog().error({ err: error, canonicalRepoPath }, 'repo_config_load_failed');
-        // Don't return - still copy default files even if config fails
+        const err = error instanceof Error ? error : new Error(String(error));
+        getLog().error(
+          { err, errorType: err.constructor.name, canonicalRepoPath },
+          'repo_config_load_failed'
+        );
+        configLoadFailed = true;
+        // Continue with default files only — worktree is still usable
       }
     }
 
@@ -649,7 +673,7 @@ export class WorktreeProvider implements IIsolationProvider {
     const copyFiles = [...new Set([...defaultCopyFiles, ...userCopyFiles])];
 
     if (copyFiles.length === 0) {
-      return;
+      return { configLoadFailed };
     }
 
     // Copy files - errors are handled inside copyWorktreeFiles, but wrap in
@@ -671,6 +695,8 @@ export class WorktreeProvider implements IIsolationProvider {
       // but guard against unexpected errors
       getLog().error({ err: error, worktreePath }, 'worktree_file_copy_failed');
     }
+
+    return { configLoadFailed };
   }
 
   /**
@@ -830,18 +856,26 @@ export class WorktreeProvider implements IIsolationProvider {
    * Create worktree with new branch
    */
   private async createNewBranch(
+    request: IsolationRequest,
     repoPath: string,
     worktreePath: string,
-    branchName: string
+    branchName: string,
+    baseBranch: string
   ): Promise<void> {
     // Clean up any orphan directory before creating worktree
     await this.cleanOrphanDirectoryIfExists(worktreePath);
+
+    // Determine start-point: explicit fromBranch overrides base branch
+    const startPoint =
+      request.workflowType === 'task' && request.fromBranch
+        ? request.fromBranch
+        : `origin/${baseBranch}`;
 
     try {
       // Try to create with new branch
       await execFileAsync(
         'git',
-        ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName],
+        ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName, startPoint],
         {
           timeout: 30000,
         }
@@ -850,6 +884,15 @@ export class WorktreeProvider implements IIsolationProvider {
       const err = error as Error & { stderr?: string };
       // Branch already exists - use existing branch
       if (err.stderr?.includes('already exists')) {
+        const taskFromBranch = request.workflowType === 'task' ? request.fromBranch : undefined;
+        if (taskFromBranch) {
+          // Branch already exists but caller specified an explicit start point.
+          // Adopting the existing branch would silently ignore the start point.
+          throw new Error(
+            `Branch "${branchName}" already exists. Cannot create it from "${taskFromBranch}". ` +
+              'Either choose a different --branch name or omit --from.'
+          );
+        }
         await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, branchName], {
           timeout: 30000,
         });
@@ -912,8 +955,7 @@ export class WorktreeProvider implements IIsolationProvider {
    * Used for legacy global worktree base layout where owner/repo must be appended.
    */
   private extractOwnerRepo(repoPath: string): { owner: string; repo: string } {
-    const parts = repoPath.split(/[/\\]/).filter(p => p.length > 0);
-    return { owner: parts[parts.length - 2], repo: parts[parts.length - 1] };
+    return extractOwnerRepo(toRepoPath(repoPath));
   }
 
   /**

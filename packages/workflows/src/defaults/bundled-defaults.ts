@@ -9,7 +9,7 @@
  */
 
 // =============================================================================
-// Default Commands (16 total)
+// Default Commands (21 total)
 // =============================================================================
 
 import archonAssistCmd from '../../../../.archon/commands/defaults/archon-assist.md' with { type: 'text' };
@@ -28,9 +28,14 @@ import archonResolveMergeConflictsCmd from '../../../../.archon/commands/default
 import archonSyncPrWithMainCmd from '../../../../.archon/commands/defaults/archon-sync-pr-with-main.md' with { type: 'text' };
 import archonSynthesizeReviewCmd from '../../../../.archon/commands/defaults/archon-synthesize-review.md' with { type: 'text' };
 import archonTestCoverageAgentCmd from '../../../../.archon/commands/defaults/archon-test-coverage-agent.md' with { type: 'text' };
+import archonValidatePrCodeReviewFeatureCmd from '../../../../.archon/commands/defaults/archon-validate-pr-code-review-feature.md' with { type: 'text' };
+import archonValidatePrCodeReviewMainCmd from '../../../../.archon/commands/defaults/archon-validate-pr-code-review-main.md' with { type: 'text' };
+import archonValidatePrE2eFeatureCmd from '../../../../.archon/commands/defaults/archon-validate-pr-e2e-feature.md' with { type: 'text' };
+import archonValidatePrE2eMainCmd from '../../../../.archon/commands/defaults/archon-validate-pr-e2e-main.md' with { type: 'text' };
+import archonValidatePrReportCmd from '../../../../.archon/commands/defaults/archon-validate-pr-report.md' with { type: 'text' };
 
 // =============================================================================
-// Default Workflows (9 total)
+// Default Workflows (10 total)
 // =============================================================================
 
 import archonAssistWf from '../../../../.archon/workflows/defaults/archon-assist.yaml' with { type: 'text' };
@@ -42,6 +47,7 @@ import archonRalphStatefulWf from '../../../../.archon/workflows/defaults/archon
 import archonResolveConflictsWf from '../../../../.archon/workflows/defaults/archon-resolve-conflicts.yaml' with { type: 'text' };
 import archonSmartPrReviewWf from '../../../../.archon/workflows/defaults/archon-smart-pr-review.yaml' with { type: 'text' };
 import archonTestLoopWf from '../../../../.archon/workflows/defaults/archon-test-loop.yaml' with { type: 'text' };
+import archonValidatePrWf from '../../../../.archon/workflows/defaults/archon-validate-pr.yaml' with { type: 'text' };
 
 // =============================================================================
 // Exports
@@ -67,6 +73,11 @@ export const BUNDLED_COMMANDS: Record<string, string> = {
   'archon-sync-pr-with-main': archonSyncPrWithMainCmd,
   'archon-synthesize-review': archonSynthesizeReviewCmd,
   'archon-test-coverage-agent': archonTestCoverageAgentCmd,
+  'archon-validate-pr-code-review-feature': archonValidatePrCodeReviewFeatureCmd,
+  'archon-validate-pr-code-review-main': archonValidatePrCodeReviewMainCmd,
+  'archon-validate-pr-e2e-feature': archonValidatePrE2eFeatureCmd,
+  'archon-validate-pr-e2e-main': archonValidatePrE2eMainCmd,
+  'archon-validate-pr-report': archonValidatePrReportCmd,
 };
 
 /**
@@ -82,6 +93,7 @@ export const BUNDLED_WORKFLOWS: Record<string, string> = {
   'archon-resolve-conflicts': archonResolveConflictsWf,
   'archon-smart-pr-review': archonSmartPrReviewWf,
   'archon-test-loop': archonTestLoopWf,
+  'archon-validate-pr': archonValidatePrWf,
 };
 
 /**

@@ -1,57 +1,86 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { getWorkflowRun } from '@/lib/api';
 import type {
   WorkflowState,
   WorkflowStepState,
+  DagNodeState,
   WorkflowStepEvent,
   WorkflowStatusEvent,
   ParallelAgentEvent,
   WorkflowArtifactEvent,
+  DagNodeEvent,
 } from '@/lib/types';
 
 interface UseWorkflowStatusReturn {
   workflows: Map<string, WorkflowState>;
   activeWorkflow: WorkflowState | null;
+  /** Inject a workflow from REST data (only if not already tracked via SSE). */
+  hydrateWorkflow: (state: WorkflowState) => void;
   handlers: {
     onWorkflowStep: (event: WorkflowStepEvent) => void;
     onWorkflowStatus: (event: WorkflowStatusEvent) => void;
     onParallelAgent: (event: ParallelAgentEvent) => void;
     onWorkflowArtifact: (event: WorkflowArtifactEvent) => void;
+    onDagNode: (event: DagNodeEvent) => void;
   };
 }
 
 export function useWorkflowStatus(): UseWorkflowStatusReturn {
   const [workflows, setWorkflows] = useState<Map<string, WorkflowState>>(new Map());
+  const queryClient = useQueryClient();
 
-  const handleWorkflowStatus = useCallback((event: WorkflowStatusEvent): void => {
-    setWorkflows(prev => {
-      const next = new Map(prev);
-      const existing = next.get(event.runId);
+  const handleWorkflowStatus = useCallback(
+    (event: WorkflowStatusEvent): void => {
+      setWorkflows(prev => {
+        const next = new Map(prev);
+        const existing = next.get(event.runId);
 
-      if (!existing) {
-        // New workflow or first SSE event for a REST-loaded workflow
-        next.set(event.runId, {
-          runId: event.runId,
-          workflowName: event.workflowName,
-          status: event.status,
-          steps: [],
-          artifacts: [],
-          isLoop: false,
-          startedAt: event.timestamp,
-          completedAt: event.status !== 'running' ? event.timestamp : undefined,
-          error: event.error,
-        });
-      } else {
-        next.set(event.runId, {
-          ...existing,
-          status: event.status,
-          error: event.error,
-          completedAt: event.status !== 'running' ? event.timestamp : undefined,
-        });
+        if (!existing) {
+          // New workflow or first SSE event for a REST-loaded workflow.
+          // Set completedAt for terminal events so the UI immediately stops the timer.
+          // The REST re-fetch (triggered by terminal liveStatus) will correct startedAt
+          // from initialData, providing the authoritative elapsed duration.
+          const isTerminal =
+            event.status === 'completed' ||
+            event.status === 'failed' ||
+            event.status === 'cancelled';
+          next.set(event.runId, {
+            runId: event.runId,
+            workflowName: event.workflowName,
+            status: event.status,
+            steps: [],
+            dagNodes: [],
+            artifacts: [],
+            isLoop: false,
+            startedAt: event.timestamp,
+            completedAt: isTerminal ? event.timestamp : undefined,
+            error: event.error,
+          });
+        } else {
+          next.set(event.runId, {
+            ...existing,
+            status: event.status,
+            error: event.error,
+            completedAt: event.status !== 'running' ? event.timestamp : undefined,
+          });
+        }
+        return next;
+      });
+
+      // Invalidate React Query caches when workflow reaches terminal status
+      if (
+        event.status === 'completed' ||
+        event.status === 'failed' ||
+        event.status === 'cancelled'
+      ) {
+        void queryClient.invalidateQueries({ queryKey: ['workflow-runs'] });
+        void queryClient.invalidateQueries({ queryKey: ['workflowRuns'] });
+        void queryClient.invalidateQueries({ queryKey: ['conversations'] });
       }
-      return next;
-    });
-  }, []);
+    },
+    [queryClient]
+  );
 
   const handleWorkflowStep = useCallback((event: WorkflowStepEvent): void => {
     setWorkflows(prev => {
@@ -145,63 +174,121 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
     });
   }, []);
 
-  // Poll for stuck workflows: if any workflow is "running" for >30s, check REST API.
+  const handleDagNode = useCallback((event: DagNodeEvent): void => {
+    setWorkflows(prev => {
+      const next = new Map(prev);
+      const wf = next.get(event.runId);
+      if (!wf) return prev;
+
+      const dagNodes = [...wf.dagNodes];
+      const existingIdx = dagNodes.findIndex(n => n.nodeId === event.nodeId);
+
+      const nodeState: DagNodeState = {
+        nodeId: event.nodeId,
+        name: event.name,
+        status: event.status,
+        duration: event.duration,
+        error: event.error,
+        reason: event.reason,
+      };
+
+      if (existingIdx >= 0) {
+        dagNodes[existingIdx] = nodeState;
+      } else {
+        dagNodes.push(nodeState);
+      }
+
+      next.set(event.runId, { ...wf, dagNodes });
+      return next;
+    });
+  }, []);
+
+  const hydrateWorkflow = useCallback((state: WorkflowState): void => {
+    setWorkflows(prev => {
+      const existing = prev.get(state.runId);
+      if (existing) {
+        // Allow REST to override a stale "running" status with a terminal one.
+        // This fixes the case where SSE events are lost (e.g., user navigated away
+        // and back) and the Map has a stale running entry that SSE will never update.
+        const isTerminal =
+          state.status === 'completed' || state.status === 'failed' || state.status === 'cancelled';
+        if (!isTerminal || (existing.status !== 'running' && existing.status !== 'pending')) {
+          return prev;
+        }
+      }
+      const next = new Map(prev);
+      next.set(state.runId, state);
+      return next;
+    });
+  }, []);
+
+  // Poll for stuck workflows: if any workflow is "running", check REST API.
   // Use a ref to read current workflows inside the interval to avoid recreating
   // the interval on every state change (which caused interval thrash + stale closures).
   const workflowsRef = useRef(workflows);
   workflowsRef.current = workflows;
   const hasRunning = Array.from(workflows.values()).some(wf => wf.status === 'running');
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hasRunInitialCheckRef = useRef(false);
+
+  const checkWorkflowStatus = useCallback(
+    (runId: string): Promise<void> =>
+      getWorkflowRun(runId)
+        .then(data => {
+          const serverStatus = data.run.status;
+          if (
+            serverStatus === 'completed' ||
+            serverStatus === 'failed' ||
+            serverStatus === 'cancelled'
+          ) {
+            setWorkflows(prev => {
+              const next = new Map(prev);
+              const existing = next.get(runId);
+              if (existing?.status === 'running' || existing?.status === 'pending') {
+                next.set(runId, {
+                  ...existing,
+                  status: serverStatus,
+                  completedAt: data.run.completed_at
+                    ? new Date(
+                        data.run.completed_at.endsWith('Z')
+                          ? data.run.completed_at
+                          : data.run.completed_at + 'Z'
+                      ).getTime()
+                    : Date.now(),
+                });
+              }
+              return next;
+            });
+            // Invalidate React Query caches on terminal status from polling fallback
+            void queryClient.invalidateQueries({ queryKey: ['workflow-runs'] });
+            void queryClient.invalidateQueries({ queryKey: ['workflowRuns'] });
+            void queryClient.invalidateQueries({ queryKey: ['conversations'] });
+            void queryClient.invalidateQueries({ queryKey: ['workflowMessages'] });
+          }
+        })
+        .catch((err: unknown) => {
+          console.warn('[WorkflowStatus] Status check failed', {
+            runId,
+            error: err instanceof Error ? err.message : err,
+          });
+          setWorkflows(prev => {
+            const next = new Map(prev);
+            const existing = next.get(runId);
+            if (existing?.status === 'running') {
+              next.set(runId, { ...existing, stale: true });
+            }
+            return next;
+          });
+        }),
+    [queryClient]
+  );
+
   useEffect(() => {
     if (hasRunning && !pollingRef.current) {
       pollingRef.current = setInterval(() => {
         for (const wf of workflowsRef.current.values()) {
           if (wf.status !== 'running') continue;
-          // Only poll workflows running for >30s (safety net for stuck SSE; interval is 15s — max latency ~45s)
-          if (Date.now() - wf.startedAt < 30_000) continue;
-
-          void getWorkflowRun(wf.runId)
-            .then(data => {
-              const serverStatus = data.run.status;
-              if (
-                serverStatus === 'completed' ||
-                serverStatus === 'failed' ||
-                serverStatus === 'cancelled'
-              ) {
-                setWorkflows(prev => {
-                  const next = new Map(prev);
-                  const existing = next.get(wf.runId);
-                  if (existing?.status === 'running') {
-                    next.set(wf.runId, {
-                      ...existing,
-                      status: serverStatus,
-                      completedAt: data.run.completed_at
-                        ? new Date(
-                            data.run.completed_at.endsWith('Z')
-                              ? data.run.completed_at
-                              : data.run.completed_at + 'Z'
-                          ).getTime()
-                        : Date.now(),
-                    });
-                  }
-                  return next;
-                });
-              }
-            })
-            .catch((err: unknown) => {
-              console.warn('[WorkflowStatus] Polling failed', {
-                runId: wf.runId,
-                error: err instanceof Error ? err.message : err,
-              });
-              setWorkflows(prev => {
-                const next = new Map(prev);
-                const existing = next.get(wf.runId);
-                if (existing?.status === 'running') {
-                  next.set(wf.runId, { ...existing, stale: true });
-                }
-                return next;
-              });
-            });
+          void checkWorkflowStatus(wf.runId);
         }
       }, 15_000);
     } else if (!hasRunning && pollingRef.current) {
@@ -215,7 +302,29 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
         pollingRef.current = null;
       }
     };
-  }, [hasRunning]);
+  }, [hasRunning, checkWorkflowStatus]);
+
+  // Immediate REST check when a running workflow appears (e.g., hydrated on mount).
+  // Without this, the user sees stale "Running" until the 15s polling interval fires.
+  useEffect(() => {
+    if (!hasRunning) {
+      hasRunInitialCheckRef.current = false;
+      return;
+    }
+    if (hasRunInitialCheckRef.current) return;
+    hasRunInitialCheckRef.current = true;
+
+    // Small delay to let SSE events arrive first (avoids unnecessary REST call)
+    const timer = setTimeout(() => {
+      for (const wf of workflowsRef.current.values()) {
+        if (wf.status !== 'running') continue;
+        void checkWorkflowStatus(wf.runId);
+      }
+    }, 2_000);
+    return (): void => {
+      clearTimeout(timer);
+    };
+  }, [hasRunning, checkWorkflowStatus]);
 
   // Find the most recent running workflow
   let activeWorkflow: WorkflowState | null = null;
@@ -238,11 +347,13 @@ export function useWorkflowStatus(): UseWorkflowStatusReturn {
   return {
     workflows,
     activeWorkflow,
+    hydrateWorkflow,
     handlers: {
       onWorkflowStep: handleWorkflowStep,
       onWorkflowStatus: handleWorkflowStatus,
       onParallelAgent: handleParallelAgent,
       onWorkflowArtifact: handleWorkflowArtifact,
+      onDagNode: handleDagNode,
     },
   };
 }

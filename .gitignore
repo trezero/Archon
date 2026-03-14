@@ -39,10 +39,13 @@ e2e-screenshots/
 .archon/artifacts/
 
 # Agent artifacts (generated, local only)
+.agents/
 .agents/rca-reports/
 .agents/plans/
 .agents/pr-reviews
 .claude/PRPs/
+.claude/archon/
+.claude/settings.local.json
 e2e-testing-findings-session2.md
 
 # Local workspace
@@ -65,14 +68,21 @@ Thumbs.db
 .test-repo-url
 .test-issue-number
 
-# Test SQLite databases
+# Test SQLite databases and WAL/journal files
 *.test*.db
 .test-*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Defensive: literal 'undefined' directories from env var bugs
+undefined/
 
 coverage
 
 worktrees
 screenshots/
+test-screenshots/
 .claude/worktree-registry.json
 
 .agents/PRDs
@@ -80,3 +90,7 @@ screenshots/
 .agents/posts
 .agents/PRODUCT.md
 packages/server/.env
+
+# Playwright
+.playwright/
+.playwright-cli/

@@ -219,7 +219,9 @@ export async function cloneRepository(repoUrl: string): Promise<RegisterResult> 
   await execFileAsync('git', ['config', '--global', '--add', 'safe.directory', targetPath]);
   getLog().debug({ path: targetPath }, 'safe_directory_added');
 
-  return registerRepoAtPath(targetPath, `${ownerName}/${repoName}`, workingUrl);
+  const result = await registerRepoAtPath(targetPath, `${ownerName}/${repoName}`, workingUrl);
+  getLog().info({ url: workingUrl, targetPath }, 'clone_completed');
+  return result;
 }
 
 /**

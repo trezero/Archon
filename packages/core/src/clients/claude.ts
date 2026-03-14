@@ -14,7 +14,12 @@
  * - Not set: Auto-detect - use tokens if present in env, otherwise global auth
  */
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
-import { type AssistantRequestOptions, IAssistantClient, MessageChunk, TokenUsage } from '../types';
+import {
+  type AssistantRequestOptions,
+  type IAssistantClient,
+  type MessageChunk,
+  type TokenUsage,
+} from '../types';
 import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -152,8 +157,11 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
   return baseEnv;
 }
 
-/** Max retries for transient subprocess failures */
-const MAX_SUBPROCESS_RETRIES = 1;
+/** Max retries for transient subprocess failures (3 = 4 total attempts).
+ *  SDK subprocess crashes (exit code 1) are often intermittent — AJV schema validation
+ *  regressions, stale HTTP/2 connections, and other transient SDK issues typically
+ *  succeed on retry 3 or 4. See: anthropics/claude-code#22973, claude-code-action#853 */
+const MAX_SUBPROCESS_RETRIES = 3;
 
 /** Delay between retries in milliseconds */
 const RETRY_BASE_DELAY_MS = 2000;
@@ -192,7 +200,7 @@ function classifySubprocessError(
 export class ClaudeClient implements IAssistantClient {
   /**
    * Send a query to Claude and stream responses.
-   * Includes retry logic for transient failures (1 retry with backoff).
+   * Includes retry logic for transient failures (up to 3 retries with exponential backoff).
    * Enriches errors with stderr context and classification.
    */
   async *sendQuery(
@@ -240,6 +248,12 @@ export class ClaudeClient implements IAssistantClient {
         ...(requestOptions?.outputFormat !== undefined
           ? { outputFormat: requestOptions.outputFormat }
           : {}),
+        // Skip writing session transcripts to ~/.claude/projects/ — Archon manages its own
+        // session persistence. persistSession: false reduces disk I/O and keeps the session
+        // directory clean. Claude Agent SDK v0.2.74+.
+        ...(requestOptions?.persistSession !== undefined
+          ? { persistSession: requestOptions.persistSession }
+          : { persistSession: false }),
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         systemPrompt: { type: 'preset', preset: 'claude_code' },
@@ -247,6 +261,10 @@ export class ClaudeClient implements IAssistantClient {
         stderr: (data: string) => {
           const output = data.trim();
           if (!output) return;
+
+          // Always capture stderr for diagnostics — previous filtering discarded
+          // useful SDK startup output, leaving stderrContext empty on crashes.
+          stderrLines.push(output);
 
           const isError =
             output.toLowerCase().includes('error') ||
@@ -262,7 +280,6 @@ export class ClaudeClient implements IAssistantClient {
             output.includes('--permission-mode');
 
           if (isError && !isInfoMessage) {
-            stderrLines.push(output);
             getLog().error({ stderr: output }, 'subprocess_error');
           }
         },
@@ -296,12 +313,16 @@ export class ClaudeClient implements IAssistantClient {
             const resultMsg = msg as {
               session_id?: string;
               usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+              structured_output?: unknown;
             };
             const tokens = normalizeClaudeUsage(resultMsg.usage);
             yield {
               type: 'result',
               sessionId: resultMsg.session_id,
               ...(tokens ? { tokens } : {}),
+              ...(resultMsg.structured_output !== undefined
+                ? { structuredOutput: resultMsg.structured_output }
+                : {}),
             };
           }
         }

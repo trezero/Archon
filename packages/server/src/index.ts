@@ -7,6 +7,7 @@
 // Uses dotenv with explicit path so it works from any CWD (worktrees, packages/server/, etc.)
 import { config } from 'dotenv';
 import { resolve } from 'path';
+import { existsSync } from 'fs';
 
 // Resolve from this file's location: packages/server/src/ → ../../.. → repo root
 const envPath = resolve(import.meta.dir, '..', '..', '..', '.env');
@@ -16,6 +17,18 @@ if (dotenvResult.error) {
   // Use console.error since logger depends on env vars (LOG_LEVEL)
   console.error(`Failed to load .env from ${envPath}: ${dotenvResult.error.message}`);
   console.error('Hint: Copy .env.example to .env and configure your credentials.');
+}
+
+// Load ~/.archon/.env for infrastructure config (DATABASE_URL).
+// The CLI loads this file with override: true, so both CLI and server
+// resolve DATABASE_URL from the same source. We only override DATABASE_URL
+// (not PORT, LOG_LEVEL, etc.) to avoid stomping on server-specific config.
+const globalEnvPath = resolve(process.env.HOME ?? '~', '.archon', '.env');
+if (existsSync(globalEnvPath)) {
+  const globalResult = config({ path: globalEnvPath, processEnv: {} });
+  if (globalResult.parsed?.DATABASE_URL) {
+    process.env.DATABASE_URL = globalResult.parsed.DATABASE_URL;
+  }
 }
 
 import { Hono } from 'hono';
@@ -152,11 +165,15 @@ async function main(): Promise<void> {
   // Initialize web adapter (always enabled)
   // Note: Circular references between transport/persistence/workflowBridge are safe because:
   // - transport's cleanup callback references persistence/workflowBridge (declared after, but
-  //   only invoked from a 60s timer — well after all constructors complete)
+  //   only invoked from a grace period timer — well after all constructors complete)
   // - persistence's emitEvent closure references transport.emit (same lazy pattern)
   const transport = new SSETransport(conversationId => {
-    persistence.clearConversation(conversationId);
-    workflowBridge.clearConversation(conversationId);
+    // Flush (not clear!) — the orchestrator/workflow may still be writing messages
+    // even though the SSE stream disconnected. Clearing the dbId mapping would cause
+    // all subsequent messages to be lost (never persisted to DB).
+    void persistence.flush(conversationId).catch((e: unknown) => {
+      getLog().error({ conversationId, err: e }, 'transport_cleanup_flush_failed');
+    });
   });
   const persistence = new MessagePersistence((conversationId, event) =>
     transport.emit(conversationId, event)
@@ -164,6 +181,7 @@ async function main(): Promise<void> {
   const workflowBridge = new WorkflowEventBridge(transport);
   const webAdapter = new WebAdapter(transport, persistence, workflowBridge);
   await webAdapter.start();
+  persistence.startPeriodicFlush();
 
   // Check that at least one platform is configured
   const hasTelegram = Boolean(process.env.TELEGRAM_BOT_TOKEN);
@@ -466,20 +484,28 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     getLog().info('server_shutting_down');
     stopCleanupScheduler();
+    persistence.stopPeriodicFlush();
 
-    // Stop adapters (these should not throw, but be defensive)
-    try {
-      telegram?.stop();
-      discord?.stop();
-      slack?.stop();
-      gitea?.stop();
-      webAdapter.stop();
-    } catch (error) {
-      getLog().error({ err: error }, 'adapter_stop_error');
-    }
+    // Flush all buffered messages before stopping adapters
+    persistence
+      .flushAll()
+      .catch((e: unknown) => {
+        getLog().error({ err: e }, 'shutdown_flush_failed');
+      })
+      .then(async () => {
+        // Stop adapters (these should not throw, but be defensive)
+        try {
+          telegram?.stop();
+          discord?.stop();
+          slack?.stop();
+          gitea?.stop();
+          await webAdapter.stop();
+        } catch (error) {
+          getLog().error({ err: error }, 'adapter_stop_error');
+        }
 
-    pool
-      .end()
+        return pool.end();
+      })
       .then(() => {
         getLog().info('database_pool_closed');
         process.exit(0);

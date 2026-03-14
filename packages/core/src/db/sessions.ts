@@ -2,7 +2,8 @@
  * Database operations for sessions
  */
 import { pool, getDialect, getDatabase } from './connection';
-import type { Session } from '../types';
+import type { Session, SessionMetadata } from '../types';
+import { sessionMetadataSchema } from '../types';
 import type { TransitionTrigger } from '../state/session-transitions';
 import { createLogger } from '@archon/paths';
 
@@ -78,10 +79,8 @@ export async function deactivateSession(id: string, reason: TransitionTrigger): 
   }
 }
 
-export async function updateSessionMetadata(
-  id: string,
-  metadata: Record<string, unknown>
-): Promise<void> {
+export async function updateSessionMetadata(id: string, metadata: SessionMetadata): Promise<void> {
+  sessionMetadataSchema.parse(metadata); // throws ZodError if invalid
   const dialect = getDialect();
   const result = await pool.query(
     `UPDATE remote_agent_sessions SET metadata = ${dialect.jsonMerge('metadata', 1)} WHERE id = $2`,
@@ -150,7 +149,7 @@ export async function transitionSession(
     const newSession = newResult.rows[0];
     getLog().debug(
       { conversationId, reason, parentSessionId: current?.id, newSessionId: newSession.id },
-      'session_transitioned'
+      'db.session_transition_completed'
     );
     return newSession;
   });
@@ -186,4 +185,27 @@ export async function getSessionChain(sessionId: string): Promise<readonly Sessi
     [sessionId]
   );
   return result.rows;
+}
+
+/**
+ * Delete inactive sessions older than the specified number of days.
+ * Only deletes sessions where active = false (never touches active sessions).
+ *
+ * @param retentionDays - Delete sessions ended more than this many days ago
+ * @returns Number of deleted sessions
+ */
+export async function deleteOldSessions(retentionDays: number): Promise<number> {
+  const dialect = getDialect();
+  const result = await pool.query(
+    `DELETE FROM remote_agent_sessions
+     WHERE active = false
+       AND ended_at IS NOT NULL
+       AND ended_at < ${dialect.nowMinusDays(1)}`,
+    [retentionDays]
+  );
+  const count = result.rowCount;
+  if (count > 0) {
+    getLog().info({ deletedCount: count, retentionDays }, 'sessions.cleanup_completed');
+  }
+  return count;
 }

@@ -37,24 +37,5 @@ jobs:
       - name: Check formatting
         run: bun run format:check
 
-      - name: Run tests with coverage
-        # Run tests in specific order to avoid Bun mock.module() pollution:
-        # 1. Run factory tests first (before any mock.module calls)
-        # 2. Run client tests that use mock.module (claude, codex)
-        # 3. Run command-handler tests (use mock.module for DB mocks)
-        # 4. Run all other tests EXCEPT orchestrator and command-handler
-        # 5. Run orchestrator tests last (mocks command-handler and factory)
-        # Note: Tests are in packages/core/src/ and packages/server/src/ after monorepo restructure
-        run: |
-          bun test --coverage packages/core/src/clients/factory.test.ts
-          bun test --coverage packages/core/src/clients/claude.test.ts packages/core/src/clients/codex.test.ts
-          bun test --coverage packages/core/src/handlers
-          bun test --coverage packages/core/src/db packages/core/src/utils packages/core/src/config packages/core/src/state packages/core/src/services packages/core/src/isolation packages/core/src/workflows packages/server/src/adapters
-          bun test --coverage packages/core/src/orchestrator
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report-${{ matrix.os }}
-          path: coverage/
-          retention-days: 14
+      - name: Run tests
+        run: bun run test

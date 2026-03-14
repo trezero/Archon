@@ -101,6 +101,7 @@ export {
   startCleanupScheduler,
   stopCleanupScheduler,
   onConversationClosed,
+  SESSION_RETENTION_DAYS,
 } from './services/cleanup-service';
 
 export { generateAndSetTitle } from './services/title-generator';

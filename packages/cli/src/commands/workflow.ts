@@ -14,6 +14,8 @@ import * as conversationDb from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
 import * as isolationDb from '@archon/core/db/isolation-environments';
 import * as messageDb from '@archon/core/db/messages';
+import * as workflowDb from '@archon/core/db/workflows';
+import { getDatabase } from '@archon/core/db/connection';
 import * as git from '@archon/git';
 import { CLIAdapter } from '../adapters/cli-adapter';
 
@@ -28,10 +30,11 @@ function getLog(): ReturnType<typeof createLogger> {
  * Options for workflow run command
  *
  * Discriminated union ensures `noWorktree` can only be set when `branchName` is provided.
+ * `resume` is mutually exclusive with `branchName`.
  */
 export type WorkflowRunOptions =
-  | { branchName?: undefined; noWorktree?: undefined } // No isolation
-  | { branchName: string; noWorktree?: boolean }; // With branch - worktree or direct checkout
+  | { branchName?: undefined; noWorktree?: undefined; resume?: boolean } // No isolation (optionally with resume)
+  | { branchName: string; fromBranch?: string; noWorktree?: boolean; resume?: undefined }; // With branch - worktree or direct checkout
 
 /**
  * Generate a unique conversation ID for CLI usage
@@ -57,13 +60,46 @@ async function loadWorkflows(cwd: string): Promise<WorkflowLoadResult> {
   }
 }
 
+interface WorkflowJsonEntry {
+  name: string;
+  description: string;
+  provider?: string;
+  model?: string;
+  modelReasoningEffort?: string;
+  webSearchMode?: string;
+}
+
 /**
  * List available workflows in the current directory
  */
-export async function workflowListCommand(cwd: string): Promise<void> {
-  console.log(`Discovering workflows in: ${cwd}`);
-
+export async function workflowListCommand(cwd: string, json?: boolean): Promise<void> {
   const { workflows, errors } = await loadWorkflows(cwd);
+
+  if (json) {
+    const output = {
+      workflows: workflows.map(w => {
+        const entry: WorkflowJsonEntry = {
+          name: w.name,
+          description: w.description,
+        };
+        if (w.provider !== undefined) entry.provider = w.provider;
+        if (w.model !== undefined) entry.model = w.model;
+        if (w.modelReasoningEffort !== undefined)
+          entry.modelReasoningEffort = w.modelReasoningEffort;
+        if (w.webSearchMode !== undefined) entry.webSearchMode = w.webSearchMode;
+        return entry;
+      }),
+      errors: errors.map(e => ({
+        filename: e.filename,
+        error: e.error,
+        errorType: e.errorType,
+      })),
+    };
+    console.log(JSON.stringify(output, null, 2));
+    return;
+  }
+
+  console.log(`Discovering workflows in: ${cwd}`);
 
   if (workflows.length === 0 && errors.length === 0) {
     console.log('\nNo workflows found.');
@@ -140,6 +176,15 @@ export async function workflowRunCommand(
     );
   }
 
+  // Validate mutually exclusive flags early
+  if (options.resume && options.branchName !== undefined) {
+    throw new Error(
+      '--resume and --branch are mutually exclusive.\n' +
+        '  --resume reuses the existing worktree from the failed run.\n' +
+        '  Remove --branch when using --resume.'
+    );
+  }
+
   console.log(`Running workflow: ${workflowName}`);
   console.log(`Working directory: ${cwd}`);
   console.log('');
@@ -203,6 +248,84 @@ export async function workflowRunCommand(
   let workingCwd = cwd;
   let isolationEnvId: string | undefined;
 
+  // Handle --resume: find the most recent failed run and reuse its worktree
+  let preCreatedRun: Awaited<ReturnType<typeof workflowDb.resumeWorkflowRun>> | undefined;
+  let startFromStep: number | undefined;
+
+  if (options.resume) {
+    if (!codebase) {
+      if (codebaseLookupError) {
+        throw new Error(
+          'Cannot resume: Database lookup failed.\n' +
+            `Error: ${codebaseLookupError.message}\n` +
+            'Hint: Check your database connection before using --resume.'
+        );
+      }
+      throw new Error(
+        'Cannot resume: Not in a git repository.\n' +
+          'Either run from a git repo or use /clone first.'
+      );
+    }
+
+    const db = getDatabase();
+    const lastFailed = await workflowDb.findLastFailedRun(db, workflowName, codebase.id);
+
+    if (!lastFailed) {
+      throw new Error(`No failed run found for workflow '${workflowName}' to resume.`);
+    }
+
+    getLog().info(
+      {
+        workflowRunId: lastFailed.id,
+        workflowName,
+        currentStepIndex: lastFailed.current_step_index,
+        workingPath: lastFailed.working_path,
+      },
+      'workflow.resume_found_last_failed'
+    );
+
+    // Guard: nothing to resume if the workflow failed before completing any steps
+    if (lastFailed.current_step_index === 0) {
+      throw new Error(
+        `Workflow '${workflowName}' failed before completing any steps — nothing to resume.\n` +
+          'Start a fresh run instead.'
+      );
+    }
+
+    // Reuse the working path from the failed run (verify it still exists)
+    if (lastFailed.working_path) {
+      const { existsSync } = await import('fs');
+      if (!existsSync(lastFailed.working_path)) {
+        throw new Error(
+          `Cannot resume: the working path from the failed run no longer exists: ${lastFailed.working_path}\n` +
+            'The worktree may have been cleaned up. Start a fresh run with --branch instead.'
+        );
+      }
+      workingCwd = lastFailed.working_path;
+    }
+
+    // Look up the isolation environment that owns this working path (if any)
+    const allEnvs = await isolationDb.listByCodebase(codebase.id);
+    const matchingEnv = allEnvs.find(e => e.working_path === workingCwd);
+    if (matchingEnv) {
+      isolationEnvId = matchingEnv.id;
+      getLog().info(
+        { envId: isolationEnvId, workingPath: workingCwd },
+        'workflow.resume_env_found'
+      );
+    }
+
+    // Reactivate the failed run so the executor treats it as pre-created (already running)
+    preCreatedRun = await workflowDb.resumeWorkflowRun(lastFailed.id);
+    startFromStep = lastFailed.current_step_index;
+
+    console.log(
+      `Resuming from step ${String(startFromStep + 1)} — skipping ${String(startFromStep)} already-completed step(s).`
+    );
+    console.log(`Working path: ${workingCwd}`);
+    console.log('');
+  }
+
   if (options.branchName) {
     // Need a codebase for isolation
     if (!codebase) {
@@ -220,10 +343,23 @@ export async function workflowRunCommand(
     }
 
     if (options.noWorktree) {
-      // Checkout branch in cwd, no worktree
-      getLog().info({ branch: options.branchName }, 'branch_checkout');
-      await git.checkout(git.toRepoPath(cwd), git.toBranchName(options.branchName));
-      workingCwd = cwd;
+      if (options.fromBranch) {
+        getLog().warn(
+          { branchName: options.branchName, fromBranch: options.fromBranch },
+          'workflow.branch_flag_conflict'
+        );
+        throw new Error(
+          '--from/--from-branch has no effect with --no-worktree. ' +
+            'Remove --from or drop --no-worktree.'
+        );
+      }
+      getLog().warn({ branchName: options.branchName }, 'workflow.branch_no_worktree_conflict');
+      throw new Error(
+        '--branch and --no-worktree are mutually exclusive.\n' +
+          '  --branch creates an isolated worktree (safe).\n' +
+          '  --no-worktree checks out directly in your repo (no isolation).\n' +
+          'Use one or the other.'
+      );
     } else {
       // Create or reuse worktree
       const provider = getIsolationProvider();
@@ -236,16 +372,32 @@ export async function workflowRunCommand(
       );
 
       if (existingEnv && (await provider.healthCheck(existingEnv.working_path))) {
+        if (options.fromBranch) {
+          getLog().warn(
+            { path: existingEnv.working_path, fromBranch: options.fromBranch },
+            'worktree.reuse_from_branch_ignored'
+          );
+          console.warn(
+            `Warning: Reusing existing worktree at ${existingEnv.working_path}. ` +
+              `--from ${options.fromBranch} was not applied (worktree already exists).`
+          );
+        }
         getLog().info({ path: existingEnv.working_path }, 'worktree_reused');
         workingCwd = existingEnv.working_path;
         isolationEnvId = existingEnv.id;
       } else {
         // Create new worktree
-        getLog().info({ branch: options.branchName }, 'worktree_creating');
+        getLog().info(
+          { branch: options.branchName, fromBranch: options.fromBranch },
+          'worktree_creating'
+        );
 
         const isolatedEnv = await provider.create({
           workflowType: 'task',
           identifier: options.branchName,
+          fromBranch: options.fromBranch?.trim()
+            ? git.toBranchName(options.fromBranch.trim())
+            : undefined,
           codebaseId: codebase.id,
           canonicalRepoPath: git.toRepoPath(codebase.default_cwd),
           description: `CLI workflow: ${workflowName}`,
@@ -304,6 +456,22 @@ export async function workflowRunCommand(
     workflowName
   );
 
+  // Register cleanup handlers for graceful termination
+  const cleanup = async (signal: string): Promise<void> => {
+    getLog().info({ conversationId: conversation.id, signal }, 'workflow.process_terminating');
+    try {
+      const activeRun = await workflowDb.getActiveWorkflowRun(conversation.id);
+      if (activeRun) {
+        await workflowDb.failWorkflowRun(activeRun.id, `Process terminated (${signal})`);
+      }
+    } catch (err) {
+      getLog().error({ err: err as Error }, 'workflow.termination_cleanup_failed');
+    }
+    process.exit(1);
+  };
+  process.on('SIGTERM', () => void cleanup('SIGTERM'));
+  process.on('SIGINT', () => void cleanup('SIGINT'));
+
   // Execute workflow with workingCwd (may be worktree path)
   const result = await executeWorkflow(
     createWorkflowDeps(),
@@ -313,7 +481,12 @@ export async function workflowRunCommand(
     workflow,
     userMessage,
     conversation.id,
-    codebase?.id
+    codebase?.id,
+    undefined, // issueContext
+    undefined, // isolationContext
+    undefined, // parentConversationId
+    preCreatedRun, // pre-activated run for --resume
+    startFromStep // step index to resume from
   );
 
   // Check result and exit appropriately

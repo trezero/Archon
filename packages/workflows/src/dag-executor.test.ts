@@ -654,9 +654,15 @@ describe('substituteNodeOutputRefs', () => {
     expect(substituteNodeOutputRefs('Result: $a.output', outputs)).toBe('Result: hello');
   });
 
-  it('unknown node ref resolves to empty string', () => {
+  it('unknown node ref resolves to empty string and logs a warning', () => {
+    mockLogFn.mockClear();
     const outputs = new Map<string, NodeOutput>();
     expect(substituteNodeOutputRefs('Result: $missing.output', outputs)).toBe('Result: ');
+    const warnCalls = mockLogFn.mock.calls.filter(
+      (call: unknown[]) => call[1] === 'dag_node_output_ref_unknown_node'
+    );
+    expect(warnCalls.length).toBe(1);
+    expect(warnCalls[0][0]).toEqual(expect.objectContaining({ nodeId: 'missing' }));
   });
 
   it('dot notation extracts JSON field', () => {
@@ -667,6 +673,71 @@ describe('substituteNodeOutputRefs', () => {
   it('dot notation on invalid JSON returns empty string', () => {
     const outputs = new Map([['a', makeOutput('completed', 'not-json')]]);
     expect(substituteNodeOutputRefs('$a.output.field', outputs)).toBe('');
+  });
+});
+
+describe('substituteNodeOutputRefs -- shell escaping', () => {
+  it('does not escape by default (AI prompt substitution)', () => {
+    const outputs = new Map([['a', makeOutput('completed', 'hello; rm -rf /')]]);
+    expect(substituteNodeOutputRefs('Result: $a.output', outputs)).toBe('Result: hello; rm -rf /');
+  });
+
+  it('shell-quotes output when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', 'hello world')]]);
+    expect(substituteNodeOutputRefs('echo $a.output', outputs, true)).toBe("echo 'hello world'");
+  });
+
+  it('escapes shell metacharacters when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', 'hello; rm -rf /')]]);
+    expect(substituteNodeOutputRefs('echo $a.output', outputs, true)).toBe(
+      "echo 'hello; rm -rf /'"
+    );
+  });
+
+  it('escapes single quotes inside output when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', "it's alive")]]);
+    expect(substituteNodeOutputRefs('echo $a.output', outputs, true)).toBe("echo 'it'\\''s alive'");
+  });
+
+  it('missing ref becomes empty string when escapedForBash=true', () => {
+    const outputs = new Map<string, NodeOutput>();
+    expect(substituteNodeOutputRefs('echo $missing.output', outputs, true)).toBe("echo ''");
+  });
+
+  it('JSON field escapes shell metacharacters when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', JSON.stringify({ cmd: 'foo; bar' }))]]);
+    expect(substituteNodeOutputRefs('echo $a.output.cmd', outputs, true)).toBe("echo 'foo; bar'");
+  });
+
+  it('numeric JSON field is not quoted (safe as-is)', () => {
+    const outputs = new Map([['a', makeOutput('completed', JSON.stringify({ count: 42 }))]]);
+    expect(substituteNodeOutputRefs('exit $a.output.count', outputs, true)).toBe('exit 42');
+  });
+
+  it('boolean JSON field is not quoted (safe as-is)', () => {
+    const outputs = new Map([['a', makeOutput('completed', JSON.stringify({ ok: true }))]]);
+    expect(substituteNodeOutputRefs('[ $a.output.ok ]', outputs, true)).toBe('[ true ]');
+  });
+
+  it('empty string output becomes quoted empty string when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', '')]]);
+    expect(substituteNodeOutputRefs('echo $a.output', outputs, true)).toBe("echo ''");
+  });
+
+  it('embedded newline in output is safe when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', 'hello\nworld')]]);
+    // Single-quoted bash strings can contain literal newlines safely
+    expect(substituteNodeOutputRefs('echo $a.output', outputs, true)).toBe("echo 'hello\nworld'");
+  });
+
+  it('object JSON field becomes quoted empty string when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', JSON.stringify({ nested: { x: 1 } }))]]);
+    expect(substituteNodeOutputRefs('echo $a.output.nested', outputs, true)).toBe("echo ''");
+  });
+
+  it('dot notation on invalid JSON returns quoted empty string when escapedForBash=true', () => {
+    const outputs = new Map([['a', makeOutput('completed', 'not-json')]]);
+    expect(substituteNodeOutputRefs('$a.output.field', outputs, true)).toBe("''");
   });
 });
 
@@ -1018,4 +1089,532 @@ describe('executeDagWorkflow -- bash nodes', () => {
     // AI client called only for the AI node, not the bash node
     expect(mockSendQueryDag.mock.calls.length).toBe(1);
   });
+
+  it('bash node output with shell metacharacters does not inject into downstream bash script', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('bash-injection-run-id', {
+      workflow_name: 'bash-injection-test',
+      conversation_id: 'conv-injection',
+      user_message: 'test',
+    });
+
+    // upstream: outputs a value containing shell metacharacters
+    // downstream: embeds $upstream.output literally in a bash script
+    // If injection were present, the semicolon would split into two commands and INJECTED would print
+    const nodes: DagNode[] = [
+      { id: 'upstream', bash: 'printf "%s" "safe; echo INJECTED"' },
+      {
+        id: 'downstream',
+        bash: 'result=$upstream.output; echo "got: $result"',
+        depends_on: ['upstream'],
+      },
+    ];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-injection',
+      testDir,
+      { name: 'bash-injection-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // No AI calls
+    expect(mockSendQueryDag.mock.calls.length).toBe(0);
+
+    // The downstream node ran without injection: stdout should contain the literal value, not a separate INJECTED line
+    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
+    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
+    // 'INJECTED' as a standalone result of injection must not appear
+    const injectedMessage = messages.find((m: string) => m === 'INJECTED');
+    expect(injectedMessage).toBeUndefined();
+  });
+});
+
+describe('executeDagWorkflow -- output_format structured output', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-output-fmt-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'classify.md'), 'Classify this: $USER_MESSAGE');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+  });
+
+  afterEach(async () => {
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('uses structuredOutput from result when output_format is set', async () => {
+    const structuredJson = { run_code_review: 'true', run_tests: 'false' };
+
+    // Mock yields prose + JSON as assistant text, then result with structuredOutput
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'Let me analyze the PR scope...\n' };
+      yield { type: 'assistant', content: JSON.stringify(structuredJson) };
+      yield { type: 'result', sessionId: 'sid-1', structuredOutput: structuredJson };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('output-fmt-run', {
+      user_message: 'classify this PR',
+    });
+
+    const nodes: DagNode[] = [
+      {
+        id: 'classify',
+        command: 'classify',
+        output_format: {
+          type: 'object',
+          properties: {
+            run_code_review: { type: 'string', enum: ['true', 'false'] },
+            run_tests: { type: 'string', enum: ['true', 'false'] },
+          },
+        },
+      },
+      {
+        id: 'review',
+        prompt: 'Review the code',
+        depends_on: ['classify'],
+        when: "$classify.output.run_code_review == 'true'",
+      },
+      {
+        id: 'test',
+        prompt: 'Run tests',
+        depends_on: ['classify'],
+        when: "$classify.output.run_tests == 'true'",
+      },
+    ];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-output-fmt',
+      testDir,
+      { name: 'output-fmt-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // The review node's when condition should evaluate to true (run_code_review == 'true')
+    // The test node's when condition should evaluate to false (run_tests == 'false', not 'true')
+    // So sendQuery should be called for classify + review = 2 times (not 3)
+    expect(mockSendQueryDag.mock.calls.length).toBe(2);
+  });
+
+  it('does NOT override nodeOutputText with structuredOutput when output_format is absent', async () => {
+    // Even if the SDK returns structuredOutput, nodes without output_format use concatenated text
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'prose analysis text' };
+      yield { type: 'result', sessionId: 'sid-no-fmt', structuredOutput: { type: 'BUG' } };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('no-output-fmt-run', {
+      user_message: 'test guard',
+    });
+
+    const nodes: DagNode[] = [
+      { id: 'a', command: 'classify' },
+      {
+        id: 'b',
+        prompt: 'Got: $a.output',
+        depends_on: ['a'],
+      },
+    ];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-no-fmt',
+      testDir,
+      { name: 'no-fmt-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    expect(mockSendQueryDag.mock.calls.length).toBe(2);
+
+    // Second node's prompt should contain the concatenated prose, not the JSON
+    const secondCallPrompt = mockSendQueryDag.mock.calls[1][0] as string;
+    expect(secondCallPrompt).toContain('prose analysis text');
+    expect(secondCallPrompt).not.toContain('"type"');
+  });
+
+  it('falls back to concatenated text when structuredOutput is absent', async () => {
+    // Mock without structuredOutput on result — backward compatible
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'plain text response' };
+      yield { type: 'result', sessionId: 'sid-2' };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('no-structured-run', {
+      user_message: 'test fallback',
+    });
+
+    const nodes: DagNode[] = [
+      { id: 'a', command: 'classify' },
+      {
+        id: 'b',
+        prompt: 'Use output: $a.output',
+        depends_on: ['a'],
+      },
+    ];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-fallback',
+      testDir,
+      { name: 'fallback-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // Both nodes should execute (no output_format, no when conditions)
+    expect(mockSendQueryDag.mock.calls.length).toBe(2);
+
+    // Second node's prompt should contain the concatenated text from node a
+    const secondCallPrompt = mockSendQueryDag.mock.calls[1][0] as string;
+    expect(secondCallPrompt).toContain('plain text response');
+  });
+});
+
+describe('executeDagWorkflow -- when condition parse errors (fail-closed)', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-parse-err-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'Do something for $USER_MESSAGE');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'AI response' };
+      yield { type: 'result', sessionId: 'sess-parse-err' };
+    });
+  });
+
+  afterEach(async () => {
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('skips node (does not run it) when when: expression is unparseable', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('parse-err-skip-run');
+
+    const nodes: DagNode[] = [
+      { id: 'unconditional', command: 'my-cmd' },
+      // Single = is not valid syntax — will fail to parse
+      {
+        id: 'guarded',
+        command: 'my-cmd',
+        depends_on: ['unconditional'],
+        when: "$unconditional.output = 'yes'",
+      },
+    ];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-parse-err-skip',
+      testDir,
+      { name: 'parse-err-skip-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // Only the unconditional node should have triggered an AI call.
+    // The guarded node must be skipped (fail-closed), not executed.
+    expect(mockSendQueryDag.mock.calls.length).toBe(1);
+  });
+
+  it('sends a platform warning message naming the node and stating it was skipped', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('parse-err-warn-run');
+
+    const nodes: DagNode[] = [{ id: 'gate', command: 'my-cmd', when: 'not a valid condition' }];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-parse-err-warn',
+      testDir,
+      { name: 'parse-warn-test', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
+    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
+    const warning = messages.find(m => m.includes('gate') && m.includes('skipped'));
+    expect(warning).toBeDefined();
+    // Must NOT indicate the node ran (the old fail-open behavior)
+    expect(warning).not.toMatch(/node ran/i);
+  });
+
+  it('workflow completes without throwing when all nodes are skipped via parse error', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('parse-err-all-skip-run');
+
+    const nodes: DagNode[] = [{ id: 'only', command: 'my-cmd', when: 'bad expression' }];
+
+    await expect(
+      executeDagWorkflow(
+        mockDeps,
+        platform,
+        'conv-all-skipped',
+        testDir,
+        { name: 'all-skipped-test', nodes },
+        workflowRun,
+        'claude',
+        undefined,
+        join(testDir, 'artifacts'),
+        join(testDir, 'logs'),
+        'main',
+        minimalConfig
+      )
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('executeDagWorkflow -- node-level retry for transient errors', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-retry-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'Do something for $USER_MESSAGE');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'DAG AI response' };
+      yield { type: 'result', sessionId: 'dag-session-id' };
+    });
+  });
+
+  afterEach(async () => {
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('node succeeds on retry after a transient error', async () => {
+    let callCount = 0;
+    mockSendQueryDag.mockImplementation(function* () {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error('Claude Code crash: process exited with code 1');
+      }
+      yield { type: 'assistant', content: 'Recovered' };
+      yield { type: 'result', sessionId: 'retry-sess' };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('dag-retry-succeed-run');
+
+    const nodes: DagNode[] = [{ id: 'my-node', command: 'my-cmd' }];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag-retry-succeed',
+      testDir,
+      { name: 'dag-retry-succeed', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // Node was called at least twice (first fails transiently, second succeeds)
+    expect(callCount).toBeGreaterThanOrEqual(2);
+    expect(mockDeps.store.failWorkflowRun as ReturnType<typeof mock>).not.toHaveBeenCalled();
+  }, 60_000);
+
+  it('workflow fails after exhausting all node retries', async () => {
+    let callCount = 0;
+    mockSendQueryDag.mockImplementation(function* () {
+      callCount++;
+      throw new Error('Claude Code crash: process exited with code 1');
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('dag-retry-exhaust-run');
+
+    const nodes: DagNode[] = [{ id: 'my-node', command: 'my-cmd' }];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag-retry-exhaust',
+      testDir,
+      { name: 'dag-retry-exhaust', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // Default retry is 2 retries → 3 total attempts
+    expect(callCount).toBe(3);
+    expect(mockDeps.store.failWorkflowRun as ReturnType<typeof mock>).toHaveBeenCalled();
+  }, 60_000);
+
+  it('node with FATAL error does not retry (call count = 1)', async () => {
+    let callCount = 0;
+    mockSendQueryDag.mockImplementation(function* () {
+      callCount++;
+      throw new Error('Claude Code auth error: unauthorized');
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('dag-retry-fatal-run');
+
+    const nodes: DagNode[] = [{ id: 'my-node', command: 'my-cmd' }];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag-retry-fatal',
+      testDir,
+      { name: 'dag-retry-fatal', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // FATAL error must not be retried — exactly 1 attempt
+    expect(callCount).toBe(1);
+    expect(mockDeps.store.failWorkflowRun as ReturnType<typeof mock>).toHaveBeenCalled();
+  });
+
+  it('sends retry notification to platform before each delay', async () => {
+    let callCount = 0;
+    mockSendQueryDag.mockImplementation(function* () {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error('Claude Code crash: process exited with code 1');
+      }
+      yield { type: 'assistant', content: 'OK' };
+      yield { type: 'result', sessionId: 'ok-sess' };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('dag-retry-notify-run');
+
+    const nodes: DagNode[] = [{ id: 'my-node', command: 'my-cmd' }];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag-retry-notify',
+      testDir,
+      { name: 'dag-retry-notify', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    const sendCalls = (platform.sendMessage as ReturnType<typeof mock>).mock.calls;
+    const retryMessages = sendCalls.filter(
+      (call: unknown[]) =>
+        typeof call[1] === 'string' && (call[1] as string).includes('transient error')
+    );
+    expect(retryMessages.length).toBeGreaterThan(0);
+  }, 60_000);
 });

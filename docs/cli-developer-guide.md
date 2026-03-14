@@ -58,8 +58,8 @@ packages/cli/
 **Code:** `packages/cli/src/cli.ts:106-259`
 
 **Git repository check:**
-- Commands `workflow` and `isolation` require running from a git repository
-- Commands `version` and `help` bypass this check
+- Commands `workflow`, `isolation`, and `complete` require running from a git repository
+- Commands `version`, `help`, `setup`, and `chat` bypass this check
 - When in a subdirectory, automatically resolves to repository root
 - Exit code 1 if not in a git repository
 
@@ -68,31 +68,33 @@ packages/cli/
 ## `workflow list` Flow
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ archon workflow list                                            │
-└─────────────────────────────────┬───────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ workflow.ts:31-41  workflowListCommand(cwd)                     │
-└─────────────────────────────────┬───────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ @archon/workflows discoverWorkflows(cwd)                        │
-│ - Loads bundled defaults                                        │
-│ - Searches .archon/workflows/ recursively                       │
-│ - Merges (repo overrides defaults by name)                      │
-└─────────────────────────────────┬───────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ workflow.ts:46-67  Print workflow list to stdout                │
-│                    name, description, type, step count          │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ archon workflow list [--json]                                    │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ workflow.ts  workflowListCommand(cwd, json?)                     │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ @archon/workflows discoverWorkflows(cwd)                         │
+│ - Loads bundled defaults                                         │
+│ - Searches .archon/workflows/ recursively                        │
+│ - Merges (repo overrides defaults by name)                       │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+               ┌───────────────┴───────────────┐
+               │ json=true                     │ json=false
+               ▼                               ▼
+┌──────────────────────────┐   ┌───────────────────────────────────┐
+│ JSON output to stdout    │   │ Human-readable list to stdout     │
+│ { workflows, errors }    │   │ name, description, type, options  │
+└──────────────────────────┘   └───────────────────────────────────┘
 ```
 
-**Code:** `packages/cli/src/commands/workflow.ts:31-67`
+**Code:** `packages/cli/src/commands/workflow.ts`
 
 ---
 
@@ -100,7 +102,7 @@ packages/cli/
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ archon workflow run <name> [message] [--branch X] [--no-worktree]│
+│ archon workflow run <name> [message] [--branch X] [--from X] [--no-worktree]│
 └─────────────────────────────────┬───────────────────────────────┘
                                   │
                                   ▼
@@ -277,8 +279,8 @@ When `--branch` is provided:
 
 1. **Lookup:** `isolationDb.findActiveByWorkflow(codebaseId, 'task', branchName)`
 2. **Health check:** `provider.healthCheck(path)` on existing
-3. **Reuse:** If found and healthy
-4. **Create:** If not found or unhealthy
+3. **Reuse:** If found and healthy (warns if `--from` was specified but not applied)
+4. **Create:** If not found or unhealthy — passes `fromBranch` to provider if specified via `--from`
 
 Worktrees stored at: `~/.archon/worktrees/<repo>/<branch-slug>/`
 

@@ -3,6 +3,8 @@ import { mkdir, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
+const isWindows = process.platform === 'win32';
+
 // Inline mock logger to suppress noisy output during tests
 const mockLogger = {
   fatal: mock(() => undefined),
@@ -1388,26 +1390,29 @@ steps:
       expect(result.errors[0].error).toContain('empty');
     });
 
-    it('should report directory read errors for non-ENOENT failures', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
+    it.skipIf(isWindows)(
+      'should report directory read errors for non-ENOENT failures',
+      async () => {
+        const workflowDir = join(testDir, '.archon', 'workflows');
+        await mkdir(workflowDir, { recursive: true });
 
-      // Create a file where a directory is expected (causes ENOTDIR on readdir)
-      await writeFile(join(workflowDir, 'not-a-dir'), 'file content');
+        // Create a file where a directory is expected (causes ENOTDIR on readdir)
+        await writeFile(join(workflowDir, 'not-a-dir'), 'file content');
 
-      // Create a YAML file that references the fake dir as a subdirectory
-      // The loader recurses into directories, so create a setup that triggers readdir error
-      // Simplest: create a workflow dir, then a symlink to nowhere
-      const brokenLink = join(workflowDir, 'broken-subdir');
-      const { symlink } = await import('fs/promises');
-      await symlink('/nonexistent/path', brokenLink);
+        // Create a YAML file that references the fake dir as a subdirectory
+        // The loader recurses into directories, so create a setup that triggers readdir error
+        // Simplest: create a workflow dir, then a symlink to nowhere
+        const brokenLink = join(workflowDir, 'broken-subdir');
+        const { symlink } = await import('fs/promises');
+        await symlink('/nonexistent/path', brokenLink);
 
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+        const result = await discoverWorkflows(testDir, { loadDefaults: false });
 
-      // The symlink stat will fail, producing a read_error
-      const readErrors = result.errors.filter(e => e.errorType === 'read_error');
-      expect(readErrors.length).toBeGreaterThanOrEqual(1);
-    });
+        // The symlink stat will fail, producing a read_error
+        const readErrors = result.errors.filter(e => e.errorType === 'read_error');
+        expect(readErrors.length).toBeGreaterThanOrEqual(1);
+      }
+    );
   });
 
   describe('bash node parsing', () => {
@@ -1553,6 +1558,140 @@ nodes:
       expect(result.errors[0].error).toMatch(/timeout.*positive/i);
     });
 
+    it('should parse idle_timeout on command node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'idle-timeout.yaml'),
+        `
+name: idle-timeout
+description: Node with idle timeout
+nodes:
+  - id: long-running
+    command: my-cmd
+    idle_timeout: 1800000
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (!isDagWorkflow(wf)) return;
+      expect(wf.nodes[0].idle_timeout).toBe(1800000);
+    });
+
+    it('should parse idle_timeout on prompt node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'idle-timeout-prompt.yaml'),
+        `
+name: idle-timeout-prompt
+description: Prompt node with idle timeout
+nodes:
+  - id: long-prompt
+    prompt: "do something slow"
+    idle_timeout: 600000
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (!isDagWorkflow(wf)) return;
+      expect(wf.nodes[0].idle_timeout).toBe(600000);
+    });
+
+    it('should parse idle_timeout on bash node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'idle-timeout-bash.yaml'),
+        `
+name: idle-timeout-bash
+description: Bash node with idle timeout
+nodes:
+  - id: slow-bash
+    bash: "sleep 100"
+    idle_timeout: 900000
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (!isDagWorkflow(wf)) return;
+      if (isBashNode(wf.nodes[0])) {
+        expect(wf.nodes[0].idle_timeout).toBe(900000);
+      }
+    });
+
+    it('should reject invalid idle_timeout (negative)', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-idle-timeout.yaml'),
+        `
+name: bad-idle-timeout
+description: Invalid idle timeout
+nodes:
+  - id: bad
+    command: my-cmd
+    idle_timeout: -1
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/idle_timeout.*positive/i);
+    });
+
+    it('should reject invalid idle_timeout (string)', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'string-idle-timeout.yaml'),
+        `
+name: string-idle-timeout
+description: String idle timeout
+nodes:
+  - id: bad
+    prompt: "do something"
+    idle_timeout: "slow"
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/idle_timeout.*positive/i);
+    });
+
+    it('should reject invalid idle_timeout (Infinity)', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'inf-idle-timeout.yaml'),
+        `
+name: inf-idle-timeout
+description: Infinity idle timeout
+nodes:
+  - id: bad
+    prompt: "do something"
+    idle_timeout: .inf
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/idle_timeout.*finite.*positive/i);
+    });
+
     it('should ignore AI-specific fields on bash nodes (parses successfully, fields stripped)', async () => {
       const workflowDir = join(testDir, '.archon', 'workflows');
       await mkdir(workflowDir, { recursive: true });
@@ -1582,6 +1721,373 @@ nodes:
       expect(isBashNode(node)).toBe(true);
       expect(node.provider).toBeUndefined();
       expect(node.model).toBeUndefined();
+    });
+  });
+
+  describe('DAG output ref validation', () => {
+    it('should reject a workflow where when: references an unknown node output', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-when-ref.yaml'),
+        `
+name: bad-when-ref
+description: Unknown output ref in when
+nodes:
+  - id: classify
+    prompt: "Classify the input"
+  - id: implement
+    prompt: "Implement the fix"
+    depends_on: [classify]
+    when: "$clasify.output == 'BUG'"
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/unknown node/i);
+      expect(result.errors[0].error).toContain('clasify');
+    });
+
+    it('should reject a workflow where prompt: references an unknown node output', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-prompt-ref.yaml'),
+        `
+name: bad-prompt-ref
+description: Unknown output ref in prompt
+nodes:
+  - id: analyze
+    prompt: "Analyze the code"
+  - id: fix
+    prompt: "Fix this: $analyize.output"
+    depends_on: [analyze]
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/unknown node/i);
+      expect(result.errors[0].error).toContain('analyize');
+    });
+
+    it('should accept a workflow where output refs use valid existing node IDs', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'valid-refs.yaml'),
+        `
+name: valid-refs
+description: Valid output refs
+nodes:
+  - id: classify
+    prompt: "Classify the input"
+  - id: implement
+    prompt: "Fix this: $classify.output"
+    depends_on: [classify]
+    when: "$classify.output == 'BUG'"
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      expect(result.workflows).toHaveLength(1);
+    });
+
+    it('should accept a workflow where a node has both when: and prompt: with valid refs', async () => {
+      // Exercises the lastIndex = 0 reset across multiple sources per node
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'multi-source.yaml'),
+        `
+name: multi-source
+description: Node with both when and prompt refs
+nodes:
+  - id: step1
+    prompt: "Do step 1"
+  - id: step2
+    prompt: "Based on $step1.output, do step 2"
+    depends_on: [step1]
+    when: "$step1.output == 'go'"
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      expect(result.workflows).toHaveLength(1);
+    });
+
+    it('should not validate bash: script $nodeId.output refs at load time', async () => {
+      // bash: nodes are intentionally excluded from load-time validation
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bash-unknown-ref.yaml'),
+        `
+name: bash-unknown-ref
+description: Bash node with unknown output ref (not validated at load time)
+nodes:
+  - id: step1
+    prompt: "Do step 1"
+  - id: step2
+    bash: "echo $typo.output"
+    depends_on: [step1]
+`
+      );
+
+      // Should parse without error — bash: refs are validated at runtime only
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      expect(result.workflows).toHaveLength(1);
+    });
+  });
+
+  describe('retry config parsing', () => {
+    it('should parse valid retry config on sequential step', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'retry-step.yaml'),
+        `
+name: retry-step
+description: Step with retry config
+steps:
+  - command: my-cmd
+    retry:
+      max_attempts: 3
+      delay_ms: 5000
+      on_error: transient
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      expect(wf.steps).toBeDefined();
+      if (wf.steps) {
+        const step = wf.steps[0];
+        if (!Array.isArray(step)) {
+          expect(step.retry).toEqual({
+            max_attempts: 3,
+            delay_ms: 5000,
+            on_error: 'transient',
+          });
+        }
+      }
+    });
+
+    it('should parse retry config on DAG command node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'retry-dag.yaml'),
+        `
+name: retry-dag
+description: DAG node with retry
+nodes:
+  - id: sync
+    command: sync-cmd
+    retry:
+      max_attempts: 2
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (isDagWorkflow(wf)) {
+        expect(wf.nodes[0].retry).toEqual({ max_attempts: 2 });
+      }
+    });
+
+    it('should parse retry config on DAG bash node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'retry-bash.yaml'),
+        `
+name: retry-bash
+description: Bash node with retry
+nodes:
+  - id: deploy
+    bash: "npm run deploy"
+    retry:
+      max_attempts: 1
+      delay_ms: 2000
+      on_error: all
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (isDagWorkflow(wf)) {
+        if (isBashNode(wf.nodes[0])) {
+          expect(wf.nodes[0].retry).toEqual({
+            max_attempts: 1,
+            delay_ms: 2000,
+            on_error: 'all',
+          });
+        }
+      }
+    });
+
+    it('should parse retry config on DAG prompt node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'retry-prompt.yaml'),
+        `
+name: retry-prompt
+description: Prompt node with retry config
+nodes:
+  - id: summarise
+    prompt: "Summarise the changes"
+    retry:
+      max_attempts: 2
+      delay_ms: 4000
+      on_error: transient
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      expect(isDagWorkflow(wf)).toBe(true);
+      if (isDagWorkflow(wf)) {
+        expect(wf.nodes[0].retry).toEqual({
+          max_attempts: 2,
+          delay_ms: 4000,
+          on_error: 'transient',
+        });
+      }
+    });
+
+    it('should reject retry with missing max_attempts', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-retry.yaml'),
+        `
+name: bad-retry
+description: Missing required field
+steps:
+  - command: my-cmd
+    retry:
+      delay_ms: 5000
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/max_attempts.*required/i);
+    });
+
+    it('should reject retry with max_attempts out of range', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-retry-range.yaml'),
+        `
+name: bad-retry-range
+description: max_attempts too high
+steps:
+  - command: my-cmd
+    retry:
+      max_attempts: 10
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/max_attempts.*between 1 and 5/i);
+    });
+
+    it('should reject retry with invalid on_error value', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-retry-onerror.yaml'),
+        `
+name: bad-retry-onerror
+description: Invalid on_error value
+steps:
+  - command: my-cmd
+    retry:
+      max_attempts: 2
+      on_error: always
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/on_error.*transient.*all/i);
+    });
+
+    it('should reject retry with delay_ms out of range', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-retry-delay.yaml'),
+        `
+name: bad-retry-delay
+description: delay_ms too low
+steps:
+  - command: my-cmd
+    retry:
+      max_attempts: 2
+      delay_ms: 100
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toMatch(/delay_ms.*1000.*60000/i);
+    });
+
+    it('should use defaults when retry fields are omitted', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'retry-defaults.yaml'),
+        `
+name: retry-defaults
+description: Minimal retry config
+steps:
+  - command: my-cmd
+    retry:
+      max_attempts: 1
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (wf.steps) {
+        const step = wf.steps[0];
+        if (!Array.isArray(step)) {
+          expect(step.retry).toEqual({ max_attempts: 1 });
+          // delay_ms and on_error should be undefined (defaults applied at runtime)
+          expect(step.retry?.delay_ms).toBeUndefined();
+          expect(step.retry?.on_error).toBeUndefined();
+        }
+      }
     });
   });
 });

@@ -56,7 +56,7 @@ export async function createWorkflowEvent(data: {
   } catch (error) {
     getLog().error(
       { err: error as Error, eventType: data.event_type, runId: data.workflow_run_id },
-      'create_event_failed'
+      'db.workflow_event_create_failed'
     );
     // Fire-and-forget: never throw
   }
@@ -78,7 +78,7 @@ export async function listWorkflowEvents(workflowRunId: string): Promise<Workflo
       data: typeof row.data === 'string' ? JSON.parse(row.data) : row.data,
     }));
   } catch (error) {
-    getLog().error({ err: error as Error, runId: workflowRunId }, 'list_events_failed');
+    getLog().error({ err: error as Error, runId: workflowRunId }, 'db.workflow_events_list_failed');
     throw new Error(`Failed to list workflow events: ${(error as Error).message}`);
   }
 }
@@ -105,7 +105,10 @@ export async function listRecentEvents(
     }
     return await listWorkflowEvents(workflowRunId);
   } catch (error) {
-    getLog().error({ err: error as Error, runId: workflowRunId }, 'list_recent_events_failed');
+    getLog().error(
+      { err: error as Error, runId: workflowRunId },
+      'db.workflow_events_list_recent_failed'
+    );
     throw new Error(`Failed to list recent workflow events: ${(error as Error).message}`);
   }
 }

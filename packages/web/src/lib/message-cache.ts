@@ -3,6 +3,20 @@ import type { ChatMessage } from '@/lib/types';
 const MAX_CACHED_CONVERSATIONS = 20;
 const messageCache = new Map<string, ChatMessage[]>();
 
+/**
+ * Module-level flag indicating a send is in flight.
+ * Survives component remounts (e.g., navigate after new-chat creation)
+ * so the hydration merge in ChatInterface knows not to discard the
+ * optimistic thinking placeholder.
+ */
+let sendInFlight = false;
+export function setSendInFlight(v: boolean): void {
+  sendInFlight = v;
+}
+export function isSendInFlight(): boolean {
+  return sendInFlight;
+}
+
 export function getCachedMessages(id: string): ChatMessage[] {
   const msgs = messageCache.get(id);
   if (msgs) {

@@ -8,7 +8,16 @@ function getLog(): ReturnType<typeof createLogger> {
   return cachedLog;
 }
 
+/** Info returned when a tool call is finalized (so the adapter can emit tool_result SSE). */
+export interface FinalizedToolInfo {
+  toolCallId: string;
+  name: string;
+  duration: number;
+}
+
 interface BufferedToolCall {
+  /** Unique ID within this conversation (conversationId-tool-N) */
+  toolCallId: string;
   name: string;
   input: Record<string, unknown>;
   startedAt: number;
@@ -30,6 +39,8 @@ interface AssistantBuffer {
 export class MessagePersistence {
   private assistantBuffer = new Map<string, AssistantBuffer>();
   private dbIdMap = new Map<string, string>(); // platform_conversation_id → DB UUID
+  /** Per-conversation incrementing counter for unique tool call IDs */
+  private toolCallCounter = new Map<string, number>();
 
   constructor(private emitEvent: (conversationId: string, event: string) => Promise<void>) {}
 
@@ -89,14 +100,16 @@ export class MessagePersistence {
     // Prevent unbounded buffer growth — force flush if too many segments
     if (buf.segments.length > 50) {
       getLog().warn({ conversationId, segments: buf.segments.length }, 'assistant_buffer_overflow');
-      void this.flush(conversationId);
+      this.flush(conversationId).catch((e: unknown) => {
+        getLog().error({ conversationId, err: e }, 'buffer_overflow_flush_failed');
+      });
     }
   }
 
   appendToolCall(
     conversationId: string,
     tool: { name: string; input: Record<string, unknown> }
-  ): void {
+  ): { newToolCallId: string; finalized?: FinalizedToolInfo } {
     // Buffer tool call for persistence (add to current segment)
     const buf = this.assistantBuffer.get(conversationId) ?? { segments: [] };
     if (buf.segments.length === 0) {
@@ -105,16 +118,28 @@ export class MessagePersistence {
     const lastSeg = buf.segments[buf.segments.length - 1];
     // Finalize duration on previous running tool (agent moved on to next tool)
     const now = Date.now();
+    let finalized: FinalizedToolInfo | undefined;
     const prevTool = lastSeg.toolCalls[lastSeg.toolCalls.length - 1];
     if (prevTool && prevTool.duration === undefined) {
       prevTool.duration = now - prevTool.startedAt;
+      finalized = {
+        toolCallId: prevTool.toolCallId,
+        name: prevTool.name,
+        duration: prevTool.duration,
+      };
     }
+    // Generate unique tool call ID
+    const counter = (this.toolCallCounter.get(conversationId) ?? 0) + 1;
+    this.toolCallCounter.set(conversationId, counter);
+    const newToolCallId = `${conversationId}-tool-${String(counter)}`;
     lastSeg.toolCalls.push({
+      toolCallId: newToolCallId,
       name: tool.name,
       input: tool.input,
       startedAt: now,
     });
     this.assistantBuffer.set(conversationId, buf);
+    return { newToolCallId, finalized };
   }
 
   /**
@@ -123,11 +148,17 @@ export class MessagePersistence {
    * structure as the live streaming view (text+tools interleaving).
    */
   async flush(conversationId: string): Promise<void> {
+    // Snapshot and clear the buffer synchronously before any async work.
+    // This prevents a race where concurrent appendText calls push segments
+    // onto the same buf reference that is mid-flush: once the map entry is
+    // cleared here, new appendText calls create a fresh buffer entry and
+    // those segments won't be dropped when this flush completes.
     const buf = this.assistantBuffer.get(conversationId);
     if (!buf || buf.segments.length === 0) {
       this.assistantBuffer.delete(conversationId);
       return;
     }
+    this.assistantBuffer.delete(conversationId);
 
     const dbId = this.dbIdMap.get(conversationId);
     if (!dbId) {
@@ -135,12 +166,16 @@ export class MessagePersistence {
         { conversationId, segmentCount: buf.segments.length },
         'assistant_persist_no_db_id'
       );
-      // Keep buffer — dbId may arrive later (e.g., race with conversation creation)
+      // Restore buffer — dbId may arrive later (e.g., race with conversation creation).
+      // Merge with any segments that arrived since we cleared the map above.
+      const existing = this.assistantBuffer.get(conversationId);
+      if (existing) {
+        existing.segments.unshift(...buf.segments);
+      } else {
+        this.assistantBuffer.set(conversationId, buf);
+      }
       return;
     }
-
-    // Safe to delete now — we have dbId and will persist
-    this.assistantBuffer.delete(conversationId);
 
     // Finalize any remaining tool durations (last tool in each segment)
     const now = Date.now();
@@ -182,25 +217,90 @@ export class MessagePersistence {
   }
 
   /**
+   * Finalize all running tools in the buffer for a conversation.
+   * Returns info for each finalized tool so the adapter can emit tool_result SSE events.
+   */
+  finalizeRunningTools(conversationId: string): FinalizedToolInfo[] {
+    const buf = this.assistantBuffer.get(conversationId);
+    if (!buf) return [];
+    const now = Date.now();
+    const finalized: FinalizedToolInfo[] = [];
+    for (const seg of buf.segments) {
+      for (const tc of seg.toolCalls) {
+        if (tc.duration === undefined) {
+          tc.duration = now - tc.startedAt;
+          finalized.push({ toolCallId: tc.toolCallId, name: tc.name, duration: tc.duration });
+        }
+      }
+    }
+    return finalized;
+  }
+
+  /**
    * Remove the last segment from the persistence buffer.
    * Called when emitRetract fires so retracted text doesn't get written to DB.
    */
   retractLastSegment(conversationId: string): void {
     const buf = this.assistantBuffer.get(conversationId);
     if (!buf || buf.segments.length === 0) return;
-    buf.segments.pop();
-    if (buf.segments.length === 0) {
-      this.assistantBuffer.delete(conversationId);
+    const lastSeg = buf.segments[buf.segments.length - 1];
+    if (lastSeg.toolCalls.length > 0) {
+      // Preserve tool call records — only clear the text content
+      lastSeg.content = '';
+    } else {
+      buf.segments.pop();
+      if (buf.segments.length === 0) {
+        this.assistantBuffer.delete(conversationId);
+      }
     }
   }
 
-  clearConversation(conversationId: string): void {
+  async clearConversation(conversationId: string): Promise<void> {
+    // Attempt to flush before clearing so buffered messages aren't lost
+    await this.flush(conversationId).catch((e: unknown) => {
+      getLog().error({ conversationId, err: e }, 'clear_conversation_flush_failed');
+    });
     this.assistantBuffer.delete(conversationId);
     this.dbIdMap.delete(conversationId);
+    this.toolCallCounter.delete(conversationId);
+  }
+
+  /**
+   * Flush all buffered conversations. Used by shutdown and periodic flush.
+   */
+  async flushAll(): Promise<void> {
+    const ids = [...this.assistantBuffer.keys()];
+    if (ids.length === 0) return;
+    getLog().info({ count: ids.length }, 'flush_all_started');
+    await Promise.allSettled(ids.map(id => this.flush(id)));
+    getLog().info({ count: ids.length }, 'flush_all_completed');
+  }
+
+  private periodicFlushTimer: ReturnType<typeof setInterval> | undefined;
+
+  /**
+   * Start a periodic timer that flushes all buffered conversations every 30s.
+   * Ensures messages are persisted even if the lock-release flush is missed.
+   */
+  startPeriodicFlush(): void {
+    if (this.periodicFlushTimer) return;
+    this.periodicFlushTimer = setInterval(() => {
+      this.flushAll().catch((e: unknown) => {
+        getLog().error({ err: e }, 'periodic_flush_failed');
+      });
+    }, 30_000);
+  }
+
+  stopPeriodicFlush(): void {
+    if (this.periodicFlushTimer) {
+      clearInterval(this.periodicFlushTimer);
+      this.periodicFlushTimer = undefined;
+    }
   }
 
   clearAll(): void {
     this.assistantBuffer.clear();
     this.dbIdMap.clear();
+    this.toolCallCounter.clear();
   }
 }

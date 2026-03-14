@@ -60,7 +60,7 @@ export async function getCodebaseCommands(
     try {
       parsed = JSON.parse(raw);
     } catch {
-      getLog().error({ codebaseId: id, raw }, 'commands_json_parse_failed');
+      getLog().error({ codebaseId: id, raw }, 'db.codebase_commands_json_parse_failed');
       return {};
     }
   } else {
@@ -126,7 +126,7 @@ export async function listCodebases(): Promise<readonly Codebase[]> {
 }
 
 export async function deleteCodebase(id: string): Promise<void> {
-  getLog().debug({ codebaseId: id }, 'codebase_delete_cascade_started');
+  getLog().debug({ codebaseId: id }, 'db.codebase_delete_cascade_started');
   // First, unlink any sessions referencing this codebase (FK has no cascade)
   await pool.query('UPDATE remote_agent_sessions SET codebase_id = NULL WHERE codebase_id = $1', [
     id,
@@ -138,5 +138,5 @@ export async function deleteCodebase(id: string): Promise<void> {
   );
   // Then delete the codebase
   await pool.query('DELETE FROM remote_agent_codebases WHERE id = $1', [id]);
-  getLog().info({ codebaseId: id }, 'codebase_deleted');
+  getLog().info({ codebaseId: id }, 'db.codebase_delete_completed');
 }

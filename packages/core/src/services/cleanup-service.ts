@@ -35,9 +35,10 @@ function getLog(): ReturnType<typeof createLogger> {
 const STALE_THRESHOLD_DAYS = parseInt(process.env.STALE_THRESHOLD_DAYS ?? '14', 10);
 const CLEANUP_INTERVAL_HOURS = parseInt(process.env.CLEANUP_INTERVAL_HOURS ?? '6', 10);
 const MAX_WORKTREES_PER_CODEBASE = parseInt(process.env.MAX_WORKTREES_PER_CODEBASE ?? '25', 10);
+const SESSION_RETENTION_DAYS = parseInt(process.env.SESSION_RETENTION_DAYS ?? '30', 10);
 
 // Export configuration for use by other modules
-export { MAX_WORKTREES_PER_CODEBASE, STALE_THRESHOLD_DAYS };
+export { MAX_WORKTREES_PER_CODEBASE, STALE_THRESHOLD_DAYS, SESSION_RETENTION_DAYS };
 
 // Module-level variable for scheduler
 let cleanupIntervalId: NodeJS.Timeout | null = null;
@@ -46,6 +47,7 @@ export interface CleanupReport {
   removed: string[];
   skipped: { id: string; reason: string }[];
   errors: { id: string; error: string }[];
+  sessionsDeleted: number;
 }
 
 /**
@@ -228,7 +230,7 @@ export async function cleanupToMakeRoom(
  */
 export async function runScheduledCleanup(): Promise<CleanupReport> {
   getLog().info('cleanup_started');
-  const report: CleanupReport = { removed: [], skipped: [], errors: [] };
+  const report: CleanupReport = { removed: [], skipped: [], errors: [], sessionsDeleted: 0 };
 
   try {
     // Get all active environments with their codebase info
@@ -327,13 +329,23 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
     report.errors.push({ id: 'scheduler', error: err.message });
   }
 
+  // Clean up old inactive sessions
+  try {
+    report.sessionsDeleted = await sessionDb.deleteOldSessions(SESSION_RETENTION_DAYS);
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err: error }, 'session_cleanup_failed');
+    report.errors.push({ id: 'session-cleanup', error: err.message });
+  }
+
   getLog().info(
     {
       removed: report.removed.length,
       skipped: report.skipped.length,
       errors: report.errors.length,
+      sessionsDeleted: report.sessionsDeleted,
     },
-    'cleanup_complete'
+    'cleanup_completed'
   );
 
   return report;

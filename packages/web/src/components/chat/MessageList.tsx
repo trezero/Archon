@@ -26,7 +26,7 @@ function WorkflowDispatchInline({
     queryFn: () => getWorkflowRunByWorker(workerConversationId),
     refetchInterval: (query): number | false => {
       const status = query.state.data?.run.status;
-      if (status === 'completed' || status === 'failed') return false;
+      if (status === 'completed' || status === 'failed' || status === 'cancelled') return false;
       return 3000;
     },
   });
@@ -46,6 +46,8 @@ function WorkflowDispatchInline({
       <span className="text-success text-xs shrink-0">&#x2713;</span>
     ) : status === 'failed' ? (
       <span className="text-error text-xs shrink-0">&#x2717;</span>
+    ) : status === 'cancelled' ? (
+      <span className="text-text-secondary text-xs shrink-0">&#x2715;</span>
     ) : (
       <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent shrink-0" />
     );
@@ -76,8 +78,9 @@ function WorkflowResultCard({
 
   const lines = content.split('\n');
   const isTruncatable = content.length > 500 || lines.length > 8;
+  const previewText = lines.slice(0, 8).join('\n').slice(0, 500);
   const preview = isTruncatable
-    ? lines.slice(0, 8).join('\n').slice(0, 500) + (content.length > 500 ? '...' : '')
+    ? previewText + (previewText.length < content.length ? '...' : '')
     : content;
 
   const displayContent = expanded || !isTruncatable ? content : preview;
@@ -120,11 +123,21 @@ function WorkflowResultCard({
 interface MessageListProps {
   messages: ChatMessage[];
   isStreaming: boolean;
+  /** When this value changes, force-scroll to bottom regardless of user scroll position. */
+  scrollTrigger?: number;
 }
 
-function MessageListRaw({ messages, isStreaming }: MessageListProps): React.ReactElement {
+function MessageListRaw({
+  messages,
+  isStreaming,
+  scrollTrigger,
+}: MessageListProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
-  const { isAtBottom, scrollToBottom } = useAutoScroll(containerRef, [messages, isStreaming]);
+  const { isAtBottom, scrollToBottom } = useAutoScroll(
+    containerRef,
+    [messages, isStreaming],
+    scrollTrigger
+  );
 
   if (messages.length === 0) {
     return (

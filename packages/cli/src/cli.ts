@@ -51,6 +51,7 @@ import {
   isolationListCommand,
   isolationCleanupCommand,
   isolationCleanupMergedCommand,
+  isolationCompleteCommand,
 } from './commands/isolation';
 import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
@@ -84,16 +85,20 @@ Commands:
   isolation list             List all active worktrees/environments
   isolation cleanup [days]   Remove stale environments (default: 7 days)
   isolation cleanup --merged Remove environments with branches merged into main
+  complete <branch> [...]    Complete branch lifecycle (remove worktree + branches)
   version                    Show version info
   help                       Show this help message
 
 Options:
   --cwd <path>               Override working directory (default: current directory)
   --branch, -b <name>        Create worktree for branch (or reuse existing)
+  --from, --from-branch <name> Create new branch from specific start point
   --no-worktree              Run on branch directly without worktree isolation
+  --resume                   Resume the most recent failed run of the workflow (mutually exclusive with --branch)
   --spawn                    Open setup wizard in a new terminal window (for setup command)
   --quiet, -q                Reduce log verbosity to warnings and errors only
   --verbose, -v              Show debug-level output
+  --json                     Output machine-readable JSON (for workflow list)
 
 Examples:
   archon chat "What does the orchestrator do?"
@@ -141,10 +146,14 @@ async function main(): Promise<number> {
         cwd: { type: 'string', default: process.cwd() },
         help: { type: 'boolean', short: 'h' },
         branch: { type: 'string', short: 'b' },
+        from: { type: 'string' },
+        'from-branch': { type: 'string' },
         'no-worktree': { type: 'boolean' },
+        resume: { type: 'boolean' },
         spawn: { type: 'boolean' },
         quiet: { type: 'boolean', short: 'q' },
         verbose: { type: 'boolean', short: 'v' },
+        json: { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false, // Allow unknown flags to pass through
@@ -160,8 +169,12 @@ async function main(): Promise<number> {
   const cwdValue = values.cwd;
   const cwd = resolve(typeof cwdValue === 'string' ? cwdValue : process.cwd());
   const branchName = values.branch as string | undefined;
+  const fromBranch =
+    (values.from as string | undefined) ?? (values['from-branch'] as string | undefined);
   const noWorktree = values['no-worktree'] as boolean | undefined;
+  const resumeFlag = values.resume as boolean | undefined;
   const spawnFlag = values.spawn as boolean | undefined;
+  const jsonFlag = values.json as boolean | undefined;
 
   // Handle help flag
   if (values.help) {
@@ -231,7 +244,7 @@ async function main(): Promise<number> {
       case 'workflow':
         switch (subcommand) {
           case 'list':
-            await workflowListCommand(effectiveCwd);
+            await workflowListCommand(effectiveCwd, jsonFlag);
             break;
 
           case 'run': {
@@ -241,8 +254,32 @@ async function main(): Promise<number> {
               return 1;
             }
             const userMessage = positionals.slice(3).join(' ') || '';
+            if (fromBranch !== undefined && branchName === undefined) {
+              console.error('Error: --from/--from-branch requires --branch to be specified.');
+              return 1;
+            }
+            if (branchName !== undefined && noWorktree) {
+              console.error(
+                'Error: --branch and --no-worktree are mutually exclusive.\n' +
+                  '  --branch creates an isolated worktree (safe).\n' +
+                  '  --no-worktree checks out directly in your repo (no isolation).\n' +
+                  'Use one or the other.'
+              );
+              return 1;
+            }
+            if (resumeFlag && branchName !== undefined) {
+              console.error(
+                'Error: --resume and --branch are mutually exclusive.\n' +
+                  '  --resume reuses the existing worktree from the failed run.\n' +
+                  '  Remove --branch when using --resume.'
+              );
+              return 1;
+            }
             // Conditionally construct options to satisfy discriminated union
-            const options = branchName !== undefined ? { branchName, noWorktree } : {};
+            const options =
+              branchName !== undefined
+                ? { branchName, fromBranch, noWorktree }
+                : { resume: resumeFlag };
             await workflowRunCommand(effectiveCwd, workflowName, userMessage, options);
             break;
           }
@@ -290,6 +327,17 @@ async function main(): Promise<number> {
             return 1;
         }
         break;
+
+      case 'complete': {
+        const branches = positionals.slice(1);
+        if (branches.length === 0) {
+          console.error('Usage: archon complete <branch-name> [branch2 ...]');
+          return 1;
+        }
+        const forceFlag = args.includes('--force');
+        await isolationCompleteCommand(branches, { force: forceFlag, deleteRemote: true });
+        break;
+      }
 
       default:
         if (command === undefined) {

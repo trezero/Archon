@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { Header } from '@/components/layout/Header';
@@ -14,6 +14,7 @@ import {
   listCodebases,
   getMessages,
   createConversation,
+  getWorkflowRunByWorker,
 } from '@/lib/api';
 import type { ConversationResponse, CodebaseResponse, MessageResponse } from '@/lib/api';
 import type {
@@ -22,7 +23,12 @@ import type {
   ErrorDisplay,
   WorkflowDispatchEvent,
 } from '@/lib/types';
-import { getCachedMessages, setCachedMessages } from '@/lib/message-cache';
+import {
+  getCachedMessages,
+  setCachedMessages,
+  isSendInFlight,
+  setSendInFlight,
+} from '@/lib/message-cache';
 import { useProject } from '@/contexts/ProjectContext';
 
 interface ChatInterfaceProps {
@@ -43,7 +49,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   const [sending, setSending] = useState(false);
   const [hasSentMessage, setHasSentMessage] = useState(false);
   const messageIdCounter = useRef(0);
-  const { activeWorkflow, handlers: workflowHandlers } = useWorkflowStatus();
+  const { activeWorkflow, hydrateWorkflow, handlers: workflowHandlers } = useWorkflowStatus();
 
   // Sync messages to cache for persistence across navigation
   useEffect(() => {
@@ -105,33 +111,21 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             isStreaming: false,
           };
         });
-        // Merge history with any SSE messages that arrived during fetch
+        // REST is the source of truth for all completed messages.
+        // Keep actively streaming messages that have content (AI is generating).
+        // Discard empty thinking placeholders ONLY if we're not currently sending —
+        // a send in progress means the placeholder was just created for the current
+        // request and should be preserved until the first SSE text event arrives.
+        // Uses a module-level flag (isSendInFlight) rather than a component ref
+        // because navigate() after new-chat creation causes a full remount, and
+        // refs don't survive across mount boundaries.
         setMessages(prev => {
           if (prev.length === 0) {
-            // No SSE messages arrived yet — use full history
             return hydrated;
           }
-          // Build dedup sets for hydrated messages.
-          // Use role+content as the primary key, and workflowResult.runId as a
-          // secondary key for workflow result messages (avoids duplicates when
-          // the SSE-received message and DB-persisted message have any content
-          // difference, e.g. trailing whitespace from text batching).
-          const hydratedSigs = new Set(hydrated.map(m => `${m.role}:${m.content}`));
-          const hydratedWorkflowRunIds = new Set(
-            hydrated.flatMap(m => (m.workflowResult?.runId ? [m.workflowResult.runId] : []))
-          );
-          // Keep prev messages that are either:
-          // 1. Newer than the latest history message (SSE messages during fetch), OR
-          // 2. Streaming/thinking indicators (no DB equivalent yet)
-          // But exclude any that match a hydrated message by role+content or workflowResult.runId (dedup).
-          const latestHistoryTs = Math.max(...hydrated.map(m => m.timestamp));
-          const sseOnly = prev.filter(
-            m =>
-              (m.timestamp > latestHistoryTs || m.isStreaming) &&
-              !hydratedSigs.has(`${m.role}:${m.content}`) &&
-              !(m.workflowResult?.runId && hydratedWorkflowRunIds.has(m.workflowResult.runId))
-          );
-          return [...hydrated, ...sseOnly];
+          const sendActive = isSendInFlight();
+          const activeStreaming = prev.filter(m => m.isStreaming && (m.content || sendActive));
+          return [...hydrated, ...activeStreaming];
         });
         setHasSentMessage(true);
       })
@@ -144,7 +138,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         setMessages(prev => [
           ...prev,
           {
-            id: 'error-load-history',
+            id: `error-load-history-${String(Date.now())}`,
             role: 'assistant' as const,
             content: '',
             error: {
@@ -160,6 +154,52 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       cancelled = true;
     };
   }, [conversationId, isNewChat]);
+
+  // Memoize dispatch IDs as a joined string so the hydration effect only re-fires
+  // when a new workflow is dispatched, not on every streaming token.
+  const workflowDispatchIds = useMemo(
+    () =>
+      messages
+        .map(m => m.workflowDispatch?.workerConversationId)
+        .filter((id): id is string => Boolean(id))
+        .join(','),
+    [messages]
+  );
+
+  // Hydrate workflow status from message metadata when SSE events were missed.
+  // workflowDispatch metadata is persisted in DB messages — scan for it after
+  // loading history and fetch the workflow run status via REST.
+  useEffect(() => {
+    if (isNewChat || !workflowDispatchIds) return;
+    const ids = workflowDispatchIds.split(',');
+    // Only hydrate the most recent dispatch (typical case: one active workflow per chat)
+    const latestId = ids[ids.length - 1];
+    void getWorkflowRunByWorker(latestId)
+      .then(result => {
+        if (!result) return;
+        const run = result.run;
+        const ensureUtc = (ts: string): string => (ts.endsWith('Z') ? ts : ts + 'Z');
+        hydrateWorkflow({
+          runId: run.id,
+          workflowName: run.workflow_name,
+          status: run.status,
+          steps: [],
+          dagNodes: [],
+          artifacts: [],
+          isLoop: false,
+          startedAt: new Date(ensureUtc(run.started_at)).getTime(),
+          completedAt: run.completed_at
+            ? new Date(ensureUtc(run.completed_at)).getTime()
+            : undefined,
+        });
+      })
+      .catch((err: unknown) => {
+        console.warn('[Chat] Failed to hydrate workflow status from message metadata', {
+          workerConversationId: latestId,
+          error: err instanceof Error ? err.message : err,
+        });
+      });
+  }, [workflowDispatchIds, isNewChat, hydrateWorkflow]);
 
   // Share conversations cache with sidebar for title/context display
   const { data: conversations, isError: conversationsError } = useQuery<ConversationResponse[]>({
@@ -187,6 +227,9 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
 
   const onText = useCallback(
     (content: string, workflowResult?: { workflowName: string; runId: string }): void => {
+      // First AI text received — the thinking placeholder is about to gain content,
+      // so the hydration merge no longer needs the sendInFlight guard.
+      setSendInFlight(false);
       setMessages(prev => {
         const last = prev[prev.length - 1];
         // Workflow status messages (🚀 start, ✅ complete) should always be their own message
@@ -258,47 +301,73 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     []
   );
 
-  const onToolCall = useCallback((name: string, input: Record<string, unknown>): void => {
-    setMessages(prev => {
-      const last = prev[prev.length - 1];
-      if (last?.role === 'assistant') {
-        const now = Date.now();
-        // Mark any previous running tools as complete (agent moved on)
-        const updatedExistingTools = (last.toolCalls ?? []).map(tc =>
-          !tc.output && tc.duration === undefined ? { ...tc, duration: now - tc.startedAt } : tc
-        );
-        const newTool: ToolCallDisplay = {
-          id: `${last.id}-tool-${String(updatedExistingTools.length)}`,
-          name,
-          input,
-          startedAt: now,
-          isExpanded: false,
-        };
-        return [
-          ...prev.slice(0, -1),
-          {
-            ...last,
-            isStreaming: false,
-            toolCalls: [...updatedExistingTools, newTool],
-          },
-        ];
-      }
-      return prev;
-    });
-  }, []);
+  const onToolCall = useCallback(
+    (name: string, input: Record<string, unknown>, toolCallId?: string): void => {
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.role === 'assistant') {
+          const now = Date.now();
+          // Mark any previous running tools as complete (agent moved on)
+          const updatedExistingTools = (last.toolCalls ?? []).map(tc =>
+            !tc.output && tc.duration === undefined ? { ...tc, duration: now - tc.startedAt } : tc
+          );
+          const newTool: ToolCallDisplay = {
+            id: toolCallId ?? `${last.id}-tool-${String(updatedExistingTools.length)}`,
+            name,
+            input,
+            startedAt: now,
+            isExpanded: false,
+          };
+          return [
+            ...prev.slice(0, -1),
+            {
+              ...last,
+              isStreaming: false,
+              toolCalls: [...updatedExistingTools, newTool],
+            },
+          ];
+        }
+        return prev;
+      });
+    },
+    []
+  );
 
-  const onToolResult = useCallback((name: string, output: string, duration: number): void => {
-    setMessages(prev => {
-      const last = prev[prev.length - 1];
-      if (last?.role === 'assistant' && last.toolCalls) {
-        const updatedTools = last.toolCalls.map(tc =>
-          tc.name === name && !tc.output ? { ...tc, output, duration } : tc
-        );
-        return [...prev.slice(0, -1), { ...last, toolCalls: updatedTools }];
-      }
-      return prev;
-    });
-  }, []);
+  const onToolResult = useCallback(
+    (name: string, output: string, duration: number, toolCallId?: string): void => {
+      setMessages(prev => {
+        // Search all messages (not just last) — tool_result may arrive after a text message
+        let targetIdx = -1;
+        for (let i = prev.length - 1; i >= 0; i--) {
+          if (prev[i].role === 'assistant' && prev[i].toolCalls?.length) {
+            // Match by toolCallId if available, otherwise fall back to name-based matching
+            const hasMatch = prev[i].toolCalls?.some(
+              tc =>
+                (toolCallId ? tc.id === toolCallId : tc.name === name) && tc.duration === undefined
+            );
+            if (hasMatch) {
+              targetIdx = i;
+              break;
+            }
+          }
+        }
+        if (targetIdx === -1) return prev;
+        const msg = prev[targetIdx];
+        const updatedTools = msg.toolCalls?.map(tc => {
+          if (toolCallId ? tc.id === toolCallId : tc.name === name && tc.duration === undefined) {
+            return { ...tc, output: output || tc.output, duration };
+          }
+          return tc;
+        });
+        return [
+          ...prev.slice(0, targetIdx),
+          { ...msg, toolCalls: updatedTools },
+          ...prev.slice(targetIdx + 1),
+        ];
+      });
+    },
+    []
+  );
 
   const onError = useCallback((error: ErrorDisplay): void => {
     setMessages(prev => {
@@ -323,6 +392,8 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     setLocked(isLocked);
     setQueuePosition(position);
     if (!isLocked) {
+      // Lock released — processing is done, clear the sendInFlight guard
+      setSendInFlight(false);
       const now = Date.now();
       // Mark ALL streaming messages as complete and all running tools as finished
       setMessages(prev =>
@@ -345,6 +416,24 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       );
     }
   }, []);
+
+  // Safety net: when the active workflow transitions to terminal status, ensure
+  // locked state is cleared and streaming messages are finalized. Handles cases
+  // where conversation_lock:false and workflow_status:completed SSE events were
+  // lost (e.g., user navigated away during workflow execution and came back).
+  const prevWorkflowStatusRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const status = activeWorkflow?.status;
+    const prevStatus = prevWorkflowStatusRef.current;
+    prevWorkflowStatusRef.current = status;
+    if (
+      status &&
+      status !== prevStatus &&
+      (status === 'completed' || status === 'failed' || status === 'cancelled')
+    ) {
+      onLockChange(false);
+    }
+  }, [activeWorkflow?.status, onLockChange]);
 
   const onSessionInfo = useCallback((_sessionId: string, _cost?: number): void => {
     // Session info can be stored for display later
@@ -428,6 +517,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         isStreaming: true,
       };
       setMessages(prev => [...prev, userMsg, thinkingMsg]);
+      setSendInFlight(true);
       setSending(true);
       setHasSentMessage(true);
 
@@ -451,6 +541,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             classification: 'transient',
             suggestedActions: ['Retry'],
           });
+          setSendInFlight(false);
           setSending(false);
           return;
         }
@@ -474,6 +565,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           suggestedActions: ['Retry'],
         });
       } finally {
+        setSendInFlight(false);
         setSending(false);
       }
     },
@@ -509,7 +601,12 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       <LockIndicator locked={locked && hasSentMessage} queuePosition={queuePosition} />
       <MessageInput
         onSend={handleSend}
-        disabled={sending || (currentConv != null && currentConv.platform_type !== 'web')}
+        disabled={
+          sending ||
+          locked ||
+          isStreaming ||
+          (currentConv != null && currentConv.platform_type !== 'web')
+        }
         disabledReason={
           currentConv != null && currentConv.platform_type !== 'web'
             ? 'Continuing chats from other platforms in the Web UI is coming soon'

@@ -45,6 +45,7 @@ import {
 } from './logger';
 import { isValidCommandName } from './command-validation';
 import type { LoadCommandResult } from './types';
+import { withIdleTimeout, STEP_IDLE_TIMEOUT_MS } from './utils/idle-timeout';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -52,6 +53,10 @@ function getLog(): ReturnType<typeof createLogger> {
   if (!cachedLog) cachedLog = createLogger('workflow.dag-executor');
   return cachedLog;
 }
+
+/** Throttle state for activity updates + cancel checks inside streaming loops */
+const lastNodeActivityUpdate = new Map<string, number>();
+const NODE_ACTIVITY_UPDATE_INTERVAL_MS = 10_000;
 
 /** Context for platform message sending */
 interface SendMessageContext {
@@ -100,6 +105,43 @@ function classifyError(error: Error): ErrorType {
   if (matchesPattern(message, FATAL_PATTERNS)) return 'FATAL';
   if (matchesPattern(message, TRANSIENT_PATTERNS)) return 'TRANSIENT';
   return 'UNKNOWN';
+}
+
+/** Default DAG node retry for TRANSIENT errors */
+const DEFAULT_NODE_MAX_RETRIES = 2;
+const DEFAULT_NODE_RETRY_DELAY_MS = 3000;
+
+/**
+ * Get effective retry config for a DAG node.
+ */
+function getEffectiveNodeRetryConfig(node: DagNode): {
+  maxRetries: number;
+  delayMs: number;
+  onError: 'transient' | 'all';
+} {
+  if ('retry' in node && node.retry) {
+    return {
+      maxRetries: node.retry.max_attempts,
+      delayMs: node.retry.delay_ms ?? DEFAULT_NODE_RETRY_DELAY_MS,
+      onError: node.retry.on_error ?? 'transient',
+    };
+  }
+  return {
+    maxRetries: DEFAULT_NODE_MAX_RETRIES,
+    delayMs: DEFAULT_NODE_RETRY_DELAY_MS,
+    onError: 'transient',
+  };
+}
+
+/**
+ * Check if a NodeOutput failure is transient by delegating to classifyError.
+ * FATAL patterns (auth, permission, credits) take priority over TRANSIENT patterns,
+ * matching the same precedence rules as classifyError(). This prevents an error
+ * message that contains both a FATAL substring and a TRANSIENT substring (e.g.
+ * "unauthorized: process exited with code 1") from being silently retried.
+ */
+function isTransientNodeError(errorMessage: string): boolean {
+  return classifyError(new Error(errorMessage)) === 'TRANSIENT';
 }
 
 /**
@@ -319,31 +361,52 @@ async function loadCommandPrompt(
 }
 
 /**
+ * Single-quote a string for safe inline shell use.
+ * Replaces each ' with '\'' (end quote, literal single-quote, re-open quote).
+ */
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/**
  * Substitute $node_id.output and $node_id.output.field references in a prompt.
  * Called AFTER the standard substituteWorkflowVariables pass.
+ *
+ * @param escapedForBash - When true, wraps substituted values in single quotes so
+ *   they are safe to embed in bash scripts passed to `bash -c`. Set true only for
+ *   bash node script substitution; AI/command prompt substitution should use false.
  */
 export function substituteNodeOutputRefs(
   prompt: string,
-  nodeOutputs: Map<string, NodeOutput>
+  nodeOutputs: Map<string, NodeOutput>,
+  escapedForBash = false
 ): string {
   return prompt.replace(
     /\$([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?/g,
-    (_match, nodeId: string, field: string | undefined) => {
+    (match, nodeId: string, field: string | undefined) => {
       const nodeOutput = nodeOutputs.get(nodeId);
-      if (!nodeOutput) return '';
-      if (!field) return nodeOutput.output;
+      if (!nodeOutput) {
+        getLog().warn({ nodeId, match }, 'dag_node_output_ref_unknown_node');
+        return escapedForBash ? "''" : '';
+      }
+      if (!field) {
+        return escapedForBash ? shellQuote(nodeOutput.output) : nodeOutput.output;
+      }
       try {
         const parsed = JSON.parse(nodeOutput.output) as Record<string, unknown>;
         const value = parsed[field];
-        if (typeof value === 'string') return value;
+        if (typeof value === 'string') return escapedForBash ? shellQuote(value) : value;
+        // numbers and booleans from JSON.parse are shell-safe without quoting:
+        // JSON disallows NaN/Infinity, so String(number) contains only digits, sign, and '.'.
+        // String(boolean) is 'true' or 'false' — no shell metacharacters.
         if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-        return ''; // objects, null, undefined, symbol, bigint → empty
+        return escapedForBash ? "''" : ''; // objects, null, undefined, symbol, bigint → empty
       } catch {
         getLog().warn(
           { nodeId, field, outputPreview: nodeOutput.output.slice(0, 100) },
           'dag_node_output_ref_json_parse_failed'
         );
-        return '';
+        return escapedForBash ? "''" : '';
       }
     }
   );
@@ -635,17 +698,64 @@ async function executeNodeInternal(
   const streamingMode = platform.getStreamingMode();
 
   let nodeOutputText = ''; // Always accumulate regardless of streaming mode
+  let structuredOutput: unknown;
   let newSessionId: string | undefined;
   let nodeTokens: WorkflowTokenUsage | undefined;
   const batchMessages: string[] = [];
 
+  // Create per-node abort controller for idle timeout cleanup
+  const nodeAbortController = new AbortController();
+  const nodeOptionsWithAbort: WorkflowAssistantOptions | undefined = {
+    ...nodeOptions,
+    abortSignal: nodeAbortController.signal,
+  };
+  let nodeIdleTimedOut = false;
+  const effectiveIdleTimeout = node.idle_timeout ?? STEP_IDLE_TIMEOUT_MS;
+
   try {
-    for await (const msg of aiClient.sendQuery(finalPrompt, cwd, resumeSessionId, nodeOptions)) {
-      // Update activity timestamp
-      try {
-        await deps.store.updateWorkflowActivity(workflowRun.id);
-      } catch (e) {
-        getLog().warn({ err: e as Error, workflowRunId: workflowRun.id }, 'activity_update_failed');
+    for await (const msg of withIdleTimeout(
+      aiClient.sendQuery(finalPrompt, cwd, resumeSessionId, nodeOptionsWithAbort),
+      effectiveIdleTimeout,
+      () => {
+        nodeIdleTimedOut = true;
+        getLog().warn(
+          { nodeId: node.id, timeoutMs: effectiveIdleTimeout },
+          'dag_node_idle_timeout_reached'
+        );
+        nodeAbortController.abort();
+      }
+    )) {
+      // Update activity timestamp + check cancel (throttled to once per 10s)
+      const activityNow = Date.now();
+      const nodeKey = `${workflowRun.id}:${node.id}`;
+      if (
+        activityNow - (lastNodeActivityUpdate.get(nodeKey) ?? 0) >
+        NODE_ACTIVITY_UPDATE_INTERVAL_MS
+      ) {
+        lastNodeActivityUpdate.set(nodeKey, activityNow);
+        try {
+          await deps.store.updateWorkflowActivity(workflowRun.id);
+        } catch (e) {
+          getLog().warn(
+            { err: e as Error, workflowRunId: workflowRun.id },
+            'dag.activity_update_failed'
+          );
+        }
+
+        // Check for cancellation during node streaming (not just between layers)
+        try {
+          const streamStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
+          if (streamStatus === 'cancelled') {
+            getLog().info(
+              { workflowRunId: workflowRun.id, nodeId: node.id },
+              'dag.cancel_detected_during_streaming'
+            );
+            nodeAbortController.abort();
+            break;
+          }
+        } catch (cancelCheckErr) {
+          getLog().warn({ err: cancelCheckErr as Error }, 'dag.cancel_check_failed');
+        }
       }
 
       if (msg.type === 'assistant' && msg.content) {
@@ -667,11 +777,96 @@ async function executeNodeInternal(
       } else if (msg.type === 'result') {
         if (msg.sessionId) newSessionId = msg.sessionId;
         if (msg.tokens) nodeTokens = msg.tokens;
+        if (msg.structuredOutput !== undefined) structuredOutput = msg.structuredOutput;
       }
     }
 
+    // When output_format is set and the SDK returned structured_output,
+    // use it instead of the concatenated assistant text (which includes prose)
+    if (nodeOptions?.outputFormat) {
+      if (structuredOutput !== undefined) {
+        try {
+          nodeOutputText =
+            typeof structuredOutput === 'string'
+              ? structuredOutput
+              : JSON.stringify(structuredOutput);
+        } catch (serializeErr) {
+          const err = serializeErr as Error;
+          throw new Error(
+            `Node '${node.id}': failed to serialize structured_output to JSON: ${err.message}`
+          );
+        }
+        getLog().debug({ nodeId: node.id, streamingMode }, 'dag.structured_output_override');
+      } else {
+        getLog().warn(
+          { nodeId: node.id, workflowRunId: workflowRun.id },
+          'dag.structured_output_missing'
+        );
+        await safeSendMessage(
+          platform,
+          conversationId,
+          `Warning: Node '${node.id}' requested output_format but the SDK did not return structured output. Downstream conditions may not evaluate correctly.`,
+          nodeContext
+        );
+      }
+    }
+
+    // If the node completed via idle timeout, log it
+    if (nodeIdleTimedOut) {
+      getLog().warn(
+        { nodeId: node.id, timeoutMs: effectiveIdleTimeout },
+        'dag_node_completed_via_idle_timeout'
+      );
+      await safeSendMessage(
+        platform,
+        conversationId,
+        `⚠️ Node \`${node.id}\` completed via idle timeout (no output for ${String(effectiveIdleTimeout / 60000)} min). The AI likely finished but the subprocess didn't exit cleanly.`,
+        nodeContext
+      );
+    }
+
+    // If cancelled during streaming (not idle timeout), return as failed with cancel reason
+    if (nodeAbortController.signal.aborted && !nodeIdleTimedOut) {
+      const duration = Date.now() - nodeStartTime;
+      getLog().info(
+        { nodeId: node.id, durationMs: duration },
+        'dag_node_cancelled_during_streaming'
+      );
+
+      deps.store
+        .createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'node_failed',
+          step_name: node.id,
+          data: { error: 'Cancelled by user', duration_ms: duration },
+        })
+        .catch((err: Error) => {
+          getLog().error(
+            { err, workflowRunId: workflowRun.id, eventType: 'node_failed' },
+            'workflow_event_persist_failed'
+          );
+        });
+
+      emitter.emit({
+        type: 'node_failed',
+        runId: workflowRun.id,
+        nodeId: node.id,
+        nodeName: node.command ?? node.id,
+        error: 'Cancelled by user',
+      });
+
+      // Clean up throttle entry
+      lastNodeActivityUpdate.delete(`${workflowRun.id}:${node.id}`);
+
+      return { state: 'failed', output: nodeOutputText, error: 'Cancelled by user' };
+    }
+
     if (streamingMode === 'batch' && batchMessages.length > 0) {
-      await safeSendMessage(platform, conversationId, batchMessages.join('\n\n'), nodeContext);
+      const batchContent =
+        structuredOutput !== undefined && nodeOptions?.outputFormat
+          ? nodeOutputText
+          : batchMessages.join('\n\n');
+      await safeSendMessage(platform, conversationId, batchContent, nodeContext);
     }
 
     const duration = Date.now() - nodeStartTime;
@@ -703,9 +898,22 @@ async function executeNodeInternal(
       duration,
     });
 
+    // Clean up throttle entry on completion
+    lastNodeActivityUpdate.delete(`${workflowRun.id}:${node.id}`);
+
     return { state: 'completed', output: nodeOutputText, sessionId: newSessionId };
   } catch (error) {
     const err = error as Error;
+
+    // Clean up throttle entry on failure
+    lastNodeActivityUpdate.delete(`${workflowRun.id}:${node.id}`);
+
+    // If the abort was triggered by user cancel (not idle timeout), classify as cancel
+    if (nodeAbortController.signal.aborted && !nodeIdleTimedOut) {
+      getLog().info({ nodeId: node.id }, 'dag_node_cancelled_via_abort');
+      return { state: 'failed', output: nodeOutputText, error: 'Cancelled by user' };
+    }
+
     getLog().error({ err, nodeId: node.id }, 'dag_node_failed');
     await logNodeError(logDir, workflowRun.id, node.id, err.message);
 
@@ -793,7 +1001,7 @@ async function executeBashNode(
     baseBranch,
     issueContext
   );
-  const finalScript = substituteNodeOutputRefs(substitutedScript, nodeOutputs);
+  const finalScript = substituteNodeOutputRefs(substitutedScript, nodeOutputs, true);
 
   const timeout = node.timeout ?? BASH_DEFAULT_TIMEOUT;
 
@@ -971,12 +1179,38 @@ export async function executeDagWorkflow(
               nodeOutputs
             );
             if (!conditionParsed) {
-              await safeSendMessage(
-                platform,
-                conversationId,
-                `\u26a0\ufe0f Node '${node.id}': unparseable \`when:\` expression "${node.when}" \u2014 node ran (fail-open). Check syntax: use \`$nodeId.output == 'VALUE'\`.`,
-                { workflowId: workflowRun.id, nodeName: node.id }
+              const parseErrMsg = `\u26a0\ufe0f Node '${node.id}': unparseable \`when:\` expression "${node.when}" \u2014 node skipped (fail-closed). Check syntax: use \`$nodeId.output == 'VALUE'\`.`;
+              await safeSendMessage(platform, conversationId, parseErrMsg, {
+                workflowId: workflowRun.id,
+                nodeName: node.id,
+              });
+              getLog().error(
+                { nodeId: node.id, when: node.when },
+                'dag_node_skipped_condition_parse_error'
               );
+              await logNodeSkip(logDir, workflowRun.id, node.id, 'when_condition_parse_error');
+              deps.store
+                .createWorkflowEvent({
+                  workflow_run_id: workflowRun.id,
+                  event_type: 'node_skipped',
+                  step_name: node.id,
+                  data: { reason: 'when_condition_parse_error', expr: node.when },
+                })
+                .catch((err: Error) => {
+                  getLog().error(
+                    { err, workflowRunId: workflowRun.id, eventType: 'node_skipped' },
+                    'workflow_event_persist_failed'
+                  );
+                });
+              const emitter = getWorkflowEventEmitter();
+              emitter.emit({
+                type: 'node_skipped',
+                runId: workflowRun.id,
+                nodeId: node.id,
+                nodeName: node.command ?? node.id,
+                reason: 'when_condition_parse_error',
+              });
+              return { nodeId: node.id, output: { state: 'skipped' as const, output: '' } };
             }
             if (!conditionPasses) {
               getLog().info({ nodeId: node.id, when: node.when }, 'dag_node_skipped_condition');
@@ -1042,24 +1276,67 @@ export async function executeDagWorkflow(
           const isFresh = isParallelLayer || node.context === 'fresh';
           const resumeSessionId = isFresh ? undefined : lastSequentialSessionId;
 
-          // 6. Execute
-          const output = await executeNodeInternal(
-            deps,
-            platform,
-            conversationId,
-            cwd,
-            workflowRun,
-            node,
-            provider,
-            nodeOptions,
-            artifactsDir,
-            logDir,
-            baseBranch,
-            nodeOutputs,
-            resumeSessionId,
-            configuredCommandFolder,
-            issueContext
-          );
+          // 6. Execute with retry for transient failures
+          const retryConfig = getEffectiveNodeRetryConfig(node);
+          let output: NodeOutput = { state: 'failed', output: '', error: 'Node did not execute' };
+
+          for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt++) {
+            output = await executeNodeInternal(
+              deps,
+              platform,
+              conversationId,
+              cwd,
+              workflowRun,
+              node,
+              provider,
+              nodeOptions,
+              artifactsDir,
+              logDir,
+              baseBranch,
+              nodeOutputs,
+              // Don't resume session on retry — start fresh
+              attempt > 0 ? undefined : resumeSessionId,
+              configuredCommandFolder,
+              issueContext
+            );
+
+            if (output.state !== 'failed') break;
+
+            // Check if retryable.
+            // FATAL errors (auth, permissions, credit balance) are never retried even when on_error:all.
+            const isFatal = output.error
+              ? classifyError(new Error(output.error)) === 'FATAL'
+              : false;
+            const isTransient = output.error ? isTransientNodeError(output.error) : false;
+            const shouldRetry =
+              !isFatal &&
+              (retryConfig.onError === 'all' ||
+                (retryConfig.onError === 'transient' && isTransient));
+
+            if (!shouldRetry || attempt >= retryConfig.maxRetries) break;
+
+            const delayMs = retryConfig.delayMs * Math.pow(2, attempt);
+            getLog().warn(
+              {
+                nodeId: node.id,
+                attempt: attempt + 1,
+                maxRetries: retryConfig.maxRetries,
+                delayMs,
+                error: output.error,
+              },
+              'dag_node_transient_retry'
+            );
+
+            const errorKind = isTransient ? 'transient error' : 'error';
+            await safeSendMessage(
+              platform,
+              conversationId,
+              `⚠️ Node \`${node.id}\` failed with ${errorKind} (attempt ${String(attempt + 1)}/${String(retryConfig.maxRetries + 1)}). Retrying in ${String(Math.round(delayMs / 1000))}s...`,
+              { workflowId: workflowRun.id, nodeName: node.id }
+            );
+
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+          }
 
           return { nodeId: node.id, output };
         } catch (error) {
@@ -1122,6 +1399,27 @@ export async function executeDagWorkflow(
 
     if (layerHadFailure) {
       getLog().warn({ layerIdx, nodeCount: layer.length }, 'dag_layer_had_failures');
+    }
+
+    // Check for cancellation between DAG layers
+    try {
+      const dagStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
+      if (dagStatus === 'cancelled') {
+        getLog().info(
+          { workflowRunId: workflowRun.id, layerIdx, totalLayers: layers.length },
+          'dag.cancel_detected_between_layers'
+        );
+        await safeSendMessage(
+          platform,
+          conversationId,
+          `⚠️ **Workflow cancelled**: DAG execution stopped after layer ${String(layerIdx + 1)}/${String(layers.length)}`,
+          { workflowId: workflowRun.id }
+        );
+        break;
+      }
+    } catch (cancelErr) {
+      // Non-fatal — cancel check failure should not crash the workflow
+      getLog().warn({ err: cancelErr as Error }, 'dag.cancel_check_failed');
     }
   }
 
@@ -1187,18 +1485,19 @@ export async function executeDagWorkflow(
     );
   }
   await logWorkflowComplete(logDir, workflowRun.id);
+  const duration = Date.now() - dagStartTime;
   const emitter = getWorkflowEventEmitter();
   emitter.emit({
     type: 'workflow_completed',
     runId: workflowRun.id,
     workflowName: workflow.name,
-    duration: Date.now() - dagStartTime,
+    duration,
   });
   deps.store
     .createWorkflowEvent({
       workflow_run_id: workflowRun.id,
       event_type: 'workflow_completed',
-      data: { duration_ms: Date.now() - dagStartTime },
+      data: { duration_ms: duration },
     })
     .catch((err: Error) => {
       getLog().error(

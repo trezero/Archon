@@ -22,6 +22,7 @@ export interface TextEvent extends BaseSSEEvent {
 // Tool call started
 export interface ToolCallEvent extends BaseSSEEvent {
   type: 'tool_call';
+  toolCallId?: string;
   name: string;
   input: Record<string, unknown>;
 }
@@ -29,6 +30,7 @@ export interface ToolCallEvent extends BaseSSEEvent {
 // Tool call completed
 export interface ToolResultEvent extends BaseSSEEvent {
   type: 'tool_result';
+  toolCallId?: string;
   name: string;
   output: string;
   duration: number;
@@ -108,6 +110,18 @@ export interface ParallelAgentEvent extends BaseSSEEvent {
   error?: string;
 }
 
+// DAG node status (emitted during DAG workflow execution)
+export interface DagNodeEvent extends BaseSSEEvent {
+  type: 'dag_node';
+  runId: string;
+  nodeId: string;
+  name: string;
+  status: WorkflowStepStatus;
+  duration?: number;
+  error?: string;
+  reason?: 'when_condition' | 'trigger_rule';
+}
+
 // Workflow artifact
 export interface WorkflowArtifactEvent extends BaseSSEEvent {
   type: 'workflow_artifact';
@@ -153,6 +167,7 @@ export type SSEEvent =
   | WorkflowStepEvent
   | WorkflowStatusEvent
   | ParallelAgentEvent
+  | DagNodeEvent
   | WorkflowArtifactEvent
   | WorkflowDispatchEvent
   | WorkflowOutputPreviewEvent
@@ -217,6 +232,15 @@ export interface ParallelAgentState {
   error?: string;
 }
 
+export interface DagNodeState {
+  nodeId: string;
+  name: string;
+  status: WorkflowStepStatus;
+  duration?: number;
+  error?: string;
+  reason?: 'when_condition' | 'trigger_rule';
+}
+
 export interface WorkflowArtifact {
   type: ArtifactType;
   label: string;
@@ -229,6 +253,7 @@ export interface WorkflowState {
   workflowName: string;
   status: WorkflowRunStatus;
   steps: WorkflowStepState[];
+  dagNodes: DagNodeState[];
   artifacts: WorkflowArtifact[];
   isLoop: boolean;
   currentIteration?: number;

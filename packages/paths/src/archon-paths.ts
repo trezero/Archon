@@ -60,6 +60,13 @@ export function getArchonHome(): string {
 
   const envHome = process.env.ARCHON_HOME;
   if (envHome) {
+    if (envHome === 'undefined') {
+      throw new Error(
+        'ARCHON_HOME is set to the literal string "undefined". ' +
+          'This indicates a bug where an undefined value was coerced to a string. ' +
+          'Unset ARCHON_HOME or provide a valid path.'
+      );
+    }
     return expandTilde(envHome);
   }
 
@@ -241,7 +248,7 @@ export function resolveProjectRootFromCwd(cwd: string): string | null {
 
   // Path after workspaces/: "owner/repo/..." or "owner/repo"
   const relative = cwd.substring(workspacesPath.length + 1); // +1 for trailing slash
-  const parts = relative.split('/').filter(p => p.length > 0);
+  const parts = relative.split(/[/\\]/).filter(p => p.length > 0);
   if (parts.length < 2) return null;
 
   return join(workspacesPath, parts[0], parts[1]);

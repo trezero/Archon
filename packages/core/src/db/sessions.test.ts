@@ -1,6 +1,7 @@
 import { mock, describe, test, expect, beforeEach } from 'bun:test';
+import { ZodError } from 'zod';
 import { createQueryResult, mockPostgresDialect } from '../test/mocks/database';
-import { Session } from '../types';
+import { Session, SessionMetadata, sessionMetadataSchema } from '../types';
 
 const mockQuery = mock(() => Promise.resolve(createQueryResult([])));
 const mockWithTransaction = mock(
@@ -29,6 +30,7 @@ import {
   transitionSession,
   getSessionHistory,
   getSessionChain,
+  deleteOldSessions,
   SessionNotFoundError,
 } from './sessions';
 
@@ -255,6 +257,22 @@ describe('sessions', () => {
       const error = await updateSessionMetadata('non-existent', { key: 'value' }).catch(e => e);
       expect(error).toBeInstanceOf(SessionNotFoundError);
       expect(error.message).toBe('Session not found: non-existent');
+    });
+
+    test('throws ZodError when metadata has invalid types', async () => {
+      const error = await updateSessionMetadata('session-123', {
+        lastCommand: 123,
+      } as unknown as SessionMetadata).catch(e => e);
+      expect(error).toBeInstanceOf(ZodError);
+      expect(mockQuery).not.toHaveBeenCalled(); // validation fires before DB
+    });
+
+    test('allows and preserves unknown keys via passthrough', () => {
+      const result = sessionMetadataSchema.parse({
+        lastCommand: 'plan',
+        unknownField: 'preserved',
+      });
+      expect((result as Record<string, unknown>).unknownField).toBe('preserved');
     });
   });
 
@@ -562,6 +580,42 @@ describe('sessions', () => {
       const result = await getSessionChain('non-existent-session');
 
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('deleteOldSessions', () => {
+    test('deletes inactive sessions older than retention period', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 5));
+
+      const count = await deleteOldSessions(30);
+
+      expect(count).toBe(5);
+      expect(mockQuery).toHaveBeenCalledWith(
+        `DELETE FROM remote_agent_sessions
+     WHERE active = false
+       AND ended_at IS NOT NULL
+       AND ended_at < NOW() - ($1 || ' days')::INTERVAL`,
+        [30]
+      );
+    });
+
+    test('returns zero when no sessions match', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 0));
+
+      const count = await deleteOldSessions(30);
+
+      expect(count).toBe(0);
+    });
+
+    test('uses provided retention days parameter', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 10));
+
+      await deleteOldSessions(90);
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('DELETE FROM remote_agent_sessions'),
+        [90]
+      );
     });
   });
 });

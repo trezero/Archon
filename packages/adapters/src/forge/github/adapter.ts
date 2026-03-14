@@ -78,6 +78,28 @@ export class GitHubAdapter implements IPlatformAdapter {
    * Check if an error is retryable (transient network issues)
    */
   private isRetryableError(error: unknown): boolean {
+    interface StatusBearingError {
+      status?: unknown;
+      response?: { status?: unknown };
+      cause?: {
+        status?: unknown;
+        response?: { status?: unknown };
+      };
+    }
+
+    const statusError = error as StatusBearingError;
+    const status = [
+      statusError.status,
+      statusError.response?.status,
+      statusError.cause?.status,
+      statusError.cause?.response?.status,
+    ].find((value): value is number => typeof value === 'number');
+
+    // Prefer structured status classification when available.
+    if (typeof status === 'number') {
+      return status === 429 || status === 502 || status === 503 || status === 504;
+    }
+
     const err = error as Error | undefined;
     const message = err?.message ?? '';
     const causeErr = (error as { cause?: Error }).cause;
@@ -697,7 +719,7 @@ ${userComment}`;
     }
     // Secondary: Check comment author (works with dedicated bot account)
     const commentAuthor = event.comment?.user?.login;
-    if (commentAuthor && commentAuthor.toLowerCase() === this.botMention.toLowerCase()) {
+    if (commentAuthor?.toLowerCase() === this.botMention.toLowerCase()) {
       getLog().debug({ commentAuthor }, 'ignoring_own_comment');
       return;
     }

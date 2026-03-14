@@ -5,6 +5,7 @@ import { listConversations, listWorkflowRuns } from '@/lib/api';
 import type { WorkflowRunResponse } from '@/lib/api';
 import { ConversationItem } from '@/components/conversations/ConversationItem';
 import { WorkflowInvoker } from '@/components/sidebar/WorkflowInvoker';
+import { formatDuration } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 interface ProjectDetailProps {
@@ -28,19 +29,6 @@ function RunStatusBadge({ status }: { status: string }): React.ReactElement {
       {status}
     </span>
   );
-}
-
-function ensureUtc(timestamp: string): string {
-  return timestamp.endsWith('Z') ? timestamp : timestamp + 'Z';
-}
-
-function formatDuration(startedAt: string, completedAt: string | null): string {
-  const start = new Date(ensureUtc(startedAt)).getTime();
-  const end = completedAt ? new Date(ensureUtc(completedAt)).getTime() : Date.now();
-  const ms = end - start;
-  if (ms < 1000) return `${String(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
 }
 
 export function ProjectDetail({

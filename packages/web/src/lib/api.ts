@@ -100,7 +100,7 @@ export async function sendMessage(
   conversationId: string,
   message: string
 ): Promise<{ accepted: boolean; status: string }> {
-  return fetchJSON(`/api/conversations/${conversationId}/message`, {
+  return fetchJSON(`/api/conversations/${encodeURIComponent(conversationId)}/message`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message }),
@@ -163,6 +163,7 @@ export interface WorkflowRunResponse {
   last_activity_at: string | null;
   worker_platform_id?: string;
   parent_platform_id?: string;
+  conversation_platform_id?: string;
 }
 
 export interface WorkflowEventResponse {
@@ -190,6 +191,64 @@ export async function runWorkflow(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ conversationId, message }),
+  });
+}
+
+// Dashboard-enriched workflow run (includes joined data from single SQL query)
+export interface DashboardRunResponse extends Omit<
+  WorkflowRunResponse,
+  'worker_platform_id' | 'parent_platform_id'
+> {
+  working_path: string | null;
+  codebase_name: string | null;
+  platform_type: string | null;
+  worker_platform_id: string | null;
+  parent_platform_id: string | null;
+}
+
+/** Status counts across all matching runs (ignoring status filter). */
+export interface DashboardCounts {
+  all: number;
+  running: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  pending: number;
+}
+
+/** Paginated dashboard runs response. */
+export interface DashboardRunsResult {
+  runs: DashboardRunResponse[];
+  total: number;
+  counts: DashboardCounts;
+}
+
+export async function listDashboardRuns(options?: {
+  status?: WorkflowRunStatus;
+  codebaseId?: string;
+  search?: string;
+  after?: string;
+  before?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<DashboardRunsResult> {
+  const params = new URLSearchParams();
+  if (options?.status) params.set('status', options.status);
+  if (options?.codebaseId) params.set('codebaseId', options.codebaseId);
+  if (options?.search) params.set('search', options.search);
+  if (options?.after) params.set('after', options.after);
+  if (options?.before) params.set('before', options.before);
+  if (options?.limit) params.set('limit', String(options.limit));
+  if (options?.offset) params.set('offset', String(options.offset));
+  const qs = params.toString();
+  return fetchJSON<DashboardRunsResult>(`/api/dashboard/runs${qs ? `?${qs}` : ''}`);
+}
+
+export async function cancelWorkflowRun(
+  runId: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: 'POST',
   });
 }
 

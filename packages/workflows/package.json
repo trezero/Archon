@@ -9,7 +9,7 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "test": "bun test src/executor.test.ts && bun test src/dag-executor.test.ts && bun test src/loader.test.ts && bun test src/logger.test.ts && bun test src/condition-evaluator.test.ts src/defaults/ src/model-validation.test.ts src/router.test.ts src/utils/",
+    "test": "bun test src/executor.test.ts && bun test src/dag-executor.test.ts && bun test src/loader.test.ts && bun test src/logger.test.ts && bun test src/condition-evaluator.test.ts && bun test src/event-emitter.test.ts && bun test src/defaults/ src/model-validation.test.ts src/router.test.ts src/utils/ && bun test src/validation-parser.test.ts src/types.test.ts src/command-validation.test.ts",
     "type-check": "bun x tsc --noEmit"
   },
   "dependencies": {

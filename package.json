@@ -45,5 +45,8 @@
   },
   "overrides": {
     "test-exclude": "^7.0.1"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.74"
   }
 }

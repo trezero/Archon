@@ -3,6 +3,7 @@
  */
 import type { TransitionTrigger } from '../state/session-transitions';
 import type { WorkflowDefinition } from '@archon/workflows';
+import { z } from 'zod';
 
 /**
  * Custom error for when a conversation is not found during update operations
@@ -51,6 +52,14 @@ export interface Codebase {
   updated_at: Date;
 }
 
+export const sessionMetadataSchema = z
+  .object({
+    lastCommand: z.string().optional(),
+  })
+  .passthrough();
+
+export type SessionMetadata = z.infer<typeof sessionMetadataSchema>;
+
 export interface Session {
   id: string;
   conversation_id: string;
@@ -58,7 +67,7 @@ export interface Session {
   ai_assistant_type: string;
   assistant_session_id: string | null;
   active: boolean;
-  metadata: Record<string, unknown>;
+  metadata: SessionMetadata;
   started_at: Date;
   ended_at: Date | null;
   // Audit trail fields (added in migration 010)
@@ -150,7 +159,7 @@ export interface IWebPlatformAdapter extends IPlatformAdapter {
   sendStructuredEvent(conversationId: string, event: MessageChunk): Promise<void>;
   setConversationDbId(platformConversationId: string, dbId: string): void;
   setupEventBridge(workerConversationId: string, parentConversationId: string): () => void;
-  emitLockEvent(conversationId: string, locked: boolean, queuePosition?: number): void;
+  emitLockEvent(conversationId: string, locked: boolean, queuePosition?: number): Promise<void>;
   registerOutputCallback(conversationId: string, callback: (text: string) => void): void;
   removeOutputCallback(conversationId: string): void;
 }
@@ -214,6 +223,12 @@ export interface AssistantRequestOptions {
    * When aborted, the AI client should terminate the subprocess/query gracefully.
    */
   abortSignal?: AbortSignal;
+  /**
+   * When false (default), skips writing session transcript to ~/.claude/projects/.
+   * Claude Agent SDK v0.2.74+. The SDK default is true, but Archon overrides it to false
+   * to avoid disk pollution. Set to true only when session persistence is explicitly needed.
+   */
+  persistSession?: boolean;
 }
 
 /**

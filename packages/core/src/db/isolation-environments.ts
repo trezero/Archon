@@ -98,7 +98,7 @@ export async function create(env: CreateEnvironmentParams): Promise<IsolationEnv
 
   getLog().debug(
     { envId: result.rows[0].id, codebaseId: env.codebase_id, branch: env.branch_name },
-    'isolation_env_created'
+    'db.isolation_env_create_completed'
   );
   return result.rows[0];
 }
@@ -117,7 +117,7 @@ export async function updateStatus(id: string, status: 'active' | 'destroyed'): 
       `Failed to update isolation environment status: no environment found with id '${id}'`
     );
   }
-  getLog().debug({ envId: id, status }, 'isolation_env_status_updated');
+  getLog().debug({ envId: id, status }, 'db.isolation_env_status_update_completed');
 }
 
 /**
@@ -208,6 +208,26 @@ export async function findStaleEnvironments(
     [staleDays, staleDays]
   );
   return result.rows;
+}
+
+/**
+ * Find an active isolation environment by branch name.
+ * Returns the environment row joined with its codebase's default_cwd,
+ * or null if no active environment matches.
+ */
+export async function findActiveByBranchName(
+  branchName: string
+): Promise<(IsolationEnvironmentRow & { codebase_default_cwd: string }) | null> {
+  const result = await pool.query<IsolationEnvironmentRow & { codebase_default_cwd: string }>(
+    `SELECT e.*, c.default_cwd as codebase_default_cwd
+     FROM remote_agent_isolation_environments e
+     JOIN remote_agent_codebases c ON e.codebase_id = c.id
+     WHERE e.branch_name = $1 AND e.status = 'active'
+     ORDER BY e.created_at DESC
+     LIMIT 1`,
+    [branchName]
+  );
+  return result.rows[0] ?? null;
 }
 
 /**

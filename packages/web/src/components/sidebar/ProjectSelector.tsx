@@ -41,12 +41,15 @@ export function ProjectSelector({
     void deleteCodebase(id)
       .then(() => {
         void queryClient.invalidateQueries({ queryKey: ['codebases'] });
+        if (id === selectedProjectId) {
+          onSelectProject(null);
+        }
         setDeleteTarget(null);
       })
       .catch((err: Error) => {
         setDeleteError(err.message);
       });
-  }, [deleteTarget, queryClient]);
+  }, [deleteTarget, queryClient, selectedProjectId, onSelectProject]);
 
   if (isLoading) {
     return (

@@ -3,10 +3,14 @@ import { SqliteAdapter } from './sqlite';
 import { unlinkSync } from 'fs';
 import { join } from 'path';
 
-const TEST_DB_PATH = join(import.meta.dir, '.test-sqlite-adapter.db');
+let currentDbPath = '';
 
 function createTestDb(): SqliteAdapter {
-  return new SqliteAdapter(TEST_DB_PATH);
+  currentDbPath = join(
+    import.meta.dir,
+    `.test-sqlite-adapter-${Date.now()}-${Math.random().toString(36).slice(2)}.db`
+  );
+  return new SqliteAdapter(currentDbPath);
 }
 
 /** Insert a parent codebase row to satisfy FK constraints */
@@ -26,11 +30,19 @@ describe('SqliteAdapter', () => {
       await db.close();
     }
     try {
-      unlinkSync(TEST_DB_PATH);
-      unlinkSync(TEST_DB_PATH + '-wal');
-      unlinkSync(TEST_DB_PATH + '-shm');
+      unlinkSync(currentDbPath);
     } catch {
-      // Files may not exist
+      /* may not exist */
+    }
+    try {
+      unlinkSync(currentDbPath + '-wal');
+    } catch {
+      /* may not exist */
+    }
+    try {
+      unlinkSync(currentDbPath + '-shm');
+    } catch {
+      /* may not exist */
     }
   });
 

@@ -22,8 +22,18 @@ mock.module('@archon/paths', () => ({
 // Mock @archon/isolation (getIsolationProvider moved here from @archon/core)
 mock.module('@archon/isolation', () => ({
   getIsolationProvider: mock(() => ({
-    createEnvironment: mock(() => Promise.resolve({ cwd: '/test/path' })),
-    cleanupEnvironment: mock(() => Promise.resolve()),
+    create: mock(() =>
+      Promise.resolve({
+        provider: 'worktree',
+        id: '/test/path',
+        workingPath: '/test/path',
+        branchName: 'test-branch',
+        status: 'active',
+        createdAt: new Date(),
+        metadata: { adopted: false },
+      })
+    ),
+    healthCheck: mock(() => Promise.resolve(true)),
   })),
 }));
 
@@ -51,6 +61,8 @@ mock.module('@archon/git', () => ({
   findRepoRoot: mock(() => Promise.resolve(null)),
   getRemoteUrl: mock(() => Promise.resolve(null)),
   checkout: mock(() => Promise.resolve()),
+  toRepoPath: mock((path: string) => path),
+  toBranchName: mock((branch: string) => branch),
 }));
 
 mock.module('@archon/core/db/conversations', () => ({
@@ -62,6 +74,11 @@ mock.module('@archon/core/db/conversations', () => ({
 
 mock.module('@archon/core/db/codebases', () => ({
   findCodebaseByDefaultCwd: mock(() => Promise.resolve(null)),
+}));
+
+mock.module('@archon/core/db/isolation-environments', () => ({
+  findActiveByWorkflow: mock(() => Promise.resolve(null)),
+  create: mock(() => Promise.resolve({ id: 'iso-123' })),
 }));
 
 describe('workflowListCommand', () => {
@@ -106,6 +123,121 @@ describe('workflowListCommand', () => {
     expect(consoleSpy).toHaveBeenCalledWith('  plan');
     expect(consoleSpy).toHaveBeenCalledWith('    Create implementation plan');
     expect(consoleSpy).toHaveBeenCalledWith('    Provider: claude');
+  });
+
+  it('should output JSON when json flag is true', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows');
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [
+        { name: 'assist', description: 'General assistance workflow', steps: [] },
+        { name: 'plan', description: 'Create implementation plan', provider: 'claude', steps: [] },
+      ],
+      errors: [],
+    });
+
+    await workflowListCommand('/test/path', true);
+
+    expect(consoleSpy).toHaveBeenCalledTimes(1);
+    const output = consoleSpy.mock.calls[0][0] as string;
+    const parsed = JSON.parse(output) as { workflows: unknown[]; errors: unknown[] };
+    expect(parsed.workflows).toHaveLength(2);
+    expect(parsed.errors).toHaveLength(0);
+    expect(parsed.workflows[0]).toEqual({
+      name: 'assist',
+      description: 'General assistance workflow',
+    });
+    expect(parsed.workflows[1]).toEqual({
+      name: 'plan',
+      description: 'Create implementation plan',
+      provider: 'claude',
+    });
+  });
+
+  it('should include errors in JSON output', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows');
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [],
+      errors: [{ filename: 'bad.yaml', error: 'Invalid YAML', errorType: 'parse_error' }],
+    });
+
+    await workflowListCommand('/test/path', true);
+
+    const output = consoleSpy.mock.calls[0][0] as string;
+    const parsed = JSON.parse(output) as {
+      workflows: unknown[];
+      errors: Array<{ filename: string; error: string; errorType: string }>;
+    };
+    expect(parsed.workflows).toHaveLength(0);
+    expect(parsed.errors).toHaveLength(1);
+    expect(parsed.errors[0]).toEqual({
+      filename: 'bad.yaml',
+      error: 'Invalid YAML',
+      errorType: 'parse_error',
+    });
+  });
+
+  it('should not print header text in JSON mode', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows');
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [],
+      errors: [],
+    });
+
+    await workflowListCommand('/test/path', true);
+
+    // Only one console.log call (the JSON), no "Discovering workflows" text
+    expect(consoleSpy).toHaveBeenCalledTimes(1);
+    const output = consoleSpy.mock.calls[0][0] as string;
+    expect(output).not.toContain('Discovering workflows');
+    // Output must be valid JSON
+    expect(() => JSON.parse(output)).not.toThrow();
+  });
+
+  it('should include modelReasoningEffort and webSearchMode in JSON output when present', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows');
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [
+        {
+          name: 'plan',
+          description: 'Planning workflow',
+          provider: 'codex',
+          model: 'gpt-5.3-codex',
+          modelReasoningEffort: 'high',
+          webSearchMode: 'live',
+          steps: [],
+        },
+      ],
+      errors: [],
+    });
+
+    await workflowListCommand('/test/path', true);
+
+    const output = consoleSpy.mock.calls[0][0] as string;
+    const parsed = JSON.parse(output) as {
+      workflows: Array<Record<string, string>>;
+      errors: unknown[];
+    };
+    expect(parsed.workflows[0]).toEqual({
+      name: 'plan',
+      description: 'Planning workflow',
+      provider: 'codex',
+      model: 'gpt-5.3-codex',
+      modelReasoningEffort: 'high',
+      webSearchMode: 'live',
+    });
+  });
+
+  it('should produce text output when json flag is false', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows');
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [{ name: 'assist', description: 'General assistance', steps: [] }],
+      errors: [],
+    });
+
+    await workflowListCommand('/test/path', false);
+
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Discovering workflows'));
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Found 1 workflow(s)'));
   });
 
   it('should throw error when discoverWorkflows fails', async () => {
@@ -253,6 +385,99 @@ describe('workflowRunCommand', () => {
     await expect(workflowRunCommand('/test/path', 'assist', 'hello')).rejects.toThrow(
       'Workflow failed: Step failed: assist'
     );
+  });
+
+  it('passes fromBranch into isolation task request', async () => {
+    const { discoverWorkflowsWithConfig, executeWorkflow } = await import('@archon/workflows');
+    const conversationDb = await import('@archon/core/db/conversations');
+    const codebaseDb = await import('@archon/core/db/codebases');
+    const isolation = await import('@archon/isolation');
+
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [{ name: 'assist', description: 'Help', steps: [] }],
+      errors: [],
+    });
+    (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'conv-123',
+    });
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'cb-123',
+      default_cwd: '/test/path',
+    });
+    (conversationDb.updateConversation as ReturnType<typeof mock>).mockResolvedValueOnce(undefined);
+    (executeWorkflow as ReturnType<typeof mock>).mockResolvedValueOnce({
+      success: true,
+      workflowRunId: 'run-123',
+    });
+
+    await workflowRunCommand('/test/path', 'assist', 'hello', {
+      branchName: 'test-adapters',
+      fromBranch: 'feature/extract-adapters',
+    });
+
+    const getIsolationProviderMock = isolation.getIsolationProvider as ReturnType<typeof mock>;
+    const provider = getIsolationProviderMock.mock.results.at(-1)?.value as
+      | { create: ReturnType<typeof mock> }
+      | undefined;
+
+    expect(provider?.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowType: 'task',
+        identifier: 'test-adapters',
+        fromBranch: 'feature/extract-adapters',
+      })
+    );
+  });
+
+  it('throws when --branch is used with --no-worktree', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows');
+    const conversationDb = await import('@archon/core/db/conversations');
+    const codebaseDb = await import('@archon/core/db/codebases');
+
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [{ name: 'assist', description: 'Help', steps: [] }],
+      errors: [],
+    });
+    (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'conv-123',
+    });
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'cb-123',
+      default_cwd: '/test/path',
+    });
+
+    await expect(
+      workflowRunCommand('/test/path', 'assist', 'hello', {
+        branchName: 'test-branch',
+        noWorktree: true,
+      })
+    ).rejects.toThrow('--branch and --no-worktree are mutually exclusive');
+  });
+
+  it('throws when --from-branch is used with --no-worktree', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows');
+    const conversationDb = await import('@archon/core/db/conversations');
+    const codebaseDb = await import('@archon/core/db/codebases');
+
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [{ name: 'assist', description: 'Help', steps: [] }],
+      errors: [],
+    });
+    (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'conv-123',
+    });
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'cb-123',
+      default_cwd: '/test/path',
+    });
+
+    await expect(
+      workflowRunCommand('/test/path', 'assist', 'hello', {
+        branchName: 'test-branch',
+        fromBranch: 'main',
+        noWorktree: true,
+      })
+    ).rejects.toThrow('--from/--from-branch has no effect with --no-worktree');
   });
 });
 

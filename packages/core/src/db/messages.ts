@@ -43,7 +43,7 @@ export async function addMessage(
       `Failed to persist message: INSERT returned no rows (conversation: ${conversationId})`
     );
   }
-  getLog().debug({ conversationId, role, messageId: row.id }, 'message_persisted');
+  getLog().debug({ conversationId, role, messageId: row.id }, 'db.message_persist_completed');
   return row;
 }
 

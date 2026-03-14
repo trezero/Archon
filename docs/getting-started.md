@@ -80,6 +80,8 @@ archon isolation list              # show active worktrees
 archon isolation cleanup           # remove stale (>7 days)
 archon isolation cleanup 14        # custom staleness threshold
 archon isolation cleanup --merged  # remove merged branches (deletes remote too)
+archon complete <branch>           # complete branch lifecycle (worktree + branches)
+archon complete <branch> --force   # skip uncommitted-changes check
 ```
 
 ### Available Workflows

@@ -17,6 +17,7 @@ import {
   cloneRepository,
   registerRepository,
   ConversationNotFoundError,
+  generateAndSetTitle,
 } from '@archon/core';
 import { removeWorktree, toRepoPath, toWorktreePath } from '@archon/git';
 import {
@@ -97,11 +98,17 @@ export function registerApiRoutes(
           getLog().error({ err: sseError, conversationId }, 'sse_error_emit_failed');
         }
       } finally {
-        webAdapter.emitLockEvent(conversationId, false);
+        await webAdapter.emitLockEvent(conversationId, false);
       }
     });
 
     if (result.status === 'queued-conversation' || result.status === 'queued-capacity') {
+      // Intentionally fire-and-forget: the lock-acquire signal (locked: true) is sent
+      // optimistically so the UI shows a queued state immediately. It is not awaited
+      // because we want the HTTP response to return before the SSE write completes.
+      // The lock-release signal (locked: false) IS awaited inside the task callback
+      // above to guarantee ordering — all tool results and flush must precede the
+      // release event on the SSE stream.
       webAdapter.emitLockEvent(conversationId, true);
     }
 
@@ -121,11 +128,41 @@ export function registerApiRoutes(
     }
   });
 
+  // GET /api/conversations/:id - Get single conversation by platform conversation ID
+  app.get('/api/conversations/:id', async c => {
+    const platformId = c.req.param('id');
+    try {
+      const conv = await conversationDb.findConversationByPlatformId(platformId);
+      if (!conv) {
+        return apiError(c, 404, 'Conversation not found');
+      }
+      return c.json(conv);
+    } catch (error) {
+      getLog().error({ err: error, platformId }, 'get_conversation_failed');
+      return apiError(c, 500, 'Failed to get conversation');
+    }
+  });
+
   // POST /api/conversations - Create new conversation
   app.post('/api/conversations', async c => {
+    let body: { codebaseId?: unknown; conversationId?: unknown };
     try {
-      const body: { codebaseId?: unknown } = await c.req.json();
+      body = await c.req.json();
+    } catch {
+      return apiError(c, 400, 'Invalid JSON in request body');
+    }
+
+    try {
       const codebaseId = typeof body.codebaseId === 'string' ? body.codebaseId : undefined;
+
+      if (body.conversationId !== undefined) {
+        return apiError(
+          c,
+          400,
+          'conversationId is not accepted',
+          'Conversation IDs are auto-generated; do not provide conversationId in the request body'
+        );
+      }
 
       // Validate codebase exists if provided
       if (codebaseId) {
@@ -152,12 +189,21 @@ export function registerApiRoutes(
 
   // PATCH /api/conversations/:id - Update conversation (title)
   app.patch('/api/conversations/:id', async c => {
-    const id = c.req.param('id');
+    const platformId = c.req.param('id');
+    let body: { title?: unknown };
     try {
-      const body: { title?: unknown } = await c.req.json();
+      body = await c.req.json();
+    } catch {
+      return apiError(c, 400, 'Invalid JSON in request body');
+    }
+    try {
+      const conv = await conversationDb.findConversationByPlatformId(platformId);
+      if (!conv) {
+        return apiError(c, 404, 'Conversation not found');
+      }
       if (typeof body.title === 'string') {
         const title = body.title.slice(0, 255);
-        await conversationDb.updateConversationTitle(id, title);
+        await conversationDb.updateConversationTitle(conv.id, title);
       }
       return c.json({ success: true });
     } catch (error) {
@@ -171,9 +217,13 @@ export function registerApiRoutes(
 
   // DELETE /api/conversations/:id - Soft delete
   app.delete('/api/conversations/:id', async c => {
-    const id = c.req.param('id');
+    const platformId = c.req.param('id');
     try {
-      await conversationDb.softDeleteConversation(id);
+      const conv = await conversationDb.findConversationByPlatformId(platformId);
+      if (!conv) {
+        return apiError(c, 404, 'Conversation not found');
+      }
+      await conversationDb.softDeleteConversation(conv.id);
       return c.json({ success: true });
     } catch (error) {
       if (error instanceof ConversationNotFoundError) {
@@ -507,6 +557,32 @@ export function registerApiRoutes(
       if (!/^[\w-]+$/.test(workflowName)) {
         return c.json({ error: 'Invalid workflow name' }, 400);
       }
+      // Persist user message and register DB ID (same as message endpoint)
+      let conv: Awaited<ReturnType<typeof conversationDb.findConversationByPlatformId>> = null;
+      try {
+        conv = await conversationDb.findConversationByPlatformId(conversationId);
+      } catch (e: unknown) {
+        getLog().error({ err: e, conversationId }, 'conversation_lookup_failed');
+      }
+      if (conv) {
+        try {
+          await messageDb.addMessage(conv.id, 'user', message);
+        } catch (e: unknown) {
+          getLog().error({ err: e, conversationId: conv.id }, 'message_persistence_failed');
+        }
+        webAdapter.setConversationDbId(conversationId, conv.id);
+        // Generate title for sidebar (fire-and-forget)
+        if (!conv.title) {
+          void generateAndSetTitle(
+            conv.id,
+            message,
+            conv.ai_assistant_type,
+            getArchonWorkspacesPath(),
+            workflowName
+          );
+        }
+      }
+
       const fullMessage = `/workflow run ${workflowName} ${message}`;
       const result = await dispatchToOrchestrator(conversationId, fullMessage);
       return c.json(result);
@@ -516,20 +592,81 @@ export function registerApiRoutes(
     }
   });
 
+  // GET /api/dashboard/runs - Enriched workflow runs for Command Center
+  // Supports server-side search, status/date filtering, and offset pagination.
+  app.get('/api/dashboard/runs', async c => {
+    try {
+      const rawStatus = c.req.query('status');
+      const dashboardValidStatuses = [
+        'pending',
+        'running',
+        'completed',
+        'failed',
+        'cancelled',
+      ] as const;
+      type DashboardRunStatus = (typeof dashboardValidStatuses)[number];
+      const status: DashboardRunStatus | undefined =
+        rawStatus && (dashboardValidStatuses as readonly string[]).includes(rawStatus)
+          ? (rawStatus as DashboardRunStatus)
+          : undefined;
+      const codebaseId = c.req.query('codebaseId') ?? undefined;
+      const search = c.req.query('search')?.trim() || undefined;
+      const after = c.req.query('after') ?? undefined;
+      const before = c.req.query('before') ?? undefined;
+      const limitRaw = Number(c.req.query('limit'));
+      const limit = Number.isNaN(limitRaw) ? 50 : Math.min(Math.max(1, limitRaw), 200);
+      const offsetRaw = Number(c.req.query('offset'));
+      const offset = Number.isNaN(offsetRaw) ? 0 : Math.max(0, offsetRaw);
+
+      const result = await workflowDb.listDashboardRuns({
+        status,
+        codebaseId,
+        search,
+        after,
+        before,
+        limit,
+        offset,
+      });
+      return c.json(result);
+    } catch (error) {
+      getLog().error({ err: error }, 'list_dashboard_runs_failed');
+      return c.json({ error: 'Failed to list dashboard runs' }, 500);
+    }
+  });
+
+  // POST /api/workflows/runs/:runId/cancel - Cancel a workflow run
+  app.post('/api/workflows/runs/:runId/cancel', async c => {
+    try {
+      const runId = c.req.param('runId');
+      const run = await workflowDb.getWorkflowRun(runId);
+      if (!run) {
+        return c.json({ error: 'Workflow run not found' }, 404);
+      }
+      if (run.status !== 'running' && run.status !== 'pending') {
+        return c.json({ error: `Cannot cancel workflow in '${run.status}' status` }, 400);
+      }
+      await workflowDb.cancelWorkflowRun(runId);
+      return c.json({ success: true, message: `Cancelled workflow: ${run.workflow_name}` });
+    } catch (error) {
+      getLog().error({ err: error }, 'cancel_workflow_run_api_failed');
+      return c.json({ error: 'Failed to cancel workflow run' }, 500);
+    }
+  });
+
   // GET /api/workflows/runs - List workflow runs
   app.get('/api/workflows/runs', async c => {
     try {
       const conversationId = c.req.query('conversationId') ?? undefined;
       const rawStatus = c.req.query('status');
-      const validStatuses = ['pending', 'running', 'completed', 'failed'] as const;
+      const validStatuses = ['pending', 'running', 'completed', 'failed', 'cancelled'] as const;
       type WorkflowRunStatus = (typeof validStatuses)[number];
       const status: WorkflowRunStatus | undefined =
         rawStatus && (validStatuses as readonly string[]).includes(rawStatus)
           ? (rawStatus as WorkflowRunStatus)
           : undefined;
       const codebaseId = c.req.query('codebaseId') ?? undefined;
-      const limitStr = c.req.query('limit');
-      const limit = Math.min(Math.max(1, limitStr ? Number(limitStr) : 50), 200);
+      const limitRaw = Number(c.req.query('limit'));
+      const limit = Number.isNaN(limitRaw) ? 50 : Math.min(Math.max(1, limitRaw), 200);
 
       const runs = await workflowDb.listWorkflowRuns({
         conversationId,
@@ -570,11 +707,20 @@ export function registerApiRoutes(
       }
       const events = await workflowEventDb.listWorkflowEvents(runId);
 
-      // Look up worker conversation to get its platform_conversation_id for SSE/messages
+      // Look up the run's conversation platform ID.
+      // For web runs (parent_conversation_id set): conversation_id is the worker conversation → set worker_platform_id
+      // For CLI runs (no parent): conversation_id is the single conversation → set conversation_platform_id only
       let workerPlatformId: string | undefined;
+      let conversationPlatformId: string | undefined;
       if (run.conversation_id) {
         const conv = await conversationDb.getConversationById(run.conversation_id);
-        workerPlatformId = conv?.platform_conversation_id;
+        if (run.parent_conversation_id) {
+          // Web run: conversation_id points to the worker conversation
+          workerPlatformId = conv?.platform_conversation_id;
+        } else {
+          // CLI run: conversation_id is the only conversation (no worker/parent split)
+          conversationPlatformId = conv?.platform_conversation_id;
+        }
       }
 
       // Look up parent conversation to get its platform_conversation_id for navigation
@@ -585,7 +731,12 @@ export function registerApiRoutes(
       }
 
       return c.json({
-        run: { ...run, worker_platform_id: workerPlatformId, parent_platform_id: parentPlatformId },
+        run: {
+          ...run,
+          worker_platform_id: workerPlatformId,
+          parent_platform_id: parentPlatformId,
+          conversation_platform_id: conversationPlatformId ?? null,
+        },
         events,
       });
     } catch (error) {
