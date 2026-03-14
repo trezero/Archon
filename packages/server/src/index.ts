@@ -1,6 +1,6 @@
 /**
  * Remote Coding Agent - Main Entry Point
- * Multi-platform AI coding assistant (Telegram, Discord, Slack, GitHub)
+ * Multi-platform AI coding assistant (Telegram, Discord, Slack, GitHub, Gitea)
  */
 
 // Load environment variables FIRST — resolve to monorepo root .env
@@ -20,6 +20,7 @@ if (dotenvResult.error) {
 
 import { Hono } from 'hono';
 import { TelegramAdapter, GitHubAdapter, DiscordAdapter, SlackAdapter } from '@archon/adapters';
+import { GiteaAdapter } from '@archon/adapters/community/forge/gitea';
 import { WebAdapter } from './adapters/web';
 import { MessagePersistence } from './adapters/web/persistence';
 import { SSETransport } from './adapters/web/transport';
@@ -168,8 +169,11 @@ async function main(): Promise<void> {
   const hasTelegram = Boolean(process.env.TELEGRAM_BOT_TOKEN);
   const hasDiscord = Boolean(process.env.DISCORD_BOT_TOKEN);
   const hasGitHub = Boolean(process.env.GITHUB_TOKEN && process.env.WEBHOOK_SECRET);
+  const hasGitea = Boolean(
+    process.env.GITEA_URL && process.env.GITEA_TOKEN && process.env.GITEA_WEBHOOK_SECRET
+  );
 
-  if (!hasTelegram && !hasDiscord && !hasGitHub) {
+  if (!hasTelegram && !hasDiscord && !hasGitHub && !hasGitea) {
     getLog().warn('no_platform_adapters_configured');
   }
 
@@ -187,6 +191,23 @@ async function main(): Promise<void> {
     await github.start();
   } else {
     getLog().info('github_adapter_skipped');
+  }
+
+  // Initialize Gitea adapter (conditional)
+  let gitea: GiteaAdapter | null = null;
+  if (process.env.GITEA_URL && process.env.GITEA_TOKEN && process.env.GITEA_WEBHOOK_SECRET) {
+    const giteaBotMention =
+      process.env.GITEA_BOT_MENTION || process.env.BOT_DISPLAY_NAME || config.botName;
+    gitea = new GiteaAdapter(
+      process.env.GITEA_URL,
+      process.env.GITEA_TOKEN,
+      process.env.GITEA_WEBHOOK_SECRET,
+      lockManager,
+      giteaBotMention
+    );
+    await gitea.start();
+  } else {
+    getLog().info('gitea_adapter_skipped');
   }
 
   // Initialize Discord adapter (conditional)
@@ -348,6 +369,34 @@ async function main(): Promise<void> {
     getLog().info('github_webhook_registered');
   }
 
+  // Gitea webhook endpoint
+  if (gitea) {
+    app.post('/webhooks/gitea', async c => {
+      const eventType = c.req.header('x-gitea-event');
+
+      try {
+        const signature = c.req.header('x-gitea-signature');
+        if (!signature) {
+          return c.json({ error: 'Missing signature header' }, 400);
+        }
+
+        // CRITICAL: Use c.req.text() for raw body (signature verification)
+        const payload = await c.req.text();
+
+        // Process async (fire-and-forget for fast webhook response)
+        gitea.handleWebhook(payload, signature).catch((error: unknown) => {
+          getLog().error({ err: error, eventType }, 'gitea_webhook_processing_error');
+        });
+
+        return c.text('OK', 200);
+      } catch (error) {
+        getLog().error({ err: error, eventType }, 'gitea_webhook_endpoint_error');
+        return c.json({ error: 'Internal server error' }, 500);
+      }
+    });
+    getLog().info('gitea_webhook_registered');
+  }
+
   // Health check endpoints
   app.get('/health', c => {
     return c.json({ status: 'ok' });
@@ -423,6 +472,7 @@ async function main(): Promise<void> {
       telegram?.stop();
       discord?.stop();
       slack?.stop();
+      gitea?.stop();
       webAdapter.stop();
     } catch (error) {
       getLog().error({ err: error }, 'adapter_stop_error');
@@ -449,6 +499,7 @@ async function main(): Promise<void> {
   if (discord) activePlatforms.push('Discord');
   if (slack) activePlatforms.push('Slack');
   if (github) activePlatforms.push('GitHub');
+  if (gitea) activePlatforms.push('Gitea');
 
   getLog().info({ activePlatforms, port }, 'server_ready');
 }
