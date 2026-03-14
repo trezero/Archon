@@ -886,7 +886,8 @@ async function executeStepInternal(
 
     // If the streaming loop exited because of a cancel (abort+break),
     // return failure instead of falling through to step_completed.
-    if (stepAbortController.signal.aborted) {
+    // Skip if idleTimedOut — idle timeout also sets abort signal but has its own handling above.
+    if (stepAbortController.signal.aborted && !idleTimedOut) {
       const cancelStepIdx = Number(stepId.split('.')[0]);
       getLog().info({ workflowRunId: workflowRun.id, commandName }, 'step_cancelled_by_user');
       const emitter = getWorkflowEventEmitter();
