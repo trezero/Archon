@@ -130,11 +130,14 @@ function getEffectiveNodeRetryConfig(node: DagNode): {
 }
 
 /**
- * Check if a NodeOutput failure is transient by pattern-matching the error message.
+ * Check if a NodeOutput failure is transient by delegating to classifyError.
+ * FATAL patterns (auth, permission, credits) take priority over TRANSIENT patterns,
+ * matching the same precedence rules as classifyError(). This prevents an error
+ * message that contains both a FATAL substring and a TRANSIENT substring (e.g.
+ * "unauthorized: process exited with code 1") from being silently retried.
  */
 function isTransientNodeError(errorMessage: string): boolean {
-  const lower = errorMessage.toLowerCase();
-  return TRANSIENT_PATTERNS.some(p => lower.includes(p));
+  return classifyError(new Error(errorMessage)) === 'TRANSIENT';
 }
 
 /**
@@ -1223,10 +1226,16 @@ export async function executeDagWorkflow(
 
             if (output.state !== 'failed') break;
 
-            // Check if retryable
+            // Check if retryable.
+            // FATAL errors (auth, permissions, credit balance) are never retried even when on_error:all.
+            const isFatal = output.error
+              ? classifyError(new Error(output.error)) === 'FATAL'
+              : false;
             const isTransient = output.error ? isTransientNodeError(output.error) : false;
             const shouldRetry =
-              retryConfig.onError === 'all' || (retryConfig.onError === 'transient' && isTransient);
+              !isFatal &&
+              (retryConfig.onError === 'all' ||
+                (retryConfig.onError === 'transient' && isTransient));
 
             if (!shouldRetry || attempt >= retryConfig.maxRetries) break;
 
@@ -1242,10 +1251,11 @@ export async function executeDagWorkflow(
               'dag_node_transient_retry'
             );
 
+            const errorKind = isTransient ? 'transient error' : 'error';
             await safeSendMessage(
               platform,
               conversationId,
-              `⚠️ Node \`${node.id}\` failed with transient error (attempt ${String(attempt + 1)}/${String(retryConfig.maxRetries + 1)}). Retrying in ${String(Math.round(delayMs / 1000))}s...`,
+              `⚠️ Node \`${node.id}\` failed with ${errorKind} (attempt ${String(attempt + 1)}/${String(retryConfig.maxRetries + 1)}). Retrying in ${String(Math.round(delayMs / 1000))}s...`,
               { workflowId: workflowRun.id, nodeName: node.id }
             );
 

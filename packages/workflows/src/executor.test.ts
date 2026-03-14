@@ -3845,7 +3845,9 @@ describe('Workflow Executor', () => {
     }, 60_000);
 
     it('should fail workflow after exhausting step retries', async () => {
+      let callCount = 0;
       mockSendQuery.mockImplementation(function* () {
+        callCount++;
         throw new Error('Claude Code crash: process exited with code 1');
       });
 
@@ -3865,6 +3867,8 @@ describe('Workflow Executor', () => {
 
       // Should fail after exhausting all retries
       expect(result.success).toBe(false);
+      // Default is 2 retries → 3 total attempts; off-by-one in loop boundary would be caught here
+      expect(callCount).toBe(3);
       // Verify failure was recorded in DB
       expect(getWorkflowStatusUpdates('failed')).toHaveLength(1);
     }, 60_000);
@@ -3927,6 +3931,43 @@ describe('Workflow Executor', () => {
           typeof call[1] === 'string' && (call[1] as string).includes('transient error')
       );
       expect(retryCalls.length).toBeGreaterThan(0);
+    }, 60_000);
+
+    it('should retry an UNKNOWN error when on_error is set to all', async () => {
+      let callCount = 0;
+      mockSendQuery.mockImplementation(function* () {
+        callCount++;
+        if (callCount === 1) {
+          // UNKNOWN error — not in FATAL or TRANSIENT patterns
+          throw new Error('Something completely unexpected happened');
+        }
+        yield { type: 'assistant', content: 'Recovered' };
+        yield { type: 'result', sessionId: 'recovered-session' };
+      });
+
+      const result = await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'retry-on-error-all',
+          description: 'on_error all retries unknown errors',
+          steps: [
+            {
+              command: 'command-one',
+              clearContext: false,
+              retry: { max_attempts: 2, on_error: 'all' },
+            },
+          ],
+        },
+        'User message',
+        'db-conv-id'
+      );
+
+      // UNKNOWN error should be retried when on_error:all
+      expect(result.success).toBe(true);
+      expect(callCount).toBe(2);
     }, 60_000);
   });
 });

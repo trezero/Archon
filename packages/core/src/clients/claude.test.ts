@@ -461,15 +461,13 @@ describe('ClaudeClient', () => {
         }
       };
 
-      try {
-        await consumeGenerator();
-      } catch (err) {
-        // The error should contain stderr context from ALL captured lines
-        const message = (err as Error).message;
-        expect(message).toContain('stderr:');
-        expect(message).toContain('AJV validation');
-        expect(message).toContain('startup diagnostic');
-      }
+      // Use rejects so assertions always execute — prevents vacuous pass when mock doesn't throw
+      const err = await consumeGenerator().catch((e: unknown) => e as Error);
+      expect(err).toBeInstanceOf(Error);
+      // The error should contain stderr context from ALL captured lines
+      expect(err.message).toContain('stderr:');
+      expect(err.message).toContain('AJV validation');
+      expect(err.message).toContain('startup diagnostic');
     }, 30_000);
 
     test('ignores empty text blocks', async () => {

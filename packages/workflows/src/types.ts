@@ -31,7 +31,9 @@ export interface StepRetryConfig {
   delay_ms?: number;
   /** Which error types trigger a retry. Default: 'transient'.
    *  - 'transient': Only retry TRANSIENT errors (rate limits, crashes, network issues)
-   *  - 'all': Retry all errors (including UNKNOWN — use with caution) */
+   *  - 'all': Retry all errors including UNKNOWN (use with caution).
+   *  Note: FATAL errors (auth failure, permission denied, credit balance exhausted)
+   *  are NEVER retried regardless of this setting. */
   on_error?: 'transient' | 'all';
 }
 

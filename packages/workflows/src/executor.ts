@@ -1030,13 +1030,14 @@ function getEffectiveRetryConfig(step: SingleStep): {
 }
 
 /**
- * Check if a failed StepResult error is transient by re-classifying the error message.
- * The error message from executeStepInternal contains classification hints
- * (e.g., "Claude Code crash:", "Hint: Temporary error").
+ * Check if a failed StepResult error is transient by delegating to classifyError.
+ * FATAL patterns (auth, permission, credits) take priority over TRANSIENT patterns,
+ * matching the same precedence rules as classifyError(). This prevents an error
+ * message that contains both a FATAL substring and a TRANSIENT substring (e.g.
+ * "unauthorized: process exited with code 1") from being silently retried.
  */
 function isTransientStepError(errorMessage: string): boolean {
-  const lower = errorMessage.toLowerCase();
-  return TRANSIENT_PATTERNS.some(p => lower.includes(p));
+  return classifyError(new Error(errorMessage)) === 'TRANSIENT';
 }
 
 /**
@@ -1090,10 +1091,13 @@ async function executeStepWithRetry(
 
     if (result.success) return result;
 
-    // Check if the error is retryable
+    // Check if the error is retryable.
+    // FATAL errors (auth, permissions, credit balance) are never retried even when on_error:all.
+    const isFatal = classifyError(new Error(result.error)) === 'FATAL';
     const isTransient = isTransientStepError(result.error);
     const shouldRetry =
-      retryConfig.onError === 'all' || (retryConfig.onError === 'transient' && isTransient);
+      !isFatal &&
+      (retryConfig.onError === 'all' || (retryConfig.onError === 'transient' && isTransient));
 
     if (!shouldRetry || attempt >= retryConfig.maxRetries) {
       return result; // Not retryable or exhausted retries
@@ -1112,10 +1116,11 @@ async function executeStepWithRetry(
       'step_transient_retry'
     );
 
+    const errorKind = isTransient ? 'transient error' : 'error';
     await safeSendMessage(
       platform,
       conversationId,
-      `⚠️ Step \`${step.command}\` failed with transient error (attempt ${String(attempt + 1)}/${String(retryConfig.maxRetries + 1)}). Retrying in ${String(Math.round(delayMs / 1000))}s...`
+      `⚠️ Step \`${step.command}\` failed with ${errorKind} (attempt ${String(attempt + 1)}/${String(retryConfig.maxRetries + 1)}). Retrying in ${String(Math.round(delayMs / 1000))}s...`
     );
 
     await delay(delayMs);

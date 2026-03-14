@@ -1937,6 +1937,38 @@ nodes:
       }
     });
 
+    it('should parse retry config on DAG prompt node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'retry-prompt.yaml'),
+        `
+name: retry-prompt
+description: Prompt node with retry config
+nodes:
+  - id: summarise
+    prompt: "Summarise the changes"
+    retry:
+      max_attempts: 2
+      delay_ms: 4000
+      on_error: transient
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      expect(isDagWorkflow(wf)).toBe(true);
+      if (isDagWorkflow(wf)) {
+        expect(wf.nodes[0].retry).toEqual({
+          max_attempts: 2,
+          delay_ms: 4000,
+          on_error: 'transient',
+        });
+      }
+    });
+
     it('should reject retry with missing max_attempts', async () => {
       const workflowDir = join(testDir, '.archon', 'workflows');
       await mkdir(workflowDir, { recursive: true });

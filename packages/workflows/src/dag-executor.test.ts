@@ -1441,3 +1441,180 @@ describe('executeDagWorkflow -- when condition parse errors (fail-closed)', () =
     ).resolves.toBeUndefined();
   });
 });
+
+describe('executeDagWorkflow -- node-level retry for transient errors', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-retry-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'Do something for $USER_MESSAGE');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'DAG AI response' };
+      yield { type: 'result', sessionId: 'dag-session-id' };
+    });
+  });
+
+  afterEach(async () => {
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('node succeeds on retry after a transient error', async () => {
+    let callCount = 0;
+    mockSendQueryDag.mockImplementation(function* () {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error('Claude Code crash: process exited with code 1');
+      }
+      yield { type: 'assistant', content: 'Recovered' };
+      yield { type: 'result', sessionId: 'retry-sess' };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('dag-retry-succeed-run');
+
+    const nodes: DagNode[] = [{ id: 'my-node', command: 'my-cmd' }];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag-retry-succeed',
+      testDir,
+      { name: 'dag-retry-succeed', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // Node was called at least twice (first fails transiently, second succeeds)
+    expect(callCount).toBeGreaterThanOrEqual(2);
+    expect(mockDeps.store.failWorkflowRun as ReturnType<typeof mock>).not.toHaveBeenCalled();
+  }, 60_000);
+
+  it('workflow fails after exhausting all node retries', async () => {
+    let callCount = 0;
+    mockSendQueryDag.mockImplementation(function* () {
+      callCount++;
+      throw new Error('Claude Code crash: process exited with code 1');
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('dag-retry-exhaust-run');
+
+    const nodes: DagNode[] = [{ id: 'my-node', command: 'my-cmd' }];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag-retry-exhaust',
+      testDir,
+      { name: 'dag-retry-exhaust', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // Default retry is 2 retries → 3 total attempts
+    expect(callCount).toBe(3);
+    expect(mockDeps.store.failWorkflowRun as ReturnType<typeof mock>).toHaveBeenCalled();
+  }, 60_000);
+
+  it('node with FATAL error does not retry (call count = 1)', async () => {
+    let callCount = 0;
+    mockSendQueryDag.mockImplementation(function* () {
+      callCount++;
+      throw new Error('Claude Code auth error: unauthorized');
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('dag-retry-fatal-run');
+
+    const nodes: DagNode[] = [{ id: 'my-node', command: 'my-cmd' }];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag-retry-fatal',
+      testDir,
+      { name: 'dag-retry-fatal', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // FATAL error must not be retried — exactly 1 attempt
+    expect(callCount).toBe(1);
+    expect(mockDeps.store.failWorkflowRun as ReturnType<typeof mock>).toHaveBeenCalled();
+  });
+
+  it('sends retry notification to platform before each delay', async () => {
+    let callCount = 0;
+    mockSendQueryDag.mockImplementation(function* () {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error('Claude Code crash: process exited with code 1');
+      }
+      yield { type: 'assistant', content: 'OK' };
+      yield { type: 'result', sessionId: 'ok-sess' };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('dag-retry-notify-run');
+
+    const nodes: DagNode[] = [{ id: 'my-node', command: 'my-cmd' }];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag-retry-notify',
+      testDir,
+      { name: 'dag-retry-notify', nodes },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    const sendCalls = (platform.sendMessage as ReturnType<typeof mock>).mock.calls;
+    const retryMessages = sendCalls.filter(
+      (call: unknown[]) =>
+        typeof call[1] === 'string' && (call[1] as string).includes('transient error')
+    );
+    expect(retryMessages.length).toBeGreaterThan(0);
+  }, 60_000);
+});
