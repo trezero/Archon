@@ -315,7 +315,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
         if (startEvent) {
           return {
             nodeName: nodeId,
-            startedAt: new Date(startEvent.created_at).getTime(),
+            startedAt: new Date(ensureUtc(startEvent.created_at)).getTime(),
           };
         }
       }
