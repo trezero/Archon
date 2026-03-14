@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock, type Mock } from 'bun:test';
-
-const isWindows = process.platform === 'win32';
 import { mkdir, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+
+const isWindows = process.platform === 'win32';
 
 // Inline mock logger to suppress noisy output during tests
 const mockLogger = {

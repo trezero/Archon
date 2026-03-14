@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-
-const isWindows = process.platform === 'win32';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import { mkdir, rm, writeFile, lstat, readlink } from 'fs/promises';
+
+const isWindows = process.platform === 'win32';
 
 import {
   isDocker,
