@@ -50,6 +50,7 @@ mock.module('@archon/core', () => ({
     })
   ),
   loadConfig: mock(() => Promise.resolve({ defaults: {} })),
+  generateAndSetTitle: mock(() => Promise.resolve()),
 }));
 
 mock.module('@archon/workflows', () => ({
@@ -79,6 +80,17 @@ mock.module('@archon/core/db/codebases', () => ({
 mock.module('@archon/core/db/isolation-environments', () => ({
   findActiveByWorkflow: mock(() => Promise.resolve(null)),
   create: mock(() => Promise.resolve({ id: 'iso-123' })),
+}));
+
+mock.module('@archon/core/db/messages', () => ({
+  addMessage: mock(() => Promise.resolve()),
+}));
+
+mock.module('@archon/core/db/workflows', () => ({
+  getActiveWorkflowRun: mock(() => Promise.resolve(null)),
+  failWorkflowRun: mock(() => Promise.resolve()),
+  findLastFailedRun: mock(() => Promise.resolve(null)),
+  resumeWorkflowRun: mock(() => Promise.resolve(null)),
 }));
 
 describe('workflowListCommand', () => {
@@ -384,6 +396,39 @@ describe('workflowRunCommand', () => {
 
     await expect(workflowRunCommand('/test/path', 'assist', 'hello')).rejects.toThrow(
       'Workflow failed: Step failed: assist'
+    );
+  });
+
+  it('should call generateAndSetTitle with workflow name and user message', async () => {
+    const { discoverWorkflowsWithConfig, executeWorkflow } = await import('@archon/workflows');
+    const conversationDb = await import('@archon/core/db/conversations');
+    const codebaseDb = await import('@archon/core/db/codebases');
+    const core = await import('@archon/core');
+
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [{ name: 'assist', description: 'Help', steps: [] }],
+      errors: [],
+    });
+    (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'conv-123',
+      ai_assistant_type: 'claude',
+    });
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce(null);
+    (conversationDb.updateConversation as ReturnType<typeof mock>).mockResolvedValueOnce(undefined);
+    (executeWorkflow as ReturnType<typeof mock>).mockResolvedValueOnce({
+      success: true,
+      workflowRunId: 'run-123',
+    });
+    (core.generateAndSetTitle as ReturnType<typeof mock>).mockClear();
+
+    await workflowRunCommand('/test/path', 'assist', 'hello world');
+
+    expect(core.generateAndSetTitle).toHaveBeenCalledWith(
+      'conv-123',
+      'hello world',
+      'claude',
+      '/test/path',
+      'assist'
     );
   });
 
