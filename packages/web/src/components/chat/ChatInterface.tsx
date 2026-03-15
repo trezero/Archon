@@ -621,10 +621,10 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <Header
-        title={headerTitle}
+        title={isNewChat ? 'New Chat' : headerTitle}
         subtitle={headerSubtitle}
         projectName={currentCodebase?.name ?? contextCodebase?.name}
-        connected={connected}
+        connected={isNewChat ? undefined : connected}
       />
       {(conversationsError || codebasesError) && (
         <div className="flex gap-2 px-4 py-1">
@@ -634,7 +634,17 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           {codebasesError && <span className="text-xs text-red-400">Failed to load projects</span>}
         </div>
       )}
-      <MessageList messages={messages} isStreaming={isStreaming} />
+      <MessageList
+        messages={messages}
+        isStreaming={isStreaming}
+        isNewChat={isNewChat}
+        projectName={currentCodebase?.name ?? contextCodebase?.name}
+        onQuickAction={(action): void => {
+          if (action !== 'focus') {
+            void handleSend(action);
+          }
+        }}
+      />
       {activeWorkflow && (
         <WorkflowProgressCard workflow={activeWorkflow} onCancel={handleCancelWorkflow} />
       )}
