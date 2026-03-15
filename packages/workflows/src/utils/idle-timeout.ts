@@ -26,6 +26,13 @@ const IDLE_TIMEOUT_SENTINEL = Symbol('IDLE_TIMEOUT');
  * Wraps an async generator with an idle timeout. If no value is yielded within
  * `timeoutMs`, the wrapper returns normally — converting a hang into a clean exit.
  *
+ * When `shouldResetTimer` is provided and returns `false` for a yielded value, the
+ * timer is NOT reset — it keeps counting from the previous reset point. This allows
+ * callers to distinguish between "activity that indicates the system is alive" (reset)
+ * and "activity that marks the start of a potentially long operation" (don't reset).
+ *
+ * Example: pass `(msg) => msg.type !== 'tool'` to keep counting through tool execution.
+ *
  * When timeout fires:
  * 1. `onTimeout` callback is invoked (use this to abort the subprocess and log)
  * 2. The pending `generator.next()` promise gets a `.catch()` to prevent unhandled rejection
@@ -35,21 +42,27 @@ const IDLE_TIMEOUT_SENTINEL = Symbol('IDLE_TIMEOUT');
  * @param generator - The async generator to wrap
  * @param timeoutMs - Maximum idle time in milliseconds before terminating
  * @param onTimeout - Optional callback invoked when idle timeout fires (before return)
+ * @param shouldResetTimer - Optional predicate; return false to NOT reset the timer for a value
  */
 export async function* withIdleTimeout<T>(
   generator: AsyncGenerator<T>,
   timeoutMs: number,
-  onTimeout?: () => void
+  onTimeout?: () => void,
+  shouldResetTimer?: (value: T) => boolean
 ): AsyncGenerator<T> {
   let timedOut = false;
+  let timerStartedAt = Date.now();
 
   try {
     while (true) {
+      const elapsed = Date.now() - timerStartedAt;
+      const remaining = Math.max(0, timeoutMs - elapsed);
+
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<typeof IDLE_TIMEOUT_SENTINEL>(resolve => {
         timer = setTimeout(() => {
           resolve(IDLE_TIMEOUT_SENTINEL);
-        }, timeoutMs);
+        }, remaining);
       });
 
       // Start waiting for the next value from the generator
@@ -71,6 +84,14 @@ export async function* withIdleTimeout<T>(
       // result is IteratorResult<T> since it's not the sentinel
       const iterResult = result;
       if (iterResult.done) return;
+
+      // Reset the timer unless the predicate says not to
+      if (!shouldResetTimer || shouldResetTimer(iterResult.value)) {
+        timerStartedAt = Date.now();
+      }
+      // If shouldResetTimer returns false, timerStartedAt is unchanged — remaining time
+      // continues counting down through this value's processing
+
       yield iterResult.value;
     }
   } finally {

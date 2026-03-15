@@ -779,7 +779,8 @@ async function executeStepInternal(
           'step_idle_timeout_reached'
         );
         stepAbortController.abort();
-      }
+      },
+      msg => msg.type !== 'tool'
     )) {
       // Update activity timestamp with failure tracking (throttled to once per 10s)
       const activityNow = Date.now();
