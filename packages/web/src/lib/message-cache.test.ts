@@ -70,7 +70,8 @@ describe('getCachedMessages', () => {
     const idA = baseId + 'A';
     const idB = baseId + 'B';
 
-    setCachedMessages(idA, [makeMsg('a1')]);
+    const msgA = makeMsg('a1');
+    setCachedMessages(idA, [msgA]);
     setCachedMessages(idB, [makeMsg('b1')]);
 
     // Access A — moves it to MRU position, so B becomes LRU.
@@ -94,7 +95,7 @@ describe('getCachedMessages', () => {
     expect(getCachedMessages(idB)).toEqual([]);
 
     // A should still be present (it was promoted to MRU before the filler inserts).
-    expect(getCachedMessages(idA)).toEqual([makeMsg('a1')]);
+    expect(getCachedMessages(idA)).toEqual([msgA]);
   });
 
   test('returns the same message objects that were stored', () => {
@@ -138,40 +139,47 @@ describe('setCachedMessages', () => {
     }
 
     // Insert 21st entry — should evict the very first one (prefix + '0').
-    setCachedMessages(prefix + '20', [makeMsg('m20')]);
+    const msg20 = makeMsg('m20');
+    setCachedMessages(prefix + '20', [msg20]);
 
     expect(getCachedMessages(prefix + '0')).toEqual([]);
-    expect(getCachedMessages(prefix + '20')).toEqual([makeMsg('m20')]);
+    expect(getCachedMessages(prefix + '20')).toEqual([msg20]);
   });
 
   test('does not evict when size is exactly MAX_CACHED_CONVERSATIONS (20)', () => {
     const prefix = 'no-evict-' + Math.random() + '-';
 
-    // Insert exactly 20 entries.
+    // Insert exactly 20 entries — capture boundary messages for assertion.
+    const msgs: Record<string, ChatMessage[]> = {};
     for (let i = 0; i < 20; i++) {
-      setCachedMessages(prefix + String(i), [makeMsg('n' + String(i))]);
+      const m = [makeMsg('n' + String(i))];
+      msgs[String(i)] = m;
+      setCachedMessages(prefix + String(i), m);
     }
 
     // All 20 entries should still be present.
-    expect(getCachedMessages(prefix + '0')).toEqual([makeMsg('n0')]);
-    expect(getCachedMessages(prefix + '19')).toEqual([makeMsg('n19')]);
+    expect(getCachedMessages(prefix + '0')).toEqual(msgs['0']);
+    expect(getCachedMessages(prefix + '19')).toEqual(msgs['19']);
   });
 
   test('re-inserting an existing id does not increase size and does not evict another entry', () => {
     const prefix = 'reinsert-' + Math.random() + '-';
 
-    // Fill to 20.
-    for (let i = 0; i < 20; i++) {
+    // Fill to 20 — capture first entry for assertion.
+    const msg0 = makeMsg('r0');
+    setCachedMessages(prefix + '0', [msg0]);
+    for (let i = 1; i < 20; i++) {
       setCachedMessages(prefix + String(i), [makeMsg('r' + String(i))]);
     }
 
     // Re-insert an existing id — size stays at 20, nothing should be evicted.
-    setCachedMessages(prefix + '5', [makeMsg('updated')]);
+    const msgUpdated = makeMsg('updated');
+    setCachedMessages(prefix + '5', [msgUpdated]);
 
     // The first entry (0) must still be present because no eviction occurred.
-    expect(getCachedMessages(prefix + '0')).toEqual([makeMsg('r0')]);
+    expect(getCachedMessages(prefix + '0')).toEqual([msg0]);
     // The re-inserted entry has the new content.
-    expect(getCachedMessages(prefix + '5')).toEqual([makeMsg('updated')]);
+    expect(getCachedMessages(prefix + '5')).toEqual([msgUpdated]);
   });
 });
 
