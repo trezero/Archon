@@ -57,3 +57,30 @@ obvious from the diff.]
 
 [Optional: Fixes #123, Closes #456]
 ```
+
+### 4. Capture AI Context Changes
+
+If any AI context assets were modified in this commit, add a `Context:` section to the commit body:
+
+```
+feat(orchestrator): add retry logic for session recovery
+
+Added exponential backoff when SDK subprocess crashes mid-session.
+Previously a single crash would fail the entire workflow.
+
+Context:
+- Updated .claude/rules/orchestrator.md with retry conventions
+- Added .claude/commands/debug-session.md for session state inspection
+- Surfaced issue: mock.module() in retry tests needs isolated batch
+
+Fixes #482
+```
+
+**What counts as AI context changes:**
+- `.claude/rules/` — on-demand conventions added, updated, or removed
+- `.claude/commands/` — slash commands created or modified
+- `.claude/docs/` — reference docs added or updated
+- `CLAUDE.md` — global rules changes
+- `.archon/workflows/` or `.archon/commands/` — workflow or command definitions
+
+**Why this matters:** Your git log is long-term memory. Future agents and sessions use `git log` to understand project history. If context changes aren't captured in commits, the AI layer's evolution becomes invisible — you lose the ability to trace WHY a rule exists or WHEN a command was added.

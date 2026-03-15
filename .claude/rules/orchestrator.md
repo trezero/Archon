@@ -7,18 +7,61 @@ paths:
 
 # Orchestrator Conventions
 
-## Message Flow
+## Message Flow — Routing Agent Architecture
 
 ```
 Platform message
   → ConversationLockManager.acquireLock()
-  → handleMessage()
-      → Command handler (if starts with `/`) — deterministic, no AI
-      → OR workflow router → executeWorkflow()
-      → OR AI client directly (sendQuery)
+  → handleMessage() (orchestrator-agent.ts:383)
+      → inheritThreadContext() — copy parent's codebase/cwd if child thread
+      → Deterministic gate: 5 commands only (help, status, reset, workflow, register-project)
+      → Everything else → AI routing call:
+          → listCodebases() + discoverAllWorkflows()
+          → buildFullPrompt() → buildOrchestratorPrompt() or buildProjectScopedPrompt()
+          → AI responds with natural language ± /invoke-workflow or /register-project
+          → parseOrchestratorCommands() extracts structured commands from AI response
+          → If /invoke-workflow found → dispatchOrchestratorWorkflow()
+          → If /register-project found → handleRegisterProject()
+          → Otherwise → send AI text to user
 ```
 
 Lock manager returns `{ status: 'started' | 'queued-conversation' | 'queued-capacity' }`. Always use the return value to decide whether to emit a "queued" notice — never call `isActive()` separately (TOCTOU race).
+
+## Deterministic Commands (command-handler.ts)
+
+Only **5 commands** are handled deterministically (orchestrator-agent.ts:420):
+
+| Command | Behavior |
+|---------|----------|
+| `/help` | Show available commands |
+| `/status` | Show conversation/session state |
+| `/reset` | Deactivate current session |
+| `/workflow` | Subcommands: `list`, `run`, `status`, `cancel`, `reload` |
+| `/register-project` | Handled inline — creates codebase DB record |
+
+**All other slash commands fall through to the AI router.** Legacy commands (`/clone`, `/setcwd`, `/getcwd`, `/repos`, `/repo`, `/worktree`, `/init`, `/command-set`, `/command-invoke`, `/load-commands`, `/reset-context`) still have implementations in command-handler.ts but are only reachable via the old direct path. The `default` case returns a deprecation notice for a subset of these: `codebase-switch`, `command-invoke`, `template-*`.
+
+## Routing AI — Prompt Building (prompt-builder.ts)
+
+The choice between prompts depends on whether the conversation has an attached project:
+
+- **No project** → `buildOrchestratorPrompt()` (prompt-builder.ts:116) — lists all projects equally, asks user to clarify if ambiguous
+- **Has project** → `buildProjectScopedPrompt()` (prompt-builder.ts:153) — active project shown first, ambiguous requests default to it
+
+Both prompts include: registered projects, discovered workflows, and the `/invoke-workflow` + `/register-project` format specification.
+
+### `/invoke-workflow` Protocol
+
+The AI emits: `/invoke-workflow <name> --project <project> --prompt "user's intent"`
+
+`parseOrchestratorCommands()` (orchestrator-agent.ts:90) parses this with:
+- Workflow name validated against discovered workflows via `findWorkflow()`
+- Project name validated via `findCodebaseByName()` — case-insensitive, supports partial path segment match (e.g., `"repo"` matches `"owner/repo"`)
+- `--project` must appear before `--prompt`
+
+### `filterToolIndicators()` (orchestrator-agent.ts:163)
+
+Batch mode only. Strips paragraphs starting with emoji tool indicators (🔧💭📝✏️🗑️📂🔍) from accumulated AI response before sending to user.
 
 ## Session Transitions
 
@@ -39,7 +82,7 @@ if (shouldCreateNewSession(trigger)) {
 
 ## Isolation Resolution
 
-`validateAndResolveIsolation()` delegates to `IsolationResolver` and handles:
+`validateAndResolveIsolation()` (orchestrator.ts:108) delegates to `IsolationResolver` and handles:
 - Sending contextual messages to the platform (e.g., "Reusing worktree from issue #42")
 - Updating the DB (`conversation.isolation_env_id`, `conversation.cwd`)
 - Retrying once when a stale reference is found (`stale_cleaned`)
@@ -47,15 +90,9 @@ if (shouldCreateNewSession(trigger)) {
 
 When isolation is blocked, **stop all further processing** — `IsolationBlockedError` means the user was already notified.
 
-## Slash Commands (command-handler.ts)
-
-Commands are deterministic — no AI. Full list: `/command-set`, `/command-invoke`, `/load-commands`, `/clone`, `/getcwd`, `/setcwd`, `/codebase-switch`, `/status`, `/commands`, `/help`, `/reset`, `/reset-context`, `/workflow list`, `/workflow run`, `/workflow status`, `/workflow cancel`, `/worktree list`, `/worktree remove`, `/worktree cleanup`, `/repo`, `/repo-remove`.
-
-`wrapCommandForExecution()` adds an explicit "execute immediately" wrapper around command content to prevent the AI from asking for confirmation.
-
 ## Background Workflow Dispatch (Web only)
 
-`dispatchBackgroundWorkflow()` creates a hidden worker conversation, sets up event bridging from worker SSE → parent SSE, pre-creates the workflow run row, and fires-and-forgets `executeWorkflow()`. The worker conversation has `hidden: true` in the DB.
+`dispatchBackgroundWorkflow()` (orchestrator.ts:256) creates a hidden worker conversation (`web-worker-{timestamp}-{random}`), sets up event bridging from worker SSE → parent SSE, pre-creates the workflow run row (prevents 404 on immediate UI navigation), and fires-and-forgets `executeWorkflow()`. On completion, surfaces `result.summary` to the parent conversation.
 
 ## Lazy Logger Pattern
 
@@ -76,3 +113,4 @@ function getLog(): ReturnType<typeof createLogger> {
 - Never skip `IsolationBlockedError` — it must propagate to stop all further message handling
 - Never add platform-specific logic to the orchestrator; it uses `IPlatformAdapter` interface only
 - Never transition sessions by mutating them; always deactivate and create a new linked session
+- Never assume a slash command is deterministic — only the 5 listed above bypass the AI router

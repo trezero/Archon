@@ -6,7 +6,9 @@
 
 ---
 
-## 1. Message Flow: Slack Message → AI Response
+## 1. Message Flow: Routing Agent Architecture
+
+The orchestrator is a **routing agent** — most messages go through an AI call that decides how to handle them, not a command dispatcher.
 
 ```
 Slack event
@@ -16,24 +18,39 @@ Slack event
     → lockManager.acquireLock(conversationId, handler) (conversation-lock.ts:59)
       → handleMessage(platform, conversationId, text) (orchestrator-agent.ts:383)
         → db.getOrCreateConversation() (orchestrator-agent.ts:394)
-        → Slash command check: if message.startsWith('/') → commandHandler (orchestrator-agent.ts:418)
-        → Load context: codebaseDb.listCodebases() + discoverAllWorkflows() (orchestrator-agent.ts:448)
-        → buildFullPrompt() (orchestrator-agent.ts:450)
-        → sessionDb.getActiveSession() → transitionSession('first-message') if none (orchestrator-agent.ts:462)
-        → getAssistantClient('claude') → ClaudeClient (factory.ts:30)
-        → handleBatchMode() (orchestrator-agent.ts:489)
-          → for await (msg of aiClient.sendQuery(prompt, cwd, sessionId)) (claude.ts:290)
-          → filterToolIndicators(assistantMessages) (orchestrator-agent.ts:711)
-          → parseOrchestratorCommands() — check for /invoke-workflow (orchestrator-agent.ts:719)
-          → platform.sendMessage(conversationId, finalMessage) (orchestrator-agent.ts:747)
-            → SlackAdapter.sendMessage() → splitIntoParagraphChunks() if needed
-            → app.client.chat.postMessage() with markdown block (adapter.ts:89)
+        → inheritThreadContext() — if child thread, copy parent's codebase/cwd (orchestrator-agent.ts:400)
+        → generateAndSetTitle() — fire-and-forget for non-slash messages (orchestrator-agent.ts:409)
+
+        IF message.startsWith('/') AND command in [help, status, reset, workflow, register-project]:
+          → Deterministic handling via commandHandler.handleCommand() (orchestrator-agent.ts:430)
+          → If result.workflow → handleWorkflowRunCommand() → dispatchOrchestratorWorkflow()
+          → Return response directly, no AI involved
+
+        ALL OTHER MESSAGES (including unknown slash commands):
+          → codebaseDb.listCodebases() + discoverAllWorkflows() (orchestrator-agent.ts:448-449)
+          → buildFullPrompt() (orchestrator-agent.ts:450)
+            → If conversation has codebase → buildProjectScopedPrompt() (prompt-builder.ts:153)
+            → Otherwise → buildOrchestratorPrompt() (prompt-builder.ts:116)
+            → Prompt includes: registered projects, discovered workflows, /invoke-workflow format
+          → sessionDb.getActiveSession() → transitionSession('first-message') if none (orchestrator-agent.ts:462)
+          → getAssistantClient(conversation.ai_assistant_type) (orchestrator-agent.ts:470)
+          → cwd = getArchonWorkspacesPath() (orchestrator-agent.ts:458)
+          → handleBatchMode() or handleStreamMode() based on getStreamingMode()
+
+          AI responds with natural language ± structured commands:
+            → filterToolIndicators(assistantMessages) — strip emoji-prefixed tool noise (orchestrator-agent.ts:711)
+            → parseOrchestratorCommands() (orchestrator-agent.ts:719)
+              → If /invoke-workflow found → dispatchOrchestratorWorkflow()
+              → If /register-project found → handleRegisterProject()
+              → Otherwise → send remaining text to user via platform.sendMessage()
 ```
 
 **Key decision points:**
-- `getStreamingMode()` → Slack returns `'batch'` (accumulate, send once)
-- `parseOrchestratorCommands()` → if `/invoke-workflow` found, dispatches to workflow engine instead
+- `getStreamingMode()` → Slack returns `'batch'`, Web returns `'stream'`
+- `buildFullPrompt()` → project-scoped prompt if conversation has codebase attached, otherwise global orchestrator prompt listing all projects
+- `parseOrchestratorCommands()` → AI decides whether to dispatch a workflow or just respond conversationally
 - Session resume: `session.assistant_session_id` passed to SDK's `options.resume`
+- Only 5 commands are deterministic — everything else is AI-routed, even slash commands
 
 ---
 
