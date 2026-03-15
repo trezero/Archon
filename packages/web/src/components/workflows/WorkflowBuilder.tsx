@@ -266,7 +266,7 @@ function WorkflowBuilderInner(): React.ReactElement {
               <NodePalette />
             </div>
             <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex-1">
+              <div className="flex-1 h-full">
                 <WorkflowCanvas
                   nodes={nodes}
                   edges={edges}
