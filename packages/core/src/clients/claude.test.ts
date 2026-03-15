@@ -190,7 +190,7 @@ describe('ClaudeClient', () => {
       });
     });
 
-    test('passes persistSession: false to SDK by default', async () => {
+    test('omits persistSession from SDK options by default', async () => {
       mockQuery.mockImplementation(async function* () {
         // Empty generator
       });
@@ -200,12 +200,9 @@ describe('ClaudeClient', () => {
         // consume
       }
 
-      expect(mockQuery).toHaveBeenCalledWith({
-        prompt: 'test',
-        options: expect.objectContaining({
-          persistSession: false,
-        }),
-      });
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
+      expect(callArgs.options).not.toHaveProperty('persistSession');
     });
 
     test('passes persistSession: true when explicitly requested', async () => {
