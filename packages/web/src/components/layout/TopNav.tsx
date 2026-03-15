@@ -37,7 +37,7 @@ export function TopNav(): React.ReactElement {
         >
           <Icon className="h-4 w-4" />
           {label}
-          {label === 'Dashboard' && hasRunning && (
+          {to === '/' && hasRunning && (
             <span className="flex h-2 w-2 rounded-full bg-primary animate-pulse" />
           )}
         </NavLink>
