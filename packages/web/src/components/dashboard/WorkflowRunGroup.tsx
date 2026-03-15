@@ -1,0 +1,46 @@
+import { useNavigate } from 'react-router';
+import { MessageSquare } from 'lucide-react';
+import type { DashboardRunResponse } from '@/lib/api';
+import { WorkflowRunCard } from './WorkflowRunCard';
+
+interface WorkflowRunGroupProps {
+  parentPlatformId: string | null;
+  runs: DashboardRunResponse[];
+  onCancel: (runId: string) => void;
+}
+
+export function WorkflowRunGroup({
+  parentPlatformId,
+  runs,
+  onCancel,
+}: WorkflowRunGroupProps): React.ReactElement {
+  const navigate = useNavigate();
+
+  return (
+    <div className="space-y-2">
+      {/* Group header — only shown when there's a shared parent */}
+      {parentPlatformId && (
+        <div className="flex items-center gap-2 px-1">
+          <div className="h-px flex-1 bg-border" />
+          <button
+            onClick={(): void => {
+              navigate(`/chat/${encodeURIComponent(parentPlatformId)}`);
+            }}
+            className="flex items-center gap-1.5 rounded-full border border-border bg-surface-elevated px-2.5 py-0.5 text-[11px] text-text-secondary hover:border-primary/40 hover:text-primary transition-colors shrink-0"
+          >
+            <MessageSquare className="h-3 w-3" />
+            {runs.length} run{runs.length !== 1 ? 's' : ''} from this chat
+          </button>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+      )}
+
+      {/* Cards for this group */}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {runs.map(run => (
+          <WorkflowRunCard key={run.id} run={run} onCancel={onCancel} />
+        ))}
+      </div>
+    </div>
+  );
+}

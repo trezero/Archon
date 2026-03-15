@@ -43,10 +43,12 @@ export function WorkflowRunCard({ run, onCancel }: WorkflowRunCardProps): React.
   }, [run.status, run.started_at]);
 
   const chatId = run.parent_platform_id ?? run.worker_platform_id;
-  const truncatedMessage = run.user_message
-    ? run.user_message.length > 80
-      ? run.user_message.slice(0, 80) + '...'
-      : run.user_message
+  const [messageExpanded, setMessageExpanded] = useState(false);
+  const longMessage = (run.user_message?.length ?? 0) > 80;
+  const displayMessage = run.user_message
+    ? messageExpanded || !longMessage
+      ? run.user_message
+      : run.user_message.slice(0, 80) + '…'
     : null;
 
   return (
@@ -83,11 +85,36 @@ export function WorkflowRunCard({ run, onCancel }: WorkflowRunCardProps): React.
         </span>
         <span>{run.codebase_name ?? 'Unknown project'}</span>
         {run.current_step_index > 0 && <span>Step {String(run.current_step_index)}</span>}
+        {run.parent_platform_id && run.parent_platform_id !== run.worker_platform_id && (
+          <button
+            onClick={(): void => {
+              navigate(`/chat/${encodeURIComponent(run.parent_platform_id ?? '')}`);
+            }}
+            className="flex items-center gap-1 text-primary/80 hover:text-primary transition-colors"
+          >
+            <MessageSquare className="h-3 w-3" />
+            Parent chat
+          </button>
+        )}
       </div>
 
-      {/* User message */}
-      {truncatedMessage && (
-        <p className="text-xs text-text-tertiary italic truncate">{truncatedMessage}</p>
+      {/* User message — expandable */}
+      {displayMessage && (
+        <div className="space-y-0.5">
+          <p className={cn('text-xs text-text-tertiary italic', !messageExpanded && 'truncate')}>
+            {displayMessage}
+          </p>
+          {longMessage && (
+            <button
+              onClick={(): void => {
+                setMessageExpanded(e => !e);
+              }}
+              className="text-[10px] text-text-tertiary hover:text-text-secondary underline"
+            >
+              {messageExpanded ? 'Show less' : 'Show more'}
+            </button>
+          )}
+        </div>
       )}
 
       {/* Working path */}
