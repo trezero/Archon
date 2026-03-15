@@ -1686,7 +1686,8 @@ async function executeLoopWorkflow(
             'loop_iteration_idle_timeout_reached'
           );
           iterationAbortController.abort();
-        }
+        },
+        msg => msg.type !== 'tool'
       )) {
         // Update activity timestamp with failure tracking (throttled to once per 10s)
         const activityNow = Date.now();
