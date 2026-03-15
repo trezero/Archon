@@ -25,7 +25,8 @@ export type WorkflowEventType =
   | 'loop_iteration_started'
   | 'loop_iteration_completed'
   | 'loop_iteration_failed'
-  | 'tool_called';
+  | 'tool_called'
+  | 'tool_completed';
 
 export interface IWorkflowStore {
   // Run lifecycle

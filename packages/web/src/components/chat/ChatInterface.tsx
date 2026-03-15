@@ -31,6 +31,48 @@ import {
 } from '@/lib/message-cache';
 import { useProject } from '@/contexts/ProjectContext';
 
+function mapMessageRow(row: MessageResponse): ChatMessage {
+  let meta: {
+    toolCalls?: { name: string; input: Record<string, unknown>; duration?: number }[];
+    error?: ErrorDisplay;
+    workflowDispatch?: { workerConversationId: string; workflowName: string };
+    workflowResult?: { workflowName: string; runId: string };
+  } = {};
+  try {
+    meta = JSON.parse(row.metadata) as typeof meta;
+  } catch (parseErr) {
+    // Intentional fallback: render an error card rather than crashing the message list
+    console.warn('[Chat] Corrupted message metadata', {
+      messageId: row.id,
+      error: (parseErr as Error).message,
+    });
+    meta = {
+      error: {
+        message: 'Message data corrupted',
+        classification: 'fatal' as const,
+        suggestedActions: [],
+      },
+    };
+  }
+  return {
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    toolCalls: meta.toolCalls?.map((tc, i) => ({
+      ...tc,
+      id: `${row.id}-tool-${String(i)}`,
+      startedAt: 0,
+      isExpanded: false,
+      duration: tc.duration ?? 0,
+    })),
+    error: meta.error,
+    workflowDispatch: meta.workflowDispatch,
+    workflowResult: meta.workflowResult,
+    timestamp: new Date(row.created_at).getTime(),
+    isStreaming: false,
+  };
+}
+
 interface ChatInterfaceProps {
   conversationId: string;
 }
@@ -49,6 +91,14 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   const [sending, setSending] = useState(false);
   const [hasSentMessage, setHasSentMessage] = useState(false);
   const messageIdCounter = useRef(0);
+  const conversationIdRef = useRef(conversationId);
+  const messagesRef = useRef(messages);
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  }, [conversationId]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   const { activeWorkflow, hydrateWorkflow, handlers: workflowHandlers } = useWorkflowStatus();
 
   // Sync messages to cache for persistence across navigation
@@ -67,50 +117,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     void getMessages(conversationId)
       .then((rows: MessageResponse[]) => {
         if (cancelled || rows.length === 0) return;
-        const hydrated: ChatMessage[] = rows.map(row => {
-          let meta: {
-            toolCalls?: {
-              name: string;
-              input: Record<string, unknown>;
-              duration?: number;
-            }[];
-            error?: ErrorDisplay;
-            workflowDispatch?: { workerConversationId: string; workflowName: string };
-            workflowResult?: { workflowName: string; runId: string };
-          } = {};
-          try {
-            meta = JSON.parse(row.metadata) as typeof meta;
-          } catch (parseErr) {
-            console.warn('[Chat] Corrupted message metadata', {
-              messageId: row.id,
-              error: (parseErr as Error).message,
-            });
-            meta = {
-              error: {
-                message: 'Message data corrupted',
-                classification: 'fatal' as const,
-                suggestedActions: [],
-              },
-            };
-          }
-          return {
-            id: row.id,
-            role: row.role,
-            content: row.content,
-            toolCalls: meta.toolCalls?.map((tc, i) => ({
-              ...tc,
-              id: `${row.id}-tool-${String(i)}`,
-              startedAt: 0,
-              isExpanded: false,
-              duration: tc.duration ?? 0, // Use stored duration, fallback to 0
-            })),
-            error: meta.error,
-            workflowDispatch: meta.workflowDispatch,
-            workflowResult: meta.workflowResult,
-            timestamp: new Date(row.created_at).getTime(),
-            isStreaming: false,
-          };
-        });
+        const hydrated: ChatMessage[] = rows.map(mapMessageRow);
         // REST is the source of truth for all completed messages.
         // Keep actively streaming messages that have content (AI is generating).
         // Discard empty thinking placeholders ONLY if we're not currently sending —
@@ -392,18 +399,29 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     setLocked(isLocked);
     setQueuePosition(position);
     if (!isLocked) {
-      // Lock released — processing is done, clear the sendInFlight guard
-      setSendInFlight(false);
       const now = Date.now();
-      // Mark ALL streaming messages as complete and all running tools as finished
+      // AI processing is done (lock released) — always clear the sendInFlight guard.
+      // This must be unconditional: if it's only cleared inside hasStuckPlaceholder,
+      // the flag stays true after workflow dispatches (where the placeholder is replaced
+      // by status text), causing ghost streaming messages on the second send.
+      setSendInFlight(false);
+      // Mark streaming messages with content as complete and fix running tools.
+      // Empty thinking placeholders (isStreaming: true, content: '') are intentionally
+      // skipped — they indicate the AI hasn't started streaming yet. On the first message
+      // of a new conversation, navigate() causes a component remount and a fresh SSE
+      // connection; if text events were emitted before the connection established, only
+      // the lock-release event is received. We detect this race and re-fetch via REST.
+      // Read current messages from ref (stable closure-safe snapshot) to avoid
+      // side effects inside the state updater (which React may call twice in StrictMode).
+      const hasStuckPlaceholder = messagesRef.current.some(m => m.isStreaming && !m.content);
       setMessages(prev =>
         prev.map(msg => {
           const needsToolFix = msg.toolCalls?.some(tc => !tc.output && tc.duration === undefined);
-          const needsStreamFix = msg.isStreaming;
+          const needsStreamFix = msg.isStreaming && !!msg.content; // Skip empty placeholders
           if (!needsToolFix && !needsStreamFix) return msg;
           return {
             ...msg,
-            isStreaming: false,
+            isStreaming: needsStreamFix ? false : msg.isStreaming,
             toolCalls: needsToolFix
               ? msg.toolCalls?.map(tc =>
                   !tc.output && tc.duration === undefined
@@ -414,6 +432,23 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           };
         })
       );
+      // If a thinking placeholder is stuck (text events were missed due to SSE connection
+      // timing on first message), fetch the completed response from REST to populate it.
+      if (hasStuckPlaceholder) {
+        const cid = conversationIdRef.current;
+        void getMessages(cid)
+          .then((rows: MessageResponse[]) => {
+            if (rows.length === 0) return;
+            const hydrated = rows.map(mapMessageRow);
+            setMessages(hydrated);
+          })
+          .catch(() => {
+            // Re-fetch failed — clear stuck placeholder so user can retry
+            setMessages(prev =>
+              prev.map(m => (m.isStreaming && !m.content ? { ...m, isStreaming: false } : m))
+            );
+          });
+      }
     }
   }, []);
 
@@ -565,7 +600,12 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           suggestedActions: ['Retry'],
         });
       } finally {
-        setSendInFlight(false);
+        // Only clear sending UI state here. Do NOT clear setSendInFlight —
+        // it must stay true until onText fires (first SSE text) or the
+        // hasStuckPlaceholder recovery runs on lock release. Clearing it
+        // here causes a race: the new mount's REST hydration may run after
+        // this finally block, find sendInFlight=false, and discard the
+        // thinking placeholder before any SSE text arrives.
         setSending(false);
       }
     },

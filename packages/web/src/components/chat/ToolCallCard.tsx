@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ChevronRight, Loader2, Terminal } from 'lucide-react';
 import type { ToolCallDisplay } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -11,6 +11,19 @@ export function ToolCallCard({ tool }: ToolCallCardProps): React.ReactElement {
   const [expanded, setExpanded] = useState(tool.isExpanded);
   const [showAllOutput, setShowAllOutput] = useState(false);
   const isRunning = tool.output === undefined && tool.duration === undefined;
+
+  // Live elapsed counter — ticks every second while tool is running
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!isRunning || !tool.startedAt) return;
+    setElapsed(Date.now() - tool.startedAt);
+    const interval = setInterval(() => {
+      setElapsed(Date.now() - tool.startedAt);
+    }, 1000);
+    return (): void => {
+      clearInterval(interval);
+    };
+  }, [isRunning, tool.startedAt]);
 
   // Get a brief summary from the input
   const summary = Object.values(tool.input)[0];
@@ -50,13 +63,17 @@ export function ToolCallCard({ tool }: ToolCallCardProps): React.ReactElement {
         <span className="truncate font-mono text-xs text-text-secondary">{tool.name}</span>
         {summaryText && <span className="truncate text-xs text-text-tertiary">{summaryText}</span>}
         <span className="ml-auto shrink-0">
-          {tool.duration !== undefined && (
+          {isRunning && elapsed > 0 ? (
+            <span className="rounded-full bg-primary/20 px-2 py-0.5 text-[10px] text-primary">
+              {elapsed < 1000 ? `${String(elapsed)}ms` : `${(elapsed / 1000).toFixed(1)}s`}
+            </span>
+          ) : tool.duration !== undefined ? (
             <span className="rounded-full bg-surface-elevated px-2 py-0.5 text-[10px] text-text-secondary">
               {tool.duration < 1000
                 ? `${String(tool.duration)}ms`
                 : `${(tool.duration / 1000).toFixed(1)}s`}
             </span>
-          )}
+          ) : null}
         </span>
       </button>
 

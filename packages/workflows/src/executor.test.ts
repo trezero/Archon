@@ -2675,6 +2675,46 @@ describe('Workflow Executor', () => {
         yield { type: 'result', sessionId: 'new-session-id' };
       });
     });
+
+    it('calls sendStructuredEvent for tool messages in streaming mode during loop', async () => {
+      const platform = createMockPlatform();
+      (platform.getStreamingMode as Mock).mockReturnValue('stream');
+
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'tool', toolName: 'Read', toolInput: { path: '/foo' } };
+        yield { type: 'assistant', content: '<promise>COMPLETE</promise>' };
+        yield { type: 'result', sessionId: 'session-loop-tool' };
+      });
+
+      const loopWorkflow: WorkflowDefinition = {
+        name: 'loop-tool-test',
+        description: 'Test loop sendStructuredEvent',
+        loop: { until: 'COMPLETE', max_iterations: 3, fresh_context: false },
+        prompt: 'Do the thing.',
+      };
+
+      await executeWorkflow(
+        mockDeps,
+        platform,
+        'conv-loop-tool',
+        testDir,
+        loopWorkflow,
+        'Test',
+        'db-conv-id'
+      );
+
+      expect(platform.sendStructuredEvent).toHaveBeenCalledWith('conv-loop-tool', {
+        type: 'tool',
+        toolName: 'Read',
+        toolInput: { path: '/foo' },
+      });
+
+      // Reset mock
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'assistant', content: 'AI response' };
+        yield { type: 'result', sessionId: 'new-session-id' };
+      });
+    });
   });
 
   describe('issueContext handling', () => {
@@ -4676,5 +4716,141 @@ describe('cancel detection during streaming', () => {
     expect(result.error).not.toContain('cancelled by user');
     // It should contain the original error message
     expect(result.error).toContain('transaction aborted');
+  });
+});
+
+describe('tool_completed event emission', () => {
+  let testDir: string;
+  let commitAllChangesSpy: Mock<typeof gitUtils.commitAllChanges>;
+  let getDefaultBranchSpy: Mock<typeof gitUtils.getDefaultBranch>;
+
+  beforeEach(async () => {
+    mockSendQuery.mockClear();
+    mockGetAssistantClient.mockClear();
+    mockLoadConfig.mockClear();
+    mockLogger.error.mockClear();
+
+    mockLoadConfig.mockImplementation((_cwd: string) => Promise.resolve({ ...DEFAULT_CONFIG }));
+    commitAllChangesSpy = spyOn(gitUtils, 'commitAllChanges').mockResolvedValue(false);
+    getDefaultBranchSpy = spyOn(gitUtils, 'getDefaultBranch').mockResolvedValue('main');
+
+    testDir = join(
+      tmpdir(),
+      `executor-tool-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'command-one.md'), 'Command one prompt for $USER_MESSAGE');
+  });
+
+  afterEach(async () => {
+    commitAllChangesSpy.mockRestore();
+    getDefaultBranchSpy.mockRestore();
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('should emit tool_completed with duration_ms when next tool starts', async () => {
+    mockSendQuery.mockImplementation(function* () {
+      yield { type: 'tool', toolName: 'read_file', toolInput: { path: '/a' } };
+      yield { type: 'tool', toolName: 'write_file', toolInput: { path: '/b', content: 'x' } };
+      yield { type: 'result', sessionId: 'sess-1' };
+    });
+
+    const localStore = createMockStore();
+    const localPlatform = createMockPlatform();
+    const localDeps = createMockDeps({ store: localStore });
+
+    await executeWorkflow(
+      localDeps,
+      localPlatform,
+      'conv-123',
+      testDir,
+      {
+        name: 'test-tool-complete',
+        description: 'Test',
+        steps: [{ command: 'command-one' }],
+      },
+      'user message',
+      'db-conv-id'
+    );
+
+    const createEventCalls = (localStore.createWorkflowEvent as ReturnType<typeof mock>).mock
+      .calls as Array<[{ event_type: string; data?: Record<string, unknown> }]>;
+    const completedEvents = createEventCalls.filter(([arg]) => arg.event_type === 'tool_completed');
+
+    // At least one tool_completed for read_file (emitted when write_file starts)
+    expect(completedEvents.length).toBeGreaterThanOrEqual(1);
+    const readFileComplete = completedEvents.find(([arg]) => arg.data?.tool_name === 'read_file');
+    expect(readFileComplete).toBeDefined();
+    expect(typeof readFileComplete?.[0].data?.duration_ms).toBe('number');
+    expect((readFileComplete?.[0].data?.duration_ms as number) >= 0).toBe(true);
+  });
+
+  it('should emit tool_completed for last tool on result message', async () => {
+    mockSendQuery.mockImplementation(function* () {
+      yield { type: 'tool', toolName: 'read_file', toolInput: { path: '/a' } };
+      yield { type: 'result', sessionId: 'sess-1' };
+    });
+
+    const localStore = createMockStore();
+    const localPlatform = createMockPlatform();
+    const localDeps = createMockDeps({ store: localStore });
+
+    await executeWorkflow(
+      localDeps,
+      localPlatform,
+      'conv-123',
+      testDir,
+      {
+        name: 'test-last-tool',
+        description: 'Test',
+        steps: [{ command: 'command-one' }],
+      },
+      'user message',
+      'db-conv-id'
+    );
+
+    const createEventCalls = (localStore.createWorkflowEvent as ReturnType<typeof mock>).mock
+      .calls as Array<[{ event_type: string; data?: Record<string, unknown> }]>;
+    const completedEvents = createEventCalls.filter(([arg]) => arg.event_type === 'tool_completed');
+
+    expect(completedEvents.length).toBe(1);
+    expect(completedEvents[0][0].data?.tool_name).toBe('read_file');
+    expect(typeof completedEvents[0][0].data?.duration_ms).toBe('number');
+  });
+
+  it('should not emit tool_completed when no tools were called', async () => {
+    mockSendQuery.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'AI response' };
+      yield { type: 'result', sessionId: 'sess-1' };
+    });
+
+    const localStore = createMockStore();
+    const localPlatform = createMockPlatform();
+    const localDeps = createMockDeps({ store: localStore });
+
+    await executeWorkflow(
+      localDeps,
+      localPlatform,
+      'conv-123',
+      testDir,
+      {
+        name: 'test-no-tools',
+        description: 'Test',
+        steps: [{ command: 'command-one' }],
+      },
+      'user message',
+      'db-conv-id'
+    );
+
+    const createEventCalls = (localStore.createWorkflowEvent as ReturnType<typeof mock>).mock
+      .calls as Array<[{ event_type: string; data?: Record<string, unknown> }]>;
+    const completedEvents = createEventCalls.filter(([arg]) => arg.event_type === 'tool_completed');
+
+    expect(completedEvents.length).toBe(0);
   });
 });

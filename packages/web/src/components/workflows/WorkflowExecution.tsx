@@ -27,6 +27,7 @@ export interface ToolEvent {
   stepName?: string;
   stepIndex?: number;
   createdAt: string;
+  duration?: number;
 }
 
 const TERMINAL_STATUSES: readonly WorkflowRunStatus[] = ['completed', 'failed', 'cancelled'];
@@ -203,18 +204,41 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       : String(queryError)
     : null;
 
-  // Extract tool_called events from workflow events for WorkflowLogs
+  // Extract tool_called events from workflow events for WorkflowLogs,
+  // matching each with its corresponding tool_completed to get duration.
   const toolEvents = useMemo((): ToolEvent[] => {
-    return (queryData?.events ?? [])
+    const allEvents = queryData?.events ?? [];
+    const completedEvents = allEvents
+      .filter(ev => ev.event_type === 'tool_completed')
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+    // Greedy match: claim the earliest tool_completed with matching name after evTime.
+    // usedCompleted tracks claimed IDs to prevent double-use. Local mutation is intentional.
+    const usedCompleted = new Set<string>();
+
+    return allEvents
       .filter(ev => ev.event_type === 'tool_called')
-      .map(ev => ({
-        id: ev.id,
-        name: ev.data.tool_name as string,
-        input: (ev.data.tool_input as Record<string, unknown>) ?? {},
-        stepName: ev.step_name ?? undefined,
-        stepIndex: ev.step_index ?? undefined,
-        createdAt: ev.created_at,
-      }));
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      .map(ev => {
+        const evTime = new Date(ev.created_at).getTime();
+        const toolName = ev.data.tool_name as string;
+        const completed = completedEvents.find(
+          c =>
+            !usedCompleted.has(c.id) &&
+            (c.data.tool_name as string) === toolName &&
+            new Date(c.created_at).getTime() > evTime
+        );
+        if (completed) usedCompleted.add(completed.id);
+        return {
+          id: ev.id,
+          name: toolName,
+          input: (ev.data.tool_input as Record<string, unknown>) ?? {},
+          stepName: ev.step_name ?? undefined,
+          stepIndex: ev.step_index ?? undefined,
+          createdAt: ev.created_at,
+          duration: completed ? (completed.data.duration_ms as number | undefined) : undefined,
+        };
+      });
   }, [queryData?.events]);
 
   // Fetch codebase name when run data becomes available

@@ -767,6 +767,7 @@ async function executeStepInternal(
     let activityWarningShown = false;
     let idleTimedOut = false;
     const effectiveIdleTimeout = stepDef.idle_timeout ?? STEP_IDLE_TIMEOUT_MS;
+    let lastToolStartedAt: { toolName: string; startedAt: number } | null = null;
 
     for await (const msg of withIdleTimeout(
       aiClient.sendQuery(substitutedPrompt, cwd, resumeSessionId, stepOptions),
@@ -843,6 +844,31 @@ async function executeStepInternal(
         }
         await logAssistant(logDir, workflowRun.id, msg.content);
       } else if (msg.type === 'tool' && msg.toolName) {
+        const now = Date.now();
+
+        // Emit tool_completed for the previous tool (fire-and-forget)
+        if (lastToolStartedAt) {
+          const prevTool = lastToolStartedAt;
+          deps.store
+            .createWorkflowEvent({
+              workflow_run_id: workflowRun.id,
+              event_type: 'tool_completed',
+              step_index: Number(stepId.split('.')[0]),
+              step_name: commandName,
+              data: {
+                tool_name: prevTool.toolName,
+                duration_ms: now - prevTool.startedAt,
+              },
+            })
+            .catch((err: Error) => {
+              getLog().error(
+                { err, workflowRunId: workflowRun.id, eventType: 'tool_completed' },
+                'workflow_event_persist_failed'
+              );
+            });
+        }
+        lastToolStartedAt = { toolName: msg.toolName, startedAt: now };
+
         if (streamingMode === 'stream') {
           const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
           const sent = await safeSendMessage(
@@ -882,6 +908,28 @@ async function executeStepInternal(
             );
           });
       } else if (msg.type === 'result') {
+        // Emit tool_completed for the last tool in the step
+        if (lastToolStartedAt) {
+          const prevTool = lastToolStartedAt;
+          deps.store
+            .createWorkflowEvent({
+              workflow_run_id: workflowRun.id,
+              event_type: 'tool_completed',
+              step_index: Number(stepId.split('.')[0]),
+              step_name: commandName,
+              data: {
+                tool_name: prevTool.toolName,
+                duration_ms: Date.now() - prevTool.startedAt,
+              },
+            })
+            .catch((err: Error) => {
+              getLog().error(
+                { err, workflowRunId: workflowRun.id, eventType: 'tool_completed' },
+                'workflow_event_persist_failed'
+              );
+            });
+          lastToolStartedAt = null;
+        }
         if (msg.sessionId) newSessionId = msg.sessionId;
         if (msg.tokens) stepTokens = msg.tokens;
       }
@@ -1607,6 +1655,7 @@ async function executeLoopWorkflow(
       const unknownErrorTracker: UnknownErrorTracker = { count: 0 };
       let activityUpdateFailures = 0;
       let activityWarningShown = false;
+      let lastToolStartedAt: { toolName: string; startedAt: number } | null = null;
 
       // Create per-iteration abort controller — wraps the workflow-level signal so we can
       // independently abort on idle timeout without cancelling the entire workflow
@@ -1688,6 +1737,31 @@ async function executeLoopWorkflow(
           }
           await logAssistant(logDir, workflowRun.id, msg.content); // Log raw for debugging
         } else if (msg.type === 'tool' && msg.toolName) {
+          const now = Date.now();
+
+          // Emit tool_completed for the previous tool (fire-and-forget)
+          if (lastToolStartedAt) {
+            const prevTool = lastToolStartedAt;
+            deps.store
+              .createWorkflowEvent({
+                workflow_run_id: workflowRun.id,
+                event_type: 'tool_completed',
+                step_index: i - 1,
+                step_name: `iteration-${String(i)}`,
+                data: {
+                  tool_name: prevTool.toolName,
+                  duration_ms: now - prevTool.startedAt,
+                },
+              })
+              .catch((err: Error) => {
+                getLog().error(
+                  { err, workflowRunId: workflowRun.id, eventType: 'tool_completed' },
+                  'workflow_event_persist_failed'
+                );
+              });
+          }
+          lastToolStartedAt = { toolName: msg.toolName, startedAt: now };
+
           if (streamingMode === 'stream') {
             const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
             const sent = await safeSendMessage(
@@ -1727,6 +1801,28 @@ async function executeLoopWorkflow(
               );
             });
         } else if (msg.type === 'result' && msg.sessionId) {
+          // Emit tool_completed for the last tool in the iteration
+          if (lastToolStartedAt) {
+            const prevTool = lastToolStartedAt;
+            deps.store
+              .createWorkflowEvent({
+                workflow_run_id: workflowRun.id,
+                event_type: 'tool_completed',
+                step_index: i - 1,
+                step_name: `iteration-${String(i)}`,
+                data: {
+                  tool_name: prevTool.toolName,
+                  duration_ms: Date.now() - prevTool.startedAt,
+                },
+              })
+              .catch((err: Error) => {
+                getLog().error(
+                  { err, workflowRunId: workflowRun.id, eventType: 'tool_completed' },
+                  'workflow_event_persist_failed'
+                );
+              });
+            lastToolStartedAt = null;
+          }
           currentSessionId = msg.sessionId;
         }
       }

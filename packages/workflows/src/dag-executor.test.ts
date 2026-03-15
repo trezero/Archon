@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock, type Mock } from 'bun:test';
 import { mkdir, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -1688,23 +1688,24 @@ describe('executeDagWorkflow -- tool_called event persistence', () => {
     });
   });
 
-  it('calls sendStructuredEvent for tool messages in DAG streaming mode', async () => {
-    const mockDeps = createMockDeps();
+  it('calls sendStructuredEvent for tool messages in streaming mode during DAG', async () => {
+    const mockStore = createMockStore();
+    const mockDeps = createMockDeps(mockStore);
     const platform = createMockPlatform();
-    (platform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
+    (platform.getStreamingMode as Mock).mockReturnValue('stream');
     const workflowRun = makeWorkflowRun();
 
     mockSendQueryDag.mockImplementation(function* () {
-      yield { type: 'tool', toolName: 'read_file', toolInput: { path: '/tmp/test.ts' } };
-      yield { type: 'result', sessionId: 'dag-stream-session-id' };
+      yield { type: 'tool', toolName: 'Write', toolInput: { path: '/bar', content: 'x' } };
+      yield { type: 'result', sessionId: 'dag-session-tool' };
     });
 
     await executeDagWorkflow(
       mockDeps,
       platform,
-      'conv-dag-stream',
+      'conv-dag-tool',
       testDir,
-      { name: 'dag-stream-test', nodes: [node('my-cmd')] },
+      { name: 'dag-tool-test', nodes: [node('my-cmd')] },
       workflowRun,
       'claude',
       undefined,
@@ -1714,13 +1715,145 @@ describe('executeDagWorkflow -- tool_called event persistence', () => {
       minimalConfig
     );
 
-    const sendStructuredEvent = platform.sendStructuredEvent as ReturnType<typeof mock>;
-    expect(sendStructuredEvent.mock.calls.length).toBeGreaterThan(0);
-    const [calledConvId, calledMsg] = sendStructuredEvent.mock.calls[0] as [
-      string,
-      Record<string, unknown>,
-    ];
-    expect(calledConvId).toBe('conv-dag-stream');
-    expect(calledMsg).toMatchObject({ type: 'tool', toolName: 'read_file' });
+    expect(platform.sendStructuredEvent).toHaveBeenCalledWith('conv-dag-tool', {
+      type: 'tool',
+      toolName: 'Write',
+      toolInput: { path: '/bar', content: 'x' },
+    });
+  });
+});
+
+describe('executeDagWorkflow -- tool_completed event emission', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `dag-toolcomplete-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'My command prompt for $USER_MESSAGE');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+  });
+
+  afterEach(async () => {
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('should emit tool_completed with duration_ms when next tool starts in DAG node', async () => {
+    const mockStore = createMockStore();
+    const mockDeps = createMockDeps(mockStore);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'tool', toolName: 'read_file', toolInput: { path: '/a' } };
+      yield { type: 'tool', toolName: 'write_file', toolInput: { path: '/b', content: 'x' } };
+      yield { type: 'result', sessionId: 'dag-sess-1' };
+    });
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag-complete',
+      testDir,
+      { name: 'dag-complete-test', nodes: [node('my-cmd')] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    const createEventCalls = (mockStore.createWorkflowEvent as ReturnType<typeof mock>).mock
+      .calls as Array<[{ event_type: string; data?: Record<string, unknown> }]>;
+    const completedEvents = createEventCalls.filter(([arg]) => arg.event_type === 'tool_completed');
+
+    expect(completedEvents.length).toBeGreaterThanOrEqual(1);
+    const readFileComplete = completedEvents.find(([arg]) => arg.data?.tool_name === 'read_file');
+    expect(readFileComplete).toBeDefined();
+    expect(typeof readFileComplete?.[0].data?.duration_ms).toBe('number');
+    expect((readFileComplete?.[0].data?.duration_ms as number) >= 0).toBe(true);
+  });
+
+  it('should emit tool_completed for last tool on result in DAG node', async () => {
+    const mockStore = createMockStore();
+    const mockDeps = createMockDeps(mockStore);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'tool', toolName: 'read_file', toolInput: { path: '/a' } };
+      yield { type: 'result', sessionId: 'dag-sess-2' };
+    });
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag-last',
+      testDir,
+      { name: 'dag-last-test', nodes: [node('my-cmd')] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    const createEventCalls = (mockStore.createWorkflowEvent as ReturnType<typeof mock>).mock
+      .calls as Array<[{ event_type: string; data?: Record<string, unknown> }]>;
+    const completedEvents = createEventCalls.filter(([arg]) => arg.event_type === 'tool_completed');
+
+    expect(completedEvents.length).toBe(1);
+    expect(completedEvents[0][0].data?.tool_name).toBe('read_file');
+    expect(typeof completedEvents[0][0].data?.duration_ms).toBe('number');
+  });
+
+  it('should not emit tool_completed when no tools were called in DAG node', async () => {
+    const mockStore = createMockStore();
+    const mockDeps = createMockDeps(mockStore);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'DAG AI response' };
+      yield { type: 'result', sessionId: 'dag-sess-3' };
+    });
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag-notools',
+      testDir,
+      { name: 'dag-notools-test', nodes: [node('my-cmd')] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    const createEventCalls = (mockStore.createWorkflowEvent as ReturnType<typeof mock>).mock
+      .calls as Array<[{ event_type: string; data?: Record<string, unknown> }]>;
+    const completedEvents = createEventCalls.filter(([arg]) => arg.event_type === 'tool_completed');
+
+    expect(completedEvents.length).toBe(0);
   });
 });

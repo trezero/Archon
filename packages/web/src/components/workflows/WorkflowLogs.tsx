@@ -78,7 +78,7 @@ function hydrateMessages(
             input: te.input,
             startedAt: teTimestamp,
             isExpanded: false,
-            duration: 0,
+            duration: te.duration, // undefined = running (shows spinner + ticking elapsed)
           });
         }
       }
@@ -150,20 +150,33 @@ export function WorkflowLogs({
     return undefined;
   }, [isRunning, conversationId, queryClient]);
 
-  // Merge DB messages (canonical) with SSE-only messages (live streaming)
+  // Merge DB messages (canonical) with SSE-only messages (live streaming).
+  //
+  // Strategy:
+  // - While running: SSE is the live source of truth (has tool spinners, streaming
+  //   text). Show SSE messages, and prepend any DB messages from BEFORE the SSE
+  //   session started (older messages not in SSE). This avoids duplicates where
+  //   DB and SSE have the same message at different completion stages.
+  // - After completion: DB is the sole source of truth. SSE state is discarded
+  //   to avoid signature collisions between multiple empty-content messages.
   const messages = useMemo((): ChatMessage[] => {
     const dbMessages = queryMessages ?? [];
+
+    // After workflow completes, use DB only — clean, no duplicates.
+    if (!isRunning && !gracePolling) return dbMessages;
+
+    // While running with no SSE data yet, show DB messages.
     if (sseMessages.length === 0) return dbMessages;
+
+    // While running with SSE data: SSE messages are the live view.
+    // Prepend any DB messages that arrived before our SSE session
+    // (messages from earlier steps that SSE didn't capture).
     if (dbMessages.length === 0) return sseMessages;
 
-    const dbSigs = new Set(dbMessages.map(m => `${m.role}:${m.content}`));
-    // Keep SSE messages whose content hasn't appeared in DB yet (canonical dedup).
-    // Previous logic also required timestamp > latestDbTs || isStreaming, but that
-    // caused a flash: onLockChange sets isStreaming=false before DB flushes the
-    // final message, so the SSE copy vanished for ~3s until the next DB poll.
-    const uniqueSse = sseMessages.filter(m => !dbSigs.has(`${m.role}:${m.content}`));
-    return [...dbMessages, ...uniqueSse];
-  }, [queryMessages, sseMessages]);
+    const earliestSseTs = Math.min(...sseMessages.map(m => m.timestamp));
+    const olderDbMessages = dbMessages.filter(m => m.timestamp < earliestSseTs);
+    return [...olderDbMessages, ...sseMessages];
+  }, [queryMessages, sseMessages, isRunning, gracePolling]);
 
   const onText = useCallback((content: string): void => {
     setSseMessages(prev => {
@@ -187,29 +200,48 @@ export function WorkflowLogs({
 
   const onToolCall = useCallback((name: string, input: Record<string, unknown>): void => {
     setSseMessages(prev => {
-      const last = prev[prev.length - 1];
-      if (last?.role === 'assistant') {
-        const now = Date.now();
-        const updatedExistingTools = (last.toolCalls ?? []).map(tc =>
-          !tc.output && tc.duration === undefined ? { ...tc, duration: now - tc.startedAt } : tc
-        );
+      const now = Date.now();
+      let last = prev[prev.length - 1];
+
+      // If no assistant message exists yet (tool arrives before any text),
+      // create one so the tool card has a home in the message list.
+      if (last?.role !== 'assistant') {
+        last = {
+          id: `msg-${String(now)}`,
+          role: 'assistant' as const,
+          content: '',
+          timestamp: now,
+          isStreaming: false,
+          toolCalls: [],
+        };
         const newTool: ToolCallDisplay = {
-          id: `${last.id}-tool-${String(updatedExistingTools.length)}`,
+          id: `${last.id}-tool-0`,
           name,
           input,
           startedAt: now,
           isExpanded: false,
         };
-        return [
-          ...prev.slice(0, -1),
-          {
-            ...last,
-            isStreaming: false,
-            toolCalls: [...updatedExistingTools, newTool],
-          },
-        ];
+        return [...prev, { ...last, toolCalls: [newTool] }];
       }
-      return prev;
+
+      const updatedExistingTools = (last.toolCalls ?? []).map(tc =>
+        !tc.output && tc.duration === undefined ? { ...tc, duration: now - tc.startedAt } : tc
+      );
+      const newTool: ToolCallDisplay = {
+        id: `${last.id}-tool-${String(updatedExistingTools.length)}`,
+        name,
+        input,
+        startedAt: now,
+        isExpanded: false,
+      };
+      return [
+        ...prev.slice(0, -1),
+        {
+          ...last,
+          isStreaming: false,
+          toolCalls: [...updatedExistingTools, newTool],
+        },
+      ];
     });
   }, []);
 

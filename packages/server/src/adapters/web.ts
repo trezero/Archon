@@ -18,10 +18,14 @@ function getLog(): ReturnType<typeof createLogger> {
 export class WebAdapter implements IWebPlatformAdapter {
   /** Per-conversation tool call counter for unique SSE tool IDs */
   private toolCallCounter = new Map<string, number>();
-  /** Per-conversation last tool start time for duration tracking */
-  private lastToolStart = new Map<
+  /**
+   * Per-conversation running tool stack for SSE duration tracking.
+   * Uses a Map of toolCallId → start info so parallel DAG nodes don't
+   * overwrite each other (they share a conversationId).
+   */
+  private runningTools = new Map<
     string,
-    { toolCallId: string; name: string; startedAt: number }
+    Map<string, { toolCallId: string; name: string; startedAt: number }>
   >();
 
   constructor(
@@ -40,6 +44,10 @@ export class WebAdapter implements IWebPlatformAdapter {
 
   removeStream(conversationId: string, expectedStream?: SSEWriter): void {
     this.transport.removeStream(conversationId, expectedStream);
+    // Clean up stale tool tracking state on SSE disconnect to prevent
+    // spurious tool_result events on the next message to this conversation.
+    this.runningTools.delete(conversationId);
+    this.toolCallCounter.delete(conversationId);
   }
 
   /**
@@ -92,27 +100,24 @@ export class WebAdapter implements IWebPlatformAdapter {
     if (chunk.type === 'tool' && chunk.toolName) {
       const now = Date.now();
 
-      // Finalize previous tool's duration (agent moved on to next tool)
-      const prev = this.lastToolStart.get(conversationId);
-      if (prev) {
-        const resultEvent = JSON.stringify({
-          type: 'tool_result',
-          toolCallId: prev.toolCallId,
-          name: prev.name,
-          output: '',
-          duration: now - prev.startedAt,
-          timestamp: now,
-        });
-        await this.transport.emit(conversationId, resultEvent);
-      }
+      // Buffer tool call for direct chat persistence (message metadata)
+      this.persistence.appendToolCall(conversationId, {
+        name: chunk.toolName,
+        input: chunk.toolInput ?? {},
+      });
 
       // Generate unique tool call ID for SSE
       const counter = (this.toolCallCounter.get(conversationId) ?? 0) + 1;
       this.toolCallCounter.set(conversationId, counter);
       const toolCallId = `${conversationId}-tool-${String(counter)}`;
 
-      // Track this tool's start for duration computation
-      this.lastToolStart.set(conversationId, { toolCallId, name: chunk.toolName, startedAt: now });
+      // Track this tool's start for duration computation (supports parallel DAG nodes)
+      let convTools = this.runningTools.get(conversationId);
+      if (!convTools) {
+        convTools = new Map();
+        this.runningTools.set(conversationId, convTools);
+      }
+      convTools.set(toolCallId, { toolCallId, name: chunk.toolName, startedAt: now });
 
       event = JSON.stringify({
         type: 'tool_call',
@@ -174,7 +179,7 @@ export class WebAdapter implements IWebPlatformAdapter {
     this.workflowBridge.stop();
     this.persistence.clearAll();
     this.toolCallCounter.clear();
-    this.lastToolStart.clear();
+    this.runningTools.clear();
   }
 
   /**
@@ -187,21 +192,25 @@ export class WebAdapter implements IWebPlatformAdapter {
     queuePosition?: number
   ): Promise<void> {
     if (!locked) {
-      // Finalize the last running tool and emit tool_result before lock release
-      const prev = this.lastToolStart.get(conversationId);
-      if (prev) {
+      // Finalize ALL running tools and emit tool_result for each before lock release
+      const convTools = this.runningTools.get(conversationId);
+      if (convTools && convTools.size > 0) {
         const now = Date.now();
-        const resultEvent = JSON.stringify({
-          type: 'tool_result',
-          toolCallId: prev.toolCallId,
-          name: prev.name,
-          output: '',
-          duration: now - prev.startedAt,
-          timestamp: now,
-        });
-        await this.transport.emit(conversationId, resultEvent);
-        this.lastToolStart.delete(conversationId);
+        for (const tool of convTools.values()) {
+          const resultEvent = JSON.stringify({
+            type: 'tool_result',
+            toolCallId: tool.toolCallId,
+            name: tool.name,
+            output: '',
+            duration: now - tool.startedAt,
+            timestamp: now,
+          });
+          await this.transport.emit(conversationId, resultEvent);
+        }
+        this.runningTools.delete(conversationId);
       }
+      // Finalize tool durations in persistence buffer before flushing to DB
+      this.persistence.finalizeRunningTools(conversationId);
       await this.persistence.flush(conversationId).catch((e: unknown) => {
         getLog().error({ conversationId, err: e }, 'lock_release_flush_failed');
       });

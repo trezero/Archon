@@ -8,8 +8,16 @@ function getLog(): ReturnType<typeof createLogger> {
   return cachedLog;
 }
 
+interface BufferedToolCall {
+  name: string;
+  input: Record<string, unknown>;
+  startedAt: number;
+  duration?: number;
+}
+
 interface BufferedSegment {
   content: string;
+  toolCalls: BufferedToolCall[];
   category?: MessageMetadata['category'];
   workflowDispatch?: MessageMetadata['workflowDispatch'];
   workflowResult?: MessageMetadata['workflowResult'];
@@ -53,19 +61,22 @@ export class MessagePersistence {
 
     // Start a new segment when:
     // 1. No segments yet
-    // 2. This is a workflow status message (🚀/✅ should be its own bubble)
-    // 3. Previous segment was a workflow status (next text should be separate)
+    // 2. Previous segment has tool calls (text after tool = new message in live view)
+    // 3. This is a workflow status message (🚀/✅ should be its own bubble)
+    // 4. Previous segment was a workflow status (next text should be separate)
     const needsNewSegment =
       !lastSeg ||
       segmentDirective === 'new' ||
       (segmentDirective === 'auto' &&
-        (isWorkflowStatus ||
+        (lastSeg.toolCalls.length > 0 ||
+          isWorkflowStatus ||
           lastSeg.category === 'workflow_status' ||
           lastSeg.category === 'workflow_dispatch_status'));
 
     if (needsNewSegment) {
       buf.segments.push({
         content: message,
+        toolCalls: [],
         category: metadata?.category,
         workflowDispatch: metadata?.workflowDispatch,
         workflowResult: metadata?.workflowResult,
@@ -81,6 +92,49 @@ export class MessagePersistence {
       this.flush(conversationId).catch((e: unknown) => {
         getLog().error({ conversationId, err: e }, 'buffer_overflow_flush_failed');
       });
+    }
+  }
+
+  /**
+   * Buffer a tool call for persistence (direct chat path).
+   * Finalizes duration on the previous running tool when a new one arrives.
+   */
+  appendToolCall(
+    conversationId: string,
+    tool: { name: string; input: Record<string, unknown> }
+  ): void {
+    const buf = this.assistantBuffer.get(conversationId) ?? { segments: [] };
+    if (buf.segments.length === 0) {
+      buf.segments.push({ content: '', toolCalls: [] });
+    }
+    const lastSeg = buf.segments[buf.segments.length - 1];
+    // Finalize duration on previous running tool
+    const now = Date.now();
+    const prevTool = lastSeg.toolCalls[lastSeg.toolCalls.length - 1];
+    if (prevTool && prevTool.duration === undefined) {
+      prevTool.duration = now - prevTool.startedAt;
+    }
+    lastSeg.toolCalls.push({
+      name: tool.name,
+      input: tool.input,
+      startedAt: now,
+    });
+    this.assistantBuffer.set(conversationId, buf);
+  }
+
+  /**
+   * Finalize all running tools in the buffer for a conversation.
+   * Called on lock release to ensure the last tool gets a duration.
+   */
+  finalizeRunningTools(conversationId: string): void {
+    const buf = this.assistantBuffer.get(conversationId);
+    if (!buf) return;
+    const now = Date.now();
+    for (const seg of buf.segments) {
+      const lastTool = seg.toolCalls[seg.toolCalls.length - 1];
+      if (lastTool && lastTool.duration === undefined) {
+        lastTool.duration = now - lastTool.startedAt;
+      }
     }
   }
 
@@ -119,11 +173,26 @@ export class MessagePersistence {
       return;
     }
 
+    // Finalize any remaining tool durations (last tool in each segment)
+    const now = Date.now();
+    for (const seg of buf.segments) {
+      const lastTool = seg.toolCalls[seg.toolCalls.length - 1];
+      if (lastTool && lastTool.duration === undefined) {
+        lastTool.duration = now - lastTool.startedAt;
+      }
+    }
+
     try {
       const { addMessage } = await import('@archon/core/db/messages');
       for (const seg of buf.segments) {
-        if (!seg.content) continue;
+        if (!seg.content && seg.toolCalls.length === 0) continue;
+        const toolCalls = seg.toolCalls.map(tc => ({
+          name: tc.name,
+          input: tc.input,
+          duration: tc.duration,
+        }));
         const metadata = {
+          ...(toolCalls.length > 0 ? { toolCalls } : {}),
           ...(seg.workflowDispatch ? { workflowDispatch: seg.workflowDispatch } : {}),
           ...(seg.workflowResult ? { workflowResult: seg.workflowResult } : {}),
         };
@@ -149,9 +218,15 @@ export class MessagePersistence {
   retractLastSegment(conversationId: string): void {
     const buf = this.assistantBuffer.get(conversationId);
     if (!buf || buf.segments.length === 0) return;
-    buf.segments.pop();
-    if (buf.segments.length === 0) {
-      this.assistantBuffer.delete(conversationId);
+    const lastSeg = buf.segments[buf.segments.length - 1];
+    if (lastSeg.toolCalls.length > 0) {
+      // Preserve tool call records — only clear the text content
+      lastSeg.content = '';
+    } else {
+      buf.segments.pop();
+      if (buf.segments.length === 0) {
+        this.assistantBuffer.delete(conversationId);
+      }
     }
   }
 

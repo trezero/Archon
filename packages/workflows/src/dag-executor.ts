@@ -711,6 +711,7 @@ async function executeNodeInternal(
   };
   let nodeIdleTimedOut = false;
   const effectiveIdleTimeout = node.idle_timeout ?? STEP_IDLE_TIMEOUT_MS;
+  let lastToolStartedAt: { toolName: string; startedAt: number } | null = null;
 
   try {
     for await (const msg of withIdleTimeout(
@@ -767,6 +768,30 @@ async function executeNodeInternal(
         }
         await logAssistant(logDir, workflowRun.id, msg.content);
       } else if (msg.type === 'tool' && msg.toolName) {
+        const now = Date.now();
+
+        // Emit tool_completed for the previous tool (fire-and-forget)
+        if (lastToolStartedAt) {
+          const prevTool = lastToolStartedAt;
+          deps.store
+            .createWorkflowEvent({
+              workflow_run_id: workflowRun.id,
+              event_type: 'tool_completed',
+              step_name: node.id,
+              data: {
+                tool_name: prevTool.toolName,
+                duration_ms: now - prevTool.startedAt,
+              },
+            })
+            .catch((err: Error) => {
+              getLog().error(
+                { err, workflowRunId: workflowRun.id, eventType: 'tool_completed' },
+                'workflow_event_persist_failed'
+              );
+            });
+        }
+        lastToolStartedAt = { toolName: msg.toolName, startedAt: now };
+
         if (streamingMode === 'stream') {
           const toolMsg = formatToolCall(msg.toolName, msg.toolInput);
           await safeSendMessage(platform, conversationId, toolMsg, nodeContext, {
@@ -798,6 +823,27 @@ async function executeNodeInternal(
             );
           });
       } else if (msg.type === 'result') {
+        // Emit tool_completed for the last tool in the node
+        if (lastToolStartedAt) {
+          const prevTool = lastToolStartedAt;
+          deps.store
+            .createWorkflowEvent({
+              workflow_run_id: workflowRun.id,
+              event_type: 'tool_completed',
+              step_name: node.id,
+              data: {
+                tool_name: prevTool.toolName,
+                duration_ms: Date.now() - prevTool.startedAt,
+              },
+            })
+            .catch((err: Error) => {
+              getLog().error(
+                { err, workflowRunId: workflowRun.id, eventType: 'tool_completed' },
+                'workflow_event_persist_failed'
+              );
+            });
+          lastToolStartedAt = null;
+        }
         if (msg.sessionId) newSessionId = msg.sessionId;
         if (msg.tokens) nodeTokens = msg.tokens;
         if (msg.structuredOutput !== undefined) structuredOutput = msg.structuredOutput;
