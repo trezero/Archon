@@ -131,6 +131,7 @@ function createMockPlatform(): IWorkflowPlatform {
     sendMessage: mock(() => Promise.resolve()),
     getStreamingMode: mock(() => 'batch' as const),
     getPlatformType: mock(() => 'test'),
+    sendStructuredEvent: mock(() => Promise.resolve()),
   };
 }
 
@@ -1771,6 +1772,40 @@ describe('Workflow Executor', () => {
       expect(
         (mockStore.completeWorkflowRun as ReturnType<typeof mock>).mock.calls.length
       ).toBeGreaterThan(0);
+    });
+
+    it('calls sendStructuredEvent for tool messages in loop streaming mode', async () => {
+      (mockPlatform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
+
+      mockSendQuery.mockImplementation(function* () {
+        yield { type: 'tool', toolName: 'read_file', toolInput: { path: '/tmp/test.ts' } };
+        yield { type: 'assistant', content: '<promise>COMPLETE</promise>' };
+        yield { type: 'result', sessionId: 'loop-tool-session' };
+      });
+
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        {
+          name: 'loop-tool-workflow',
+          description: 'Test loop tool streaming',
+          loop: { until: 'COMPLETE', max_iterations: 5, fresh_context: false },
+          prompt: 'Do the thing. Output <promise>COMPLETE</promise> when done.',
+        },
+        'Implement everything',
+        'db-conv-id'
+      );
+
+      const sendStructuredEvent = mockPlatform.sendStructuredEvent as ReturnType<typeof mock>;
+      expect(sendStructuredEvent.mock.calls.length).toBeGreaterThan(0);
+      const [calledConvId, calledMsg] = sendStructuredEvent.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+      expect(calledConvId).toBe('conv-123');
+      expect(calledMsg).toMatchObject({ type: 'tool', toolName: 'read_file' });
     });
   });
 

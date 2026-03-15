@@ -121,6 +121,7 @@ function createMockPlatform(): IWorkflowPlatform {
     sendMessage: mock(() => Promise.resolve()),
     getStreamingMode: mock(() => 'batch' as const),
     getPlatformType: mock(() => 'test'),
+    sendStructuredEvent: mock(() => Promise.resolve()),
   };
 }
 
@@ -1685,5 +1686,41 @@ describe('executeDagWorkflow -- tool_called event persistence', () => {
     expect((eventData.data as Record<string, unknown>).tool_input).toEqual({
       path: '/tmp/test.ts',
     });
+  });
+
+  it('calls sendStructuredEvent for tool messages in DAG streaming mode', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    (platform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
+    const workflowRun = makeWorkflowRun();
+
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'tool', toolName: 'read_file', toolInput: { path: '/tmp/test.ts' } };
+      yield { type: 'result', sessionId: 'dag-stream-session-id' };
+    });
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag-stream',
+      testDir,
+      { name: 'dag-stream-test', nodes: [node('my-cmd')] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    const sendStructuredEvent = platform.sendStructuredEvent as ReturnType<typeof mock>;
+    expect(sendStructuredEvent.mock.calls.length).toBeGreaterThan(0);
+    const [calledConvId, calledMsg] = sendStructuredEvent.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(calledConvId).toBe('conv-dag-stream');
+    expect(calledMsg).toMatchObject({ type: 'tool', toolName: 'read_file' });
   });
 });

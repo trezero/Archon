@@ -1699,6 +1699,11 @@ async function executeLoopWorkflow(
               { category: 'tool_call_formatted' }
             );
             if (!sent) droppedMessageCount++;
+
+            // Send structured event to adapters that support it (Web UI)
+            if (platform.sendStructuredEvent) {
+              await platform.sendStructuredEvent(conversationId, msg);
+            }
           }
           const toolInput = normalizeToolInput(msg.toolName, msg.toolInput);
           await logTool(logDir, workflowRun.id, msg.toolName, toolInput);

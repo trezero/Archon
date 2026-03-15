@@ -772,6 +772,11 @@ async function executeNodeInternal(
           await safeSendMessage(platform, conversationId, toolMsg, nodeContext, {
             category: 'tool_call_formatted',
           } as WorkflowMessageMetadata);
+
+          // Send structured event to adapters that support it (Web UI)
+          if (platform.sendStructuredEvent) {
+            await platform.sendStructuredEvent(conversationId, msg);
+          }
         }
         await logTool(logDir, workflowRun.id, msg.toolName, msg.toolInput ?? {});
 
