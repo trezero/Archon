@@ -441,7 +441,7 @@ export async function workflowRunCommand(
   }
 
   // Wire adapter for assistant message persistence
-  adapter.setConversationDbId(conversation.id);
+  adapter.setConversationDbId(conversationId, conversation.id);
 
   // Persist user message for Web UI history
   try {

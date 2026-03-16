@@ -84,16 +84,17 @@ describe('CLIAdapter', () => {
       expect(consoleSpy).toHaveBeenCalledWith(multiLine);
     });
 
-    it('should ignore conversationId (CLI has no threading)', async () => {
-      await adapter.sendMessage('any-id', 'test');
-      await adapter.sendMessage('different-id', 'test');
+    it('does not persist when conversationId has no registered db mapping', async () => {
+      await adapter.sendMessage('unregistered-id', 'test');
+      await adapter.sendMessage('another-unregistered-id', 'test');
       expect(consoleSpy).toHaveBeenCalledTimes(2);
+      expect(mockAddMessage).not.toHaveBeenCalled();
     });
   });
 
   describe('message persistence', () => {
     it('persists assistant message when conversationDbId is set', async () => {
-      adapter.setConversationDbId('conv-db-123');
+      adapter.setConversationDbId('conv-id', 'conv-db-123');
       await adapter.sendMessage('conv-id', 'Hello from AI');
       expect(consoleSpy).toHaveBeenCalledWith('Hello from AI');
       expect(mockAddMessage).toHaveBeenCalledWith(
@@ -112,14 +113,14 @@ describe('CLIAdapter', () => {
 
     it('handles addMessage errors gracefully (warn, no throw)', async () => {
       mockAddMessage.mockRejectedValueOnce(new Error('DB connection failed'));
-      adapter.setConversationDbId('conv-db-123');
+      adapter.setConversationDbId('conv-id', 'conv-db-123');
       await expect(adapter.sendMessage('conv-id', 'Hello')).resolves.toBeUndefined();
       expect(consoleSpy).toHaveBeenCalledWith('Hello');
       expect(mockLogger.warn).toHaveBeenCalled();
     });
 
     it('persists category and workflowResult metadata when provided', async () => {
-      adapter.setConversationDbId('conv-123');
+      adapter.setConversationDbId('conv-id', 'conv-123');
       await adapter.sendMessage('conv-id', 'Hello', {
         category: 'workflow_status',
         workflowResult: { workflowName: 'test', runId: 'run-1' },
@@ -131,7 +132,7 @@ describe('CLIAdapter', () => {
     });
 
     it('persists workflowDispatch metadata', async () => {
-      adapter.setConversationDbId('conv-123');
+      adapter.setConversationDbId('conv-id', 'conv-123');
       await adapter.sendMessage('conv-id', 'Dispatching...', {
         workflowDispatch: { workerConversationId: 'worker-1', workflowName: 'assist' },
       });
@@ -141,13 +142,13 @@ describe('CLIAdapter', () => {
     });
 
     it('omits metadata parameter when only non-persistent fields present', async () => {
-      adapter.setConversationDbId('conv-123');
+      adapter.setConversationDbId('conv-id', 'conv-123');
       await adapter.sendMessage('conv-id', 'Hello', { segment: 'new' });
       expect(mockAddMessage).toHaveBeenCalledWith('conv-123', 'assistant', 'Hello', undefined);
     });
 
     it('omits metadata parameter when metadata is undefined', async () => {
-      adapter.setConversationDbId('conv-123');
+      adapter.setConversationDbId('conv-id', 'conv-123');
       await adapter.sendMessage('conv-id', 'Hello');
       expect(mockAddMessage).toHaveBeenCalledWith('conv-123', 'assistant', 'Hello', undefined);
     });
