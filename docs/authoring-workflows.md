@@ -309,6 +309,7 @@ nodes:
     context: fresh               # Force fresh session for this node
     provider: claude             # Per-node provider override
     model: haiku                 # Per-node model override
+    # hooks:                     # Optional: per-node SDK hook callbacks (Claude only) — see docs/hooks.md
 ```
 
 ### Node Fields
@@ -328,6 +329,7 @@ nodes:
 | `allowed_tools` | string[] | — | Whitelist of built-in tools for this node. `[]` disables all built-in tools (MCP-only mode). Claude only — Codex nodes emit a warning and ignore this field |
 | `denied_tools` | string[] | — | Blacklist of built-in tools to remove from this node. Applied after `allowed_tools` if both are set. Claude only — Codex nodes emit a warning and ignore this field |
 | `retry` | object | — | Per-node retry configuration. See [Retry Configuration](#retry-configuration). Omit to use the automatic default (2 retries, 3 s base delay, transient errors only) |
+| `hooks` | object | — | Per-node SDK hook callbacks. Claude only — Codex nodes emit a warning and ignore this field. See [docs/hooks.md](./hooks.md) |
 
 ### `trigger_rule` Values
 
@@ -1072,4 +1074,5 @@ Before deploying a workflow:
 8. **`output_format`** - Enforce structured JSON output from Claude nodes for reliable branching
 9. **`allowed_tools` / `denied_tools`** - Restrict which tools a node or step can use (Claude only, enforced at SDK level)
 10. **`retry:`** - All steps/nodes auto-retry transient errors (default: 2 retries, 3 s backoff); configure per-step with `retry:` block
-11. **Test thoroughly** - Each command, the artifact flow, and edge cases
+11. **`hooks`** — Attach static SDK hook callbacks to individual Claude nodes for tool control and context injection (see [docs/hooks.md](./hooks.md))
+12. **Test thoroughly** - Each command, the artifact flow, and edge cases

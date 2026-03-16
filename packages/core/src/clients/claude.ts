@@ -248,9 +248,11 @@ export class ClaudeClient implements IAssistantClient {
         ...(requestOptions?.outputFormat !== undefined
           ? { outputFormat: requestOptions.outputFormat }
           : {}),
-        // Write session transcripts so the Claude Agent SDK `resume` mechanism works
-        // on subsequent messages in the same conversation. Without this, the second
-        // message crashes because the subprocess can't find the transcript file.
+        // Pass hooks for per-node SDK hook callbacks
+        ...(requestOptions?.hooks !== undefined ? { hooks: requestOptions.hooks } : {}),
+        // Skip writing session transcripts to ~/.claude/projects/ — Archon manages its own
+        // session persistence. persistSession: false reduces disk I/O and keeps the session
+        // directory clean. Claude Agent SDK v0.2.74+.
         ...(requestOptions?.persistSession !== undefined
           ? { persistSession: requestOptions.persistSession }
           : {}),

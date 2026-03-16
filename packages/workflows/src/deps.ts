@@ -49,6 +49,25 @@ export interface WorkflowAssistantOptions {
   tools?: string[];
   disallowedTools?: string[];
   outputFormat?: { type: 'json_schema'; schema: Record<string, unknown> };
+  /**
+   * SDK hooks callbacks. Structural match for Partial<Record<HookEvent, HookCallbackMatcher[]>>.
+   * Inline type avoids @archon/workflows depending on @anthropic-ai/claude-agent-sdk.
+   * Claude only — ignored for Codex.
+   */
+  hooks?: Partial<
+    Record<
+      string,
+      {
+        matcher?: string;
+        hooks: ((
+          input: unknown,
+          toolUseID: string | undefined,
+          options: { signal: AbortSignal }
+        ) => Promise<unknown>)[];
+        timeout?: number;
+      }[]
+    >
+  >;
   abortSignal?: AbortSignal;
   /**
    * When false (default), skips writing session transcript to ~/.claude/projects/.

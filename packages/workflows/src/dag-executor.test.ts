@@ -878,6 +878,87 @@ describe('executeDagWorkflow -- tool restrictions', () => {
     const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
     expect(optionsArg?.tools).toEqual([]);
   });
+
+  it('passes hooks to sendQuery options for Claude node', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-hooks',
+        nodes: [
+          {
+            id: 'review',
+            command: 'my-cmd',
+            hooks: {
+              PreToolUse: [{ matcher: 'Bash', response: { decision: 'block' } }],
+            },
+          },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    expect(mockSendQueryDag.mock.calls.length).toBeGreaterThan(0);
+    const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+    expect(optionsArg?.hooks).toBeDefined();
+    const hooks = optionsArg?.hooks as Record<string, unknown[]>;
+    expect(hooks.PreToolUse).toHaveLength(1);
+  });
+
+  it('warns user when Codex DAG node has hooks', async () => {
+    mockGetAssistantClientDag.mockReturnValue({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'codex',
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-codex-hooks',
+        nodes: [
+          {
+            id: 'review',
+            command: 'my-cmd',
+            provider: 'codex',
+            hooks: {
+              PreToolUse: [{ response: { decision: 'block' } }],
+            },
+          },
+        ],
+      },
+      workflowRun,
+      'codex',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      { ...minimalConfig, assistant: 'codex' }
+    );
+
+    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
+    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
+    const warning = messages.find(m => m.includes('hooks') && m.includes('Codex'));
+    expect(warning).toBeDefined();
+  });
 });
 
 describe('executeDagWorkflow -- bash nodes', () => {

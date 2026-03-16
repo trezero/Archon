@@ -12,8 +12,11 @@ import type {
   StepRetryConfig,
   WorkflowStep,
   DagNode,
+  WorkflowHookEvent,
+  WorkflowHookMatcher,
+  WorkflowNodeHooks,
 } from './types';
-import { TRIGGER_RULES, isTriggerRule } from './types';
+import { TRIGGER_RULES, isTriggerRule, WORKFLOW_HOOK_EVENTS } from './types';
 import type { ModelReasoningEffort, WebSearchMode } from './types';
 import * as archonPaths from '@archon/paths';
 import { isValidCommandName } from './command-validation';
@@ -248,7 +251,7 @@ function parseStep(s: unknown, index: number, errors: string[]): WorkflowStep | 
   return parseSingleStep(step, String(index + 1), errors);
 }
 
-/** AI-specific fields that are meaningless on bash nodes */
+/** AI-specific fields that are meaningless on bash nodes — triggers a warning when set */
 const BASH_NODE_AI_FIELDS = [
   'provider',
   'model',
@@ -256,7 +259,72 @@ const BASH_NODE_AI_FIELDS = [
   'output_format',
   'allowed_tools',
   'denied_tools',
+  'hooks',
 ] as const;
+
+/**
+ * Parse and validate per-node hooks from raw YAML input.
+ * Returns undefined when the field is absent, structurally invalid, or produces no valid matchers.
+ */
+export function parseNodeHooks(
+  raw: unknown,
+  context: { id: string; errors: string[] }
+): WorkflowNodeHooks | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    context.errors.push(`'${context.id}': 'hooks' must be an object`);
+    return undefined;
+  }
+
+  const result: WorkflowNodeHooks = {};
+  const rawObj = raw as Record<string, unknown>;
+
+  for (const [event, matchers] of Object.entries(rawObj)) {
+    if (!(WORKFLOW_HOOK_EVENTS as readonly string[]).includes(event)) {
+      context.errors.push(
+        `'${context.id}': unknown hook event '${event}' (valid: ${WORKFLOW_HOOK_EVENTS.join(', ')})`
+      );
+      continue;
+    }
+    if (!Array.isArray(matchers)) {
+      context.errors.push(`'${context.id}': hooks.${event} must be an array`);
+      continue;
+    }
+
+    const parsed: WorkflowHookMatcher[] = [];
+    for (const [i, entry] of (matchers as unknown[]).entries()) {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+        context.errors.push(`'${context.id}': hooks.${event}[${String(i)}] must be an object`);
+        continue;
+      }
+      const m = entry as Record<string, unknown>;
+
+      if (
+        m.response === undefined ||
+        typeof m.response !== 'object' ||
+        m.response === null ||
+        Array.isArray(m.response)
+      ) {
+        context.errors.push(
+          `'${context.id}': hooks.${event}[${String(i)}].response is required and must be an object`
+        );
+        continue;
+      }
+
+      parsed.push({
+        ...(typeof m.matcher === 'string' ? { matcher: m.matcher } : {}),
+        response: m.response as Record<string, unknown>,
+        ...(typeof m.timeout === 'number' && m.timeout > 0 ? { timeout: m.timeout } : {}),
+      });
+    }
+
+    if (parsed.length > 0) {
+      result[event as WorkflowHookEvent] = parsed;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
 
 /** Validate and parse a single DagNode from raw YAML data */
 function parseDagNode(
@@ -418,6 +486,9 @@ function parseDagNode(
             errors,
           }),
         }
+      : {}),
+    ...(raw.hooks !== undefined
+      ? { hooks: parseNodeHooks(raw.hooks, { id: `Node '${id}'`, errors }) }
       : {}),
   };
   if (errors.length > errorsBeforeToolFields) return null;

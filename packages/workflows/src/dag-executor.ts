@@ -24,6 +24,7 @@ import type {
   NodeOutput,
   TriggerRule,
   WorkflowRun,
+  WorkflowNodeHooks,
 } from './types';
 import { isBashNode } from './types';
 import { formatToolCall } from './utils/tool-formatter';
@@ -401,15 +402,41 @@ export function substituteNodeOutputRefs(
         // String(boolean) is 'true' or 'false' — no shell metacharacters.
         if (typeof value === 'number' || typeof value === 'boolean') return String(value);
         return escapedForBash ? "''" : ''; // objects, null, undefined, symbol, bigint → empty
-      } catch {
+      } catch (jsonErr) {
         getLog().warn(
-          { nodeId, field, outputPreview: nodeOutput.output.slice(0, 100) },
+          { nodeId, field, outputPreview: nodeOutput.output.slice(0, 100), err: jsonErr as Error },
           'dag_node_output_ref_json_parse_failed'
         );
         return escapedForBash ? "''" : '';
       }
     }
   );
+}
+
+/** SDK-compatible hook structure returned by buildSDKHooksFromYAML */
+type SDKHooksMap = NonNullable<WorkflowAssistantOptions['hooks']>;
+
+/**
+ * Convert declarative YAML hook definitions to SDK HookCallbackMatcher arrays.
+ * Each YAML matcher's `response` is wrapped in `async () => response`.
+ */
+export function buildSDKHooksFromYAML(nodeHooks: WorkflowNodeHooks): SDKHooksMap {
+  const sdkHooks: SDKHooksMap = {};
+
+  for (const [event, matchers] of Object.entries(nodeHooks)) {
+    if (!matchers) continue;
+    sdkHooks[event] = matchers.map(m => ({
+      ...(m.matcher ? { matcher: m.matcher } : {}),
+      hooks: [async (): Promise<unknown> => m.response],
+      ...(m.timeout ? { timeout: m.timeout } : {}),
+    }));
+  }
+
+  if (Object.keys(sdkHooks).length === 0) {
+    getLog().warn({ nodeHooksKeys: Object.keys(nodeHooks) }, 'dag.hooks_build_produced_empty_map');
+  }
+
+  return sdkHooks;
 }
 
 /**
@@ -453,7 +480,7 @@ async function resolveNodeProviderAndModel(
 
   // Warn if Codex node has output_format (unsupported)
   if (provider === 'codex' && node.output_format) {
-    getLog().error({ nodeId: node.id }, 'dag_node_output_format_ignored_codex');
+    getLog().warn({ nodeId: node.id }, 'dag_node_output_format_ignored_codex');
     const outputFormatDelivered = await safeSendMessage(
       platform,
       conversationId,
@@ -473,7 +500,7 @@ async function resolveNodeProviderAndModel(
     provider === 'codex' &&
     (node.allowed_tools !== undefined || node.denied_tools !== undefined)
   ) {
-    getLog().error({ nodeId: node.id }, 'dag_node_tool_restrictions_ignored_codex');
+    getLog().warn({ nodeId: node.id }, 'dag_node_tool_restrictions_ignored_codex');
     const delivered = await safeSendMessage(
       platform,
       conversationId,
@@ -482,6 +509,20 @@ async function resolveNodeProviderAndModel(
     );
     if (!delivered) {
       getLog().error({ nodeId: node.id, workflowRunId }, 'dag_node_codex_warning_delivery_failed');
+    }
+  }
+
+  // Warn if Codex node has hooks (unsupported)
+  if (provider === 'codex' && node.hooks) {
+    getLog().warn({ nodeId: node.id }, 'dag_node_hooks_ignored_codex');
+    const delivered = await safeSendMessage(
+      platform,
+      conversationId,
+      `Warning: Node '${node.id}' has hooks set but uses Codex provider — hooks are Claude-only and will be ignored.`,
+      { workflowId: workflowRunId, nodeName: node.id }
+    );
+    if (!delivered) {
+      getLog().error({ nodeId: node.id, workflowRunId }, 'dag_node_hooks_warning_delivery_failed');
     }
   }
 
@@ -504,6 +545,10 @@ async function resolveNodeProviderAndModel(
     }
     if (node.allowed_tools !== undefined) claudeOptions.tools = node.allowed_tools;
     if (node.denied_tools !== undefined) claudeOptions.disallowedTools = node.denied_tools;
+    if (node.hooks) {
+      const builtHooks = buildSDKHooksFromYAML(node.hooks);
+      if (Object.keys(builtHooks).length > 0) claudeOptions.hooks = builtHooks;
+    }
     options = Object.keys(claudeOptions).length > 0 ? claudeOptions : undefined;
   }
 

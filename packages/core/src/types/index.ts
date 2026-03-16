@@ -218,6 +218,21 @@ export interface AssistantRequestOptions {
    * Shape: { type: 'json_schema', schema: <JSON Schema object> }
    */
   outputFormat?: { type: 'json_schema'; schema: Record<string, unknown> };
+  /** SDK hooks configuration. Passed directly to Claude Agent SDK Options.hooks. Claude only — ignored for Codex. */
+  hooks?: Partial<
+    Record<
+      string,
+      {
+        matcher?: string;
+        hooks: ((
+          input: unknown,
+          toolUseID: string | undefined,
+          options: { signal: AbortSignal }
+        ) => Promise<unknown>)[];
+        timeout?: number;
+      }[]
+    >
+  >;
   /**
    * Abort signal for cancelling in-flight AI requests.
    * When aborted, the AI client should terminate the subprocess/query gracefully.
