@@ -85,7 +85,7 @@ ask() {
 
 # Safe parse of .env value — only reads the .env file, never checks environment
 _env_val() {
-  grep -E "^${1}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-
+  grep "^${1}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-
 }
 
 # Check .env first, then fall back to shell environment
@@ -147,7 +147,7 @@ check_dep() {
 
   if command -v "$cmd" &>/dev/null; then
     local ver=""
-    ver="$($cmd $version_flag 2>&1 | head -1)" || ver="installed"
+    ver="$("$cmd" $version_flag 2>&1 | head -1)" || ver="installed"
     printf "    %s%-14s%s %s✓%s  %s\n" "$C_BOLD" "$name" "$C_RESET" "$C_GREEN" "$C_RESET" "$ver"
     return 0
   else
@@ -665,6 +665,7 @@ action_start_docker() {
   # Poll health endpoint for 30s, tail logs in background for visibility
   echo
   ui_info "Waiting for service to become healthy..."
+  trap 'kill "$log_pid" 2>/dev/null || true' INT TERM
   docker compose -f "$REPO_ROOT/docker-compose.yml" logs -f archon-agent-work-orders --since 5s &
   local log_pid=$!
   local attempts=0
@@ -674,6 +675,7 @@ action_start_docker() {
     code="$(curl -sf -m 3 -o /dev/null -w "%{http_code}" "http://localhost:8053/health" 2>/dev/null)" || code="000"
     if [ "$code" = "200" ]; then
       kill "$log_pid" 2>/dev/null || true
+      trap - INT TERM
       echo
       ui_success "Work Orders service is healthy at http://localhost:8053"
       echo
@@ -685,6 +687,7 @@ action_start_docker() {
   done
 
   kill "$log_pid" 2>/dev/null || true
+  trap - INT TERM
   echo
   ui_warn "Service did not become healthy within 30 seconds."
   ui_info "Check logs: docker compose logs -f archon-agent-work-orders"
@@ -757,6 +760,10 @@ action_start_local() {
       case "$key" in
         \#*|"") continue ;;
       esac
+      # Validate key is a valid env var name
+      if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        continue
+      fi
       # Strip surrounding quotes from value
       value="${value%\"}"
       value="${value#\"}"
