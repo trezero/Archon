@@ -85,7 +85,12 @@ ask() {
 
 # Safe parse of .env value — only reads the .env file, never checks environment
 _env_val() {
-  grep "^${1}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-
+  local val
+  val="$(grep "^${1}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)"
+  # Strip surrounding quotes (written by _env_set for special-char values)
+  val="${val%\"}"; val="${val#\"}"
+  val="${val%\'}"; val="${val#\'}"
+  printf "%s" "$val"
 }
 
 # Check .env first, then fall back to shell environment
@@ -815,8 +820,8 @@ action_verify() {
   fi
 
   local has_anthropic="" has_oauth=""
-  has_anthropic="$(_env_val "ANTHROPIC_API_KEY")"
-  has_oauth="$(_env_val "CLAUDE_CODE_OAUTH_TOKEN")"
+  has_anthropic="$(_env_or_shell_val "ANTHROPIC_API_KEY")"
+  has_oauth="$(_env_or_shell_val "CLAUDE_CODE_OAUTH_TOKEN")"
   if [ -z "$has_anthropic" ] && [ -z "$has_oauth" ]; then
     issues+=("1 - Claude auth missing — set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (run option [1])")
   fi
