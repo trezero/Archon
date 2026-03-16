@@ -152,7 +152,7 @@ EOF
 
 Return the PR URL to the user.
 
-### Step 9: Tag After Merge
+### Step 9: Tag and Sync After Merge
 
 After the PR is merged (either by the user or via `gh pr merge`):
 
@@ -163,9 +163,14 @@ git fetch origin main
 # Tag the merge commit
 git tag vx.y.z origin/main
 git push origin vx.y.z
+
+# Sync dev with main so both branches are identical
+git checkout dev
+git pull origin main
+git push origin dev
 ```
 
-If the user merges the PR themselves and comes back, still offer to create the tag.
+If the user merges the PR themselves and comes back, still offer to tag and sync.
 
 ## Important Rules
 
