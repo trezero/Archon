@@ -7,18 +7,232 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-03-16
+
+Git workflow and release automation.
+
 ### Added
 
-- **Workflow error visibility** - `/workflow list` and `/workflow reload` now show per-file load errors (#260, #263, #264)
-- **Case-insensitive workflow routing** - Router falls back to case-insensitive match before reporting unknown workflow (#263)
+- **Dev branch workflow** — `dev` is now the working branch; `main` is the release branch. All feature work branches off `dev` (#684)
+- **`/release` skill** — stack-agnostic release automation that generates changelog entries, bumps version, and creates a PR to main
 
 ### Changed
 
-- **Resilient workflow loading** - One broken YAML no longer aborts loading all workflows; errors accumulated and reported (#260)
+- GitHub default branch changed from `main` to `dev`
+
+## [0.2.10] - 2026-03-16
+
+CLI-Web observability overhaul, comprehensive test coverage, and per-node hooks.
+
+### Added
+
+- **CLI-Web observability overhaul** — DAG visualization, cancel support, metadata display, and progress tracking across CLI and Web UI
+- **Per-node SDK hooks** for DAG workflows — attach static hook callbacks to individual Claude nodes for tool control and context injection (#634)
+- **Multi-layer transient error retry** for SDK subprocess crashes with exponential backoff (#639)
+- **Comprehensive test coverage** across all packages — postgres adapter, clone handler, orchestrator agent, error formatter, API routes (#645)
+- **Windows test compatibility** — resolved 33 Windows-specific test failures (#644)
+
+### Changed
+
+- Tool call persistence decoupled from web adapter for cleaner architecture (#642, #652)
+- Loop and DAG executors now emit structured SSE events for live tool cards (#656)
 
 ### Fixed
 
-- **Router error feedback** - Users now see clear error messages with available workflow names instead of raw `/invoke-workflow` output (#263)
+- Loading indicator race condition and workflow tool call duration display (#654, #655, #657)
+- DAG node cancel detection during streaming and UTC timestamp elapsed time
+- Idle timeout excluded from post-loop cancel classification
+- Flaky message-cache test caused by `Date.now()` drift
+
+## [0.2.9] - 2026-03-13
+
+DAG hardening, security fixes, validate-pr workflow, and worktree lifecycle management.
+
+### Added
+
+- **`archon complete <branch>` command** for worktree lifecycle cleanup — removes worktree + local/remote branches (#601)
+- **`--json` flag for `workflow list`** — machine-readable workflow output (#594)
+- **`archon-validate-pr` workflow** with per-node idle timeout support (#635)
+- **Typed SessionMetadata** with Zod validation for safer metadata handling (#600)
+- **`persistSession: false`** in ClaudeClient to avoid disk pollution from session transcripts (#626)
+- **DAG workflow for GitHub issue resolution** with structured node pipeline
+
+### Changed
+
+- Claude Agent SDK updated to v0.2.74 (#625)
+
+### Fixed
+
+- **Shell injection via `$nodeId.output` in bash nodes** — output is now properly escaped (#591)
+- DAG `when:` parse errors now fail-closed (skip node) instead of fail-open (#590)
+- Unknown `$nodeId.output` refs warn instead of silently returning empty string (#593)
+- Isolation resolver no longer swallows errors or leaks partial state (#597)
+- `extractOwnerRepo` no longer silently produces `undefined` path segments (#592)
+- Chat stuck states after failed message send (#578, #589)
+- DAG node events properly wired to frontend (#577, #602)
+- Worktree creation no longer moves canonical repo HEAD (#572)
+- Conversation DELETE/PATCH now use platform ID instead of internal DB ID (#575)
+- DAG workflow duration computed once for consistency (#570, #573)
+- SSE gaps from ordered lock events and retract preserving tool calls (#581)
+- Sidebar delete now clears selection and guards localStorage (#582)
+- Git fetch errors classified in syncRepository (#574)
+- `DATABASE_URL` loaded from `~/.archon/.env` for CLI/server parity
+- API returns 400 when `conversationId` is provided in POST `/api/conversations` (#595)
+
+## [0.2.8] - 2026-03-06
+
+Skills system overhaul and workshop documentation.
+
+### Added
+
+- **Archon-dev skill** with routing to 10 specialized cookbooks (research, plan, implement, review, debug, commit, PR, issue)
+- **Rulecheck skill** — autonomous agent that scans for CLAUDE.md rule violations, creates PRs with fixes, and notifies via Slack
+- **Triage skill** — upgraded from command to skill with custom agent for GitHub issue labeling
+- **Save-task-list skill** — upgraded from command to skill with SessionStart hook for task restoration
+- **Replicate-issue skill** for systematic GitHub issue reproduction
+- **Workshop documentation** — part 1 and part 2 guides, combined rundown, and feature coverage matrix
+
+### Changed
+
+- Default AI assistant switched from Codex to Claude
+- Skills upgraded from `.claude/commands` to `.claude/skills` with dedicated directories
+
+## [0.2.7] - 2026-02-26
+
+Monorepo deep extraction and visual workflow builder.
+
+### Added
+
+- **Visual workflow builder** with React Flow for drag-and-drop workflow creation (#471)
+- **AI-generated conversation titles** + CLI-to-Web UI integration (#515)
+- **Workflow Command Center** — unified dashboard for cross-project workflow observability with pagination and filtering
+- **`@archon/paths` package** extracted from `@archon/core` — path resolution and logger with zero internal deps (#483)
+- **`@archon/git` package** extracted from `@archon/core` — git operations with branded types (#492)
+- **`@archon/isolation` package** extracted from `@archon/core` — worktree isolation with provider abstraction (#492)
+- **`@archon/adapters` package** extracted from `@archon/server` — platform adapters for Slack, Telegram, GitHub, Discord (#499)
+- **`@archon/workflows` package** extracted from `@archon/core` — workflow engine with loader, router, executor, DAG (#507)
+
+### Changed
+
+- Backward-compat re-exports removed from `@archon/core` — use direct package imports (#512)
+
+### Fixed
+
+- Workflow dispatch history loss, cancel, and streaming UX (#475, #480)
+- Workflow summary duplicate on chat navigation (#490)
+- Text buffer flushed before workflow_dispatch SSE events (#491, #498)
+- SQLite adapter RETURNING test fixture (#508)
+- Mock restoration in 3 test files to prevent cross-file pollution (#509, #510)
+- Windows path fixes for Archon directories
+
+## [0.2.6] - 2026-02-21
+
+DAG workflow engine, orchestrator agent, and per-node tool restrictions.
+
+### Added
+
+- **DAG workflow engine** with parallel execution, conditional branching, and `$nodeId.output` substitution (#450)
+- **Orchestrator agent** that routes natural language to workflows and passes prompts through (#452)
+- **Per-node and per-step tool restrictions** — `allowed_tools` and `denied_tools` for Claude nodes (#454)
+- **Workflow builder backend APIs** (Phase A) — validate, fetch, save, and delete workflows (#471)
+- **Session retention policy** for automatic cleanup of old sessions (#306)
+- **Failed workflow resume** from prior artifacts on same branch (#440)
+
+### Changed
+
+- Claude Agent SDK upgraded to 0.2.45 and Codex SDK to 0.104.0 (#448)
+- Workflow step lifecycle logs promoted from debug to info (#469)
+
+### Fixed
+
+- Router bypass when AI uses tools instead of `/invoke-workflow` (#449)
+- Cancelled workflow status handled in frontend (#458)
+- Workflows always run in isolated worktree regardless of registration method (#457)
+- `--branch` and `--no-worktree` conflict in CLI (#545)
+- `/invoke-workflow` chunk suppressed before streaming to frontend (#486)
+- Idle timeout added to streaming loops to prevent executor hang (#552)
+- Codex model access errors surfaced with actionable guidance (#438)
+
+## [0.2.5] - 2026-02-17
+
+Web UI launch, structured logging, and major stabilization.
+
+### Added
+
+- **Archon Web UI** — React frontend with SSE streaming, workflow events, and conversation management
+- **Pino structured logging** replacing console.log across all packages (#388)
+- **Project-centric `~/.archon/` layout** — workspaces organized by `owner/repo` (#382)
+- **Session deactivation reasons** stored in database for audit trail (#303, #385)
+- **Remote branch cleanup** when PR is merged
+- **Workflow log duration, tokens, and validation events** (#417)
+- **Save-task-list command** for persisting task lists across sessions
+
+### Changed
+
+- `~/.archon/` restructured to project-centric layout (#382)
+- Database command templates deprecated in favor of filesystem commands (#425)
+- SQLite-first documentation with Postgres as optional (#418)
+- `transitionSession` wrapped in database transaction for atomicity (#408)
+- Codex SDK bumped to 0.101.0
+
+### Fixed
+
+- `.env` resolution in worktrees with credential error guidance (#404)
+- CLI picking up `DATABASE_URL` from target repo `.env` (#389)
+- PRs targeting wrong base branch instead of configured one (#387)
+- Client error handling and GitHub self-triggering (#223, #240, #407)
+- Handler bugs: JSON parsing, dotenv worktree, error messages (#392-#395, #406)
+- Model selection and Codex options wiring (#428)
+- SQLite busy timeout to prevent database locks (#418, #420)
+- Workflow load errors and router failures surfaced to users (#410)
+- WorkflowInvoker crash from workflows API type mismatch (#436)
+- `getCodebaseCommands()` returning mutable reference (#379, #384)
+
+## [0.2.4] - 2026-02-05
+
+SQLite as default database and simplified CLI setup.
+
+### Added
+
+- **SQLite as default database** — zero-config setup with `~/.archon/archon.db`, no PostgreSQL required
+- **Simplified CLI setup** — streamlined first-run experience on macOS/Linux
+
+### Fixed
+
+- Combined SQL schema syntax error (extra comma)
+- Post-install configuration for Ubuntu VPS deployments
+
+## [0.2.3] - 2026-01-31
+
+Archon CLI skill, workflow routing improvements, and configuration fixes.
+
+### Added
+
+- **Archon CLI skill** for Claude Code — run workflows from within Claude Code sessions (#331, #332, #333)
+- **Interactive setup wizard** and config editor for the Archon skill
+- **`/workflow run` command** for direct workflow invocation from CLI
+- **`archon-plan-to-merge` workflow** for end-to-end plan execution (#346)
+- **Workflow error visibility** — `/workflow list` and `/workflow reload` show per-file load errors (#260, #263, #264)
+- **Case-insensitive workflow routing** — router falls back to case-insensitive match (#263)
+
+### Changed
+
+- Workflow artifacts standardized with workflow-scoped paths (#352)
+- Resilient workflow loading — one broken YAML no longer aborts loading all workflows (#260)
+- `baseBranch` config option wired up for worktree creation (#330, #334)
+
+### Fixed
+
+- Config parse errors surfaced to users instead of silently failing (#284, #286)
+- Workflow router prioritizes user intent over context (#365)
+- Issue context passed to workflows for non-slash commands (#215)
+- Cross-platform path splitting for worktree isolation (#245)
+- WorktreeProvider error handling and silent failures (#276)
+- Router error feedback with available workflow names (#263)
+- Metadata serialization failure when `github_context` present (#262)
+- Consecutive unknown errors tracked in workflow executor (#259)
+- Thread inheritance error handling with logging and tests (#269)
+- Isolation environments partial index replaces full unique constraint (#239)
 
 ## [0.2.2] - 2026-01-22
 
