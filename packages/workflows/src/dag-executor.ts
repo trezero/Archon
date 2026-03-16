@@ -722,7 +722,8 @@ async function executeNodeInternal(
           'dag_node_idle_timeout_reached'
         );
         nodeAbortController.abort();
-      }
+      },
+      msg => msg.type !== 'tool'
     )) {
       // Update activity timestamp + check cancel (throttled to once per 10s)
       const activityNow = Date.now();
