@@ -754,6 +754,16 @@ async def http_archon_setup_sh(request: Request) -> PlainTextResponse:
     )
 
 
+async def http_agent_work_orders_setup_sh(request: Request) -> PlainTextResponse:
+    """Serve agentWorkOrderSetup.sh with URLs baked in."""
+    api_url, mcp_url = _get_setup_urls(request)
+    script = _render_agent_work_orders_setup_sh(api_url, mcp_url)
+    return PlainTextResponse(
+        script,
+        headers={"Content-Disposition": 'attachment; filename="agentWorkOrderSetup.sh"'},
+    )
+
+
 async def http_archon_setup_bat(request: Request) -> PlainTextResponse:
     """Serve archonSetup.bat with API and MCP URLs baked in."""
     api_url, mcp_url = _get_setup_urls(request)
@@ -780,6 +790,18 @@ def _render_setup_sh(api_url: str, mcp_url: str) -> str:
             content = content.replace("{{ARCHON_MCP_URL}}", mcp_url)
             return content
     raise FileNotFoundError("archonSetup.sh template not found")
+
+
+def _render_agent_work_orders_setup_sh(api_url: str, mcp_url: str) -> str:
+    """Read agentWorkOrderSetup.sh template, substitute placeholders, return."""
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "integrations" / "claude-code" / "setup" / "agentWorkOrderSetup.sh"
+        if candidate.exists():
+            content = candidate.read_text()
+            content = content.replace("{{ARCHON_API_URL}}", api_url)
+            content = content.replace("{{ARCHON_MCP_URL}}", mcp_url)
+            return content
+    raise FileNotFoundError("agentWorkOrderSetup.sh template not found")
 
 
 def _render_setup_bat(api_url: str, mcp_url: str) -> str:
@@ -892,6 +914,7 @@ try:
     mcp.custom_route("/archon-setup.sh", methods=["GET"])(http_archon_setup_sh)
     mcp.custom_route("/archon-setup.bat", methods=["GET"])(http_archon_setup_bat)
     mcp.custom_route("/archon-setup.md", methods=["GET"])(http_archon_setup_md)
+    mcp.custom_route("/archon-setup/agent-work-orders-setup.sh", methods=["GET"])(http_agent_work_orders_setup_sh)
     logger.info("✓ Setup file endpoints registered")
     mcp.custom_route("/archon-setup/plugin-manifest", methods=["GET"])(http_plugin_manifest)
     mcp.custom_route("/archon-setup/plugin/archon-memory.tar.gz", methods=["GET"])(http_download_plugin)
