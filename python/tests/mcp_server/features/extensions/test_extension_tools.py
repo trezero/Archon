@@ -462,15 +462,15 @@ async def test_manage_extensions_sync_missing_params(registered_tools, mock_cont
 
 @pytest.mark.asyncio
 async def test_manage_extensions_bootstrap_basic(registered_tools, mock_context):
-    """Bootstrap returns all extensions and registers system when fingerprint+project provided."""
+    """Bootstrap returns extension metadata (no content) and registers system."""
     manage_extensions = registered_tools["manage_extensions"]
 
     mock_extensions_response = MagicMock()
     mock_extensions_response.status_code = 200
     mock_extensions_response.json.return_value = {
         "extensions": [
-            {"name": "archon-memory", "content": "---\nname: archon-memory\n---\n# Content", "display_name": "Archon Memory"},
-            {"name": "archon-bootstrap", "content": "---\nname: archon-bootstrap\n---\n# Bootstrap", "display_name": "Archon Bootstrap"},
+            {"name": "archon-memory", "display_name": "Archon Memory"},
+            {"name": "archon-bootstrap", "display_name": "Archon Bootstrap"},
         ]
     }
 
@@ -500,9 +500,9 @@ async def test_manage_extensions_bootstrap_basic(registered_tools, mock_context)
         assert data["success"] is True
         assert len(data["extensions"]) == 2
         assert data["extensions"][0]["name"] == "archon-memory"
+        assert "content" not in data["extensions"][0], "Bootstrap should not return extension content"
         assert data["system"]["id"] == "sys-1"
         assert data["system"]["is_new"] is True
-        assert "install_path" not in data
         assert "Bootstrap complete" in data["message"]
 
 
@@ -514,7 +514,7 @@ async def test_manage_extensions_bootstrap_no_project(registered_tools, mock_con
     mock_extensions_response = MagicMock()
     mock_extensions_response.status_code = 200
     mock_extensions_response.json.return_value = {
-        "extensions": [{"name": "archon-memory", "content": "---\nname: archon-memory\n---\n# Content", "display_name": "Archon Memory"}]
+        "extensions": [{"name": "archon-memory", "display_name": "Archon Memory"}]
     }
 
     with patch("src.mcp_server.features.extensions.extension_tools.httpx.AsyncClient") as mock_client:

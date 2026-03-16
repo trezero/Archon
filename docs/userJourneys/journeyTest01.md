@@ -941,22 +941,42 @@ After upload: extension appears in Archon UI → **Extensions** registry.
 
 Use this checklist during test execution. Mark each item Pass (P), Fail (F), or Skip (S) with notes.
 
+**Test execution started:** 2026-03-14, MacBookPro_M1
+**Archon server:** 172.16.1.230 (API :8181, MCP :8051)
+**Test project:** RecipeRaiders (2d747998-7c66-46bb-82a9-74a6dcffd6c2)
+**Secondary project tested:** MemeCoinInvestor2026 (320fe077-18c6-4082-944a-969f53659aac)
+
 ### Day 1 — MacBookPro_M1
 
 | # | Test | P/F/S | Notes |
 |---|------|-------|-------|
-| 1.1 | MCP page shows download card with both buttons | | |
-| 1.2 | archonSetup.sh runs to completion on Mac | | |
-| 1.3 | All expected files created in .claude/ | | |
-| 1.4 | /archon-setup registers system and installs extensions | | |
-| 1.5 | `<archon-context>` block injected at session start | | |
-| 1.6 | manage_rag_source ingests docs successfully | | |
-| 1.7 | Knowledge source visible in Archon UI | | |
-| 1.8 | Knowledge tab shows project-scoped sources | | |
-| 1.9 | RAG search respects project_id filter | | |
-| 1.10 | Claude saves LeaveOff Point after coding task | | |
-| 1.11 | LeaveOff Point record in database | | |
-| 1.12 | LeaveOffPoint.md written to .archon/knowledge/ | | |
+| 1.1 | MCP page shows download card with both buttons | P | Both .sh and .bat buttons visible |
+| 1.2 | archonSetup.sh runs to completion on Mac | P | Required fixes: venv creation (--clear flag, Python 3.10+ detection), pip upgrade before install, chmod after tarball extract. Also tested on MemeCoinInvestor2026 (clean repo) — passed. |
+| 1.3 | All expected files created in .claude/ | P | archon-config.json, archon-state.json, plugins/archon-memory/, skills/ (14 extensions), settings.local.json all present |
+| 1.4 | /archon-setup registers system and installs extensions | P | System: Jasons-M1-MAX-2.local (925ebc1a). Bootstrap response optimized from ~12.5k to ~500 tokens (content moved to HTTP tarball). 9 extensions verified. |
+| 1.5 | `<archon-context>` block injected at session start | P | Required fixes: (1) hooks must be in ~/.claude/settings.json for SessionStart/Stop (not settings.local.json), (2) plugin Python deps must be installed in venv, (3) venv --clear to prevent stale symlinks. "No recent context available" shown correctly for first session. |
+| 1.6 | manage_rag_source ingests docs successfully | P | RecipeRaiders: 52 files already ingested (detected, no re-sync). MemeCoinInvestor2026: 49 files ingested fresh, 53 chunks created, source ID 407ea00b345893e8. |
+| 1.7 | Knowledge source visible in Archon UI | P | 149 document chunks visible for RecipeRaiders Documentation source |
+| 1.8 | Knowledge tab shows project-scoped sources | P | Source listed in left panel, document chunks browsable with pagination in right panel |
+| 1.9 | RAG search respects project_id filter | P | Searched "subscription gates" scoped to RecipeRaiders — returned relevant chunks about subscription tiers, gate functions, and implementation details. No cross-project contamination. |
+| 1.10 | Claude saves LeaveOff Point after coding task | P* | *Tool works when prompted — Claude successfully called manage_leaveoff_point with comprehensive content, next_steps, references. Not yet automatic (requires explicit prompt). LeaveOff Protocol now injected via SessionStart hook. See docs/gaps/leaveoff-protocol-injection.md for improvement plan. |
+| 1.11 | LeaveOff Point record in database | P | Record confirmed in `archon_leaveoff_points` table via Archon API — project_id matches, component and next_steps populated. |
+| 1.12 | LeaveOffPoint.md written to .archon/knowledge/ | P | Required fix: server-side `_write_file()` can't write to remote client filesystem. Added local materialization to `session_end_hook.py` — fetches LeaveOff from API and writes `.archon/knowledge/LeaveOffPoint.md` on the client machine. Also fixed hooks to use venv Python (system python3 lacked httpx). |
+
+#### Bugs Found and Fixed During Day 1
+
+| Issue | Root Cause | Fix |
+|-------|-----------|-----|
+| Bootstrap MCP response ~12.5k tokens | `_handle_bootstrap` returned full SKILL.md content for all extensions | Added `/archon-setup/extensions.tar.gz` HTTP endpoint; shell script downloads tarball; bootstrap returns metadata only |
+| SessionStart hook not firing | Hooks in `settings.local.json` — Claude Code only supports SessionStart/Stop in global `~/.claude/settings.json` | Split hooks: lifecycle → global settings, PostToolUse → project settings |
+| Plugin Python deps not installed | Setup script extracted tarball but never ran pip install | Added venv creation + pip install step to setup script |
+| Venv created with wrong Python | macOS had Python 3.8 (system) and 3.13 (homebrew); `python3 -m venv` picked 3.8, pip used 3.13, site-packages mismatch | Added Python 3.10+ detection loop, `--clear` flag, stale venv removal, pip upgrade before install |
+| File permissions after tarball extract | `requirements.txt` had no read permission | Added `chmod -R u+r` after extraction |
+| LeaveOffPoint.md never written to repo | `LeaveOffService._write_file()` runs server-side but project dir is on the remote client — path doesn't exist on server | Added local materialization to `session_end_hook.py`: fetches LeaveOff from API at session end and writes `.archon/knowledge/LeaveOffPoint.md` on the client machine |
+| SessionStart/Stop hooks using system python3 | `settings.local.json` had `python3` for lifecycle hooks but httpx is only in the plugin venv | Fixed hook commands to use `.claude/plugins/archon-memory/.venv/bin/python` for all three hooks |
+| `.archon/` not in .gitignore | Setup script didn't include `.archon/` in the gitignore entries | Added `.archon/` to both `archonSetup.sh` and `archonSetup.bat` gitignore lists |
+| MCP session errors (400 Bad Request) | Docker container rebuilds invalidated active MCP sessions | Restarted archon-mcp container |
+| LeaveOff Protocol not injected to user projects | Protocol only existed in Archon's own CLAUDE.md, not in any extension or hook output | Added `_leaveoff_protocol_section()` to `session_start_hook.py` — injects protocol with project_id into `<archon-context>` |
 
 ### Day 2 — WIN_AI_PC
 

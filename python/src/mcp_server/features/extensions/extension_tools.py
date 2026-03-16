@@ -514,9 +514,10 @@ async def _handle_bootstrap(
     os: str | None,
     project_id: str | None,
 ) -> str:
-    """Fetch all extensions with content and optionally register the system with a project."""
-    # Fetch all extensions with full content
-    response = await client.get(urljoin(api_url, "/api/extensions"), params={"include_content": True})
+    """Register the system and return extension metadata (content delivered via HTTP tarball)."""
+    # Fetch extensions without content — content is downloaded separately via
+    # /archon-setup/extensions.tar.gz to avoid bloating the LLM context window.
+    response = await client.get(urljoin(api_url, "/api/extensions"), params={"include_content": False})
 
     if response.status_code != 200:
         return MCPErrorFormatter.from_http_error(response, "fetch extensions for bootstrap")
@@ -524,12 +525,11 @@ async def _handle_bootstrap(
     data = response.json()
     raw_extensions = data.get("extensions", [])
 
-    # Normalize: keep only name, display_name, content per extension
+    # Return metadata only — no content
     extensions = [
         {
             "name": e.get("name", ""),
             "display_name": e.get("display_name", ""),
-            "content": e.get("content", ""),
         }
         for e in raw_extensions
     ]

@@ -190,20 +190,140 @@ echo.
 :: ── Install archon-memory plugin ─────────────────────────────────────────────
 if "!SKIP_PLUGIN_INSTALL!"=="true" goto :plugin_done
 
+set "PLUGIN_DIR=!INSTALL_DIR!\plugins\archon-memory"
 echo Installing archon-memory plugin...
-if not exist "!INSTALL_DIR!\plugins\archon-memory" mkdir "!INSTALL_DIR!\plugins\archon-memory"
+if not exist "!PLUGIN_DIR!" mkdir "!PLUGIN_DIR!"
 set "PLUGIN_TMP=%TEMP%\archon-memory.tar.gz"
 curl -sf "%ARCHON_MCP_URL%/archon-setup/plugin/archon-memory.tar.gz" -o "%PLUGIN_TMP%" 2>nul
 if %errorlevel%==0 (
     powershell -Command "tar -xzf '%PLUGIN_TMP%' -C '!INSTALL_DIR!\plugins\'" 2>nul
-    echo       ^✓ Plugin installed to !INSTALL_DIR!\plugins\archon-memory\
+    echo       ^✓ Plugin installed to !PLUGIN_DIR!\
+    :: Remove stale venv from previous install (different Python, broken state, etc.)
+    if exist "!PLUGIN_DIR!\.venv" rmdir /s /q "!PLUGIN_DIR!\.venv" 2>nul
+    :: Create fresh venv and install Python dependencies
+    if exist "!PLUGIN_DIR!\requirements.txt" (
+        echo Creating plugin virtual environment...
+        python3 -m venv "!PLUGIN_DIR!\.venv" 2>nul
+        if exist "!PLUGIN_DIR!\.venv\Scripts\python.exe" (
+            echo       ^✓ Created venv
+            "!PLUGIN_DIR!\.venv\Scripts\pip.exe" install -q --upgrade pip 2>nul
+            echo Installing plugin dependencies...
+            "!PLUGIN_DIR!\.venv\Scripts\pip.exe" install -q -r "!PLUGIN_DIR!\requirements.txt" 2>nul
+            if %errorlevel%==0 (
+                echo       ^✓ Plugin dependencies installed in venv
+            ) else (
+                echo       ^! pip install failed. Run manually:
+                echo         !PLUGIN_DIR!\.venv\Scripts\pip install -r !PLUGIN_DIR!\requirements.txt
+            )
+            :: Verify the venv works
+            "!PLUGIN_DIR!\.venv\Scripts\python.exe" -c "import httpx" 2>nul
+            if not %errorlevel%==0 (
+                echo       ^! Verification failed -- httpx not importable
+            )
+        ) else (
+            echo       ^! Could not create venv. Falling back to system pip...
+            python3 -m pip install -q -r "!PLUGIN_DIR!\requirements.txt" 2>nul
+            if %errorlevel%==0 (
+                echo       ^✓ Plugin dependencies installed ^(system-wide^)
+            ) else (
+                echo       ^! Could not install plugin dependencies.
+            )
+        )
+    )
 ) else (
-    echo       ^⚠ Plugin download failed -- install manually from Archon
+    echo       ^! Plugin download failed -- install manually from Archon
 )
 del "%PLUGIN_TMP%" 2>nul
 echo.
 
 :plugin_done
+:: ── Register hooks in Claude Code settings ──────────────────────────────────
+:: SessionStart and Stop hooks only work in global ~/.claude/settings.json.
+:: PostToolUse works in project settings.local.json.
+if "!SKIP_PLUGIN_INSTALL!"=="true" goto :hooks_done
+
+set "GLOBAL_SETTINGS=%USERPROFILE%\.claude\settings.json"
+
+:: Determine Python executable and script paths for hooks
+if "!INSTALL_SCOPE!"=="2" (
+    set "LC_PYTHON=!PLUGIN_DIR!\.venv\Scripts\python"
+    set "LC_SCRIPTS=!PLUGIN_DIR!\scripts"
+    set "PTU_PYTHON=!PLUGIN_DIR!\.venv\Scripts\python"
+    set "PTU_SCRIPTS=!PLUGIN_DIR!\scripts"
+    set "PTU_SETTINGS=!GLOBAL_SETTINGS!"
+) else (
+    set "LC_PYTHON=$CLAUDE_PROJECT_DIR\.claude\plugins\archon-memory\.venv\Scripts\python"
+    set "LC_SCRIPTS=$CLAUDE_PROJECT_DIR\.claude\plugins\archon-memory\scripts"
+    set "PTU_PYTHON=.claude\plugins\archon-memory\.venv\Scripts\python"
+    set "PTU_SCRIPTS=.claude\plugins\archon-memory\scripts"
+    set "PTU_SETTINGS=!INSTALL_DIR!\settings.local.json"
+)
+
+:: Fall back to system python3 if venv doesn't exist (global scope only)
+if "!INSTALL_SCOPE!"=="2" (
+    if not exist "!PLUGIN_DIR!\.venv\Scripts\python.exe" (
+        set "LC_PYTHON=python3"
+        set "PTU_PYTHON=python3"
+    )
+)
+
+echo Registering lifecycle hooks in global settings...
+set "LCPY_FILE=%TEMP%\archon_lcpy.txt"
+set "LCSC_FILE=%TEMP%\archon_lcsc.txt"
+echo !LC_PYTHON!>"%LCPY_FILE%"
+echo !LC_SCRIPTS!>"%LCSC_FILE%"
+
+powershell -Command ^
+  "$settingsPath = '!GLOBAL_SETTINGS!'; " ^
+  "$pyPath = (Get-Content '%LCPY_FILE%').Trim(); " ^
+  "$scPath = (Get-Content '%LCSC_FILE%').Trim(); " ^
+  "if (Test-Path $settingsPath) { $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json } else { $settings = @{} }; " ^
+  "if (-not $settings.hooks) { $settings | Add-Member -Force NotePropertyName 'hooks' -NotePropertyValue @{} }; " ^
+  "$hooks = $settings.hooks; " ^
+  "$ssHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('\"' + $pyPath + '\" \"' + $scPath + '/session_start_hook.py\"'); timeout=10 }) }); " ^
+  "$stopHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('\"' + $pyPath + '\" \"' + $scPath + '/session_end_hook.py\"'); timeout=30 }) }); " ^
+  "$hooks | Add-Member -Force NotePropertyName 'SessionStart' -NotePropertyValue $ssHook; " ^
+  "$hooks | Add-Member -Force NotePropertyName 'Stop' -NotePropertyValue $stopHook; " ^
+  "$settings | ConvertTo-Json -Depth 10 | Set-Content $settingsPath"
+
+echo       ^✓ SessionStart + Stop hooks registered globally
+
+echo Registering PostToolUse hook...
+set "PTUPY_FILE=%TEMP%\archon_ptupy.txt"
+set "PTUSC_FILE=%TEMP%\archon_ptusc.txt"
+echo !PTU_PYTHON!>"%PTUPY_FILE%"
+echo !PTU_SCRIPTS!>"%PTUSC_FILE%"
+
+powershell -Command ^
+  "$settingsPath = '!PTU_SETTINGS!'; " ^
+  "$pyPath = (Get-Content '%PTUPY_FILE%').Trim(); " ^
+  "$scPath = (Get-Content '%PTUSC_FILE%').Trim(); " ^
+  "if (Test-Path $settingsPath) { $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json } else { $settings = @{} }; " ^
+  "if (-not $settings.hooks) { $settings | Add-Member -Force NotePropertyName 'hooks' -NotePropertyValue @{} }; " ^
+  "$hooks = $settings.hooks; " ^
+  "$ptuHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('\"' + $pyPath + '\" \"' + $scPath + '/observation_hook.py\"'); timeout=5 }) }); " ^
+  "$hooks | Add-Member -Force NotePropertyName 'PostToolUse' -NotePropertyValue $ptuHook; " ^
+  "$settings | ConvertTo-Json -Depth 10 | Set-Content $settingsPath"
+
+del "%LCPY_FILE%" "%LCSC_FILE%" "%PTUPY_FILE%" "%PTUSC_FILE%" 2>nul
+echo       ^✓ PostToolUse hook registered
+echo.
+
+:hooks_done
+:: ── Download and install extensions ─────────────────────────────────────────
+echo Installing extensions...
+if not exist "!INSTALL_DIR!\skills" mkdir "!INSTALL_DIR!\skills"
+set "EXT_TMP=%TEMP%\archon-extensions.tar.gz"
+curl -sf "%ARCHON_MCP_URL%/archon-setup/extensions.tar.gz" -o "%EXT_TMP%" 2>nul
+if %errorlevel%==0 (
+    powershell -Command "tar -xzf '%EXT_TMP%' -C '!INSTALL_DIR!\skills\'" 2>nul
+    for /f %%C in ('dir /b /s "!INSTALL_DIR!\skills\SKILL.md" 2^>nul ^| find /c /v ""') do echo       ^✓ Installed %%C extension^(s^) to !INSTALL_DIR!\skills\
+) else (
+    echo       ^! Extension download failed -- /archon-setup will handle installation
+)
+del "%EXT_TMP%" 2>nul
+echo.
+
 :: ── Write archon-config.json ─────────────────────────────────────────────────
 set "FINGERPRINT_FILE=%TEMP%\archon_fp.txt"
 powershell -Command ^
@@ -238,7 +358,7 @@ echo       ^✓ Wrote !INSTALL_DIR!\archon-config.json
 echo.
 
 :: ── Update .gitignore ────────────────────────────────────────────────────────
-for %%G in (".claude/plugins/" ".claude/skills/" ".claude/archon-config.json" ".claude/archon-state.json" ".claude/archon-memory-buffer.jsonl") do (
+for %%G in (".claude/plugins/" ".claude/skills/" ".claude/archon-config.json" ".claude/archon-state.json" ".claude/archon-memory-buffer.jsonl" ".archon/") do (
     findstr /x /c:"%%~G" .gitignore >nul 2>&1 || echo %%~G>>.gitignore
 )
 

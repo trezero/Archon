@@ -83,12 +83,27 @@ If the call fails, report the error and stop.
 
 Extract `<system_id>` from `response.system.id` if present, otherwise `"unknown"`.
 
-## Phase 5: Install Extensions
+## Phase 5: Verify Extensions
 
-For each extension in `response.extensions`:
+Extensions are pre-installed by the setup script. Verify they exist:
 
-1. Create directory `<install_dir>/skills/<name>/`
-2. Write extension content to `<install_dir>/skills/<name>/SKILL.md` using the Write tool (not bash heredoc)
+```bash
+ls <install_dir>/skills/*/SKILL.md 2>/dev/null
+```
+
+If extensions are found, count them and continue to Phase 6.
+
+If NO extensions are found (setup script download may have failed), download them:
+
+1. Read `archon_mcp_url` from `.claude/archon-config.json` (fall back to `~/.claude/archon-config.json`)
+2. Run:
+
+```bash
+mkdir -p <install_dir>/skills
+curl -sf "<archon_mcp_url>/archon-setup/extensions.tar.gz" | tar xz -C "<install_dir>/skills/"
+```
+
+3. Verify again with the `ls` command above
 
 ## Phase 6: Update State
 

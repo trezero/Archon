@@ -85,14 +85,26 @@ If the call fails, report the error and stop.
 
 Extract `<system_id>` from `response.system.id` (if `response.system` is present, otherwise use `"unknown"`).
 
-## Phase 5: Write Extension Files
+## Phase 5: Download Extension Files
 
-For each extension object in `response.extensions`:
+Extensions are delivered via HTTP tarball to avoid bloating the LLM context.
 
-1. Create the directory `<install_dir>/skills/<name>/`
-2. Write the extension content to `<install_dir>/skills/<name>/SKILL.md` (extension definition file)
+Read `archon_mcp_url` from `.claude/archon-config.json` (fall back to `~/.claude/archon-config.json`).
 
-Use the Write tool (not a bash heredoc) to write each file.
+Download and extract extensions:
+
+```bash
+mkdir -p <install_dir>/skills
+curl -sf "<archon_mcp_url>/archon-setup/extensions.tar.gz" | tar xz -C "<install_dir>/skills/"
+```
+
+If the download fails, report the error but continue with Phase 6.
+
+Verify installed extensions:
+
+```bash
+ls <install_dir>/skills/*/SKILL.md 2>/dev/null
+```
 
 ## Phase 6: Update State
 

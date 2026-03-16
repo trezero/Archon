@@ -4,14 +4,20 @@
 Runs on SessionStart (startup, clear, compact). Outputs a context block to
 stdout that Claude Code injects into the system prompt.
 
-Also flushes any stale buffer left by a previous crashed session.
+Also flushes any stale buffer left by a previous crashed session and
+auto-updates the plugin if a newer version is available on the Archon server.
 """
 
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import shutil
+import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 
 # Add plugin src directory to path so imports work regardless of cwd
@@ -25,6 +31,104 @@ _BUFFER_PATH = ".claude/archon-memory-buffer.jsonl"
 _TIMEOUT_SECONDS = 5
 
 
+def _parse_version(v: str) -> tuple[int, ...]:
+    """Parse a semver string like '1.2.3' into a comparable tuple."""
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except (ValueError, AttributeError):
+        return (0, 0, 0)
+
+
+async def _auto_update_plugin(mcp_url: str, plugin_dir: Path) -> str | None:
+    """Check the Archon server for a newer plugin version and apply it automatically.
+
+    Returns a status message if updated, None if no update was needed or possible.
+    """
+    import httpx
+
+    local_manifest = plugin_dir / ".claude-plugin" / "plugin.json"
+    if not local_manifest.exists() or not mcp_url:
+        return None
+
+    try:
+        local_version = json.loads(local_manifest.read_text(encoding="utf-8")).get("version", "0.0.0")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    # Fetch remote version
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{mcp_url}/archon-setup/plugin-manifest")
+            if resp.status_code != 200:
+                return None
+            remote_version = resp.json().get("version", "0.0.0")
+    except Exception:
+        return None
+
+    if _parse_version(remote_version) <= _parse_version(local_version):
+        return None
+
+    # Download tarball
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{mcp_url}/archon-setup/plugin/archon-memory.tar.gz")
+            if resp.status_code != 200:
+                return None
+    except Exception:
+        return None
+
+    # Extract and apply
+    tmp_dir = Path(tempfile.mkdtemp())
+    try:
+        buf = io.BytesIO(resp.content)
+        with tarfile.open(fileobj=buf, mode="r:gz") as tar:
+            tar.extractall(tmp_dir, filter="data")
+
+        extracted = tmp_dir / "archon-memory"
+        if not extracted.is_dir():
+            return None
+
+        # Check if requirements changed before overwriting
+        old_reqs = (plugin_dir / "requirements.txt").read_text(encoding="utf-8") if (plugin_dir / "requirements.txt").exists() else ""
+        new_reqs = (extracted / "requirements.txt").read_text(encoding="utf-8") if (extracted / "requirements.txt").exists() else ""
+        reqs_changed = old_reqs.strip() != new_reqs.strip()
+
+        # Copy new files into plugin dir, preserving .venv
+        for item in list(plugin_dir.iterdir()):
+            if item.name in (".venv", ".pytest_cache"):
+                continue
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
+
+        for item in extracted.iterdir():
+            if item.name in (".venv", ".pytest_cache"):
+                continue
+            dst = plugin_dir / item.name
+            if item.is_dir():
+                shutil.copytree(item, dst)
+            else:
+                shutil.copy2(item, dst)
+
+        # Reinstall deps if requirements.txt changed
+        if reqs_changed:
+            venv_pip = plugin_dir / ".venv" / "bin" / "pip"
+            reqs_file = plugin_dir / "requirements.txt"
+            if venv_pip.exists() and reqs_file.exists():
+                subprocess.run(
+                    [str(venv_pip), "install", "-q", "-r", str(reqs_file)],
+                    capture_output=True,
+                    timeout=30,
+                )
+
+        return f"archon-memory: plugin updated {local_version} → {remote_version}"
+    except Exception:
+        return None
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def _setup_message() -> str:
     return """<archon-setup-needed>
 Archon is not configured for this project. Run the Archon setup script to enable
@@ -36,7 +140,46 @@ Until configured, smart_search / smart_outline / smart_unfold tools are still av
 </archon-setup-needed>"""
 
 
-def _format_context(sessions: list[dict], tasks: list[dict], knowledge: dict, leaveoff: dict | None = None) -> str:
+def _leaveoff_protocol_section(project_id: str) -> str:
+    """Return the LeaveOff Point Protocol instructions for injection into the system prompt."""
+    return f"""
+## LeaveOff Point Protocol
+
+### After Every Coding Task
+After completing any coding task that adds, modifies, or removes functionality, you MUST
+update the LeaveOff Point before moving to the next task:
+
+1. Call `manage_leaveoff_point(action="update")` with:
+   - `project_id`: `{project_id}`
+   - `content`: What was accomplished in this task (be specific about files changed and why)
+   - `component`: The architectural module or feature area being worked on
+   - `next_steps`: Concrete, actionable items for the next session (include file paths, not vague descriptions)
+   - `references`: Key files that were changed or informed this work
+
+2. This is NOT optional. Skipping this step means the next session starts with no context.
+
+### Session Resource Management (The 90% Rule)
+When you observe any of these signals, you are approaching resource limits:
+- The conversation has exceeded 80+ tool uses
+- You receive a system reminder about observation count
+- You sense the conversation has been running extensively
+
+Upon detecting these signals:
+1. Stop active coding immediately
+2. Generate a final LeaveOff Point via `manage_leaveoff_point(action="update")` with
+   comprehensive next_steps covering all remaining planned work
+3. Advise the user: "This session has reached its resource limit. The LeaveOff Point
+   has been saved. Please start a new session to continue."
+4. Do not continue coding after generating the final LeaveOff Point"""
+
+
+def _format_context(
+    sessions: list[dict],
+    tasks: list[dict],
+    knowledge: dict,
+    leaveoff: dict | None = None,
+    project_id: str | None = None,
+) -> str:
     parts: list[str] = ["<archon-context>"]
 
     # LeaveOff Point goes first — most important context
@@ -85,6 +228,10 @@ def _format_context(sessions: list[dict], tasks: list[dict], knowledge: dict, le
     if len(parts) == 1:
         parts.append("\nNo recent context available.")
 
+    # Inject LeaveOff Point Protocol so Claude knows to update it after coding tasks
+    if project_id:
+        parts.append(_leaveoff_protocol_section(project_id))
+
     parts.append("\n</archon-context>")
     return "\n".join(parts)
 
@@ -95,6 +242,19 @@ async def main() -> None:
     if not client.is_configured():
         print(_setup_message())
         return
+
+    # Auto-update plugin if a newer version is available on the server
+    try:
+        update_msg = await asyncio.wait_for(
+            _auto_update_plugin(client.mcp_url, _PLUGIN_ROOT),
+            timeout=8.0,
+        )
+        if update_msg:
+            print(update_msg, file=sys.stderr)
+    except asyncio.TimeoutError:
+        print("archon-memory: plugin update check timed out", file=sys.stderr)
+    except Exception:
+        pass  # Never block session start for an update failure
 
     tracker = SessionTracker(buffer_path=_BUFFER_PATH)
     tracker.start_session()
@@ -134,7 +294,7 @@ async def main() -> None:
     if isinstance(leaveoff, Exception):
         leaveoff = None
 
-    print(_format_context(sessions, tasks, knowledge, leaveoff))  # type: ignore[arg-type]
+    print(_format_context(sessions, tasks, knowledge, leaveoff, project_id=client.project_id))  # type: ignore[arg-type]
 
     # Postman environment sync (API mode only, best-effort)
     try:

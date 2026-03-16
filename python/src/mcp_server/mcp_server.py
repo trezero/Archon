@@ -815,17 +815,29 @@ async def http_plugin_manifest(request: Request) -> JSONResponse:
 
 
 async def http_download_plugin(request: Request):
-    """Return the archon-memory plugin as a compressed tar archive."""
+    """Return the archon-memory plugin as a compressed tar archive.
+
+    Excludes development artifacts (.venv, .pytest_cache, __pycache__, .git)
+    so the tarball is small and won't overwrite the client's virtual environment.
+    """
     import io
     import tarfile
     from starlette.responses import Response
+
+    _EXCLUDE_DIRS = {".venv", ".pytest_cache", "__pycache__", ".git"}
+
+    def _tar_filter(tarinfo: tarfile.TarInfo) -> tarfile.TarInfo | None:
+        parts = Path(tarinfo.name).parts
+        if any(part in _EXCLUDE_DIRS for part in parts):
+            return None
+        return tarinfo
 
     for parent in Path(__file__).resolve().parents:
         plugin_dir = parent / "integrations" / "claude-code" / "plugins" / "archon-memory"
         if plugin_dir.is_dir():
             buf = io.BytesIO()
             with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-                tar.add(plugin_dir, arcname="archon-memory")
+                tar.add(plugin_dir, arcname="archon-memory", filter=_tar_filter)
             buf.seek(0)
             return Response(
                 content=buf.read(),
@@ -833,6 +845,46 @@ async def http_download_plugin(request: Request):
                 headers={"Content-Disposition": 'attachment; filename="archon-memory.tar.gz"'},
             )
     return JSONResponse({"error": "plugin not found"}, status_code=404)
+
+
+async def http_download_extensions(request: Request):
+    """Return all extensions as a compressed tar archive (skills/{name}/SKILL.md)."""
+    import io
+    import tarfile
+
+    import httpx
+    from starlette.responses import Response
+
+    from src.server.config.service_discovery import get_api_url
+
+    try:
+        api_url = get_api_url()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(f"{api_url}/api/extensions", params={"include_content": True})
+            if response.status_code != 200:
+                return JSONResponse({"error": "failed to fetch extensions from API"}, status_code=502)
+            extensions = response.json().get("extensions", [])
+    except httpx.RequestError as e:
+        logger.error(f"Failed to fetch extensions for tarball: {e}")
+        return JSONResponse({"error": "API server unreachable"}, status_code=502)
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for ext in extensions:
+            name = ext.get("name", "")
+            content = ext.get("content", "")
+            if not name or not content:
+                continue
+            data = content.encode("utf-8")
+            info = tarfile.TarInfo(name=f"{name}/SKILL.md")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    buf.seek(0)
+    return Response(
+        content=buf.read(),
+        media_type="application/gzip",
+        headers={"Content-Disposition": 'attachment; filename="extensions.tar.gz"'},
+    )
 
 
 # Register setup endpoints
@@ -843,7 +895,8 @@ try:
     logger.info("✓ Setup file endpoints registered")
     mcp.custom_route("/archon-setup/plugin-manifest", methods=["GET"])(http_plugin_manifest)
     mcp.custom_route("/archon-setup/plugin/archon-memory.tar.gz", methods=["GET"])(http_download_plugin)
-    logger.info("✓ Plugin distribution endpoints registered")
+    mcp.custom_route("/archon-setup/extensions.tar.gz", methods=["GET"])(http_download_extensions)
+    logger.info("✓ Plugin and extension distribution endpoints registered")
 except Exception as e:
     logger.error(f"✗ Failed to register setup endpoints: {e}")
 

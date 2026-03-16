@@ -284,17 +284,205 @@ fi
 
 # ── Install archon-memory plugin ─────────────────────────────────────────────
 
+PLUGIN_DIR="$INSTALL_DIR/plugins/archon-memory"
+
 if [ "$SKIP_PLUGIN_INSTALL" = "false" ]; then
   ui_info "Installing archon-memory plugin..."
   mkdir -p "$INSTALL_DIR/plugins"
   if curl -sf "${ARCHON_MCP_URL}/archon-setup/plugin/archon-memory.tar.gz" | \
     tar xz -C "$INSTALL_DIR/plugins/" 2>/dev/null; then
-    ui_success "Plugin installed to $INSTALL_DIR/plugins/archon-memory/"
+    ui_success "Plugin installed to $PLUGIN_DIR/"
+
+    # Fix permissions — tarball may extract with restrictive modes
+    chmod -R u+r "$PLUGIN_DIR/" 2>/dev/null
+
+    # Remove any stale venv from a previous install (different Python version, broken symlinks, etc.)
+    if [ -d "$PLUGIN_DIR/.venv" ]; then
+      rm -rf "$PLUGIN_DIR/.venv"
+    fi
+
+    # Create isolated venv and install dependencies
+    VENV_DIR="$PLUGIN_DIR/.venv"
+    REQUIREMENTS="$PLUGIN_DIR/requirements.txt"
+    if [ -f "$REQUIREMENTS" ]; then
+      ui_info "Creating plugin virtual environment..."
+      # Use the best available Python (>=3.10 required for tree-sitter 0.24+)
+      BEST_PYTHON=""
+      for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+        if command -v "$candidate" &>/dev/null; then
+          PY_VER=$("$candidate" -c "import sys; print(sys.version_info[:2] >= (3,10))" 2>/dev/null)
+          if [ "$PY_VER" = "True" ]; then
+            BEST_PYTHON="$candidate"
+            break
+          fi
+        fi
+      done
+
+      if [ -z "$BEST_PYTHON" ]; then
+        ui_warn "Python 3.10+ required for plugin. Found only:"
+        python3 --version 2>&1 | sed 's/^/    /'
+        ui_info "Install Python 3.10+ and re-run this script."
+      elif "$BEST_PYTHON" -m venv "$VENV_DIR" 2>/dev/null; then
+        ui_success "Created venv ($($BEST_PYTHON --version 2>&1))"
+        # Upgrade pip before installing packages
+        "$VENV_DIR/bin/pip" install -q --upgrade pip 2>/dev/null
+        ui_info "Installing plugin dependencies..."
+        if "$VENV_DIR/bin/pip" install -q -r "$REQUIREMENTS" 2>/dev/null; then
+          ui_success "Plugin dependencies installed in venv"
+        else
+          ui_warn "pip install failed. Run manually:"
+          ui_info "$VENV_DIR/bin/pip install -r $REQUIREMENTS"
+        fi
+
+        # Verify the venv works
+        if ! "$VENV_DIR/bin/python" -c "import httpx" 2>/dev/null; then
+          ui_warn "Verification failed — httpx not importable. Run manually:"
+          ui_info "$VENV_DIR/bin/pip install -r $REQUIREMENTS"
+        fi
+      else
+        ui_warn "Could not create venv. Falling back to system pip..."
+        if python3 -m pip install -q -r "$REQUIREMENTS" 2>/dev/null; then
+          ui_success "Plugin dependencies installed (system-wide)"
+        else
+          ui_warn "Could not install plugin dependencies. Run manually:"
+          ui_info "pip3 install -r $REQUIREMENTS"
+        fi
+      fi
+    fi
   else
     ui_warn "Plugin download failed. Install manually from Archon."
   fi
   echo
 fi
+
+# Determine the Python executable for plugin scripts
+# Prefer venv python if available, fall back to system python3
+if [ -x "$PLUGIN_DIR/.venv/bin/python" ]; then
+  PLUGIN_PYTHON="$PLUGIN_DIR/.venv/bin/python"
+else
+  PLUGIN_PYTHON="python3"
+fi
+
+# ── Register hooks in Claude Code settings ──────────────────────────────────
+#
+# Claude Code limitation: SessionStart and Stop hooks only work in the global
+# ~/.claude/settings.json. PostToolUse works in project settings.local.json.
+# So we split: lifecycle hooks → global, observation hook → project or global.
+
+if [ "$SKIP_PLUGIN_INSTALL" = "false" ]; then
+  GLOBAL_SETTINGS="$HOME/.claude/settings.json"
+
+  if [ "$INSTALL_SCOPE_LABEL" = "project" ]; then
+    # Project scope: lifecycle hooks in global settings use $CLAUDE_PROJECT_DIR
+    # for dynamic resolution. PostToolUse in project settings uses relative path.
+    PROJECT_SETTINGS="$INSTALL_DIR/settings.local.json"
+    LIFECYCLE_PYTHON='$CLAUDE_PROJECT_DIR/.claude/plugins/archon-memory/.venv/bin/python'
+    LIFECYCLE_SCRIPTS='$CLAUDE_PROJECT_DIR/.claude/plugins/archon-memory/scripts'
+    PTU_PYTHON=".claude/plugins/archon-memory/.venv/bin/python"
+    PTU_SCRIPTS=".claude/plugins/archon-memory/scripts"
+  else
+    # Global scope: everything uses absolute paths
+    PROJECT_SETTINGS=""
+    LIFECYCLE_PYTHON="$PLUGIN_DIR/.venv/bin/python"
+    LIFECYCLE_SCRIPTS="$PLUGIN_DIR/scripts"
+    PTU_PYTHON="$PLUGIN_DIR/.venv/bin/python"
+    PTU_SCRIPTS="$PLUGIN_DIR/scripts"
+  fi
+
+  # Fall back to system python3 if venv doesn't exist
+  if [ ! -x "$PLUGIN_DIR/.venv/bin/python" ] && [ "$INSTALL_SCOPE_LABEL" != "project" ]; then
+    LIFECYCLE_PYTHON="python3"
+    PTU_PYTHON="python3"
+  fi
+
+  # Helper: merge archon hooks into a settings file
+  merge_hooks() {
+    local target_file="$1"
+    shift
+    # Remaining args are event:command pairs
+    python3 - "$target_file" "$@" <<'PYEOF'
+import json, sys
+from pathlib import Path
+
+settings_path = Path(sys.argv[1])
+pairs = sys.argv[2:]  # event:command:timeout triples
+
+if settings_path.is_file():
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        settings = {}
+else:
+    settings = {}
+
+hooks = settings.setdefault("hooks", {})
+
+i = 0
+while i < len(pairs):
+    event = pairs[i]
+    command = pairs[i + 1]
+    timeout = int(pairs[i + 2])
+    i += 3
+
+    existing = hooks.get(event, [])
+    cleaned = [h for h in existing if not any("archon-memory" in hk.get("command", "") for hk in h.get("hooks", []))]
+    cleaned.append({
+        "matcher": "",
+        "hooks": [{"type": "command", "command": command, "timeout": timeout}],
+    })
+    hooks[event] = cleaned
+
+settings_path.parent.mkdir(parents=True, exist_ok=True)
+settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+PYEOF
+  }
+
+  # Register SessionStart + Stop in global settings (required by Claude Code)
+  ui_info "Registering lifecycle hooks in ~/.claude/settings.json..."
+  merge_hooks "$GLOBAL_SETTINGS" \
+    "SessionStart" "\"${LIFECYCLE_PYTHON}\" \"${LIFECYCLE_SCRIPTS}/session_start_hook.py\"" "10" \
+    "Stop" "\"${LIFECYCLE_PYTHON}\" \"${LIFECYCLE_SCRIPTS}/session_end_hook.py\"" "30"
+  if [ $? -eq 0 ]; then
+    ui_success "SessionStart + Stop hooks → ~/.claude/settings.json"
+  else
+    ui_warn "Could not register lifecycle hooks."
+  fi
+
+  # Register PostToolUse in project or global settings
+  if [ -n "$PROJECT_SETTINGS" ]; then
+    ui_info "Registering PostToolUse hook in settings.local.json..."
+    merge_hooks "$PROJECT_SETTINGS" \
+      "PostToolUse" "\"${PTU_PYTHON}\" \"${PTU_SCRIPTS}/observation_hook.py\"" "5"
+    if [ $? -eq 0 ]; then
+      ui_success "PostToolUse hook → settings.local.json"
+    else
+      ui_warn "Could not register PostToolUse hook."
+    fi
+  else
+    ui_info "Registering PostToolUse hook in ~/.claude/settings.json..."
+    merge_hooks "$GLOBAL_SETTINGS" \
+      "PostToolUse" "\"${PTU_PYTHON}\" \"${PTU_SCRIPTS}/observation_hook.py\"" "5"
+    if [ $? -eq 0 ]; then
+      ui_success "PostToolUse hook → ~/.claude/settings.json"
+    else
+      ui_warn "Could not register PostToolUse hook."
+    fi
+  fi
+  echo
+fi
+
+# ── Download and install extensions ──────────────────────────────────────────
+
+ui_info "Installing extensions..."
+mkdir -p "$INSTALL_DIR/skills"
+if curl -sf "${ARCHON_MCP_URL}/archon-setup/extensions.tar.gz" | \
+    tar xz -C "$INSTALL_DIR/skills/" 2>/dev/null; then
+  EXT_COUNT=$(find "$INSTALL_DIR/skills" -maxdepth 2 -name "SKILL.md" 2>/dev/null | wc -l | tr -d ' ')
+  ui_success "Installed $EXT_COUNT extension(s) to $INSTALL_DIR/skills/"
+else
+  ui_warn "Extension download failed. /archon-setup will handle installation."
+fi
+echo
 
 # ── Write archon-config.json ─────────────────────────────────────────────────
 
@@ -317,7 +505,7 @@ echo
 
 # ── Update .gitignore ────────────────────────────────────────────────────────
 
-for entry in ".claude/plugins/" ".claude/skills/" ".claude/archon-config.json" ".claude/archon-state.json" ".claude/archon-memory-buffer.jsonl"; do
+for entry in ".claude/plugins/" ".claude/skills/" ".claude/archon-config.json" ".claude/archon-state.json" ".claude/archon-memory-buffer.jsonl" ".claude/settings.local.json" ".archon/"; do
   grep -qxF "$entry" .gitignore 2>/dev/null || echo "$entry" >> .gitignore
 done
 ui_success "Updated .gitignore with Archon local paths."

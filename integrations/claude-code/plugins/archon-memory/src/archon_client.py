@@ -24,6 +24,7 @@ class ArchonClient:
     def __init__(self, config_path: str | None = None):
         self.config = self._load_config(config_path)
         self.api_url = self.config.get("archon_api_url", "").rstrip("/")
+        self.mcp_url = self.config.get("archon_mcp_url", "").rstrip("/")
         self.project_id = self.config.get("project_id", "")
         self.machine_id = self.config.get("machine_id", "")
 
