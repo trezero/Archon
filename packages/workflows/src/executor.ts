@@ -12,8 +12,8 @@ import type {
 import type { WorkflowDeps } from './deps';
 import { formatToolCall } from './utils/tool-formatter';
 import * as archonPaths from '@archon/paths';
-import { BUNDLED_COMMANDS, isBinaryBuild } from './defaults/bundled-defaults';
 import { createLogger } from '@archon/paths';
+import { classifyError, buildPromptWithContext, loadCommandPrompt } from './utils/execution-utils';
 import {
   commitAllChanges,
   execFileAsync,
@@ -25,7 +25,6 @@ import type {
   WorkflowDefinition,
   WorkflowRun,
   StepResult,
-  LoadCommandResult,
   SingleStep,
   WorkflowExecutionResult,
 } from './types';
@@ -46,7 +45,6 @@ import {
 import { parseValidationResults } from './validation-parser';
 import { getWorkflowEventEmitter } from './event-emitter';
 import { isClaudeModel, isModelCompatible } from './model-validation';
-import { isValidCommandName } from './command-validation';
 import { withIdleTimeout, STEP_IDLE_TIMEOUT_MS } from './utils/idle-timeout';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -67,42 +65,10 @@ interface SendMessageContext {
   stepIndex?: number;
 }
 
-/** Result of error classification */
-type ErrorType = 'TRANSIENT' | 'FATAL' | 'UNKNOWN';
-
 /** Default step-level retry for TRANSIENT errors when no per-step retry config is set */
 const DEFAULT_STEP_MAX_RETRIES = 2;
 const DEFAULT_STEP_RETRY_DELAY_MS = 3000;
 
-/** Fatal error patterns - authentication/authorization issues that won't resolve with retry */
-const FATAL_PATTERNS = [
-  'unauthorized',
-  'forbidden',
-  'invalid token',
-  'authentication failed',
-  'permission denied',
-  '401',
-  '403',
-  'credit balance',
-  'auth error',
-];
-
-/** Transient error patterns - temporary issues that may resolve with retry */
-const TRANSIENT_PATTERNS = [
-  'timeout',
-  'econnrefused',
-  'econnreset',
-  'etimedout',
-  'rate limit',
-  'too many requests',
-  '429',
-  '503',
-  '502',
-  'network error',
-  'socket hang up',
-  'exited with code',
-  'claude code crash',
-];
 
 /**
  * Escape special regex characters in string
@@ -229,28 +195,6 @@ function detectCompletionSignal(output: string, signal: string): boolean {
 /** Strip internal completion signal tags before sending to user-facing output. */
 function stripCompletionTags(content: string): string {
   return content.replace(/<promise>[\s\S]*?<\/promise>/gi, '').trim();
-}
-
-/**
- * Check if error message matches any pattern in the list
- */
-function matchesPattern(message: string, patterns: string[]): boolean {
-  return patterns.some(pattern => message.includes(pattern));
-}
-
-/**
- * Classify an error to determine if it's transient (can retry) or fatal (should fail).
- */
-function classifyError(error: Error): ErrorType {
-  const message = error.message.toLowerCase();
-
-  if (matchesPattern(message, FATAL_PATTERNS)) {
-    return 'FATAL';
-  }
-  if (matchesPattern(message, TRANSIENT_PATTERNS)) {
-    return 'TRANSIENT';
-  }
-  return 'UNKNOWN';
 }
 
 /**
@@ -396,243 +340,6 @@ async function sendCriticalMessage(
   );
 
   return false;
-}
-
-/**
- * Load command prompt from file
- *
- * @param cwd - Working directory (repo root)
- * @param commandName - Name of the command (without .md extension)
- * @param configuredFolder - Optional additional folder from config to search
- * @param deps - Workflow dependencies (for config loading)
- * @returns On success: `{ success: true, content }`. On failure: `{ success: false, reason, message }`.
- */
-async function loadCommandPrompt(
-  deps: WorkflowDeps,
-  cwd: string,
-  commandName: string,
-  configuredFolder?: string
-): Promise<LoadCommandResult> {
-  // Validate command name first
-  if (!isValidCommandName(commandName)) {
-    getLog().error({ commandName }, 'invalid_command_name');
-    return {
-      success: false,
-      reason: 'invalid_name',
-      message: `Invalid command name (potential path traversal): ${commandName}`,
-    };
-  }
-
-  // Load config to check opt-out
-  let config;
-  try {
-    config = await deps.loadConfig(cwd);
-  } catch (error) {
-    const err = error as Error;
-    getLog().warn(
-      {
-        err,
-        cwd,
-        note: 'Default commands will be loaded. Check your .archon/config.yaml if this is unexpected.',
-      },
-      'config_load_failed_using_defaults'
-    );
-    config = { defaults: { loadDefaultCommands: true } };
-  }
-
-  // Use command folder paths with optional configured folder
-  const searchPaths = archonPaths.getCommandFolderSearchPaths(configuredFolder);
-
-  // Search repo paths first
-  for (const folder of searchPaths) {
-    const filePath = join(cwd, folder, `${commandName}.md`);
-    try {
-      await access(filePath);
-      const content = await readFile(filePath, 'utf-8');
-      if (!content.trim()) {
-        getLog().error({ commandName }, 'command_file_empty');
-        return {
-          success: false,
-          reason: 'empty_file',
-          message: `Command file is empty: ${commandName}.md`,
-        };
-      }
-      getLog().debug({ commandName, folder }, 'command_loaded');
-      return { success: true, content };
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') {
-        // File doesn't exist - try next path
-        continue;
-      }
-      if (err.code === 'EACCES') {
-        getLog().error({ commandName, filePath }, 'command_file_permission_denied');
-        return {
-          success: false,
-          reason: 'permission_denied',
-          message: `Permission denied reading command: ${commandName}.md`,
-        };
-      }
-      // Other unexpected errors
-      getLog().error({ err, commandName, filePath }, 'command_file_read_error');
-      return {
-        success: false,
-        reason: 'read_error',
-        message: `Error reading command ${commandName}.md: ${err.message}`,
-      };
-    }
-  }
-
-  // If not found in repo and app defaults enabled, search app defaults
-  const loadDefaultCommands = config.defaults?.loadDefaultCommands ?? true;
-  if (loadDefaultCommands) {
-    if (isBinaryBuild()) {
-      // Binary: check bundled commands
-      const bundledContent = BUNDLED_COMMANDS[commandName];
-      if (bundledContent) {
-        getLog().debug({ commandName }, 'command_loaded_bundled');
-        return { success: true, content: bundledContent };
-      }
-      getLog().debug({ commandName }, 'command_bundled_not_found');
-    } else {
-      // Bun: load from filesystem
-      const appDefaultsPath = archonPaths.getDefaultCommandsPath();
-      const filePath = join(appDefaultsPath, `${commandName}.md`);
-      try {
-        await access(filePath);
-        const content = await readFile(filePath, 'utf-8');
-        if (!content.trim()) {
-          getLog().error({ commandName }, 'command_app_default_empty');
-          return {
-            success: false,
-            reason: 'empty_file',
-            message: `App default command file is empty: ${commandName}.md`,
-          };
-        }
-        getLog().debug({ commandName }, 'command_loaded_app_defaults');
-        return { success: true, content };
-      } catch (error) {
-        const err = error as NodeJS.ErrnoException;
-        if (err.code !== 'ENOENT') {
-          getLog().warn({ err, commandName }, 'command_app_default_read_error');
-        } else {
-          getLog().debug({ commandName }, 'command_app_default_not_found');
-        }
-        // Fall through to not found
-      }
-    }
-  }
-
-  // Not found anywhere
-  const allSearchPaths = loadDefaultCommands ? [...searchPaths, 'app defaults'] : searchPaths;
-  getLog().error({ commandName, searchPaths: allSearchPaths }, 'command_not_found');
-  return {
-    success: false,
-    reason: 'not_found',
-    message: `Command prompt not found: ${commandName}.md (searched: ${allSearchPaths.join(', ')})`,
-  };
-}
-
-/** Pattern string for context variables - used to create fresh regex instances */
-const CONTEXT_VAR_PATTERN_STR = '\\$(?:CONTEXT|EXTERNAL_CONTEXT|ISSUE_CONTEXT)';
-
-/**
- * Substitute workflow variables in command prompt.
- *
- * Supported variables:
- * - $WORKFLOW_ID - The workflow run ID
- * - $USER_MESSAGE, $ARGUMENTS - The user's trigger message
- * - $ARTIFACTS_DIR - External artifacts directory for this workflow run
- * - $BASE_BRANCH - The base branch (from config or auto-detected)
- * - $CONTEXT, $EXTERNAL_CONTEXT, $ISSUE_CONTEXT - GitHub issue/PR context (if available)
- *
- * When issueContext is undefined, context variables are replaced with empty string
- * to avoid sending literal "$CONTEXT" to the AI.
- *
- * @param prompt - The command prompt template with variable placeholders
- * @param workflowId - The workflow run ID for $WORKFLOW_ID substitution
- * @param userMessage - The user's trigger message for $USER_MESSAGE and $ARGUMENTS
- * @param artifactsDir - The external artifacts directory for $ARTIFACTS_DIR substitution
- * @param baseBranch - The resolved base branch for $BASE_BRANCH substitution
- * @param issueContext - Optional GitHub issue/PR context for $CONTEXT variables
- * @returns Object with substituted prompt and whether context variables were found and substituted
- */
-function substituteWorkflowVariables(
-  prompt: string,
-  workflowId: string,
-  userMessage: string,
-  artifactsDir: string,
-  baseBranch: string,
-  issueContext?: string
-): { prompt: string; contextSubstituted: boolean } {
-  // Substitute basic variables
-  let result = prompt
-    .replace(/\$WORKFLOW_ID/g, workflowId)
-    .replace(/\$USER_MESSAGE/g, userMessage)
-    .replace(/\$ARGUMENTS/g, userMessage)
-    .replace(/\$ARTIFACTS_DIR/g, artifactsDir)
-    .replace(/\$BASE_BRANCH/g, baseBranch);
-
-  // Check if context variables exist (use fresh regex to avoid lastIndex issues)
-  const hasContextVariables = new RegExp(CONTEXT_VAR_PATTERN_STR).test(result);
-
-  // Substitute or clear context variables (use fresh global regex for replace)
-  const contextValue = issueContext ?? '';
-  if (!issueContext && hasContextVariables) {
-    getLog().debug(
-      {
-        action: 'clearing variables',
-        variables: ['$CONTEXT', '$EXTERNAL_CONTEXT', '$ISSUE_CONTEXT'],
-      },
-      'context_variables_cleared'
-    );
-  }
-  result = result.replace(new RegExp(CONTEXT_VAR_PATTERN_STR, 'g'), contextValue);
-
-  return {
-    prompt: result,
-    contextSubstituted: hasContextVariables && !!issueContext,
-  };
-}
-
-/**
- * Apply variable substitution and optionally append issue context.
- * Appends context only if it wasn't already substituted via $CONTEXT variables.
- * This prevents duplicate context being sent to the AI.
- *
- * @param template - The command prompt template with variable placeholders
- * @param workflowId - The workflow run ID for variable substitution
- * @param userMessage - The user's trigger message for variable substitution
- * @param artifactsDir - The external artifacts directory for $ARTIFACTS_DIR substitution
- * @param baseBranch - The resolved base branch for $BASE_BRANCH substitution
- * @param issueContext - Optional GitHub issue/PR context to substitute or append
- * @param logLabel - Human-readable label for logging (e.g., 'workflow step prompt')
- * @returns The final prompt with variables substituted and context optionally appended
- */
-function buildPromptWithContext(
-  template: string,
-  workflowId: string,
-  userMessage: string,
-  artifactsDir: string,
-  baseBranch: string,
-  issueContext: string | undefined,
-  logLabel: string
-): string {
-  const { prompt, contextSubstituted } = substituteWorkflowVariables(
-    template,
-    workflowId,
-    userMessage,
-    artifactsDir,
-    baseBranch,
-    issueContext
-  );
-
-  if (issueContext && !contextSubstituted) {
-    getLog().debug({ logLabel }, 'issue_context_appended');
-    return prompt + '\n\n---\n\n' + issueContext;
-  }
-
-  return prompt;
 }
 
 /**

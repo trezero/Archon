@@ -5,8 +5,6 @@
  * Independent nodes within the same layer run concurrently via Promise.allSettled.
  * Captures all assistant output regardless of streaming mode for $node_id.output substitution.
  */
-import { readFile, access } from 'fs/promises';
-import { join } from 'path';
 import { execFileAsync } from '@archon/git';
 import type {
   WorkflowAssistantOptions,
@@ -28,8 +26,6 @@ import type {
 } from './types';
 import { isBashNode } from './types';
 import { formatToolCall } from './utils/tool-formatter';
-import * as archonPaths from '@archon/paths';
-import { BUNDLED_COMMANDS, isBinaryBuild } from './defaults/bundled-defaults';
 import { createLogger } from '@archon/paths';
 import { getWorkflowEventEmitter } from './event-emitter';
 import { evaluateCondition } from './condition-evaluator';
@@ -44,8 +40,12 @@ import {
   logWorkflowComplete,
   logWorkflowError,
 } from './logger';
-import { isValidCommandName } from './command-validation';
-import type { LoadCommandResult } from './types';
+import {
+  classifyError,
+  substituteWorkflowVariables,
+  buildPromptWithContext,
+  loadCommandPrompt,
+} from './utils/execution-utils';
 import { withIdleTimeout, STEP_IDLE_TIMEOUT_MS } from './utils/idle-timeout';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -63,49 +63,6 @@ const NODE_ACTIVITY_UPDATE_INTERVAL_MS = 10_000;
 interface SendMessageContext {
   workflowId?: string;
   nodeName?: string;
-}
-
-/** Fatal error patterns - authentication/authorization issues that won't resolve with retry */
-const FATAL_PATTERNS = [
-  'unauthorized',
-  'forbidden',
-  'invalid token',
-  'authentication failed',
-  'permission denied',
-  '401',
-  '403',
-  'credit balance',
-  'auth error',
-];
-
-/** Transient error patterns - temporary issues that may resolve with retry */
-const TRANSIENT_PATTERNS = [
-  'timeout',
-  'econnrefused',
-  'econnreset',
-  'etimedout',
-  'rate limit',
-  'too many requests',
-  '429',
-  '503',
-  '502',
-  'network error',
-  'socket hang up',
-  'exited with code',
-  'claude code crash',
-];
-
-function matchesPattern(message: string, patterns: string[]): boolean {
-  return patterns.some(pattern => message.includes(pattern));
-}
-
-type ErrorType = 'TRANSIENT' | 'FATAL' | 'UNKNOWN';
-
-function classifyError(error: Error): ErrorType {
-  const message = error.message.toLowerCase();
-  if (matchesPattern(message, FATAL_PATTERNS)) return 'FATAL';
-  if (matchesPattern(message, TRANSIENT_PATTERNS)) return 'TRANSIENT';
-  return 'UNKNOWN';
 }
 
 /** Default DAG node retry for TRANSIENT errors */
@@ -145,13 +102,10 @@ function isTransientNodeError(errorMessage: string): boolean {
   return classifyError(new Error(errorMessage)) === 'TRANSIENT';
 }
 
+
 /**
  * Safely send a message to the platform without crashing on failure.
  * Returns true if message was sent successfully, false otherwise.
- *
- * TODO: These helpers (safeSendMessage, substituteWorkflowVariables, loadCommandPrompt,
- * buildPromptWithContext) are duplicated from executor.ts. Rule of Three is met.
- * Extract to a shared module (e.g. packages/workflows/src/utils.ts).
  */
 async function safeSendMessage(
   platform: IWorkflowPlatform,
@@ -185,180 +139,6 @@ async function safeSendMessage(
 
     return false;
   }
-}
-
-/** Pattern string for context variables - used to create fresh regex instances */
-const CONTEXT_VAR_PATTERN_STR = '\\$(?:CONTEXT|EXTERNAL_CONTEXT|ISSUE_CONTEXT)';
-
-/**
- * Substitute workflow variables in a prompt.
- * Duplicated from executor.ts (Rule of Three is met).
- * TODO: extract to shared module (e.g. packages/workflows/src/utils.ts).
- */
-function substituteWorkflowVariables(
-  prompt: string,
-  workflowId: string,
-  userMessage: string,
-  artifactsDir: string,
-  baseBranch: string,
-  issueContext?: string
-): { prompt: string; contextSubstituted: boolean } {
-  let result = prompt
-    .replace(/\$WORKFLOW_ID/g, workflowId)
-    .replace(/\$USER_MESSAGE/g, userMessage)
-    .replace(/\$ARGUMENTS/g, userMessage)
-    .replace(/\$ARTIFACTS_DIR/g, artifactsDir)
-    .replace(/\$BASE_BRANCH/g, baseBranch);
-
-  const hasContextVariables = new RegExp(CONTEXT_VAR_PATTERN_STR).test(result);
-  const contextValue = issueContext ?? '';
-  result = result.replace(new RegExp(CONTEXT_VAR_PATTERN_STR, 'g'), contextValue);
-
-  return { prompt: result, contextSubstituted: hasContextVariables && !!issueContext };
-}
-
-/**
- * Apply variable substitution and optionally append issue context.
- * Duplicated from executor.ts (Rule of Three not yet met).
- */
-function buildPromptWithContext(
-  template: string,
-  workflowId: string,
-  userMessage: string,
-  artifactsDir: string,
-  baseBranch: string,
-  issueContext: string | undefined,
-  logLabel: string
-): string {
-  const { prompt, contextSubstituted } = substituteWorkflowVariables(
-    template,
-    workflowId,
-    userMessage,
-    artifactsDir,
-    baseBranch,
-    issueContext
-  );
-
-  if (issueContext && !contextSubstituted) {
-    getLog().debug({ logLabel }, 'issue_context_appended');
-    return prompt + '\n\n---\n\n' + issueContext;
-  }
-
-  return prompt;
-}
-
-/**
- * Load command prompt from file.
- * Duplicated from executor.ts (Rule of Three is met).
- * TODO: extract to shared module (e.g. packages/workflows/src/utils.ts).
- */
-async function loadCommandPrompt(
-  deps: WorkflowDeps,
-  cwd: string,
-  commandName: string,
-  configuredFolder?: string
-): Promise<LoadCommandResult> {
-  if (!isValidCommandName(commandName)) {
-    getLog().error({ commandName }, 'invalid_command_name');
-    return {
-      success: false,
-      reason: 'invalid_name',
-      message: `Invalid command name (potential path traversal): ${commandName}`,
-    };
-  }
-
-  let config;
-  try {
-    config = await deps.loadConfig(cwd);
-  } catch (error) {
-    const err = error as Error;
-    getLog().warn(
-      {
-        err,
-        cwd,
-        note: 'Default commands will be loaded. Check your .archon/config.yaml if this is unexpected.',
-      },
-      'config_load_failed_using_defaults'
-    );
-    config = { defaults: { loadDefaultCommands: true } };
-  }
-
-  const searchPaths = archonPaths.getCommandFolderSearchPaths(configuredFolder);
-
-  for (const folder of searchPaths) {
-    const filePath = join(cwd, folder, `${commandName}.md`);
-    try {
-      await access(filePath);
-      const content = await readFile(filePath, 'utf-8');
-      if (!content.trim()) {
-        getLog().error({ commandName }, 'command_file_empty');
-        return {
-          success: false,
-          reason: 'empty_file',
-          message: `Command file is empty: ${commandName}.md`,
-        };
-      }
-      getLog().debug({ commandName, folder }, 'command_loaded');
-      return { success: true, content };
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') continue;
-      if (err.code === 'EACCES') {
-        getLog().error({ commandName, filePath }, 'command_file_permission_denied');
-        return {
-          success: false,
-          reason: 'permission_denied',
-          message: `Permission denied reading command: ${commandName}.md`,
-        };
-      }
-      getLog().error({ err, commandName, filePath }, 'command_file_read_error');
-      return {
-        success: false,
-        reason: 'read_error',
-        message: `Error reading command ${commandName}.md: ${err.message}`,
-      };
-    }
-  }
-
-  const loadDefaultCommands = config.defaults?.loadDefaultCommands ?? true;
-  if (loadDefaultCommands) {
-    if (isBinaryBuild()) {
-      const bundledContent = BUNDLED_COMMANDS[commandName];
-      if (bundledContent) {
-        getLog().debug({ commandName }, 'command_loaded_bundled');
-        return { success: true, content: bundledContent };
-      }
-    } else {
-      const appDefaultsPath = archonPaths.getDefaultCommandsPath();
-      const filePath = join(appDefaultsPath, `${commandName}.md`);
-      try {
-        await access(filePath);
-        const content = await readFile(filePath, 'utf-8');
-        if (!content.trim()) {
-          return {
-            success: false,
-            reason: 'empty_file',
-            message: `App default command file is empty: ${commandName}.md`,
-          };
-        }
-        getLog().debug({ commandName }, 'command_loaded_app_defaults');
-        return { success: true, content };
-      } catch (error) {
-        const err = error as NodeJS.ErrnoException;
-        if (err.code !== 'ENOENT') {
-          getLog().warn({ err, commandName }, 'command_app_default_read_error');
-        }
-      }
-    }
-  }
-
-  const allSearchPaths = loadDefaultCommands ? [...searchPaths, 'app defaults'] : searchPaths;
-  getLog().error({ commandName, searchPaths: allSearchPaths }, 'command_not_found');
-  return {
-    success: false,
-    reason: 'not_found',
-    message: `Command prompt not found: ${commandName}.md (searched: ${allSearchPaths.join(', ')})`,
-  };
 }
 
 /**

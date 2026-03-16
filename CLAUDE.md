@@ -233,7 +233,7 @@ packages/
 │       ├── event-emitter.ts  # Workflow observability events
 │       ├── logger.ts         # JSONL file logger
 │       ├── defaults/         # Bundled default commands and workflows
-│       ├── utils/            # Variable substitution, tool formatting
+│       ├── utils/            # Variable substitution, tool formatting, execution utilities
 │       └── index.ts          # Package exports
 ├── git/                      # @archon/git - Git operations (no @archon/core dep)
 │   └── src/

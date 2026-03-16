@@ -224,6 +224,31 @@ export async function cleanupToMakeRoom(
 }
 
 /**
+ * Returns the reason the environment cannot be removed, or null if it is safe to remove.
+ * Checks uncommitted changes first (avoids a DB query when changes are present),
+ * then active conversation references.
+ */
+type RemovalBlocker =
+  | { reason: 'uncommitted_changes'; display: string }
+  | { reason: 'in_use'; display: string; conversationCount: number };
+
+async function getRemovalBlocker(env: {
+  id: string;
+  working_path: string;
+}): Promise<RemovalBlocker | null> {
+  const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
+  if (hasChanges) return { reason: 'uncommitted_changes', display: 'has uncommitted changes' };
+  const conversations = await isolationEnvDb.getConversationsUsingEnv(env.id);
+  if (conversations.length > 0)
+    return {
+      reason: 'in_use',
+      display: `still used by ${String(conversations.length)} conversation(s)`,
+      conversationCount: conversations.length,
+    };
+  return null;
+}
+
+/**
  * Run full scheduled cleanup cycle
  * 1. Find and remove merged branches
  * 2. Find and remove stale environments
@@ -261,25 +286,17 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
         );
 
         if (merged) {
-          // Check for uncommitted changes before removing
-          const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
-          if (hasChanges) {
-            report.skipped.push({ id: env.id, reason: 'merged but has uncommitted changes' });
-            getLog().warn({ envId: env.id }, 'skip_merged_uncommitted_changes');
-            continue;
-          }
-
-          // Check if any conversations still reference this env
-          const conversations = await isolationEnvDb.getConversationsUsingEnv(env.id);
-          if (conversations.length > 0) {
-            report.skipped.push({
-              id: env.id,
-              reason: `merged but still used by ${String(conversations.length)} conversations`,
-            });
-            getLog().info(
-              { envId: env.id, conversationCount: conversations.length },
-              'skip_merged_still_in_use'
-            );
+          const blocker = await getRemovalBlocker(env);
+          if (blocker) {
+            report.skipped.push({ id: env.id, reason: `merged but ${blocker.display}` });
+            if (blocker.reason === 'in_use') {
+              getLog().info(
+                { envId: env.id, conversationCount: blocker.conversationCount },
+                'skip_merged_still_in_use'
+              );
+            } else {
+              getLog().warn({ envId: env.id }, 'skip_merged_uncommitted_changes');
+            }
             continue;
           }
 
@@ -297,19 +314,17 @@ export async function runScheduledCleanup(): Promise<CleanupReport> {
         // Check if environment is stale
         const isStale = await isEnvironmentStale(env, STALE_THRESHOLD_DAYS);
         if (isStale) {
-          const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
-          if (hasChanges) {
-            report.skipped.push({ id: env.id, reason: 'stale but has uncommitted changes' });
-            getLog().warn({ envId: env.id }, 'skip_stale_uncommitted_changes');
-            continue;
-          }
-
-          const conversations = await isolationEnvDb.getConversationsUsingEnv(env.id);
-          if (conversations.length > 0) {
-            report.skipped.push({
-              id: env.id,
-              reason: `stale but still used by ${String(conversations.length)} conversations`,
-            });
+          const blocker = await getRemovalBlocker(env);
+          if (blocker) {
+            report.skipped.push({ id: env.id, reason: `stale but ${blocker.display}` });
+            if (blocker.reason === 'in_use') {
+              getLog().info(
+                { envId: env.id, conversationCount: blocker.conversationCount },
+                'skip_stale_still_in_use'
+              );
+            } else {
+              getLog().warn({ envId: env.id }, 'skip_stale_uncommitted_changes');
+            }
             continue;
           }
 
@@ -467,20 +482,10 @@ export async function cleanupStaleWorktrees(
     // Check if stale
     if (env.days_since_activity < STALE_THRESHOLD_DAYS) continue;
 
-    // Check for uncommitted changes
-    const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
-    if (hasChanges) {
-      result.skipped.push({ branchName: env.branch_name, reason: 'has uncommitted changes' });
-      continue;
-    }
-
-    // Check for conversation references
-    const conversations = await isolationEnvDb.getConversationsUsingEnv(env.id);
-    if (conversations.length > 0) {
-      result.skipped.push({
-        branchName: env.branch_name,
-        reason: `still used by ${String(conversations.length)} conversation(s)`,
-      });
+    // Check for uncommitted changes or active conversation references
+    const blocker = await getRemovalBlocker(env);
+    if (blocker) {
+      result.skipped.push({ branchName: env.branch_name, reason: blocker.display });
       continue;
     }
 
@@ -525,20 +530,10 @@ export async function cleanupMergedWorktrees(
     }
     if (!merged) continue;
 
-    // Check for uncommitted changes
-    const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
-    if (hasChanges) {
-      result.skipped.push({ branchName: env.branch_name, reason: 'has uncommitted changes' });
-      continue;
-    }
-
-    // Check for conversation references
-    const conversations = await isolationEnvDb.getConversationsUsingEnv(env.id);
-    if (conversations.length > 0) {
-      result.skipped.push({
-        branchName: env.branch_name,
-        reason: `still used by ${String(conversations.length)} conversation(s)`,
-      });
+    // Check for uncommitted changes or active conversation references
+    const blocker = await getRemovalBlocker(env);
+    if (blocker) {
+      result.skipped.push({ branchName: env.branch_name, reason: blocker.display });
       continue;
     }
 
