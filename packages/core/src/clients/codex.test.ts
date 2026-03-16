@@ -690,9 +690,12 @@ describe('CodexClient', () => {
         }
       };
 
-      await expect(consumeGenerator()).rejects.toThrow('Codex query failed: Network failure');
+      await expect(consumeGenerator()).rejects.toThrow('Codex unknown: Network failure');
 
-      expect(mockLogger.error).toHaveBeenCalledWith({ err: networkError }, 'query_error');
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: networkError }),
+        'query_error'
+      );
     });
 
     test('throws actionable model-access message for unavailable configured model', async () => {
@@ -758,6 +761,77 @@ describe('CodexClient', () => {
       // Only the result should be yielded
       expect(chunks).toHaveLength(1);
       expect(chunks[0]).toEqual({ type: 'result', sessionId: 'new-thread-id' });
+    });
+
+    describe('retry behavior', () => {
+      test('classifies exit code errors as crash and retries up to 3 times', async () => {
+        mockRunStreamed.mockRejectedValue(
+          new Error('Codex Exec exited with code 1: stderr output')
+        );
+
+        const consumeGenerator = async (): Promise<void> => {
+          for await (const _ of client.sendQuery('test', '/workspace')) {
+            // consume
+          }
+        };
+
+        await expect(consumeGenerator()).rejects.toThrow(/Codex crash/);
+        // Initial attempt + 3 retries = 4 runStreamed calls
+        expect(mockRunStreamed).toHaveBeenCalledTimes(4);
+      }, 30_000);
+
+      test('recovers from transient crash on retry', async () => {
+        let callCount = 0;
+        mockRunStreamed.mockImplementation(() => {
+          callCount++;
+          if (callCount <= 2) {
+            return Promise.reject(new Error('Codex Exec exited with code 1'));
+          }
+          return Promise.resolve({
+            events: (async function* () {
+              yield {
+                type: 'item.completed',
+                item: { type: 'agent_message', text: 'Recovered!' },
+              };
+              yield { type: 'turn.completed' };
+            })(),
+          });
+        });
+
+        const chunks = [];
+        for await (const chunk of client.sendQuery('test', '/workspace')) {
+          chunks.push(chunk);
+        }
+
+        expect(callCount).toBe(3);
+        expect(chunks.some(c => c.type === 'assistant' && c.content === 'Recovered!')).toBe(true);
+      }, 30_000);
+
+      test('classifies auth errors as fatal (no retry)', async () => {
+        mockRunStreamed.mockRejectedValue(new Error('unauthorized'));
+
+        const consumeGenerator = async (): Promise<void> => {
+          for await (const _ of client.sendQuery('test', '/workspace')) {
+            // consume
+          }
+        };
+
+        await expect(consumeGenerator()).rejects.toThrow(/Codex auth error/);
+        expect(mockRunStreamed).toHaveBeenCalledTimes(1);
+      });
+
+      test('does not retry unknown errors', async () => {
+        mockRunStreamed.mockRejectedValue(new Error('something unexpected and unclassified'));
+
+        const consumeGenerator = async (): Promise<void> => {
+          for await (const _ of client.sendQuery('test', '/workspace')) {
+            // consume
+          }
+        };
+
+        await expect(consumeGenerator()).rejects.toThrow(/Codex unknown/);
+        expect(mockRunStreamed).toHaveBeenCalledTimes(1);
+      });
     });
   });
 });
