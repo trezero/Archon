@@ -18,6 +18,14 @@
 - No `any` types without explicit justification
 - Interfaces for all major abstractions
 
+**Git Workflow and Releases**
+- `main` is the release branch. Never commit directly to `main`.
+- `dev` is the working branch. All feature work branches off `dev` and merges back into `dev`.
+- To release, use the `/release` skill. It compares `dev` to `main`, generates changelog entries, bumps the version, and creates a PR to merge `dev` into `main`.
+- Releases follow Semantic Versioning: `/release` (patch), `/release minor`, `/release major`.
+- Changelog lives in `CHANGELOG.md` and follows Keep a Changelog format.
+- Version is the single `version` field in the root `package.json`.
+
 **Git as First-Class Citizen**
 - Let git handle what git does best (conflicts, uncommitted changes, branch management)
 - Surface git errors to users for actionable issues (conflicts, uncommitted changes)
