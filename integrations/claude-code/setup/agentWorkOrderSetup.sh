@@ -83,24 +83,19 @@ ask() {
 
 # ── .env helpers ─────────────────────────────────────────────────────────────
 
-# Safe parse of .env value — never sources the file
+# Safe parse of .env value — only reads the .env file, never checks environment
 _env_val() {
-  local key="$1"
-  # Check actual environment first, then .env file
+  grep -E "^${1}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-
+}
+
+# Check .env first, then fall back to shell environment
+_env_or_shell_val() {
   local val=""
-  val="$(printenv "$key" 2>/dev/null)" || true
+  val="$(_env_val "$1")"
   if [ -n "$val" ]; then
     printf "%s" "$val"
-    return
-  fi
-  if [ -f "$ENV_FILE" ]; then
-    val="$(grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2-)" || true
-    # Strip surrounding quotes if present
-    val="${val%\"}"
-    val="${val#\"}"
-    val="${val%\'}"
-    val="${val#\'}"
-    printf "%s" "$val"
+  else
+    printf "%s" "${!1:-}"
   fi
 }
 
@@ -210,8 +205,7 @@ check_config() {
   if [ -n "$val" ]; then
     # Mask sensitive values (KEY, TOKEN, SECRET, PASSWORD patterns)
     if echo "$key" | grep -qiE '(KEY|TOKEN|SECRET|PASSWORD)'; then
-      local masked="${val:0:6}..."
-      printf "    %s%-30s%s %s✓%s  %s\n" "$C_BOLD" "$label" "$C_RESET" "$C_GREEN" "$C_RESET" "$masked"
+      printf "    %s%-30s%s %s✓%s  set\n" "$C_BOLD" "$label" "$C_RESET" "$C_GREEN" "$C_RESET"
     else
       printf "    %s%-30s%s %s✓%s  %s\n" "$C_BOLD" "$label" "$C_RESET" "$C_GREEN" "$C_RESET" "$val"
     fi
@@ -300,9 +294,10 @@ show_dashboard() {
   check_config "SUPABASE_SERVICE_KEY" "SUPABASE_SERVICE_KEY" || true
 
   # Auth check: need at least one of ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN
+  # Check both .env and shell environment for auth variables
   local has_anthropic="" has_oauth=""
-  has_anthropic="$(_env_val "ANTHROPIC_API_KEY")"
-  has_oauth="$(_env_val "CLAUDE_CODE_OAUTH_TOKEN")"
+  has_anthropic="$(_env_or_shell_val "ANTHROPIC_API_KEY")"
+  has_oauth="$(_env_or_shell_val "CLAUDE_CODE_OAUTH_TOKEN")"
   if [ -n "$has_anthropic" ] || [ -n "$has_oauth" ]; then
     local auth_method=""
     if [ -n "$has_anthropic" ] && [ -n "$has_oauth" ]; then
@@ -481,7 +476,7 @@ action_check_deps() {
       ui_info "Docker:      https://docs.docker.com/get-docker/"
     fi
     if ! command -v claude &>/dev/null; then
-      ui_info "Claude CLI:  npm install -g @anthropic-ai/claude-code"
+      ui_info "Claude CLI:  curl -fsSL https://claude.ai/install.sh | bash"
     fi
     if ! command -v gh &>/dev/null; then
       ui_info "GitHub CLI:  https://cli.github.com/"
@@ -642,17 +637,19 @@ action_start_docker() {
   fi
 
   # Check port 8053
+  local port_in_use=""
   if command -v lsof &>/dev/null; then
-    local port_user=""
-    port_user="$(lsof -i :8053 -sTCP:LISTEN -t 2>/dev/null | head -1)" || true
-    if [ -n "$port_user" ]; then
-      ui_warn "Port 8053 is already in use (PID $port_user)."
-      local proceed=""
-      proceed="$(ask "Continue anyway? (y/n)" "n")"
-      if [ "$proceed" != "y" ] && [ "$proceed" != "Y" ]; then
-        echo
-        return
-      fi
+    port_in_use="$(lsof -i :8053 -sTCP:LISTEN -t 2>/dev/null | head -1)" || true
+  elif command -v ss &>/dev/null; then
+    port_in_use="$(ss -tlnp | grep ':8053 ' 2>/dev/null | head -1)" || true
+  fi
+  if [ -n "$port_in_use" ]; then
+    ui_warn "Port 8053 is already in use."
+    local proceed=""
+    proceed="$(ask "Continue anyway? (y/n)" "n")"
+    if [ "$proceed" != "y" ] && [ "$proceed" != "Y" ]; then
+      echo
+      return
     fi
   fi
 
@@ -665,15 +662,18 @@ action_start_docker() {
     return
   fi
 
-  # Poll health endpoint for 30s
+  # Poll health endpoint for 30s, tail logs in background for visibility
   echo
   ui_info "Waiting for service to become healthy..."
+  docker compose -f "$REPO_ROOT/docker-compose.yml" logs -f archon-agent-work-orders --since 5s &
+  local log_pid=$!
   local attempts=0
   local max_attempts=15
   while [ "$attempts" -lt "$max_attempts" ]; do
     local code=""
     code="$(curl -sf -m 3 -o /dev/null -w "%{http_code}" "http://localhost:8053/health" 2>/dev/null)" || code="000"
     if [ "$code" = "200" ]; then
+      kill "$log_pid" 2>/dev/null || true
       echo
       ui_success "Work Orders service is healthy at http://localhost:8053"
       echo
@@ -684,6 +684,7 @@ action_start_docker() {
     attempts=$((attempts + 1))
   done
 
+  kill "$log_pid" 2>/dev/null || true
   echo
   ui_warn "Service did not become healthy within 30 seconds."
   ui_info "Check logs: docker compose logs -f archon-agent-work-orders"
@@ -718,28 +719,34 @@ action_start_local() {
   fi
 
   # Check port 8053
+  local port_in_use=""
   if command -v lsof &>/dev/null; then
-    local port_user=""
-    port_user="$(lsof -i :8053 -sTCP:LISTEN -t 2>/dev/null | head -1)" || true
-    if [ -n "$port_user" ]; then
-      ui_warn "Port 8053 is already in use (PID $port_user)."
-      local proceed=""
-      proceed="$(ask "Continue anyway? (y/n)" "n")"
-      if [ "$proceed" != "y" ] && [ "$proceed" != "Y" ]; then
-        echo
-        return
-      fi
+    port_in_use="$(lsof -i :8053 -sTCP:LISTEN -t 2>/dev/null | head -1)" || true
+  elif command -v ss &>/dev/null; then
+    port_in_use="$(ss -tlnp | grep ':8053 ' 2>/dev/null | head -1)" || true
+  fi
+  if [ -n "$port_in_use" ]; then
+    ui_warn "Port 8053 is already in use."
+    local proceed=""
+    proceed="$(ask "Continue anyway? (y/n)" "n")"
+    if [ "$proceed" != "y" ] && [ "$proceed" != "Y" ]; then
+      echo
+      return
     fi
   fi
 
-  # Install dependencies
-  ui_info "Installing dependencies with uv..."
-  if (cd "$REPO_ROOT/python" && uv sync --group all 2>&1); then
-    ui_success "Dependencies installed."
+  # Install dependencies (skip if .venv is up to date)
+  if [ "$REPO_ROOT/python/pyproject.toml" -nt "$REPO_ROOT/python/.venv/" ] 2>/dev/null; then
+    ui_info "Syncing dependencies..."
+    if (cd "$REPO_ROOT/python" && uv sync --group all 2>&1); then
+      ui_success "Dependencies installed."
+    else
+      ui_error "uv sync failed."
+      echo
+      return
+    fi
   else
-    ui_error "uv sync failed."
-    echo
-    return
+    ui_info "Dependencies up to date."
   fi
 
   # Load env vars safely — never source .env
@@ -770,7 +777,7 @@ action_start_local() {
 
   # exec replaces this shell process with uvicorn
   cd "$REPO_ROOT/python"
-  exec uv run python -m uvicorn src.agent_work_orders.server:app --host 0.0.0.0 --port 8053 --reload
+  exec uv run python -m uvicorn src.agent_work_orders.server:app --port 8053 --reload
 }
 
 # Action 6: Verify setup
