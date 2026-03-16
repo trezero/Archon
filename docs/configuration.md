@@ -95,7 +95,7 @@ commands:
 
 # Worktree settings
 worktree:
-  baseBranch: main  # Optional: Base branch for workspace sync (default: auto-detect)
+  baseBranch: main  # Required for worktree workflows (or use --from flag)
   copyFiles:  # Optional: Additional files to copy to worktrees
     - .env.example -> .env  # Rename during copy
     - .vscode               # Copy entire directory
@@ -113,7 +113,7 @@ defaults:
 
 **Base branch behavior:** Before creating a worktree, the canonical workspace is synced to the latest code:
 - If `worktree.baseBranch` is set: Uses the configured branch. **Fails with an error** if the branch doesn't exist (no silent fallback).
-- If `worktree.baseBranch` is omitted: Auto-detects the default branch via `git symbolic-ref` (falls back to `main` or `master`).
+- If `worktree.baseBranch` is omitted: Worktree creation and workflows referencing `$BASE_BRANCH` fail with an error, unless the `--from` flag is provided at the CLI.
 
 ## Environment Variables
 

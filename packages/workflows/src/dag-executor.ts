@@ -102,7 +102,6 @@ function isTransientNodeError(errorMessage: string): boolean {
   return classifyError(new Error(errorMessage)) === 'TRANSIENT';
 }
 
-
 /**
  * Safely send a message to the platform without crashing on failure.
  * Returns true if message was sent successfully, false otherwise.
@@ -506,15 +505,21 @@ async function executeNodeInternal(
   }
 
   // Standard variable substitution
-  const substitutedPrompt = buildPromptWithContext(
-    rawPrompt,
-    workflowRun.id,
-    workflowRun.user_message,
-    artifactsDir,
-    baseBranch,
-    issueContext,
-    `dag node '${node.id}' prompt`
-  );
+  let substitutedPrompt: string;
+  try {
+    substitutedPrompt = buildPromptWithContext(
+      rawPrompt,
+      workflowRun.id,
+      workflowRun.user_message,
+      artifactsDir,
+      baseBranch,
+      issueContext,
+      `dag node '${node.id}' prompt`
+    );
+  } catch (error) {
+    const err = error as Error;
+    return { state: 'failed', output: '', error: err.message };
+  }
 
   // Substitute upstream node output references
   const finalPrompt = substituteNodeOutputRefs(substitutedPrompt, nodeOutputs);

@@ -1,8 +1,8 @@
 /**
  * Workflow command - list and run workflows
  */
-import { registerRepository, loadConfig, generateAndSetTitle } from '@archon/core';
-import { getIsolationProvider } from '@archon/isolation';
+import { registerRepository, loadConfig, loadRepoConfig, generateAndSetTitle } from '@archon/core';
+import { configureIsolation, getIsolationProvider } from '@archon/isolation';
 import { createLogger } from '@archon/paths';
 import { createWorkflowDeps } from '@archon/core/workflows/store-adapter';
 import {
@@ -361,6 +361,12 @@ export async function workflowRunCommand(
           'Use one or the other.'
       );
     } else {
+      // Configure isolation with repo config loader (same as orchestrator)
+      configureIsolation(async (repoPath: string) => {
+        const repoConfig = await loadRepoConfig(repoPath);
+        return repoConfig?.worktree ?? null;
+      });
+
       // Create or reuse worktree
       const provider = getIsolationProvider();
 

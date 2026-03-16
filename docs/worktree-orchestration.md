@@ -93,7 +93,7 @@ IsolationRequest
        ▼
 ┌──────────────────────────────────────────────────┐
 │ SYNC WORKSPACE (before creating worktree)        │
-│   Branch: config worktree.baseBranch or auto     │
+│   Branch: worktree.baseBranch (required) or --from│
 │   git fetch origin <branch>                      │
 │   git reset --hard origin/<branch>               │
 │   (skipped if uncommitted changes)               │
@@ -283,7 +283,7 @@ App checks: findWorktreeByBranch("feature/auth")
 | `src/isolation/types.ts`              | `IIsolationProvider`, `IsolationRequest`, `IsolatedEnvironment`, `DestroyResult` |
 | `src/isolation/providers/worktree.ts` | `WorktreeProvider` implementation                               |
 | `src/isolation/index.ts`              | `getIsolationProvider()` factory                                |
-| `@archon/git` (`packages/git/src/`)   | `getWorktreeBase()`, `listWorktrees()`, `syncWorkspace()`, `getDefaultBranch()`, low-level git ops |
+| `@archon/git` (`packages/git/src/`)   | `getWorktreeBase()`, `listWorktrees()`, `syncWorkspace()`, low-level git ops |
 | `src/adapters/github.ts`              | Webhook handling, `cleanupPRWorktree()`                         |
 | `src/handlers/command-handler.ts`     | `/worktree` command handling                                    |
 

@@ -583,7 +583,7 @@ async function createSession(conversationId: string, codebaseId: string) {
 - `$IMPLEMENTATION_SUMMARY` - Previous execution summary
 - `$ARTIFACTS_DIR` - External artifacts directory for the current workflow run (pre-created by executor)
 - `$WORKFLOW_ID` - The workflow run ID
-- `$BASE_BRANCH` - Base branch from config (worktree.baseBranch) or auto-detected from repo default
+- `$BASE_BRANCH` - Base branch from config (`worktree.baseBranch`); required when referenced — fails if not set and no `--from` flag
 
 **Command Types:**
 

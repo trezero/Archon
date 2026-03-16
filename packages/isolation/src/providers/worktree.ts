@@ -37,6 +37,7 @@ import type {
   WorktreeEnvironment,
 } from '../types';
 import { isPRIsolationRequest } from '../types';
+import type { WorktreeCreateConfig } from '../types';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -532,12 +533,27 @@ export class WorktreeProvider implements IIsolationProvider {
   ): Promise<{ warnings: string[] }> {
     const repoPath = request.canonicalRepoPath;
 
-    const worktreeConfig = await this.loadConfig(repoPath).catch(error => {
-      getLog().error({ err: error, repoPath }, 'repo_config_load_failed');
-      return null;
-    });
+    let worktreeConfig: WorktreeCreateConfig | null;
+    try {
+      worktreeConfig = await this.loadConfig(repoPath);
+    } catch (error) {
+      const err = error as Error;
+      getLog().error({ err, repoPath }, 'repo_config_load_failed');
+      throw new Error(`Failed to load config: ${err.message}`);
+    }
 
-    const baseBranch = await this.syncWorkspaceBeforeCreate(repoPath, worktreeConfig?.baseBranch);
+    const configuredBaseBranch = worktreeConfig?.baseBranch;
+    const fromBranch = request.workflowType === 'task' ? request.fromBranch : undefined;
+
+    if (!configuredBaseBranch && !fromBranch) {
+      throw new Error(
+        'No base branch configured. Set `worktree.baseBranch` in .archon/config.yaml ' +
+          'or use the --from flag to select a branch (e.g., --from dev).'
+      );
+    }
+
+    const branchToSync = configuredBaseBranch ?? fromBranch;
+    const baseBranch = await this.syncWorkspaceBeforeCreate(repoPath, branchToSync);
 
     const worktreeBase = getWorktreeBase(repoPath);
 

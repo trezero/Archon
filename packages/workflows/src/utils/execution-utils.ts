@@ -86,6 +86,14 @@ export function substituteWorkflowVariables(
   baseBranch: string,
   issueContext?: string
 ): { prompt: string; contextSubstituted: boolean } {
+  // Fail fast if the prompt references $BASE_BRANCH but no base branch is configured
+  if (!baseBranch && prompt.includes('$BASE_BRANCH')) {
+    throw new Error(
+      'No base branch configured. Set `worktree.baseBranch` in .archon/config.yaml ' +
+        'or use the --from flag to select a branch (e.g., --from dev).'
+    );
+  }
+
   let result = prompt
     .replace(/\$WORKFLOW_ID/g, workflowId)
     .replace(/\$USER_MESSAGE/g, userMessage)

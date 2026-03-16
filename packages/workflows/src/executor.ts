@@ -14,13 +14,7 @@ import { formatToolCall } from './utils/tool-formatter';
 import * as archonPaths from '@archon/paths';
 import { createLogger } from '@archon/paths';
 import { classifyError, buildPromptWithContext, loadCommandPrompt } from './utils/execution-utils';
-import {
-  commitAllChanges,
-  execFileAsync,
-  getDefaultBranch,
-  toRepoPath,
-  toWorktreePath,
-} from '@archon/git';
+import { commitAllChanges, execFileAsync, toWorktreePath } from '@archon/git';
 import type {
   WorkflowDefinition,
   WorkflowRun,
@@ -68,7 +62,6 @@ interface SendMessageContext {
 /** Default step-level retry for TRANSIENT errors when no per-step retry config is set */
 const DEFAULT_STEP_MAX_RETRIES = 2;
 const DEFAULT_STEP_RETRY_DELAY_MS = 3000;
-
 
 /**
  * Escape special regex characters in string
@@ -343,6 +336,16 @@ async function sendCriticalMessage(
 }
 
 /**
+<<<<<<< HEAD
+ * Load command prompt from file
+ *
+ * @param cwd - Working directory (repo root)
+ * @param commandName - Name of the command (without .md extension)
+ * @param configuredFolder - Optional additional folder from config to search
+ * @param deps - Workflow dependencies (for config loading)
+ * @returns On success: `{ success: true, content }`. On failure: `{ success: false, reason, message }`.
+ */
+/**
  * Internal function that executes a single step
  * (extracted to allow parallel execution)
  */
@@ -384,15 +387,25 @@ async function executeStepInternal(
   }
 
   // Substitute variables and append context if needed
-  const substitutedPrompt = buildPromptWithContext(
-    promptResult.content,
-    workflowRun.id,
-    workflowRun.user_message,
-    artifactsDir,
-    baseBranch,
-    issueContext,
-    'workflow step prompt'
-  );
+  let substitutedPrompt: string;
+  try {
+    substitutedPrompt = buildPromptWithContext(
+      promptResult.content,
+      workflowRun.id,
+      workflowRun.user_message,
+      artifactsDir,
+      baseBranch,
+      issueContext,
+      'workflow step prompt'
+    );
+  } catch (error) {
+    const err = error as Error;
+    return {
+      commandName,
+      success: false,
+      error: err.message,
+    };
+  }
 
   // Determine if we need fresh context
   const needsFreshSession = stepDef.clearContext === true;
@@ -1325,6 +1338,7 @@ async function executeLoopWorkflow(
     }
 
     // Substitute variables and append context if needed
+    // Throws if $BASE_BRANCH is referenced but not configured
     const substitutedPrompt = buildPromptWithContext(
       prompt,
       workflowRun.id,
@@ -1790,24 +1804,9 @@ export async function executeWorkflow(
   const config = await deps.loadConfig(cwd);
   const configuredCommandFolder = config.commands.folder;
 
-  // Resolve base branch once (used for $BASE_BRANCH substitution in all steps)
-  let baseBranch: string;
-  try {
-    baseBranch = config.baseBranch ?? (await getDefaultBranch(toRepoPath(cwd)));
-  } catch (error) {
-    const err = error as Error;
-    getLog().error({ err, cwd, configBaseBranch: config.baseBranch }, 'base_branch_resolve_failed');
-    await sendCriticalMessage(
-      platform,
-      conversationId,
-      `❌ **Workflow failed**: Could not determine the base branch for \`${cwd}\`.\n\nError: ${err.message}\n\nHint: Set \`worktree.baseBranch\` in your \`.archon/config.yaml\` to avoid auto-detection.`
-    );
-    return { success: false, error: `Failed to resolve base branch: ${err.message}` };
-  }
-  const baseBranchSource = config.baseBranch
-    ? 'repo config (worktree.baseBranch)'
-    : 'auto-detected';
-  getLog().info({ baseBranch, source: baseBranchSource }, 'base_branch_resolved');
+  // Resolved lazily: workflows that don't reference $BASE_BRANCH work without config.
+  // If a step does reference $BASE_BRANCH and config.baseBranch is unset, substituteWorkflowVariables throws.
+  const baseBranch = config.baseBranch ?? '';
 
   // Resolve provider and model once (used by all steps/iterations)
   // When workflow sets a model but not a provider, infer provider from the model.
