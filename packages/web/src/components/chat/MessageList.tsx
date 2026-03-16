@@ -2,7 +2,7 @@ import { memo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowDown, Sparkles, ArrowRight } from 'lucide-react';
+import { ArrowDown, Sparkles, ArrowRight, MessageSquare } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { MessageBubble } from './MessageBubble';
@@ -189,7 +189,7 @@ function MessageListRaw({
     return (
       <div className="flex flex-1 items-center justify-center">
         <div className="flex flex-col items-center gap-3 text-text-tertiary">
-          <Sparkles className="h-10 w-10" />
+          <MessageSquare className="h-10 w-10" />
           <p className="text-sm">Send a message to start chatting</p>
         </div>
       </div>

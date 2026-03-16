@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { MessageList } from './MessageList';
-import { MessageInput } from './MessageInput';
+import { MessageInput, type MessageInputHandle } from './MessageInput';
 import { LockIndicator } from './LockIndicator';
 import { WorkflowProgressCard } from './WorkflowProgressCard';
 import { useSSE } from '@/hooks/useSSE';
@@ -90,6 +90,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   const [queuePosition, setQueuePosition] = useState<number | undefined>();
   const [sending, setSending] = useState(false);
   const [hasSentMessage, setHasSentMessage] = useState(false);
+  const inputRef = useRef<MessageInputHandle>(null);
   const messageIdCounter = useRef(0);
   const conversationIdRef = useRef(conversationId);
   const messagesRef = useRef(messages);
@@ -640,7 +641,9 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         isNewChat={isNewChat}
         projectName={currentCodebase?.name ?? contextCodebase?.name}
         onQuickAction={(action): void => {
-          if (action !== 'focus') {
+          if (action === 'focus') {
+            inputRef.current?.focus();
+          } else {
             void handleSend(action);
           }
         }}
@@ -650,6 +653,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       )}
       <LockIndicator locked={locked && hasSentMessage} queuePosition={queuePosition} />
       <MessageInput
+        ref={inputRef}
         onSend={handleSend}
         disabled={
           sending ||
