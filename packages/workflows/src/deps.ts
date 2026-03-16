@@ -68,6 +68,25 @@ export interface WorkflowAssistantOptions {
       }[]
     >
   >;
+  /**
+   * MCP server configuration. Structural match for Record<string, McpServerConfig>.
+   * Discriminated union mirrors the SDK types so that WorkflowAssistantOptions is
+   * assignable to AssistantRequestOptions without casts.
+   * @archon/workflows must not depend on @anthropic-ai/claude-agent-sdk.
+   * Claude only — ignored for Codex.
+   */
+  mcpServers?: Record<
+    string,
+    | { type?: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
+    | { type: 'sse'; url: string; headers?: Record<string, string> }
+    | { type: 'http'; url: string; headers?: Record<string, string> }
+  >;
+  /**
+   * Tools to auto-allow without permission prompts.
+   * Used for MCP tool wildcards (e.g., 'mcp__github__*').
+   * Claude only — ignored for Codex.
+   */
+  allowedTools?: string[];
   abortSignal?: AbortSignal;
   /**
    * When false (default), skips writing session transcript to ~/.claude/projects/.

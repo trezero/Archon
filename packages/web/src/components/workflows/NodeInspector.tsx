@@ -357,6 +357,27 @@ function DagInspector({
         </div>
       )}
 
+      {/* MCP Config Path (hidden for Bash and explicit Codex nodes) */}
+      {!isBash && node.provider !== 'codex' && (
+        <div className="flex flex-col gap-1 w-full">
+          <label className="text-[10px] text-text-tertiary uppercase tracking-wide">
+            MCP Config (path to JSON file)
+          </label>
+          <input
+            type="text"
+            value={node.mcp ?? ''}
+            onChange={(e): void => {
+              onUpdate({ mcp: e.target.value || undefined });
+            }}
+            placeholder=".archon/mcp/github.json"
+            className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary font-mono placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+          <span className="text-[9px] text-text-tertiary">
+            Path relative to repo root. JSON object matching SDK McpServerConfig format.
+          </span>
+        </div>
+      )}
+
       {/* Output Format (hidden for Bash and explicit Codex nodes; inherited provider may still be Codex at runtime) */}
       {!isBash && node.provider !== 'codex' && (
         <div className="flex flex-col gap-1 w-full">

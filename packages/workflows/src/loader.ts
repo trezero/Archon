@@ -260,6 +260,7 @@ const BASH_NODE_AI_FIELDS = [
   'allowed_tools',
   'denied_tools',
   'hooks',
+  'mcp',
 ] as const;
 
 /**
@@ -491,6 +492,16 @@ function parseDagNode(
       ? { hooks: parseNodeHooks(raw.hooks, { id: `Node '${id}'`, errors }) }
       : {}),
   };
+
+  // Validate mcp field separately — error path doesn't fit the spread-ternary pattern
+  if (raw.mcp !== undefined) {
+    if (typeof raw.mcp === 'string' && raw.mcp.trim().length > 0) {
+      (baseFields as Record<string, unknown>).mcp = raw.mcp.trim();
+    } else {
+      errors.push(`Node '${id}': 'mcp' must be a non-empty string path`);
+    }
+  }
+
   if (errors.length > errorsBeforeToolFields) return null;
 
   if (baseFields.allowed_tools?.length === 0 && baseFields.denied_tools !== undefined) {

@@ -31,6 +31,7 @@ import {
   checkTriggerRule,
   substituteNodeOutputRefs,
   executeDagWorkflow,
+  loadMcpConfig,
 } from './dag-executor';
 import type { DagNode, BashNode, NodeOutput, WorkflowRun } from './types';
 import { discoverWorkflows } from './loader';
@@ -1936,5 +1937,127 @@ describe('executeDagWorkflow -- tool_completed event emission', () => {
     const completedEvents = createEventCalls.filter(([arg]) => arg.event_type === 'tool_completed');
 
     expect(completedEvents.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadMcpConfig — per-node MCP server config loading (#445)
+// ---------------------------------------------------------------------------
+
+describe('loadMcpConfig', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-mcp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(testDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it('loads and parses a valid MCP config JSON', async () => {
+    const config = { github: { command: 'npx', args: ['-y', '@mcp/server-github'] } };
+    await writeFile(join(testDir, 'mcp.json'), JSON.stringify(config));
+
+    const result = await loadMcpConfig('mcp.json', testDir);
+    expect(result.serverNames).toEqual(['github']);
+    expect(result.servers).toEqual(config);
+    expect(result.missingVars).toEqual([]);
+  });
+
+  it('loads multiple servers from one config', async () => {
+    const config = {
+      github: { command: 'npx', args: ['-y', '@mcp/server-github'] },
+      postgres: { command: 'npx', args: ['-y', '@mcp/server-postgres'] },
+    };
+    await writeFile(join(testDir, 'multi.json'), JSON.stringify(config));
+
+    const result = await loadMcpConfig('multi.json', testDir);
+    expect(result.serverNames).toEqual(['github', 'postgres']);
+  });
+
+  it('expands $VAR_NAME in env values from process.env', async () => {
+    process.env.TEST_MCP_TOKEN_445 = 'secret123';
+    const config = { github: { command: 'npx', env: { TOKEN: '$TEST_MCP_TOKEN_445' } } };
+    await writeFile(join(testDir, 'mcp.json'), JSON.stringify(config));
+
+    const result = await loadMcpConfig('mcp.json', testDir);
+    const server = result.servers.github as Record<string, unknown>;
+    expect(server.env).toEqual({ TOKEN: 'secret123' });
+
+    delete process.env.TEST_MCP_TOKEN_445;
+  });
+
+  it('expands $VAR_NAME in headers values', async () => {
+    process.env.TEST_API_KEY_445 = 'key456';
+    const config = {
+      api: {
+        type: 'http',
+        url: 'https://example.com',
+        headers: { Authorization: 'Bearer $TEST_API_KEY_445' },
+      },
+    };
+    await writeFile(join(testDir, 'mcp.json'), JSON.stringify(config));
+
+    const result = await loadMcpConfig('mcp.json', testDir);
+    const server = result.servers.api as Record<string, unknown>;
+    expect(server.headers).toEqual({ Authorization: 'Bearer key456' });
+
+    delete process.env.TEST_API_KEY_445;
+  });
+
+  it('replaces undefined env vars with empty string and reports them', async () => {
+    delete process.env.NONEXISTENT_VAR_445;
+    const config = { svc: { command: 'npx', env: { KEY: '$NONEXISTENT_VAR_445' } } };
+    await writeFile(join(testDir, 'mcp.json'), JSON.stringify(config));
+
+    const result = await loadMcpConfig('mcp.json', testDir);
+    const server = result.servers.svc as Record<string, unknown>;
+    expect(server.env).toEqual({ KEY: '' });
+    expect(result.missingVars).toContain('NONEXISTENT_VAR_445');
+  });
+
+  it('does not expand vars in command or args fields', async () => {
+    process.env.TEST_CMD_445 = 'should-not-expand';
+    const config = { svc: { command: '$TEST_CMD_445', args: ['$TEST_CMD_445'] } };
+    await writeFile(join(testDir, 'mcp.json'), JSON.stringify(config));
+
+    const result = await loadMcpConfig('mcp.json', testDir);
+    const server = result.servers.svc as Record<string, unknown>;
+    expect(server.command).toBe('$TEST_CMD_445');
+    expect(server.args).toEqual(['$TEST_CMD_445']);
+
+    delete process.env.TEST_CMD_445;
+  });
+
+  it('resolves absolute paths as-is', async () => {
+    const config = { svc: { command: 'npx' } };
+    const absPath = join(testDir, 'abs.json');
+    await writeFile(absPath, JSON.stringify(config));
+
+    const result = await loadMcpConfig(absPath, '/some/other/dir');
+    expect(result.serverNames).toEqual(['svc']);
+  });
+
+  it('throws on missing file', async () => {
+    await expect(loadMcpConfig('nonexistent.json', testDir)).rejects.toThrow(
+      'MCP config file not found'
+    );
+  });
+
+  it('throws on invalid JSON', async () => {
+    await writeFile(join(testDir, 'bad.json'), 'not json');
+    await expect(loadMcpConfig('bad.json', testDir)).rejects.toThrow('not valid JSON');
+  });
+
+  it('throws on non-object JSON (array)', async () => {
+    await writeFile(join(testDir, 'arr.json'), '[]');
+    await expect(loadMcpConfig('arr.json', testDir)).rejects.toThrow('must be a JSON object');
+  });
+
+  it('throws on non-object JSON (string)', async () => {
+    await writeFile(join(testDir, 'str.json'), '"hello"');
+    await expect(loadMcpConfig('str.json', testDir)).rejects.toThrow('must be a JSON object');
   });
 });

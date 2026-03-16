@@ -140,6 +140,7 @@ export function reactFlowToDagNodes(rfNodes: DagFlowNode[], rfEdges: Edge[]): Da
       allowed_tools: node.data.allowed_tools ?? undefined,
       denied_tools: node.data.denied_tools ?? undefined,
       hooks: node.data.hooks ?? undefined,
+      mcp: node.data.mcp ?? undefined,
     };
 
     // DagNode uses `never` discriminant fields that can't be set on object literals

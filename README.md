@@ -1222,7 +1222,10 @@ nodes:
   - id: mcp-only
     command: mcp-command
     allowed_tools: []                   # disable all built-in tools
+    mcp: .archon/mcp/github.json        # per-node MCP servers (Claude only)
 ```
+
+**Per-node MCP servers** (`mcp`) attach MCP server definitions to a specific node. Point to a JSON file (relative to cwd) in `Record<string, McpServerConfig>` format — environment variables (`$VAR_NAME`) in `env`/`headers` values are expanded from `process.env` at execution time. Claude only — Codex nodes emit a warning and ignore this field.
 
 See [Authoring Workflows](docs/authoring-workflows.md) for full DAG documentation.
 

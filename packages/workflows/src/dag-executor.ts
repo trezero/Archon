@@ -5,6 +5,8 @@
  * Independent nodes within the same layer run concurrently via Promise.allSettled.
  * Captures all assistant output regardless of streaming mode for $node_id.output substitution.
  */
+import { readFile } from 'fs/promises';
+import { resolve, isAbsolute } from 'path';
 import { execFileAsync } from '@archon/git';
 import type {
   WorkflowAssistantOptions,
@@ -12,8 +14,8 @@ import type {
   WorkflowMessageMetadata,
   WorkflowTokenUsage,
   WorkflowConfig,
+  WorkflowDeps,
 } from './deps';
-import type { WorkflowDeps } from './deps';
 import type {
   DagNode,
   BashNode,
@@ -219,6 +221,104 @@ export function buildSDKHooksFromYAML(nodeHooks: WorkflowNodeHooks): SDKHooksMap
 }
 
 /**
+ * Load MCP server config from a JSON file and expand environment variables.
+ * Format: Record<string, McpServerConfig> matching the SDK's expected shape.
+ * $VAR_NAME references in env/headers values are expanded from process.env.
+ * Secrets are NEVER logged.
+ */
+export async function loadMcpConfig(
+  mcpPath: string,
+  cwd: string
+): Promise<{ servers: Record<string, unknown>; serverNames: string[]; missingVars: string[] }> {
+  const fullPath = isAbsolute(mcpPath) ? mcpPath : resolve(cwd, mcpPath);
+
+  let raw: string;
+  try {
+    raw = await readFile(fullPath, 'utf-8');
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code === 'ENOENT') {
+      throw new Error(`MCP config file not found: ${mcpPath} (resolved to ${fullPath})`);
+    }
+    throw new Error(`Failed to read MCP config file: ${mcpPath} — ${e.message}`);
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    throw new Error(`MCP config file is not valid JSON: ${mcpPath}`);
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`MCP config must be a JSON object (Record<string, ServerConfig>): ${mcpPath}`);
+  }
+
+  const { expanded, missingVars } = expandEnvVars(parsed);
+  const serverNames = Object.keys(expanded);
+
+  return { servers: expanded, serverNames, missingVars };
+}
+
+/**
+ * Expand $VAR_NAME references in a string-valued record from process.env.
+ * Undefined env vars are replaced with empty string; their names are collected in missingVars.
+ * Non-string values are coerced to string with a warning.
+ */
+function expandEnvVarsInRecord(
+  record: Record<string, unknown>,
+  missingVars: string[]
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, val] of Object.entries(record)) {
+    if (typeof val !== 'string') {
+      getLog().warn({ key, valueType: typeof val }, 'dag.mcp_env_value_coerced_to_string');
+      result[key] = String(val);
+      continue;
+    }
+    result[key] = val.replace(/\$([A-Z_][A-Z0-9_]*)/g, (_, varName: string) => {
+      const envVal = process.env[varName];
+      if (envVal === undefined) {
+        missingVars.push(varName);
+      }
+      return envVal ?? '';
+    });
+  }
+  return result;
+}
+
+/**
+ * Expand $VAR_NAME references in 'env' and 'headers' string values from process.env.
+ * Other fields (command, args, url) are left untouched.
+ * Undefined env vars are replaced with empty string and collected in missingVars.
+ */
+function expandEnvVars(config: Record<string, unknown>): {
+  expanded: Record<string, unknown>;
+  missingVars: string[];
+} {
+  const result: Record<string, unknown> = {};
+  const missingVars: string[] = [];
+  for (const [serverName, serverConfig] of Object.entries(config)) {
+    if (typeof serverConfig !== 'object' || serverConfig === null) {
+      result[serverName] = serverConfig;
+      continue;
+    }
+    const server = { ...(serverConfig as Record<string, unknown>) };
+    if (server.env && typeof server.env === 'object') {
+      server.env = expandEnvVarsInRecord(server.env as Record<string, unknown>, missingVars);
+    }
+    if (server.headers && typeof server.headers === 'object') {
+      server.headers = expandEnvVarsInRecord(
+        server.headers as Record<string, unknown>,
+        missingVars
+      );
+    }
+    result[serverName] = server;
+  }
+  return { expanded: result, missingVars };
+}
+
+/**
  * Resolve per-node provider and model.
  * Node-level overrides take precedence over workflow defaults.
  */
@@ -229,7 +329,8 @@ async function resolveNodeProviderAndModel(
   config: WorkflowConfig,
   platform: IWorkflowPlatform,
   conversationId: string,
-  workflowRunId: string
+  workflowRunId: string,
+  cwd: string
 ): Promise<{
   provider: 'claude' | 'codex';
   model: string | undefined;
@@ -305,6 +406,20 @@ async function resolveNodeProviderAndModel(
     }
   }
 
+  // Warn if Codex node has mcp (unsupported per-call)
+  if (provider === 'codex' && node.mcp) {
+    getLog().warn({ nodeId: node.id }, 'dag.mcp_ignored_codex');
+    const delivered = await safeSendMessage(
+      platform,
+      conversationId,
+      `Warning: Node '${node.id}' has mcp config but uses Codex — per-node MCP servers are not supported for Codex. Configure MCP servers globally in the Codex CLI config instead.`,
+      { workflowId: workflowRunId, nodeName: node.id }
+    );
+    if (!delivered) {
+      getLog().error({ nodeId: node.id, workflowRunId }, 'dag.mcp_warning_delivery_failed');
+    }
+  }
+
   let options: WorkflowAssistantOptions | undefined;
   if (provider === 'codex') {
     options = {
@@ -327,6 +442,59 @@ async function resolveNodeProviderAndModel(
     if (node.hooks) {
       const builtHooks = buildSDKHooksFromYAML(node.hooks);
       if (Object.keys(builtHooks).length > 0) claudeOptions.hooks = builtHooks;
+    }
+    // Load MCP config if specified
+    if (node.mcp) {
+      try {
+        const { servers, serverNames, missingVars } = await loadMcpConfig(node.mcp, cwd);
+        // loadMcpConfig returns Record<string, unknown> from JSON; cast to the structural
+        // union type — the SDK validates server configs at connection time
+        claudeOptions.mcpServers = servers as unknown as WorkflowAssistantOptions['mcpServers'];
+        // Auto-allow all MCP tools via wildcards
+        const mcpWildcards = serverNames.map(name => `mcp__${name}__*`);
+        claudeOptions.allowedTools = [...(claudeOptions.allowedTools ?? []), ...mcpWildcards];
+        getLog().info({ nodeId: node.id, serverNames, mcpPath: node.mcp }, 'dag.mcp_config_loaded');
+        // Warn user about missing env vars (likely secrets that will cause auth failures)
+        if (missingVars.length > 0) {
+          const uniqueVars = [...new Set(missingVars)];
+          getLog().warn({ nodeId: node.id, missingVars: uniqueVars }, 'dag.mcp_env_vars_missing');
+          const delivered = await safeSendMessage(
+            platform,
+            conversationId,
+            `Warning: Node '${node.id}' MCP config references undefined env vars: ${uniqueVars.join(', ')}. These will be empty strings — MCP servers may fail to authenticate.`,
+            { workflowId: workflowRunId, nodeName: node.id }
+          );
+          if (!delivered) {
+            getLog().error(
+              { nodeId: node.id, workflowRunId },
+              'dag.mcp_env_vars_warning_delivery_failed'
+            );
+          }
+        }
+        // Warn if Haiku model is used with MCP (tool search not supported)
+        if (model?.toLowerCase().includes('haiku')) {
+          getLog().warn({ nodeId: node.id, model }, 'dag.mcp_haiku_tool_search_unsupported');
+          const haikuDelivered = await safeSendMessage(
+            platform,
+            conversationId,
+            `Warning: Node '${node.id}' uses Haiku model with MCP servers — tool search (lazy loading for many tools) is not supported on Haiku. Consider using Sonnet or Opus.`,
+            { workflowId: workflowRunId, nodeName: node.id }
+          );
+          if (!haikuDelivered) {
+            getLog().error(
+              { nodeId: node.id, workflowRunId },
+              'dag.mcp_haiku_warning_delivery_failed'
+            );
+          }
+        }
+      } catch (mcpErr) {
+        const errMsg = (mcpErr as Error).message;
+        getLog().error(
+          { nodeId: node.id, mcpPath: node.mcp, error: errMsg },
+          'dag.mcp_config_load_failed'
+        );
+        throw new Error(`Node '${node.id}': ${errMsg}`);
+      }
     }
     options = Object.keys(claudeOptions).length > 0 ? claudeOptions : undefined;
   }
@@ -677,6 +845,31 @@ async function executeNodeInternal(
         if (msg.sessionId) newSessionId = msg.sessionId;
         if (msg.tokens) nodeTokens = msg.tokens;
         if (msg.structuredOutput !== undefined) structuredOutput = msg.structuredOutput;
+      } else if (msg.type === 'system' && msg.content) {
+        // Surface MCP connection failures to the user
+        if (msg.content.startsWith('MCP server connection failed:')) {
+          getLog().warn(
+            { nodeId: node.id, mcpStatus: msg.content },
+            'dag.mcp_server_connection_failed'
+          );
+          const delivered = await safeSendMessage(
+            platform,
+            conversationId,
+            msg.content,
+            nodeContext
+          );
+          if (!delivered) {
+            getLog().error(
+              { nodeId: node.id, mcpStatus: msg.content, workflowRunId: workflowRun.id },
+              'dag.mcp_connection_failure_delivery_failed'
+            );
+          }
+        } else {
+          getLog().debug(
+            { nodeId: node.id, systemContent: msg.content },
+            'dag.system_message_unhandled'
+          );
+        }
       }
     }
 
@@ -1168,7 +1361,8 @@ export async function executeDagWorkflow(
             config,
             platform,
             conversationId,
-            workflowRun.id
+            workflowRun.id,
+            cwd
           );
 
           // 5. Determine session — parallel or context:fresh → always fresh
