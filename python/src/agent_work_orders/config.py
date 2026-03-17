@@ -68,7 +68,7 @@ class AgentWorkOrdersConfig:
     FRONTEND_PORT_RANGE_END: int = int(os.getenv("FRONTEND_PORT_END", "9214"))
 
     # State management configuration
-    STATE_STORAGE_TYPE: str = os.getenv("STATE_STORAGE_TYPE", "memory")  # "memory" or "file"
+    STATE_STORAGE_TYPE: str = os.getenv("STATE_STORAGE_TYPE", "memory")  # "memory", "file", or "supabase"
     FILE_STATE_DIRECTORY: str = os.getenv("FILE_STATE_DIRECTORY", "agent-work-orders-state")
 
     @classmethod

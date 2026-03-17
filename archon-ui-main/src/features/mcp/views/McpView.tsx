@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { Loader, Server } from "lucide-react";
 import type React from "react";
 import { useStaggeredEntrance } from "../../../hooks/useStaggeredEntrance";
-import { ArchonSetupDownload, McpClientList, McpConfigSection, McpStatusBar } from "../components";
+import { AgentWorkOrdersSetupDownload, ArchonSetupDownload, McpClientList, McpConfigSection, McpStatusBar } from "../components";
 import { useMcpClients, useMcpConfig, useMcpSessionInfo, useMcpStatus } from "../hooks";
 
 export const McpView: React.FC = () => {
@@ -12,7 +12,7 @@ export const McpView: React.FC = () => {
   const { data: sessionInfo } = useMcpSessionInfo();
 
   // Staggered entrance animation
-  const isVisible = useStaggeredEntrance([1, 2, 3, 4], 0.15);
+  const isVisible = useStaggeredEntrance([1, 2, 3, 4, 5], 0.15);
 
   // Animation variants
   const containerVariants = {
@@ -89,6 +89,11 @@ export const McpView: React.FC = () => {
       {/* Connect a New Machine */}
       <motion.div variants={itemVariants}>
         <ArchonSetupDownload />
+      </motion.div>
+
+      {/* Agent Work Orders Setup */}
+      <motion.div variants={itemVariants}>
+        <AgentWorkOrdersSetupDownload />
       </motion.div>
 
       {/* Status Bar */}

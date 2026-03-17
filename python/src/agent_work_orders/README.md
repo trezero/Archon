@@ -83,6 +83,71 @@ docker compose --profile work-orders up -d
 docker compose up -d
 ```
 
+## Setup CLI
+
+An interactive setup utility that guides you through the full Agent Work Orders configuration.
+
+### Getting the Script
+
+**From the UI:** Download from the MCP Status Dashboard page → "Agent Work Orders Setup" card.
+
+**From the repo:** The script lives at `integrations/claude-code/setup/agentWorkOrderSetup.sh`.
+
+### Running
+
+```bash
+bash agentWorkOrderSetup.sh
+```
+
+The script automatically detects your current setup state and shows a status dashboard:
+
+```
+═══════════════════════════════════════════════
+  Agent Work Orders — Status Dashboard
+═══════════════════════════════════════════════
+
+  Dependencies
+  ✓ Docker              v27.5.1
+  ✓ Claude CLI          v1.0.12
+  ✓ GitHub CLI          v2.65.0
+  ✓ Python 3.12+        v3.12.3
+  ✓ uv                  v0.6.1
+  ✓ Git                 v2.43.0
+
+  Configuration
+  ✓ .env file                      exists
+  ✓ ENABLE_AGENT_WORK_ORDERS       true
+  ✓ STATE_STORAGE_TYPE             supabase
+  ✓ SUPABASE_URL                   set
+  ✓ SUPABASE_SERVICE_KEY           set
+  ✓ ANTHROPIC_API_KEY              set
+  ! GITHUB_PAT_TOKEN               not set
+
+  Services
+  ✓ Archon Server       http://localhost:8181 (healthy)
+  ✓ Archon MCP          http://localhost:8051 (healthy)
+  ✗ Work Orders         http://localhost:8053 (not responding)
+
+  Database
+  ✓ archon_agent_work_orders       exists
+  ✓ archon_agent_work_order_steps  exists
+  ✓ archon_configured_repositories exists
+
+═══════════════════════════════════════════════
+```
+
+### Menu Options
+
+| Option | Description |
+|--------|-------------|
+| **1) Configure environment** | Interactive `.env` setup for all agent work order variables |
+| **2) Check dependencies** | Verify all required tools are installed with install instructions |
+| **3) Run migrations** | Check and create missing database tables (via `psql` or SQL Editor guidance) |
+| **4) Start (Docker)** | Build and start via `docker compose --profile work-orders` |
+| **5) Start (Local)** | Start locally with `uv run uvicorn` on port 8053 |
+| **6) Verify setup** | Full dashboard + readiness assessment |
+| **7) Status dashboard** | Re-display the status dashboard |
+
 ## Configuration
 
 ### Environment Variables
