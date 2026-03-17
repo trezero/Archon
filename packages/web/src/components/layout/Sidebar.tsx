@@ -1,17 +1,7 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
-import { NavLink, useNavigate, Link } from 'react-router';
-import {
-  Plus,
-  Settings,
-  Loader2,
-  Workflow,
-  Hammer,
-  ChevronDown,
-  FolderGit2,
-  MessageSquarePlus,
-  LayoutDashboard,
-} from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate, Link } from 'react-router';
+import { Plus, Loader2, ChevronDown, FolderGit2, MessageSquarePlus } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
@@ -21,8 +11,7 @@ import { ProjectDetail } from '@/components/sidebar/ProjectDetail';
 import { AllConversationsView } from '@/components/sidebar/AllConversationsView';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useProject } from '@/contexts/ProjectContext';
-import { addCodebase, listWorkflowRuns } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { addCodebase } from '@/lib/api';
 
 const SIDEBAR_MIN = 240;
 const SIDEBAR_MAX = 400;
@@ -37,14 +26,6 @@ function getInitialWidth(): number {
   }
   return SIDEBAR_DEFAULT;
 }
-
-const navLinkClass = ({ isActive }: { isActive: boolean }): string =>
-  cn(
-    'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150',
-    isActive
-      ? 'border-l-2 border-primary bg-accent-muted text-primary'
-      : 'text-text-secondary hover:bg-surface-elevated hover:text-text-primary'
-  );
 
 export function Sidebar(): React.ReactElement {
   const [searchQuery, setSearchQuery] = useState('');
@@ -173,13 +154,6 @@ export function Sidebar(): React.ReactElement {
     setSelectedProjectId(null);
     navigate('/chat');
   }, [navigate, setSelectedProjectId]);
-
-  const { data: runningRuns } = useQuery({
-    queryKey: ['workflowRuns', { status: 'running' }],
-    queryFn: () => listWorkflowRuns({ status: 'running', limit: 1 }),
-    refetchInterval: 10_000,
-  });
-  const hasRunning = (runningRuns?.length ?? 0) > 0;
 
   useKeyboardShortcuts(shortcuts);
 
@@ -326,33 +300,6 @@ export function Sidebar(): React.ReactElement {
         </div>
       )}
 
-      <Separator className="bg-border" />
-
-      {/* Navigation */}
-      <nav className="flex flex-col gap-1 p-2">
-        <NavLink to="/" end className={navLinkClass}>
-          <LayoutDashboard className="h-4 w-4" />
-          Mission Control
-          {hasRunning && (
-            <span className="ml-auto flex h-2 w-2 rounded-full bg-primary animate-pulse" />
-          )}
-        </NavLink>
-        <NavLink to="/workflows" end className={navLinkClass}>
-          <Workflow className="h-4 w-4" />
-          Workflows
-        </NavLink>
-        <NavLink to="/workflows/builder" className={navLinkClass}>
-          <Hammer className="h-4 w-4" />
-          Workflow Builder
-          <span className="ml-auto rounded-full bg-accent-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
-            Beta
-          </span>
-        </NavLink>
-        <NavLink to="/settings" className={navLinkClass}>
-          <Settings className="h-4 w-4" />
-          Settings
-        </NavLink>
-      </nav>
       {/* Resize handle */}
       <div
         onMouseDown={handleMouseDown}
