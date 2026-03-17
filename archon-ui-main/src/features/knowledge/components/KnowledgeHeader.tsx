@@ -4,7 +4,7 @@
  */
 
 import { Asterisk, BookOpen, Briefcase, Grid, List, Plus, Search, Sparkles, Terminal } from "lucide-react";
-import { Button, Input, ToggleGroup, ToggleGroupItem } from "../../ui/primitives";
+import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, ToggleGroup, ToggleGroupItem } from "../../ui/primitives";
 import { cn } from "../../ui/primitives/styles";
 
 interface KnowledgeHeaderProps {
@@ -121,17 +121,17 @@ export const KnowledgeHeader: React.FC<KnowledgeHeaderProps> = ({
 
         {/* Project filter */}
         {projects.length > 0 && (
-          <select
-            value={projectFilter}
-            onChange={(e) => onProjectFilterChange(e.target.value)}
-            className="h-8 px-2 text-xs bg-white/5 border border-white/10 rounded text-gray-300 focus:outline-none focus:border-cyan-500/50"
-            aria-label="Filter by project"
-          >
-            <option value="">All Projects</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>{p.title}</option>
-            ))}
-          </select>
+          <Select value={projectFilter} onValueChange={onProjectFilterChange}>
+            <SelectTrigger color="cyan" className="h-8 min-w-[140px] px-3 text-xs text-gray-300" aria-label="Filter by project">
+              <SelectValue placeholder="All Projects" />
+            </SelectTrigger>
+            <SelectContent color="cyan">
+              <SelectItem value="all" color="cyan">All Projects</SelectItem>
+              {projects.map((p) => (
+                <SelectItem key={p.id} value={p.id} color="cyan">{p.title}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         )}
 
         {/* View Mode Toggle */}

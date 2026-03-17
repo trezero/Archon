@@ -25,6 +25,8 @@ def register_leaveoff_tools(mcp: FastMCP):
         component: str | None = None,
         references: list[str] | None = None,
         machine_id: str | None = None,
+        system_name: str | None = None,
+        git_clean: bool | None = None,
         last_session_id: str | None = None,
         metadata: dict | None = None,
         project_path: str | None = None,
@@ -50,6 +52,8 @@ def register_leaveoff_tools(mcp: FastMCP):
             component: (update only) The component or area of the codebase being worked on.
             references: (update only) List of relevant file paths, URLs, or identifiers.
             machine_id: (update only) Identifier for the machine where work was performed.
+            system_name: (update only) Human-readable name of the machine (e.g. "MacBookPro_M1").
+            git_clean: (update only) Whether all changes are committed. False means uncommitted changes exist.
             last_session_id: (update only) The session ID from the ending session.
             metadata: (update only) Additional key-value data for context.
             project_path: (update only) Filesystem path to the project repository.
@@ -79,6 +83,10 @@ def register_leaveoff_tools(mcp: FastMCP):
                         body["references"] = references
                     if machine_id is not None:
                         body["machine_id"] = machine_id
+                    if system_name is not None:
+                        body["system_name"] = system_name
+                    if git_clean is not None:
+                        body["git_clean"] = git_clean
                     if last_session_id is not None:
                         body["last_session_id"] = last_session_id
                     if metadata is not None:

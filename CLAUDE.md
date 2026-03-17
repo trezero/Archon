@@ -70,13 +70,17 @@ When a process should continue despite failures, it must **skip the failed item 
 After completing any coding task that adds, modifies, or removes functionality, you MUST
 update the LeaveOff Point before moving to the next task:
 
-1. Call `manage_leaveoff_point(action="update")` with:
+1. Run `git status --porcelain` to check for uncommitted changes.
+2. Call `manage_leaveoff_point(action="update")` with:
    - `content`: What was accomplished in this task (be specific about files changed and why)
    - `component`: The architectural module or feature area (e.g., "Authentication Module")
    - `next_steps`: Concrete, actionable items for the next session (not vague — include file paths)
    - `references`: PRPs, design docs, or key files that informed this work
-
-2. This is NOT optional. Skipping this step means the next session starts with no context.
+   - `system_name`: Read from `.claude/archon-state.json` field "system_name", or fall back to hostname
+   - `git_clean`: `true` if `git status --porcelain` output is empty, `false` otherwise
+3. If `git_clean` is `false`, tell the user: "There are uncommitted changes. Consider
+   committing your work to GitHub before ending this session."
+4. This is NOT optional. Skipping this step means the next session starts with no context.
 
 ### Session Resource Management (The 90% Rule)
 When you observe any of these signals, you are approaching resource limits:
@@ -86,12 +90,15 @@ When you observe any of these signals, you are approaching resource limits:
 
 Upon detecting these signals:
 1. **Stop active coding immediately** — do not start new tasks
-2. **Generate a final LeaveOff Point** via `manage_leaveoff_point(action="update")` with
-   comprehensive next_steps covering all remaining planned work
-3. **Advise the user**: "This session has reached its resource limit. The LeaveOff Point
+2. Run `git status --porcelain` to check for uncommitted changes
+3. **Generate a final LeaveOff Point** via `manage_leaveoff_point(action="update")` with
+   comprehensive next_steps covering all remaining planned work, including `system_name`
+   and `git_clean`
+4. If there are uncommitted changes, **advise the user to commit** before ending the session
+5. **Advise the user**: "This session has reached its resource limit. The LeaveOff Point
    has been saved. Please start a new session to continue — context will be restored
    automatically."
-4. **Do not continue coding** after generating the final LeaveOff Point
+6. **Do not continue coding** after generating the final LeaveOff Point
 
 ### Session Start
 At the beginning of every session, the LeaveOff Point is automatically loaded via the

@@ -431,6 +431,20 @@ async def sync_system(project_id: str, request: SyncSystemRequest):
             system_extensions=system_extensions,
         )
 
+        # Persist "installed" status for extensions that are in sync locally
+        archon_by_name: dict[str, dict[str, Any]] = {e["name"]: e for e in archon_extensions}
+        for name in report["in_sync"]:
+            ext = archon_by_name.get(name)
+            if ext:
+                sync_service.set_install_status(
+                    system_id=system_id,
+                    extension_id=ext["id"],
+                    project_id=project_id,
+                    status="installed",
+                    installed_content_hash=ext.get("content_hash"),
+                    installed_version=ext.get("current_version"),
+                )
+
         logfire.info(
             f"Sync complete | project_id={project_id} | system_id={system_id} | "
             f"in_sync={len(report['in_sync'])} | pending_install={len(report['pending_install'])} | "

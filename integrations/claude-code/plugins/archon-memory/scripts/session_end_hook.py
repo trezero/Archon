@@ -42,6 +42,8 @@ def _materialize_leaveoff(leaveoff: dict) -> None:
     component = leaveoff.get("component", "")
     updated_at = leaveoff.get("updated_at", "")
     machine_id = leaveoff.get("machine_id", "")
+    system_name = leaveoff.get("system_name", "")
+    git_clean = leaveoff.get("git_clean")
     content = leaveoff.get("content", "")
     next_steps = leaveoff.get("next_steps") or []
     references = leaveoff.get("references") or []
@@ -52,6 +54,9 @@ def _materialize_leaveoff(leaveoff: dict) -> None:
     lines.append(f"component: {component}")
     lines.append(f"updated_at: {updated_at}")
     lines.append(f"machine_id: {machine_id}")
+    lines.append(f"system_name: {system_name}")
+    if git_clean is not None:
+        lines.append(f"git_clean: {str(git_clean).lower()}")
     lines.append("---")
     lines.append("")
     lines.append(content)

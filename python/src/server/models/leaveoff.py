@@ -9,6 +9,8 @@ class UpsertLeaveOffRequest(BaseModel):
     component: str | None = None
     references: list[str] | None = None
     machine_id: str | None = None
+    system_name: str | None = None
+    git_clean: bool | None = None
     last_session_id: str | None = None
     metadata: dict | None = None
     project_path: str | None = None

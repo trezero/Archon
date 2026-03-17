@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul 2>&1
 setlocal EnableDelayedExpansion
 
 set "ARCHON_API_URL={{ARCHON_API_URL}}"
@@ -278,12 +279,12 @@ powershell -Command ^
   "$pyPath = (Get-Content '%LCPY_FILE%').Trim(); " ^
   "$scPath = (Get-Content '%LCSC_FILE%').Trim(); " ^
   "if (Test-Path $settingsPath) { $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json } else { $settings = @{} }; " ^
-  "if (-not $settings.hooks) { $settings | Add-Member -Force NotePropertyName 'hooks' -NotePropertyValue @{} }; " ^
+  "if (-not $settings.hooks) { $settings | Add-Member -Force -NotePropertyName 'hooks' -NotePropertyValue @{} }; " ^
   "$hooks = $settings.hooks; " ^
   "$ssHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('\"' + $pyPath + '\" \"' + $scPath + '/session_start_hook.py\"'); timeout=10 }) }); " ^
   "$stopHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('\"' + $pyPath + '\" \"' + $scPath + '/session_end_hook.py\"'); timeout=30 }) }); " ^
-  "$hooks | Add-Member -Force NotePropertyName 'SessionStart' -NotePropertyValue $ssHook; " ^
-  "$hooks | Add-Member -Force NotePropertyName 'Stop' -NotePropertyValue $stopHook; " ^
+  "$hooks | Add-Member -Force -NotePropertyName 'SessionStart' -NotePropertyValue $ssHook; " ^
+  "$hooks | Add-Member -Force -NotePropertyName 'Stop' -NotePropertyValue $stopHook; " ^
   "$settings | ConvertTo-Json -Depth 10 | Set-Content $settingsPath"
 
 echo       ^✓ SessionStart + Stop hooks registered globally
@@ -299,10 +300,10 @@ powershell -Command ^
   "$pyPath = (Get-Content '%PTUPY_FILE%').Trim(); " ^
   "$scPath = (Get-Content '%PTUSC_FILE%').Trim(); " ^
   "if (Test-Path $settingsPath) { $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json } else { $settings = @{} }; " ^
-  "if (-not $settings.hooks) { $settings | Add-Member -Force NotePropertyName 'hooks' -NotePropertyValue @{} }; " ^
+  "if (-not $settings.hooks) { $settings | Add-Member -Force -NotePropertyName 'hooks' -NotePropertyValue @{} }; " ^
   "$hooks = $settings.hooks; " ^
   "$ptuHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('\"' + $pyPath + '\" \"' + $scPath + '/observation_hook.py\"'); timeout=5 }) }); " ^
-  "$hooks | Add-Member -Force NotePropertyName 'PostToolUse' -NotePropertyValue $ptuHook; " ^
+  "$hooks | Add-Member -Force -NotePropertyName 'PostToolUse' -NotePropertyValue $ptuHook; " ^
   "$settings | ConvertTo-Json -Depth 10 | Set-Content $settingsPath"
 
 del "%LCPY_FILE%" "%LCSC_FILE%" "%PTUPY_FILE%" "%PTUSC_FILE%" 2>nul
@@ -382,8 +383,8 @@ powershell -Command ^
   "$sysName = (Get-Content '%SYSNAME_FILE%').Trim(); " ^
   "$projId = (Get-Content '%PROJID_FILE%').Trim(); " ^
   "$state = if (Test-Path '.claude\archon-state.json') { Get-Content '.claude\archon-state.json' | ConvertFrom-Json } else { @{} }; " ^
-  "$state | Add-Member -Force NotePropertyName 'system_name' -NotePropertyValue $sysName; " ^
-  "if ($projId) { $state | Add-Member -Force NotePropertyName 'archon_project_id' -NotePropertyValue $projId }; " ^
+  "$state | Add-Member -Force -NotePropertyName 'system_name' -NotePropertyValue $sysName; " ^
+  "if ($projId) { $state | Add-Member -Force -NotePropertyName 'archon_project_id' -NotePropertyValue $projId }; " ^
   "$state | ConvertTo-Json | Set-Content '.claude\archon-state.json'"
 
 :: ── Done ─────────────────────────────────────────────────────────────────

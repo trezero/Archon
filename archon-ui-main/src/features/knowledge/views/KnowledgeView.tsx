@@ -21,7 +21,7 @@ export const KnowledgeView = () => {
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "technical" | "business">("all");
-  const [projectFilter, setProjectFilter] = useState("");
+  const [projectFilter, setProjectFilter] = useState("all");
   const [showMaterialized, setShowMaterialized] = useState(false);
 
   // Projects query for filter dropdown
@@ -51,7 +51,7 @@ export const KnowledgeView = () => {
       f.knowledge_type = typeFilter;
     }
 
-    if (projectFilter) {
+    if (projectFilter && projectFilter !== "all") {
       f.project_id = projectFilter;
     }
 
@@ -171,7 +171,7 @@ export const KnowledgeView = () => {
 
         {/* Toggle between Knowledge Items and Materialized list */}
         {showMaterialized ? (
-          <MaterializationList projectId={projectFilter || undefined} />
+          <MaterializationList projectId={projectFilter !== "all" ? projectFilter : undefined} />
         ) : (
           <KnowledgeList
             items={knowledgeItems}

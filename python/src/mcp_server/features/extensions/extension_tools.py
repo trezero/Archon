@@ -537,9 +537,18 @@ async def _handle_bootstrap(
     # Register system with project when both fingerprint and project_id are provided
     system = None
     if system_fingerprint and project_id:
+        # The setup script downloads ALL registry extensions via tarball before
+        # bootstrap runs, so report them as locally installed so the sync endpoint
+        # can mark them as "installed" in archon_system_extensions.
+        local_extensions = [
+            {"name": e.get("name", ""), "content_hash": e.get("content_hash", "")}
+            for e in raw_extensions
+            if e.get("name") and e.get("content_hash")
+        ]
+
         payload: dict = {
             "fingerprint": system_fingerprint,
-            "local_extensions": [],
+            "local_extensions": local_extensions,
         }
         if system_name:
             payload["system_name"] = system_name

@@ -52,6 +52,8 @@ def test_upsert_leaveoff():
             component="auth",
             references=["/src/auth.py"],
             machine_id="machine-abc",
+            system_name=None,
+            git_clean=None,
             last_session_id="sess-1",
             metadata=None,
             project_path=None,

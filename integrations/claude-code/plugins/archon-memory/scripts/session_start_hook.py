@@ -140,8 +140,9 @@ Until configured, smart_search / smart_outline / smart_unfold tools are still av
 </archon-setup-needed>"""
 
 
-def _leaveoff_protocol_section(project_id: str) -> str:
+def _leaveoff_protocol_section(project_id: str, system_name: str = "") -> str:
     """Return the LeaveOff Point Protocol instructions for injection into the system prompt."""
+    system_line = f'   - `system_name`: `{system_name}`' if system_name else '   - `system_name`: Read from `.claude/archon-state.json` field "system_name", or fall back to hostname'
     return f"""
 ## LeaveOff Point Protocol
 
@@ -149,14 +150,18 @@ def _leaveoff_protocol_section(project_id: str) -> str:
 After completing any coding task that adds, modifies, or removes functionality, you MUST
 update the LeaveOff Point before moving to the next task:
 
-1. Call `manage_leaveoff_point(action="update")` with:
+1. Run `git status --porcelain` to check for uncommitted changes.
+2. Call `manage_leaveoff_point(action="update")` with:
    - `project_id`: `{project_id}`
    - `content`: What was accomplished in this task (be specific about files changed and why)
    - `component`: The architectural module or feature area being worked on
    - `next_steps`: Concrete, actionable items for the next session (include file paths, not vague descriptions)
    - `references`: Key files that were changed or informed this work
-
-2. This is NOT optional. Skipping this step means the next session starts with no context.
+{system_line}
+   - `git_clean`: `true` if `git status --porcelain` output is empty, `false` otherwise
+3. If `git_clean` is `false`, tell the user: "There are uncommitted changes. Consider
+   committing your work to GitHub before ending this session."
+4. This is NOT optional. Skipping this step means the next session starts with no context.
 
 ### Session Resource Management (The 90% Rule)
 When you observe any of these signals, you are approaching resource limits:
@@ -166,11 +171,14 @@ When you observe any of these signals, you are approaching resource limits:
 
 Upon detecting these signals:
 1. Stop active coding immediately
-2. Generate a final LeaveOff Point via `manage_leaveoff_point(action="update")` with
-   comprehensive next_steps covering all remaining planned work
-3. Advise the user: "This session has reached its resource limit. The LeaveOff Point
+2. Run `git status --porcelain` to check for uncommitted changes
+3. Generate a final LeaveOff Point via `manage_leaveoff_point(action="update")` with
+   comprehensive next_steps covering all remaining planned work, including `system_name`
+   and `git_clean`
+4. If there are uncommitted changes, advise the user to commit before ending the session
+5. Advise the user: "This session has reached its resource limit. The LeaveOff Point
    has been saved. Please start a new session to continue."
-4. Do not continue coding after generating the final LeaveOff Point"""
+6. Do not continue coding after generating the final LeaveOff Point"""
 
 
 def _format_context(
@@ -179,6 +187,7 @@ def _format_context(
     knowledge: dict,
     leaveoff: dict | None = None,
     project_id: str | None = None,
+    system_name: str = "",
 ) -> str:
     parts: list[str] = ["<archon-context>"]
 
@@ -189,10 +198,17 @@ def _format_context(
         content = leaveoff.get("content", "")
         next_steps = leaveoff.get("next_steps", [])
         references = leaveoff.get("references", [])
+        generated_by = leaveoff.get("system_name", "")
+        git_clean = leaveoff.get("git_clean")
 
         parts.append("\n## LeaveOff Point (Last Session State)")
         parts.append(f"**Component:** {component}")
         parts.append(f"**Updated:** {updated}")
+        if generated_by:
+            parts.append(f"**Generated on:** {generated_by}")
+        if git_clean is not None:
+            git_label = "All changes committed" if git_clean else "UNCOMMITTED CHANGES present"
+            parts.append(f"**Git status:** {git_label}")
         if content:
             parts.append(f"\n{content}")
         if next_steps:
@@ -230,10 +246,22 @@ def _format_context(
 
     # Inject LeaveOff Point Protocol so Claude knows to update it after coding tasks
     if project_id:
-        parts.append(_leaveoff_protocol_section(project_id))
+        parts.append(_leaveoff_protocol_section(project_id, system_name=system_name))
 
     parts.append("\n</archon-context>")
     return "\n".join(parts)
+
+
+def _load_system_name() -> str:
+    """Load the system_name from archon-state.json, falling back to empty string."""
+    state_path = Path.cwd() / ".claude" / "archon-state.json"
+    if state_path.is_file():
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            return state.get("system_name", "")
+        except (json.JSONDecodeError, OSError):
+            pass
+    return ""
 
 
 async def main() -> None:
@@ -242,6 +270,8 @@ async def main() -> None:
     if not client.is_configured():
         print(_setup_message())
         return
+
+    system_name = _load_system_name()
 
     # Auto-update plugin if a newer version is available on the server
     try:
@@ -294,7 +324,7 @@ async def main() -> None:
     if isinstance(leaveoff, Exception):
         leaveoff = None
 
-    print(_format_context(sessions, tasks, knowledge, leaveoff, project_id=client.project_id))  # type: ignore[arg-type]
+    print(_format_context(sessions, tasks, knowledge, leaveoff, project_id=client.project_id, system_name=system_name))  # type: ignore[arg-type]
 
     # Postman environment sync (API mode only, best-effort)
     try:

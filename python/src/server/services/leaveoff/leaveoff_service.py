@@ -42,6 +42,8 @@ class LeaveOffService:
             "component": record.get("component"),
             "updated_at": record.get("updated_at"),
             "machine_id": record.get("machine_id"),
+            "system_name": record.get("system_name"),
+            "git_clean": record.get("git_clean"),
         }
 
         lines: list[str] = []
@@ -80,6 +82,8 @@ class LeaveOffService:
         component: str | None = None,
         references: list[str] | None = None,
         machine_id: str | None = None,
+        system_name: str | None = None,
+        git_clean: bool | None = None,
         last_session_id: str | None = None,
         metadata: dict | None = None,
         project_path: str | None = None,
@@ -114,6 +118,8 @@ class LeaveOffService:
             "next_steps": next_steps or [],
             "references": references or [],
             "machine_id": machine_id,
+            "system_name": system_name,
+            "git_clean": git_clean,
             "last_session_id": last_session_id,
             "metadata": metadata or {},
             "updated_at": now,
