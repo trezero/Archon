@@ -419,8 +419,17 @@ export function toSafeConfig(config: MergedConfig): SafeConfig {
         webSearchMode: config.assistants.codex.webSearchMode,
       },
     },
-    streaming: { ...config.streaming },
+    streaming: {
+      telegram: config.streaming.telegram,
+      discord: config.streaming.discord,
+      slack: config.streaming.slack,
+      github: config.streaming.github,
+    },
     concurrency: { maxConversations: config.concurrency.maxConversations },
-    defaults: { ...config.defaults },
+    defaults: {
+      copyDefaults: config.defaults.copyDefaults,
+      loadDefaultCommands: config.defaults.loadDefaultCommands,
+      loadDefaultWorkflows: config.defaults.loadDefaultWorkflows,
+    },
   };
 }

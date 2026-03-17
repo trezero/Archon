@@ -370,7 +370,7 @@ worktree:
       expect(safe).not.toHaveProperty('paths');
     });
 
-    test('strips commands.folder from MergedConfig', async () => {
+    test('strips entire commands object from MergedConfig', async () => {
       mockReadConfigFile.mockResolvedValue('');
       const config = await loadConfig();
       const safe = toSafeConfig(config);
@@ -398,6 +398,10 @@ assistants:
       expect(safe.streaming).toBeDefined();
       expect(safe.concurrency).toBeDefined();
       expect(safe.defaults).toBeDefined();
+      expect(safe.assistants).toBeDefined();
+      expect(safe.assistants.claude).toBeDefined();
+      expect(safe.assistants.codex).toBeDefined();
+      expect(safe.assistants.codex).not.toHaveProperty('additionalDirectories');
     });
   });
 });
