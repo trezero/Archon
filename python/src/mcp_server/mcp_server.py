@@ -656,6 +656,23 @@ def register_modules():
         logger.error(f"✗ Failed to register postman tools: {e}")
         logger.error(traceback.format_exc())
 
+    # Scanner Tools (Local Project Scanner)
+    try:
+        from src.mcp_server.features.scanner import register_scanner_tools
+
+        register_scanner_tools(mcp)
+        modules_registered += 1
+        logger.info("✓ Scanner module registered (HTTP-based)")
+    except ImportError as e:
+        logger.warning(f"⚠ Scanner module not available (optional): {e}")
+    except (SyntaxError, NameError, AttributeError) as e:
+        logger.error(f"✗ Code error in scanner tools - MUST FIX: {e}")
+        logger.error(traceback.format_exc())
+        raise
+    except Exception as e:
+        logger.error(f"✗ Failed to register scanner tools: {e}")
+        logger.error(traceback.format_exc())
+
     logger.info(f"📦 Total modules registered: {modules_registered}")
 
     if modules_registered == 0:

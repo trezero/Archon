@@ -31,6 +31,8 @@ services:
       - AGENT_WORK_ORDERS_PORT=${AGENT_WORK_ORDERS_PORT:-8053}
       - AGENTS_ENABLED=${AGENTS_ENABLED:-false}
       - ARCHON_HOST=${HOST:-localhost}
+      - SCANNER_PROJECTS_ROOT=/projects
+      - SCANNER_ENABLED=${SCANNER_ENABLED:-false}
     networks:
       - app-network
       - default  # Connects to supabase_default network
@@ -46,6 +48,7 @@ services:
       - ./migration:/app/migration # Mount migration files for version tracking
       - ./integrations:/app/integrations # Bundled skills for registry seeding
       - archon-server-data:/app/data # Persistent data storage
+      - ${PROJECTS_DIRECTORY:-~/projects}:/projects:rw   # Scanner mount
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command:
