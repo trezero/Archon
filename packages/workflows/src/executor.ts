@@ -13,7 +13,13 @@ import type { WorkflowDeps } from './deps';
 import { formatToolCall } from './utils/tool-formatter';
 import * as archonPaths from '@archon/paths';
 import { createLogger } from '@archon/paths';
-import { commitAllChanges, execFileAsync, toWorktreePath } from '@archon/git';
+import {
+  commitAllChanges,
+  execFileAsync,
+  toWorktreePath,
+  getDefaultBranch,
+  toRepoPath,
+} from '@archon/git';
 import type {
   WorkflowDefinition,
   WorkflowRun,
@@ -1796,9 +1802,24 @@ export async function executeWorkflow(
   const config = await deps.loadConfig(cwd);
   const configuredCommandFolder = config.commands.folder;
 
-  // Resolved lazily: workflows that don't reference $BASE_BRANCH work without config.
-  // If a step does reference $BASE_BRANCH and config.baseBranch is unset, substituteWorkflowVariables throws.
-  const baseBranch = config.baseBranch ?? '';
+  // Auto-detect base branch when not configured. Config takes priority.
+  // If detection fails, leave empty — substituteWorkflowVariables throws only if $BASE_BRANCH is referenced.
+  let baseBranch: string;
+  if (config.baseBranch) {
+    baseBranch = config.baseBranch;
+  } else {
+    try {
+      baseBranch = await getDefaultBranch(toRepoPath(cwd));
+    } catch (error) {
+      // Intentional fallback: auto-detection failure is non-fatal.
+      // substituteWorkflowVariables throws if $BASE_BRANCH is actually referenced in a prompt.
+      getLog().warn(
+        { err: error as Error, errorType: (error as Error).constructor.name, cwd },
+        'workflow.base_branch_auto_detect_failed'
+      );
+      baseBranch = '';
+    }
+  }
 
   // Resolve provider and model once (used by all steps/iterations)
   // When workflow sets a model but not a provider, infer provider from the model.

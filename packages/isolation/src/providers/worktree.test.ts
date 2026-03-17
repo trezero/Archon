@@ -85,7 +85,7 @@ describe('WorktreeProvider', () => {
         workflowType: 'issue',
         identifier: '42',
       };
-      expect(provider.generateBranchName(request)).toBe('issue-42');
+      expect(provider.generateBranchName(request)).toBe('archon/issue-42');
     });
 
     test('generates actual branch name for same-repo PR workflows', () => {
@@ -109,7 +109,7 @@ describe('WorktreeProvider', () => {
         prBranch: 'feature/auth',
         isForkPR: true,
       };
-      expect(provider.generateBranchName(request)).toBe('pr-123-review');
+      expect(provider.generateBranchName(request)).toBe('archon/pr-123-review');
     });
 
     test('generates review-N for review workflows', () => {
@@ -119,7 +119,7 @@ describe('WorktreeProvider', () => {
         workflowType: 'review',
         identifier: '456',
       };
-      expect(provider.generateBranchName(request)).toBe('review-456');
+      expect(provider.generateBranchName(request)).toBe('archon/review-456');
     });
 
     test('generates thread-{hash} for thread workflows', () => {
@@ -130,7 +130,7 @@ describe('WorktreeProvider', () => {
         identifier: 'C123:1234567890.123456',
       };
       const name = provider.generateBranchName(request);
-      expect(name).toMatch(/^thread-[a-f0-9]{8}$/);
+      expect(name).toMatch(/^archon\/thread-[a-f0-9]{8}$/);
     });
 
     test('generates consistent hash for same identifier', () => {
@@ -168,7 +168,7 @@ describe('WorktreeProvider', () => {
         workflowType: 'task',
         identifier: 'add-dark-mode',
       };
-      expect(provider.generateBranchName(request)).toBe('task-add-dark-mode');
+      expect(provider.generateBranchName(request)).toBe('archon/task-add-dark-mode');
     });
 
     test('slugifies task identifiers properly', () => {
@@ -178,7 +178,7 @@ describe('WorktreeProvider', () => {
         workflowType: 'task',
         identifier: 'Add Dark Mode!!!',
       };
-      expect(provider.generateBranchName(request)).toBe('task-add-dark-mode');
+      expect(provider.generateBranchName(request)).toBe('archon/task-add-dark-mode');
     });
   });
 
@@ -194,7 +194,7 @@ describe('WorktreeProvider', () => {
       const env = await provider.create(baseRequest);
 
       expect(env.provider).toBe('worktree');
-      expect(env.branchName).toBe('issue-42');
+      expect(env.branchName).toBe('archon/issue-42');
       expect(env.workingPath).toContain('issue-42');
       expect(env.status).toBe('active');
 
@@ -208,7 +208,7 @@ describe('WorktreeProvider', () => {
           'add',
           expect.any(String),
           '-b',
-          'issue-42',
+          'archon/issue-42',
           'origin/main',
         ]),
         expect.any(Object)
@@ -251,7 +251,7 @@ describe('WorktreeProvider', () => {
           'add',
           expect.any(String),
           '-b',
-          'task-test-adapters',
+          'archon/task-test-adapters',
           'feature/extract-adapters',
         ]),
         expect.any(Object)
@@ -262,7 +262,8 @@ describe('WorktreeProvider', () => {
       const alreadyExistsError = new Error('fatal: branch already exists') as Error & {
         stderr: string;
       };
-      alreadyExistsError.stderr = "fatal: a branch named 'task-test-adapters' already exists";
+      alreadyExistsError.stderr =
+        "fatal: a branch named 'archon/task-test-adapters' already exists";
 
       // First call (worktree add -b) fails with "already exists"
       execSpy.mockRejectedValueOnce(alreadyExistsError);
@@ -275,7 +276,7 @@ describe('WorktreeProvider', () => {
       };
 
       await expect(provider.create(request)).rejects.toThrow(
-        'Branch "task-test-adapters" already exists. Cannot create it from "feature/extract-adapters".'
+        'Branch "archon/task-test-adapters" already exists. Cannot create it from "feature/extract-adapters".'
       );
     });
 
@@ -283,7 +284,8 @@ describe('WorktreeProvider', () => {
       const alreadyExistsError = new Error('fatal: branch already exists') as Error & {
         stderr: string;
       };
-      alreadyExistsError.stderr = "fatal: a branch named 'task-test-adapters' already exists";
+      alreadyExistsError.stderr =
+        "fatal: a branch named 'archon/task-test-adapters' already exists";
 
       // First call fails, second succeeds (fallback)
       execSpy.mockRejectedValueOnce(alreadyExistsError);
@@ -300,7 +302,14 @@ describe('WorktreeProvider', () => {
       // Fallback call should not include a start-point
       expect(execSpy).toHaveBeenCalledWith(
         'git',
-        ['-C', '/workspace/repo', 'worktree', 'add', expect.any(String), 'task-test-adapters'],
+        [
+          '-C',
+          '/workspace/repo',
+          'worktree',
+          'add',
+          expect.any(String),
+          'archon/task-test-adapters',
+        ],
         expect.any(Object)
       );
     });
@@ -517,10 +526,12 @@ describe('WorktreeProvider', () => {
         callCount++;
         // First worktree add call fails (branch exists)
         if (callCount === 1 && args.includes('-b')) {
-          const error = new Error('fatal: A branch named issue-42 already exists.') as Error & {
+          const error = new Error(
+            'fatal: A branch named archon/issue-42 already exists.'
+          ) as Error & {
             stderr?: string;
           };
-          error.stderr = 'fatal: A branch named issue-42 already exists.';
+          error.stderr = 'fatal: A branch named archon/issue-42 already exists.';
           throw error;
         }
         return { stdout: '', stderr: '' };
@@ -538,7 +549,7 @@ describe('WorktreeProvider', () => {
           'add',
           expect.any(String),
           '-b',
-          'issue-42',
+          'archon/issue-42',
         ]),
         expect.any(Object)
       );
@@ -552,7 +563,7 @@ describe('WorktreeProvider', () => {
           'worktree',
           'add',
           expect.any(String),
-          'issue-42',
+          'archon/issue-42',
         ]),
         expect.any(Object)
       );
@@ -1791,22 +1802,25 @@ describe('WorktreeProvider', () => {
           'add',
           expect.any(String),
           '-b',
-          'issue-42',
+          'archon/issue-42',
           'origin/develop',
         ]),
         expect.any(Object)
       );
     });
 
-    test('throws when no baseBranch configured and no fromBranch', async () => {
+    test('auto-detects base branch when no baseBranch configured and no fromBranch', async () => {
       worktreeExistsSpy.mockResolvedValue(false);
       const configLoader: RepoConfigLoader = async () => ({});
       provider = new WorktreeProvider(configLoader);
 
-      await expect(provider.create(baseRequest)).rejects.toThrow('No base branch configured');
+      await provider.create(baseRequest);
+
+      // syncWorkspace called with undefined → triggers auto-detect via getDefaultBranch
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', undefined);
     });
 
-    test('uses fromBranch for sync when no baseBranch configured', async () => {
+    test('auto-detects base branch when fromBranch is set but no baseBranch configured', async () => {
       worktreeExistsSpy.mockResolvedValue(false);
       const configLoader: RepoConfigLoader = async () => ({});
       provider = new WorktreeProvider(configLoader);
@@ -1820,7 +1834,8 @@ describe('WorktreeProvider', () => {
 
       await provider.create(request);
 
-      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', 'dev');
+      // fromBranch is the start-point for the branch, not for sync — sync auto-detects
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', undefined);
     });
 
     test('uses configuredBaseBranch over fromBranch when both are set', async () => {
@@ -1840,18 +1855,21 @@ describe('WorktreeProvider', () => {
       expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', 'main');
     });
 
-    test('throws when fromBranch is set but workflowType is not task and no baseBranch', async () => {
+    test('auto-detects when fromBranch is set but workflowType is not task and no baseBranch', async () => {
       worktreeExistsSpy.mockResolvedValue(false);
       const configLoader: RepoConfigLoader = async () => ({});
       provider = new WorktreeProvider(configLoader);
 
-      // baseRequest has workflowType 'issue', not 'task' — fromBranch is ignored
+      // baseRequest has workflowType 'issue', not 'task' — fromBranch is ignored, auto-detects
       const request: IsolationRequest = {
         ...baseRequest,
         fromBranch: 'dev',
       };
 
-      await expect(provider.create(request)).rejects.toThrow('No base branch configured');
+      await provider.create(request);
+
+      // fromBranch is ignored for non-task types, so syncWorkspace gets undefined → auto-detect
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', undefined);
     });
 
     test('passes configured base branch to workspace sync when provided', async () => {

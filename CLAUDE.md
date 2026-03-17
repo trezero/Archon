@@ -171,10 +171,13 @@ bun run cli workflow run assist "What does the orchestrator do?"
 # Run in a specific directory
 bun run cli workflow run plan --cwd /path/to/repo "Add dark mode"
 
-# Isolation: Create/reuse worktree for a branch
+# Default: auto-creates worktree with generated branch name (isolation by default)
+bun run cli workflow run implement "Add auth"
+
+# Explicit branch name for the worktree
 bun run cli workflow run implement --branch feature-auth "Add auth"
 
-# Isolation: Run on branch directly without worktree
+# Opt out of isolation (run in live checkout)
 bun run cli workflow run quick-fix --no-worktree "Fix typo"
 
 # List active worktrees/environments
@@ -585,7 +588,7 @@ async function createSession(conversationId: string, codebaseId: string) {
 - `$IMPLEMENTATION_SUMMARY` - Previous execution summary
 - `$ARTIFACTS_DIR` - External artifacts directory for the current workflow run (pre-created by executor)
 - `$WORKFLOW_ID` - The workflow run ID
-- `$BASE_BRANCH` - Base branch from config (`worktree.baseBranch`); required when referenced — fails if not set and no `--from` flag
+- `$BASE_BRANCH` - Base branch; auto-detected from git when `worktree.baseBranch` is not set; fails only if referenced in a prompt and auto-detection also fails
 
 **Command Types:**
 

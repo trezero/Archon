@@ -34,16 +34,28 @@ bun run cli version
 3. Smart Claude auth default: if no `CLAUDE_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, sets `CLAUDE_USE_GLOBAL_AUTH=true`
 4. Imports all commands AFTER dotenv setup
 
-## WorkflowRunOptions Discriminated Union
+## WorkflowRunOptions Interface
 
 ```typescript
-type WorkflowRunOptions =
-  | { branchName?: undefined; noWorktree?: undefined; resume?: boolean }  // No isolation
-  | { branchName: string; fromBranch?: string; noWorktree?: boolean; resume?: undefined }; // With branch
+interface WorkflowRunOptions {
+  branchName?: string;   // Explicit branch name for the worktree
+  fromBranch?: string;   // Override base branch (start-point for worktree)
+  noWorktree?: boolean;  // Opt out of isolation, run in live checkout
+  resume?: boolean;      // Reuse worktree from last failed run
+}
 ```
 
+**Default behavior**: Creates worktree with auto-generated branch name (`archon/task-{workflow}-{timestamp}`).
+
+**Mutually exclusive** (enforced in both `cli.ts` pre-flight and `workflowRunCommand`):
+- `--branch` + `--no-worktree`
+- `--from` + `--no-worktree`
+- `--resume` + `--branch`
+
 - `--branch feature-auth` → creates/reuses worktree for that branch
-- `--no-worktree` → checks out branch directly without worktree (only with `--branch`)
+- (no flags) → creates worktree with auto-generated `archon/task-*` branch (isolation by default)
+- `--no-worktree` → runs directly in live checkout (opt-out of isolation)
+- `--from dev` → overrides the start-point for new worktree (works with or without `--branch`)
 - `--resume` → resumes last run for this conversation (mutually exclusive with `--branch`)
 
 ## Git Repo Requirement

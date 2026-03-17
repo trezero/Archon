@@ -206,7 +206,7 @@ prompt: |
   - $WORKFLOW_ID - unique run identifier
   - $USER_MESSAGE - original trigger
   - $ARGUMENTS - same as $USER_MESSAGE
-  - $BASE_BRANCH - base branch (from worktree.baseBranch in config; required)
+  - $BASE_BRANCH - base branch (auto-detected from git; optional config: worktree.baseBranch)
   - $CONTEXT - GitHub issue/PR context (if available)
 
   When done, output: <promise>COMPLETE</promise>
@@ -740,7 +740,7 @@ All workflow types (steps, loop, nodes) support these variables in prompts and c
 | `$USER_MESSAGE` | Original message that triggered workflow |
 | `$ARGUMENTS` | Same as `$USER_MESSAGE` |
 | `$ARTIFACTS_DIR` | Pre-created artifacts directory for this workflow run |
-| `$BASE_BRANCH` | Base branch from `worktree.baseBranch` in config (required) |
+| `$BASE_BRANCH` | Base branch; auto-detected from git when `worktree.baseBranch` is not set. Fails only if referenced and detection fails |
 | `$CONTEXT` | GitHub issue/PR context (if available) |
 | `$EXTERNAL_CONTEXT` | Same as `$CONTEXT` |
 | `$ISSUE_CONTEXT` | Same as `$CONTEXT` |

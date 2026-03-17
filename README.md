@@ -1131,7 +1131,7 @@ EOF
 - `$ARGUMENTS` - All arguments as a single string
 - `$PLAN` - Previous plan from session metadata
 - `$IMPLEMENTATION_SUMMARY` - Previous execution summary
-- `$BASE_BRANCH` - Base branch from `worktree.baseBranch` in config (required; or pass `--from` at CLI)
+- `$BASE_BRANCH` - Base branch; auto-detected from git when `worktree.baseBranch` is not set. Fails only if referenced and detection fails
 
 Commands are version-controlled with your codebase, not stored in the database.
 

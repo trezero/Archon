@@ -66,11 +66,11 @@ interface IsolationRequest {
 
 | Workflow            | Identifier      | Branch Name              |
 | ------------------- | --------------- | ------------------------ |
-| issue               | `"42"`          | `issue-42`               |
-| pr (same-repo)      | `"123"`         | `feature/auth` (actual)  |
-| pr (fork)           | `"123"`         | `pr-123-review`          |
-| task                | `"my-feature"`  | `task-my-feature`        |
-| thread              | `"C123:ts.123"` | `thread-a1b2c3d4` (hash) |
+| issue               | `"42"`          | `archon/issue-42`               |
+| pr (same-repo)      | `"123"`         | `feature/auth` (actual branch)  |
+| pr (fork)           | `"123"`         | `archon/pr-123-review`          |
+| task                | `"my-feature"`  | `archon/task-my-feature`        |
+| thread              | `"C123:ts.123"` | `archon/thread-a1b2c3d4` (hash) |
 
 ## Creation Flow
 
@@ -93,7 +93,7 @@ IsolationRequest
        ▼
 ┌──────────────────────────────────────────────────┐
 │ SYNC WORKSPACE (before creating worktree)        │
-│   Branch: worktree.baseBranch (required) or --from│
+│   Branch: worktree.baseBranch or auto-detected   │
 │   git fetch origin <branch>                      │
 │   git reset --hard origin/<branch>               │
 │   (skipped if uncommitted changes)               │

@@ -554,6 +554,9 @@ describe('Workflow Executor', () => {
         // baseBranch intentionally omitted to test error case
       });
 
+      // Also make auto-detection fail so baseBranch stays empty
+      getDefaultBranchSpy.mockRejectedValueOnce(new Error('Not a git repo'));
+
       const workflow: WorkflowDefinition = {
         name: 'no-base-branch-workflow',
         description: 'Test missing baseBranch error',
@@ -571,7 +574,7 @@ describe('Workflow Executor', () => {
       );
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('No base branch configured');
+      expect(result.error).toContain('No base branch could be resolved');
     });
 
     it('should succeed without baseBranch when workflow does not reference $BASE_BRANCH', async () => {
@@ -641,6 +644,45 @@ describe('Workflow Executor', () => {
       // $BASE_BRANCH should use config value
       expect(callArg).not.toContain('$BASE_BRANCH');
       expect(callArg).toContain('origin/staging');
+    });
+
+    it('should substitute $BASE_BRANCH using auto-detected default branch when config.baseBranch is not set', async () => {
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'branch-auto.md'), 'git rebase origin/$BASE_BRANCH');
+
+      mockLoadConfig.mockResolvedValue({
+        assistant: 'claude' as const,
+        assistants: { claude: {}, codex: {} },
+        commands: {},
+        defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+        // baseBranch intentionally omitted — auto-detect should kick in
+      });
+
+      // Override the default mock to return 'develop' for this test
+      getDefaultBranchSpy.mockResolvedValueOnce('develop');
+
+      const callCountBefore = mockSendQuery.mock.calls.length;
+
+      const workflow: WorkflowDefinition = {
+        name: 'auto-detect-branch-workflow',
+        description: 'Test auto-detected baseBranch substitution',
+        steps: [{ command: 'branch-auto' }],
+      };
+
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'Run rebase',
+        'db-conv-id'
+      );
+
+      expect(mockSendQuery.mock.calls.length).toBeGreaterThan(callCountBefore);
+      const callArg = mockSendQuery.mock.calls[callCountBefore][0] as string;
+      expect(callArg).not.toContain('$BASE_BRANCH');
+      expect(callArg).toContain('origin/develop');
     });
 
     it('should handle codebase_id being undefined', async () => {

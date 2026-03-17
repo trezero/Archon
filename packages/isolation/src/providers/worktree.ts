@@ -424,21 +424,20 @@ export class WorktreeProvider implements IIsolationProvider {
   generateBranchName(request: IsolationRequest): string {
     switch (request.workflowType) {
       case 'issue':
-        return `issue-${request.identifier}`;
+        return `archon/issue-${request.identifier}`;
       case 'pr':
-        // Type narrowing: request is PRIsolationRequest here
-        // Same-repo PRs use actual branch, fork PRs use synthetic branch
+        // Same-repo PRs use actual branch (already exists on remote), fork PRs use synthetic
         if (!request.isForkPR) {
           return request.prBranch;
         }
-        return `pr-${request.identifier}-review`;
+        return `archon/pr-${request.identifier}-review`;
       case 'review':
-        return `review-${request.identifier}`;
+        return `archon/review-${request.identifier}`;
       case 'thread':
         // Use short hash for arbitrary thread IDs (Slack, Discord)
-        return `thread-${this.shortHash(request.identifier)}`;
+        return `archon/thread-${this.shortHash(request.identifier)}`;
       case 'task':
-        return `task-${this.slugify(request.identifier)}`;
+        return `archon/task-${this.slugify(request.identifier)}`;
     }
   }
 
@@ -542,18 +541,9 @@ export class WorktreeProvider implements IIsolationProvider {
       throw new Error(`Failed to load config: ${err.message}`);
     }
 
-    const configuredBaseBranch = worktreeConfig?.baseBranch;
-    const fromBranch = request.workflowType === 'task' ? request.fromBranch : undefined;
-
-    if (!configuredBaseBranch && !fromBranch) {
-      throw new Error(
-        'No base branch configured. Set `worktree.baseBranch` in .archon/config.yaml ' +
-          'or use the --from flag to select a branch (e.g., --from dev).'
-      );
-    }
-
-    const branchToSync = configuredBaseBranch ?? fromBranch;
-    const baseBranch = await this.syncWorkspaceBeforeCreate(repoPath, branchToSync);
+    // Sync uses only the configured base branch (or auto-detects via getDefaultBranch).
+    // request.fromBranch is the start-point for worktree creation, not a sync target.
+    const baseBranch = await this.syncWorkspaceBeforeCreate(repoPath, worktreeConfig?.baseBranch);
 
     const worktreeBase = getWorktreeBase(repoPath);
 

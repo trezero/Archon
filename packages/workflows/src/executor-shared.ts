@@ -240,11 +240,11 @@ export function substituteWorkflowVariables(
   baseBranch: string,
   issueContext?: string
 ): { prompt: string; contextSubstituted: boolean } {
-  // Fail fast if the prompt references $BASE_BRANCH but no base branch is configured
+  // Fail fast if the prompt references $BASE_BRANCH but no base branch could be resolved
   if (!baseBranch && prompt.includes('$BASE_BRANCH')) {
     throw new Error(
-      'No base branch configured. Set `worktree.baseBranch` in .archon/config.yaml ' +
-        'or use the --from flag to select a branch (e.g., --from dev).'
+      'No base branch could be resolved. Auto-detection failed and `worktree.baseBranch` is not set in .archon/config.yaml. ' +
+        'Set the config value or use the --from flag to select a branch (e.g., --from dev).'
     );
   }
 
