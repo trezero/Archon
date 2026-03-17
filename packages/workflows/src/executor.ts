@@ -336,16 +336,6 @@ async function sendCriticalMessage(
 }
 
 /**
-<<<<<<< HEAD
- * Load command prompt from file
- *
- * @param cwd - Working directory (repo root)
- * @param commandName - Name of the command (without .md extension)
- * @param configuredFolder - Optional additional folder from config to search
- * @param deps - Workflow dependencies (for config loading)
- * @returns On success: `{ success: true, content }`. On failure: `{ success: false, reason, message }`.
- */
-/**
  * Internal function that executes a single step
  * (extracted to allow parallel execution)
  */
