@@ -328,8 +328,8 @@ describe('GET /api/commands', () => {
 
   test('returns commands with cwd query param without error', async () => {
     const app = makeApp();
-    // Use a non-existent dir so filesystem access naturally yields ENOENT (not an error)
-    const response = await app.request('/api/commands?cwd=/tmp/nonexistent-project-xyz');
+    // Use the registered codebase path (/tmp/project from the mock) so validateCwd passes
+    const response = await app.request('/api/commands?cwd=/tmp/project');
     expect(response.status).toBe(200);
 
     const body = (await response.json()) as { commands: Array<{ name: string }> };

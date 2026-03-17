@@ -247,6 +247,19 @@ describe('GET /api/workflows/:name', () => {
   });
 });
 
+describe('GET /api/workflows/:name - cwd validation', () => {
+  test('returns 400 when cwd is not a registered codebase path', async () => {
+    const app = new Hono();
+    registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
+
+    // default mock returns /tmp/project; /etc/secrets is not registered
+    const response = await app.request('/api/workflows/archon-assist?cwd=/etc/secrets');
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('Invalid cwd');
+  });
+});
+
 describe('PUT /api/workflows/:name', () => {
   test('returns 400 for invalid name', async () => {
     const app = new Hono();
