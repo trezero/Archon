@@ -7,7 +7,7 @@ import { streamSSE } from 'hono/streaming';
 import { cors } from 'hono/cors';
 import type { WebAdapter } from '../adapters/web';
 import { rm, readFile, writeFile, unlink, mkdir } from 'fs/promises';
-import { normalize, join } from 'path';
+import { normalize, join, sep } from 'path';
 import type { Context } from 'hono';
 import type { ConversationLockManager } from '@archon/core';
 import {
@@ -69,6 +69,19 @@ export function registerApiRoutes(
     detail?: string
   ): Response {
     return c.json({ error: message, ...(detail ? { detail } : {}) }, status);
+  }
+
+  /**
+   * Validate that a caller-supplied `cwd` is rooted at a registered codebase path.
+   * This prevents path traversal — callers cannot read/write outside known project roots.
+   */
+  async function validateCwd(cwd: string): Promise<boolean> {
+    const codebases = await codebaseDb.listCodebases();
+    const normalizedCwd = normalize(cwd);
+    return codebases.some(cb => {
+      const base = normalize(cb.default_cwd);
+      return normalizedCwd === base || normalizedCwd.startsWith(base + sep);
+    });
   }
 
   // CORS for Web UI — allow-all is fine for a single-developer tool.
@@ -517,8 +530,13 @@ export function registerApiRoutes(
       const cwd = c.req.query('cwd');
       let workingDir = cwd;
 
-      // Fallback to first codebase's default_cwd
-      if (!workingDir) {
+      // Validate caller-supplied cwd against registered codebase paths
+      if (cwd) {
+        if (!(await validateCwd(cwd))) {
+          return apiError(c, 400, 'Invalid cwd: must match a registered codebase path');
+        }
+      } else {
+        // Fallback to first codebase's default_cwd
         const codebases = await codebaseDb.listCodebases();
         if (codebases.length > 0) {
           workingDir = codebases[0].default_cwd;
@@ -795,7 +813,11 @@ export function registerApiRoutes(
     try {
       const cwd = c.req.query('cwd');
       let workingDir = cwd;
-      if (!workingDir) {
+      if (cwd) {
+        if (!(await validateCwd(cwd))) {
+          return apiError(c, 400, 'Invalid cwd: must match a registered codebase path');
+        }
+      } else {
         const codebases = await codebaseDb.listCodebases();
         if (codebases.length > 0) workingDir = codebases[0].default_cwd;
       }
@@ -873,7 +895,11 @@ export function registerApiRoutes(
 
     const cwd = c.req.query('cwd');
     let workingDir = cwd;
-    if (!workingDir) {
+    if (cwd) {
+      if (!(await validateCwd(cwd))) {
+        return apiError(c, 400, 'Invalid cwd: must match a registered codebase path');
+      }
+    } else {
       const codebases = await codebaseDb.listCodebases();
       if (codebases.length > 0) workingDir = codebases[0].default_cwd;
     }
@@ -938,7 +964,11 @@ export function registerApiRoutes(
 
     const cwd = c.req.query('cwd');
     let workingDir = cwd;
-    if (!workingDir) {
+    if (cwd) {
+      if (!(await validateCwd(cwd))) {
+        return apiError(c, 400, 'Invalid cwd: must match a registered codebase path');
+      }
+    } else {
       const codebases = await codebaseDb.listCodebases();
       if (codebases.length > 0) workingDir = codebases[0].default_cwd;
     }
@@ -966,7 +996,11 @@ export function registerApiRoutes(
     try {
       const cwd = c.req.query('cwd');
       let workingDir = cwd;
-      if (!workingDir) {
+      if (cwd) {
+        if (!(await validateCwd(cwd))) {
+          return apiError(c, 400, 'Invalid cwd: must match a registered codebase path');
+        }
+      } else {
         const codebases = await codebaseDb.listCodebases();
         if (codebases.length > 0) workingDir = codebases[0].default_cwd;
       }
