@@ -2,7 +2,7 @@ import { memo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowDown, MessageSquare } from 'lucide-react';
+import { ArrowDown, Sparkles, ArrowRight, MessageSquare } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { MessageBubble } from './MessageBubble';
@@ -125,13 +125,23 @@ interface MessageListProps {
   isStreaming: boolean;
   /** When this value changes, force-scroll to bottom regardless of user scroll position. */
   scrollTrigger?: number;
+  /** When true, show welcoming empty state instead of generic placeholder. */
+  isNewChat?: boolean;
+  /** Project name to display as context in the welcoming view. */
+  projectName?: string;
+  /** Called when user clicks a quick action: receives a message string to send or 'focus'. */
+  onQuickAction?: (action: string) => void;
 }
 
 function MessageListRaw({
   messages,
   isStreaming,
   scrollTrigger,
+  isNewChat,
+  projectName,
+  onQuickAction,
 }: MessageListProps): React.ReactElement {
+  const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
   const { isAtBottom, scrollToBottom } = useAutoScroll(
     containerRef,
@@ -140,6 +150,42 @@ function MessageListRaw({
   );
 
   if (messages.length === 0) {
+    if (isNewChat) {
+      return (
+        <div className="flex flex-1 items-center justify-center">
+          <div className="flex flex-col items-center gap-4 max-w-sm w-full px-4">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <Sparkles className="h-8 w-8 text-primary" />
+              <h2 className="text-base font-semibold text-text-primary">
+                What would you like to do?
+              </h2>
+            </div>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(): void => {
+                  navigate('/workflows');
+                }}
+                className="flex items-center gap-1.5"
+              >
+                Run a workflow
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={(): void => onQuickAction?.('focus')}>
+                Ask a question
+              </Button>
+              <Button variant="outline" size="sm" onClick={(): void => onQuickAction?.('/status')}>
+                /status
+              </Button>
+            </div>
+            {projectName && (
+              <p className="text-xs text-text-tertiary text-center">Project: {projectName}</p>
+            )}
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex flex-1 items-center justify-center">
         <div className="flex flex-col items-center gap-3 text-text-tertiary">

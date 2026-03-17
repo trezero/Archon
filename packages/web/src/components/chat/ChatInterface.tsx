@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { MessageList } from './MessageList';
-import { MessageInput } from './MessageInput';
+import { MessageInput, type MessageInputHandle } from './MessageInput';
 import { LockIndicator } from './LockIndicator';
 import { WorkflowProgressCard } from './WorkflowProgressCard';
 import { useSSE } from '@/hooks/useSSE';
@@ -90,6 +90,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   const [queuePosition, setQueuePosition] = useState<number | undefined>();
   const [sending, setSending] = useState(false);
   const [hasSentMessage, setHasSentMessage] = useState(false);
+  const inputRef = useRef<MessageInputHandle>(null);
   const messageIdCounter = useRef(0);
   const conversationIdRef = useRef(conversationId);
   const messagesRef = useRef(messages);
@@ -621,10 +622,10 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <Header
-        title={headerTitle}
+        title={isNewChat ? 'New Chat' : headerTitle}
         subtitle={headerSubtitle}
         projectName={currentCodebase?.name ?? contextCodebase?.name}
-        connected={connected}
+        connected={isNewChat ? undefined : connected}
       />
       {(conversationsError || codebasesError) && (
         <div className="flex gap-2 px-4 py-1">
@@ -634,12 +635,25 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           {codebasesError && <span className="text-xs text-red-400">Failed to load projects</span>}
         </div>
       )}
-      <MessageList messages={messages} isStreaming={isStreaming} />
+      <MessageList
+        messages={messages}
+        isStreaming={isStreaming}
+        isNewChat={isNewChat}
+        projectName={currentCodebase?.name ?? contextCodebase?.name}
+        onQuickAction={(action): void => {
+          if (action === 'focus') {
+            inputRef.current?.focus();
+          } else {
+            void handleSend(action);
+          }
+        }}
+      />
       {activeWorkflow && (
         <WorkflowProgressCard workflow={activeWorkflow} onCancel={handleCancelWorkflow} />
       )}
       <LockIndicator locked={locked && hasSentMessage} queuePosition={queuePosition} />
       <MessageInput
+        ref={inputRef}
         onSend={handleSend}
         disabled={
           sending ||
