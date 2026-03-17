@@ -29,14 +29,15 @@ The scanner produces the same end state as if the user ran `/archon-setup` in ea
 
 | Operation | How Scanner Implements It |
 |-----------|--------------------------|
-| Create Archon project in DB | `ProjectService.create_project(title, github_repo, tags)` |
+| Create Archon project in DB | `ProjectService.create_project(title, github_repo, tags, metadata)` — includes dependencies in metadata, infra markers in tags |
 | Register system for project | `POST /api/projects/{project_id}/sync` with system fingerprint |
 | Write `.claude/archon-config.json` | Backend writes to mounted volume at project path |
 | Write `.claude/archon-state.json` | Backend writes to mounted volume at project path |
 | Write `.claude/settings.local.json` | Backend writes PostToolUse hook config |
 | Install extensions to `.claude/skills/` | Extract cached tarball into project's `.claude/skills/` |
 | Update `.gitignore` | Backend appends Archon entries if not present |
-| Crawl README as knowledge source | `POST /api/knowledge-items/crawl` with `project_id` |
+| Ingest local README to knowledge base | Store full README as document with embeddings — immediate searchable knowledge |
+| Crawl GitHub README as knowledge source | `POST /api/knowledge-items/crawl` with `project_id` (supplements local copy) |
 | Generate AI description | Claude Code generates from README content (see AI Description section) |
 
 ### Per-Project Extension Installation
@@ -242,6 +243,89 @@ Before starting the apply phase, Claude Code should confirm with the user:
 
 ---
 
+## Dependency & Infrastructure Capture
+
+### Why Capture This During Scan
+
+The scanner has **one-time filesystem access** to every project via the Docker volume mount. A future conversational AI interface in Archon will need cross-project context: "which projects use React?", "how do my RecipeRaiders projects relate?", "which projects have Docker deployments?". Capturing dependency and infrastructure data now — while we have filesystem access — avoids expensive re-scanning later.
+
+### Dependency Extraction
+
+During scan, the git detector reads dependency names (not versions) from manifest files:
+
+| File | Ecosystem | What to Extract |
+|------|-----------|-----------------|
+| `package.json` | npm | `dependencies` + `devDependencies` keys |
+| `pyproject.toml` | pip | `[project.dependencies]` package names |
+| `requirements.txt` | pip | Package names (strip version specifiers) |
+| `Cargo.toml` | cargo | `[dependencies]` keys |
+| `go.mod` | go | `require` block module paths |
+| `pom.xml` | maven | `<artifactId>` values from `<dependencies>` |
+| `build.gradle` | gradle | `implementation`/`api` dependency strings |
+
+**Storage format** (JSONB on `archon_scan_projects`):
+```json
+{
+    "npm": ["react", "next", "tailwindcss", "@tanstack/react-query"],
+    "pip": ["fastapi", "pydantic", "supabase"]
+}
+```
+
+Only top-level dependency names are captured — no versions, no transitive dependencies. This keeps the scan fast while providing enough signal for cross-project analysis.
+
+### Infrastructure Markers
+
+The scanner checks for the **existence** of infrastructure-revealing files and directories (no content reading — just `os.path.exists()`):
+
+```python
+INFRA_MARKERS = {
+    "docker-compose.yml": "docker",
+    "docker-compose.yaml": "docker",
+    "Dockerfile": "docker",
+    ".github/workflows": "github-actions",
+    ".gitlab-ci.yml": "gitlab-ci",
+    "firebase.json": "firebase",
+    ".firebaserc": "firebase",
+    "vercel.json": "vercel",
+    "netlify.toml": "netlify",
+    "serverless.yml": "serverless",
+    "terraform": "terraform",
+    "k8s": "kubernetes",
+    "Makefile": "make",
+    ".env.example": "env-config",
+    "supabase": "supabase",
+    "prisma": "prisma",
+    ".github/dependabot.yml": "dependabot",
+}
+```
+
+**Storage**: `infra_markers TEXT[]` on `archon_scan_projects`. Persisted to project `tags` alongside language tags during apply.
+
+### Persisting to Projects After Apply
+
+When a project is created during apply, the scanner persists captured data to the Archon project record:
+- `dependencies` → stored in the project's `metadata` JSONB field under key `"dependencies"`
+- `infra_markers` → merged into the project's `tags` array alongside language tags
+- `group_name` → stored in `metadata` under key `"project_group"` (preserves the relationship even for non-hierarchical setups)
+
+This ensures the data survives scan expiration and is queryable through the standard project API.
+
+### Local README as Knowledge Document
+
+In addition to the GitHub README crawl (which may fail for private repos), the scanner **directly stores the local README** content as a document in the Archon knowledge base during apply:
+
+1. Read full `README.md` from the mounted volume (already captured during scan)
+2. Create a document via `DocumentService` with:
+   - `source`: project directory name
+   - `content`: full README text
+   - `metadata`: `{"origin": "scanner", "file": "README.md"}`
+3. Generate embeddings for the document
+4. Link to the project via `source_linking`
+
+This provides immediate searchable knowledge for every project — no crawl delay, works for private repos, and ensures the conversational AI has context for every scanned project from the moment the scan completes.
+
+---
+
 ## Duplicate Prevention
 
 ### During Scan: Existing Project Detection
@@ -316,9 +400,12 @@ CREATE TABLE IF NOT EXISTS archon_scan_projects (
     github_url TEXT,                       -- normalized canonical URL
     default_branch TEXT,
     has_readme BOOLEAN NOT NULL DEFAULT FALSE,
-    readme_excerpt TEXT,                   -- first 5000 chars for description generation
+    readme_content TEXT,                   -- full README.md for knowledge base ingestion
+    readme_excerpt TEXT,                   -- first 5000 chars for description generation context
     detected_languages TEXT[] DEFAULT '{}',
     project_indicators TEXT[] DEFAULT '{}', -- e.g. ["node", "python", "rust"]
+    dependencies JSONB DEFAULT '{}',       -- {"npm": ["react","next"], "pip": ["fastapi"]}
+    infra_markers TEXT[] DEFAULT '{}',     -- ["docker", "github-actions", "supabase"]
     is_project_group BOOLEAN NOT NULL DEFAULT FALSE,
     group_name TEXT,                       -- parent group directory name, if nested
     already_in_archon BOOLEAN NOT NULL DEFAULT FALSE,
@@ -369,9 +456,12 @@ class DetectedProject:
     github_url: str | None      # Normalized https://github.com/owner/repo
     default_branch: str | None  # HEAD branch
     has_readme: bool
-    readme_excerpt: str | None  # First 5000 chars of README.md
+    readme_content: str | None  # Full README.md content (for knowledge base ingestion)
+    readme_excerpt: str | None  # First 5000 chars (for description generation context)
     detected_languages: list[str]  # From file extensions
     project_indicators: list[str]  # ["node", "python", "rust", ...]
+    dependencies: dict[str, list[str]] | None  # {"npm": ["react", "next"], "pip": ["fastapi"]}
+    infra_markers: list[str]    # ["docker", "github-actions", "firebase", ...]
     is_project_group: bool      # True if this is a group parent
     group_name: str | None      # Parent group name, if nested
 
@@ -391,7 +481,9 @@ class ScanSummary:
 - Normalize to canonical `https://github.com/{owner}/{repo}`
 - Detect project type from marker files: `package.json` (node), `pyproject.toml`/`setup.py` (python), `Cargo.toml` (rust), `go.mod` (go), `pom.xml`/`build.gradle` (java)
 - Detect languages from file extensions in top-level directory (shallow scan, not recursive)
-- Read README.md first 5000 chars if present
+- Read full README.md content (store both full content and 5000-char excerpt)
+- Extract dependency names from manifest files (see Dependency & Infrastructure Capture below)
+- Check for infrastructure marker files (see Dependency & Infrastructure Capture below)
 
 **Non-GitHub remotes**: Detected during scan but **skipped by default** (`require_github_remote: true`). Logged in the post-scan report with reason "Non-GitHub remote" so the user has visibility. Users who want to include them can set `require_github_remote: false` in the template, but those projects will be created without knowledge sources (no crawling for non-GitHub hosts in v1).
 
@@ -481,14 +573,15 @@ class ScannerService:
         Set up a single project — equivalent to running /archon-setup in that directory.
 
         Steps:
-        1. Create Archon project via ProjectService
+        1. Create Archon project via ProjectService (with dependencies in metadata, infra in tags)
         2. Register system for project via sync endpoint
         3. Write .claude/archon-config.json (using template.archon_api_url, template.archon_mcp_url)
         4. Write .claude/archon-state.json
         5. Write .claude/settings.local.json (if template.write_settings_local)
         6. Install extensions to .claude/skills/ (if template.install_extensions)
         7. Update .gitignore (if template.update_gitignore)
-        8. Start README crawl (if template.crawl_github_readme and github_url present)
+        8. Ingest local README as knowledge document with embeddings
+        9. Start GitHub README crawl (if template.crawl_github_readme and github_url present)
         """
 
     async def _write_project_config_files(
@@ -948,7 +1041,8 @@ Every step in `_setup_single_project` is designed to be **idempotent** — safe 
 | Write `.claude/settings.local.json` | Overwrite — always produces correct state. |
 | Install extensions to `.claude/skills/` | Extract overwrites existing files. |
 | Update `.gitignore` | Checks for existing entries before appending — no duplicates. |
-| Start README crawl | Check if source already exists for this project before starting. Skip if already crawled. |
+| Ingest local README to knowledge base | Check if document already exists for this project/source. Skip if present. |
+| Start GitHub README crawl | Check if source already exists for this project before starting. Skip if already crawled. |
 
 ### Resume Flow
 
@@ -1116,6 +1210,9 @@ The MCP tool detects the partial state and communicates it clearly.
 | 17 | One-time onboarding tool, no re-scan | New projects after initial scan use `/archon-setup`. Scanner is for bulk onboarding only. |
 | 18 | Record extension version hash per project | SHA-256 of tarball in `archon-config.json`. Enables future update detection without ongoing scans. |
 | 19 | Idempotent apply with crash resume | All setup steps are idempotent. Re-invoking `apply_scan_template` with same `scan_id` safely resumes from where it left off. |
+| 20 | Capture dependencies and infra markers during scan | Scanner has one-time filesystem access. Capture now to enable future conversational AI cross-project queries. |
+| 21 | Store full README + ingest to knowledge base | Local README ingested immediately with embeddings. Works for private repos, no crawl delay. GitHub crawl supplements. |
+| 22 | Persist scan metadata to project records | Dependencies → project metadata, infra markers → project tags. Survives scan expiration. |
 
 ---
 
@@ -1131,3 +1228,5 @@ The MCP tool detects the partial state and communicates it clearly.
 
 - **Non-GitHub repository support**: Add URL normalization and crawl strategies for GitLab and Bitbucket. Requires extending the URL normalizer and adding new crawl endpoint handlers.
 - **Extension update detection**: With version hashes recorded per-project, a future tool could compare installed versions against the registry and flag stale installations.
+- **Conversational AI interface**: The dependency snapshots, infra markers, project group relationships, and README knowledge documents captured by the scanner are designed to feed a future chat interface where users can ask questions across all their projects (e.g., "which projects use PostgreSQL?", "how do my RecipeRaiders services connect?", "what CI/CD do I have set up?"). The scanner's data capture is the foundation for this cross-project intelligence.
+- **Cross-project dependency analysis**: With dependency data persisted to project metadata, a future service could build a dependency graph showing which projects share libraries, which projects might be affected by a library vulnerability, and which projects form logical clusters based on shared technology stacks.
