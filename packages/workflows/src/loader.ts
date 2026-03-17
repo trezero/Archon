@@ -261,6 +261,7 @@ const BASH_NODE_AI_FIELDS = [
   'denied_tools',
   'hooks',
   'mcp',
+  'skills',
 ] as const;
 
 /**
@@ -499,6 +500,19 @@ function parseDagNode(
       (baseFields as Record<string, unknown>).mcp = raw.mcp.trim();
     } else {
       errors.push(`Node '${id}': 'mcp' must be a non-empty string path`);
+    }
+  }
+
+  if (raw.skills !== undefined) {
+    const skills = raw.skills;
+    if (
+      Array.isArray(skills) &&
+      skills.length > 0 &&
+      skills.every((s): s is string => typeof s === 'string' && s.trim().length > 0)
+    ) {
+      (baseFields as Record<string, unknown>).skills = skills.map(s => s.trim());
+    } else {
+      errors.push(`Node '${id}': 'skills' must be a non-empty array of strings`);
     }
   }
 

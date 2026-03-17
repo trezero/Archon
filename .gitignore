@@ -97,3 +97,4 @@ packages/server/.env
 # Playwright
 .playwright/
 .playwright-cli/
+skills-lock.json

@@ -378,6 +378,17 @@ function DagInspector({
         </div>
       )}
 
+      {/* Skills (hidden for Bash and explicit Codex nodes) */}
+      {!isBash && node.provider !== 'codex' && (
+        <ToolsInput
+          label="Skills (preloaded into node context)"
+          value={node.skills}
+          onChange={(v): void => {
+            onUpdate({ skills: v });
+          }}
+        />
+      )}
+
       {/* Output Format (hidden for Bash and explicit Codex nodes; inherited provider may still be Codex at runtime) */}
       {!isBash && node.provider !== 'codex' && (
         <div className="flex flex-col gap-1 w-full">

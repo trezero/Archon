@@ -34,7 +34,7 @@ import {
   loadMcpConfig,
 } from './dag-executor';
 import type { DagNode, BashNode, NodeOutput, WorkflowRun } from './types';
-import { discoverWorkflows } from './loader';
+import { discoverWorkflows, parseWorkflow } from './loader';
 import { isDagWorkflow } from './types';
 import type { WorkflowDeps, IWorkflowPlatform, WorkflowConfig } from './deps';
 import type { IWorkflowStore } from './store';
@@ -2059,5 +2059,249 @@ describe('loadMcpConfig', () => {
   it('throws on non-object JSON (string)', async () => {
     await writeFile(join(testDir, 'str.json'), '"hello"');
     await expect(loadMcpConfig('str.json', testDir)).rejects.toThrow('must be a JSON object');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Skills — executor-level behavior (#446)
+// ---------------------------------------------------------------------------
+
+describe('executeDagWorkflow -- skills options', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-exec-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'My command prompt for $USER_MESSAGE');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'DAG AI response' };
+      yield { type: 'result', sessionId: 'dag-session-id' };
+    });
+  });
+
+  afterEach(async () => {
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('passes agents/agent/allowedTools to sendQuery when node has skills', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-skills',
+        nodes: [{ id: 'review', command: 'my-cmd', skills: ['codebase-search', 'test-runner'] }],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    expect(mockSendQueryDag.mock.calls.length).toBeGreaterThan(0);
+    const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+    // agents contains the agent definition
+    const agents = optionsArg?.agents as Record<string, Record<string, unknown>>;
+    expect(agents).toBeDefined();
+    expect(agents['dag-node-review']).toBeDefined();
+    expect(agents['dag-node-review'].skills).toEqual(['codebase-search', 'test-runner']);
+    // tools always includes 'Skill' explicitly
+    expect(agents['dag-node-review'].tools).toEqual(['Skill']);
+    // agent references the key
+    expect(optionsArg?.agent).toBe('dag-node-review');
+    // allowedTools includes 'Skill' for the parent session
+    expect(optionsArg?.allowedTools).toContain('Skill');
+  });
+
+  it('appends Skill to existing allowed_tools list when node has both', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-skills-tools',
+        nodes: [
+          {
+            id: 'review',
+            command: 'my-cmd',
+            skills: ['codebase-search'],
+            allowed_tools: ['Read', 'Grep'],
+          },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    expect(mockSendQueryDag.mock.calls.length).toBeGreaterThan(0);
+    const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+    const agents = optionsArg?.agents as Record<string, Record<string, unknown>>;
+    // Agent tools = allowed_tools + Skill
+    expect(agents['dag-node-review'].tools).toEqual(['Read', 'Grep', 'Skill']);
+    // Parent session also gets Skill
+    expect(optionsArg?.allowedTools).toContain('Skill');
+  });
+
+  it('warns user when Codex DAG node has skills and does not pass agents', async () => {
+    mockGetAssistantClientDag.mockReturnValue({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'codex',
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-codex-skills',
+        nodes: [
+          { id: 'review', command: 'my-cmd', provider: 'codex', skills: ['codebase-search'] },
+        ],
+      },
+      workflowRun,
+      'codex',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      { ...minimalConfig, assistant: 'codex' }
+    );
+
+    // Warning sent to user
+    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
+    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
+    const warning = messages.find(m => m.includes('skills') && m.includes('Codex'));
+    expect(warning).toBeDefined();
+
+    // No agents/agent passed to Codex sendQuery
+    if (mockSendQueryDag.mock.calls.length > 0) {
+      const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+      expect(optionsArg?.agents).toBeUndefined();
+      expect(optionsArg?.agent).toBeUndefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Skills — loader validation via discoverWorkflows (#446)
+// ---------------------------------------------------------------------------
+
+describe('skills field validation via parseWorkflow', () => {
+  it('parses valid skills array on a DAG node', () => {
+    const yaml = `
+name: test-skills
+description: test
+nodes:
+  - id: review
+    prompt: "Review the code"
+    skills:
+      - codebase-search
+      - test-runner
+`;
+    const result = parseWorkflow(yaml, 'test.yaml');
+    expect(result.error).toBeNull();
+    expect(result.workflow).not.toBeNull();
+    const wf = result.workflow!;
+    if (!isDagWorkflow(wf)) throw new Error('Expected DAG workflow');
+    expect(wf.nodes[0].skills).toEqual(['codebase-search', 'test-runner']);
+  });
+
+  it('rejects non-string skills array entries', () => {
+    const yaml = `
+name: bad-skills
+description: test
+nodes:
+  - id: review
+    prompt: "Review"
+    skills:
+      - 123
+`;
+    const result = parseWorkflow(yaml, 'bad.yaml');
+    expect(result.error).not.toBeNull();
+    expect(result.error!.error).toContain('skills');
+  });
+
+  it('rejects empty skills array', () => {
+    const yaml = `
+name: empty-skills
+description: test
+nodes:
+  - id: review
+    prompt: "Review"
+    skills: []
+`;
+    const result = parseWorkflow(yaml, 'empty.yaml');
+    expect(result.error).not.toBeNull();
+    expect(result.error!.error).toContain('skills');
+  });
+
+  it('ignores skills on bash nodes with warning', () => {
+    const yaml = `
+name: bash-skills
+description: test
+nodes:
+  - id: lint
+    bash: "echo lint"
+    skills:
+      - should-be-ignored
+`;
+    const result = parseWorkflow(yaml, 'bash-skills.yaml');
+    expect(result.error).toBeNull();
+    expect(result.workflow).not.toBeNull();
+    const wf = result.workflow!;
+    if (!isDagWorkflow(wf)) throw new Error('Expected DAG workflow');
+    // Bash nodes don't get the skills field
+    expect(wf.nodes[0].skills).toBeUndefined();
+  });
+
+  it('node with no skills has undefined skills field', () => {
+    const yaml = `
+name: no-skills
+description: test
+nodes:
+  - id: basic
+    prompt: "Do something"
+`;
+    const result = parseWorkflow(yaml, 'no-skills.yaml');
+    expect(result.error).toBeNull();
+    const wf = result.workflow!;
+    if (!isDagWorkflow(wf)) throw new Error('Expected DAG workflow');
+    expect(wf.nodes[0].skills).toBeUndefined();
   });
 });

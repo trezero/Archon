@@ -48,6 +48,7 @@ import archonResolveConflictsWf from '../../../../.archon/workflows/defaults/arc
 import archonSmartPrReviewWf from '../../../../.archon/workflows/defaults/archon-smart-pr-review.yaml' with { type: 'text' };
 import archonTestLoopWf from '../../../../.archon/workflows/defaults/archon-test-loop.yaml' with { type: 'text' };
 import archonValidatePrWf from '../../../../.archon/workflows/defaults/archon-validate-pr.yaml' with { type: 'text' };
+import archonRemotionGenerateWf from '../../../../.archon/workflows/defaults/archon-remotion-generate.yaml' with { type: 'text' };
 
 // =============================================================================
 // Exports
@@ -94,6 +95,7 @@ export const BUNDLED_WORKFLOWS: Record<string, string> = {
   'archon-smart-pr-review': archonSmartPrReviewWf,
   'archon-test-loop': archonTestLoopWf,
   'archon-validate-pr': archonValidatePrWf,
+  'archon-remotion-generate': archonRemotionGenerateWf,
 };
 
 /**

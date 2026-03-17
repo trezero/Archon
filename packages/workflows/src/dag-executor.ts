@@ -246,8 +246,9 @@ export async function loadMcpConfig(
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    throw new Error(`MCP config file is not valid JSON: ${mcpPath}`);
+  } catch (parseErr) {
+    const detail = (parseErr as SyntaxError).message;
+    throw new Error(`MCP config file is not valid JSON: ${mcpPath} — ${detail}`);
   }
 
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
@@ -300,7 +301,10 @@ function expandEnvVars(config: Record<string, unknown>): {
   const missingVars: string[] = [];
   for (const [serverName, serverConfig] of Object.entries(config)) {
     if (typeof serverConfig !== 'object' || serverConfig === null) {
-      result[serverName] = serverConfig;
+      getLog().warn(
+        { serverName, valueType: typeof serverConfig },
+        'dag.mcp_server_config_not_object'
+      );
       continue;
     }
     const server = { ...(serverConfig as Record<string, unknown>) };
@@ -420,6 +424,20 @@ async function resolveNodeProviderAndModel(
     }
   }
 
+  // Warn if Codex node has skills (unsupported)
+  if (provider === 'codex' && node.skills) {
+    getLog().warn({ nodeId: node.id }, 'dag.skills_ignored_codex');
+    const delivered = await safeSendMessage(
+      platform,
+      conversationId,
+      `Warning: Node '${node.id}' has skills set but uses Codex — per-node skills are not supported for Codex.`,
+      { workflowId: workflowRunId, nodeName: node.id }
+    );
+    if (!delivered) {
+      getLog().error({ nodeId: node.id, workflowRunId }, 'dag.skills_warning_delivery_failed');
+    }
+  }
+
   let options: WorkflowAssistantOptions | undefined;
   if (provider === 'codex') {
     options = {
@@ -495,6 +513,33 @@ async function resolveNodeProviderAndModel(
         );
         throw new Error(`Node '${node.id}': ${errMsg}`);
       }
+    }
+    // Wrap node in AgentDefinition when skills are specified
+    if (node.skills) {
+      const agentId = `dag-node-${node.id}`;
+      // Always include 'Skill' explicitly — SDK behavior for undefined tools is undocumented
+      const agentTools = claudeOptions.tools ? [...claudeOptions.tools, 'Skill'] : ['Skill'];
+      const agentDef: {
+        description: string;
+        prompt: string;
+        skills: string[];
+        tools: string[];
+        model?: string;
+      } = {
+        description: `DAG node '${node.id}'`,
+        prompt: `You have preloaded skills: ${node.skills.join(', ')}. Use them when relevant.`,
+        skills: node.skills,
+        tools: agentTools,
+      };
+      if (claudeOptions.model) agentDef.model = claudeOptions.model;
+
+      claudeOptions.agents = { [agentId]: agentDef };
+      claudeOptions.agent = agentId;
+      // Ensure 'Skill' is in allowedTools for the parent session
+      if (!claudeOptions.allowedTools?.includes('Skill')) {
+        claudeOptions.allowedTools = [...(claudeOptions.allowedTools ?? []), 'Skill'];
+      }
+      getLog().info({ nodeId: node.id, skills: node.skills, agentId }, 'dag.skills_agent_created');
     }
     options = Object.keys(claudeOptions).length > 0 ? claudeOptions : undefined;
   }
@@ -686,6 +731,13 @@ async function executeNodeInternal(
     );
   } catch (error) {
     const err = error as Error;
+    getLog().error({ nodeId: node.id, error: err.message }, 'dag.node_prompt_substitution_failed');
+    await safeSendMessage(
+      platform,
+      conversationId,
+      `Node '${node.id}' failed: ${err.message}`,
+      nodeContext
+    );
     return { state: 'failed', output: '', error: err.message };
   }
 

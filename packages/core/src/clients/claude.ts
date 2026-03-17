@@ -258,6 +258,9 @@ export class ClaudeClient implements IAssistantClient {
         ...(requestOptions?.allowedTools !== undefined
           ? { allowedTools: requestOptions.allowedTools }
           : {}),
+        // Pass agents/agent for per-node skill scoping via AgentDefinition wrapping
+        ...(requestOptions?.agents !== undefined ? { agents: requestOptions.agents } : {}),
+        ...(requestOptions?.agent !== undefined ? { agent: requestOptions.agent } : {}),
         // Skip writing session transcripts to ~/.claude/projects/ — Archon manages its own
         // session persistence. persistSession: false reduces disk I/O and keeps the session
         // directory clean. Claude Agent SDK v0.2.74+.

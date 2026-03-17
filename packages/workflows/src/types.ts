@@ -229,6 +229,13 @@ export interface DagNodeBase {
    * Claude only — Codex nodes emit a warning and ignore this field.
    */
   mcp?: string;
+  /**
+   * Skill names to preload into this node's agent context.
+   * Skills must be installed in .claude/skills/ (loaded via settingSources: ['project']).
+   * The node is wrapped in an AgentDefinition with these skills + 'Skill' auto-added to allowedTools.
+   * Claude only — Codex nodes emit a warning and ignore this field.
+   */
+  skills?: string[];
 }
 
 /**

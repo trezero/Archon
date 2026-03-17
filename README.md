@@ -1227,6 +1227,8 @@ nodes:
 
 **Per-node MCP servers** (`mcp`) attach MCP server definitions to a specific node. Point to a JSON file (relative to cwd) in `Record<string, McpServerConfig>` format — environment variables (`$VAR_NAME`) in `env`/`headers` values are expanded from `process.env` at execution time. Claude only — Codex nodes emit a warning and ignore this field.
 
+**Per-node skills** (`skills`) preload named SKILL.md files into a node's agent context via AgentDefinition wrapping. Install skills with `npx skills add <source>` and list them on any Claude DAG node. See [docs/skills.md](docs/skills.md).
+
 See [Authoring Workflows](docs/authoring-workflows.md) for full DAG documentation.
 
 **How workflows are invoked:**

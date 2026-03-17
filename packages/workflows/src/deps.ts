@@ -87,6 +87,27 @@ export interface WorkflowAssistantOptions {
    * Claude only — ignored for Codex.
    */
   allowedTools?: string[];
+  /**
+   * Custom subagent definitions. Structural match for Record<string, AgentDefinition>.
+   * Used when a DAG node has skills — the node is wrapped in an AgentDefinition.
+   * @archon/workflows must not depend on @anthropic-ai/claude-agent-sdk.
+   * Claude only — ignored for Codex.
+   */
+  agents?: Record<
+    string,
+    {
+      description: string;
+      prompt: string;
+      tools?: string[];
+      model?: string;
+      skills?: string[];
+    }
+  >;
+  /**
+   * Name of the agent definition to use for the main thread.
+   * References a key in `agents`. Claude only.
+   */
+  agent?: string;
   abortSignal?: AbortSignal;
   /**
    * When false (default), skips writing session transcript to ~/.claude/projects/.

@@ -311,6 +311,7 @@ nodes:
     model: haiku                 # Per-node model override
     # hooks:                     # Optional: per-node SDK hook callbacks (Claude only) — see docs/hooks.md
     # mcp: .archon/mcp/servers.json  # Optional: per-node MCP servers (Claude only)
+    # skills: [remotion-best-practices]  # Optional: per-node skills (Claude only) — see docs/skills.md
 ```
 
 ### Node Fields
@@ -332,6 +333,7 @@ nodes:
 | `retry` | object | — | Per-node retry configuration. See [Retry Configuration](#retry-configuration). Omit to use the automatic default (2 retries, 3 s base delay, transient errors only) |
 | `hooks` | object | — | Per-node SDK hook callbacks. Claude only — Codex nodes emit a warning and ignore this field. See [docs/hooks.md](./hooks.md) |
 | `mcp` | string | — | Path to MCP server config JSON file (relative to cwd or absolute). Environment variables (`$VAR_NAME`) in `env`/`headers` values are expanded from `process.env` at execution time. Claude only — Codex nodes emit a warning and ignore this field. See [docs/mcp-servers.md](./mcp-servers.md) |
+| `skills` | string[] | — | Skill names to preload into this node's agent context. Skills must be installed in `.claude/skills/`. The node is wrapped in an AgentDefinition with these skills + `Skill` auto-added to allowedTools. Claude only — Codex nodes emit a warning and ignore this field. See [docs/skills.md](./skills.md) |
 
 ### `trigger_rule` Values
 
@@ -1078,4 +1080,5 @@ Before deploying a workflow:
 10. **`retry:`** - All steps/nodes auto-retry transient errors (default: 2 retries, 3 s backoff); configure per-step with `retry:` block
 11. **`hooks`** — Attach static SDK hook callbacks to individual Claude nodes for tool control and context injection (see [docs/hooks.md](./hooks.md))
 12. **`mcp:`** — Attach per-node MCP servers via a JSON config file path (Claude only; env vars expanded at execution time); use with `allowed_tools: []` for MCP-only nodes
-13. **Test thoroughly** - Each command, the artifact flow, and edge cases
+13. **`skills:`** — Preload named skills into individual Claude nodes for domain expertise (Claude only; see [docs/skills.md](./skills.md))
+14. **Test thoroughly** - Each command, the artifact flow, and edge cases

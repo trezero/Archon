@@ -3,7 +3,7 @@
  */
 import type { TransitionTrigger } from '../state/session-transitions';
 import type { WorkflowDefinition } from '@archon/workflows';
-import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
+import type { McpServerConfig, AgentDefinition } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 
 /**
@@ -243,6 +243,11 @@ export interface AssistantRequestOptions {
   /** Tools to auto-allow without permission prompts (e.g., MCP tool wildcards).
    *  Passed to Claude Agent SDK Options.allowedTools. Claude only. */
   allowedTools?: string[];
+  /** Custom subagent definitions passed to Claude Agent SDK Options.agents.
+   *  Used for per-node skill scoping via AgentDefinition wrapping. Claude only. */
+  agents?: Record<string, AgentDefinition>;
+  /** Name of agent definition for the main thread. References a key in `agents`. Claude only. */
+  agent?: string;
   /**
    * Abort signal for cancelling in-flight AI requests.
    * When aborted, the AI client should terminate the subprocess/query gracefully.
