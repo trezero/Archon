@@ -252,7 +252,7 @@ Implements `IPlatformAdapter` for terminal output.
 
 | Function | Package | Location | Purpose |
 |----------|---------|----------|---------|
-| `discoverWorkflows(cwd)` | `@archon/workflows` | `workflows/src/loader.ts` | Find and parse workflow YAML |
+| `discoverWorkflows(cwd)` | `@archon/workflows` | `workflows/src/workflow-discovery.ts` | Find and parse workflow YAML |
 | `executeWorkflow(...)` | `@archon/workflows` | `workflows/src/executor.ts` | Run workflow steps |
 | `getIsolationProvider()` | `@archon/isolation` | `isolation/src/factory.ts` | Get WorktreeProvider singleton |
 | `conversationDb.*` | `@archon/core` | `core/src/db/conversations.ts` | Conversation CRUD |

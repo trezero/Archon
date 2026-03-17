@@ -719,6 +719,9 @@ async function handleBatchMode(
   const commands = parseOrchestratorCommands(finalMessage, codebases, workflows);
 
   if (commands.workflowInvocation) {
+    if (platform.emitRetract) {
+      await platform.emitRetract(conversationId);
+    }
     await handleWorkflowInvocationResult(
       platform,
       conversationId,
@@ -733,6 +736,9 @@ async function handleBatchMode(
   }
 
   if (commands.projectRegistration) {
+    if (platform.emitRetract) {
+      await platform.emitRetract(conversationId);
+    }
     await handleProjectRegistrationResult(
       platform,
       conversationId,

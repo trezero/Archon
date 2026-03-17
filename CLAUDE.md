@@ -224,7 +224,9 @@ packages/
 ├── workflows/                # @archon/workflows - Workflow engine (depends on @archon/git + @archon/paths)
 │   └── src/
 │       ├── types.ts          # Workflow type definitions (step, loop, DAG)
-│       ├── loader.ts         # YAML parsing + validation (discoverWorkflows, parseWorkflow)
+│       ├── loader.ts         # YAML parsing + validation (parseWorkflow)
+│       ├── workflow-discovery.ts # Workflow filesystem discovery (discoverWorkflows, discoverWorkflowsWithConfig)
+│       ├── executor-shared.ts # Shared executor infrastructure (error classification, variable substitution)
 │       ├── router.ts         # Prompt building + invocation parsing
 │       ├── executor.ts       # Sequential, parallel, loop, DAG execution (executeWorkflow)
 │       ├── dag-executor.ts   # DAG-specific execution logic

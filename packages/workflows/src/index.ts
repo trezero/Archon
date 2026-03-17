@@ -37,7 +37,8 @@ export type {
 // =============================================================================
 // Loader
 // =============================================================================
-export { discoverWorkflows, discoverWorkflowsWithConfig, parseWorkflow } from './loader';
+export { parseWorkflow } from './loader';
+export { discoverWorkflows, discoverWorkflowsWithConfig } from './workflow-discovery';
 export type { ParseResult } from './loader';
 
 // =============================================================================

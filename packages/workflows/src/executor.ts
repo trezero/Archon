@@ -13,7 +13,6 @@ import type { WorkflowDeps } from './deps';
 import { formatToolCall } from './utils/tool-formatter';
 import * as archonPaths from '@archon/paths';
 import { createLogger } from '@archon/paths';
-import { classifyError, buildPromptWithContext, loadCommandPrompt } from './utils/execution-utils';
 import { commitAllChanges, execFileAsync, toWorktreePath } from '@archon/git';
 import type {
   WorkflowDefinition,
@@ -40,6 +39,7 @@ import { parseValidationResults } from './validation-parser';
 import { getWorkflowEventEmitter } from './event-emitter';
 import { isClaudeModel, isModelCompatible } from './model-validation';
 import { withIdleTimeout, STEP_IDLE_TIMEOUT_MS } from './utils/idle-timeout';
+import { classifyError, loadCommandPrompt, buildPromptWithContext } from './executor-shared';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;

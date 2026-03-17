@@ -42,13 +42,13 @@ import {
   logWorkflowComplete,
   logWorkflowError,
 } from './logger';
+import { withIdleTimeout, STEP_IDLE_TIMEOUT_MS } from './utils/idle-timeout';
 import {
   classifyError,
+  loadCommandPrompt,
   substituteWorkflowVariables,
   buildPromptWithContext,
-  loadCommandPrompt,
-} from './utils/execution-utils';
-import { withIdleTimeout, STEP_IDLE_TIMEOUT_MS } from './utils/idle-timeout';
+} from './executor-shared';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
