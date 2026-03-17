@@ -1,12 +1,12 @@
-import { NavLink } from 'react-router';
+import { NavLink, Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { LayoutDashboard, MessageSquare, Workflow, Settings } from 'lucide-react';
 import { listWorkflowRuns } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const tabs = [
-  { to: '/', end: true, icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/chat', end: false, icon: MessageSquare, label: 'Chat' },
+  { to: '/dashboard', end: true, icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/workflows', end: false, icon: Workflow, label: 'Workflows' },
   { to: '/settings', end: false, icon: Settings, label: 'Settings' },
 ] as const;
@@ -21,6 +21,14 @@ export function TopNav(): React.ReactElement {
 
   return (
     <nav className="flex items-center gap-1 border-b border-border bg-surface px-4">
+      {/* Brand logo */}
+      <Link to="/chat" className="flex items-center gap-2 mr-4 hover:opacity-80 transition-opacity">
+        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary">
+          <span className="text-sm font-semibold text-primary-foreground">A</span>
+        </div>
+        <span className="text-sm font-semibold text-text-primary">Archon</span>
+      </Link>
+
       {tabs.map(({ to, end, icon: Icon, label }) => (
         <NavLink
           key={to}
@@ -37,7 +45,7 @@ export function TopNav(): React.ReactElement {
         >
           <Icon className="h-4 w-4" />
           {label}
-          {to === '/' && hasRunning && (
+          {to === '/dashboard' && hasRunning && (
             <span className="flex h-2 w-2 rounded-full bg-primary animate-pulse" />
           )}
         </NavLink>
