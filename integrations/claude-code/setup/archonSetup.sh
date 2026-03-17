@@ -440,8 +440,8 @@ PYEOF
   # Register SessionStart + Stop in global settings (required by Claude Code)
   ui_info "Registering lifecycle hooks in ~/.claude/settings.json..."
   merge_hooks "$GLOBAL_SETTINGS" \
-    "SessionStart" "\"${LIFECYCLE_PYTHON}\" \"${LIFECYCLE_SCRIPTS}/session_start_hook.py\"" "10" \
-    "Stop" "\"${LIFECYCLE_PYTHON}\" \"${LIFECYCLE_SCRIPTS}/session_end_hook.py\"" "30"
+    "SessionStart" "test -f \"${LIFECYCLE_SCRIPTS}/session_start_hook.py\" && \"${LIFECYCLE_PYTHON}\" \"${LIFECYCLE_SCRIPTS}/session_start_hook.py\" || true" "10" \
+    "Stop" "test -f \"${LIFECYCLE_SCRIPTS}/session_end_hook.py\" && \"${LIFECYCLE_PYTHON}\" \"${LIFECYCLE_SCRIPTS}/session_end_hook.py\" || true" "30"
   if [ $? -eq 0 ]; then
     ui_success "SessionStart + Stop hooks → ~/.claude/settings.json"
   else
@@ -452,7 +452,7 @@ PYEOF
   if [ -n "$PROJECT_SETTINGS" ]; then
     ui_info "Registering PostToolUse hook in settings.local.json..."
     merge_hooks "$PROJECT_SETTINGS" \
-      "PostToolUse" "\"${PTU_PYTHON}\" \"${PTU_SCRIPTS}/observation_hook.py\"" "5"
+      "PostToolUse" "test -f \"${PTU_SCRIPTS}/observation_hook.py\" && \"${PTU_PYTHON}\" \"${PTU_SCRIPTS}/observation_hook.py\" || true" "5"
     if [ $? -eq 0 ]; then
       ui_success "PostToolUse hook → settings.local.json"
     else
@@ -461,7 +461,7 @@ PYEOF
   else
     ui_info "Registering PostToolUse hook in ~/.claude/settings.json..."
     merge_hooks "$GLOBAL_SETTINGS" \
-      "PostToolUse" "\"${PTU_PYTHON}\" \"${PTU_SCRIPTS}/observation_hook.py\"" "5"
+      "PostToolUse" "test -f \"${PTU_SCRIPTS}/observation_hook.py\" && \"${PTU_PYTHON}\" \"${PTU_SCRIPTS}/observation_hook.py\" || true" "5"
     if [ $? -eq 0 ]; then
       ui_success "PostToolUse hook → ~/.claude/settings.json"
     else

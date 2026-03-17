@@ -281,8 +281,8 @@ powershell -Command ^
   "if (Test-Path $settingsPath) { $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json } else { $settings = @{} }; " ^
   "if (-not $settings.hooks) { $settings | Add-Member -Force -NotePropertyName 'hooks' -NotePropertyValue @{} }; " ^
   "$hooks = $settings.hooks; " ^
-  "$ssHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('\"' + $pyPath + '\" \"' + $scPath + '/session_start_hook.py\"'); timeout=10 }) }); " ^
-  "$stopHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('\"' + $pyPath + '\" \"' + $scPath + '/session_end_hook.py\"'); timeout=30 }) }); " ^
+  "$ssHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('if exist \"' + $scPath + '/session_start_hook.py\" (\"' + $pyPath + '\" \"' + $scPath + '/session_start_hook.py\")'); timeout=10 }) }); " ^
+  "$stopHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('if exist \"' + $scPath + '/session_end_hook.py\" (\"' + $pyPath + '\" \"' + $scPath + '/session_end_hook.py\")'); timeout=30 }) }); " ^
   "$hooks | Add-Member -Force -NotePropertyName 'SessionStart' -NotePropertyValue $ssHook; " ^
   "$hooks | Add-Member -Force -NotePropertyName 'Stop' -NotePropertyValue $stopHook; " ^
   "$settings | ConvertTo-Json -Depth 10 | Set-Content $settingsPath"
@@ -302,7 +302,7 @@ powershell -Command ^
   "if (Test-Path $settingsPath) { $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json } else { $settings = @{} }; " ^
   "if (-not $settings.hooks) { $settings | Add-Member -Force -NotePropertyName 'hooks' -NotePropertyValue @{} }; " ^
   "$hooks = $settings.hooks; " ^
-  "$ptuHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('\"' + $pyPath + '\" \"' + $scPath + '/observation_hook.py\"'); timeout=5 }) }); " ^
+  "$ptuHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('if exist \"' + $scPath + '/observation_hook.py\" (\"' + $pyPath + '\" \"' + $scPath + '/observation_hook.py\")'); timeout=5 }) }); " ^
   "$hooks | Add-Member -Force -NotePropertyName 'PostToolUse' -NotePropertyValue $ptuHook; " ^
   "$settings | ConvertTo-Json -Depth 10 | Set-Content $settingsPath"
 
