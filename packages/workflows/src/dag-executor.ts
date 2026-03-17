@@ -5,8 +5,8 @@
  * Independent nodes within the same layer run concurrently via Promise.allSettled.
  * Captures all assistant output regardless of streaming mode for $node_id.output substitution.
  */
-import { readFile, access } from 'fs/promises';
-import { join } from 'path';
+import { readFile } from 'fs/promises';
+import { resolve, isAbsolute } from 'path';
 import { execFileAsync } from '@archon/git';
 import type {
   WorkflowAssistantOptions,
@@ -14,8 +14,8 @@ import type {
   WorkflowMessageMetadata,
   WorkflowTokenUsage,
   WorkflowConfig,
+  WorkflowDeps,
 } from './deps';
-import type { WorkflowDeps } from './deps';
 import type {
   DagNode,
   BashNode,
@@ -24,11 +24,10 @@ import type {
   NodeOutput,
   TriggerRule,
   WorkflowRun,
+  WorkflowNodeHooks,
 } from './types';
 import { isBashNode } from './types';
 import { formatToolCall } from './utils/tool-formatter';
-import * as archonPaths from '@archon/paths';
-import { BUNDLED_COMMANDS, isBinaryBuild } from './defaults/bundled-defaults';
 import { createLogger } from '@archon/paths';
 import { getWorkflowEventEmitter } from './event-emitter';
 import { evaluateCondition } from './condition-evaluator';
@@ -43,9 +42,13 @@ import {
   logWorkflowComplete,
   logWorkflowError,
 } from './logger';
-import { isValidCommandName } from './command-validation';
-import type { LoadCommandResult } from './types';
 import { withIdleTimeout, STEP_IDLE_TIMEOUT_MS } from './utils/idle-timeout';
+import {
+  classifyError,
+  loadCommandPrompt,
+  substituteWorkflowVariables,
+  buildPromptWithContext,
+} from './executor-shared';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -62,49 +65,6 @@ const NODE_ACTIVITY_UPDATE_INTERVAL_MS = 10_000;
 interface SendMessageContext {
   workflowId?: string;
   nodeName?: string;
-}
-
-/** Fatal error patterns - authentication/authorization issues that won't resolve with retry */
-const FATAL_PATTERNS = [
-  'unauthorized',
-  'forbidden',
-  'invalid token',
-  'authentication failed',
-  'permission denied',
-  '401',
-  '403',
-  'credit balance',
-  'auth error',
-];
-
-/** Transient error patterns - temporary issues that may resolve with retry */
-const TRANSIENT_PATTERNS = [
-  'timeout',
-  'econnrefused',
-  'econnreset',
-  'etimedout',
-  'rate limit',
-  'too many requests',
-  '429',
-  '503',
-  '502',
-  'network error',
-  'socket hang up',
-  'exited with code',
-  'claude code crash',
-];
-
-function matchesPattern(message: string, patterns: string[]): boolean {
-  return patterns.some(pattern => message.includes(pattern));
-}
-
-type ErrorType = 'TRANSIENT' | 'FATAL' | 'UNKNOWN';
-
-function classifyError(error: Error): ErrorType {
-  const message = error.message.toLowerCase();
-  if (matchesPattern(message, FATAL_PATTERNS)) return 'FATAL';
-  if (matchesPattern(message, TRANSIENT_PATTERNS)) return 'TRANSIENT';
-  return 'UNKNOWN';
 }
 
 /** Default DAG node retry for TRANSIENT errors */
@@ -147,10 +107,6 @@ function isTransientNodeError(errorMessage: string): boolean {
 /**
  * Safely send a message to the platform without crashing on failure.
  * Returns true if message was sent successfully, false otherwise.
- *
- * TODO: These helpers (safeSendMessage, substituteWorkflowVariables, loadCommandPrompt,
- * buildPromptWithContext) are duplicated from executor.ts. Rule of Three is met.
- * Extract to a shared module (e.g. packages/workflows/src/utils.ts).
  */
 async function safeSendMessage(
   platform: IWorkflowPlatform,
@@ -184,180 +140,6 @@ async function safeSendMessage(
 
     return false;
   }
-}
-
-/** Pattern string for context variables - used to create fresh regex instances */
-const CONTEXT_VAR_PATTERN_STR = '\\$(?:CONTEXT|EXTERNAL_CONTEXT|ISSUE_CONTEXT)';
-
-/**
- * Substitute workflow variables in a prompt.
- * Duplicated from executor.ts (Rule of Three is met).
- * TODO: extract to shared module (e.g. packages/workflows/src/utils.ts).
- */
-function substituteWorkflowVariables(
-  prompt: string,
-  workflowId: string,
-  userMessage: string,
-  artifactsDir: string,
-  baseBranch: string,
-  issueContext?: string
-): { prompt: string; contextSubstituted: boolean } {
-  let result = prompt
-    .replace(/\$WORKFLOW_ID/g, workflowId)
-    .replace(/\$USER_MESSAGE/g, userMessage)
-    .replace(/\$ARGUMENTS/g, userMessage)
-    .replace(/\$ARTIFACTS_DIR/g, artifactsDir)
-    .replace(/\$BASE_BRANCH/g, baseBranch);
-
-  const hasContextVariables = new RegExp(CONTEXT_VAR_PATTERN_STR).test(result);
-  const contextValue = issueContext ?? '';
-  result = result.replace(new RegExp(CONTEXT_VAR_PATTERN_STR, 'g'), contextValue);
-
-  return { prompt: result, contextSubstituted: hasContextVariables && !!issueContext };
-}
-
-/**
- * Apply variable substitution and optionally append issue context.
- * Duplicated from executor.ts (Rule of Three not yet met).
- */
-function buildPromptWithContext(
-  template: string,
-  workflowId: string,
-  userMessage: string,
-  artifactsDir: string,
-  baseBranch: string,
-  issueContext: string | undefined,
-  logLabel: string
-): string {
-  const { prompt, contextSubstituted } = substituteWorkflowVariables(
-    template,
-    workflowId,
-    userMessage,
-    artifactsDir,
-    baseBranch,
-    issueContext
-  );
-
-  if (issueContext && !contextSubstituted) {
-    getLog().debug({ logLabel }, 'issue_context_appended');
-    return prompt + '\n\n---\n\n' + issueContext;
-  }
-
-  return prompt;
-}
-
-/**
- * Load command prompt from file.
- * Duplicated from executor.ts (Rule of Three is met).
- * TODO: extract to shared module (e.g. packages/workflows/src/utils.ts).
- */
-async function loadCommandPrompt(
-  deps: WorkflowDeps,
-  cwd: string,
-  commandName: string,
-  configuredFolder?: string
-): Promise<LoadCommandResult> {
-  if (!isValidCommandName(commandName)) {
-    getLog().error({ commandName }, 'invalid_command_name');
-    return {
-      success: false,
-      reason: 'invalid_name',
-      message: `Invalid command name (potential path traversal): ${commandName}`,
-    };
-  }
-
-  let config;
-  try {
-    config = await deps.loadConfig(cwd);
-  } catch (error) {
-    const err = error as Error;
-    getLog().warn(
-      {
-        err,
-        cwd,
-        note: 'Default commands will be loaded. Check your .archon/config.yaml if this is unexpected.',
-      },
-      'config_load_failed_using_defaults'
-    );
-    config = { defaults: { loadDefaultCommands: true } };
-  }
-
-  const searchPaths = archonPaths.getCommandFolderSearchPaths(configuredFolder);
-
-  for (const folder of searchPaths) {
-    const filePath = join(cwd, folder, `${commandName}.md`);
-    try {
-      await access(filePath);
-      const content = await readFile(filePath, 'utf-8');
-      if (!content.trim()) {
-        getLog().error({ commandName }, 'command_file_empty');
-        return {
-          success: false,
-          reason: 'empty_file',
-          message: `Command file is empty: ${commandName}.md`,
-        };
-      }
-      getLog().debug({ commandName, folder }, 'command_loaded');
-      return { success: true, content };
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') continue;
-      if (err.code === 'EACCES') {
-        getLog().error({ commandName, filePath }, 'command_file_permission_denied');
-        return {
-          success: false,
-          reason: 'permission_denied',
-          message: `Permission denied reading command: ${commandName}.md`,
-        };
-      }
-      getLog().error({ err, commandName, filePath }, 'command_file_read_error');
-      return {
-        success: false,
-        reason: 'read_error',
-        message: `Error reading command ${commandName}.md: ${err.message}`,
-      };
-    }
-  }
-
-  const loadDefaultCommands = config.defaults?.loadDefaultCommands ?? true;
-  if (loadDefaultCommands) {
-    if (isBinaryBuild()) {
-      const bundledContent = BUNDLED_COMMANDS[commandName];
-      if (bundledContent) {
-        getLog().debug({ commandName }, 'command_loaded_bundled');
-        return { success: true, content: bundledContent };
-      }
-    } else {
-      const appDefaultsPath = archonPaths.getDefaultCommandsPath();
-      const filePath = join(appDefaultsPath, `${commandName}.md`);
-      try {
-        await access(filePath);
-        const content = await readFile(filePath, 'utf-8');
-        if (!content.trim()) {
-          return {
-            success: false,
-            reason: 'empty_file',
-            message: `App default command file is empty: ${commandName}.md`,
-          };
-        }
-        getLog().debug({ commandName }, 'command_loaded_app_defaults');
-        return { success: true, content };
-      } catch (error) {
-        const err = error as NodeJS.ErrnoException;
-        if (err.code !== 'ENOENT') {
-          getLog().warn({ err, commandName }, 'command_app_default_read_error');
-        }
-      }
-    }
-  }
-
-  const allSearchPaths = loadDefaultCommands ? [...searchPaths, 'app defaults'] : searchPaths;
-  getLog().error({ commandName, searchPaths: allSearchPaths }, 'command_not_found');
-  return {
-    success: false,
-    reason: 'not_found',
-    message: `Command prompt not found: ${commandName}.md (searched: ${allSearchPaths.join(', ')})`,
-  };
 }
 
 /**
@@ -401,15 +183,143 @@ export function substituteNodeOutputRefs(
         // String(boolean) is 'true' or 'false' — no shell metacharacters.
         if (typeof value === 'number' || typeof value === 'boolean') return String(value);
         return escapedForBash ? "''" : ''; // objects, null, undefined, symbol, bigint → empty
-      } catch {
+      } catch (jsonErr) {
         getLog().warn(
-          { nodeId, field, outputPreview: nodeOutput.output.slice(0, 100) },
+          { nodeId, field, outputPreview: nodeOutput.output.slice(0, 100), err: jsonErr as Error },
           'dag_node_output_ref_json_parse_failed'
         );
         return escapedForBash ? "''" : '';
       }
     }
   );
+}
+
+/** SDK-compatible hook structure returned by buildSDKHooksFromYAML */
+type SDKHooksMap = NonNullable<WorkflowAssistantOptions['hooks']>;
+
+/**
+ * Convert declarative YAML hook definitions to SDK HookCallbackMatcher arrays.
+ * Each YAML matcher's `response` is wrapped in `async () => response`.
+ */
+export function buildSDKHooksFromYAML(nodeHooks: WorkflowNodeHooks): SDKHooksMap {
+  const sdkHooks: SDKHooksMap = {};
+
+  for (const [event, matchers] of Object.entries(nodeHooks)) {
+    if (!matchers) continue;
+    sdkHooks[event] = matchers.map(m => ({
+      ...(m.matcher ? { matcher: m.matcher } : {}),
+      hooks: [async (): Promise<unknown> => m.response],
+      ...(m.timeout ? { timeout: m.timeout } : {}),
+    }));
+  }
+
+  if (Object.keys(sdkHooks).length === 0) {
+    getLog().warn({ nodeHooksKeys: Object.keys(nodeHooks) }, 'dag.hooks_build_produced_empty_map');
+  }
+
+  return sdkHooks;
+}
+
+/**
+ * Load MCP server config from a JSON file and expand environment variables.
+ * Format: Record<string, McpServerConfig> matching the SDK's expected shape.
+ * $VAR_NAME references in env/headers values are expanded from process.env.
+ * Secrets are NEVER logged.
+ */
+export async function loadMcpConfig(
+  mcpPath: string,
+  cwd: string
+): Promise<{ servers: Record<string, unknown>; serverNames: string[]; missingVars: string[] }> {
+  const fullPath = isAbsolute(mcpPath) ? mcpPath : resolve(cwd, mcpPath);
+
+  let raw: string;
+  try {
+    raw = await readFile(fullPath, 'utf-8');
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code === 'ENOENT') {
+      throw new Error(`MCP config file not found: ${mcpPath} (resolved to ${fullPath})`);
+    }
+    throw new Error(`Failed to read MCP config file: ${mcpPath} — ${e.message}`);
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch (parseErr) {
+    const detail = (parseErr as SyntaxError).message;
+    throw new Error(`MCP config file is not valid JSON: ${mcpPath} — ${detail}`);
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`MCP config must be a JSON object (Record<string, ServerConfig>): ${mcpPath}`);
+  }
+
+  const { expanded, missingVars } = expandEnvVars(parsed);
+  const serverNames = Object.keys(expanded);
+
+  return { servers: expanded, serverNames, missingVars };
+}
+
+/**
+ * Expand $VAR_NAME references in a string-valued record from process.env.
+ * Undefined env vars are replaced with empty string; their names are collected in missingVars.
+ * Non-string values are coerced to string with a warning.
+ */
+function expandEnvVarsInRecord(
+  record: Record<string, unknown>,
+  missingVars: string[]
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, val] of Object.entries(record)) {
+    if (typeof val !== 'string') {
+      getLog().warn({ key, valueType: typeof val }, 'dag.mcp_env_value_coerced_to_string');
+      result[key] = String(val);
+      continue;
+    }
+    result[key] = val.replace(/\$([A-Z_][A-Z0-9_]*)/g, (_, varName: string) => {
+      const envVal = process.env[varName];
+      if (envVal === undefined) {
+        missingVars.push(varName);
+      }
+      return envVal ?? '';
+    });
+  }
+  return result;
+}
+
+/**
+ * Expand $VAR_NAME references in 'env' and 'headers' string values from process.env.
+ * Other fields (command, args, url) are left untouched.
+ * Undefined env vars are replaced with empty string and collected in missingVars.
+ */
+function expandEnvVars(config: Record<string, unknown>): {
+  expanded: Record<string, unknown>;
+  missingVars: string[];
+} {
+  const result: Record<string, unknown> = {};
+  const missingVars: string[] = [];
+  for (const [serverName, serverConfig] of Object.entries(config)) {
+    if (typeof serverConfig !== 'object' || serverConfig === null) {
+      getLog().warn(
+        { serverName, valueType: typeof serverConfig },
+        'dag.mcp_server_config_not_object'
+      );
+      continue;
+    }
+    const server = { ...(serverConfig as Record<string, unknown>) };
+    if (server.env && typeof server.env === 'object') {
+      server.env = expandEnvVarsInRecord(server.env as Record<string, unknown>, missingVars);
+    }
+    if (server.headers && typeof server.headers === 'object') {
+      server.headers = expandEnvVarsInRecord(
+        server.headers as Record<string, unknown>,
+        missingVars
+      );
+    }
+    result[serverName] = server;
+  }
+  return { expanded: result, missingVars };
 }
 
 /**
@@ -423,7 +333,8 @@ async function resolveNodeProviderAndModel(
   config: WorkflowConfig,
   platform: IWorkflowPlatform,
   conversationId: string,
-  workflowRunId: string
+  workflowRunId: string,
+  cwd: string
 ): Promise<{
   provider: 'claude' | 'codex';
   model: string | undefined;
@@ -453,7 +364,7 @@ async function resolveNodeProviderAndModel(
 
   // Warn if Codex node has output_format (unsupported)
   if (provider === 'codex' && node.output_format) {
-    getLog().error({ nodeId: node.id }, 'dag_node_output_format_ignored_codex');
+    getLog().warn({ nodeId: node.id }, 'dag_node_output_format_ignored_codex');
     const outputFormatDelivered = await safeSendMessage(
       platform,
       conversationId,
@@ -473,7 +384,7 @@ async function resolveNodeProviderAndModel(
     provider === 'codex' &&
     (node.allowed_tools !== undefined || node.denied_tools !== undefined)
   ) {
-    getLog().error({ nodeId: node.id }, 'dag_node_tool_restrictions_ignored_codex');
+    getLog().warn({ nodeId: node.id }, 'dag_node_tool_restrictions_ignored_codex');
     const delivered = await safeSendMessage(
       platform,
       conversationId,
@@ -482,6 +393,48 @@ async function resolveNodeProviderAndModel(
     );
     if (!delivered) {
       getLog().error({ nodeId: node.id, workflowRunId }, 'dag_node_codex_warning_delivery_failed');
+    }
+  }
+
+  // Warn if Codex node has hooks (unsupported)
+  if (provider === 'codex' && node.hooks) {
+    getLog().warn({ nodeId: node.id }, 'dag_node_hooks_ignored_codex');
+    const delivered = await safeSendMessage(
+      platform,
+      conversationId,
+      `Warning: Node '${node.id}' has hooks set but uses Codex provider — hooks are Claude-only and will be ignored.`,
+      { workflowId: workflowRunId, nodeName: node.id }
+    );
+    if (!delivered) {
+      getLog().error({ nodeId: node.id, workflowRunId }, 'dag_node_hooks_warning_delivery_failed');
+    }
+  }
+
+  // Warn if Codex node has mcp (unsupported per-call)
+  if (provider === 'codex' && node.mcp) {
+    getLog().warn({ nodeId: node.id }, 'dag.mcp_ignored_codex');
+    const delivered = await safeSendMessage(
+      platform,
+      conversationId,
+      `Warning: Node '${node.id}' has mcp config but uses Codex — per-node MCP servers are not supported for Codex. Configure MCP servers globally in the Codex CLI config instead.`,
+      { workflowId: workflowRunId, nodeName: node.id }
+    );
+    if (!delivered) {
+      getLog().error({ nodeId: node.id, workflowRunId }, 'dag.mcp_warning_delivery_failed');
+    }
+  }
+
+  // Warn if Codex node has skills (unsupported)
+  if (provider === 'codex' && node.skills) {
+    getLog().warn({ nodeId: node.id }, 'dag.skills_ignored_codex');
+    const delivered = await safeSendMessage(
+      platform,
+      conversationId,
+      `Warning: Node '${node.id}' has skills set but uses Codex — per-node skills are not supported for Codex.`,
+      { workflowId: workflowRunId, nodeName: node.id }
+    );
+    if (!delivered) {
+      getLog().error({ nodeId: node.id, workflowRunId }, 'dag.skills_warning_delivery_failed');
     }
   }
 
@@ -504,6 +457,90 @@ async function resolveNodeProviderAndModel(
     }
     if (node.allowed_tools !== undefined) claudeOptions.tools = node.allowed_tools;
     if (node.denied_tools !== undefined) claudeOptions.disallowedTools = node.denied_tools;
+    if (node.hooks) {
+      const builtHooks = buildSDKHooksFromYAML(node.hooks);
+      if (Object.keys(builtHooks).length > 0) claudeOptions.hooks = builtHooks;
+    }
+    // Load MCP config if specified
+    if (node.mcp) {
+      try {
+        const { servers, serverNames, missingVars } = await loadMcpConfig(node.mcp, cwd);
+        // loadMcpConfig returns Record<string, unknown> from JSON; cast to the structural
+        // union type — the SDK validates server configs at connection time
+        claudeOptions.mcpServers = servers as unknown as WorkflowAssistantOptions['mcpServers'];
+        // Auto-allow all MCP tools via wildcards
+        const mcpWildcards = serverNames.map(name => `mcp__${name}__*`);
+        claudeOptions.allowedTools = [...(claudeOptions.allowedTools ?? []), ...mcpWildcards];
+        getLog().info({ nodeId: node.id, serverNames, mcpPath: node.mcp }, 'dag.mcp_config_loaded');
+        // Warn user about missing env vars (likely secrets that will cause auth failures)
+        if (missingVars.length > 0) {
+          const uniqueVars = [...new Set(missingVars)];
+          getLog().warn({ nodeId: node.id, missingVars: uniqueVars }, 'dag.mcp_env_vars_missing');
+          const delivered = await safeSendMessage(
+            platform,
+            conversationId,
+            `Warning: Node '${node.id}' MCP config references undefined env vars: ${uniqueVars.join(', ')}. These will be empty strings — MCP servers may fail to authenticate.`,
+            { workflowId: workflowRunId, nodeName: node.id }
+          );
+          if (!delivered) {
+            getLog().error(
+              { nodeId: node.id, workflowRunId },
+              'dag.mcp_env_vars_warning_delivery_failed'
+            );
+          }
+        }
+        // Warn if Haiku model is used with MCP (tool search not supported)
+        if (model?.toLowerCase().includes('haiku')) {
+          getLog().warn({ nodeId: node.id, model }, 'dag.mcp_haiku_tool_search_unsupported');
+          const haikuDelivered = await safeSendMessage(
+            platform,
+            conversationId,
+            `Warning: Node '${node.id}' uses Haiku model with MCP servers — tool search (lazy loading for many tools) is not supported on Haiku. Consider using Sonnet or Opus.`,
+            { workflowId: workflowRunId, nodeName: node.id }
+          );
+          if (!haikuDelivered) {
+            getLog().error(
+              { nodeId: node.id, workflowRunId },
+              'dag.mcp_haiku_warning_delivery_failed'
+            );
+          }
+        }
+      } catch (mcpErr) {
+        const errMsg = (mcpErr as Error).message;
+        getLog().error(
+          { nodeId: node.id, mcpPath: node.mcp, error: errMsg },
+          'dag.mcp_config_load_failed'
+        );
+        throw new Error(`Node '${node.id}': ${errMsg}`);
+      }
+    }
+    // Wrap node in AgentDefinition when skills are specified
+    if (node.skills) {
+      const agentId = `dag-node-${node.id}`;
+      // Always include 'Skill' explicitly — SDK behavior for undefined tools is undocumented
+      const agentTools = claudeOptions.tools ? [...claudeOptions.tools, 'Skill'] : ['Skill'];
+      const agentDef: {
+        description: string;
+        prompt: string;
+        skills: string[];
+        tools: string[];
+        model?: string;
+      } = {
+        description: `DAG node '${node.id}'`,
+        prompt: `You have preloaded skills: ${node.skills.join(', ')}. Use them when relevant.`,
+        skills: node.skills,
+        tools: agentTools,
+      };
+      if (claudeOptions.model) agentDef.model = claudeOptions.model;
+
+      claudeOptions.agents = { [agentId]: agentDef };
+      claudeOptions.agent = agentId;
+      // Ensure 'Skill' is in allowedTools for the parent session
+      if (!claudeOptions.allowedTools?.includes('Skill')) {
+        claudeOptions.allowedTools = [...(claudeOptions.allowedTools ?? []), 'Skill'];
+      }
+      getLog().info({ nodeId: node.id, skills: node.skills, agentId }, 'dag.skills_agent_created');
+    }
     options = Object.keys(claudeOptions).length > 0 ? claudeOptions : undefined;
   }
 
@@ -681,15 +718,28 @@ async function executeNodeInternal(
   }
 
   // Standard variable substitution
-  const substitutedPrompt = buildPromptWithContext(
-    rawPrompt,
-    workflowRun.id,
-    workflowRun.user_message,
-    artifactsDir,
-    baseBranch,
-    issueContext,
-    `dag node '${node.id}' prompt`
-  );
+  let substitutedPrompt: string;
+  try {
+    substitutedPrompt = buildPromptWithContext(
+      rawPrompt,
+      workflowRun.id,
+      workflowRun.user_message,
+      artifactsDir,
+      baseBranch,
+      issueContext,
+      `dag node '${node.id}' prompt`
+    );
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ nodeId: node.id, error: err.message }, 'dag.node_prompt_substitution_failed');
+    await safeSendMessage(
+      platform,
+      conversationId,
+      `Node '${node.id}' failed: ${err.message}`,
+      nodeContext
+    );
+    return { state: 'failed', output: '', error: err.message };
+  }
 
   // Substitute upstream node output references
   const finalPrompt = substituteNodeOutputRefs(substitutedPrompt, nodeOutputs);
@@ -724,7 +774,8 @@ async function executeNodeInternal(
           'dag_node_idle_timeout_reached'
         );
         nodeAbortController.abort();
-      }
+      },
+      msg => msg.type !== 'tool'
     )) {
       // Update activity timestamp + check cancel (throttled to once per 10s)
       const activityNow = Date.now();
@@ -847,6 +898,31 @@ async function executeNodeInternal(
         if (msg.sessionId) newSessionId = msg.sessionId;
         if (msg.tokens) nodeTokens = msg.tokens;
         if (msg.structuredOutput !== undefined) structuredOutput = msg.structuredOutput;
+      } else if (msg.type === 'system' && msg.content) {
+        // Surface MCP connection failures to the user
+        if (msg.content.startsWith('MCP server connection failed:')) {
+          getLog().warn(
+            { nodeId: node.id, mcpStatus: msg.content },
+            'dag.mcp_server_connection_failed'
+          );
+          const delivered = await safeSendMessage(
+            platform,
+            conversationId,
+            msg.content,
+            nodeContext
+          );
+          if (!delivered) {
+            getLog().error(
+              { nodeId: node.id, mcpStatus: msg.content, workflowRunId: workflowRun.id },
+              'dag.mcp_connection_failure_delivery_failed'
+            );
+          }
+        } else {
+          getLog().debug(
+            { nodeId: node.id, systemContent: msg.content },
+            'dag.system_message_unhandled'
+          );
+        }
       }
     }
 
@@ -1338,7 +1414,8 @@ export async function executeDagWorkflow(
             config,
             platform,
             conversationId,
-            workflowRun.id
+            workflowRun.id,
+            cwd
           );
 
           // 5. Determine session — parallel or context:fresh → always fresh

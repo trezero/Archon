@@ -21,22 +21,22 @@ export interface CLIAdapterOptions {
 
 export class CLIAdapter implements IPlatformAdapter {
   private readonly streamingMode: 'stream' | 'batch';
-  private conversationDbId: string | undefined;
+  private readonly dbIdMap = new Map<string, string>(); // platform_conversation_id → DB UUID
 
   constructor(options?: CLIAdapterOptions) {
     this.streamingMode = options?.streamingMode ?? 'batch';
   }
 
   /**
-   * Set the database conversation ID for message persistence.
+   * Map a platform conversation ID to its database UUID for message persistence.
    * Must be called after conversation creation and before executeWorkflow.
    */
-  setConversationDbId(dbId: string): void {
-    this.conversationDbId = dbId;
+  setConversationDbId(conversationId: string, dbId: string): void {
+    this.dbIdMap.set(conversationId, dbId);
   }
 
   async sendMessage(
-    _conversationId: string,
+    conversationId: string,
     message: string,
     metadata?: MessageMetadata
   ): Promise<void> {
@@ -44,7 +44,8 @@ export class CLIAdapter implements IPlatformAdapter {
     console.log(message);
 
     // Persist assistant message for Web UI history
-    if (this.conversationDbId) {
+    const dbId = this.dbIdMap.get(conversationId);
+    if (dbId) {
       try {
         // Build persistence metadata from MessageMetadata (mirror web adapter pattern)
         const persistMeta: Record<string, unknown> = {};
@@ -53,14 +54,14 @@ export class CLIAdapter implements IPlatformAdapter {
         if (metadata?.workflowResult) persistMeta.workflowResult = metadata.workflowResult;
 
         await messageDb.addMessage(
-          this.conversationDbId,
+          dbId,
           'assistant',
           message,
           Object.keys(persistMeta).length > 0 ? persistMeta : undefined
         );
       } catch (error) {
         getLog().warn(
-          { err: error as Error, conversationDbId: this.conversationDbId },
+          { err: error as Error, conversationDbId: dbId },
           'cli_message_persist_failed'
         );
       }

@@ -1131,7 +1131,7 @@ EOF
 - `$ARGUMENTS` - All arguments as a single string
 - `$PLAN` - Previous plan from session metadata
 - `$IMPLEMENTATION_SUMMARY` - Previous execution summary
-- `$BASE_BRANCH` - Base branch from config or auto-detected from repo
+- `$BASE_BRANCH` - Base branch; auto-detected from git when `worktree.baseBranch` is not set. Fails only if referenced and detection fails
 
 Commands are version-controlled with your codebase, not stored in the database.
 
@@ -1222,7 +1222,12 @@ nodes:
   - id: mcp-only
     command: mcp-command
     allowed_tools: []                   # disable all built-in tools
+    mcp: .archon/mcp/github.json        # per-node MCP servers (Claude only)
 ```
+
+**Per-node MCP servers** (`mcp`) attach MCP server definitions to a specific node. Point to a JSON file (relative to cwd) in `Record<string, McpServerConfig>` format — environment variables (`$VAR_NAME`) in `env`/`headers` values are expanded from `process.env` at execution time. Claude only — Codex nodes emit a warning and ignore this field.
+
+**Per-node skills** (`skills`) preload named SKILL.md files into a node's agent context via AgentDefinition wrapping. Install skills with `npx skills add <source>` and list them on any Claude DAG node. See [docs/skills.md](docs/skills.md).
 
 See [Authoring Workflows](docs/authoring-workflows.md) for full DAG documentation.
 

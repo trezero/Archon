@@ -95,7 +95,7 @@ commands:
 
 # Worktree settings
 worktree:
-  baseBranch: main  # Optional: Base branch for workspace sync (default: auto-detect)
+  baseBranch: main  # Optional: auto-detected from git when not set
   copyFiles:  # Optional: Additional files to copy to worktrees
     - .env.example -> .env  # Rename during copy
     - .vscode               # Copy entire directory
@@ -111,9 +111,10 @@ defaults:
 
 **Defaults behavior:** The app's bundled default commands and workflows are loaded at runtime and merged with repo-specific ones. Repo commands/workflows override app defaults by name. Set `defaults.loadDefaultCommands: false` or `defaults.loadDefaultWorkflows: false` to disable runtime loading.
 
-**Base branch behavior:** Before creating a worktree, the canonical workspace is synced to the latest code:
-- If `worktree.baseBranch` is set: Uses the configured branch. **Fails with an error** if the branch doesn't exist (no silent fallback).
-- If `worktree.baseBranch` is omitted: Auto-detects the default branch via `git symbolic-ref` (falls back to `main` or `master`).
+**Base branch behavior:** Before creating a worktree, the canonical workspace is synced to the latest code. Resolution order:
+1. If `worktree.baseBranch` is set: Uses the configured branch. **Fails with an error** if the branch doesn't exist on remote (no silent fallback).
+2. If omitted: Auto-detects the default branch via `git remote show origin`. Works without any config for standard repos.
+3. If auto-detection fails and a workflow references `$BASE_BRANCH`: Fails with an error explaining the resolution chain.
 
 ## Environment Variables
 

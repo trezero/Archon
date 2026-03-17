@@ -248,9 +248,22 @@ export class ClaudeClient implements IAssistantClient {
         ...(requestOptions?.outputFormat !== undefined
           ? { outputFormat: requestOptions.outputFormat }
           : {}),
-        // Write session transcripts so the Claude Agent SDK `resume` mechanism works
-        // on subsequent messages in the same conversation. Without this, the second
-        // message crashes because the subprocess can't find the transcript file.
+        // Pass hooks for per-node SDK hook callbacks
+        ...(requestOptions?.hooks !== undefined ? { hooks: requestOptions.hooks } : {}),
+        // Pass MCP servers for per-node MCP support (Claude Agent SDK v0.2.74+)
+        ...(requestOptions?.mcpServers !== undefined
+          ? { mcpServers: requestOptions.mcpServers }
+          : {}),
+        // Pass allowedTools for MCP tool wildcards (e.g., 'mcp__github__*')
+        ...(requestOptions?.allowedTools !== undefined
+          ? { allowedTools: requestOptions.allowedTools }
+          : {}),
+        // Pass agents/agent for per-node skill scoping via AgentDefinition wrapping
+        ...(requestOptions?.agents !== undefined ? { agents: requestOptions.agents } : {}),
+        ...(requestOptions?.agent !== undefined ? { agent: requestOptions.agent } : {}),
+        // Skip writing session transcripts to ~/.claude/projects/ — Archon manages its own
+        // session persistence. persistSession: false reduces disk I/O and keeps the session
+        // directory clean. Claude Agent SDK v0.2.74+.
         ...(requestOptions?.persistSession !== undefined
           ? { persistSession: requestOptions.persistSession }
           : {}),
@@ -308,6 +321,21 @@ export class ClaudeClient implements IAssistantClient {
                   toolInput: block.input ?? {},
                 };
               }
+            }
+          } else if (msg.type === 'system') {
+            // Check MCP server connection status from system/init
+            const sysMsg = msg as {
+              subtype?: string;
+              mcp_servers?: { name: string; status: string }[];
+            };
+            if (sysMsg.subtype === 'init' && sysMsg.mcp_servers) {
+              const failed = sysMsg.mcp_servers.filter(s => s.status !== 'connected');
+              if (failed.length > 0) {
+                const names = failed.map(s => `${s.name} (${s.status})`).join(', ');
+                yield { type: 'system', content: `MCP server connection failed: ${names}` };
+              }
+            } else {
+              getLog().debug({ subtype: sysMsg.subtype }, 'claude.system_message_unhandled');
             }
           } else if (msg.type === 'result') {
             const resultMsg = msg as {

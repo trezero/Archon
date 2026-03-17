@@ -28,7 +28,7 @@ mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
 }));
 
-import { discoverWorkflows } from './loader';
+import { discoverWorkflows } from './workflow-discovery';
 import { isParallelBlock, isDagWorkflow, isBashNode } from './types';
 import * as bundledDefaults from './defaults/bundled-defaults';
 
@@ -1122,7 +1122,7 @@ steps:
 
   describe('discoverWorkflowsWithConfig', () => {
     it('should pass loadDefaults from config to discoverWorkflows', async () => {
-      const { discoverWorkflowsWithConfig } = await import('./loader');
+      const { discoverWorkflowsWithConfig } = await import('./workflow-discovery');
       const mockLoadConfig = mock(async () => ({
         defaults: { loadDefaultWorkflows: false },
       }));
@@ -1136,7 +1136,7 @@ steps:
     });
 
     it('should default to loadDefaults: true when config load fails', async () => {
-      const { discoverWorkflowsWithConfig } = await import('./loader');
+      const { discoverWorkflowsWithConfig } = await import('./workflow-discovery');
       const mockLoadConfig = mock(async () => {
         throw new Error('Config not found');
       });
@@ -1149,7 +1149,7 @@ steps:
     });
 
     it('should pass globalSearchPath through to discoverWorkflows', async () => {
-      const { discoverWorkflowsWithConfig } = await import('./loader');
+      const { discoverWorkflowsWithConfig } = await import('./workflow-discovery');
       const globalDir = join(
         tmpdir(),
         `global-test-${Date.now()}-${Math.random().toString(36).slice(2)}`

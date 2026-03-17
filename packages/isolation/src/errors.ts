@@ -62,6 +62,12 @@ export function classifyIsolationError(err: Error): string {
       message:
         '**Error:** Branch not found. The requested branch may have been deleted or not yet pushed.',
     },
+    {
+      pattern: 'no base branch configured',
+      message:
+        '**Error:** No base branch configured. Set `worktree.baseBranch` in `.archon/config.yaml` ' +
+        'or use the `--from` flag to select a branch (e.g., `--from dev`).',
+    },
   ];
 
   for (const { pattern, message } of errorPatterns) {
@@ -92,6 +98,7 @@ export function isKnownIsolationError(err: Error): boolean {
     'enospc',
     'not a git repository',
     'branch not found',
+    'no base branch configured',
   ];
 
   return knownPatterns.some(pattern => errorLower.includes(pattern));

@@ -206,7 +206,7 @@ prompt: |
   - $WORKFLOW_ID - unique run identifier
   - $USER_MESSAGE - original trigger
   - $ARGUMENTS - same as $USER_MESSAGE
-  - $BASE_BRANCH - base branch (config or auto-detected)
+  - $BASE_BRANCH - base branch (auto-detected from git; optional config: worktree.baseBranch)
   - $CONTEXT - GitHub issue/PR context (if available)
 
   When done, output: <promise>COMPLETE</promise>
@@ -309,6 +309,9 @@ nodes:
     context: fresh               # Force fresh session for this node
     provider: claude             # Per-node provider override
     model: haiku                 # Per-node model override
+    # hooks:                     # Optional: per-node SDK hook callbacks (Claude only) — see docs/hooks.md
+    # mcp: .archon/mcp/servers.json  # Optional: per-node MCP servers (Claude only)
+    # skills: [remotion-best-practices]  # Optional: per-node skills (Claude only) — see docs/skills.md
 ```
 
 ### Node Fields
@@ -328,6 +331,9 @@ nodes:
 | `allowed_tools` | string[] | — | Whitelist of built-in tools for this node. `[]` disables all built-in tools (MCP-only mode). Claude only — Codex nodes emit a warning and ignore this field |
 | `denied_tools` | string[] | — | Blacklist of built-in tools to remove from this node. Applied after `allowed_tools` if both are set. Claude only — Codex nodes emit a warning and ignore this field |
 | `retry` | object | — | Per-node retry configuration. See [Retry Configuration](#retry-configuration). Omit to use the automatic default (2 retries, 3 s base delay, transient errors only) |
+| `hooks` | object | — | Per-node SDK hook callbacks. Claude only — Codex nodes emit a warning and ignore this field. See [docs/hooks.md](./hooks.md) |
+| `mcp` | string | — | Path to MCP server config JSON file (relative to cwd or absolute). Environment variables (`$VAR_NAME`) in `env`/`headers` values are expanded from `process.env` at execution time. Claude only — Codex nodes emit a warning and ignore this field. See [docs/mcp-servers.md](./mcp-servers.md) |
+| `skills` | string[] | — | Skill names to preload into this node's agent context. Skills must be installed in `.claude/skills/`. The node is wrapped in an AgentDefinition with these skills + `Skill` auto-added to allowedTools. Claude only — Codex nodes emit a warning and ignore this field. See [docs/skills.md](./skills.md) |
 
 ### `trigger_rule` Values
 
@@ -425,7 +431,7 @@ steps:
     denied_tools: [WebSearch]
 ```
 
-- `allowed_tools: []` disables all built-in tools (useful for MCP-only nodes)
+- `allowed_tools: []` disables all built-in tools (useful for MCP-only nodes). Use the `mcp` field on a node to attach per-node MCP servers — see [Node Fields](#node-fields)
 - If both are set, `denied_tools` is applied after `allowed_tools`
 - `undefined` (field absent) and `[]` have different semantics — absent means use default tool set, `[]` means no tools
 - Claude only — Codex nodes/steps emit a warning and continue (Codex doesn't support per-call tool restrictions)
@@ -734,7 +740,7 @@ All workflow types (steps, loop, nodes) support these variables in prompts and c
 | `$USER_MESSAGE` | Original message that triggered workflow |
 | `$ARGUMENTS` | Same as `$USER_MESSAGE` |
 | `$ARTIFACTS_DIR` | Pre-created artifacts directory for this workflow run |
-| `$BASE_BRANCH` | Base branch from config or auto-detected from repo |
+| `$BASE_BRANCH` | Base branch; auto-detected from git when `worktree.baseBranch` is not set. Fails only if referenced and detection fails |
 | `$CONTEXT` | GitHub issue/PR context (if available) |
 | `$EXTERNAL_CONTEXT` | Same as `$CONTEXT` |
 | `$ISSUE_CONTEXT` | Same as `$CONTEXT` |
@@ -1072,4 +1078,7 @@ Before deploying a workflow:
 8. **`output_format`** - Enforce structured JSON output from Claude nodes for reliable branching
 9. **`allowed_tools` / `denied_tools`** - Restrict which tools a node or step can use (Claude only, enforced at SDK level)
 10. **`retry:`** - All steps/nodes auto-retry transient errors (default: 2 retries, 3 s backoff); configure per-step with `retry:` block
-11. **Test thoroughly** - Each command, the artifact flow, and edge cases
+11. **`hooks`** — Attach static SDK hook callbacks to individual Claude nodes for tool control and context injection (see [docs/hooks.md](./hooks.md))
+12. **`mcp:`** — Attach per-node MCP servers via a JSON config file path (Claude only; env vars expanded at execution time); use with `allowed_tools: []` for MCP-only nodes
+13. **`skills:`** — Preload named skills into individual Claude nodes for domain expertise (Claude only; see [docs/skills.md](./skills.md))
+14. **Test thoroughly** - Each command, the artifact flow, and edge cases

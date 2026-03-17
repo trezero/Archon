@@ -18,6 +18,14 @@
 - No `any` types without explicit justification
 - Interfaces for all major abstractions
 
+**Git Workflow and Releases**
+- `main` is the release branch. Never commit directly to `main`.
+- `dev` is the working branch. All feature work branches off `dev` and merges back into `dev`.
+- To release, use the `/release` skill. It compares `dev` to `main`, generates changelog entries, bumps the version, and creates a PR to merge `dev` into `main`.
+- Releases follow Semantic Versioning: `/release` (patch), `/release minor`, `/release major`.
+- Changelog lives in `CHANGELOG.md` and follows Keep a Changelog format.
+- Version is the single `version` field in the root `package.json`.
+
 **Git as First-Class Citizen**
 - Let git handle what git does best (conflicts, uncommitted changes, branch management)
 - Surface git errors to users for actionable issues (conflicts, uncommitted changes)
@@ -163,10 +171,13 @@ bun run cli workflow run assist "What does the orchestrator do?"
 # Run in a specific directory
 bun run cli workflow run plan --cwd /path/to/repo "Add dark mode"
 
-# Isolation: Create/reuse worktree for a branch
+# Default: auto-creates worktree with generated branch name (isolation by default)
+bun run cli workflow run implement "Add auth"
+
+# Explicit branch name for the worktree
 bun run cli workflow run implement --branch feature-auth "Add auth"
 
-# Isolation: Run on branch directly without worktree
+# Opt out of isolation (run in live checkout)
 bun run cli workflow run quick-fix --no-worktree "Fix typo"
 
 # List active worktrees/environments
@@ -216,7 +227,9 @@ packages/
 ├── workflows/                # @archon/workflows - Workflow engine (depends on @archon/git + @archon/paths)
 │   └── src/
 │       ├── types.ts          # Workflow type definitions (step, loop, DAG)
-│       ├── loader.ts         # YAML parsing + validation (discoverWorkflows, parseWorkflow)
+│       ├── loader.ts         # YAML parsing + validation (parseWorkflow)
+│       ├── workflow-discovery.ts # Workflow filesystem discovery (discoverWorkflows, discoverWorkflowsWithConfig)
+│       ├── executor-shared.ts # Shared executor infrastructure (error classification, variable substitution)
 │       ├── router.ts         # Prompt building + invocation parsing
 │       ├── executor.ts       # Sequential, parallel, loop, DAG execution (executeWorkflow)
 │       ├── dag-executor.ts   # DAG-specific execution logic
@@ -225,7 +238,7 @@ packages/
 │       ├── event-emitter.ts  # Workflow observability events
 │       ├── logger.ts         # JSONL file logger
 │       ├── defaults/         # Bundled default commands and workflows
-│       ├── utils/            # Variable substitution, tool formatting
+│       ├── utils/            # Variable substitution, tool formatting, execution utilities
 │       └── index.ts          # Package exports
 ├── git/                      # @archon/git - Git operations (no @archon/core dep)
 │   └── src/
@@ -575,7 +588,7 @@ async function createSession(conversationId: string, codebaseId: string) {
 - `$IMPLEMENTATION_SUMMARY` - Previous execution summary
 - `$ARTIFACTS_DIR` - External artifacts directory for the current workflow run (pre-created by executor)
 - `$WORKFLOW_ID` - The workflow run ID
-- `$BASE_BRANCH` - Base branch from config (worktree.baseBranch) or auto-detected from repo default
+- `$BASE_BRANCH` - Base branch; auto-detected from git when `worktree.baseBranch` is not set; fails only if referenced in a prompt and auto-detection also fails
 
 **Command Types:**
 
@@ -588,7 +601,7 @@ async function createSession(conversationId: string, codebaseId: string) {
    - Stored in `.archon/workflows/` (searched recursively)
    - Multi-step AI execution chains, discovered at runtime
    - Three execution modes (mutually exclusive): `steps:` (sequential), `loop:` (iterative), `nodes:` (DAG)
-   - **`nodes:` (DAG mode)**: Nodes with explicit `depends_on` edges; independent nodes in the same topological layer run concurrently. Node types: `command:` (named command file), `prompt:` (inline prompt), `bash:` (shell script, stdout captured as `$nodeId.output`, no AI). Supports `when:` conditions, `trigger_rule` join semantics, `$nodeId.output` substitution, `output_format` for structured JSON output (Claude only), and `allowed_tools`/`denied_tools` for per-node tool restrictions (Claude only)
+   - **`nodes:` (DAG mode)**: Nodes with explicit `depends_on` edges; independent nodes in the same topological layer run concurrently. Node types: `command:` (named command file), `prompt:` (inline prompt), `bash:` (shell script, stdout captured as `$nodeId.output`, no AI). Supports `when:` conditions, `trigger_rule` join semantics, `$nodeId.output` substitution, `output_format` for structured JSON output (Claude only), `allowed_tools`/`denied_tools` for per-node tool restrictions (Claude only), `hooks` for per-node SDK hook callbacks (Claude only) — see docs/hooks.md, `mcp` for per-node MCP server config files (Claude only, env vars expanded at execution time) — see docs/mcp-servers.md, and `skills` for per-node skill preloading via AgentDefinition wrapping (Claude only) — see docs/skills.md
    - Provider inherited from `.archon/config.yaml` unless explicitly set; per-node `provider` and `model` overrides supported in DAG mode
    - Model and options can be set per workflow or inherited from config defaults
    - Model validation ensures provider/model compatibility at load time

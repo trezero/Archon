@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, type ChangeEvent } from 'react';
 import { TRIGGER_RULES } from '@archon/workflows/types';
 import type { TriggerRule } from '@archon/workflows/types';
 import type { DagNodeData } from './DagNodeComponent';
@@ -85,6 +85,29 @@ function DagInspector({
   );
   const [outputFormatError, setOutputFormatError] = useState<string | null>(null);
   const [showOutputFormat, setShowOutputFormat] = useState(!!node.output_format);
+
+  const [hooksText, setHooksText] = useState(node.hooks ? JSON.stringify(node.hooks, null, 2) : '');
+  const [hooksError, setHooksError] = useState<string | null>(null);
+  const [showHooks, setShowHooks] = useState(!!node.hooks);
+
+  const handleHooksChange = useCallback(
+    (text: string): void => {
+      setHooksText(text);
+      if (!text.trim()) {
+        setHooksError(null);
+        onUpdate({ hooks: undefined });
+        return;
+      }
+      try {
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        setHooksError(null);
+        onUpdate({ hooks: parsed });
+      } catch (e) {
+        setHooksError(e instanceof SyntaxError ? e.message : 'Invalid JSON');
+      }
+    },
+    [onUpdate]
+  );
 
   const handleOutputFormatChange = useCallback(
     (text: string): void => {
@@ -301,6 +324,69 @@ function DagInspector({
             }}
           />
         </>
+      )}
+
+      {/* Hooks (hidden for Bash and explicit Codex nodes) */}
+      {!isBash && node.provider !== 'codex' && (
+        <div className="flex flex-col gap-1 w-full">
+          <button
+            type="button"
+            onClick={(): void => {
+              setShowHooks(!showHooks);
+            }}
+            className="text-[10px] text-text-tertiary uppercase tracking-wide text-left hover:text-text-secondary"
+          >
+            Hooks (SDK SyncHookJSONOutput) {showHooks ? '[-]' : '[+]'}
+          </button>
+          {showHooks && (
+            <>
+              <textarea
+                value={hooksText}
+                onChange={(e: ChangeEvent<HTMLTextAreaElement>): void => {
+                  handleHooksChange(e.target.value);
+                }}
+                rows={6}
+                placeholder={
+                  '{"PreToolUse": [{"matcher": "Bash", "response": {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny"}}}]}'
+                }
+                className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary font-mono placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent resize-y"
+              />
+              {hooksError && <p className="text-xs text-error">{hooksError}</p>}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* MCP Config Path (hidden for Bash and explicit Codex nodes) */}
+      {!isBash && node.provider !== 'codex' && (
+        <div className="flex flex-col gap-1 w-full">
+          <label className="text-[10px] text-text-tertiary uppercase tracking-wide">
+            MCP Config (path to JSON file)
+          </label>
+          <input
+            type="text"
+            value={node.mcp ?? ''}
+            onChange={(e): void => {
+              onUpdate({ mcp: e.target.value || undefined });
+            }}
+            placeholder=".archon/mcp/github.json"
+            className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary font-mono placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+          <span className="text-[9px] text-text-tertiary">
+            Path relative to repo root. JSON object matching SDK McpServerConfig format.
+          </span>
+        </div>
+      )}
+
+      {/* Skills (hidden for Bash and explicit Codex nodes) */}
+      {!isBash && node.provider !== 'codex' && (
+        <ToolsInput
+          label="Skills (preloaded into node context)"
+          value={node.skills}
+          onChange={(v): void => {
+            onUpdate({ skills: v });
+          }}
+        />
       )}
 
       {/* Output Format (hidden for Bash and explicit Codex nodes; inherited provider may still be Codex at runtime) */}

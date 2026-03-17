@@ -215,7 +215,100 @@ export interface DagNodeBase {
   /** Retry configuration for transient failures. When present, the DAG executor retries
    *  the node instead of marking it failed immediately. */
   retry?: StepRetryConfig;
+  /**
+   * SDK hooks applied during this node's AI execution.
+   * Each hook matcher returns a static SyncHookJSONOutput response.
+   * Claude only — Codex nodes emit a warning and ignore this field.
+   */
+  hooks?: WorkflowNodeHooks;
+  /**
+   * Path to MCP server config JSON file (relative to cwd).
+   * The JSON must follow the SDK's Record<string, McpServerConfig> format.
+   * Environment variables ($VAR_NAME) in env/headers values are expanded from
+   * process.env at execution time (not load time) — secrets stay out of YAML.
+   * Claude only — Codex nodes emit a warning and ignore this field.
+   */
+  mcp?: string;
+  /**
+   * Skill names to preload into this node's agent context.
+   * Skills must be installed in .claude/skills/ (loaded via settingSources: ['project']).
+   * The node is wrapped in an AgentDefinition with these skills + 'Skill' auto-added to allowedTools.
+   * Claude only — Codex nodes emit a warning and ignore this field.
+   */
+  skills?: string[];
 }
+
+/**
+ * Supported hook events for per-node hooks.
+ * Uses the same event names as the Claude Agent SDK's HookEvent type.
+ */
+export type WorkflowHookEvent =
+  | 'PreToolUse'
+  | 'PostToolUse'
+  | 'PostToolUseFailure'
+  | 'Notification'
+  | 'UserPromptSubmit'
+  | 'SessionStart'
+  | 'SessionEnd'
+  | 'Stop'
+  | 'SubagentStart'
+  | 'SubagentStop'
+  | 'PreCompact'
+  | 'PermissionRequest'
+  | 'Setup'
+  | 'TeammateIdle'
+  | 'TaskCompleted'
+  | 'Elicitation'
+  | 'ElicitationResult'
+  | 'ConfigChange'
+  | 'WorktreeCreate'
+  | 'WorktreeRemove'
+  | 'InstructionsLoaded';
+
+/** Canonical list of hook events — derive from this, do not duplicate. */
+export const WORKFLOW_HOOK_EVENTS: readonly WorkflowHookEvent[] = [
+  'PreToolUse',
+  'PostToolUse',
+  'PostToolUseFailure',
+  'Notification',
+  'UserPromptSubmit',
+  'SessionStart',
+  'SessionEnd',
+  'Stop',
+  'SubagentStart',
+  'SubagentStop',
+  'PreCompact',
+  'PermissionRequest',
+  'Setup',
+  'TeammateIdle',
+  'TaskCompleted',
+  'Elicitation',
+  'ElicitationResult',
+  'ConfigChange',
+  'WorktreeCreate',
+  'WorktreeRemove',
+  'InstructionsLoaded',
+];
+
+/**
+ * A single hook matcher in a YAML workflow definition.
+ * Maps 1:1 to the SDK's HookCallbackMatcher, with `response` replacing `hooks` callbacks.
+ * At runtime, `response` is wrapped in `async () => response` to create the SDK callback.
+ */
+export interface WorkflowHookMatcher {
+  /** Regex pattern to match tool names (PreToolUse/PostToolUse) or event subtypes. */
+  matcher?: string;
+  /** The SDK SyncHookJSONOutput to return when this hook fires. */
+  response: Record<string, unknown>;
+  /** Timeout in seconds (default: SDK default of 60). Note: BashNode.timeout uses milliseconds — units differ. */
+  timeout?: number;
+}
+
+/**
+ * Per-node hook configuration keyed by event name.
+ * Each event maps to an array of matchers with static responses.
+ */
+export type WorkflowNodeHooks = Partial<Record<WorkflowHookEvent, WorkflowHookMatcher[]>>;
 
 /** DAG node that runs a named command from .archon/commands/ */
 export interface CommandNode extends DagNodeBase {

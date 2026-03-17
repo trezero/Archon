@@ -1,8 +1,8 @@
 /**
  * Workflow command - list and run workflows
  */
-import { registerRepository, loadConfig, generateAndSetTitle } from '@archon/core';
-import { getIsolationProvider } from '@archon/isolation';
+import { registerRepository, loadConfig, loadRepoConfig, generateAndSetTitle } from '@archon/core';
+import { configureIsolation, getIsolationProvider } from '@archon/isolation';
 import { createLogger } from '@archon/paths';
 import { createWorkflowDeps } from '@archon/core/workflows/store-adapter';
 import {
@@ -29,12 +29,20 @@ function getLog(): ReturnType<typeof createLogger> {
 /**
  * Options for workflow run command
  *
- * Discriminated union ensures `noWorktree` can only be set when `branchName` is provided.
- * `resume` is mutually exclusive with `branchName`.
+ * Default: creates worktree with auto-generated branch name (isolation by default).
+ * --branch: explicit branch name for the worktree.
+ * --no-worktree: opt out of isolation, run in live checkout.
+ * --resume: reuse worktree from last failed run.
+ * --from: override base branch (start-point for worktree).
+ *
+ * Mutually exclusive: --branch + --no-worktree, --resume + --branch.
  */
-export type WorkflowRunOptions =
-  | { branchName?: undefined; noWorktree?: undefined; resume?: boolean } // No isolation (optionally with resume)
-  | { branchName: string; fromBranch?: string; noWorktree?: boolean; resume?: undefined }; // With branch - worktree or direct checkout
+export interface WorkflowRunOptions {
+  branchName?: string;
+  fromBranch?: string;
+  noWorktree?: boolean;
+  resume?: boolean;
+}
 
 /**
  * Generate a unique conversation ID for CLI usage
@@ -176,7 +184,22 @@ export async function workflowRunCommand(
     );
   }
 
-  // Validate mutually exclusive flags early
+  // Validate mutually exclusive flags (defensive — cli.ts checks these for UX, but
+  // workflowRunCommand is the authoritative boundary for programmatic callers)
+  if (options.branchName !== undefined && options.noWorktree) {
+    throw new Error(
+      '--branch and --no-worktree are mutually exclusive.\n' +
+        '  --branch creates an isolated worktree (safe).\n' +
+        '  --no-worktree runs directly in your repo (no isolation).\n' +
+        'Use one or the other.'
+    );
+  }
+  if (options.noWorktree && options.fromBranch !== undefined) {
+    throw new Error(
+      '--from/--from-branch has no effect with --no-worktree.\n' +
+        'Remove --from or drop --no-worktree.'
+    );
+  }
   if (options.resume && options.branchName !== undefined) {
     throw new Error(
       '--resume and --branch are mutually exclusive.\n' +
@@ -239,7 +262,10 @@ export async function workflowRunCommand(
         }
       } catch (error) {
         const err = error as Error;
-        getLog().warn({ err }, 'codebase_auto_registration_failed');
+        getLog().warn(
+          { err, errorType: err.constructor.name, repoRoot },
+          'codebase_auto_registration_failed'
+        );
       }
     }
   }
@@ -326,100 +352,89 @@ export async function workflowRunCommand(
     console.log('');
   }
 
-  if (options.branchName) {
-    // Need a codebase for isolation
-    if (!codebase) {
-      if (codebaseLookupError) {
-        throw new Error(
-          'Cannot create worktree: Database lookup failed.\n' +
-            `Error: ${codebaseLookupError.message}\n` +
-            'Hint: Check your database connection before using --branch.'
-        );
-      }
-      throw new Error(
-        'Cannot create worktree: Not in a git repository.\n' +
-          'Either run from a git repo or use /clone first.'
-      );
-    }
+  // Default to worktree isolation unless --no-worktree or --resume
+  const wantsIsolation = !options.resume && !options.noWorktree;
 
-    if (options.noWorktree) {
+  if (wantsIsolation && codebase) {
+    // Auto-generate branch identifier from workflow name + timestamp when --branch not provided
+    const branchIdentifier = options.branchName ?? `${workflowName}-${Date.now()}`;
+
+    // Configure isolation with repo config loader (same as orchestrator)
+    configureIsolation(async (repoPath: string) => {
+      const repoConfig = await loadRepoConfig(repoPath);
+      return repoConfig?.worktree ?? null;
+    });
+
+    const provider = getIsolationProvider();
+
+    // Check for existing worktree (only when explicit --branch)
+    const existingEnv = options.branchName
+      ? await isolationDb.findActiveByWorkflow(codebase.id, 'task', options.branchName)
+      : undefined;
+
+    if (existingEnv && (await provider.healthCheck(existingEnv.working_path))) {
       if (options.fromBranch) {
         getLog().warn(
-          { branchName: options.branchName, fromBranch: options.fromBranch },
-          'workflow.branch_flag_conflict'
+          { path: existingEnv.working_path, fromBranch: options.fromBranch },
+          'worktree.reuse_from_branch_ignored'
         );
-        throw new Error(
-          '--from/--from-branch has no effect with --no-worktree. ' +
-            'Remove --from or drop --no-worktree.'
+        console.warn(
+          `Warning: Reusing existing worktree at ${existingEnv.working_path}. ` +
+            `--from ${options.fromBranch} was not applied (worktree already exists).`
         );
       }
-      getLog().warn({ branchName: options.branchName }, 'workflow.branch_no_worktree_conflict');
-      throw new Error(
-        '--branch and --no-worktree are mutually exclusive.\n' +
-          '  --branch creates an isolated worktree (safe).\n' +
-          '  --no-worktree checks out directly in your repo (no isolation).\n' +
-          'Use one or the other.'
-      );
+      getLog().info({ path: existingEnv.working_path }, 'worktree_reused');
+      workingCwd = existingEnv.working_path;
+      isolationEnvId = existingEnv.id;
     } else {
-      // Create or reuse worktree
-      const provider = getIsolationProvider();
-
-      // Check for existing worktree
-      const existingEnv = await isolationDb.findActiveByWorkflow(
-        codebase.id,
-        'task',
-        options.branchName
+      // Create new worktree
+      getLog().info(
+        { branch: branchIdentifier, fromBranch: options.fromBranch },
+        'worktree_creating'
       );
 
-      if (existingEnv && (await provider.healthCheck(existingEnv.working_path))) {
-        if (options.fromBranch) {
-          getLog().warn(
-            { path: existingEnv.working_path, fromBranch: options.fromBranch },
-            'worktree.reuse_from_branch_ignored'
-          );
-          console.warn(
-            `Warning: Reusing existing worktree at ${existingEnv.working_path}. ` +
-              `--from ${options.fromBranch} was not applied (worktree already exists).`
-          );
-        }
-        getLog().info({ path: existingEnv.working_path }, 'worktree_reused');
-        workingCwd = existingEnv.working_path;
-        isolationEnvId = existingEnv.id;
-      } else {
-        // Create new worktree
-        getLog().info(
-          { branch: options.branchName, fromBranch: options.fromBranch },
-          'worktree_creating'
-        );
+      const isolatedEnv = await provider.create({
+        workflowType: 'task',
+        identifier: branchIdentifier,
+        fromBranch: options.fromBranch?.trim()
+          ? git.toBranchName(options.fromBranch.trim())
+          : undefined,
+        codebaseId: codebase.id,
+        canonicalRepoPath: git.toRepoPath(codebase.default_cwd),
+        description: `CLI workflow: ${workflowName}`,
+      });
 
-        const isolatedEnv = await provider.create({
-          workflowType: 'task',
-          identifier: options.branchName,
-          fromBranch: options.fromBranch?.trim()
-            ? git.toBranchName(options.fromBranch.trim())
-            : undefined,
-          codebaseId: codebase.id,
-          canonicalRepoPath: git.toRepoPath(codebase.default_cwd),
-          description: `CLI workflow: ${workflowName}`,
-        });
+      // Track in database
+      const envRecord = await isolationDb.create({
+        codebase_id: codebase.id,
+        workflow_type: 'task',
+        workflow_id: branchIdentifier,
+        provider: 'worktree',
+        working_path: isolatedEnv.workingPath,
+        branch_name: isolatedEnv.branchName,
+        created_by_platform: 'cli',
+        metadata: {},
+      });
 
-        // Track in database
-        const envRecord = await isolationDb.create({
-          codebase_id: codebase.id,
-          workflow_type: 'task',
-          workflow_id: options.branchName,
-          provider: 'worktree',
-          working_path: isolatedEnv.workingPath,
-          branch_name: isolatedEnv.branchName,
-          created_by_platform: 'cli',
-          metadata: {},
-        });
-
-        workingCwd = isolatedEnv.workingPath;
-        isolationEnvId = envRecord.id;
-        getLog().info({ path: workingCwd }, 'worktree_created');
-      }
+      workingCwd = isolatedEnv.workingPath;
+      isolationEnvId = envRecord.id;
+      getLog().info({ path: workingCwd }, 'worktree_created');
     }
+  } else if (options.noWorktree) {
+    getLog().info({ cwd }, 'workflow.running_without_isolation');
+  } else if (wantsIsolation) {
+    // Isolation was expected (default) but codebase is unavailable — fail fast
+    if (codebaseLookupError) {
+      throw new Error(
+        'Cannot create worktree: database lookup failed.\n' +
+          `Error: ${codebaseLookupError.message}\n` +
+          'Hint: Check your database connection, or use --no-worktree to skip isolation.'
+      );
+    }
+    throw new Error(
+      'Cannot create worktree: not in a git repository.\n' +
+        'Run from within a git repo, or use --no-worktree to skip isolation.'
+    );
   }
 
   // Update conversation with cwd and isolation info
@@ -435,7 +450,7 @@ export async function workflowRunCommand(
   }
 
   // Wire adapter for assistant message persistence
-  adapter.setConversationDbId(conversation.id);
+  adapter.setConversationDbId(conversationId, conversation.id);
 
   // Persist user message for Web UI history
   try {

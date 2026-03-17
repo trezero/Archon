@@ -127,4 +127,87 @@ describe('withIdleTimeout', () => {
 
     expect(result).toEqual([1, 2]);
   });
+
+  test('does not reset timer on tool events — fires if tool hangs after tool event', async () => {
+    type Msg = { type: string };
+    const onTimeout = mock(() => {});
+    const result: Msg[] = [];
+
+    // Generator yields an assistant event, then a tool event, then hangs
+    async function* toolThenHang(): AsyncGenerator<Msg> {
+      yield { type: 'assistant' };
+      yield { type: 'tool' };
+      // Hang — simulates a tool call that never completes
+      await new Promise<void>(() => {});
+    }
+
+    // Timeout is 100ms; shouldResetTimer returns false for 'tool'
+    // After 'assistant', timer resets (100ms). After 'tool', timer does NOT reset.
+    // So total elapsed from 'assistant' reset = time-for-tool-yield + hang.
+    // Timer fires within ~100ms of the 'assistant' event.
+    for await (const v of withIdleTimeout(
+      toolThenHang(),
+      100,
+      onTimeout,
+      msg => msg.type !== 'tool'
+    )) {
+      result.push(v);
+    }
+
+    expect(result).toEqual([{ type: 'assistant' }, { type: 'tool' }]);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  test('resets timer on assistant events even after a tool event', async () => {
+    type Msg = { type: string };
+    const onTimeout = mock(() => {});
+    const result: Msg[] = [];
+
+    // Generator: assistant (resets timer), tool (no reset), assistant (resets timer),
+    // then hangs longer than timeout
+    async function* toolThenRecover(): AsyncGenerator<Msg> {
+      yield { type: 'assistant' };
+      yield { type: 'tool' };
+      // Simulate quick tool result (comes as next assistant)
+      await new Promise(r => setTimeout(r, 20));
+      yield { type: 'assistant' };
+      // Now hang — but timer should have been reset by second assistant
+      await new Promise<void>(() => {});
+    }
+
+    for await (const v of withIdleTimeout(
+      toolThenRecover(),
+      150,
+      onTimeout,
+      msg => msg.type !== 'tool'
+    )) {
+      result.push(v);
+    }
+
+    expect(result).toEqual([{ type: 'assistant' }, { type: 'tool' }, { type: 'assistant' }]);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  test('without shouldResetTimer, tool events reset timer (original behavior)', async () => {
+    type Msg = { type: string };
+    const onTimeout = mock(() => {});
+    const result: Msg[] = [];
+
+    // Without shouldResetTimer, tool events reset the timer — hang after tool
+    // does NOT fire within the original window (it fires in a fresh window)
+    async function* toolThenHang(): AsyncGenerator<Msg> {
+      yield { type: 'assistant' };
+      yield { type: 'tool' };
+      await new Promise<void>(() => {});
+    }
+
+    // With no shouldResetTimer, timer resets on 'tool' → 100ms fresh window
+    // Hang fires after 100ms from the 'tool' event
+    for await (const v of withIdleTimeout(toolThenHang(), 100, onTimeout)) {
+      result.push(v);
+    }
+
+    expect(result).toEqual([{ type: 'assistant' }, { type: 'tool' }]);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
 });
