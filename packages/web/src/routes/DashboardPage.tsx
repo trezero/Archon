@@ -8,10 +8,11 @@ import {
   listCodebases,
   getHealth,
   type DashboardCounts,
+  type DashboardRunResponse,
 } from '@/lib/api';
 import type { WorkflowRunStatus } from '@/lib/types';
 import { StatusSummaryBar } from '@/components/dashboard/StatusSummaryBar';
-import { WorkflowRunCard } from '@/components/dashboard/WorkflowRunCard';
+import { WorkflowRunGroup } from '@/components/dashboard/WorkflowRunGroup';
 import { WorkflowHistoryTable } from '@/components/dashboard/WorkflowHistoryTable';
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -188,6 +189,30 @@ export function DashboardPage(): React.ReactElement {
     [runs]
   );
 
+  /**
+   * Group active runs by parent_platform_id.
+   * Runs with no parent (standalone) each get their own singleton group keyed by run id.
+   */
+  const activeRunGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      { parentPlatformId: string | null; runs: DashboardRunResponse[] }
+    >();
+    for (const run of activeRuns) {
+      const key = run.parent_platform_id ?? `__standalone__${run.id}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.runs.push(run);
+      } else {
+        groups.set(key, {
+          parentPlatformId: run.parent_platform_id,
+          runs: [run],
+        });
+      }
+    }
+    return Array.from(groups.values());
+  }, [activeRuns]);
+
   const historyRuns = useMemo(
     () =>
       runs.filter(
@@ -268,9 +293,14 @@ export function DashboardPage(): React.ReactElement {
             {activeRuns.length > 0 && (
               <section>
                 <h2 className="mb-3 text-sm font-semibold text-text-secondary">Active Workflows</h2>
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {activeRuns.map(run => (
-                    <WorkflowRunCard key={run.id} run={run} onCancel={handleCancel} />
+                <div className="space-y-6">
+                  {activeRunGroups.map(group => (
+                    <WorkflowRunGroup
+                      key={group.parentPlatformId ?? group.runs[0]?.id ?? 'standalone'}
+                      parentPlatformId={group.parentPlatformId}
+                      runs={group.runs}
+                      onCancel={handleCancel}
+                    />
                   ))}
                 </div>
               </section>
