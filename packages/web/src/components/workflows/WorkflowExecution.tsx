@@ -381,10 +381,14 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
     return null;
   }, [queryData?.events, workflow?.status, workflow?.steps, workflow?.startedAt]);
 
-  // Compute formatted log lines for the selected step from DB events
+  // Compute formatted log lines for the selected step/node from DB events.
+  // DAG node events have step_index=null; filter by step_name when a DAG node is selected.
   const stepLogLines = useMemo((): string[] => {
     const events = queryData?.events ?? [];
-    const stepEvents = events.filter(e => e.step_index === selectedStep);
+    const stepEvents =
+      selectedDagNode !== null
+        ? events.filter(e => e.step_name === selectedDagNode)
+        : events.filter(e => e.step_index === selectedStep);
     if (stepEvents.length === 0) return [];
 
     return stepEvents.map(e => {
@@ -419,8 +423,6 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
         }
         case 'loop_iteration_failed':
           return `[${ts}] Iteration ${String(e.data.iteration)} failed: ${(e.data.error as string | undefined) ?? 'Unknown error'}`;
-        // TODO: node_* events have step_index=null so they won't appear in stepLogLines
-        // until DAG-aware log filtering is added (node selection by step_name, not step_index).
         case 'node_started':
           return `[${ts}] Node started: ${e.step_name ?? 'node'}`;
         case 'node_completed':
@@ -433,7 +435,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
           return `[${ts}] ${e.event_type}${e.step_name ? `: ${e.step_name}` : ''}`;
       }
     });
-  }, [queryData?.events, selectedStep]);
+  }, [queryData?.events, selectedStep, selectedDagNode]);
 
   if (error) {
     return (
