@@ -20,7 +20,7 @@ import {
   getArchonWorkspacesPath,
   getArchonWorktreesPath,
 } from '@archon/paths';
-import type { GlobalConfig, RepoConfig, MergedConfig } from './config-types';
+import type { GlobalConfig, RepoConfig, MergedConfig, SafeConfig } from './config-types';
 import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -401,4 +401,26 @@ export function logConfig(config: MergedConfig): void {
     },
     'config_loaded'
   );
+}
+
+/**
+ * Project a MergedConfig to a SafeConfig suitable for sending to web clients.
+ * Strips filesystem paths and any other server-internal fields.
+ */
+export function toSafeConfig(config: MergedConfig): SafeConfig {
+  return {
+    botName: config.botName,
+    assistant: config.assistant,
+    assistants: {
+      claude: { model: config.assistants.claude.model },
+      codex: {
+        model: config.assistants.codex.model,
+        modelReasoningEffort: config.assistants.codex.modelReasoningEffort,
+        webSearchMode: config.assistants.codex.webSearchMode,
+      },
+    },
+    streaming: { ...config.streaming },
+    concurrency: { maxConversations: config.concurrency.maxConversations },
+    defaults: { ...config.defaults },
+  };
 }

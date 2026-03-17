@@ -205,3 +205,30 @@ export interface MergedConfig {
    */
   baseBranch?: string;
 }
+
+/**
+ * Safe subset of MergedConfig suitable for sending to web clients.
+ * Excludes filesystem paths and any other server-internal fields.
+ */
+export interface SafeConfig {
+  botName: string;
+  assistant: 'claude' | 'codex';
+  assistants: {
+    claude: Pick<AssistantDefaults, 'model'>;
+    codex: Pick<AssistantDefaults, 'model' | 'modelReasoningEffort' | 'webSearchMode'>;
+  };
+  streaming: {
+    telegram: 'stream' | 'batch';
+    discord: 'stream' | 'batch';
+    slack: 'stream' | 'batch';
+    github: 'stream' | 'batch';
+  };
+  concurrency: {
+    maxConversations: number;
+  };
+  defaults: {
+    copyDefaults: boolean;
+    loadDefaultCommands: boolean;
+    loadDefaultWorkflows: boolean;
+  };
+}

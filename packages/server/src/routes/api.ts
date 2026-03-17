@@ -14,6 +14,7 @@ import {
   handleMessage,
   getDatabaseType,
   loadConfig,
+  toSafeConfig,
   cloneRepository,
   registerRepository,
   ConversationNotFoundError,
@@ -1022,12 +1023,12 @@ export function registerApiRoutes(
     }
   });
 
-  // GET /api/config - Read-only configuration
+  // GET /api/config - Read-only configuration (safe subset only — no filesystem paths)
   app.get('/api/config', async c => {
     try {
       const config = await loadConfig();
       return c.json({
-        config,
+        config: toSafeConfig(config),
         database: getDatabaseType(),
       });
     } catch (error) {
