@@ -259,6 +259,7 @@ async function main(): Promise<void> {
           await handleMessage(discordAdapter, conversationId, content, {
             threadContext,
             parentConversationId,
+            isolationHints: { workflowType: 'thread', workflowId: conversationId },
           });
         })
         .catch(createMessageErrorHandler('Discord', discordAdapter, conversationId));
@@ -312,6 +313,7 @@ async function main(): Promise<void> {
           await handleMessage(slackAdapter, conversationId, content, {
             threadContext,
             parentConversationId,
+            isolationHints: { workflowType: 'thread', workflowId: conversationId },
           });
         })
         .catch(createMessageErrorHandler('Slack', slackAdapter, conversationId));
@@ -421,7 +423,9 @@ async function main(): Promise<void> {
       // Fire-and-forget: handler returns immediately, processing happens async
       lockManager
         .acquireLock(conversationId, async () => {
-          await handleMessage(telegramAdapter, conversationId, message);
+          await handleMessage(telegramAdapter, conversationId, message, {
+            isolationHints: { workflowType: 'thread', workflowId: conversationId },
+          });
         })
         .catch(createMessageErrorHandler('Telegram', telegramAdapter, conversationId));
     });

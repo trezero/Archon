@@ -81,7 +81,9 @@ export function registerApiRoutes(
   ): Promise<{ accepted: boolean; status: string }> {
     const result = await lockManager.acquireLock(conversationId, async () => {
       try {
-        await handleMessage(webAdapter, conversationId, message);
+        await handleMessage(webAdapter, conversationId, message, {
+          isolationHints: { workflowType: 'thread', workflowId: conversationId },
+        });
       } catch (error) {
         getLog().error({ err: error, conversationId }, 'handle_message_failed');
         try {

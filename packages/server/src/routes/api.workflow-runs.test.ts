@@ -359,7 +359,10 @@ describe('POST /api/workflows/:name/run', () => {
     expect(mockHandleMessage).toHaveBeenCalledWith(
       expect.anything(),
       'web-test-abc',
-      '/workflow run test-suite Run tests'
+      '/workflow run test-suite Run tests',
+      expect.objectContaining({
+        isolationHints: { workflowType: 'thread', workflowId: 'web-test-abc' },
+      })
     );
   });
 
