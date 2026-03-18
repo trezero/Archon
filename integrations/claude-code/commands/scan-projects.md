@@ -129,16 +129,23 @@ If the download fails, warn the user: "Extensions tarball download failed. Proje
 
 ### Step 10 — Knowledge Base Ingestion
 
-For each created project that has a `github_url` with `github_owner` and `github_repo_name`:
+For each created project that has `readme_excerpt` (non-null) in the scan results:
 - Call `manage_rag_source` MCP tool with:
   - `action: "add"`
-  - `source_type: "url"`
+  - `source_type: "inline"`
   - `title: "<directory_name> README"`
-  - `url: "https://github.com/<owner>/<repo>#readme"`
+  - `documents: [{"title": "README.md", "content": "<readme_excerpt>"}]`
   - `project_id: "<project_id>"`
   - `knowledge_type: "technical"`
 
-For large scans (20+ projects), batch these calls in groups of 5 with a brief pause between batches to avoid overwhelming the backend.
+This uses the locally-read README content from the scan (already captured in Step 3).
+No external crawling is needed — the content is already available from the local filesystem.
+
+Inline ingestion is deterministic: calling it again with the same `project_id` and `title`
+will update the existing source, not create a duplicate.
+
+For large scans (20+ projects), batch these calls in groups of 5 with a brief pause between
+batches.
 
 ### Step 11 — Display Final Summary
 
@@ -147,7 +154,7 @@ Setup complete!
 - Projects created: <N>
 - Projects skipped (already in Archon): <N>
 - Projects failed: <N>
-- README crawls queued: <N>
+- README sources ingested: <N>
 
 <If any failures, list them with error messages>
 
