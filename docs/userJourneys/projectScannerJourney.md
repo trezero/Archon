@@ -610,7 +610,16 @@ done
 
 | # | Phase | System | Severity | Description | Status |
 |---|-------|--------|----------|-------------|--------|
-| | | | | | |
+| 1 | 5 | WIN_AI_PC_WSL | Critical | Crawl queue state was in-memory only — lost on server restart | Fixed: T5 |
+| 2 | 5 | WIN_AI_PC_WSL | Critical | Recursive crawling followed hundreds of unrelated GitHub links for README crawls | Fixed: T1 (replaced with inline) |
+| 3 | All | WIN_AI_PC_WSL | High | MCP session breaks on server restart — all tool calls fail | Mitigated: T8 (recovery guidance) |
+| 4 | 5 | WIN_AI_PC_WSL | Medium | REST crawl endpoint didn't link project_id until after crawl completed | Fixed: T4 |
+| 5 | 5 | WIN_AI_PC_WSL | Critical | Local README ingestion not used — unnecessary external crawls | Fixed: T1 |
+| 6 | 3 | WIN_AI_PC_WSL | Medium | No dedup within scan results — same GitHub URL created twice | Fixed: T2 |
+| 7 | 3 | WIN_AI_PC_WSL | Medium | No title-based fallback dedup for projects without github_repo | Fixed: T2 |
+| 8 | 5 | WIN_AI_PC_WSL | Medium | No bulk progress monitoring — had to check 17 IDs individually | Fixed: T7 |
+| 9 | 4 | WIN_AI_PC_WSL | Low | PostmanFastAPIDemo directory not found during apply step | Fixed: T3 |
+| 10 | 5 | WIN_AI_PC_WSL | Critical | 17 simultaneous crawls overwhelmed server causing OOM crash | Fixed: T6 |
 
 ---
 
