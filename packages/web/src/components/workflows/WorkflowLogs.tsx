@@ -154,14 +154,19 @@ export function WorkflowLogs({
     // While running with no SSE data yet, show DB messages.
     if (sseMessages.length === 0) return dbMessages;
 
-    // While running with SSE data: SSE messages are the live view.
-    // Prepend any DB messages that arrived before our SSE session
-    // (messages from earlier steps that SSE didn't capture).
+    // While running with SSE data: merge DB + SSE using ID-based dedup.
+    // DB IDs are UUIDs; SSE IDs are `msg-${Date.now()}` — they never collide,
+    // so this preserves all historical DB messages alongside live SSE messages.
+    // Cannot use timestamp comparison (the old approach) because DB timestamps
+    // are server-side and SSE timestamps are client-side Date.now() — concurrent
+    // messages get filtered out, causing logs to vanish. See issue #700.
     if (dbMessages.length === 0) return sseMessages;
 
-    const earliestSseTs = Math.min(...sseMessages.map(m => m.timestamp));
-    const olderDbMessages = dbMessages.filter(m => m.timestamp < earliestSseTs);
-    return [...olderDbMessages, ...sseMessages];
+    const sseIds = new Set(sseMessages.map(m => m.id));
+    const uniqueDbMessages = dbMessages.filter(m => !sseIds.has(m.id));
+    const combined = [...uniqueDbMessages, ...sseMessages];
+    combined.sort((a, b) => a.timestamp - b.timestamp);
+    return combined;
   }, [queryMessages, sseMessages, isRunning, gracePolling]);
 
   const onText = useCallback((content: string): void => {
