@@ -37,6 +37,7 @@ from .api_routes.materialization_api import router as materialization_router
 from .api_routes.leaveoff_api import router as leaveoff_router
 from .api_routes.postman_api import router as postman_router
 from .api_routes.scanner_api import router as scanner_router
+from .api_routes.scanner_script_api import router as scanner_script_router
 from .api_routes.version_api import router as version_router
 
 # Import modular API routers
@@ -226,6 +227,7 @@ app.include_router(materialization_router)
 app.include_router(leaveoff_router)
 app.include_router(postman_router)
 app.include_router(scanner_router)
+app.include_router(scanner_script_router)
 
 
 # Root endpoint
