@@ -1037,11 +1037,14 @@ export function registerApiRoutes(
   });
 
   // GET /api/health - Health check with web adapter info
-  app.get('/api/health', c => {
+  app.get('/api/health', async c => {
+    const stats = lockManager.getStats();
+    const runningWorkflows = await workflowDb.countRunningWorkflows();
     return c.json({
       status: 'ok',
       adapter: 'web',
-      concurrency: lockManager.getStats(),
+      concurrency: stats,
+      runningWorkflows,
     });
   });
 }

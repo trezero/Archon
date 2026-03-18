@@ -48,6 +48,7 @@ export interface HealthResponse {
     queuedTotal: number;
     maxConcurrent: number;
   };
+  runningWorkflows: number;
 }
 
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {

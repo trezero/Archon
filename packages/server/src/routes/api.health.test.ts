@@ -115,6 +115,8 @@ mock.module('@archon/core/db/isolation-environments', () => ({
   updateStatus: mock(async () => {}),
 }));
 
+const mockCountRunningWorkflows = mock(async () => 0);
+
 mock.module('@archon/core/db/workflows', () => ({
   listWorkflowRuns: mock(async () => []),
   listDashboardRuns: mock(async () => ({
@@ -125,6 +127,7 @@ mock.module('@archon/core/db/workflows', () => ({
   getWorkflowRun: mock(async () => null),
   cancelWorkflowRun: mock(async () => {}),
   getWorkflowRunByWorkerPlatformId: mock(async () => null),
+  countRunningWorkflows: mockCountRunningWorkflows,
 }));
 
 mock.module('@archon/core/db/workflow-events', () => ({
@@ -178,10 +181,12 @@ function makeApp(): Hono {
 describe('GET /api/health', () => {
   beforeEach(() => {
     mockGetStats.mockReset();
+    mockCountRunningWorkflows.mockReset();
   });
 
   test('returns status ok with adapter and concurrency info', async () => {
     mockGetStats.mockImplementationOnce(() => ({ active: 1, queued: 2 }));
+    mockCountRunningWorkflows.mockImplementationOnce(async () => 1);
 
     const app = makeApp();
     const response = await app.request('/api/health');
@@ -191,14 +196,17 @@ describe('GET /api/health', () => {
       status: string;
       adapter: string;
       concurrency: unknown;
+      runningWorkflows: number;
     };
     expect(body.status).toBe('ok');
     expect(body.adapter).toBe('web');
     expect(body.concurrency).toBeDefined();
+    expect(body.runningWorkflows).toBe(1);
   });
 
   test('reflects live concurrency stats from lockManager', async () => {
     mockGetStats.mockImplementationOnce(() => ({ active: 3, queued: 7 }));
+    mockCountRunningWorkflows.mockImplementationOnce(async () => 2);
 
     const app = makeApp();
     const response = await app.request('/api/health');
@@ -206,8 +214,10 @@ describe('GET /api/health', () => {
 
     const body = (await response.json()) as {
       concurrency: { active: number; queued: number };
+      runningWorkflows: number;
     };
     expect(body.concurrency).toEqual({ active: 3, queued: 7 });
+    expect(body.runningWorkflows).toBe(2);
   });
 
   test('returns 200 without any auth requirements', async () => {
