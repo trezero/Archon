@@ -812,6 +812,22 @@ async def crawl_knowledge_item(request: KnowledgeItemRequest):
             "log": f"Starting crawl for {request.url}"
         })
 
+        # Link project upfront so the association exists even if the crawl fails
+        if request.project_id:
+            try:
+                supabase_client = get_supabase_client()
+                supabase_client.table("archon_project_sources").upsert(
+                    {
+                        "project_id": request.project_id,
+                        "source_id": source_id,
+                        "notes": request.knowledge_type or "technical",
+                        "created_by": "crawl",
+                    },
+                    on_conflict="project_id,source_id",
+                ).execute()
+            except Exception as e:
+                logger.warning(f"Failed to pre-link project {request.project_id} to source {source_id}: {e}")
+
         # Start background task - no need to track this wrapper task
         # The actual crawl task will be stored inside _perform_crawl_with_progress
         asyncio.create_task(_perform_crawl_with_progress(progress_id, request, tracker))
