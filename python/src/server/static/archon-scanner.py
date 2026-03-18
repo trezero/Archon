@@ -724,16 +724,204 @@ def scan_directory(root_path: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Apply mode (placeholder — implemented in Task 2)
+# Apply mode
 # ---------------------------------------------------------------------------
 
-def apply_configs(payload: dict) -> dict:
-    """
-    Apply Archon configuration to discovered projects.
+def _compute_file_hash(path: str) -> str:
+    """Compute SHA-256 hash of a file, reading in 8192-byte chunks."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(8192)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
 
-    Placeholder implementation — will be completed in Task 2.
+
+def _write_config_files(proj: dict, extensions_hash: str | None) -> None:
     """
-    return {"error": "not implemented yet"}
+    Write .claude/archon-config.json and .claude/archon-state.json into the project directory.
+
+    Creates .claude/ if it does not exist.
+    """
+    project_path = proj["absolute_path"]
+    claude_dir = os.path.join(project_path, ".claude")
+    os.makedirs(claude_dir, exist_ok=True)
+
+    project_id = proj.get("project_id", "")
+    system_fingerprint = proj.get("system_fingerprint", "")
+    machine_id = hashlib.md5(system_fingerprint.encode()).hexdigest()[:16]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    project_title = proj.get("project_title") or os.path.basename(project_path)
+
+    archon_config = {
+        "archon_api_url": proj.get("archon_api_url", ""),
+        "archon_mcp_url": proj.get("archon_mcp_url", ""),
+        "project_id": project_id,
+        "project_title": project_title,
+        "machine_id": machine_id,
+        "install_scope": "project",
+        "installed_at": now_iso,
+        "installed_by": "scanner",
+    }
+    if extensions_hash:
+        archon_config["extensions_hash"] = extensions_hash
+        archon_config["extensions_installed_at"] = now_iso
+
+    config_path = os.path.join(claude_dir, "archon-config.json")
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(archon_config, f, indent=4)
+
+    archon_state = {
+        "system_fingerprint": system_fingerprint,
+        "system_name": proj.get("system_name", ""),
+        "archon_project_id": project_id,
+    }
+
+    state_path = os.path.join(claude_dir, "archon-state.json")
+    with open(state_path, "w", encoding="utf-8") as f:
+        json.dump(archon_state, f, indent=4)
+
+
+def _write_settings_local(project_path: str) -> None:
+    """Write .claude/settings.local.json with the Archon observation hook."""
+    claude_dir = os.path.join(project_path, ".claude")
+    os.makedirs(claude_dir, exist_ok=True)
+
+    settings = {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": ".*",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "~/.claude/plugins/archon-memory/scripts/observation_hook.sh",
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+
+    settings_path = os.path.join(claude_dir, "settings.local.json")
+    with open(settings_path, "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=4)
+
+
+def _update_gitignore(project_path: str) -> None:
+    """
+    Append Archon entries to .gitignore if not already present.
+
+    Idempotent: skips if '# Archon' is already in the file.
+    Ensures existing last line is not corrupted by prepending a newline when needed.
+    """
+    gitignore_path = os.path.join(project_path, ".gitignore")
+    existing_content = ""
+
+    if os.path.isfile(gitignore_path):
+        with open(gitignore_path, "r", encoding="utf-8", errors="replace") as f:
+            existing_content = f.read()
+
+    # Idempotency check
+    if "# Archon" in existing_content:
+        return
+
+    entries_block = "\n".join(GITIGNORE_ENTRIES) + "\n"
+
+    # Prevent corrupting the last line when existing content has no trailing newline
+    if existing_content and not existing_content.endswith("\n"):
+        entries_block = "\n" + entries_block
+
+    with open(gitignore_path, "a", encoding="utf-8") as f:
+        f.write(entries_block)
+
+
+def _install_extensions(project_path: str, tarball_path: str) -> None:
+    """
+    Extract an extensions tarball into .claude/skills/ inside the project directory.
+
+    Skips silently on tarfile or OS errors so config files are still written.
+    """
+    claude_dir = os.path.join(project_path, ".claude")
+    skills_dir = os.path.join(claude_dir, "skills")
+    os.makedirs(skills_dir, exist_ok=True)
+
+    try:
+        with tarfile.open(tarball_path, "r:gz") as tar:
+            if sys.version_info >= (3, 12):
+                tar.extractall(path=skills_dir, filter="data")
+            else:
+                tar.extractall(path=skills_dir)
+    except (tarfile.TarError, OSError):
+        pass
+
+
+def apply_configs(payload: dict, extensions_tarball: str | None = None) -> dict:
+    """
+    Apply Archon configuration to projects listed in payload.
+
+    Writes config files, settings.local.json, updates .gitignore, and optionally
+    installs extensions from a tarball into each project directory.
+    Returns a JSON-serializable summary with per-project results.
+    """
+    projects = payload.get("projects", [])
+
+    extensions_hash: str | None = None
+    if extensions_tarball and os.path.isfile(extensions_tarball):
+        extensions_hash = _compute_file_hash(extensions_tarball)
+
+    total = len(projects)
+    created = 0
+    failed = 0
+    results = []
+
+    for proj in projects:
+        project_path = proj.get("absolute_path", "")
+        project_title = proj.get("project_title") or os.path.basename(project_path)
+
+        if not project_path or not os.path.isdir(project_path):
+            failed += 1
+            results.append({
+                "path": project_path,
+                "title": project_title,
+                "status": "failed",
+                "error": f"Directory not found: {project_path}",
+            })
+            continue
+
+        try:
+            _write_config_files(proj, extensions_hash)
+            _write_settings_local(project_path)
+            _update_gitignore(project_path)
+
+            if extensions_tarball and os.path.isfile(extensions_tarball):
+                _install_extensions(project_path, extensions_tarball)
+
+            created += 1
+            results.append({
+                "path": project_path,
+                "title": project_title,
+                "status": "created",
+            })
+        except Exception as e:
+            failed += 1
+            results.append({
+                "path": project_path,
+                "title": project_title,
+                "status": "failed",
+                "error": str(e),
+            })
+
+    return {
+        "apply_summary": {
+            "total": total,
+            "created": created,
+            "failed": failed,
+        },
+        "results": results,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -781,7 +969,7 @@ def main() -> None:
         result = scan_directory(args.scan)
 
         if args.apply and "error" not in result:
-            apply_result = apply_configs(result)
+            apply_result = apply_configs(result, extensions_tarball=args.extensions_tarball)
             result["apply_result"] = apply_result
 
         print(json.dumps(result, indent=2, default=str))
@@ -805,7 +993,7 @@ def main() -> None:
             )
             sys.exit(1)
 
-        result = apply_configs(payload)
+        result = apply_configs(payload, extensions_tarball=args.extensions_tarball)
         print(json.dumps(result, indent=2, default=str))
         sys.exit(0)
 
