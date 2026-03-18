@@ -875,6 +875,7 @@ def apply_configs(payload: dict, extensions_tarball: str | None = None) -> dict:
     total = len(projects)
     created = 0
     failed = 0
+    skipped = 0
     results = []
 
     for proj in projects:
@@ -882,12 +883,12 @@ def apply_configs(payload: dict, extensions_tarball: str | None = None) -> dict:
         project_title = proj.get("project_title") or os.path.basename(project_path)
 
         if not project_path or not os.path.isdir(project_path):
-            failed += 1
+            skipped += 1
             results.append({
                 "path": project_path,
                 "title": project_title,
-                "status": "failed",
-                "error": f"Directory not found: {project_path}",
+                "status": "skipped",
+                "reason": "directory not found",
             })
             continue
 
@@ -918,6 +919,7 @@ def apply_configs(payload: dict, extensions_tarball: str | None = None) -> dict:
         "apply_summary": {
             "total": total,
             "created": created,
+            "skipped": skipped,
             "failed": failed,
         },
         "results": results,
