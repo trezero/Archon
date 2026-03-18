@@ -2,13 +2,18 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { MessageSquare } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { isDagWorkflow } from '@archon/workflows/types';
 import { StepProgress } from './StepProgress';
 import { DagNodeProgress } from './DagNodeProgress';
 import { StepLogs } from './StepLogs';
 import { WorkflowLogs } from './WorkflowLogs';
+import { WorkflowDagViewer } from './WorkflowDagViewer';
 import { ArtifactSummary } from './ArtifactSummary';
+import { ChatInterface } from '@/components/chat/ChatInterface';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { useWorkflowStore } from '@/stores/workflow-store';
-import { getWorkflowRun, getWorkflowRunByWorker, getCodebase } from '@/lib/api';
+import { getWorkflowRun, getWorkflowRunByWorker, getCodebase, getWorkflow } from '@/lib/api';
 import { ensureUtc, formatDurationMs } from '@/lib/format';
 import type {
   WorkflowState,
@@ -73,7 +78,9 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
   const [selectedStep, setSelectedStep] = useState(0);
   const [selectedDagNode, setSelectedDagNode] = useState<string | null>(null);
   const [codebaseName, setCodebaseName] = useState<string | null>(null);
+  const [codebaseCwd, setCodebaseCwd] = useState<string | null>(null);
   const [workerRunId, setWorkerRunId] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<'graph' | 'logs' | 'chat'>('graph');
   // Track which codebaseId we've already fetched to avoid stale re-fetches during runId transitions
   const fetchedCodebaseIdRef = useRef<string | null>(null);
 
@@ -82,7 +89,9 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
     setSelectedStep(0);
     setSelectedDagNode(null);
     setCodebaseName(null);
+    setCodebaseCwd(null);
     setWorkerRunId(null);
+    setActiveView('graph');
     fetchedCodebaseIdRef.current = null;
   }, [runId]);
 
@@ -249,6 +258,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
     void getCodebase(codebaseId)
       .then(cb => {
         setCodebaseName(cb.name);
+        setCodebaseCwd(cb.default_cwd);
       })
       .catch((err: unknown) => {
         console.warn('[WorkflowExecution] Failed to load codebase name', {
@@ -257,6 +267,23 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
         });
       });
   }, [codebaseId]);
+
+  // Fetch workflow definition for DAG topology (depends_on edges).
+  // Enabled whenever we have a workflow name and cwd — isDag is derived from the result,
+  // not used as a gate, to avoid a circular dependency.
+  const { data: workflowDef } = useQuery({
+    queryKey: ['workflowDefinition', initialData?.workflowName, codebaseCwd],
+    queryFn: () => getWorkflow(initialData?.workflowName ?? '', codebaseCwd ?? undefined),
+    enabled: !!initialData?.workflowName && !!codebaseCwd,
+    staleTime: Infinity,
+  });
+  const dagDefinitionNodes =
+    workflowDef?.workflow && isDagWorkflow(workflowDef.workflow)
+      ? workflowDef.workflow.nodes
+      : null;
+  // Use workflow definition when available, fall back to dagNodes from run state.
+  // isDagWorkflow() operates on the definition; dagNodes.length operates on run state.
+  const isDag = dagDefinitionNodes !== null || (initialData?.dagNodes.length ?? 0) > 0;
 
   // When SSE reports a terminal status but React Query data is still stale,
   // invalidate the cache to trigger an immediate re-fetch with correct data.
@@ -463,6 +490,91 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       : (workflow.completedAt ?? (startedAt ? Date.now() : 0));
   const elapsed = startedAt ? Math.max(0, completedAt - startedAt) : 0;
 
+  const isRunning = workflow.status === 'running' || workflow.status === 'pending';
+
+  // Pick the platform ID for logs: worker takes precedence over conversation.
+  const logsPlatformId = workerPlatformId ?? conversationPlatformId;
+
+  // Logs panel — shared between graph split and standalone logs view
+  const logsPanel = (
+    <div className="flex-1 flex flex-col overflow-hidden min-h-0 h-full">
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+        {logsPlatformId ? (
+          <WorkflowLogs
+            conversationId={logsPlatformId}
+            startedAt={initialData?.startedAt}
+            isRunning={isRunning}
+            currentlyExecuting={currentlyExecuting}
+            toolEvents={toolEvents}
+          />
+        ) : (
+          <StepLogs runId={runId} stepIndex={selectedStep} lines={stepLogLines} />
+        )}
+      </div>
+      {!isRunning && workflow.artifacts.length > 0 && (
+        <div className="border-t border-border p-3">
+          <ArtifactSummary artifacts={workflow.artifacts} />
+        </div>
+      )}
+    </div>
+  );
+
+  const renderBody = (): React.ReactElement => {
+    if (isDag && activeView === 'graph') {
+      return (
+        <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
+          <ResizablePanel defaultSize={60} minSize={30}>
+            {dagDefinitionNodes ? (
+              <WorkflowDagViewer
+                dagNodes={dagDefinitionNodes}
+                liveStatus={workflow.dagNodes}
+                isRunning={isRunning}
+                currentlyExecuting={currentlyExecuting ?? undefined}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-text-secondary">
+                <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent mr-2" />
+                Loading graph...
+              </div>
+            )}
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize={40} minSize={20}>
+            {logsPanel}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      );
+    }
+    if (isDag && activeView === 'chat' && parentPlatformId) {
+      return (
+        <div className="flex-1 overflow-hidden min-h-0">
+          <ChatInterface conversationId={parentPlatformId} />
+        </div>
+      );
+    }
+    // Logs view: default for sequential workflows, and the DAG "Logs" tab
+    return (
+      <div className="flex flex-1 overflow-hidden min-h-0">
+        <div className="w-64 border-r border-border overflow-auto">
+          {workflow.dagNodes.length > 0 ? (
+            <DagNodeProgress
+              nodes={workflow.dagNodes}
+              activeNodeId={selectedDagNode}
+              onNodeClick={setSelectedDagNode}
+            />
+          ) : (
+            <StepProgress
+              steps={workflow.steps}
+              activeStepIndex={selectedStep}
+              onStepClick={setSelectedStep}
+            />
+          )}
+        </div>
+        {logsPanel}
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -486,7 +598,8 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
         </div>
         <div className="flex items-center gap-2 ml-auto shrink-0">
           {codebaseName && <span className="text-xs text-text-secondary">{codebaseName}</span>}
-          {parentPlatformId && (
+          {/* Chat nav button — only for non-DAG workflows (DAG gets a Chat tab) */}
+          {!isDag && parentPlatformId && (
             <button
               onClick={(): void => {
                 navigate(`/chat/${encodeURIComponent(parentPlatformId)}`);
@@ -513,57 +626,31 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
         </div>
       </div>
 
-      {/* Body: Step list + Logs */}
-      <div className="flex flex-1 overflow-hidden min-h-0">
-        {/* Left panel: Step list or DAG nodes */}
-        <div className="w-64 border-r border-border overflow-auto">
-          {workflow.dagNodes.length > 0 ? (
-            <DagNodeProgress
-              nodes={workflow.dagNodes}
-              activeNodeId={selectedDagNode}
-              onNodeClick={setSelectedDagNode}
-            />
-          ) : (
-            <StepProgress
-              steps={workflow.steps}
-              activeStepIndex={selectedStep}
-              onStepClick={setSelectedStep}
-            />
-          )}
+      {/* View tabs — only for DAG workflows */}
+      {isDag && (
+        <div className="flex items-center px-4 py-1.5 border-b border-border">
+          <Tabs
+            value={activeView}
+            onValueChange={(v): void => {
+              setActiveView(v as typeof activeView);
+            }}
+          >
+            <TabsList>
+              <TabsTrigger value="graph">Graph</TabsTrigger>
+              <TabsTrigger value="logs">Logs</TabsTrigger>
+              {parentPlatformId && (
+                <TabsTrigger value="chat">
+                  <MessageSquare className="h-3 w-3 mr-1" />
+                  Chat
+                </TabsTrigger>
+              )}
+            </TabsList>
+          </Tabs>
         </div>
+      )}
 
-        {/* Right panel: Logs + Artifacts */}
-        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-            {workerPlatformId ? (
-              <WorkflowLogs
-                conversationId={workerPlatformId}
-                startedAt={initialData?.startedAt}
-                isRunning={workflow.status === 'running' || workflow.status === 'pending'}
-                currentlyExecuting={currentlyExecuting}
-                toolEvents={toolEvents}
-              />
-            ) : conversationPlatformId ? (
-              <WorkflowLogs
-                conversationId={conversationPlatformId}
-                startedAt={initialData?.startedAt}
-                isRunning={workflow.status === 'running' || workflow.status === 'pending'}
-                currentlyExecuting={currentlyExecuting}
-                toolEvents={toolEvents}
-              />
-            ) : (
-              <StepLogs runId={runId} stepIndex={selectedStep} lines={stepLogLines} />
-            )}
-          </div>
-          {workflow.status !== 'running' &&
-            workflow.status !== 'pending' &&
-            workflow.artifacts.length > 0 && (
-              <div className="border-t border-border p-3">
-                <ArtifactSummary artifacts={workflow.artifacts} />
-              </div>
-            )}
-        </div>
-      </div>
+      {/* Body — content depends on activeView for DAG, or default layout for sequential */}
+      {renderBody()}
     </div>
   );
 }
