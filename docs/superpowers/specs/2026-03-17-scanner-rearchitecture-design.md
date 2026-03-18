@@ -21,20 +21,20 @@ User: "/scan-projects"
 +-------------------------------------------------------+
 |  /scan-projects Skill (orchestrator)                  |
 |                                                        |
-|  1. Preflight: verify system registered                |
+|  1. Preflight: verify registered, detect Python & OS   |
 |  2. Download archon-scanner.py from Archon API         |
-|  3. Run: python3 archon-scanner.py --scan ~/projects   |
+|  3. Run: <PYTHON> archon-scanner.py --scan ~/projects  |
 |  4. Fetch existing projects via MCP (find_projects)    |
 |  5. Client-side dedup (compare normalized GitHub URLs) |
 |  6. Claude generates descriptions from README content  |
 |  7. Present results to user for confirmation           |
 |  8. Create projects via MCP (manage_project)           |
-|  9. Register system for each project (project sync)    |
+|  9. Register system via MCP (per project)              |
 |  10. Download extensions tarball from Archon API       |
-|  11. Run: python3 archon-scanner.py --apply <payload>  |
-|      (writes configs, extracts extensions, updates     |
-|       .gitignore for all projects in one batch)        |
-|  12. Queue README crawls via MCP (knowledge ingestion) |
+|  11. Run: <PYTHON> archon-scanner.py --apply           |
+|      --payload-file <TEMP>/payload.json                |
+|      --extensions-tarball <TEMP>/extensions.tar.gz     |
+|  12. Queue README crawls via MCP (batched, 5 at a time)|
 |  13. Display final summary                             |
 +-------------------------------------------------------+
 ```
@@ -44,7 +44,36 @@ User: "/scan-projects"
 - Script touches local filesystem only (scan reads, apply writes)
 - Project creation happens via existing MCP tools (`find_projects`, `manage_project`)
 - No Docker volume mount needed
-- Works on any system with Python 3 and Claude Code
+- Works on any system with Python 3.8+ and Claude Code
+- Cross-platform: Windows, macOS, Linux (WSL included)
+
+---
+
+## Cross-Platform Compatibility
+
+### Temp Directory
+All temp file paths use Python's `tempfile.gettempdir()` semantics. The skill resolves the platform-appropriate temp directory before executing commands:
+- Unix/macOS/WSL: `/tmp/`
+- Windows: `%TEMP%` (typically `C:\Users\<user>\AppData\Local\Temp`)
+
+The skill detects the OS and uses the correct path. Temp files are named with an `archon-` prefix for easy identification:
+- `<tempdir>/archon-scanner.py`
+- `<tempdir>/archon-extensions.tar.gz`
+- `<tempdir>/archon-apply-payload.json`
+
+### Python Executable
+The `python3` command does not exist on Windows. The skill runs a preflight detection:
+1. Try `python3 --version` — if it works, use `python3`
+2. Fall back to `python --version` — verify output shows Python 3.x
+3. If neither works: stop with "Python 3 not found. Please install Python 3.8+ and ensure it's on your PATH."
+
+The detected executable is stored and used for all subsequent script invocations in the session.
+
+### Shell Quoting
+The skill avoids raw `curl` commands with inline JSON payloads (brittle across Bash/CMD/PowerShell). Instead:
+- File downloads use simple `curl -s <url> -o <path>` (safe on all platforms)
+- JSON payloads are written to temp files via Claude Code's Write tool, then passed as `--payload-file <path>`
+- System registration uses an MCP tool (see Step 7) rather than curl with JSON body
 
 ---
 
@@ -54,7 +83,7 @@ User: "/scan-projects"
 
 **Location:** `python/src/server/static/archon-scanner.py`
 **Distribution:** Served via `GET /api/scanner/script`
-**Requirements:** Python 3, stdlib only (no pip dependencies)
+**Requirements:** Python 3.8+, stdlib only (no pip dependencies)
 **Size:** ~500 lines, single file
 
 #### Scan Mode
@@ -112,7 +141,7 @@ Outputs JSON to stdout:
 - **GitHub URL normalization:** SSH to HTTPS, strip `.git` suffix, lowercase
 - **README reading:** first 5000 chars as excerpt
 - **Language detection** from file extensions (top-level + `src/`)
-- **Dependency extraction** from `package.json`, `pyproject.toml`, `requirements.txt`, `Cargo.toml`, `go.mod`
+- **Dependency extraction** from `package.json`, `pyproject.toml`, `requirements.txt`, `Cargo.toml`, `go.mod`. For TOML files (`pyproject.toml`, `Cargo.toml`): uses `tomllib` (Python 3.11+) with a regex-based fallback parser for Python 3.8–3.10 that extracts `[project.dependencies]` and `[dependencies]` blocks. If both fail, dependency extraction is skipped for that file with a warning — the project is still detected
 - **Infrastructure markers:** Dockerfile, docker-compose, `.github/workflows/`, `vercel.json`, terraform, k8s manifests
 
 #### Apply Mode
@@ -145,7 +174,7 @@ Per project, apply writes:
 - `.claude/archon-config.json` — project_id, project_title, URLs, `installed_by: "scanner"`, extensions_hash (computed from tarball SHA-256), `extensions_installed_at` (ISO timestamp)
 - `.claude/archon-state.json` — system_fingerprint, system_name, archon_project_id
 - `.claude/settings.local.json` — PostToolUse observation hook
-- `.gitignore` — append Archon entries (idempotent, checks for `# Archon` marker)
+- `.gitignore` — append Archon entries (idempotent, checks for `# Archon` marker). Before appending, the script ensures the file ends with a newline to prevent corrupting the last existing rule (e.g., `node_modules# Archon` if the file had no trailing newline)
 - `.claude/skills/` — extract extensions tarball (if `--extensions-tarball` provided and file exists)
 
 The `extensions_hash` is computed by the script from the tarball contents (SHA-256 of the file), not passed in the payload.
@@ -180,15 +209,18 @@ Rigid, step-by-step skill:
 - Verify `archon-state.json` exists (`~/.claude/` or current project's `.claude/`)
 - Extract `system_fingerprint` and `system_name`
 - If not found: tell user to run `/archon-setup` first, stop
+- Detect Python executable: try `python3 --version`, fall back to `python --version` (verify 3.x)
+- Detect OS temp directory: use `python -c "import tempfile; print(tempfile.gettempdir())"` or infer from OS
+- Store `PYTHON_CMD` and `TEMP_DIR` for use in subsequent steps
 
 #### Step 2 — Download Scanner Script
-- `curl -s http://<archon_api_url>/api/scanner/script -o /tmp/archon-scanner.py`
+- `curl -s http://<archon_api_url>/api/scanner/script -o <TEMP_DIR>/archon-scanner.py`
 - Archon API URL from `archon-config.json` or default `http://localhost:8181`
 - If download fails: error with instructions to check Archon is running
 
 #### Step 3 — Run Scan
 - Ask user for projects directory path (default: `~/projects`)
-- `python3 /tmp/archon-scanner.py --scan <path>`
+- `<PYTHON_CMD> <TEMP_DIR>/archon-scanner.py --scan <path>`
 - Parse JSON output
 
 #### Step 4 — Deduplicate
@@ -213,20 +245,20 @@ Rigid, step-by-step skill:
 - Collect all project IDs from responses — the `manage_project` tool returns `{"success": true, "project": {...}, "project_id": "...", "message": "..."}` synchronously
 
 #### Step 7 — Register System
-- For each created project, call `POST /api/extensions/projects/{project_id}/sync` via `curl` with the system fingerprint
-- This uses the same endpoint that `/archon-setup` uses (extension sync service, table `archon_project_system_registrations`)
+- For each created project, call the `manage_extensions` MCP tool with `action: "sync"` and the `project_id` and `system_fingerprint`
+- This uses the same mechanism that `/archon-setup` uses (extension sync service, table `archon_project_system_registrations`)
 - Links the current system to each project so Archon knows which systems have which projects
-- Example: `curl -s -X POST http://<archon_api_url>/api/extensions/projects/<project_id>/sync -H "Content-Type: application/json" -d '{"system_fingerprint": "<fingerprint>"}'`
+- **Note:** A new MCP tool `register_system_to_project(project_id, system_fingerprint)` should be added if `manage_extensions` does not support a sync action. This avoids raw `curl` commands with JSON payloads which are brittle across platforms (Bash vs CMD vs PowerShell quoting)
 
 #### Step 8 — Download Extensions Tarball
 - Read `archon_mcp_url` from `archon-config.json` (same file used in Step 2 for `archon_api_url`), default `http://localhost:8051`
-- `curl -s http://<archon_mcp_url>/archon-setup/extensions.tar.gz -o /tmp/archon-extensions.tar.gz`
+- `curl -s http://<archon_mcp_url>/archon-setup/extensions.tar.gz -o <TEMP_DIR>/archon-extensions.tar.gz`
 - One download, reused for all projects
 
 #### Step 9 — Apply Configs
 - Build apply payload JSON with all project IDs, paths, titles, and system info
-- Write payload to temp file: `/tmp/archon-apply-payload.json`
-- `python3 /tmp/archon-scanner.py --apply --payload-file /tmp/archon-apply-payload.json --extensions-tarball /tmp/archon-extensions.tar.gz`
+- Write payload to temp file using Claude Code's Write tool: `<TEMP_DIR>/archon-apply-payload.json`
+- `<PYTHON_CMD> <TEMP_DIR>/archon-scanner.py --apply --payload-file <TEMP_DIR>/archon-apply-payload.json --extensions-tarball <TEMP_DIR>/archon-extensions.tar.gz`
 - Parse output summary
 
 #### Step 10 — Knowledge Base Ingestion
@@ -242,6 +274,7 @@ Rigid, step-by-step skill:
   )
   ```
 - This queues a crawl of each project's GitHub README as a knowledge source
+- **Rate limiting:** For large scans (20+ projects), the skill should batch these calls in groups of 5 with a brief pause between batches to avoid overwhelming the backend's embedding provider or hitting external rate limits. The backend's crawl queue is already async, but flooding it with 40+ simultaneous jobs can cause resource contention
 
 #### Step 11 — Display Final Summary
 - Per-project status (created, skipped, failed)
@@ -351,6 +384,10 @@ Tests import the script directly. Use `tempfile.mkdtemp()` for disposable direct
 | Apply extracts extensions | Tarball extracted to `.claude/skills/` |
 | Apply handles permission errors | Fails gracefully, continues others |
 | Apply with missing tarball | Configs written, extensions skipped |
+| .gitignore without trailing newline | Newline inserted before Archon block, no corruption |
+| .gitignore already has trailing newline | No extra blank line added |
+| TOML parsing on Python 3.10 | Regex fallback extracts dependencies correctly |
+| TOML parsing on Python 3.11+ | `tomllib` used, correct results |
 
 No Docker or Archon instance needed for any tests.
 
