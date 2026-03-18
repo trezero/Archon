@@ -39,9 +39,18 @@ Follow these steps exactly in order. Do not skip steps.
 ### Step 4 — Deduplicate Against Existing Archon Projects
 
 1. Call the `find_projects` MCP tool to get all existing Archon projects.
-2. For each project in the scan results, compare its `github_url` (normalized, lowercase) against the `github_repo` field of existing Archon projects.
-3. Mark matches by setting `already_in_archon: true` and storing the `existing_project_id`.
-4. Count: how many are new, how many already exist.
+2. For each project in the scan results, compare its `github_url` (normalized, lowercase)
+   against the `github_repo` field of existing Archon projects.
+3. **Fallback matching:** If no `github_url` match is found, also compare by case-insensitive
+   `directory_name` against existing project `title` fields. This catches projects that were
+   created without a `github_repo` value (e.g., projects created manually via the UI).
+4. Mark matches by setting `already_in_archon: true` and storing the `existing_project_id`.
+5. **Intra-scan dedup:** Check for multiple scan results sharing the same non-null `github_url`.
+   If found:
+   - Keep the first occurrence as the primary.
+   - Mark subsequent occurrences with `duplicate_of: "<directory_name of primary>"`.
+   - Present these to the user in Step 5 for a decision (create both, skip one, or merge).
+6. Count: how many are new, how many already exist, how many are intra-scan duplicates.
 
 ### Step 5 — Present Results to User
 
@@ -66,7 +75,18 @@ New projects to set up:
 ...
 
 Already in Archon (will skip): <names>
+```
 
+If intra-scan duplicates were found, show:
+```
+Duplicate GitHub URLs detected:
+- <name1> and <name2> both point to <github_url>
+  → Create both as separate projects? [y/N] Or skip <name2>?
+```
+
+Wait for user input on each duplicate pair before proceeding.
+
+```
 Proceed with setting up these <N> projects? You can exclude any by number.
 ```
 
