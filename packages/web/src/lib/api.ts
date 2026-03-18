@@ -154,6 +154,7 @@ export interface WorkflowRunResponse {
   id: string;
   workflow_name: string;
   conversation_id: string;
+  parent_conversation_id: string | null;
   codebase_id: string | null;
   current_step_index: number;
   status: WorkflowRunStatus;
