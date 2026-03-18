@@ -5,27 +5,14 @@ import { useSSE } from '@/hooks/useSSE';
 import { getMessages } from '@/lib/api';
 import { formatDurationMs } from '@/lib/format';
 import type { MessageResponse } from '@/lib/api';
-import type {
-  ChatMessage,
-  ToolCallDisplay,
-  ErrorDisplay,
-  WorkflowStepEvent,
-  WorkflowStatusEvent,
-  ParallelAgentEvent,
-  WorkflowArtifactEvent,
-} from '@/lib/types';
+import { workflowSSEHandlers } from '@/stores/workflow-store';
+import type { ChatMessage, ToolCallDisplay, ErrorDisplay } from '@/lib/types';
 import type { ToolEvent } from './WorkflowExecution';
 
 interface WorkflowLogsProps {
   conversationId: string;
   startedAt?: number;
   isRunning?: boolean;
-  workflowHandlers?: {
-    onWorkflowStep: (event: WorkflowStepEvent) => void;
-    onWorkflowStatus: (event: WorkflowStatusEvent) => void;
-    onParallelAgent: (event: ParallelAgentEvent) => void;
-    onWorkflowArtifact: (event: WorkflowArtifactEvent) => void;
-  };
   currentlyExecuting?: { nodeName: string; startedAt: number } | null;
   toolEvents?: ToolEvent[];
 }
@@ -96,7 +83,6 @@ export function WorkflowLogs({
   conversationId,
   startedAt,
   isRunning,
-  workflowHandlers,
   currentlyExecuting,
   toolEvents,
 }: WorkflowLogsProps): React.ReactElement {
@@ -312,7 +298,7 @@ export function WorkflowLogs({
     onError,
     onLockChange,
     onSessionInfo,
-    ...workflowHandlers,
+    ...workflowSSEHandlers,
   });
 
   // If workflow is running but no message is currently streaming,

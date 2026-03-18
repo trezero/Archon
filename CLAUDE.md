@@ -281,6 +281,7 @@ packages/
         ├── components/       # React components (chat, layout, projects, ui, workflows)
         ├── hooks/            # Custom hooks (useSSE, etc.)
         ├── lib/              # API client, types, utilities
+        ├── stores/           # Zustand stores (workflow-store)
         ├── routes/           # Route pages (ChatPage, WorkflowsPage, WorkflowBuilderPage, etc.)
         └── App.tsx           # Router + layout
 ```
@@ -341,7 +342,7 @@ import * as core from '@archon/core';  // Don't do this
 - **@archon/core**: Business logic, database, orchestration, AI clients (provides `createWorkflowStore()` adapter bridging core DB → `IWorkflowStore`)
 - **@archon/adapters**: Platform adapters for Slack, Telegram, GitHub, Discord (depends on @archon/core)
 - **@archon/server**: Hono HTTP server, Web adapter (SSE), API routes, Web UI static serving (depends on @archon/adapters)
-- **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui), SSE streaming to server
+- **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui + Zustand), SSE streaming to server
 
 **1. Platform Adapters**
 - Implement `IPlatformAdapter` interface

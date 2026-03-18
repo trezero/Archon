@@ -7,7 +7,11 @@ import { MessageInput, type MessageInputHandle } from './MessageInput';
 import { LockIndicator } from './LockIndicator';
 import { WorkflowProgressCard } from './WorkflowProgressCard';
 import { useSSE } from '@/hooks/useSSE';
-import { useWorkflowStatus } from '@/hooks/useWorkflowStatus';
+import {
+  useWorkflowStore,
+  selectActiveWorkflow,
+  workflowSSEHandlers,
+} from '@/stores/workflow-store';
 import {
   sendMessage as apiSendMessage,
   listConversations,
@@ -100,7 +104,8 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
-  const { activeWorkflow, hydrateWorkflow, handlers: workflowHandlers } = useWorkflowStatus();
+  const activeWorkflow = useWorkflowStore(selectActiveWorkflow);
+  const hydrateWorkflow = useWorkflowStore(s => s.hydrateWorkflow);
 
   // Sync messages to cache for persistence across navigation
   useEffect(() => {
@@ -533,7 +538,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     onWorkflowDispatch,
     onWarning,
     onRetract,
-    ...workflowHandlers,
+    ...workflowSSEHandlers,
   });
 
   const handleSend = useCallback(

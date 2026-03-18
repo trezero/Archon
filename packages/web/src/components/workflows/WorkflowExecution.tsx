@@ -7,7 +7,7 @@ import { DagNodeProgress } from './DagNodeProgress';
 import { StepLogs } from './StepLogs';
 import { WorkflowLogs } from './WorkflowLogs';
 import { ArtifactSummary } from './ArtifactSummary';
-import { useWorkflowStatus } from '@/hooks/useWorkflowStatus';
+import { useWorkflowStore } from '@/stores/workflow-store';
 import { getWorkflowRun, getWorkflowRunByWorker, getCodebase } from '@/lib/api';
 import { ensureUtc, formatDurationMs } from '@/lib/format';
 import type {
@@ -69,7 +69,7 @@ function StatusBadge({ status }: { status: string }): React.ReactElement {
 export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.ReactElement {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { workflows, handlers: workflowHandlers } = useWorkflowStatus();
+  const liveWorkflow = useWorkflowStore(s => s.workflows.get(runId));
   const [selectedStep, setSelectedStep] = useState(0);
   const [selectedDagNode, setSelectedDagNode] = useState<string | null>(null);
   const [codebaseName, setCodebaseName] = useState<string | null>(null);
@@ -260,7 +260,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
 
   // When SSE reports a terminal status but React Query data is still stale,
   // invalidate the cache to trigger an immediate re-fetch with correct data.
-  const liveStatus = workflows.get(runId)?.status;
+  const liveStatus = liveWorkflow?.status;
   useEffect(() => {
     if (!liveStatus || !isTerminal(liveStatus)) return;
     if (initialData && isTerminal(initialData.status)) return; // Already up to date
@@ -291,7 +291,6 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
   // When a `running` SSE event is missed (no buffering), the first SSE event
   // seen is `completed` — which creates liveWorkflow with steps:[] and
   // startedAt=completionTime. We must preserve initialData's structure in that case.
-  const liveWorkflow = workflows.get(runId);
   const workflow = ((): WorkflowState | null => {
     if (!liveWorkflow) return initialData;
     if (!initialData) return liveWorkflow;
@@ -541,7 +540,6 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
                 conversationId={workerPlatformId}
                 startedAt={initialData?.startedAt}
                 isRunning={workflow.status === 'running' || workflow.status === 'pending'}
-                workflowHandlers={workflowHandlers}
                 currentlyExecuting={currentlyExecuting}
                 toolEvents={toolEvents}
               />
@@ -550,7 +548,6 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
                 conversationId={conversationPlatformId}
                 startedAt={initialData?.startedAt}
                 isRunning={workflow.status === 'running' || workflow.status === 'pending'}
-                workflowHandlers={workflowHandlers}
                 currentlyExecuting={currentlyExecuting}
                 toolEvents={toolEvents}
               />
