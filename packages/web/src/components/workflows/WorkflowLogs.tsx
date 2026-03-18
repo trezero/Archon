@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MessageList } from '@/components/chat/MessageList';
 import { useSSE } from '@/hooks/useSSE';
 import { getMessages } from '@/lib/api';
-import { formatDurationMs } from '@/lib/format';
+import { ensureUtc, formatDurationMs } from '@/lib/format';
 import type { MessageResponse } from '@/lib/api';
 import { workflowSSEHandlers } from '@/stores/workflow-store';
 import type { ChatMessage, ToolCallDisplay, ErrorDisplay } from '@/lib/types';
@@ -36,7 +36,7 @@ function hydrateMessages(
       role: row.role,
       content: row.content,
       error: meta.error,
-      timestamp: new Date(row.created_at).getTime(),
+      timestamp: new Date(ensureUtc(row.created_at)).getTime(),
       isStreaming: false,
     };
   });
