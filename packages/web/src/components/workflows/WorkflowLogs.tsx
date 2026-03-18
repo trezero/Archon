@@ -156,10 +156,16 @@ export function WorkflowLogs({
 
     // While running with SSE data: merge DB + SSE using ID-based dedup.
     // DB IDs are UUIDs; SSE IDs are `msg-${Date.now()}` — they never collide,
-    // so this preserves all historical DB messages alongside live SSE messages.
-    // Cannot use timestamp comparison (the old approach) because DB timestamps
-    // are server-side and SSE timestamps are client-side Date.now() — concurrent
-    // messages get filtered out, causing logs to vanish. See issue #700.
+    // so this effectively includes ALL messages from both sources. During active
+    // execution this may show a DB-persisted version alongside an SSE streaming
+    // version of recent content — this is intentional and harmless: the SSE
+    // version has live spinners (more useful), and after completion line 152
+    // switches to DB-only (clean, no duplicates).
+    //
+    // The old timestamp-based approach (`m.timestamp < earliestSseTs`) was broken:
+    // DB timestamps are server-side, SSE uses client-side Date.now(). For in-flight
+    // workflows these are concurrent, so the filter dropped all DB messages the
+    // moment the first SSE event arrived — causing logs to vanish. See issue #700.
     if (dbMessages.length === 0) return sseMessages;
 
     const sseIds = new Set(sseMessages.map(m => m.id));
