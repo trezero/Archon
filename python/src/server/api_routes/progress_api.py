@@ -19,6 +19,27 @@ router = APIRouter(prefix="/api/progress", tags=["progress"])
 TERMINAL_STATES = {"completed", "failed", "error", "cancelled"}
 
 
+@router.get("/active")
+async def get_active_progress():
+    """Return all active progress entries (running + recently completed)."""
+    active = ProgressTracker.list_active()
+    return {
+        "success": True,
+        "count": len(active),
+        "operations": [
+            {
+                "progress_id": pid,
+                "status": state.get("status", "unknown"),
+                "progress": state.get("progress", 0),
+                "type": state.get("type", "unknown"),
+                "url": state.get("url", state.get("title", "")),
+                "start_time": state.get("start_time"),
+            }
+            for pid, state in active.items()
+        ],
+    }
+
+
 @router.get("/{operation_id}")
 async def get_progress(
     operation_id: str,
