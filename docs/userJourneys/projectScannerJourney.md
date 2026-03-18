@@ -332,22 +332,24 @@ grep -c "# Archon" ~/projects/AIOps/.gitignore
 
 ## Phase 5 — Verify Knowledge Base Ingestion
 
-### 5.1 README Crawls Queued via `manage_rag_source` MCP
+### 5.1 Inline README Ingestion via `manage_rag_source` MCP
 
 | # | Check | Expected | Status |
 |---|-------|----------|--------|
-| 5.1a | `manage_rag_source` called | One call per created GitHub project with a README | |
-| 5.1b | Crawl URL format | `https://github.com/{owner}/{repo}#readme` | |
-| 5.1c | Batched for large scans | Calls made in groups of 5 (20+ projects) | |
-| 5.1d | Knowledge sources created | Sources appear in Archon UI under Knowledge | |
+| 5.1a | `manage_rag_source` called | One call per created project with a `readme_excerpt` | |
+| 5.1b | Source type is inline | `source_type: "inline"`, NOT `"url"` | |
+| 5.1c | Content from local disk | `documents` contains locally-read README content | |
+| 5.1d | Batched for large scans | Calls made in groups of 5 (20+ projects) | |
+| 5.1e | Knowledge sources created | Sources appear in Archon UI under Knowledge | |
+| 5.1f | Project linking | Each source is linked to its project (`project_id` set) | |
 
 ### 5.2 Verify in Archon UI
 
 | # | Check | Expected | Status |
 |---|-------|----------|--------|
 | 5.2a | Sources listed | README sources visible for created projects | |
-| 5.2b | Crawl status | Shows processing or completed | |
-| 5.2c | Private repos handled | If crawl fails (404), project still exists | |
+| 5.2b | Ingestion status | Shows completed (inline is near-instant) | |
+| 5.2c | No external crawls | No URL-based sources created for READMEs | |
 
 ### 5.3 RAG Search Test
 
@@ -355,7 +357,7 @@ grep -c "# Archon" ~/projects/AIOps/.gitignore
 
 | # | Check | Expected | Status |
 |---|-------|----------|--------|
-| 5.3a | Results returned | RAG search finds content from RecipeRaiders READMEs | |
+| 5.3a | Results returned | RAG search finds content from RecipeRaiders README | |
 
 ---
 
@@ -594,13 +596,13 @@ done
 | 2 | AI Descriptions | 7 | | | |
 | 3 | Dedup and Create | 18 | | | |
 | 4 | Config Files | 15 | | | |
-| 5 | Knowledge Base | 7 | | | |
+| 5 | Knowledge Base | 10 | | | |
 | 6 | Post-Scanner Workflow | 8 | | | |
 | 7 | Idempotency | 8 | | | |
 | 8 | Edge Cases | 9 | | | |
 | 9 | Multi-System | 25 | | | |
 | 10 | Extension Versions | 2 | | | |
-| **Total** | | **128** | | | |
+| **Total** | | **131** | | | |
 
 ---
 
