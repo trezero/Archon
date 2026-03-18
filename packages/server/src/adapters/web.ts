@@ -197,15 +197,18 @@ export class WebAdapter implements IWebPlatformAdapter {
       if (convTools && convTools.size > 0) {
         const now = Date.now();
         for (const tool of convTools.values()) {
+          const duration = now - tool.startedAt;
           const resultEvent = JSON.stringify({
             type: 'tool_result',
             toolCallId: tool.toolCallId,
             name: tool.name,
             output: '',
-            duration: now - tool.startedAt,
+            duration,
             timestamp: now,
           });
           await this.transport.emit(conversationId, resultEvent);
+          // Persist output to DB so loaded messages show output section after refresh
+          this.persistence.appendToolResult(conversationId, tool.name, '', duration);
         }
         this.runningTools.delete(conversationId);
       }

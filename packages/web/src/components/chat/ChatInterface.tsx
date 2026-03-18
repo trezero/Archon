@@ -34,10 +34,16 @@ import {
   setSendInFlight,
 } from '@/lib/message-cache';
 import { useProject } from '@/contexts/ProjectContext';
+import { ensureUtc } from '@/lib/format';
 
 function mapMessageRow(row: MessageResponse): ChatMessage {
   let meta: {
-    toolCalls?: { name: string; input: Record<string, unknown>; duration?: number }[];
+    toolCalls?: {
+      name: string;
+      input: Record<string, unknown>;
+      duration?: number;
+      output?: string;
+    }[];
     error?: ErrorDisplay;
     workflowDispatch?: { workerConversationId: string; workflowName: string };
     workflowResult?: { workflowName: string; runId: string };
@@ -72,7 +78,7 @@ function mapMessageRow(row: MessageResponse): ChatMessage {
     error: meta.error,
     workflowDispatch: meta.workflowDispatch,
     workflowResult: meta.workflowResult,
-    timestamp: new Date(row.created_at).getTime(),
+    timestamp: new Date(ensureUtc(row.created_at)).getTime(),
     isStreaming: false,
   };
 }
@@ -191,7 +197,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       .then(result => {
         if (!result) return;
         const run = result.run;
-        const ensureUtc = (ts: string): string => (ts.endsWith('Z') ? ts : ts + 'Z');
         hydrateWorkflow({
           runId: run.id,
           workflowName: run.workflow_name,
@@ -368,7 +373,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         const msg = prev[targetIdx];
         const updatedTools = msg.toolCalls?.map(tc => {
           if (toolCallId ? tc.id === toolCallId : tc.name === name && tc.duration === undefined) {
-            return { ...tc, output: output || tc.output, duration };
+            return { ...tc, output: output !== undefined ? output : tc.output, duration };
           }
           return tc;
         });

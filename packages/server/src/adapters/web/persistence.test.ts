@@ -258,6 +258,63 @@ describe('MessagePersistence', () => {
     });
   });
 
+  describe('appendToolResult', () => {
+    test('should include tool output when flushing to DB', async () => {
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      persistence.appendText('conv-1', 'running bash');
+      persistence.appendToolCall('conv-1', { name: 'bash', input: { command: 'ls' } });
+      persistence.appendToolResult('conv-1', 'bash', 'file1.txt\nfile2.txt', 250);
+      await persistence.flush('conv-1');
+
+      expect(mockAddMessage).toHaveBeenCalledTimes(1);
+      const metadata = mockAddMessage.mock.calls[0][3] as {
+        toolCalls?: { name: string; output?: string; duration?: number }[];
+      };
+      expect(metadata?.toolCalls).toHaveLength(1);
+      expect(metadata?.toolCalls?.[0]?.name).toBe('bash');
+      expect(metadata?.toolCalls?.[0]?.output).toBe('file1.txt\nfile2.txt');
+      expect(metadata?.toolCalls?.[0]?.duration).toBe(250);
+    });
+
+    test('should persist empty-string output (not undefined)', async () => {
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      persistence.appendText('conv-1', 'running tool');
+      persistence.appendToolCall('conv-1', { name: 'bash', input: { command: 'echo' } });
+      persistence.appendToolResult('conv-1', 'bash', '', 100);
+      await persistence.flush('conv-1');
+
+      const metadata = mockAddMessage.mock.calls[0][3] as {
+        toolCalls?: { output?: string }[];
+      };
+      // Empty string output should be persisted (not dropped like falsy ||-based logic would)
+      expect(metadata?.toolCalls?.[0]?.output).toBe('');
+    });
+
+    test('should be a no-op when no buffer exists', () => {
+      // Should not throw
+      persistence.appendToolResult('nonexistent', 'bash', 'output', 100);
+    });
+
+    test('should match the last unresolved tool call by name (reverse order)', async () => {
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      persistence.appendText('conv-1', 'two bash calls');
+      persistence.appendToolCall('conv-1', { name: 'bash', input: { command: 'ls' } });
+      persistence.appendToolCall('conv-1', { name: 'bash', input: { command: 'pwd' } });
+      // appendToolResult should match the LAST unresolved 'bash' call
+      persistence.appendToolResult('conv-1', 'bash', 'output-for-second', 200);
+      await persistence.flush('conv-1');
+
+      const metadata = mockAddMessage.mock.calls[0][3] as {
+        toolCalls?: { name: string; output?: string }[];
+      };
+      expect(metadata?.toolCalls).toHaveLength(2);
+      // First call should have no output (not yet resolved)
+      expect(metadata?.toolCalls?.[0]?.output).toBeUndefined();
+      // Second call should have the output
+      expect(metadata?.toolCalls?.[1]?.output).toBe('output-for-second');
+    });
+  });
+
   describe('finalizeRunningTools', () => {
     test('sets duration on the last running tool', async () => {
       persistence.setConversationDbId('conv-1', 'db-uuid-1');

@@ -13,6 +13,7 @@ interface BufferedToolCall {
   input: Record<string, unknown>;
   startedAt: number;
   duration?: number;
+  output?: string;
 }
 
 interface BufferedSegment {
@@ -123,6 +124,26 @@ export class MessagePersistence {
   }
 
   /**
+   * Record tool output for a previously buffered tool call.
+   * Matches by name, scanning from the most recent segment to find the last
+   * unresolved tool call (no output yet). This mirrors WorkflowLogs.tsx's
+   * reverse-iteration approach for multi-tool-same-name correctness.
+   */
+  appendToolResult(conversationId: string, name: string, output: string, duration: number): void {
+    const buf = this.assistantBuffer.get(conversationId);
+    if (!buf) return;
+    for (let i = buf.segments.length - 1; i >= 0; i--) {
+      const seg = buf.segments[i];
+      const tc = [...seg.toolCalls].reverse().find(t => t.name === name && t.output === undefined);
+      if (tc) {
+        tc.output = output;
+        tc.duration = duration;
+        break;
+      }
+    }
+  }
+
+  /**
    * Finalize all running tools in the buffer for a conversation.
    * Called on lock release to ensure the last tool gets a duration.
    */
@@ -190,6 +211,7 @@ export class MessagePersistence {
           name: tc.name,
           input: tc.input,
           duration: tc.duration,
+          ...(tc.output !== undefined ? { output: tc.output } : {}),
         }));
         const metadata = {
           ...(toolCalls.length > 0 ? { toolCalls } : {}),
