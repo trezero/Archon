@@ -29,6 +29,18 @@ Follow these steps exactly in order. Do not skip steps.
 1. Run: `curl -s <archon_api_url>/api/scanner/script -o <TEMP_DIR>/archon-scanner.py`
 2. If the download fails (curl error or empty file), tell the user: "Can't reach Archon at <url>. Is the Archon stack running?" and STOP.
 
+### Error Recovery — MCP Connection Issues
+
+If at any point MCP tool calls fail with "session" errors, "connection refused", or
+timeout errors:
+
+1. Tell the user: "The Archon MCP connection was lost (server may have restarted).
+   Please restart Claude Code to re-establish the MCP session, then re-run /scan-projects."
+2. STOP. Do not attempt to fall back to REST API calls — the MCP tools have different
+   behavior (deterministic IDs, project linking) that REST endpoints may not replicate.
+3. If the scan was partially completed (some projects already created), re-running
+   /scan-projects is safe — Step 4 deduplication will detect already-created projects.
+
 ### Step 3 — Run Scan
 
 1. Ask the user: "What directory should I scan? (default: ~/projects)"
