@@ -19,6 +19,18 @@ Connect Archon to Telegram so you can interact with your AI coding assistant fro
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI...
 ```
 
+## Configure User Whitelist (Optional)
+
+To restrict bot access to specific users:
+1. Message [@userinfobot](https://t.me/userinfobot) on Telegram to get your user ID
+2. Add to environment:
+
+```env
+TELEGRAM_ALLOWED_USER_IDS=123456789,987654321
+```
+
+When set, only listed user IDs can interact with the bot. When empty/unset, the bot responds to all users.
+
 ## Configure Streaming Mode (Optional)
 
 ```env
@@ -27,6 +39,11 @@ TELEGRAM_STREAMING_MODE=stream  # stream (default) | batch
 
 For streaming mode details, see [Advanced Configuration](../configuration.md).
 
+## Usage
+
+See [Commands Reference](../commands-reference.md) for available slash commands and example workflows.
+
 ## Further Reading
 
+- [Commands Reference](../commands-reference.md)
 - [Advanced Configuration](../configuration.md)

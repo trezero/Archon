@@ -21,8 +21,8 @@ Archon fixes this. Encode your development process as a workflow. The workflow d
 ## What It Looks Like
 
 ```yaml
-# .archon/workflows/idea-to-pr.yaml
-name: idea-to-pr
+# .archon/workflows/archon-idea-to-pr.yaml
+name: archon-idea-to-pr
 description: Take a feature idea from plan to merged PR
 
 steps:
@@ -40,7 +40,7 @@ steps:
 ```
 
 ```bash
-archon workflow run idea-to-pr --branch feat/dark-mode "Add dark mode to settings"
+archon workflow run archon-idea-to-pr --branch feat/dark-mode "Add dark mode to settings"
 # → Creates isolated worktree
 # → Runs: plan → implement → validate → create PR → parallel reviews → self-fix
 # → Result: PR ready for human review
@@ -83,7 +83,7 @@ claude /login
 # Go to any git repo and run
 cd /path/to/your/project
 archon workflow list
-archon workflow run assist "What does this codebase do?"
+archon workflow run archon-assist "What does this codebase do?"
 ```
 
 See the [CLI User Guide](docs/cli-user-guide.md) for full documentation.
@@ -119,12 +119,13 @@ Archon ships with workflows for common development tasks:
 
 | Workflow | What it does |
 |----------|-------------|
-| `idea-to-pr` | Feature description → plan → implement → validate → PR → 5 parallel review agents → self-fix |
-| `fix-github-issue` | Fetch issue → classify (bug/feature) → investigate → implement → validate → PR → close issue |
-| `smart-pr-review` | Classify PR complexity → run targeted review agents → synthesize → post structured comment |
-| `ralph` | Read PRD with multiple stories → implement one by one → reset context each iteration → loop until done |
-| `resolve-conflicts` | Detect merge conflicts → analyze both sides → resolve → validate → commit |
-| `assist` | Simple Q&A — no workflow overhead, just talk to the AI about your code |
+| `archon-idea-to-pr` | Feature description → plan → implement → validate → PR → 5 parallel review agents → self-fix |
+| `archon-fix-github-issue` | Fetch issue → classify (bug/feature) → investigate → implement → validate → PR → close issue |
+| `archon-smart-pr-review` | Classify PR complexity → run targeted review agents → synthesize → post structured comment |
+| `archon-ralph-fresh` | Read PRD with multiple stories → implement one by one → fresh context each iteration → loop until done |
+| `archon-ralph-stateful` | Same as above but preserves context across iterations for interdependent stories |
+| `archon-resolve-conflicts` | Detect merge conflicts → analyze both sides → resolve → validate → commit |
+| `archon-assist` | Simple Q&A — no workflow overhead, just talk to the AI about your code |
 
 **Or define your own.** Workflows are YAML files in `.archon/workflows/`. Commands are markdown files in `.archon/commands/`. Commit them to your repo — your whole team runs the same process.
 
@@ -170,7 +171,7 @@ The Web UI and CLI work out of the box. Optionally connect a chat platform for r
 | Platform | Setup time | Guide |
 |----------|-----------|-------|
 | **Telegram** | 5 min | [docs/adapters/telegram.md](docs/adapters/telegram.md) |
-| **Slack** | 15 min | [docs/slack-setup.md](docs/slack-setup.md) |
+| **Slack** | 15 min | [docs/adapters/slack.md](docs/adapters/slack.md) |
 | **GitHub Webhooks** | 15 min | [docs/adapters/github.md](docs/adapters/github.md) |
 | **Discord** | 5 min | [docs/adapters/discord.md](docs/adapters/discord.md) |
 

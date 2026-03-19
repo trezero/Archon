@@ -33,7 +33,7 @@ Save this secret - you'll need it for steps 3 and 4.
 # Or: brew install ngrok (Mac)
 
 # Start tunnel
-ngrok http 3000
+ngrok http 3090
 
 # Copy the HTTPS URL (e.g., https://abc123.ngrok-free.app)
 # Free tier URLs change on restart
@@ -45,7 +45,7 @@ Keep this terminal open while testing.
 
 ```bash
 # Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/
-cloudflared tunnel --url http://localhost:3000
+cloudflared tunnel --url http://localhost:3090
 
 # Get persistent URL from Cloudflare dashboard
 ```

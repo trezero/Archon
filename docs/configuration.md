@@ -8,13 +8,13 @@ Archon supports a layered configuration system with sensible defaults, optional 
 
 ```
 ~/.archon/
-├── workspaces/     # Cloned repositories
-│   └── owner/repo/
-├── worktrees/      # Git worktrees for isolation
-│   └── repo-name/
-│       └── branch-name/
-├── archon.db       # SQLite database (when DATABASE_URL not set)
-└── config.yaml     # Global configuration (optional)
+├── workspaces/owner/repo/  # Project-centric layout
+│   ├── source/             # Clone or symlink → local path
+│   ├── worktrees/          # Git worktrees for this project
+│   ├── artifacts/          # Workflow artifacts
+│   └── logs/               # Workflow execution logs
+├── archon.db               # SQLite database (when DATABASE_URL not set)
+└── config.yaml             # Global configuration (optional)
 ```
 
 ### Repository-Level (.archon/)
@@ -23,7 +23,7 @@ Archon supports a layered configuration system with sensible defaults, optional 
 .archon/
 ├── commands/       # Custom commands
 │   └── plan.md
-├── workflows/      # Future: workflow definitions
+├── workflows/      # Workflow definitions (YAML files)
 └── config.yaml     # Repo-specific configuration (optional)
 ```
 
@@ -164,8 +164,12 @@ In Docker containers, paths are automatically set:
 
 ```
 /.archon/
-├── workspaces/
-└── worktrees/
+├── workspaces/owner/repo/
+│   ├── source/
+│   ├── worktrees/
+│   ├── artifacts/
+│   └── logs/
+└── archon.db
 ```
 
 Environment variables still work and override defaults.
