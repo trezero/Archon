@@ -98,3 +98,4 @@ packages/server/.env
 .playwright/
 .playwright-cli/
 skills-lock.json
+test-results/
