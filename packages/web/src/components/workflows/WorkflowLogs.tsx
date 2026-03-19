@@ -25,7 +25,12 @@ function hydrateMessages(
   const hydrated: ChatMessage[] = rows.map(row => {
     let meta: {
       error?: ErrorDisplay;
-      toolCalls?: { name: string; input: Record<string, unknown>; duration?: number }[];
+      toolCalls?: {
+        name: string;
+        input: Record<string, unknown>;
+        output?: string;
+        duration?: number;
+      }[];
     } = {};
     try {
       meta = JSON.parse(row.metadata) as typeof meta;
@@ -40,6 +45,7 @@ function hydrateMessages(
       id: `${row.id}-tool-${String(i)}`,
       name: tc.name,
       input: tc.input,
+      output: tc.output,
       duration: tc.duration,
       startedAt: ts,
       isExpanded: false,

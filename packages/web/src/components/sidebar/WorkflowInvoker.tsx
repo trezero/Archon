@@ -88,6 +88,8 @@ export function WorkflowInvoker({ codebaseId }: WorkflowInvokerProps): React.Rea
               }
             }}
             placeholder="Enter message..."
+            name="workflow-message"
+            autoComplete="off"
             disabled={running}
             className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary placeholder:text-text-tertiary focus:border-primary focus:outline-none disabled:opacity-50"
             autoFocus

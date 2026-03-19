@@ -189,6 +189,7 @@ export type MessageChunk =
   | { type: 'thinking'; content: string }
   | { type: 'result'; sessionId?: string; tokens?: TokenUsage }
   | { type: 'tool'; toolName: string; toolInput?: Record<string, unknown> }
+  | { type: 'tool_result'; toolName: string; toolOutput: string }
   | { type: 'workflow_dispatch'; workerConversationId: string; workflowName: string };
 
 import type { ModelReasoningEffort, WebSearchMode } from '@archon/workflows';

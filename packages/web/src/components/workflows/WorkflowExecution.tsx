@@ -418,7 +418,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
     if (stepEvents.length === 0) return [];
 
     return stepEvents.map(e => {
-      const ts = new Date(e.created_at).toLocaleTimeString();
+      const ts = new Date(ensureUtc(e.created_at)).toLocaleTimeString();
       switch (e.event_type) {
         case 'step_started':
           return `[${ts}] Step started: ${e.step_name ?? `step ${String(selectedStep + 1)}`}`;
@@ -463,6 +463,19 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
     });
   }, [queryData?.events, selectedStep, selectedDagNode]);
 
+  // When logsPlatformId is set, WorkflowLogs shows the full SSE stream and ignores selectedStep.
+  // Detect whether the selected step/node has any DB events so we can show an empty-state
+  // overlay when a step has no output. Guard with isRunning so we never hide the live stream
+  // for a currently-executing step that hasn't emitted events yet.
+  const selectedStepHasEvents = useMemo((): boolean => {
+    if (!queryData?.events) return false;
+    const events = queryData.events;
+    if (selectedDagNode !== null) {
+      return events.some(e => e.step_name === selectedDagNode);
+    }
+    return events.some(e => e.step_index === selectedStep);
+  }, [queryData?.events, selectedStep, selectedDagNode]);
+
   if (error) {
     return (
       <div className="flex items-center justify-center h-full text-error">
@@ -499,7 +512,11 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
   const logsPanel = (
     <div className="flex-1 flex flex-col overflow-hidden min-h-0 h-full">
       <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-        {logsPlatformId ? (
+        {logsPlatformId && !selectedStepHasEvents && !isRunning ? (
+          <div className="flex-1 flex items-center justify-center text-text-secondary text-sm">
+            No output available for this step.
+          </div>
+        ) : logsPlatformId ? (
           <WorkflowLogs
             conversationId={logsPlatformId}
             startedAt={initialData?.startedAt}

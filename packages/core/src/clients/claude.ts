@@ -13,7 +13,12 @@
  * - CLAUDE_USE_GLOBAL_AUTH=false: Use explicit tokens from env vars
  * - Not set: Auto-detect - use tokens if present in env, otherwise global auth
  */
-import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
+import {
+  query,
+  type Options,
+  type HookCallback,
+  type HookCallbackMatcher,
+} from '@anthropic-ai/claude-agent-sdk';
 import {
   type AssistantRequestOptions,
   type IAssistantClient,
@@ -234,6 +239,7 @@ export class ClaudeClient implements IAssistantClient {
       }
 
       const stderrLines: string[] = [];
+      const toolResultQueue: { toolName: string; toolOutput: string }[] = [];
 
       // Create per-attempt abort controller and wire to caller's signal
       const controller = new AbortController();
@@ -283,6 +289,32 @@ export class ClaudeClient implements IAssistantClient {
         allowDangerouslySkipPermissions: true,
         systemPrompt: { type: 'preset', preset: 'claude_code' },
         settingSources: ['project'],
+        // Merge user-provided hooks with our PostToolUse capture hook
+        hooks: {
+          ...(requestOptions?.hooks ?? {}),
+          PostToolUse: [
+            ...((requestOptions?.hooks?.PostToolUse ?? []) as HookCallbackMatcher[]),
+            {
+              hooks: [
+                (async (input: Record<string, unknown>): Promise<{ continue: true }> => {
+                  const toolName = (input as { tool_name?: string }).tool_name ?? 'unknown';
+                  const toolResponse = (input as { tool_response?: unknown }).tool_response;
+                  const output =
+                    typeof toolResponse === 'string'
+                      ? toolResponse
+                      : JSON.stringify(toolResponse ?? '');
+                  // Truncate large outputs (e.g., file reads) to prevent DB bloat
+                  const maxLen = 10_000;
+                  toolResultQueue.push({
+                    toolName,
+                    toolOutput: output.length > maxLen ? output.slice(0, maxLen) + '...' : output,
+                  });
+                  return { continue: true };
+                }) as HookCallback,
+              ],
+            },
+          ],
+        },
         stderr: (data: string) => {
           const output = data.trim();
           if (!output) return;
@@ -319,6 +351,14 @@ export class ClaudeClient implements IAssistantClient {
 
       try {
         for await (const msg of query({ prompt, options })) {
+          // Drain tool results captured by PostToolUse hook before processing the next message
+          while (toolResultQueue.length > 0) {
+            const tr = toolResultQueue.shift();
+            if (tr) {
+              yield { type: 'tool_result', toolName: tr.toolName, toolOutput: tr.toolOutput };
+            }
+          }
+
           if (msg.type === 'assistant') {
             const message = msg as { message: { content: ContentBlock[] } };
             const content = message.message.content;
@@ -364,6 +404,13 @@ export class ClaudeClient implements IAssistantClient {
                 ? { structuredOutput: resultMsg.structured_output }
                 : {}),
             };
+          }
+        }
+        // Drain any remaining tool results from the hook queue
+        while (toolResultQueue.length > 0) {
+          const tr = toolResultQueue.shift();
+          if (tr) {
+            yield { type: 'tool_result', toolName: tr.toolName, toolOutput: tr.toolOutput };
           }
         }
         return; // Success - exit retry loop

@@ -873,6 +873,10 @@ async function executeNodeInternal(
               'workflow_event_persist_failed'
             );
           });
+      } else if (msg.type === 'tool_result' && msg.toolName) {
+        if (streamingMode === 'stream' && platform.sendStructuredEvent) {
+          await platform.sendStructuredEvent(conversationId, msg);
+        }
       } else if (msg.type === 'result') {
         // Emit tool_completed for the last tool in the node
         if (lastToolStartedAt) {

@@ -254,6 +254,10 @@ export function parseCommand(text: string): { command: string; args: string[] } 
     return { command: '', args: [] };
   }
 
+  if (!matches[0].startsWith('/')) {
+    return { command: '', args: [] };
+  }
+
   const command = matches[0].substring(1); // Remove leading '/'
   const args = matches.slice(1).map(arg => {
     // Remove surrounding quotes if present
