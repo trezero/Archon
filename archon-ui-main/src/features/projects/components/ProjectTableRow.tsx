@@ -48,8 +48,9 @@ export function ProjectTableRow({ project, taskCounts, isSelected, onSelect }: P
   return (
     <div
       className={rowClass}
-      onClick={() => onSelect(project.id)}
+      role="button"
       tabIndex={0}
+      onClick={() => onSelect(project.id)}
       onKeyDown={(e) => {
         if (e.key === "Enter") onSelect(project.id);
       }}

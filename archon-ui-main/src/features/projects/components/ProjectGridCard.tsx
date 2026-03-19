@@ -45,7 +45,15 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
     : "text-sm font-semibold text-gray-300 leading-tight line-clamp-2";
 
   return (
-    <div className={cardClass} onClick={() => onSelect(project.id)}>
+    <div
+      className={cardClass}
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(project.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onSelect(project.id);
+      }}
+    >
       {/* Header row */}
       <div className="flex items-start justify-between gap-1 mb-1.5">
         <span className={titleClass}>{project.title}</span>
@@ -67,6 +75,7 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
             <span
               className="w-[7px] h-[7px] rounded-full bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)] ml-auto shrink-0"
               title={dirtyTitle}
+              aria-label={`Uncommitted changes on: ${dirtyTitle}`}
             />
           )}
         </div>
