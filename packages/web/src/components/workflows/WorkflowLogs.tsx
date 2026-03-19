@@ -25,18 +25,32 @@ function hydrateMessages(
   const hydrated: ChatMessage[] = rows.map(row => {
     let meta: {
       error?: ErrorDisplay;
+      toolCalls?: { name: string; input: Record<string, unknown>; duration?: number }[];
     } = {};
     try {
       meta = JSON.parse(row.metadata) as typeof meta;
     } catch {
       console.warn('[WorkflowLogs] Corrupted message metadata', { messageId: row.id });
     }
+    const ts = new Date(ensureUtc(row.created_at)).getTime();
+    // Restore tool calls persisted in message metadata (written by persistence.ts flush).
+    // This ensures historical tool calls are visible immediately on page load,
+    // without waiting for the toolEvents prop from the workflow_events table.
+    const persistedTools: ToolCallDisplay[] | undefined = meta.toolCalls?.map((tc, i) => ({
+      id: `${row.id}-tool-${String(i)}`,
+      name: tc.name,
+      input: tc.input,
+      duration: tc.duration,
+      startedAt: ts,
+      isExpanded: false,
+    }));
     return {
       id: row.id,
       role: row.role,
       content: row.content,
       error: meta.error,
-      timestamp: new Date(ensureUtc(row.created_at)).getTime(),
+      toolCalls: persistedTools,
+      timestamp: ts,
       isStreaming: false,
     };
   });
@@ -106,8 +120,10 @@ export function WorkflowLogs({
 
   // Poll for messages from DB — 3s while running (or during grace period), disabled when terminal.
   // staleTime: 0 ensures post-completion navigation always fetches fresh data on mount.
+  // Tool calls are read from message metadata directly (not from toolEvents prop),
+  // so we don't need toolEvents?.length in the query key — avoids unnecessary re-fetches.
   const { data: queryMessages } = useQuery({
-    queryKey: ['workflowMessages', conversationId, toolEvents?.length ?? 0],
+    queryKey: ['workflowMessages', conversationId],
     queryFn: async (): Promise<ChatMessage[]> => {
       const rows = await getMessages(conversationId);
       return hydrateMessages(rows, startedAt, toolEvents);
