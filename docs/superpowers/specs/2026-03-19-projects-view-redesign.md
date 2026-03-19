@@ -85,7 +85,7 @@ Full-width table with sticky header row. Replaces the grid entirely when table m
 
 New data path to power the amber dot indicator on cards and table rows. **This is entirely new work** — neither session hook currently captures git status.
 
-**Schema change** (migration 019):
+**Schema change** (migration 023):
 ```sql
 ALTER TABLE archon_project_system_registrations
   ADD COLUMN git_dirty boolean DEFAULT false,
@@ -249,7 +249,7 @@ No functional change to the project detail area (Tasks, Docs, Knowledge, Extensi
 - `projectService.ts` — update to consume new response fields
 - Session end hook script — add `git status --porcelain` check and report
 - Session start hook script — add `git status --porcelain` check and report
-- `archon_project_system_registrations` table — add `git_dirty`, `git_dirty_checked_at` columns (migration 019)
+- `archon_project_system_registrations` table — add `git_dirty`, `git_dirty_checked_at` columns (migration 023)
 - `project_service.py` — extend `list_projects` to batch-query system registrations
 - `projects_api.py` — include system registration data in list response; add `PUT /api/projects/{project_id}/systems/{system_id}/git-status` endpoint
 - `session_end_hook.py` — add git status capture and report to Archon
