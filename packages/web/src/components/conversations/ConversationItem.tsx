@@ -33,6 +33,7 @@ export function ConversationItem({
   const [editValue, setEditValue] = useState('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -59,34 +60,34 @@ export function ConversationItem({
 
   const handleDelete = useCallback((): void => {
     setDeleteError(null);
-    void deleteConversation(conversation.id)
+    void deleteConversation(conversation.platform_conversation_id)
       .then(() => {
+        setDeleteDialogOpen(false);
         void queryClient.invalidateQueries({ queryKey: ['conversations'] });
         if (params.conversationId === conversation.platform_conversation_id) {
           void navigate('/');
         }
       })
-      .catch((err: Error) => {
-        setDeleteError(err.message);
+      .catch((err: unknown) => {
+        setDeleteError(err instanceof Error ? err.message : 'Failed to delete conversation');
+        setDeleteDialogOpen(true);
       });
-  }, [
-    conversation.id,
-    conversation.platform_conversation_id,
-    queryClient,
-    navigate,
-    params.conversationId,
-  ]);
+  }, [conversation.platform_conversation_id, queryClient, navigate, params.conversationId]);
 
   const handleRenameSubmit = useCallback((): void => {
     const trimmed = editValue.trim();
     if (trimmed && trimmed !== conversation.title) {
-      void updateConversation(conversation.id, { title: trimmed })
+      setRenameError(null);
+      void updateConversation(conversation.platform_conversation_id, { title: trimmed })
         .then(() => {
           void queryClient.invalidateQueries({ queryKey: ['conversations'] });
         })
-        .catch((err: Error) => {
-          console.error('[ConversationItem] Rename failed', { error: err.message });
+        .catch((err: unknown) => {
+          setRenameError(err instanceof Error ? err.message : 'Failed to rename conversation');
+          setIsEditing(true);
         });
+    } else {
+      setRenameError(null);
     }
     setIsEditing(false);
   }, [editValue, conversation.id, conversation.title, queryClient]);
@@ -99,6 +100,7 @@ export function ConversationItem({
         handleRenameSubmit();
       } else if (e.key === 'Escape') {
         e.preventDefault();
+        setRenameError(null);
         setIsEditing(false);
       }
     },
@@ -154,6 +156,7 @@ export function ConversationItem({
             )}
           </div>
         )}
+        {renameError && <span className="text-[10px] text-error">{renameError}</span>}
         <span className="truncate text-[11px] text-text-tertiary">{lastActivity}</span>
         {projectName && (
           <span className="truncate text-[10px] text-text-tertiary">{projectName}</span>
@@ -167,6 +170,7 @@ export function ConversationItem({
                 e.preventDefault();
                 e.stopPropagation();
                 setEditValue(conversation.title ?? '');
+                setRenameError(null);
                 setIsEditing(true);
                 setTimeout(() => {
                   inputRef.current?.focus();

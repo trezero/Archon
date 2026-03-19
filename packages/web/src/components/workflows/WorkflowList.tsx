@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { listWorkflows, createConversation, runWorkflow } from '@/lib/api';
+import { listWorkflows, createConversation, runWorkflow, deleteConversation } from '@/lib/api';
 import type { WorkflowDefinition } from '@archon/workflows/types';
 import { Button } from '@/components/ui/button';
 import { useProject } from '@/contexts/ProjectContext';
@@ -26,9 +26,12 @@ export function WorkflowList(): React.ReactElement {
     if (!runMessage.trim() || running) return;
     setRunning(true);
     setRunError(null);
+    let conversationId: string | undefined;
+    let workflowStarted = false;
     try {
-      const { conversationId } = await createConversation(localProjectId ?? undefined);
+      ({ conversationId } = await createConversation(localProjectId ?? undefined));
       await runWorkflow(workflowName, conversationId, runMessage.trim());
+      workflowStarted = true;
       setRunMessage('');
       setSelectedWorkflow(null);
       navigate(`/chat/${conversationId}`);
@@ -39,12 +42,24 @@ export function WorkflowList(): React.ReactElement {
           ? `Failed to start workflow: ${error.message}`
           : 'Failed to start workflow. Check server connectivity.'
       );
+      if (conversationId !== undefined && !workflowStarted) {
+        void deleteConversation(conversationId).catch((cleanupErr: unknown) => {
+          console.warn('[Workflows] Failed to clean up orphan conversation', {
+            conversationId,
+            error: cleanupErr,
+          });
+        });
+      }
     } finally {
       setRunning(false);
     }
   };
 
-  const { data: workflows, isLoading: loadingWorkflows } = useQuery({
+  const {
+    data: workflows,
+    isLoading: loadingWorkflows,
+    isError: workflowsError,
+  } = useQuery({
     queryKey: ['workflows'],
     queryFn: () => listWorkflows(),
   });
@@ -54,6 +69,12 @@ export function WorkflowList(): React.ReactElement {
       <div className="flex items-center justify-center h-32 text-text-secondary text-sm">
         Loading workflows...
       </div>
+    );
+  }
+
+  if (workflowsError) {
+    return (
+      <div className="text-sm text-error">Failed to load workflows. Check server connectivity.</div>
     );
   }
 

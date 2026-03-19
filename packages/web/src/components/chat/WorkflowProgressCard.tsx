@@ -4,6 +4,16 @@ import { LoopIterationView } from '@/components/workflows/LoopIterationView';
 import { StatusIcon } from '@/components/workflows/StatusIcon';
 import { formatDurationMs } from '@/lib/format';
 import type { WorkflowState } from '@/lib/types';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface WorkflowProgressCardProps {
   workflow: WorkflowState;
@@ -19,6 +29,8 @@ export function WorkflowProgressCard({
   onViewFullScreen,
 }: WorkflowProgressCardProps): React.ReactElement {
   const navigate = useNavigate();
+
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
 
   // Force re-render every second while running so elapsed time counts up
   const [, setTick] = useState(0);
@@ -81,7 +93,9 @@ export function WorkflowProgressCard({
           </button>
           {workflow.status === 'running' && onCancel && (
             <button
-              onClick={onCancel}
+              onClick={(): void => {
+                setCancelDialogOpen(true);
+              }}
               className="text-[10px] text-text-secondary hover:text-error transition-colors ml-auto"
             >
               Cancel
@@ -175,13 +189,31 @@ export function WorkflowProgressCard({
         </button>
         {workflow.status === 'running' && onCancel && (
           <button
-            onClick={onCancel}
+            onClick={(): void => {
+              setCancelDialogOpen(true);
+            }}
             className="text-xs text-text-secondary hover:text-error transition-colors ml-auto"
           >
             Cancel
           </button>
         )}
       </div>
+      {onCancel && (
+        <AlertDialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Cancel workflow?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will stop the running workflow. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Keep Running</AlertDialogCancel>
+              <AlertDialogAction onClick={onCancel}>Cancel Workflow</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   );
 }
