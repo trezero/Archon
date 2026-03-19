@@ -166,6 +166,37 @@ class ProjectService:
             logger.error(f"Error listing projects: {e}")
             return False, {"error": f"Error listing projects: {str(e)}"}
 
+    def get_system_registrations_for_projects(self, project_ids: list[str]) -> dict[str, list[dict]]:
+        """Batch fetch system registrations for multiple projects.
+
+        Returns a dict mapping project_id -> list of registration dicts.
+        Each dict: {system_id, system_name, os, git_dirty, git_dirty_checked_at}
+        """
+        if not project_ids:
+            return {}
+
+        result = (
+            self.supabase_client.table("archon_project_system_registrations")
+            .select("project_id, system_id, git_dirty, git_dirty_checked_at, archon_systems(id, name, os)")
+            .in_("project_id", project_ids)
+            .execute()
+        )
+
+        registrations: dict[str, list[dict]] = {}
+        for row in result.data or []:
+            pid = row["project_id"]
+            system = row.get("archon_systems") or {}
+            entry = {
+                "system_id": row["system_id"],
+                "system_name": system.get("name", ""),
+                "os": system.get("os"),
+                "git_dirty": row.get("git_dirty", False),
+                "git_dirty_checked_at": row.get("git_dirty_checked_at"),
+            }
+            registrations.setdefault(pid, []).append(entry)
+
+        return registrations
+
     def get_project(self, project_id: str) -> tuple[bool, dict[str, Any]]:
         """
         Get a specific project by ID.
