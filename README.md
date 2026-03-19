@@ -90,28 +90,49 @@ See the [CLI User Guide](docs/cli-user-guide.md) for full documentation.
 
 </details>
 
-### Web UI Setup (5 min)
+## Using Archon on Your Project
 
-<details>
-<summary>Expand for Web UI steps</summary>
+Once installed, there are two ways to use Archon on your codebases:
 
-```bash
-git clone https://github.com/dynamous-community/remote-coding-agent
-cd remote-coding-agent
-bun install
+**Option A: From the Archon repo** — Open Claude Code in the Archon repo and tell it what to do. The skill can target any project on your machine:
 
-# Configure
-cp .env.example .env
-# Edit .env: set GH_TOKEN, GITHUB_TOKEN, CLAUDE_USE_GLOBAL_AUTH=true
-
-# Start server + Web UI
-bun run dev
-# Open http://localhost:5173
+```
+Use archon to fix issue #42 on /path/to/my-project
 ```
 
-See the [Web UI Guide](docs/adapters/web.md) for features and configuration.
+**Option B: From your own repo (recommended)** — Copy the Archon skill so you can use it directly:
 
-</details>
+```bash
+cp -r <archon-repo>/.claude/skills/archon /path/to/your-repo/.claude/skills/archon
+```
+
+Then open Claude Code in your project and start working:
+
+```
+Use archon to implement a dark mode feature
+```
+
+```
+What archon workflows do I have? When would I use each one?
+```
+
+The coding agent handles workflow selection, branch naming, and worktree isolation for you. Projects are registered automatically the first time they're used — no manual setup needed.
+
+## Web UI
+
+Archon includes a web dashboard for chatting with your coding agent, running workflows, and monitoring activity. To start it, ask your coding agent to run the frontend from the Archon repo, or run `bun run dev` from the repo root yourself.
+
+Register a project by clicking **+** next to "Project" in the chat sidebar — enter a GitHub URL or local path. Then start a conversation, invoke workflows, and watch progress in real time.
+
+**Key pages:**
+- **Chat** — Conversation interface with real-time streaming and tool call visualization
+- **Dashboard** — Mission Control for monitoring running workflows, with filterable history by project, status, and date
+- **Workflow Builder** — Visual drag-and-drop editor for creating DAG, sequential, and loop workflows
+- **Workflow Execution** — Step-by-step progress view for any running or completed workflow
+
+**Monitoring hub:** The sidebar shows conversations from **all platforms** — not just the web. Workflows kicked off from the CLI, messages from Slack or Telegram, GitHub issue interactions — everything appears in one place.
+
+See the [Web UI Guide](docs/adapters/web.md) for full documentation.
 
 ## What Can You Automate?
 
@@ -126,6 +147,8 @@ Archon ships with workflows for common development tasks:
 | `archon-ralph-stateful` | Same as above but preserves context across iterations for interdependent stories |
 | `archon-resolve-conflicts` | Detect merge conflicts → analyze both sides → resolve → validate → commit |
 | `archon-assist` | Simple Q&A — no workflow overhead, just talk to the AI about your code |
+
+Archon ships 16 workflows total — run `archon workflow list` or ask your agent to see them all.
 
 **Or define your own.** Workflows are YAML files in `.archon/workflows/`. Commands are markdown files in `.archon/commands/`. Commit them to your repo — your whole team runs the same process.
 
