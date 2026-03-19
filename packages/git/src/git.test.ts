@@ -1140,6 +1140,7 @@ branch refs/heads/feature/auth
       const result = await git.commitAllChanges('/workspace/repo', 'test commit');
 
       expect(result).toBe(false);
+      expect(execSpy).toHaveBeenCalledTimes(3); // status + add + commit
     });
 
     test('throws error when git add fails', async () => {
