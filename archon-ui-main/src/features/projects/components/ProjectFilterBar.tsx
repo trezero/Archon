@@ -1,3 +1,4 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui/primitives/select";
 import type { SystemSummary } from "../services/systemService";
 import type { ViewMode } from "../hooks/useProjectFilters";
 
@@ -72,32 +73,34 @@ export function ProjectFilterBar({
         <div className="w-px h-6 bg-purple-500/20" />
 
         {/* System dropdown */}
-        <select
-          value={systemId}
-          onChange={(e) => setSystemId(e.target.value)}
-          className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-gray-400 text-sm appearance-none cursor-pointer"
-        >
-          <option value="">All systems</option>
-          {systems.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
+        <Select value={systemId || "_all"} onValueChange={(v) => setSystemId(v === "_all" ? "" : v)}>
+          <SelectTrigger color="cyan" className="text-sm py-1.5 min-w-[140px]">
+            <SelectValue placeholder="All systems" />
+          </SelectTrigger>
+          <SelectContent color="cyan">
+            <SelectItem value="_all" color="cyan">All systems</SelectItem>
+            {systems.map((s) => (
+              <SelectItem key={s.id} value={s.id} color="cyan">
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {/* Tags dropdown */}
-        <select
-          value={tag}
-          onChange={(e) => setTag(e.target.value)}
-          className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-gray-400 text-sm appearance-none cursor-pointer"
-        >
-          <option value="">All tags</option>
-          {tags.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
+        <Select value={tag || "_all"} onValueChange={(v) => setTag(v === "_all" ? "" : v)}>
+          <SelectTrigger color="purple" className="text-sm py-1.5 min-w-[120px]">
+            <SelectValue placeholder="All tags" />
+          </SelectTrigger>
+          <SelectContent color="purple">
+            <SelectItem value="_all" color="purple">All tags</SelectItem>
+            {tags.map((t) => (
+              <SelectItem key={t} value={t} color="purple">
+                {t}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {/* Group by parent button */}
         <button
