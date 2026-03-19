@@ -11,6 +11,19 @@ Start Archon from the **main branch** code and use browser automation to reprodu
 
 **CRITICAL**: You MUST clean up ALL spawned processes before finishing. Record PIDs and kill them in Phase 4.
 
+**CRITICAL — SESSION ISOLATION**: This workflow runs in parallel with other validate-pr instances.
+You MUST use `--session $WORKFLOW_ID` on EVERY `agent-browser` command to isolate your browser session.
+Example: `agent-browser --session $WORKFLOW_ID open "http://..."`, `agent-browser --session $WORKFLOW_ID snapshot -i`, etc.
+The session ID is written to `$ARTIFACTS_DIR/.browser-session` for cleanup.
+
+**ABSOLUTELY FORBIDDEN — NEVER DO ANY OF THESE**:
+- `taskkill //F //IM chrome.exe` or ANY variant that kills chrome by image name — this kills the USER's browser
+- `taskkill //F //IM node.exe` or `taskkill //F //IM bun.exe` — this kills Claude Code, the Archon server, and all other workflows
+- `pkill chrome`, `pkill node`, `pkill bun`, or any broad process-name kill
+- `agent-browser close` without `--session $WORKFLOW_ID` — this kills OTHER workflows' browser sessions
+- Any "kill everything" or "kill all" escalation pattern — if agent-browser isn't working, SKIP E2E testing and note it in your report
+- If agent-browser fails to connect after 2 attempts, STOP trying and write your findings based on code review only
+
 ---
 
 ## Phase 1: Load Context
@@ -172,28 +185,31 @@ fi
 Follow this pattern for every interaction:
 
 ```bash
-# 1. Open the Archon UI
+# 0. Store session ID for cleanup
+echo "$WORKFLOW_ID" > "$ARTIFACTS_DIR/.browser-session"
+
+# 1. Open the Archon UI (ALWAYS use --session)
 FRONTEND_PORT=$(cat $ARTIFACTS_DIR/.frontend-port | tr -d '\n')
-agent-browser open "http://localhost:$FRONTEND_PORT"
+agent-browser --session $WORKFLOW_ID open "http://localhost:$FRONTEND_PORT"
 
 # 2. Wait for the app to load
-agent-browser wait --load networkidle
+agent-browser --session $WORKFLOW_ID wait --load networkidle
 
 # 3. Get interactive elements
-agent-browser snapshot -i
+agent-browser --session $WORKFLOW_ID snapshot -i
 
 # 4. Take a screenshot of initial state
-agent-browser screenshot "$ARTIFACTS_DIR/e2e-main-01-initial.png"
+agent-browser --session $WORKFLOW_ID screenshot "$ARTIFACTS_DIR/e2e-main-01-initial.png"
 
 # 5. Interact using refs from snapshot
-# agent-browser click @e1
-# agent-browser fill @e2 "text"
+# agent-browser --session $WORKFLOW_ID click @e1
+# agent-browser --session $WORKFLOW_ID fill @e2 "text"
 
 # 6. Re-snapshot after DOM changes
-# agent-browser snapshot -i
+# agent-browser --session $WORKFLOW_ID snapshot -i
 
 # 7. Take screenshots at every significant point
-# agent-browser screenshot "$ARTIFACTS_DIR/e2e-main-02-{step}.png"
+# agent-browser --session $WORKFLOW_ID screenshot "$ARTIFACTS_DIR/e2e-main-02-{step}.png"
 ```
 
 ### 3.3 Execute Test Plan
@@ -233,7 +249,8 @@ curl -s "http://localhost:$BACKEND_PORT/api/conversations" | head -c 500
 ### 4.1 Close Browser
 
 ```bash
-agent-browser close 2>/dev/null || true
+# ALWAYS use --session to only close YOUR browser, not other workflows'
+agent-browser --session $WORKFLOW_ID close 2>/dev/null || true
 ```
 
 ### 4.2 Stop Main Branch Archon (Cross-Platform)
