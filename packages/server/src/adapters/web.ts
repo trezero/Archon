@@ -126,6 +126,43 @@ export class WebAdapter implements IWebPlatformAdapter {
         input: chunk.toolInput ?? {},
         timestamp: now,
       });
+    } else if (chunk.type === 'tool_result' && chunk.toolName) {
+      const now = Date.now();
+      // Find and remove the matching running tool entry
+      const convTools = this.runningTools.get(conversationId);
+      let matchedToolCallId: string | undefined;
+      let startedAt = now;
+      if (convTools) {
+        // Reverse iterate to match the most recent tool with this name
+        for (const [id, t] of [...convTools.entries()].reverse()) {
+          if (t.name === chunk.toolName) {
+            matchedToolCallId = id;
+            startedAt = t.startedAt;
+            convTools.delete(id);
+            break;
+          }
+        }
+      }
+      const duration = now - startedAt;
+      // Persist tool output to DB
+      try {
+        this.persistence.appendToolResult(
+          conversationId,
+          chunk.toolName,
+          chunk.toolOutput,
+          duration
+        );
+      } catch (e: unknown) {
+        getLog().error({ conversationId, err: e }, 'tool_result_persist_failed');
+      }
+      event = JSON.stringify({
+        type: 'tool_result',
+        toolCallId: matchedToolCallId,
+        name: chunk.toolName,
+        output: chunk.toolOutput,
+        duration,
+        timestamp: now,
+      });
     } else if (chunk.type === 'result' && chunk.sessionId) {
       event = JSON.stringify({
         type: 'session_info',
@@ -207,8 +244,12 @@ export class WebAdapter implements IWebPlatformAdapter {
             timestamp: now,
           });
           await this.transport.emit(conversationId, resultEvent);
-          // Persist output to DB so loaded messages show output section after refresh
-          this.persistence.appendToolResult(conversationId, tool.name, '', duration);
+          // Persist fallback output to DB (real output may have been captured via PostToolUse hook)
+          try {
+            this.persistence.appendToolResult(conversationId, tool.name, '', duration);
+          } catch (e: unknown) {
+            getLog().error({ conversationId, err: e }, 'tool_result_persist_failed');
+          }
         }
         this.runningTools.delete(conversationId);
       }

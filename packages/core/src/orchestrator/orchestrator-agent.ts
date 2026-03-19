@@ -571,6 +571,10 @@ async function handleStreamMode(
           await platform.sendStructuredEvent(conversationId, msg);
         }
       }
+    } else if (msg.type === 'tool_result' && msg.toolName) {
+      if (!commandDetected && platform.sendStructuredEvent) {
+        await platform.sendStructuredEvent(conversationId, msg);
+      }
     } else if (msg.type === 'result' && msg.sessionId) {
       newSessionId = msg.sessionId;
       if (!commandDetected && platform.sendStructuredEvent) {

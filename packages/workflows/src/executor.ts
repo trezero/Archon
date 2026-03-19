@@ -624,6 +624,11 @@ async function executeStepInternal(
               'workflow_event_persist_failed'
             );
           });
+      } else if (msg.type === 'tool_result' && msg.toolName) {
+        // Forward tool result to web adapter for persistence and SSE
+        if (platform.sendStructuredEvent) {
+          await platform.sendStructuredEvent(conversationId, msg);
+        }
       } else if (msg.type === 'result') {
         // Emit tool_completed for the last tool in the step
         if (lastToolStartedAt) {
@@ -1519,6 +1524,10 @@ async function executeLoopWorkflow(
                 'workflow_event_persist_failed'
               );
             });
+        } else if (msg.type === 'tool_result' && msg.toolName) {
+          if (platform.sendStructuredEvent) {
+            await platform.sendStructuredEvent(conversationId, msg);
+          }
         } else if (msg.type === 'result' && msg.sessionId) {
           // Emit tool_completed for the last tool in the iteration
           if (lastToolStartedAt) {

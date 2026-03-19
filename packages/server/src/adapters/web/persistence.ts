@@ -131,7 +131,10 @@ export class MessagePersistence {
    */
   appendToolResult(conversationId: string, name: string, output: string, duration: number): void {
     const buf = this.assistantBuffer.get(conversationId);
-    if (!buf) return;
+    if (!buf) {
+      getLog().warn({ conversationId, name }, 'tool_result_dropped_no_buffer');
+      return;
+    }
     for (let i = buf.segments.length - 1; i >= 0; i--) {
       const seg = buf.segments[i];
       const tc = [...seg.toolCalls].reverse().find(t => t.name === name && t.output === undefined);
