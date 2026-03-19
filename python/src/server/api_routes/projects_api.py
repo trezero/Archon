@@ -1351,3 +1351,21 @@ async def get_project_knowledge_sources(
             f"Failed to get project knowledge sources | error={str(e)} | project_id={project_id}"
         )
         raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+# ==================== GIT STATUS ENDPOINT ====================
+
+
+@router.put("/projects/{project_id}/systems/{system_id}/git-status")
+async def update_git_status(project_id: str, system_id: str, request: Request):
+    """Update git dirty status for a project-system registration."""
+    body = await request.json()
+    git_dirty = body.get("git_dirty", False)
+
+    project_service = ProjectService(get_supabase_client())
+    success, result = project_service.update_git_status(project_id, system_id, git_dirty)
+
+    if not success:
+        raise HTTPException(status_code=404, detail=result.get("error"))
+
+    return {"success": True, "git_dirty": git_dirty}

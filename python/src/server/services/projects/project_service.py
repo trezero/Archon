@@ -7,7 +7,7 @@ separating business logic from transport-specific code.
 """
 
 # Removed direct logging import - using unified config
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from src.server.utils import get_supabase_client
@@ -196,6 +196,24 @@ class ProjectService:
             registrations.setdefault(pid, []).append(entry)
 
         return registrations
+
+    def update_git_status(self, project_id: str, system_id: str, git_dirty: bool) -> tuple[bool, dict[str, Any]]:
+        """Update git dirty status for a project-system registration."""
+        result = (
+            self.supabase_client.table("archon_project_system_registrations")
+            .update({
+                "git_dirty": git_dirty,
+                "git_dirty_checked_at": datetime.now(timezone.utc).isoformat(),
+            })
+            .eq("project_id", project_id)
+            .eq("system_id", system_id)
+            .execute()
+        )
+
+        if not result.data:
+            return False, {"error": "Project-system registration not found"}
+
+        return True, {"git_dirty": git_dirty}
 
     def get_project(self, project_id: str) -> tuple[bool, dict[str, Any]]:
         """
