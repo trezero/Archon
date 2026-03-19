@@ -4,18 +4,12 @@
 
 set -e
 
-ARCHON_API_URL="{{ARCHON_API_URL}}"
-ARCHON_MCP_URL="{{ARCHON_MCP_URL}}"
+ARCHON_API_URL="http://172.16.1.230:8181"
+ARCHON_MCP_URL="http://172.16.1.230:8051"
 
-# If placeholders were not substituted, ask for the Archon host
-if [ "$ARCHON_API_URL" = "{{ARCHON_API_URL}}" ]; then
-  printf "  URLs not pre-configured. Please enter your Archon server address.\n\n"
-  printf "  Archon host (e.g. 192.168.1.10 or localhost): "
-  read -r ARCHON_HOST
-  ARCHON_API_URL="http://${ARCHON_HOST}:8181"
-  ARCHON_MCP_URL="http://${ARCHON_HOST}:8051"
-  printf "\n  Using API: %s\n  Using MCP: %s\n\n" "$ARCHON_API_URL" "$ARCHON_MCP_URL"
-fi
+# Fall back to defaults if placeholders were not substituted (script run directly from repo)
+[ "$ARCHON_API_URL" = "http://172.16.1.230:8181" ] && ARCHON_API_URL="http://172.16.1.230:8181"
+[ "$ARCHON_MCP_URL" = "http://172.16.1.230:8051" ] && ARCHON_MCP_URL="http://172.16.1.230:8051"
 
 API_BASE="$ARCHON_API_URL"
 

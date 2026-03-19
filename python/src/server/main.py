@@ -36,6 +36,7 @@ from .api_routes.sessions_api import router as sessions_router
 from .api_routes.materialization_api import router as materialization_router
 from .api_routes.leaveoff_api import router as leaveoff_router
 from .api_routes.postman_api import router as postman_router
+from .api_routes.scanner_script_api import router as scanner_script_router
 from .api_routes.version_api import router as version_router
 
 # Import modular API routers
@@ -134,6 +135,18 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             api_logger.warning(f"Extension seeding failed (non-fatal): {e}", exc_info=True)
 
+        # Mark any sources stuck in "crawling" status as failed (crash recovery)
+        try:
+            from .config.database import get_supabase_client
+            client = get_supabase_client()
+            result = client.table("archon_sources").update(
+                {"crawl_status": "failed"}
+            ).eq("crawl_status", "crawling").execute()
+            if result.data:
+                logger.warning(f"Marked {len(result.data)} stale crawls as failed (server restart recovery)")
+        except Exception as e:
+            logger.warning(f"Failed to recover stale crawls on startup: {e}")
+
         # MCP Client functionality removed from architecture
         # Agents now use MCP tools directly
 
@@ -224,6 +237,7 @@ app.include_router(sessions_router)
 app.include_router(materialization_router)
 app.include_router(leaveoff_router)
 app.include_router(postman_router)
+app.include_router(scanner_script_router)
 
 
 # Root endpoint

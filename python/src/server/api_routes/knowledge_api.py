@@ -54,6 +54,10 @@ router = APIRouter(prefix="/api", tags=["knowledge"])
 CONCURRENT_CRAWL_LIMIT = 3  # Max simultaneous crawl operations (protects server resources)
 crawl_semaphore = asyncio.Semaphore(CONCURRENT_CRAWL_LIMIT)
 
+MAX_QUEUED_CRAWLS = 6  # Max total crawls (running + waiting). 3 run, 3 can queue.
+_queued_crawl_count = 0
+_crawl_count_lock = asyncio.Lock()
+
 # Track active async crawl tasks for cancellation support
 active_crawl_tasks: dict[str, asyncio.Task] = {}
 
@@ -764,6 +768,16 @@ async def refresh_knowledge_item(source_id: str):
 @router.post("/knowledge-items/crawl")
 async def crawl_knowledge_item(request: KnowledgeItemRequest):
     """Crawl a URL and add it to the knowledge base with progress tracking."""
+    global _queued_crawl_count
+    async with _crawl_count_lock:
+        if _queued_crawl_count >= MAX_QUEUED_CRAWLS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Too many crawls in progress ({_queued_crawl_count}). "
+                       f"Maximum {MAX_QUEUED_CRAWLS} allowed. Try again shortly.",
+            )
+        _queued_crawl_count += 1
+
     # Validate URL
     if not request.url:
         raise HTTPException(status_code=422, detail="URL is required")
@@ -811,6 +825,42 @@ async def crawl_knowledge_item(request: KnowledgeItemRequest):
             "progress": 0,
             "log": f"Starting crawl for {request.url}"
         })
+
+        # Link project upfront so the association exists even if the crawl fails
+        if request.project_id:
+            try:
+                supabase_client = get_supabase_client()
+                supabase_client.table("archon_project_sources").upsert(
+                    {
+                        "project_id": request.project_id,
+                        "source_id": source_id,
+                        "notes": request.knowledge_type or "technical",
+                        "created_by": "crawl",
+                    },
+                    on_conflict="project_id,source_id",
+                ).execute()
+            except Exception as e:
+                logger.warning(f"Failed to pre-link project {request.project_id} to source {source_id}: {e}")
+
+        # Mark source as "crawling" in the database for crash recovery
+        try:
+            supabase_client = get_supabase_client()
+            supabase_client.table("archon_sources").upsert(
+                {
+                    "source_id": source_id,
+                    "url": str(request.url),
+                    "display_name": str(request.url),
+                    "crawl_status": "crawling",
+                    "metadata": json.dumps({
+                        "progress_id": progress_id,
+                        "started_at": datetime.now(timezone.utc).isoformat(),
+                        "project_id": request.project_id,
+                    }),
+                },
+                on_conflict="source_id",
+            ).execute()
+        except Exception as e:
+            logger.warning(f"Failed to write crawl status for source {source_id}: {e}")
 
         # Start background task - no need to track this wrapper task
         # The actual crawl task will be stored inside _perform_crawl_with_progress
@@ -913,7 +963,19 @@ async def _perform_crawl_with_progress(
                 await tracker.error(error_message)
             except Exception:
                 pass
+            # Mark source as failed in DB for crash recovery visibility
+            try:
+                from ..services.crawling.helpers.url_handler import URLHandler
+                fail_source_id = URLHandler.generate_unique_source_id(str(request.url))
+                get_supabase_client().table("archon_sources").update(
+                    {"crawl_status": "failed"}
+                ).eq("source_id", fail_source_id).execute()
+            except Exception:
+                pass  # Best effort
         finally:
+            global _queued_crawl_count
+            async with _crawl_count_lock:
+                _queued_crawl_count = max(0, _queued_crawl_count - 1)
             # Clean up task from registry when done (success or failure)
             if progress_id in active_crawl_tasks:
                 del active_crawl_tasks[progress_id]
