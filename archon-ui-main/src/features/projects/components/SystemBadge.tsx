@@ -20,6 +20,24 @@ const PALETTE: ColorSet[] = [
   { bg: "bg-sky-500/15", text: "text-sky-300", border: "border-sky-500/20" },
 ];
 
+// DataCard-compatible edge colors, mapped 1:1 with the PALETTE indices above.
+// DataCard only supports: purple, blue, cyan, green, orange, pink, red
+// We map the 10 palette entries to the closest DataCard color.
+const EDGE_COLOR_PALETTE = [
+  "blue",    // 0: blue
+  "green",   // 1: emerald → green
+  "orange",  // 2: orange
+  "purple",  // 3: violet → purple
+  "cyan",    // 4: cyan
+  "pink",    // 5: rose → pink
+  "orange",  // 6: amber → orange
+  "cyan",    // 7: teal → cyan
+  "pink",    // 8: fuchsia → pink
+  "blue",    // 9: sky → blue
+] as const;
+
+export type DataCardEdgeColor = "purple" | "blue" | "cyan" | "green" | "orange" | "pink" | "red";
+
 function hashName(name: string): number {
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
@@ -30,6 +48,11 @@ function hashName(name: string): number {
 
 function resolveColor(name: string): ColorSet {
   return PALETTE[hashName(name) % PALETTE.length];
+}
+
+/** Returns a DataCard-compatible edgeColor for a given system name. */
+export function resolveEdgeColor(systemName: string): DataCardEdgeColor {
+  return EDGE_COLOR_PALETTE[hashName(systemName) % EDGE_COLOR_PALETTE.length];
 }
 
 export function SystemBadge({ name, className = "" }: SystemBadgeProps) {

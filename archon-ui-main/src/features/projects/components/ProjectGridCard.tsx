@@ -3,7 +3,7 @@ import { DataCard, DataCardContent, DataCardHeader } from "../../ui/primitives/d
 import { StatPill } from "../../ui/primitives/pill";
 import { cn } from "../../ui/primitives/styles";
 import type { Project } from "../types";
-import { SystemBadge } from "./SystemBadge";
+import { SystemBadge, resolveEdgeColor } from "./SystemBadge";
 
 interface TaskCounts {
   todo: number;
@@ -40,7 +40,10 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
   const dirtySystems = registrations.filter((r) => r.git_dirty);
   const dirtyTitle = dirtySystems.map((r) => r.system_name).join(", ");
 
-  const edgeColor = isSelected ? "purple" : project.pinned ? "cyan" : undefined;
+  // Always derive edge color from the primary system name.
+  // Selected state gets purple overlay; otherwise use the system-derived color.
+  const systemEdgeColor = primaryReg ? resolveEdgeColor(primaryReg.system_name) : "cyan";
+  const edgeColor = isSelected ? "purple" : systemEdgeColor;
 
   return (
     <div
@@ -56,8 +59,8 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
       }}
     >
       <DataCard
-        edgePosition={edgeColor ? "top" : "none"}
-        edgeColor={edgeColor ?? "cyan"}
+        edgePosition="top"
+        edgeColor={edgeColor}
         blur="md"
         compact
         className={cn(
@@ -66,12 +69,12 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
           !isSelected && "hover:shadow-[0_0_20px_rgba(6,182,212,0.15)]",
         )}
       >
-        <DataCardHeader className="p-3.5 pb-1.5">
+        <DataCardHeader className="p-4 pb-2">
           {/* Title + PINNED badge */}
-          <div className="flex items-start justify-between gap-1.5">
+          <div className="flex items-start justify-between gap-2">
             <span
               className={cn(
-                "text-[15px] font-semibold leading-tight line-clamp-2",
+                "text-base font-semibold leading-tight line-clamp-2",
                 isSelected ? "text-white/90" : "text-white/80",
               )}
             >
@@ -85,7 +88,7 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
           </div>
         </DataCardHeader>
 
-        <DataCardContent className="px-3.5 pb-3.5 space-y-2">
+        <DataCardContent className="px-4 pb-4 space-y-2.5">
           {/* System row */}
           {primaryReg && (
             <div className="flex items-center gap-1.5">
@@ -103,9 +106,9 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
             </div>
           )}
 
-          {/* Task pills row — using StatPill for consistency with Knowledge cards */}
+          {/* Task pills row */}
           {taskCounts && (taskCounts.todo > 0 || taskCounts.doing > 0 || taskCounts.done > 0) && (
-            <div className="flex gap-1.5">
+            <div className="flex gap-1.5 flex-wrap">
               {taskCounts.todo > 0 && (
                 <StatPill color="pink" value={`${taskCounts.todo} todo`} size="sm" />
               )}

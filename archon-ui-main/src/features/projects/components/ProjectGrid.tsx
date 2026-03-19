@@ -30,7 +30,7 @@ export function ProjectGrid({
 
   if (!groupByParent) {
     return (
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3 px-4 pb-4">
+      <div className="grid grid-cols-4 gap-4 px-4 pb-4">
         {projects.map((project) => (
           <ProjectGridCard
             key={project.id}
@@ -83,7 +83,7 @@ export function ProjectGrid({
   }
 
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3 px-4 pb-4">
+    <div className="grid grid-cols-4 gap-4 px-4 pb-4">
       {/* Parent sections with their children */}
       {parents.map((parent) => {
         const children = childrenByParent.get(parent.id) ?? [];
@@ -94,7 +94,7 @@ export function ProjectGrid({
               {parent.title}
             </div>
             {/* Parent card + children in a nested grid */}
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3 pt-3">
+            <div className="grid grid-cols-4 gap-4 pt-3">
               <ProjectGridCard
                 key={parent.id}
                 project={parent}
@@ -133,7 +133,7 @@ export function ProjectGrid({
           <div className="col-span-full text-sm font-semibold text-gray-400 pt-3 pb-1 border-b border-white/5">
             Ungrouped
           </div>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3 pt-3">
+          <div className="grid grid-cols-4 gap-4 pt-3">
             {orphans.map((project) => (
               <ProjectGridCard
                 key={project.id}
