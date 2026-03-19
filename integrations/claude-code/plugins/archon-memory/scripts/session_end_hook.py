@@ -20,6 +20,7 @@ _PLUGIN_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_PLUGIN_ROOT))
 
 from src.archon_client import ArchonClient
+from src.git_utils import check_git_dirty, load_system_id
 from src.session_tracker import SessionTracker
 
 _BUFFER_PATH = ".claude/archon-memory-buffer.jsonl"
@@ -111,6 +112,24 @@ async def main() -> None:
             print("archon-memory: timeout fetching LeaveOff point", file=sys.stderr)
         except Exception as e:
             print(f"archon-memory: error materializing LeaveOffPoint.md: {e}", file=sys.stderr)
+
+    # ── Report git dirty status ──────────────────────────────────────────
+    if client.is_configured():
+        system_id = load_system_id()
+        if system_id:
+            try:
+                git_dirty = check_git_dirty()
+                success = await asyncio.wait_for(
+                    client.report_git_status(system_id, git_dirty),
+                    timeout=3.0,
+                )
+                if success:
+                    status = "dirty" if git_dirty else "clean"
+                    print(f"archon-memory: git status reported ({status})", file=sys.stderr)
+            except asyncio.TimeoutError:
+                print("archon-memory: git status report timed out", file=sys.stderr)
+            except Exception as e:
+                print(f"archon-memory: git status report failed: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

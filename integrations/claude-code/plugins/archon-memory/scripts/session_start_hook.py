@@ -25,6 +25,7 @@ _PLUGIN_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_PLUGIN_ROOT))
 
 from src.archon_client import ArchonClient
+from src.git_utils import check_git_dirty, load_system_id
 from src.session_tracker import SessionTracker
 
 _BUFFER_PATH = ".claude/archon-memory-buffer.jsonl"
@@ -344,6 +345,19 @@ async def main() -> None:
                 )
     except Exception:
         pass  # Best-effort, don't block session start
+
+    # ── Report git dirty status (correction signal for commits made outside Claude Code) ──
+    if client.is_configured():
+        system_id = load_system_id()
+        if system_id:
+            try:
+                git_dirty = check_git_dirty()
+                await asyncio.wait_for(
+                    client.report_git_status(system_id, git_dirty),
+                    timeout=3.0,
+                )
+            except Exception:
+                pass  # Best-effort, don't block session start
 
 
 if __name__ == "__main__":
