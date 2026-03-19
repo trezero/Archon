@@ -780,6 +780,12 @@ async def http_archon_setup_md(request: Request) -> PlainTextResponse:
     return PlainTextResponse(content)
 
 
+async def http_scan_projects_md(request: Request) -> PlainTextResponse:
+    """Serve the /scan-projects Claude Code slash command."""
+    content = _render_command_md("scan-projects.md")
+    return PlainTextResponse(content)
+
+
 def _render_setup_sh(api_url: str, mcp_url: str) -> str:
     """Generate archonSetup.sh with API and MCP URLs injected."""
     for parent in Path(__file__).resolve().parents:
@@ -812,17 +818,24 @@ def _render_setup_bat(api_url: str, mcp_url: str) -> str:
             content = candidate.read_text()
             content = content.replace("{{ARCHON_API_URL}}", api_url)
             content = content.replace("{{ARCHON_MCP_URL}}", mcp_url)
+            # Ensure Windows CRLF line endings — cmd.exe fails with Unix LF
+            content = content.replace("\r\n", "\n").replace("\n", "\r\n")
             return content
     raise FileNotFoundError("archonSetup.bat template not found")
 
 
 def _render_setup_md() -> str:
     """Return the /archon-setup Claude Code slash command content."""
+    return _render_command_md("archon-setup.md")
+
+
+def _render_command_md(filename: str) -> str:
+    """Return a Claude Code slash command file from integrations/claude-code/commands/."""
     for parent in Path(__file__).resolve().parents:
-        candidate = parent / "integrations" / "claude-code" / "commands" / "archon-setup.md"
+        candidate = parent / "integrations" / "claude-code" / "commands" / filename
         if candidate.exists():
             return candidate.read_text()
-    raise FileNotFoundError("archon-setup.md not found")
+    raise FileNotFoundError(f"{filename} not found")
 
 
 async def http_plugin_manifest(request: Request) -> JSONResponse:
@@ -914,6 +927,7 @@ try:
     mcp.custom_route("/archon-setup.sh", methods=["GET"])(http_archon_setup_sh)
     mcp.custom_route("/archon-setup.bat", methods=["GET"])(http_archon_setup_bat)
     mcp.custom_route("/archon-setup.md", methods=["GET"])(http_archon_setup_md)
+    mcp.custom_route("/scan-projects.md", methods=["GET"])(http_scan_projects_md)
     mcp.custom_route("/archon-setup/agent-work-orders-setup.sh", methods=["GET"])(http_agent_work_orders_setup_sh)
     logger.info("✓ Setup file endpoints registered")
     mcp.custom_route("/archon-setup/plugin-manifest", methods=["GET"])(http_plugin_manifest)

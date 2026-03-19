@@ -6,9 +6,35 @@ Connect this machine to Archon: register it as a system, download all project ex
 
 Call `health_check()` via the Archon MCP tool.
 
-If the server is unreachable, print:
+If the tool is not found (MCP not configured), do the following:
+
+1. Check if `archon-config.json` exists in `.claude/` or `~/.claude/`. If found, read
+   `archon_mcp_url` from it. Otherwise, ask the user:
+   > "What is your Archon MCP URL? (e.g., http://172.16.1.230:8051)"
+
+   Store the answer as `<archon_mcp_url>`.
+
+2. Tell the user:
+   ```
+   Archon MCP is not configured. I'll add it now.
+   ```
+
+3. Run:
+   ```bash
+   claude mcp add --transport http archon <archon_mcp_url>/mcp
+   ```
+
+4. Tell the user:
+   ```
+   Archon MCP has been added. Please restart Claude Code for the new MCP
+   connection to take effect, then run /archon-setup again.
+   ```
+
+5. Stop.
+
+If the tool exists but the server is unreachable, print:
 ```
-Archon server is not reachable. Ensure the MCP is connected.
+Archon server is not reachable. Check that the Archon stack is running.
 ```
 Stop.
 

@@ -12,18 +12,31 @@ echo    Server: %ARCHON_MCP_URL%
 echo  =============================================
 echo.
 
+:: If placeholders were not substituted, ask for the Archon host
+echo %ARCHON_API_URL% | findstr /C:"{{" >nul 2>&1 && (
+  echo  URLs not pre-configured. Please enter your Archon server address.
+  echo.
+  set /p "ARCHON_HOST=  Archon host (e.g. 192.168.1.10 or localhost): "
+  set "ARCHON_API_URL=http://!ARCHON_HOST!:8181"
+  set "ARCHON_MCP_URL=http://!ARCHON_HOST!:8051"
+  echo.
+  echo  Using API: !ARCHON_API_URL!
+  echo  Using MCP: !ARCHON_MCP_URL!
+  echo.
+)
+
 :: Check dependencies
 where curl >nul 2>&1 || (echo Error: curl is required. Install from https://curl.se & exit /b 1)
 where claude >nul 2>&1 || (echo Error: claude CLI not found. Install Claude Code first. & exit /b 1)
 where powershell >nul 2>&1 || (echo Error: PowerShell is required. & exit /b 1)
 
-:: ── Step 1/4: System name ──────────────────────────────────────────────────
+:: -- Step 1/4: System name --------------------------------------------------
 echo [1/4] System name
 set "SYSTEM_NAME=%COMPUTERNAME%"
 echo       Using: %SYSTEM_NAME%
 echo.
 
-:: ── Step 2/4: Project ─────────────────────────────────────────────────────
+:: -- Step 2/4: Project -----------------------------------------------------
 echo [2/4] Project
 
 for %%F in (.) do set "DIR_NAME=%%~nxF"
@@ -133,13 +146,13 @@ if defined PROJECT_ID (
 :project_done
 echo.
 
-:: ── Step 3/4: Add MCP ─────────────────────────────────────────────────────
+:: -- Step 3/4: Add MCP -----------------------------------------------------
 echo [3/4] Setting up Claude Code MCP...
 claude mcp add --transport http archon "%ARCHON_MCP_URL%/mcp" 2>nul || echo       (Already configured)
 echo       Added archon MCP server
 echo.
 
-:: ── Step 3.5: Install scope ────────────────────────────────────────────────
+:: -- Step 3.5: Install scope ------------------------------------------------
 echo.
 echo Where should Archon tools be installed?
 echo.
@@ -161,7 +174,7 @@ if "!INSTALL_SCOPE!"=="2" (
 )
 echo.
 
-:: ── Check for existing claude-mem plugin ────────────────────────────────────
+:: -- Check for existing claude-mem plugin -----------------------------------
 set "SKIP_PLUGIN_INSTALL=false"
 if exist "%USERPROFILE%\.claude\plugins\cache\thedotmack\claude-mem" goto :claude_mem_found
 if exist ".claude\plugins\claude-mem" goto :claude_mem_found
@@ -188,7 +201,7 @@ if "!CLAUDE_MEM_CHOICE!"=="3" set "SKIP_PLUGIN_INSTALL=true"
 echo.
 
 :plugin_install
-:: ── Install archon-memory plugin ─────────────────────────────────────────────
+:: -- Install archon-memory plugin -------------------------------------------
 if "!SKIP_PLUGIN_INSTALL!"=="true" goto :plugin_done
 
 set "PLUGIN_DIR=!INSTALL_DIR!\plugins\archon-memory"
@@ -238,7 +251,7 @@ del "%PLUGIN_TMP%" 2>nul
 echo.
 
 :plugin_done
-:: ── Register hooks in Claude Code settings ──────────────────────────────────
+:: -- Register hooks in Claude Code settings ---------------------------------
 :: SessionStart and Stop hooks only work in global ~/.claude/settings.json.
 :: PostToolUse works in project settings.local.json.
 if "!SKIP_PLUGIN_INSTALL!"=="true" goto :hooks_done
@@ -311,7 +324,7 @@ echo       ^✓ PostToolUse hook registered
 echo.
 
 :hooks_done
-:: ── Download and install extensions ─────────────────────────────────────────
+:: -- Download and install extensions ----------------------------------------
 echo Installing extensions...
 if not exist "!INSTALL_DIR!\skills" mkdir "!INSTALL_DIR!\skills"
 set "EXT_TMP=%TEMP%\archon-extensions.tar.gz"
@@ -325,7 +338,7 @@ if %errorlevel%==0 (
 del "%EXT_TMP%" 2>nul
 echo.
 
-:: ── Write archon-config.json ─────────────────────────────────────────────────
+:: -- Write archon-config.json -----------------------------------------------
 set "FINGERPRINT_FILE=%TEMP%\archon_fp.txt"
 powershell -Command ^
   "$h = [System.Security.Cryptography.MD5]::Create(); " ^
@@ -358,19 +371,21 @@ powershell -Command ^
 echo       ^✓ Wrote !INSTALL_DIR!\archon-config.json
 echo.
 
-:: ── Update .gitignore ────────────────────────────────────────────────────────
+:: -- Update .gitignore ------------------------------------------------------
 for %%G in (".claude/plugins/" ".claude/skills/" ".claude/archon-config.json" ".claude/archon-state.json" ".claude/archon-memory-buffer.jsonl" ".archon/") do (
     findstr /x /c:"%%~G" .gitignore >nul 2>&1 || echo %%~G>>.gitignore
 )
 
-:: ── Step 4/4: Install /archon-setup ───────────────────────────────────────
-echo [4/4] Installing /archon-setup command...
+:: -- Step 4/4: Install slash commands ---------------------------------------
+echo [4/4] Installing slash commands...
 if not exist "%USERPROFILE%\.claude\commands" mkdir "%USERPROFILE%\.claude\commands"
 curl -sf "%ARCHON_MCP_URL%/archon-setup.md" -o "%USERPROFILE%\.claude\commands\archon-setup.md"
-echo       Installed to %USERPROFILE%\.claude\commands\archon-setup.md
+echo       Installed /archon-setup to %USERPROFILE%\.claude\commands\archon-setup.md
+curl -sf "%ARCHON_MCP_URL%/scan-projects.md" -o "%USERPROFILE%\.claude\commands\scan-projects.md"
+echo       Installed /scan-projects to %USERPROFILE%\.claude\commands\scan-projects.md
 echo.
 
-:: ── Write initial state ───────────────────────────────────────────────────
+:: -- Write initial state ----------------------------------------------------
 if not exist ".claude" mkdir ".claude"
 set "SYSNAME_FILE=%TEMP%\archon_sysname.txt"
 set "PROJID_FILE=%TEMP%\archon_projid.txt"
@@ -387,7 +402,7 @@ powershell -Command ^
   "if ($projId) { $state | Add-Member -Force -NotePropertyName 'archon_project_id' -NotePropertyValue $projId }; " ^
   "$state | ConvertTo-Json | Set-Content '.claude\archon-state.json'"
 
-:: ── Done ─────────────────────────────────────────────────────────────────
+:: -- Done ------------------------------------------------------------------
 echo =============================================
 echo  Setup complete!
 echo.
