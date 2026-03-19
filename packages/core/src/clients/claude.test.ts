@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import { describe, test, expect, mock, beforeEach, spyOn } from 'bun:test';
 import { createMockLogger } from '../test/mocks/logger';
 
 const mockLogger = createMockLogger();
@@ -28,6 +28,22 @@ describe('ClaudeClient', () => {
     mockLogger.warn.mockClear();
     mockLogger.error.mockClear();
     mockLogger.debug.mockClear();
+  });
+
+  describe('constructor', () => {
+    test('throws when running as root (UID 0)', () => {
+      const spy = spyOn(process, 'getuid').mockReturnValue(0);
+      expect(() => new ClaudeClient()).toThrow(
+        'does not support bypassPermissions when running as root'
+      );
+      spy.mockRestore();
+    });
+
+    test('does not throw for non-root user', () => {
+      const spy = spyOn(process, 'getuid').mockReturnValue(1000);
+      expect(() => new ClaudeClient()).not.toThrow();
+      spy.mockRestore();
+    });
   });
 
   describe('getType', () => {

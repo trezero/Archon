@@ -198,6 +198,18 @@ function classifySubprocessError(
  * Implements generic IAssistantClient interface
  */
 export class ClaudeClient implements IAssistantClient {
+  constructor() {
+    // Claude Code SDK silently rejects bypassPermissions when running as root (UID 0).
+    // Check once at construction time so the error surfaces early, not on first query.
+    // process.getuid is undefined on Windows, so optional chaining is required.
+    if (process.getuid?.() === 0) {
+      throw new Error(
+        'Claude Code SDK does not support bypassPermissions when running as root (UID 0). ' +
+          'Run as a non-root user, or use the Dockerfile which creates a non-root appuser.'
+      );
+    }
+  }
+
   /**
    * Send a query to Claude and stream responses.
    * Includes retry logic for transient failures (up to 3 retries with exponential backoff).
