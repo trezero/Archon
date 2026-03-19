@@ -21,6 +21,7 @@ mock.module('@archon/paths', () => ({
 
 // Mock @archon/isolation (getIsolationProvider moved here from @archon/core)
 mock.module('@archon/isolation', () => ({
+  configureIsolation: mock(() => undefined),
   getIsolationProvider: mock(() => ({
     create: mock(() =>
       Promise.resolve({
@@ -432,7 +433,11 @@ describe('workflowRunCommand', () => {
       id: 'conv-123',
       ai_assistant_type: 'claude',
     });
-    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce(null);
+    // Return a codebase so isolation can proceed (default behavior requires isolation)
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'cb-123',
+      default_cwd: '/test/path',
+    });
     (conversationDb.updateConversation as ReturnType<typeof mock>).mockResolvedValueOnce(undefined);
     (executeWorkflow as ReturnType<typeof mock>).mockResolvedValueOnce({
       success: true,
