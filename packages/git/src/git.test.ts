@@ -1117,6 +1117,31 @@ branch refs/heads/feature/auth
       expect(execSpy).toHaveBeenCalledTimes(1); // only hasUncommittedChanges
     });
 
+    test('returns false when git commit finds nothing to commit after add (CRLF normalization)', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('status')) {
+          // git status shows modified files (e.g. CRLF vs LF on Windows)
+          return { stdout: ' M file.ts\n', stderr: '' };
+        }
+        if (args.includes('add')) {
+          return { stdout: '', stderr: '' };
+        }
+        if (args.includes('commit')) {
+          // git commit exits 1 with "nothing to commit" on stdout (not stderr)
+          const err = Object.assign(new Error('Command failed: git commit'), {
+            stdout: 'On branch main\nnothing to commit, working tree clean\n',
+            stderr: '',
+          });
+          throw err;
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      const result = await git.commitAllChanges('/workspace/repo', 'test commit');
+
+      expect(result).toBe(false);
+    });
+
     test('throws error when git add fails', async () => {
       execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
         if (args.includes('status')) {
