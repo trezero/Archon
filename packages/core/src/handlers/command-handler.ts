@@ -17,7 +17,6 @@ import {
   cleanupMergedWorktrees,
   cleanupStaleWorktrees,
   getWorktreeStatusBreakdown,
-  MAX_WORKTREES_PER_CODEBASE,
 } from '../services/cleanup-service';
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '@archon/paths';
 import { loadConfig } from '../config/config-loader';
@@ -402,7 +401,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
       if (codebase) {
         try {
           const breakdown = await getWorktreeStatusBreakdown(codebase.id, codebase.default_cwd);
-          msg += `\n\nWorktrees: ${String(breakdown.total)}/${String(breakdown.limit)}`;
+          msg += `\n\nWorktrees: ${String(breakdown.total)} active`;
           if (breakdown.merged > 0 || breakdown.stale > 0) {
             if (breakdown.merged > 0) {
               msg += `\n  • ${String(breakdown.merged)} merged (can auto-remove)`;
@@ -1257,7 +1256,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
 
             // Show updated count
             const count = await isolationEnvDb.countActiveByCodebase(conversation.codebase_id);
-            msg += `\nWorktrees: ${String(count)}/${String(MAX_WORKTREES_PER_CODEBASE)}`;
+            msg += `\nWorktrees: ${String(count)} active`;
 
             return { success: true, message: msg.trim() };
           } catch (error) {

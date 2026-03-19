@@ -53,7 +53,6 @@ import { createWorkflowDeps } from '../workflows/store-adapter';
 import {
   cleanupToMakeRoom,
   getWorktreeStatusBreakdown,
-  MAX_WORKTREES_PER_CODEBASE,
   STALE_THRESHOLD_DAYS,
 } from '../services/cleanup-service';
 import { loadRepoConfig } from '../config/config-loader';
@@ -90,7 +89,6 @@ function getResolver(): IsolationResolver {
         },
         getBreakdown: getWorktreeStatusBreakdown,
       },
-      maxWorktreesPerCodebase: MAX_WORKTREES_PER_CODEBASE,
       staleThresholdDays: STALE_THRESHOLD_DAYS,
     });
   }
