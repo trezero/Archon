@@ -128,6 +128,21 @@ class ArchonClient:
         except Exception:
             return None
 
+    # ── Git status reporting ─────────────────────────────────────────────────
+
+    async def report_git_status(self, system_id: str, git_dirty: bool) -> bool:
+        """Report git dirty status for the current project + system."""
+        if not self.is_configured() or not system_id:
+            return False
+
+        url = f"{self.api_url}/api/projects/{self.project_id}/systems/{system_id}/git-status"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.put(url, json={"git_dirty": git_dirty})
+                return resp.status_code == 200
+        except httpx.HTTPError:
+            return False
+
     # ── Postman .env sync ─────────────────────────────────────────────────────
 
     async def sync_postman_environment(self, system_name: str, env_content: str) -> bool:
