@@ -6,22 +6,34 @@ interface SystemBadgeProps {
 
 interface ColorSet { bg: string; text: string; border: string }
 
-const WINDOWS_COLOR: ColorSet = { bg: "bg-blue-500/15", text: "text-blue-300", border: "border-blue-500/20" };
-const MAC_COLOR: ColorSet = { bg: "bg-green-500/12", text: "text-green-300", border: "border-green-500/15" };
-const LINUX_COLOR: ColorSet = { bg: "bg-[rgba(234,88,12,0.15)]", text: "text-[#fdba74]", border: "border-orange-500/20" };
-const DEFAULT_COLOR: ColorSet = { bg: "bg-white/10", text: "text-gray-400", border: "border-white/10" };
+// Vibrant palette — every system gets a color. The same name always maps to the same color.
+const PALETTE: ColorSet[] = [
+  { bg: "bg-blue-500/15", text: "text-blue-300", border: "border-blue-500/20" },
+  { bg: "bg-emerald-500/15", text: "text-emerald-300", border: "border-emerald-500/20" },
+  { bg: "bg-[rgba(234,88,12,0.15)]", text: "text-[#fdba74]", border: "border-orange-500/20" },
+  { bg: "bg-violet-500/15", text: "text-violet-300", border: "border-violet-500/20" },
+  { bg: "bg-cyan-500/15", text: "text-cyan-300", border: "border-cyan-500/20" },
+  { bg: "bg-rose-500/15", text: "text-rose-300", border: "border-rose-500/20" },
+  { bg: "bg-amber-500/15", text: "text-amber-300", border: "border-amber-500/20" },
+  { bg: "bg-teal-500/15", text: "text-teal-300", border: "border-teal-500/20" },
+  { bg: "bg-fuchsia-500/15", text: "text-fuchsia-300", border: "border-fuchsia-500/20" },
+  { bg: "bg-sky-500/15", text: "text-sky-300", border: "border-sky-500/20" },
+];
 
-function resolveOsColor(os: string | null): ColorSet {
-  if (!os) return DEFAULT_COLOR;
-  const lower = os.toLowerCase();
-  if (lower.includes("win") || lower.includes("mingw")) return WINDOWS_COLOR;
-  if (lower.includes("darwin") || lower.includes("mac")) return MAC_COLOR;
-  if (lower.includes("linux") || lower.includes("ubuntu") || lower.includes("wsl")) return LINUX_COLOR;
-  return DEFAULT_COLOR;
+function hashName(name: string): number {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
 }
 
-export function SystemBadge({ name, os, className = "" }: SystemBadgeProps) {
-  const colors = resolveOsColor(os);
+function resolveColor(name: string): ColorSet {
+  return PALETTE[hashName(name) % PALETTE.length];
+}
+
+export function SystemBadge({ name, className = "" }: SystemBadgeProps) {
+  const colors = resolveColor(name);
 
   return (
     <span
