@@ -30,7 +30,7 @@ export function ProjectGrid({
 
   if (!groupByParent) {
     return (
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3 px-4 pb-4">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3 px-4 pb-4">
         {projects.map((project) => (
           <ProjectGridCard
             key={project.id}
@@ -83,7 +83,7 @@ export function ProjectGrid({
   }
 
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3 px-4 pb-4">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3 px-4 pb-4">
       {/* Parent sections with their children */}
       {parents.map((parent) => {
         const children = childrenByParent.get(parent.id) ?? [];

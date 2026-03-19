@@ -17,7 +17,7 @@ export function SystemBadge({ name, os, className = "" }: SystemBadgeProps) {
 
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] border ${colors.bg} ${colors.text} ${colors.border} ${className}`}
+      className={`inline-flex items-center px-2.5 py-0.5 rounded text-xs border ${colors.bg} ${colors.text} ${colors.border} ${className}`}
     >
       {name}
     </span>

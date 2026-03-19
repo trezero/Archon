@@ -149,7 +149,7 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
 
 			{/* Grid/Table area */}
 			{!isLoading && !error && (
-				<div className={selectedProject ? "max-h-[45vh] overflow-y-auto" : "flex-1 overflow-y-auto"}>
+				<div className={selectedProject ? "max-h-[280px] overflow-y-auto" : "flex-1 overflow-y-auto"}>
 					{/* Active filter empty state */}
 					{filters.activeOnly && sortedProjects.length === 0 && (projects as Project[]).length > 0 ? (
 						<div className="flex items-center justify-center py-16 text-gray-500 text-sm">
@@ -179,7 +179,7 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
 
 			{/* Project detail tabs */}
 			{selectedProject && (
-				<div className="flex-1 min-h-0 overflow-y-auto">
+				<div className="flex-1 min-h-0 overflow-y-auto mt-4">
 					<div className="flex items-center justify-between mb-6">
 						<div className="flex-1" />
 						<PillNavigation

@@ -37,12 +37,12 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
   const dirtyTitle = dirtySystems.map((r) => r.system_name).join(", ");
 
   const cardClass = isSelected
-    ? "rounded-xl border border-purple-500/40 bg-gradient-to-br from-[rgba(30,20,60,0.9)] to-[rgba(20,15,40,0.9)] p-3.5 cursor-pointer shadow-[0_0_20px_rgba(139,92,246,0.15)]"
-    : "rounded-xl border border-white/[0.08] bg-gradient-to-br from-[rgba(20,18,35,0.9)] to-[rgba(15,13,28,0.9)] p-3.5 cursor-pointer transition-all duration-200 hover:border-white/15";
+    ? "rounded-xl border border-purple-500/40 bg-gradient-to-br from-[rgba(30,20,60,0.9)] to-[rgba(20,15,40,0.9)] p-4 cursor-pointer shadow-[0_0_20px_rgba(139,92,246,0.15)]"
+    : "rounded-xl border border-white/[0.08] bg-gradient-to-br from-[rgba(20,18,35,0.9)] to-[rgba(15,13,28,0.9)] p-4 cursor-pointer transition-all duration-200 hover:border-white/15";
 
   const titleClass = isSelected
-    ? "text-sm font-semibold text-purple-50 leading-tight line-clamp-2"
-    : "text-sm font-semibold text-gray-300 leading-tight line-clamp-2";
+    ? "text-[15px] font-semibold text-purple-50 leading-tight line-clamp-2"
+    : "text-[15px] font-semibold text-gray-300 leading-tight line-clamp-2";
 
   return (
     <div
@@ -55,10 +55,10 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
       }}
     >
       {/* Header row */}
-      <div className="flex items-start justify-between gap-1 mb-1.5">
+      <div className="flex items-start justify-between gap-1.5 mb-2">
         <span className={titleClass}>{project.title}</span>
         {project.pinned && (
-          <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-600/20 text-purple-400 whitespace-nowrap shrink-0">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-600/20 text-purple-400 whitespace-nowrap shrink-0">
             PINNED
           </span>
         )}
@@ -66,14 +66,14 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
 
       {/* System row */}
       {primaryReg && (
-        <div className="flex items-center gap-1 mb-1.5">
+        <div className="flex items-center gap-1.5 mb-2">
           <SystemBadge name={primaryReg.system_name} os={primaryReg.os} />
           {extraCount > 0 && (
-            <span className="text-[10px] text-gray-600">+{extraCount}</span>
+            <span className="text-xs text-gray-500">+{extraCount}</span>
           )}
           {project.has_uncommitted_changes && (
             <span
-              className="w-[7px] h-[7px] rounded-full bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)] ml-auto shrink-0"
+              className="w-2 h-2 rounded-full bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)] ml-auto shrink-0"
               title={dirtyTitle}
               aria-label={`Uncommitted changes on: ${dirtyTitle}`}
             />
@@ -83,19 +83,19 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
 
       {/* Task pills row */}
       {taskCounts && (taskCounts.todo > 0 || taskCounts.doing > 0 || taskCounts.done > 0) && (
-        <div className="flex gap-1.5 mb-1.5">
+        <div className="flex gap-2 mb-2">
           {taskCounts.todo > 0 && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-pink-500/12 text-pink-400">
+            <span className="text-xs px-2 py-0.5 rounded bg-pink-500/12 text-pink-400">
               {taskCounts.todo} todo
             </span>
           )}
           {taskCounts.doing > 0 && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/12 text-blue-400">
+            <span className="text-xs px-2 py-0.5 rounded bg-blue-500/12 text-blue-400">
               {taskCounts.doing} doing
             </span>
           )}
           {taskCounts.done > 0 && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/12 text-green-400">
+            <span className="text-xs px-2 py-0.5 rounded bg-green-500/12 text-green-400">
               {taskCounts.done} done
             </span>
           )}
@@ -103,7 +103,7 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
       )}
 
       {/* Activity timestamp */}
-      <div className="text-[10px] text-gray-600">{formatRelativeTime(project.updated_at)}</div>
+      <div className="text-xs text-gray-400">{formatRelativeTime(project.updated_at)}</div>
     </div>
   );
 }
