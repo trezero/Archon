@@ -216,6 +216,122 @@ commands:
 docker run -v /my/data:/.archon ghcr.io/dynamous-community/remote-coding-agent
 ```
 
+## Streaming Modes
+
+Each platform adapter supports two streaming modes, configured via environment variable or `~/.archon/config.yaml`.
+
+### Stream Mode
+
+Messages are sent in real-time as the AI generates responses.
+
+```env
+TELEGRAM_STREAMING_MODE=stream
+GITHUB_STREAMING_MODE=stream
+SLACK_STREAMING_MODE=stream
+DISCORD_STREAMING_MODE=stream
+```
+
+**Pros:**
+- Real-time feedback and progress indication
+- More interactive and engaging
+- See AI reasoning as it works
+
+**Cons:**
+- More API calls to platform
+- May hit rate limits with very long responses
+- Creates many messages/comments
+
+**Best for:** Interactive chat platforms (Telegram)
+
+### Batch Mode
+
+Only the final summary message is sent after AI completes processing.
+
+```env
+TELEGRAM_STREAMING_MODE=batch
+GITHUB_STREAMING_MODE=batch
+SLACK_STREAMING_MODE=batch
+DISCORD_STREAMING_MODE=batch
+```
+
+**Pros:**
+- Single coherent message/comment
+- Fewer API calls
+- No spam or clutter
+
+**Cons:**
+- No progress indication during processing
+- Longer wait for first response
+- Can't see intermediate steps
+
+**Best for:** Issue trackers and async platforms (GitHub)
+
+### Platform Defaults
+
+| Platform | Default Mode |
+|----------|-------------|
+| Telegram | `stream` |
+| Discord  | `batch` |
+| Slack    | `batch` |
+| GitHub   | `batch` |
+| Web UI   | SSE streaming (always real-time, not configurable) |
+
+---
+
+## Concurrency Settings
+
+Control how many conversations the system processes simultaneously:
+
+```env
+MAX_CONCURRENT_CONVERSATIONS=10  # Default: 10
+```
+
+**How it works:**
+- Conversations are processed with a lock manager
+- If the max concurrent limit is reached, new messages are queued
+- Prevents resource exhaustion and API rate limits
+- Each conversation maintains its own independent context
+
+**Tuning guidance:**
+
+| Resources | Recommended Setting |
+|-----------|-------------------|
+| Low resources | 3-5 |
+| Standard | 10 (default) |
+| High resources | 20-30 (monitor API limits) |
+
+---
+
+## Health Check Endpoints
+
+The application exposes health check endpoints for monitoring:
+
+**Basic Health Check:**
+```bash
+curl http://localhost:3090/health
+```
+Returns: `{"status":"ok"}`
+
+**Database Connectivity:**
+```bash
+curl http://localhost:3090/health/db
+```
+Returns: `{"status":"ok","database":"connected"}`
+
+**Concurrency Status:**
+```bash
+curl http://localhost:3090/health/concurrency
+```
+Returns: `{"status":"ok","active":0,"queued":0,"maxConcurrent":10}`
+
+**Use cases:**
+- Docker healthcheck configuration
+- Load balancer health checks
+- Monitoring and alerting systems (Prometheus, Datadog, etc.)
+- CI/CD deployment verification
+
+---
+
 ## Troubleshooting
 
 ### Config Parse Errors

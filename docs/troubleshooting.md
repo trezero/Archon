@@ -1,0 +1,228 @@
+# Troubleshooting
+
+Common issues and their solutions when running Archon.
+
+## Bot Not Responding
+
+**Check if the application is running:**
+
+If running locally:
+```bash
+# Check the server process
+curl http://localhost:3090/health
+# Expected: {"status":"ok"}
+```
+
+If running via Docker:
+```bash
+docker compose ps
+# Should show 'app' or 'app-with-db' with state 'Up'
+```
+
+**Check application logs:**
+
+Local:
+```bash
+# Server logs are printed to stdout when running `bun run dev`
+```
+
+Docker:
+```bash
+docker compose logs -f app          # If using --profile external-db
+docker compose logs -f app-with-db  # If using --profile with-db
+```
+
+**Verify bot token:**
+```bash
+# In your .env file
+cat .env | grep TELEGRAM_BOT_TOKEN
+```
+
+**Test with health check:**
+```bash
+curl http://localhost:3090/health
+# Expected: {"status":"ok"}
+```
+
+## Database Connection Errors
+
+**Check database health:**
+```bash
+curl http://localhost:3090/health/db
+# Expected: {"status":"ok","database":"connected"}
+```
+
+**For SQLite (default):**
+
+SQLite requires no setup. The database is created automatically at `~/.archon/archon.db`. If you see errors, check that the `~/.archon/` directory exists and is writable.
+
+**For remote PostgreSQL:**
+```bash
+# Verify DATABASE_URL
+echo $DATABASE_URL
+
+# Test connection directly
+psql $DATABASE_URL -c "SELECT 1"
+```
+
+**Verify tables exist (PostgreSQL):**
+```bash
+psql $DATABASE_URL -c "\dt"
+
+# Should show: remote_agent_codebases, remote_agent_conversations, remote_agent_sessions,
+# remote_agent_isolation_environments, remote_agent_workflow_runs, remote_agent_workflow_events,
+# remote_agent_messages
+```
+
+## Clone Command Fails
+
+**Verify GitHub token:**
+```bash
+cat .env | grep GH_TOKEN
+# Should have both GH_TOKEN and GITHUB_TOKEN set
+```
+
+**Test token validity:**
+```bash
+# Test GitHub API access
+curl -H "Authorization: token $GH_TOKEN" https://api.github.com/user
+```
+
+**Check workspace permissions:**
+
+The workspace directory is `~/.archon/workspaces/` by default (or `/.archon/workspaces/` in Docker). Make sure it exists and is writable.
+
+**Try manual clone:**
+```bash
+git clone https://github.com/user/repo ~/.archon/workspaces/test-repo
+```
+
+## GitHub Webhook Not Triggering
+
+**Verify webhook delivery:**
+1. Go to your webhook settings in GitHub
+2. Click on the webhook
+3. Check "Recent Deliveries" tab
+4. Look for successful deliveries (green checkmark)
+
+**Check webhook secret:**
+```bash
+cat .env | grep WEBHOOK_SECRET
+# Must match exactly what you entered in GitHub
+```
+
+**Verify ngrok is running (local dev):**
+```bash
+# Check ngrok status
+curl http://localhost:4040/api/tunnels
+# Or visit http://localhost:4040 in browser
+```
+
+**Check application logs for webhook processing:**
+
+Local:
+```bash
+# Look for GitHub-related log lines in server output
+```
+
+Docker:
+```bash
+docker compose logs -f app | grep GitHub          # --profile external-db
+docker compose logs -f app-with-db | grep GitHub  # --profile with-db
+```
+
+## TypeScript Compilation Errors
+
+**Clean and rebuild:**
+```bash
+rm -rf dist node_modules
+bun install
+bun run build
+```
+
+**Check for type errors:**
+```bash
+bun run type-check
+```
+
+## Port Conflicts
+
+**Check if port 3090 is already in use:**
+
+macOS/Linux:
+```bash
+lsof -i :3090
+```
+
+Windows:
+```bash
+netstat -ano | findstr :3090
+```
+
+You can override the port with the `PORT` environment variable:
+```bash
+PORT=4000 bun run dev
+```
+
+When running in a git worktree, Archon automatically allocates a unique port (3190-4089 range) so you don't need to worry about conflicts with the main instance.
+
+## Docker
+
+These issues are specific to running Archon inside Docker containers.
+
+### Container Won't Start
+
+**Check logs for specific errors:**
+```bash
+docker compose logs app          # If using --profile external-db
+docker compose logs app-with-db  # If using --profile with-db
+```
+
+**Verify environment variables:**
+```bash
+# Check if .env is properly formatted (include your profile)
+docker compose --profile external-db config  # or --profile with-db
+```
+
+**Rebuild without cache:**
+```bash
+docker compose --profile external-db build --no-cache  # or --profile with-db
+docker compose --profile external-db up -d             # or --profile with-db
+```
+
+### Docker Database Issues
+
+**For local PostgreSQL (`with-db` profile):**
+```bash
+# Check if postgres container is running
+docker compose ps postgres
+
+# Check postgres logs
+docker compose logs -f postgres
+
+# Test direct connection
+docker compose exec postgres psql -U postgres -c "SELECT 1"
+```
+
+**Verify tables exist (Docker PostgreSQL):**
+```bash
+docker compose exec postgres psql -U postgres -d remote_coding_agent -c "\dt"
+
+# Should show: remote_agent_codebases, remote_agent_conversations, remote_agent_sessions,
+# remote_agent_isolation_environments, remote_agent_workflow_runs, remote_agent_workflow_events,
+# remote_agent_messages
+```
+
+### Docker Clone Issues
+
+**Check workspace permissions inside the container:**
+```bash
+docker compose exec app ls -la /.archon/workspaces          # --profile external-db
+docker compose exec app-with-db ls -la /.archon/workspaces  # --profile with-db
+```
+
+**Try manual clone inside the container:**
+```bash
+docker compose exec app git clone https://github.com/user/repo /.archon/workspaces/test-repo
+# Or app-with-db if using --profile with-db
+```
