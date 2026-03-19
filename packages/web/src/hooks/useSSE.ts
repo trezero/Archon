@@ -74,7 +74,9 @@ export function useSSE(
   useEffect(() => {
     if (!conversationId) return;
 
-    const eventSource = new EventSource(`${SSE_BASE_URL}/api/stream/${conversationId}`);
+    const eventSource = new EventSource(
+      `${SSE_BASE_URL}/api/stream/${encodeURIComponent(conversationId)}`
+    );
 
     eventSource.onopen = (): void => {
       setConnected(true);

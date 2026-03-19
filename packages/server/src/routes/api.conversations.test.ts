@@ -305,3 +305,73 @@ describe('POST /api/conversations', () => {
     expect(body.error).toContain('Invalid JSON');
   });
 });
+
+// Regression tests for non-web adapter conversations (Gitea, GitHub forge adapters)
+// Platform conversation IDs from forge adapters contain slashes and # characters:
+// e.g. "CyberFitz-LLC/devops-platform#24" — these must be URL-encoded by the client
+// and correctly decoded by the server route params.
+// Ref: https://github.com/dynamous-community/remote-coding-agent/issues/476
+describe('GET /api/conversations/:id — forge platform IDs with encoded slashes', () => {
+  const GITEA_CONV = {
+    id: 'gitea-internal-uuid',
+    platform_conversation_id: 'CyberFitz-LLC/devops-platform#24',
+    title: 'feat: add context enrichment',
+    created_at: new Date(),
+    updated_at: new Date(),
+    platform_type: 'gitea',
+    deleted_at: null,
+    codebase_id: null,
+  };
+
+  test('finds gitea conversation when ID contains encoded slash and hash', async () => {
+    mockFindConversationByPlatformId.mockImplementationOnce(async platformId => {
+      // Server should receive the decoded platform ID (slashes + # restored)
+      expect(platformId).toBe('CyberFitz-LLC/devops-platform#24');
+      return GITEA_CONV;
+    });
+
+    const app = new Hono();
+    registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
+
+    // Client must URL-encode the ID: %2F for slash, %23 for #
+    const response = await app.request('/api/conversations/CyberFitz-LLC%2Fdevops-platform%2324');
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      platform_conversation_id: string;
+      platform_type: string;
+    };
+    expect(body.platform_conversation_id).toBe('CyberFitz-LLC/devops-platform#24');
+    expect(body.platform_type).toBe('gitea');
+  });
+
+  test('finds gitea PR conversation with ! separator when ID is encoded', async () => {
+    const giteaPRConv = {
+      ...GITEA_CONV,
+      platform_conversation_id: 'owner/repo!42',
+      platform_type: 'gitea',
+    };
+
+    mockFindConversationByPlatformId.mockImplementationOnce(async platformId => {
+      expect(platformId).toBe('owner/repo!42');
+      return giteaPRConv;
+    });
+
+    const app = new Hono();
+    registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
+
+    const response = await app.request('/api/conversations/owner%2Frepo!42');
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { platform_conversation_id: string };
+    expect(body.platform_conversation_id).toBe('owner/repo!42');
+  });
+
+  test('returns 404 for unknown gitea conversation ID', async () => {
+    mockFindConversationByPlatformId.mockImplementationOnce(async () => null);
+
+    const app = new Hono();
+    registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
+
+    const response = await app.request('/api/conversations/unknown-org%2Funknown-repo%2399');
+    expect(response.status).toBe(404);
+  });
+});
