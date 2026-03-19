@@ -18,14 +18,9 @@ describe('worktree-copy', () => {
       expect(result).toEqual({ source: '.env', destination: '.env' });
     });
 
-    test('parses rename syntax', () => {
-      const result = parseCopyFileEntry('.env.example -> .env');
-      expect(result).toEqual({ source: '.env.example', destination: '.env' });
-    });
-
-    test('handles whitespace', () => {
-      const result = parseCopyFileEntry('  .env.example   ->   .env  ');
-      expect(result).toEqual({ source: '.env.example', destination: '.env' });
+    test('trims whitespace', () => {
+      const result = parseCopyFileEntry('  .env  ');
+      expect(result).toEqual({ source: '.env', destination: '.env' });
     });
 
     test('handles directory paths', () => {
@@ -33,46 +28,28 @@ describe('worktree-copy', () => {
       expect(result).toEqual({ source: 'data/fixtures/', destination: 'data/fixtures/' });
     });
 
-    test('handles nested rename paths', () => {
-      const result = parseCopyFileEntry('.vscode/settings.example.json -> .vscode/settings.json');
+    test('handles nested paths', () => {
+      const result = parseCopyFileEntry('.vscode/settings.json');
       expect(result).toEqual({
-        source: '.vscode/settings.example.json',
+        source: '.vscode/settings.json',
         destination: '.vscode/settings.json',
       });
     });
 
-    // Input validation tests
+    test('treats arrow literally (no rename syntax)', () => {
+      const result = parseCopyFileEntry('file-with->arrow.txt');
+      expect(result).toEqual({
+        source: 'file-with->arrow.txt',
+        destination: 'file-with->arrow.txt',
+      });
+    });
+
     test('throws on empty string', () => {
       expect(() => parseCopyFileEntry('')).toThrow('Copy entry cannot be empty');
     });
 
     test('throws on whitespace-only string', () => {
       expect(() => parseCopyFileEntry('   ')).toThrow('Copy entry cannot be empty');
-    });
-
-    test('throws on empty source in rename syntax', () => {
-      expect(() => parseCopyFileEntry(' -> .env')).toThrow(
-        'source and destination cannot be empty'
-      );
-    });
-
-    test('throws on empty destination in rename syntax', () => {
-      expect(() => parseCopyFileEntry('.env -> ')).toThrow(
-        'source and destination cannot be empty'
-      );
-    });
-
-    test('throws on arrow-only entry', () => {
-      expect(() => parseCopyFileEntry(' -> ')).toThrow('source and destination cannot be empty');
-    });
-
-    // Edge case: multiple arrows - split only on first occurrence
-    test('splits only on first arrow occurrence', () => {
-      const result = parseCopyFileEntry('source.txt -> dest -> with -> arrows.txt');
-      expect(result).toEqual({
-        source: 'source.txt',
-        destination: 'dest -> with -> arrows.txt',
-      });
     });
   });
 
@@ -222,21 +199,6 @@ describe('worktree-copy', () => {
       expect(result).toBe(false);
     });
 
-    test('handles rename syntax correctly', async () => {
-      statSpy.mockResolvedValue({ isDirectory: () => false } as Stats);
-
-      const result = await copyWorktreeFile('/repo', '/worktree', {
-        source: '.env.example',
-        destination: '.env',
-      });
-
-      expect(result).toBe(true);
-      expect(copyFileSpy).toHaveBeenCalledWith(
-        join('/repo', '.env.example'),
-        join('/worktree', '.env')
-      );
-    });
-
     // Path traversal tests
     test('blocks source path traversal', async () => {
       const result = await copyWorktreeFile('/repo', '/worktree', {
@@ -326,12 +288,12 @@ describe('worktree-copy', () => {
       statSpy.mockResolvedValue({ isDirectory: () => false } as Stats);
 
       const result = await copyWorktreeFiles('/repo', '/worktree', [
-        '.env.example -> .env',
+        '.env',
         '.vscode/settings.json',
       ]);
 
       expect(result).toHaveLength(2);
-      expect(result[0]).toEqual({ source: '.env.example', destination: '.env' });
+      expect(result[0]).toEqual({ source: '.env', destination: '.env' });
       expect(result[1]).toEqual({
         source: '.vscode/settings.json',
         destination: '.vscode/settings.json',
@@ -344,13 +306,10 @@ describe('worktree-copy', () => {
         .mockResolvedValueOnce({ isDirectory: () => false } as Stats)
         .mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
 
-      const result = await copyWorktreeFiles('/repo', '/worktree', [
-        '.env.example -> .env',
-        '.env',
-      ]);
+      const result = await copyWorktreeFiles('/repo', '/worktree', ['.env', '.archon']);
 
       expect(result).toHaveLength(1);
-      expect(result[0]).toEqual({ source: '.env.example', destination: '.env' });
+      expect(result[0]).toEqual({ source: '.env', destination: '.env' });
     });
 
     test('returns empty array when no files configured', async () => {
@@ -377,14 +336,14 @@ describe('worktree-copy', () => {
 
       const result = await copyWorktreeFiles('/repo', '/worktree', [
         '', // Invalid - empty
-        '.env.example -> .env', // Valid
+        '.env', // Valid
         '   ', // Invalid - whitespace only
         '.vscode/settings.json', // Valid
       ]);
 
       // Should have only the 2 valid entries
       expect(result).toHaveLength(2);
-      expect(result[0]).toEqual({ source: '.env.example', destination: '.env' });
+      expect(result[0]).toEqual({ source: '.env', destination: '.env' });
       expect(result[1]).toEqual({
         source: '.vscode/settings.json',
         destination: '.vscode/settings.json',
@@ -395,14 +354,14 @@ describe('worktree-copy', () => {
       statSpy.mockResolvedValue({ isDirectory: () => false } as Stats);
 
       const result = await copyWorktreeFiles('/repo', '/worktree', [
-        '.env.example -> .env', // Valid
+        '.env', // Valid
         '../../../etc/passwd', // Path traversal - blocked
         'data/config.json', // Valid
       ]);
 
       // Path traversal entry should be skipped
       expect(result).toHaveLength(2);
-      expect(result[0]).toEqual({ source: '.env.example', destination: '.env' });
+      expect(result[0]).toEqual({ source: '.env', destination: '.env' });
       expect(result[1]).toEqual({ source: 'data/config.json', destination: 'data/config.json' });
     });
   });

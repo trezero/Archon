@@ -22,34 +22,18 @@ export interface CopyFileEntry {
 }
 
 /**
- * Parse a copy file entry from config
- * Supports "source -> destination" syntax or just "source"
+ * Parse a copy file entry from config.
+ * Each entry is a path to a git-ignored file or directory to copy into worktrees.
  *
- * @param entry - Config entry like ".env.example -> .env" or ".env"
- * @returns Parsed source and destination paths
- * @throws Error if entry is empty or invalid
+ * @param entry - Config entry like ".env" or "data/fixtures/"
+ * @returns Parsed source and destination (always identical)
+ * @throws Error if entry is empty
  */
 export function parseCopyFileEntry(entry: string): CopyFileEntry {
   const trimmed = entry.trim();
 
   if (!trimmed) {
     throw new Error('Copy entry cannot be empty');
-  }
-
-  // Check for arrow separator with any surrounding whitespace
-  // Using regex to handle " -> ", "->", " ->", "-> " etc.
-  const arrowRegex = /^(.*?)\s*->\s*(.*)$/;
-  const arrowMatch = arrowRegex.exec(trimmed);
-
-  if (arrowMatch) {
-    const source = arrowMatch[1].trim();
-    const destination = arrowMatch[2].trim();
-
-    if (!source || !destination) {
-      throw new Error(`Invalid copy entry: "${entry}" - source and destination cannot be empty`);
-    }
-
-    return { source, destination };
   }
 
   return { source: trimmed, destination: trimmed };
@@ -167,7 +151,7 @@ export async function copyWorktreeFile(
  *
  * @param canonicalRepoPath - Path to the main repository
  * @param worktreePath - Path to the new worktree
- * @param copyFiles - Array of file paths from config (supports "source -> dest" syntax)
+ * @param copyFiles - Array of file paths from config
  * @returns Array of successfully copied entries
  */
 export async function copyWorktreeFiles(

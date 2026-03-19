@@ -126,10 +126,9 @@ export interface RepoConfig {
     baseBranch?: string;
 
     /**
-     * Files/directories to copy from main repo to new worktrees
-     * Git-ignored files (like .env) aren't included in worktrees by default.
-     * Supports "source -> destination" syntax for renaming.
-     * @example [".env.example -> .env", ".env", "data/fixtures/"]
+     * Git-ignored files/directories to copy from main repo to new worktrees.
+     * Tracked files are already in worktrees — only use this for git-ignored files.
+     * @example [".env", ".archon", "data/fixtures/"]
      */
     copyFiles?: string[];
   };
