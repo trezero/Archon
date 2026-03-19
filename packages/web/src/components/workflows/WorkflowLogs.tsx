@@ -57,10 +57,25 @@ function hydrateMessages(
 
   const filtered = startedAt ? hydrated.filter(m => m.timestamp >= startedAt) : hydrated;
 
-  // Attach tool events from workflow_events table to their nearest preceding assistant message
+  // Attach tool events from workflow_events table to their nearest preceding assistant message.
+  // During active execution, the persistence buffer may not have flushed assistant messages
+  // to the DB yet. In that case, tool events exist (in workflow_events table) but have no
+  // messages to attach to. We collect unattached events and create a synthetic message.
   if (toolEvents && toolEvents.length > 0) {
     const assistantMsgs = filtered.filter(m => m.role === 'assistant');
+    // Collect IDs of tool calls already present on messages (from metadata)
+    const existingToolIds = new Set<string>();
+    for (const m of assistantMsgs) {
+      if (m.toolCalls) {
+        for (const tc of m.toolCalls) existingToolIds.add(tc.id);
+      }
+    }
+
+    const unattached: ToolCallDisplay[] = [];
     for (const te of toolEvents) {
+      // Skip if already hydrated from message metadata
+      if (existingToolIds.has(te.id)) continue;
+
       const teTimestamp = new Date(te.createdAt).getTime();
       // Find the last assistant message that started before this tool event
       let target: ChatMessage | undefined;
@@ -71,7 +86,6 @@ function hydrateMessages(
       if (!target) target = assistantMsgs[0];
       if (target) {
         if (!target.toolCalls) target.toolCalls = [];
-        // Dedup by event ID
         if (!target.toolCalls.some(tc => tc.id === te.id)) {
           target.toolCalls.push({
             id: te.id,
@@ -79,10 +93,38 @@ function hydrateMessages(
             input: te.input,
             startedAt: teTimestamp,
             isExpanded: false,
-            duration: te.duration, // undefined = running (shows spinner + ticking elapsed)
+            duration: te.duration,
           });
         }
+      } else {
+        // No assistant message to attach to — collect for synthetic message
+        unattached.push({
+          id: te.id,
+          name: te.name,
+          input: te.input,
+          startedAt: teTimestamp,
+          isExpanded: false,
+          duration: te.duration,
+        });
       }
+    }
+
+    // Create a synthetic assistant message for unattached tool events.
+    // This handles the case where the persistence buffer hasn't flushed yet
+    // during active workflow execution — tool events exist in the DB but
+    // the assistant messages containing them haven't been persisted.
+    if (unattached.length > 0) {
+      const earliestTs = Math.min(...unattached.map(tc => tc.startedAt));
+      filtered.push({
+        id: `synthetic-tools-${String(earliestTs)}`,
+        role: 'assistant',
+        content: '',
+        toolCalls: unattached,
+        timestamp: earliestTs,
+        isStreaming: false,
+      });
+      // Re-sort since we inserted a message
+      filtered.sort((a, b) => a.timestamp - b.timestamp);
     }
   }
 
