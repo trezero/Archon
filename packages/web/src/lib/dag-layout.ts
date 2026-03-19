@@ -3,8 +3,8 @@ import dagre from '@dagrejs/dagre';
 import type { DagNode } from '@archon/workflows/types';
 import type { DagFlowNode } from '@/components/workflows/DagNodeComponent';
 
-export const NODE_WIDTH = 160;
-export const NODE_HEIGHT = 50;
+export const NODE_WIDTH = 180;
+export const NODE_HEIGHT = 80;
 
 export function layoutWithDagre(
   nodes: DagFlowNode[],
@@ -13,7 +13,7 @@ export function layoutWithDagre(
   try {
     const g = new dagre.graphlib.Graph();
     g.setDefaultEdgeLabel(() => ({}));
-    g.setGraph({ rankdir: 'TB', ranksep: 60, nodesep: 40 });
+    g.setGraph({ rankdir: 'TB', ranksep: 80, nodesep: 40 });
 
     for (const node of nodes) {
       g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
@@ -96,4 +96,61 @@ export function dagNodesToReactFlow(dagNodes: readonly DagNode[]): {
 
   const { nodes: layouted, edges: layoutedEdges } = layoutWithDagre(nodes, edges);
   return { nodes: layouted, edges: layoutedEdges };
+}
+
+/**
+ * Compute topological layer index for each node using Kahn's algorithm (BFS).
+ * Nodes with zero in-degree start at layer 0; each subsequent layer increments by 1.
+ */
+export function computeTopologicalLayers(nodes: DagFlowNode[], edges: Edge[]): Map<string, number> {
+  const layers = new Map<string, number>();
+  const inDegree = new Map<string, number>();
+  const adjacency = new Map<string, string[]>();
+
+  for (const node of nodes) {
+    inDegree.set(node.id, 0);
+    adjacency.set(node.id, []);
+  }
+
+  for (const edge of edges) {
+    inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1);
+    const neighbors = adjacency.get(edge.source);
+    if (neighbors) {
+      neighbors.push(edge.target);
+    }
+  }
+
+  // BFS from zero-in-degree nodes
+  const queue: string[] = [];
+  for (const [nodeId, degree] of inDegree) {
+    if (degree === 0) {
+      queue.push(nodeId);
+      layers.set(nodeId, 0);
+    }
+  }
+
+  let head = 0;
+  while (head < queue.length) {
+    const current = queue[head++];
+    const currentLayer = layers.get(current) ?? 0;
+    const neighbors = adjacency.get(current) ?? [];
+
+    for (const neighbor of neighbors) {
+      const newDegree = (inDegree.get(neighbor) ?? 1) - 1;
+      inDegree.set(neighbor, newDegree);
+
+      // Assign the maximum layer from all incoming paths
+      const existingLayer = layers.get(neighbor);
+      const candidateLayer = currentLayer + 1;
+      if (existingLayer === undefined || candidateLayer > existingLayer) {
+        layers.set(neighbor, candidateLayer);
+      }
+
+      if (newDegree === 0) {
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  return layers;
 }

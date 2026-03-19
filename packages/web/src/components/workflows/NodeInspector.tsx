@@ -1,11 +1,27 @@
-import { useState, useCallback, type ChangeEvent } from 'react';
+import { useState, useCallback } from 'react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
 import { TRIGGER_RULES } from '@archon/workflows/types';
 import type { TriggerRule } from '@archon/workflows/types';
 import type { DagNodeData } from './DagNodeComponent';
 import type { CommandEntry } from '@/lib/api';
 import type { SingleStep, ParallelBlock } from '@archon/workflows/types';
 
-interface DagInspectorProps {
+// ── Props types ──
+
+/** New DAG-mode inspector props (tabbed right panel). */
+export interface NodeInspectorProps {
+  node: DagNodeData;
+  commands: CommandEntry[];
+  onUpdate: (updates: Partial<DagNodeData>) => void;
+  onDelete: () => void;
+  onClose: () => void;
+}
+
+/** @deprecated Legacy props — kept for backward compat with WorkflowBuilder until Task 15 rewrites it. */
+interface DagInspectorLegacyProps {
   mode: 'dag';
   node: DagNodeData;
   commands: CommandEntry[];
@@ -13,6 +29,7 @@ interface DagInspectorProps {
   onDelete: () => void;
 }
 
+/** @deprecated Legacy props — kept for backward compat. */
 interface SequentialInspectorProps {
   mode: 'sequential';
   step: SingleStep;
@@ -22,21 +39,54 @@ interface SequentialInspectorProps {
   onDelete: () => void;
 }
 
+/** @deprecated Legacy props — kept for backward compat. */
 interface ParallelBlockInspectorProps {
   mode: 'parallel';
   block: ParallelBlock;
   blockIndex: number;
   commands: CommandEntry[];
-  /** Takes a full ParallelBlock (not partial) because the sub-step array must be replaced atomically. */
   onUpdate: (block: ParallelBlock) => void;
   onUngroup: () => void;
   onDelete: () => void;
 }
 
-type NodeInspectorProps =
-  | DagInspectorProps
+/** @deprecated Legacy discriminated union — kept for backward compat. */
+type LegacyNodeInspectorProps =
+  | DagInspectorLegacyProps
   | SequentialInspectorProps
   | ParallelBlockInspectorProps;
+
+// ── Shared input styling ──
+
+const inputClass =
+  'w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent';
+
+const selectClass =
+  'w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent';
+
+const labelClass = 'text-[10px] text-text-tertiary uppercase tracking-wide';
+
+const textareaClass =
+  'w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text-primary font-mono placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent resize-y';
+
+// ── Field wrapper ──
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className={labelClass}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+// ── Shared tools input (used by legacy inspectors) ──
 
 function ToolsInput({
   label,
@@ -50,7 +100,7 @@ function ToolsInput({
   const text = value?.join(', ') ?? '';
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-[10px] text-text-tertiary uppercase tracking-wide">{label}</label>
+      <label className={labelClass}>{label}</label>
       <input
         type="text"
         value={text}
@@ -74,21 +124,563 @@ function ToolsInput({
   );
 }
 
-function DagInspector({
+// ── Tools mode type ──
+
+type ToolsMode = 'none' | 'allow' | 'deny';
+
+function resolveToolsMode(node: DagNodeData): ToolsMode {
+  if (node.allowed_tools !== undefined) return 'allow';
+  if (node.denied_tools !== undefined) return 'deny';
+  return 'none';
+}
+
+// ── Tag list for dependencies ──
+
+function DependencyTags({
+  values,
+  onChange,
+}: {
+  values: string[];
+  onChange: (deps: string[] | undefined) => void;
+}): React.ReactElement {
+  const [adding, setAdding] = useState(false);
+  const [addValue, setAddValue] = useState('');
+
+  const handleAdd = (): void => {
+    const trimmed = addValue.trim();
+    if (trimmed && !values.includes(trimmed)) {
+      onChange([...values, trimmed]);
+    }
+    setAddValue('');
+    setAdding(false);
+  };
+
+  const handleRemove = (dep: string): void => {
+    const next = values.filter(v => v !== dep);
+    onChange(next.length > 0 ? next : undefined);
+  };
+
+  return (
+    <div className="flex flex-wrap gap-1 items-center">
+      {values.map(dep => (
+        <span
+          key={dep}
+          className="inline-flex items-center gap-1 rounded-md bg-surface-elevated px-1.5 py-0.5 text-[10px] font-mono text-text-secondary"
+        >
+          {dep}
+          <button
+            type="button"
+            onClick={(): void => {
+              handleRemove(dep);
+            }}
+            className="text-text-tertiary hover:text-error"
+          >
+            x
+          </button>
+        </span>
+      ))}
+      {adding ? (
+        <input
+          type="text"
+          value={addValue}
+          onChange={(e): void => {
+            setAddValue(e.target.value);
+          }}
+          onKeyDown={(e): void => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              handleAdd();
+            }
+            if (e.key === 'Escape') {
+              setAdding(false);
+              setAddValue('');
+            }
+          }}
+          onBlur={handleAdd}
+          autoFocus
+          placeholder="node-id"
+          className="w-20 rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10px] font-mono text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={(): void => {
+            setAdding(true);
+          }}
+          className="inline-flex items-center rounded-md border border-dashed border-border px-1.5 py-0.5 text-[10px] text-text-tertiary hover:text-text-secondary hover:border-accent"
+        >
+          +
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── General Tab ──
+
+function GeneralTab({
   node,
   commands,
   onUpdate,
+}: {
+  node: DagNodeData;
+  commands: CommandEntry[];
+  onUpdate: (updates: Partial<DagNodeData>) => void;
+}): React.ReactElement {
+  return (
+    <div className="flex flex-col gap-3 p-3">
+      {/* Node ID */}
+      <Field label="Node ID">
+        <input
+          type="text"
+          value={node.id}
+          onChange={(e): void => {
+            onUpdate({ id: e.target.value });
+          }}
+          className={cn(inputClass, 'font-mono')}
+        />
+        <p className="text-[9px] text-warning">
+          Changing the node ID may break dependency references.
+        </p>
+      </Field>
+
+      {/* Type selector */}
+      <Field label="Type">
+        <select
+          value={node.nodeType}
+          onChange={(e): void => {
+            const newType = e.target.value as DagNodeData['nodeType'];
+            const updates: Partial<DagNodeData> = { nodeType: newType };
+            if (newType === 'command') {
+              updates.promptText = undefined;
+              updates.bashScript = undefined;
+              updates.bashTimeout = undefined;
+              updates.label = '';
+            } else if (newType === 'prompt') {
+              updates.bashScript = undefined;
+              updates.bashTimeout = undefined;
+              updates.label = 'Prompt';
+            } else if (newType === 'bash') {
+              updates.promptText = undefined;
+              updates.label = 'Shell';
+              updates.allowed_tools = undefined;
+              updates.denied_tools = undefined;
+              updates.output_format = undefined;
+              updates.hooks = undefined;
+              updates.mcp = undefined;
+              updates.skills = undefined;
+            }
+            onUpdate(updates);
+          }}
+          className={selectClass}
+        >
+          <option value="command">Command</option>
+          <option value="prompt">Prompt</option>
+          <option value="bash">Bash</option>
+        </select>
+      </Field>
+
+      {/* Type-adaptive content */}
+      {node.nodeType === 'command' && (
+        <Field label="Command">
+          <select
+            value={node.label}
+            onChange={(e): void => {
+              onUpdate({ label: e.target.value });
+            }}
+            className={selectClass}
+          >
+            <option value="">Select command...</option>
+            {commands.map(cmd => (
+              <option key={cmd.name} value={cmd.name}>
+                {cmd.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+
+      {node.nodeType === 'prompt' && (
+        <Field label="Prompt">
+          <textarea
+            value={node.promptText ?? ''}
+            onChange={(e): void => {
+              onUpdate({ promptText: e.target.value });
+            }}
+            rows={5}
+            placeholder="Enter inline prompt..."
+            className={cn(textareaClass, 'min-h-[120px]')}
+          />
+        </Field>
+      )}
+
+      {node.nodeType === 'bash' && (
+        <>
+          <Field label="Shell Script">
+            <textarea
+              value={node.bashScript ?? ''}
+              onChange={(e): void => {
+                onUpdate({ bashScript: e.target.value });
+              }}
+              rows={5}
+              placeholder="echo 'hello world'"
+              className={cn(textareaClass, 'min-h-[120px]')}
+            />
+          </Field>
+          <Field label="Timeout (ms)">
+            <input
+              type="number"
+              value={node.bashTimeout ?? ''}
+              onChange={(e): void => {
+                const v = e.target.value;
+                onUpdate({ bashTimeout: v ? Number(v) : undefined });
+              }}
+              placeholder="120000"
+              className={inputClass}
+            />
+          </Field>
+        </>
+      )}
+
+      {/* Dependencies */}
+      <Field label="Dependencies">
+        <DependencyTags
+          values={node.depends_on ?? []}
+          onChange={(deps): void => {
+            onUpdate({ depends_on: deps });
+          }}
+        />
+      </Field>
+
+      {/* When condition */}
+      <Field label="When Condition">
+        <input
+          type="text"
+          value={node.when ?? ''}
+          onChange={(e): void => {
+            onUpdate({ when: e.target.value || undefined });
+          }}
+          placeholder="$nodeId.output.field == 'value'"
+          className={cn(inputClass, 'font-mono')}
+        />
+      </Field>
+    </div>
+  );
+}
+
+// ── Execution Tab ──
+
+function ExecutionTab({
+  node,
+  onUpdate,
+}: {
+  node: DagNodeData;
+  onUpdate: (updates: Partial<DagNodeData>) => void;
+}): React.ReactElement {
+  const isBash = node.nodeType === 'bash';
+
+  return (
+    <div className="flex flex-col gap-3 p-3">
+      {!isBash && (
+        <>
+          <Field label="Provider">
+            <select
+              value={node.provider ?? ''}
+              onChange={(e): void => {
+                onUpdate({
+                  provider: (e.target.value || undefined) as 'claude' | 'codex' | undefined,
+                });
+              }}
+              className={selectClass}
+            >
+              <option value="">Inherit</option>
+              <option value="claude">Claude</option>
+              <option value="codex">Codex</option>
+            </select>
+          </Field>
+
+          <Field label="Model">
+            <input
+              type="text"
+              value={node.model ?? ''}
+              onChange={(e): void => {
+                onUpdate({ model: e.target.value || undefined });
+              }}
+              placeholder="Inherit"
+              className={inputClass}
+            />
+          </Field>
+
+          <Field label="Context">
+            <select
+              value={node.context ?? ''}
+              onChange={(e): void => {
+                onUpdate({ context: (e.target.value || undefined) as 'fresh' | undefined });
+              }}
+              className={selectClass}
+            >
+              <option value="">Inherit</option>
+              <option value="fresh">Fresh</option>
+            </select>
+          </Field>
+        </>
+      )}
+
+      <Field label="Trigger Rule">
+        <select
+          value={node.trigger_rule ?? ''}
+          onChange={(e): void => {
+            onUpdate({
+              trigger_rule: (e.target.value || undefined) as TriggerRule | undefined,
+            });
+          }}
+          className={selectClass}
+        >
+          <option value="">Default (all_success)</option>
+          {TRIGGER_RULES.map(rule => (
+            <option key={rule} value={rule}>
+              {rule}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <Field label="Idle Timeout (ms)">
+        <input
+          type="number"
+          value={node.idle_timeout ?? ''}
+          onChange={(e): void => {
+            const v = e.target.value;
+            onUpdate({ idle_timeout: v ? Number(v) : undefined });
+          }}
+          placeholder="300000"
+          className={inputClass}
+        />
+      </Field>
+
+      {/* Retry config */}
+      <div className="border-t border-border pt-3 mt-1">
+        <p className={cn(labelClass, 'mb-2')}>Retry Configuration</p>
+
+        <div className="flex flex-col gap-2">
+          <Field label="Max Attempts (1-5)">
+            <input
+              type="number"
+              min={1}
+              max={5}
+              value={node.retry?.max_attempts ?? ''}
+              onChange={(e): void => {
+                const v = e.target.value;
+                if (!v) {
+                  onUpdate({ retry: undefined });
+                } else {
+                  onUpdate({
+                    retry: {
+                      max_attempts: Number(v),
+                      delay_ms: node.retry?.delay_ms,
+                      on_error: node.retry?.on_error,
+                    },
+                  });
+                }
+              }}
+              placeholder="2"
+              className={inputClass}
+            />
+          </Field>
+
+          <Field label="Delay (ms, 1000-60000)">
+            <input
+              type="number"
+              min={1000}
+              max={60000}
+              value={node.retry?.delay_ms ?? ''}
+              onChange={(e): void => {
+                const v = e.target.value;
+                if (node.retry) {
+                  onUpdate({
+                    retry: {
+                      ...node.retry,
+                      delay_ms: v ? Number(v) : undefined,
+                    },
+                  });
+                }
+              }}
+              placeholder="3000"
+              disabled={!node.retry}
+              className={cn(inputClass, !node.retry && 'opacity-50')}
+            />
+          </Field>
+
+          <Field label="On Error">
+            <select
+              value={node.retry?.on_error ?? ''}
+              onChange={(e): void => {
+                if (node.retry) {
+                  onUpdate({
+                    retry: {
+                      ...node.retry,
+                      on_error: (e.target.value || undefined) as 'transient' | 'all' | undefined,
+                    },
+                  });
+                }
+              }}
+              disabled={!node.retry}
+              className={cn(selectClass, !node.retry && 'opacity-50')}
+            >
+              <option value="">Default (transient)</option>
+              <option value="transient">transient</option>
+              <option value="all">all</option>
+            </select>
+          </Field>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Tools Tab ──
+
+const TOOL_PRESETS: readonly {
+  label: string;
+  allowed: string[];
+}[] = [
+  { label: 'No tools', allowed: [] },
+  { label: 'Read-only', allowed: ['Read', 'Glob', 'Grep'] },
+  { label: 'Edit-only', allowed: ['Read', 'Write', 'Edit', 'Glob', 'Grep'] },
+];
+
+function ToolsTab({
+  node,
+  onUpdate,
+}: {
+  node: DagNodeData;
+  onUpdate: (updates: Partial<DagNodeData>) => void;
+}): React.ReactElement {
+  const currentMode = resolveToolsMode(node);
+
+  const handleModeChange = (mode: ToolsMode): void => {
+    if (mode === 'none') {
+      onUpdate({ allowed_tools: undefined, denied_tools: undefined });
+    } else if (mode === 'allow') {
+      onUpdate({ allowed_tools: node.allowed_tools ?? [], denied_tools: undefined });
+    } else {
+      onUpdate({ allowed_tools: undefined, denied_tools: node.denied_tools ?? [] });
+    }
+  };
+
+  const parseToolsList = (value: string): string[] | undefined => {
+    if (!value.trim()) return undefined;
+    return value
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+  };
+
+  return (
+    <div className="flex flex-col gap-3 p-3">
+      <Field label="Mode">
+        <div className="flex gap-1">
+          {(['none', 'allow', 'deny'] as const).map(mode => (
+            <button
+              key={mode}
+              type="button"
+              onClick={(): void => {
+                handleModeChange(mode);
+              }}
+              className={cn(
+                'flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                currentMode === mode
+                  ? 'bg-accent text-accent-foreground'
+                  : 'bg-surface-elevated text-text-secondary hover:text-text-primary'
+              )}
+            >
+              {mode === 'none' ? 'Default' : mode === 'allow' ? 'Allow' : 'Deny'}
+            </button>
+          ))}
+        </div>
+      </Field>
+
+      <Field label="Presets">
+        <div className="flex flex-wrap gap-1">
+          {TOOL_PRESETS.map(preset => (
+            <button
+              key={preset.label}
+              type="button"
+              onClick={(): void => {
+                onUpdate({ allowed_tools: preset.allowed, denied_tools: undefined });
+              }}
+              className="rounded-full border border-border px-2 py-0.5 text-[10px] text-text-secondary hover:text-text-primary hover:border-accent transition-colors"
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </Field>
+
+      <Field label="Allowed Tools">
+        <input
+          type="text"
+          value={node.allowed_tools?.join(', ') ?? ''}
+          onChange={(e): void => {
+            onUpdate({ allowed_tools: parseToolsList(e.target.value) });
+          }}
+          placeholder="tool1, tool2..."
+          className={inputClass}
+        />
+      </Field>
+
+      <Field label="Denied Tools">
+        <input
+          type="text"
+          value={node.denied_tools?.join(', ') ?? ''}
+          onChange={(e): void => {
+            onUpdate({ denied_tools: parseToolsList(e.target.value) });
+          }}
+          placeholder="tool1, tool2..."
+          className={inputClass}
+        />
+      </Field>
+    </div>
+  );
+}
+
+// ── Advanced Tab ──
+
+function AdvancedTab({
+  node,
+  onUpdate,
   onDelete,
-}: Omit<DagInspectorProps, 'mode'>): React.ReactElement {
+}: {
+  node: DagNodeData;
+  onUpdate: (updates: Partial<DagNodeData>) => void;
+  onDelete: () => void;
+}): React.ReactElement {
   const [outputFormatText, setOutputFormatText] = useState(
     node.output_format ? JSON.stringify(node.output_format, null, 2) : ''
   );
   const [outputFormatError, setOutputFormatError] = useState<string | null>(null);
-  const [showOutputFormat, setShowOutputFormat] = useState(!!node.output_format);
 
   const [hooksText, setHooksText] = useState(node.hooks ? JSON.stringify(node.hooks, null, 2) : '');
   const [hooksError, setHooksError] = useState<string | null>(null);
-  const [showHooks, setShowHooks] = useState(!!node.hooks);
+
+  const handleOutputFormatChange = useCallback(
+    (text: string): void => {
+      setOutputFormatText(text);
+      if (!text.trim()) {
+        setOutputFormatError(null);
+        onUpdate({ output_format: undefined });
+        return;
+      }
+      try {
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        setOutputFormatError(null);
+        onUpdate({ output_format: parsed });
+      } catch (e) {
+        setOutputFormatError(e instanceof SyntaxError ? e.message : 'Invalid JSON');
+      }
+    },
+    [onUpdate]
+  );
 
   const handleHooksChange = useCallback(
     (text: string): void => {
@@ -109,328 +701,154 @@ function DagInspector({
     [onUpdate]
   );
 
-  const handleOutputFormatChange = useCallback(
-    (text: string): void => {
-      setOutputFormatText(text);
-      if (!text.trim()) {
-        setOutputFormatError(null);
-        onUpdate({ output_format: undefined });
-        return;
-      }
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(text) as Record<string, unknown>;
-      } catch (e) {
-        setOutputFormatError(e instanceof SyntaxError ? e.message : 'Invalid JSON');
-        return;
-      }
-      setOutputFormatError(null);
-      onUpdate({ output_format: parsed });
-    },
-    [onUpdate]
-  );
-
-  const isBash = node.nodeType === 'bash';
+  const parseToolsList = (value: string): string[] | undefined => {
+    if (!value.trim()) return undefined;
+    return value
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+  };
 
   return (
-    <div className="flex flex-wrap gap-3 items-start">
-      {/* ID */}
-      <div className="flex flex-col gap-1">
-        <label className="text-[10px] text-text-tertiary uppercase tracking-wide">Node ID</label>
-        <span className="text-xs text-text-secondary font-mono">{node.id}</span>
-      </div>
-
-      {/* Command, Prompt, or Bash */}
-      {isBash ? (
-        <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
-          <label className="text-[10px] text-text-tertiary uppercase tracking-wide">
-            Shell Script
-          </label>
-          <textarea
-            value={node.bashScript ?? ''}
-            onChange={(e): void => {
-              onUpdate({ bashScript: e.target.value });
-            }}
-            rows={3}
-            placeholder="echo 'hello world'"
-            className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary font-mono placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent resize-y"
-          />
-        </div>
-      ) : node.nodeType === 'command' ? (
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-text-tertiary uppercase tracking-wide">Command</label>
-          <select
-            value={node.label}
-            onChange={(e): void => {
-              onUpdate({ label: e.target.value });
-            }}
-            className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
-          >
-            <option value="">Select...</option>
-            {commands.map(cmd => (
-              <option key={cmd.name} value={cmd.name}>
-                {cmd.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
-          <label className="text-[10px] text-text-tertiary uppercase tracking-wide">Prompt</label>
-          <textarea
-            value={node.promptText ?? ''}
-            onChange={(e): void => {
-              onUpdate({ promptText: e.target.value });
-            }}
-            rows={2}
-            placeholder="Enter inline prompt..."
-            className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent resize-y"
-          />
-        </div>
-      )}
-
-      {/* Bash-specific: Timeout */}
-      {isBash && (
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-text-tertiary uppercase tracking-wide">
-            Timeout (ms)
-          </label>
-          <input
-            type="number"
-            value={node.bashTimeout ?? ''}
-            onChange={(e): void => {
-              const v = e.target.value;
-              onUpdate({ bashTimeout: v ? Number(v) : undefined });
-            }}
-            placeholder="120000"
-            className="w-28 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
-          />
-        </div>
-      )}
-
-      {/* AI-only fields (Provider, Model, Context, Tools, Output Format); Trigger Rule and When Condition below apply to all node types */}
-      {!isBash && (
-        <>
-          {/* Provider */}
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-text-tertiary uppercase tracking-wide">
-              Provider
-            </label>
-            <select
-              value={node.provider ?? ''}
-              onChange={(e): void => {
-                onUpdate({
-                  provider: (e.target.value || undefined) as 'claude' | 'codex' | undefined,
-                });
-              }}
-              className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
-            >
-              <option value="">Inherited</option>
-              <option value="claude">claude</option>
-              <option value="codex">codex</option>
-            </select>
-          </div>
-
-          {/* Model */}
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-text-tertiary uppercase tracking-wide">Model</label>
-            <input
-              type="text"
-              value={node.model ?? ''}
-              onChange={(e): void => {
-                onUpdate({ model: e.target.value || undefined });
-              }}
-              placeholder="Inherited"
-              className="w-28 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
-            />
-          </div>
-        </>
-      )}
-
-      {/* Trigger Rule (applicable to all node types) */}
-      <div className="flex flex-col gap-1">
-        <label className="text-[10px] text-text-tertiary uppercase tracking-wide">
-          Trigger Rule
-        </label>
-        <select
-          value={node.trigger_rule ?? ''}
+    <div className="flex flex-col gap-3 p-3">
+      <Field label="Output Format (JSON Schema)">
+        <textarea
+          value={outputFormatText}
           onChange={(e): void => {
-            onUpdate({
-              trigger_rule: (e.target.value || undefined) as TriggerRule | undefined,
-            });
+            handleOutputFormatChange(e.target.value);
           }}
-          className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
-        >
-          <option value="">Default (all_success)</option>
-          {TRIGGER_RULES.map(rule => (
-            <option key={rule} value={rule}>
-              {rule}
-            </option>
-          ))}
-        </select>
-      </div>
+          rows={5}
+          placeholder='{"type": "object", "properties": {...}}'
+          className={cn(textareaClass, 'min-h-[100px]')}
+        />
+        {outputFormatError && <p className="text-[10px] text-error">{outputFormatError}</p>}
+      </Field>
 
-      {/* Context (AI-only) */}
-      {!isBash && (
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-text-tertiary uppercase tracking-wide">
-            Fresh Context
-          </label>
-          <label className="flex items-center gap-1.5 text-xs text-text-primary cursor-pointer">
-            <input
-              type="checkbox"
-              checked={node.context === 'fresh'}
-              onChange={(e): void => {
-                onUpdate({ context: e.target.checked ? 'fresh' : undefined });
-              }}
-              className="rounded"
-            />
-            <span>Reset session</span>
-          </label>
-        </div>
-      )}
-
-      {/* When condition (applicable to all node types) */}
-      <div className="flex flex-col gap-1">
-        <label className="text-[10px] text-text-tertiary uppercase tracking-wide">
-          When Condition
-        </label>
+      <Field label="Skills">
         <input
           type="text"
-          value={node.when ?? ''}
+          value={node.skills?.join(', ') ?? ''}
           onChange={(e): void => {
-            onUpdate({ when: e.target.value || undefined });
+            onUpdate({ skills: parseToolsList(e.target.value) });
           }}
-          placeholder="e.g. $classify.output.type == 'BUG'"
-          className="w-64 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+          placeholder="skill1, skill2..."
+          className={inputClass}
         />
-      </div>
+      </Field>
 
-      {/* Tools (AI-only) */}
-      {!isBash && (
-        <>
-          <ToolsInput
-            label="Allowed Tools"
-            value={node.allowed_tools}
-            onChange={(v): void => {
-              onUpdate({ allowed_tools: v });
-            }}
-          />
-          <ToolsInput
-            label="Denied Tools"
-            value={node.denied_tools}
-            onChange={(v): void => {
-              onUpdate({ denied_tools: v });
-            }}
-          />
-        </>
-      )}
-
-      {/* Hooks (hidden for Bash and explicit Codex nodes) */}
-      {!isBash && node.provider !== 'codex' && (
-        <div className="flex flex-col gap-1 w-full">
-          <button
-            type="button"
-            onClick={(): void => {
-              setShowHooks(!showHooks);
-            }}
-            className="text-[10px] text-text-tertiary uppercase tracking-wide text-left hover:text-text-secondary"
-          >
-            Hooks (SDK SyncHookJSONOutput) {showHooks ? '[-]' : '[+]'}
-          </button>
-          {showHooks && (
-            <>
-              <textarea
-                value={hooksText}
-                onChange={(e: ChangeEvent<HTMLTextAreaElement>): void => {
-                  handleHooksChange(e.target.value);
-                }}
-                rows={6}
-                placeholder={
-                  '{"PreToolUse": [{"matcher": "Bash", "response": {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny"}}}]}'
-                }
-                className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary font-mono placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent resize-y"
-              />
-              {hooksError && <p className="text-xs text-error">{hooksError}</p>}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* MCP Config Path (hidden for Bash and explicit Codex nodes) */}
-      {!isBash && node.provider !== 'codex' && (
-        <div className="flex flex-col gap-1 w-full">
-          <label className="text-[10px] text-text-tertiary uppercase tracking-wide">
-            MCP Config (path to JSON file)
-          </label>
-          <input
-            type="text"
-            value={node.mcp ?? ''}
-            onChange={(e): void => {
-              onUpdate({ mcp: e.target.value || undefined });
-            }}
-            placeholder=".archon/mcp/github.json"
-            className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary font-mono placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
-          />
-          <span className="text-[9px] text-text-tertiary">
-            Path relative to repo root. JSON object matching SDK McpServerConfig format.
-          </span>
-        </div>
-      )}
-
-      {/* Skills (hidden for Bash and explicit Codex nodes) */}
-      {!isBash && node.provider !== 'codex' && (
-        <ToolsInput
-          label="Skills (preloaded into node context)"
-          value={node.skills}
-          onChange={(v): void => {
-            onUpdate({ skills: v });
+      <Field label="MCP Config Path">
+        <input
+          type="text"
+          value={node.mcp ?? ''}
+          onChange={(e): void => {
+            onUpdate({ mcp: e.target.value || undefined });
           }}
+          placeholder=".archon/mcp/github.json"
+          className={cn(inputClass, 'font-mono')}
         />
-      )}
+        <p className="text-[9px] text-text-tertiary">
+          Path relative to repo root. JSON matching SDK McpServerConfig format.
+        </p>
+      </Field>
 
-      {/* Output Format (hidden for Bash and explicit Codex nodes; inherited provider may still be Codex at runtime) */}
-      {!isBash && node.provider !== 'codex' && (
-        <div className="flex flex-col gap-1 w-full">
-          <button
-            type="button"
-            onClick={(): void => {
-              setShowOutputFormat(!showOutputFormat);
-            }}
-            className="text-[10px] text-text-tertiary uppercase tracking-wide text-left hover:text-text-secondary"
-          >
-            Output Format (JSON Schema) {showOutputFormat ? '[-]' : '[+]'}
-          </button>
-          {showOutputFormat && (
-            <>
-              <textarea
-                value={outputFormatText}
-                onChange={(e): void => {
-                  handleOutputFormatChange(e.target.value);
-                }}
-                rows={4}
-                placeholder='{"type": "object", "properties": {...}}'
-                className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary font-mono placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent resize-y"
-              />
-              {outputFormatError && <p className="text-xs text-error">{outputFormatError}</p>}
-            </>
-          )}
-        </div>
-      )}
+      <Field label="Hooks (SDK SyncHookJSONOutput)">
+        <textarea
+          value={hooksText}
+          onChange={(e): void => {
+            handleHooksChange(e.target.value);
+          }}
+          rows={5}
+          placeholder='{"PreToolUse": [{"matcher": "Bash", "response": {...}}]}'
+          className={cn(textareaClass, 'min-h-[100px]')}
+        />
+        {hooksError && <p className="text-[10px] text-error">{hooksError}</p>}
+      </Field>
 
-      {/* Delete */}
-      <div className="flex flex-col gap-1 ml-auto">
-        <button
-          type="button"
-          onClick={onDelete}
-          className="rounded-md border border-error/30 bg-error/10 px-3 py-1 text-xs text-error hover:bg-error/20 transition-colors"
-        >
+      <div className="border-t border-border pt-3 mt-2">
+        <Button variant="destructive" size="sm" onClick={onDelete} className="w-full">
           Delete Node
-        </button>
+        </Button>
       </div>
     </div>
   );
 }
+
+// ── DAG Inspector (new tabbed layout) ──
+
+function DagInspector({
+  node,
+  commands,
+  onUpdate,
+  onDelete,
+  onClose,
+}: NodeInspectorProps): React.ReactElement {
+  const isBash = node.nodeType === 'bash';
+
+  return (
+    <div key={node.id} className="flex flex-col h-full border-l border-border bg-surface">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+        <span className="text-xs font-semibold text-text-primary truncate">
+          {node.label || node.id}
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-text-tertiary hover:text-text-primary text-sm leading-none px-1"
+          title="Close inspector"
+        >
+          x
+        </button>
+      </div>
+
+      {/* Tabbed content */}
+      <Tabs defaultValue="general" className="flex-1 flex flex-col gap-0">
+        <TabsList variant="line" className="px-2 pt-1 w-full justify-start">
+          <TabsTrigger value="general" className="text-xs">
+            General
+          </TabsTrigger>
+          <TabsTrigger value="execution" className="text-xs">
+            Execution
+          </TabsTrigger>
+          {!isBash && (
+            <TabsTrigger value="tools" className="text-xs">
+              Tools
+            </TabsTrigger>
+          )}
+          {!isBash && (
+            <TabsTrigger value="advanced" className="text-xs">
+              Advanced
+            </TabsTrigger>
+          )}
+        </TabsList>
+
+        <ScrollArea className="flex-1">
+          <TabsContent value="general">
+            <GeneralTab node={node} commands={commands} onUpdate={onUpdate} />
+          </TabsContent>
+
+          <TabsContent value="execution">
+            <ExecutionTab node={node} onUpdate={onUpdate} />
+          </TabsContent>
+
+          {!isBash && (
+            <TabsContent value="tools">
+              <ToolsTab node={node} onUpdate={onUpdate} />
+            </TabsContent>
+          )}
+
+          {!isBash && (
+            <TabsContent value="advanced">
+              <AdvancedTab node={node} onUpdate={onUpdate} onDelete={onDelete} />
+            </TabsContent>
+          )}
+        </ScrollArea>
+      </Tabs>
+    </div>
+  );
+}
+
+// ── Legacy Sequential Inspector ──
 
 function SequentialInspector({
   step,
@@ -442,13 +860,11 @@ function SequentialInspector({
   return (
     <div className="flex flex-wrap gap-3 items-start">
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] text-text-tertiary uppercase tracking-wide">
-          Step {String(stepIndex + 1)}
-        </label>
+        <label className={labelClass}>Step {String(stepIndex + 1)}</label>
       </div>
 
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] text-text-tertiary uppercase tracking-wide">Command</label>
+        <label className={labelClass}>Command</label>
         <select
           value={step.command}
           onChange={(e): void => {
@@ -466,9 +882,7 @@ function SequentialInspector({
       </div>
 
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] text-text-tertiary uppercase tracking-wide">
-          Clear Context
-        </label>
+        <label className={labelClass}>Clear Context</label>
         <label className="flex items-center gap-1.5 text-xs text-text-primary cursor-pointer">
           <input
             type="checkbox"
@@ -510,6 +924,8 @@ function SequentialInspector({
   );
 }
 
+// ── Legacy Parallel Block Inspector ──
+
 function ParallelBlockInspector({
   block,
   blockIndex,
@@ -532,7 +948,6 @@ function ParallelBlockInspector({
   const removeSubStep = useCallback(
     (subIndex: number): void => {
       if (subSteps.length <= 2) {
-        // Auto-ungroup when fewer than 2 would remain
         onUngroup();
         return;
       }
@@ -616,7 +1031,6 @@ function ParallelBlockInspector({
         </div>
       ))}
 
-      {/* Add Sub-Step */}
       <select
         value=""
         onChange={(e): void => {
@@ -635,7 +1049,6 @@ function ParallelBlockInspector({
         ))}
       </select>
 
-      {/* Actions */}
       <div className="flex gap-2">
         <button
           type="button"
@@ -656,12 +1069,58 @@ function ParallelBlockInspector({
   );
 }
 
-export function NodeInspector(props: NodeInspectorProps): React.ReactElement {
-  if (props.mode === 'dag') {
+// ── Main export (supports both new and legacy props) ──
+
+/**
+ * NodeInspector supports two calling patterns:
+ * 1. New: `<NodeInspector node={...} commands={...} onUpdate={...} onDelete={...} onClose={...} />`
+ * 2. Legacy: `<NodeInspector mode="dag|sequential|parallel" ... />` (backward compat)
+ */
+export function NodeInspector(
+  props: NodeInspectorProps | LegacyNodeInspectorProps
+): React.ReactElement {
+  // Detect legacy mode: has 'mode' property
+  if ('mode' in props) {
+    if (props.mode === 'dag') {
+      return (
+        <div className="border-t border-border px-4 py-3">
+          <div className="flex flex-wrap gap-3 items-start">
+            {/* Legacy DAG: flat layout without tabs (matches old behavior) */}
+            <DagInspector
+              node={props.node}
+              commands={props.commands}
+              onUpdate={props.onUpdate}
+              onDelete={props.onDelete}
+              onClose={(): void => {
+                /* legacy mode has no close */
+              }}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    if (props.mode === 'parallel') {
+      return (
+        <div className="border-t border-border px-4 py-3">
+          <ParallelBlockInspector
+            block={props.block}
+            blockIndex={props.blockIndex}
+            commands={props.commands}
+            onUpdate={props.onUpdate}
+            onUngroup={props.onUngroup}
+            onDelete={props.onDelete}
+          />
+        </div>
+      );
+    }
+
+    // sequential
     return (
       <div className="border-t border-border px-4 py-3">
-        <DagInspector
-          node={props.node}
+        <SequentialInspector
+          step={props.step}
+          stepIndex={props.stepIndex}
           commands={props.commands}
           onUpdate={props.onUpdate}
           onDelete={props.onDelete}
@@ -670,30 +1129,14 @@ export function NodeInspector(props: NodeInspectorProps): React.ReactElement {
     );
   }
 
-  if (props.mode === 'parallel') {
-    return (
-      <div className="border-t border-border px-4 py-3">
-        <ParallelBlockInspector
-          block={props.block}
-          blockIndex={props.blockIndex}
-          commands={props.commands}
-          onUpdate={props.onUpdate}
-          onUngroup={props.onUngroup}
-          onDelete={props.onDelete}
-        />
-      </div>
-    );
-  }
-
+  // New DAG-mode inspector (right panel with tabs)
   return (
-    <div className="border-t border-border px-4 py-3">
-      <SequentialInspector
-        step={props.step}
-        stepIndex={props.stepIndex}
-        commands={props.commands}
-        onUpdate={props.onUpdate}
-        onDelete={props.onDelete}
-      />
-    </div>
+    <DagInspector
+      node={props.node}
+      commands={props.commands}
+      onUpdate={props.onUpdate}
+      onDelete={props.onDelete}
+      onClose={props.onClose}
+    />
   );
 }

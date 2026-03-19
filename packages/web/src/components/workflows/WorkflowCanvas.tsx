@@ -1,19 +1,27 @@
-import { useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import {
   ReactFlow,
-  useNodesState,
-  useEdgesState,
   addEdge,
   useReactFlow,
   Background,
   BackgroundVariant,
+  MiniMap,
+  Controls,
 } from '@xyflow/react';
-import type { Connection, Edge, OnConnect, NodeTypes } from '@xyflow/react';
+import type {
+  Connection,
+  Edge,
+  OnConnect,
+  OnNodesChange,
+  OnEdgesChange,
+  NodeTypes,
+} from '@xyflow/react';
 import type { DagNode } from '@archon/workflows/types';
+import type { CommandEntry } from '@/lib/api';
 import { dagNodeComponent, type DagFlowNode } from './DagNodeComponent';
-import { dagNodesToReactFlow } from '@/lib/dag-layout';
+import { QuickAddPicker } from './QuickAddPicker';
 
-export { dagNodesToReactFlow };
+export { dagNodesToReactFlow } from '@/lib/dag-layout';
 
 export function reactFlowToDagNodes(rfNodes: DagFlowNode[], rfEdges: Edge[]): DagNode[] {
   return rfNodes.map(node => {
@@ -64,14 +72,18 @@ export function reactFlowToDagNodes(rfNodes: DagFlowNode[], rfEdges: Edge[]): Da
 interface WorkflowCanvasProps {
   nodes: DagFlowNode[];
   edges: Edge[];
-  /** Handles React Flow internal changes (drag, select, remove). */
-  onNodesChange: ReturnType<typeof useNodesState<DagFlowNode>>[2];
-  onEdgesChange: ReturnType<typeof useEdgesState<Edge>>[2];
-  /** Programmatic state setter for adding nodes (e.g. onDrop). Both this and onNodesChange are needed because React Flow requires its own change handler. */
-  setNodes: ReturnType<typeof useNodesState<DagFlowNode>>[1];
-  setEdges: ReturnType<typeof useEdgesState<Edge>>[1];
+  onNodesChange: OnNodesChange<DagFlowNode>;
+  onEdgesChange: OnEdgesChange;
+  setNodes: React.Dispatch<React.SetStateAction<DagFlowNode[]>>;
+  setEdges: React.Dispatch<React.SetStateAction<Edge[]>>;
   onNodeSelect: (nodeId: string | null) => void;
   onDirty: () => void;
+  commands: CommandEntry[];
+}
+
+interface QuickAddPosition {
+  screen: { x: number; y: number };
+  flow: { x: number; y: number };
 }
 
 export function WorkflowCanvas({
@@ -83,10 +95,29 @@ export function WorkflowCanvas({
   setEdges,
   onNodeSelect,
   onDirty,
+  commands,
 }: WorkflowCanvasProps): React.ReactElement {
   const { screenToFlowPosition } = useReactFlow();
+  const [quickAddPosition, setQuickAddPosition] = useState<QuickAddPosition | null>(null);
 
   const nodeTypes: NodeTypes = useMemo(() => ({ dagNode: dagNodeComponent }), []);
+
+  // Style edges: conditional edges get dashed purple stroke
+  const styledEdges = useMemo(
+    () =>
+      edges.map(edge => {
+        const targetNode = nodes.find(n => n.id === edge.target);
+        if (targetNode?.data.when) {
+          return {
+            ...edge,
+            style: { stroke: 'var(--node-prompt)', strokeDasharray: '6 4' },
+            type: 'smoothstep' as const,
+          };
+        }
+        return { ...edge, type: 'smoothstep' as const };
+      }),
+    [edges, nodes]
+  );
 
   const onConnect: OnConnect = useCallback(
     (connection: Connection) => {
@@ -132,7 +163,7 @@ export function WorkflowCanvas({
     [screenToFlowPosition, setNodes, onDirty]
   );
 
-  const handleNodesChange: typeof onNodesChange = useCallback(
+  const handleNodesChange: OnNodesChange<DagFlowNode> = useCallback(
     changes => {
       onNodesChange(changes);
       if (changes.some(c => c.type !== 'select')) {
@@ -142,7 +173,7 @@ export function WorkflowCanvas({
     [onNodesChange, onDirty]
   );
 
-  const handleEdgesChange: typeof onEdgesChange = useCallback(
+  const handleEdgesChange: OnEdgesChange = useCallback(
     changes => {
       onEdgesChange(changes);
       if (changes.some(c => c.type !== 'select')) {
@@ -152,11 +183,86 @@ export function WorkflowCanvas({
     [onEdgesChange, onDirty]
   );
 
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastClickRef = useRef<{ time: number; x: number; y: number }>({ time: 0, x: 0, y: 0 });
+
+  const handlePaneClick = useCallback(
+    (e: React.MouseEvent) => {
+      const now = Date.now();
+      const last = lastClickRef.current;
+      const isDoubleClick =
+        now - last.time < 300 &&
+        Math.abs(e.clientX - last.x) < 10 &&
+        Math.abs(e.clientY - last.y) < 10;
+
+      lastClickRef.current = { time: now, x: e.clientX, y: e.clientY };
+
+      if (isDoubleClick) {
+        // Cancel the pending single-click
+        if (clickTimerRef.current) {
+          clearTimeout(clickTimerRef.current);
+          clickTimerRef.current = null;
+        }
+        // Double click: show QuickAddPicker
+        const wrapperEl = (e.target as HTMLElement).closest('.react-flow');
+        const rect = wrapperEl?.getBoundingClientRect() ?? { left: 0, top: 0 };
+        const flowPos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        setQuickAddPosition({
+          screen: { x: e.clientX - rect.left, y: e.clientY - rect.top },
+          flow: flowPos,
+        });
+      } else {
+        // Delay single-click to allow double-click detection
+        clickTimerRef.current = setTimeout(() => {
+          onNodeSelect(null);
+          setQuickAddPosition(null);
+          clickTimerRef.current = null;
+        }, 300);
+      }
+    },
+    [screenToFlowPosition, onNodeSelect]
+  );
+
+  const handleQuickAddNode = useCallback(
+    (
+      type: 'command' | 'prompt' | 'bash',
+      options?: { commandName?: string; skills?: string[]; mcp?: string }
+    ) => {
+      if (!quickAddPosition) return;
+
+      const id = `node-${crypto.randomUUID()}`;
+      const label =
+        type === 'command' ? (options?.commandName ?? '') : type === 'bash' ? 'Shell' : 'Prompt';
+
+      const newNode: DagFlowNode = {
+        id,
+        type: 'dagNode',
+        position: quickAddPosition.flow,
+        data: {
+          id,
+          label,
+          nodeType: type,
+          ...(options?.skills && { skills: options.skills }),
+          ...(options?.mcp && { mcp: options.mcp }),
+        },
+      };
+
+      setNodes(nds => [...nds, newNode]);
+      onDirty();
+      setQuickAddPosition(null);
+    },
+    [quickAddPosition, setNodes, onDirty]
+  );
+
+  const handleQuickAddClose = useCallback(() => {
+    setQuickAddPosition(null);
+  }, []);
+
   return (
-    <div className="w-full h-full">
+    <div className="relative w-full h-full">
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={styledEdges}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
@@ -165,15 +271,28 @@ export function WorkflowCanvas({
         onNodeClick={(_e, node): void => {
           onNodeSelect(node.id);
         }}
-        onPaneClick={(): void => {
-          onNodeSelect(null);
-        }}
+        onPaneClick={handlePaneClick}
         nodeTypes={nodeTypes}
+        panOnDrag
+        selectionOnDrag={false}
         fitView
+        colorMode="dark"
         className="bg-background"
       >
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="var(--border)" />
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--border)" />
+        <MiniMap className="!bg-surface !border-border" maskColor="rgba(0,0,0,0.6)" />
+        <Controls />
       </ReactFlow>
+
+      {/* QuickAddPicker overlay */}
+      {quickAddPosition && (
+        <QuickAddPicker
+          position={quickAddPosition.screen}
+          onAddNode={handleQuickAddNode}
+          onClose={handleQuickAddClose}
+          commands={commands}
+        />
+      )}
     </div>
   );
 }
