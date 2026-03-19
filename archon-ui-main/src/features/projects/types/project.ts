@@ -40,6 +40,14 @@ export interface ProjectCreationProgress {
   project?: Project; // Forward reference - will be resolved
 }
 
+export interface ProjectSystemRegistration {
+  system_id: string;
+  system_name: string;
+  os: string | null;
+  git_dirty: boolean;
+  git_dirty_checked_at: string | null;
+}
+
 // Base Project interface (matches database schema)
 export interface Project {
   id: string;
@@ -53,6 +61,15 @@ export interface Project {
   updated_at: string;
   technical_sources?: string[];
   business_sources?: string[];
+
+  // System & hierarchy fields
+  tags?: string[];
+  parent_project_id?: string;
+  metadata?: Record<string, unknown>;
+
+  // System registration data (from enriched list response)
+  system_registrations?: ProjectSystemRegistration[];
+  has_uncommitted_changes?: boolean;
 
   // Extended UI properties
   description?: string;

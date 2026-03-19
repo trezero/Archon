@@ -135,14 +135,6 @@ export function useUpdateProject() {
       queryClient.setQueryData(projectKeys.lists(), (old: Project[] | undefined) => {
         if (!old) return old;
 
-        // If pinning a project, unpin all others first
-        if (updates.pinned === true) {
-          return old.map((p) => ({
-            ...p,
-            pinned: p.id === projectId,
-          }));
-        }
-
         return old.map((p) => (p.id === projectId ? { ...p, ...updates } : p));
       });
 
@@ -161,8 +153,8 @@ export function useUpdateProject() {
 
       if (variables.updates.pinned !== undefined) {
         const message = variables.updates.pinned
-          ? `Pinned "${data.title}" as default project`
-          : `Removed "${data.title}" from default selection`;
+          ? `Pinned "${data.title}"`
+          : `Unpinned "${data.title}"`;
         showToast(message, "info");
       }
     },

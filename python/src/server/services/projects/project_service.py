@@ -439,18 +439,6 @@ class ProjectService:
                 if field in update_fields:
                     update_data[field] = update_fields[field]
 
-            # Handle pinning logic - only one project can be pinned at a time
-            if update_fields.get("pinned") is True:
-                # Unpin any other pinned projects first
-                unpin_response = (
-                    self.supabase_client.table("archon_projects")
-                    .update({"pinned": False})
-                    .neq("id", project_id)
-                    .eq("pinned", True)
-                    .execute()
-                )
-                logger.debug(f"Unpinned {len(unpin_response.data or [])} other projects before pinning {project_id}")
-
             # Update the target project
             response = (
                 self.supabase_client.table("archon_projects")
