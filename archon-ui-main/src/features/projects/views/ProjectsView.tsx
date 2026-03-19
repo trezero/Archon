@@ -1,423 +1,230 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { motion } from "framer-motion";
-import { Activity, CheckCircle2, FileText, Library, List, ListTodo, Pin, Puzzle } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { FileText, Library, ListTodo, Puzzle } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useStaggeredEntrance } from "../../../hooks/useStaggeredEntrance";
-import { isOptimistic } from "../../shared/utils/optimistic";
 import { DeleteConfirmModal } from "../../ui/components/DeleteConfirmModal";
-import { Button, PillNavigation, SelectableCard } from "../../ui/primitives";
-import { OptimisticIndicator } from "../../ui/primitives/OptimisticIndicator";
-import { StatPill } from "../../ui/primitives/pill";
-import { cn } from "../../ui/primitives/styles";
+import { PillNavigation } from "../../ui/primitives";
 import { NewProjectModal } from "../components/NewProjectModal";
-import { ProjectHeader } from "../components/ProjectHeader";
-import { ProjectList } from "../components/ProjectList";
+import { ProjectFilterBar } from "../components/ProjectFilterBar";
+import { ProjectGrid } from "../components/ProjectGrid";
+import { ProjectTable } from "../components/ProjectTable";
 import { DocsTab } from "../documents/DocsTab";
-import { KnowledgeTab } from "../knowledge/KnowledgeTab";
-import { projectKeys, useDeleteProject, useProjects, useUpdateProject } from "../hooks/useProjectQueries";
-import { useTaskCounts } from "../tasks/hooks";
 import { ExtensionsTab } from "../extensions/ExtensionsTab";
+import { useProjectFilters } from "../hooks/useProjectFilters";
+import { useDeleteProject, useProjects } from "../hooks/useProjectQueries";
+import { useSystems } from "../hooks/useSystemQueries";
+import { KnowledgeTab } from "../knowledge/KnowledgeTab";
+import { useTaskCounts } from "../tasks/hooks";
 import { TasksTab } from "../tasks/TasksTab";
 import type { Project } from "../types";
 
 interface ProjectsViewProps {
-  className?: string;
-  "data-id"?: string;
+	className?: string;
+	"data-id"?: string;
 }
-
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.1 },
-  },
-};
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.6, ease: [0.23, 1, 0.32, 1] },
-  },
-};
 
 export function ProjectsView({ className = "", "data-id": dataId }: ProjectsViewProps) {
-  const { projectId } = useParams();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
+	const { projectId } = useParams();
+	const navigate = useNavigate();
 
-  // State management
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [activeTab, setActiveTab] = useState("tasks");
-  const [layoutMode, setLayoutMode] = useState<"horizontal" | "sidebar">("horizontal");
-  const [sidebarExpanded, setSidebarExpanded] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [projectToDelete, setProjectToDelete] = useState<{
-    id: string;
-    title: string;
-  } | null>(null);
+	// State
+	const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+	const [activeTab, setActiveTab] = useState("tasks");
+	const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
+	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+	const [projectToDelete, setProjectToDelete] = useState<{ id: string; title: string } | null>(null);
 
-  // React Query hooks
-  const { data: projects = [], isLoading: isLoadingProjects, error: projectsError } = useProjects();
-  const { data: taskCounts = {}, refetch: refetchTaskCounts } = useTaskCounts();
+	// Hooks
+	const filters = useProjectFilters();
+	const { data: systems = [] } = useSystems();
+	const { data: projects = [], isLoading, error } = useProjects();
+	const { data: taskCounts = {}, refetch: refetchTaskCounts } = useTaskCounts();
+	const deleteProjectMutation = useDeleteProject();
 
-  // Mutations
-  const updateProjectMutation = useUpdateProject();
-  const deleteProjectMutation = useDeleteProject();
+	// Apply filters and sort
+	const filteredProjects = filters.filterProjects(projects as Project[]);
+	const sortedProjects = filters.sortProjects(filteredProjects, filters.viewMode);
+	const availableTags = filters.extractTags(projects as Project[]);
 
-  // Sort and filter projects
-  const sortedProjects = useMemo(() => {
-    // Filter by search query
-    const filtered = (projects as Project[]).filter((project) =>
-      project.title.toLowerCase().includes(searchQuery.toLowerCase()),
-    );
+	// Handle project selection by ID
+	const handleProjectSelect = useCallback(
+		(id: string) => {
+			const project = (projects as Project[]).find((p) => p.id === id);
+			if (!project || selectedProject?.id === id) return;
+			setSelectedProject(project);
+			setActiveTab("tasks");
+			navigate(`/projects/${id}`, { replace: true });
+		},
+		[projects, selectedProject?.id, navigate],
+	);
 
-    // Sort: pinned first, then alphabetically
-    return filtered.sort((a, b) => {
-      if (a.pinned && !b.pinned) return -1;
-      if (!a.pinned && b.pinned) return 1;
-      return a.title.localeCompare(b.title);
-    });
-  }, [projects, searchQuery]);
+	// Auto-select project based on URL or default to first
+	useEffect(() => {
+		if (!(projects as Project[]).length) return;
 
-  // Handle project selection
-  const handleProjectSelect = useCallback(
-    (project: Project) => {
-      if (selectedProject?.id === project.id) return;
+		if (projectId) {
+			const project = (projects as Project[]).find((p) => p.id === projectId);
+			if (project) {
+				setSelectedProject(project);
+				return;
+			}
+		}
 
-      setSelectedProject(project);
-      setActiveTab("tasks");
-      navigate(`/projects/${project.id}`, { replace: true });
-    },
-    [selectedProject?.id, navigate],
-  );
+		if (!selectedProject || !(projects as Project[]).find((p) => p.id === selectedProject.id)) {
+			const first = (projects as Project[])[0];
+			setSelectedProject(first);
+			navigate(`/projects/${first.id}`, { replace: true });
+		}
+	}, [projects, projectId, selectedProject, navigate]);
 
-  // Auto-select project based on URL or default to leftmost
-  useEffect(() => {
-    if (!sortedProjects.length) return;
+	// Refetch task counts when projects change
+	useEffect(() => {
+		if ((projects as Project[]).length > 0) {
+			refetchTaskCounts();
+		}
+	}, [projects, refetchTaskCounts]);
 
-    // If there's a projectId in the URL, select that project
-    if (projectId) {
-      const project = sortedProjects.find((p) => p.id === projectId);
-      if (project) {
-        setSelectedProject(project);
-        return;
-      }
-    }
+	const confirmDeleteProject = () => {
+		if (!projectToDelete) return;
 
-    // Otherwise, select the first (leftmost) project
-    if (!selectedProject || !sortedProjects.find((p) => p.id === selectedProject.id)) {
-      const defaultProject = sortedProjects[0];
-      setSelectedProject(defaultProject);
-      navigate(`/projects/${defaultProject.id}`, { replace: true });
-    }
-  }, [sortedProjects, projectId, selectedProject, navigate]);
+		deleteProjectMutation.mutate(projectToDelete.id, {
+			onSuccess: () => {
+				setShowDeleteConfirm(false);
+				setProjectToDelete(null);
 
-  // Refetch task counts when projects change
-  useEffect(() => {
-    if ((projects as Project[]).length > 0) {
-      refetchTaskCounts();
-    }
-  }, [projects, refetchTaskCounts]);
+				// If we deleted the selected project, select another one
+				if (selectedProject?.id === projectToDelete.id) {
+					const remainingProjects = (projects as Project[]).filter((p) => p.id !== projectToDelete.id);
+					if (remainingProjects.length > 0) {
+						const nextProject = remainingProjects[0];
+						setSelectedProject(nextProject);
+						navigate(`/projects/${nextProject.id}`, { replace: true });
+					} else {
+						setSelectedProject(null);
+						navigate("/projects", { replace: true });
+					}
+				}
+			},
+		});
+	};
 
-  // Handle pin toggle
-  const handlePinProject = async (e: React.MouseEvent, projectId: string) => {
-    e.stopPropagation();
-    const project = (projects as Project[]).find((p) => p.id === projectId);
-    if (!project) return;
+	const cancelDeleteProject = () => {
+		setShowDeleteConfirm(false);
+		setProjectToDelete(null);
+	};
 
-    updateProjectMutation.mutate({
-      projectId,
-      updates: { pinned: !project.pinned },
-    });
-  };
+	return (
+		<div className={`flex flex-col h-full ${className}`} data-id={dataId}>
+			{/* Filter Bar */}
+			<ProjectFilterBar
+				activeOnly={filters.activeOnly}
+				setActiveOnly={filters.setActiveOnly}
+				systemId={filters.systemId}
+				setSystemId={filters.setSystemId}
+				tag={filters.tag}
+				setTag={filters.setTag}
+				groupByParent={filters.groupByParent}
+				setGroupByParent={filters.setGroupByParent}
+				searchQuery={filters.searchQuery}
+				setSearchQuery={filters.setSearchQuery}
+				viewMode={filters.viewMode}
+				setViewMode={filters.setViewMode}
+				systems={systems}
+				tags={availableTags}
+				totalCount={(projects as Project[]).length}
+				filteredCount={sortedProjects.length}
+				onNewProject={() => setIsNewProjectModalOpen(true)}
+			/>
 
-  // Handle delete project
-  const handleDeleteProject = (e: React.MouseEvent, projectId: string, title: string) => {
-    e.stopPropagation();
-    setProjectToDelete({ id: projectId, title });
-    setShowDeleteConfirm(true);
-  };
+			{/* Loading state */}
+			{isLoading && (
+				<div className="flex items-center justify-center py-16 text-gray-500 text-sm">Loading projects...</div>
+			)}
 
-  const confirmDeleteProject = () => {
-    if (!projectToDelete) return;
+			{/* Error state */}
+			{error && (
+				<div className="flex items-center justify-center py-16 text-red-400 text-sm">
+					Failed to load projects
+				</div>
+			)}
 
-    deleteProjectMutation.mutate(projectToDelete.id, {
-      onSuccess: () => {
-        // Success toast handled by mutation
-        setShowDeleteConfirm(false);
-        setProjectToDelete(null);
+			{/* Grid/Table area */}
+			{!isLoading && !error && (
+				<div className={selectedProject ? "max-h-[45vh] overflow-y-auto" : "flex-1 overflow-y-auto"}>
+					{/* Active filter empty state */}
+					{filters.activeOnly && sortedProjects.length === 0 && (projects as Project[]).length > 0 ? (
+						<div className="flex items-center justify-center py-16 text-gray-500 text-sm">
+							No active projects. Pin projects to see them here.
+						</div>
+					) : filters.viewMode === "grid" ? (
+						<ProjectGrid
+							projects={sortedProjects}
+							taskCounts={taskCounts}
+							selectedProjectId={selectedProject?.id}
+							onSelectProject={handleProjectSelect}
+							groupByParent={filters.groupByParent}
+						/>
+					) : (
+						<ProjectTable
+							projects={sortedProjects}
+							taskCounts={taskCounts}
+							selectedProjectId={selectedProject?.id}
+							onSelectProject={handleProjectSelect}
+							sort={filters.sort}
+							toggleSort={filters.toggleSort}
+							groupByParent={filters.groupByParent}
+						/>
+					)}
+				</div>
+			)}
 
-        // If we deleted the selected project, select another one
-        if (selectedProject?.id === projectToDelete.id) {
-          const remainingProjects = (projects as Project[]).filter((p) => p.id !== projectToDelete.id);
-          if (remainingProjects.length > 0) {
-            const nextProject = remainingProjects[0];
-            setSelectedProject(nextProject);
-            navigate(`/projects/${nextProject.id}`, { replace: true });
-          } else {
-            setSelectedProject(null);
-            navigate("/projects", { replace: true });
-          }
-        }
-      },
-    });
-  };
+			{/* Project detail tabs */}
+			{selectedProject && (
+				<div className="flex-1 min-h-0 overflow-y-auto">
+					<div className="flex items-center justify-between mb-6">
+						<div className="flex-1" />
+						<PillNavigation
+							items={[
+								{ id: "docs", label: "Docs", icon: <FileText className="w-4 h-4" /> },
+								{ id: "knowledge", label: "Knowledge", icon: <Library className="w-4 h-4" /> },
+								{ id: "extensions", label: "Extensions", icon: <Puzzle className="w-4 h-4" /> },
+								{ id: "tasks", label: "Tasks", icon: <ListTodo className="w-4 h-4" /> },
+							]}
+							activeSection={activeTab}
+							onSectionClick={(id) => setActiveTab(id as string)}
+							colorVariant="orange"
+							size="small"
+							showIcons={true}
+							showText={true}
+							hasSubmenus={false}
+						/>
+						<div className="flex-1" />
+					</div>
+					<div>
+						{activeTab === "docs" && <DocsTab project={selectedProject} />}
+						{activeTab === "knowledge" && <KnowledgeTab projectId={selectedProject.id} />}
+						{activeTab === "extensions" && <ExtensionsTab projectId={selectedProject.id} />}
+						{activeTab === "tasks" && <TasksTab projectId={selectedProject.id} />}
+					</div>
+				</div>
+			)}
 
-  const cancelDeleteProject = () => {
-    setShowDeleteConfirm(false);
-    setProjectToDelete(null);
-  };
+			{/* Modals */}
+			<NewProjectModal
+				open={isNewProjectModalOpen}
+				onOpenChange={setIsNewProjectModalOpen}
+				onSuccess={() => refetchTaskCounts()}
+			/>
 
-  // Staggered entrance animation
-  const isVisible = useStaggeredEntrance([1, 2, 3], 0.15);
-
-  return (
-    <motion.div
-      initial="hidden"
-      animate={isVisible ? "visible" : "hidden"}
-      variants={containerVariants}
-      className={cn("max-w-full mx-auto", className)}
-      data-id={dataId}
-    >
-      <ProjectHeader
-        onNewProject={() => setIsNewProjectModalOpen(true)}
-        layoutMode={layoutMode}
-        onLayoutModeChange={setLayoutMode}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-      />
-
-      {layoutMode === "horizontal" ? (
-        <>
-          <ProjectList
-            projects={sortedProjects}
-            selectedProject={selectedProject}
-            taskCounts={taskCounts}
-            isLoading={isLoadingProjects}
-            error={projectsError as Error | null}
-            onProjectSelect={handleProjectSelect}
-            onPinProject={handlePinProject}
-            onDeleteProject={handleDeleteProject}
-            onRetry={() => queryClient.invalidateQueries({ queryKey: projectKeys.lists() })}
-          />
-
-          {/* Project Details Section */}
-          {selectedProject && (
-            <motion.div variants={itemVariants} className="relative">
-              {/* PillNavigation centered, View Toggle on right */}
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex-1" />
-                <PillNavigation
-                  items={[
-                    { id: "docs", label: "Docs", icon: <FileText className="w-4 h-4" /> },
-                    { id: "knowledge", label: "Knowledge", icon: <Library className="w-4 h-4" /> },
-                    { id: "extensions", label: "Extensions", icon: <Puzzle className="w-4 h-4" /> },
-                    { id: "tasks", label: "Tasks", icon: <ListTodo className="w-4 h-4" /> },
-                  ]}
-                  activeSection={activeTab}
-                  onSectionClick={(id) => setActiveTab(id as string)}
-                  colorVariant="orange"
-                  size="small"
-                  showIcons={true}
-                  showText={true}
-                  hasSubmenus={false}
-                />
-                <div className="flex-1" />
-              </div>
-
-              {/* Tab content */}
-              <div>
-                {activeTab === "docs" && <DocsTab project={selectedProject} />}
-                {activeTab === "knowledge" && <KnowledgeTab projectId={selectedProject.id} />}
-                {activeTab === "extensions" && <ExtensionsTab projectId={selectedProject.id} />}
-                {activeTab === "tasks" && <TasksTab projectId={selectedProject.id} />}
-              </div>
-            </motion.div>
-          )}
-        </>
-      ) : (
-        /* Sidebar Mode */
-        <div className="flex gap-6">
-          {/* Left Sidebar - Collapsible Project List */}
-          {sidebarExpanded && (
-            <div className="w-64 flex-shrink-0 space-y-2">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-800 dark:text-white">Projects</h3>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSidebarExpanded(false)}
-                  className="px-2"
-                  aria-label="Collapse sidebar"
-                  aria-expanded={sidebarExpanded}
-                >
-                  <List className="w-3 h-3" aria-hidden="true" />
-                </Button>
-              </div>
-              <div className="space-y-2">
-                {sortedProjects.map((project) => (
-                  <SidebarProjectCard
-                    key={project.id}
-                    project={project}
-                    isSelected={selectedProject?.id === project.id}
-                    taskCounts={taskCounts[project.id] || { todo: 0, doing: 0, review: 0, done: 0 }}
-                    onSelect={() => handleProjectSelect(project)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Main Content Area - CRITICAL: min-w-0 prevents page expansion */}
-          <div className="flex-1 min-w-0">
-            {selectedProject && (
-              <>
-                {/* Header with project name, tabs, view toggle inline */}
-                <div className="flex items-center gap-4 mb-4">
-                  {!sidebarExpanded && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setSidebarExpanded(true)}
-                      className="px-2 flex-shrink-0"
-                      aria-label="Expand sidebar"
-                      aria-expanded={sidebarExpanded}
-                    >
-                      <List className="w-3 h-3 mr-1" aria-hidden="true" />
-                      <span className="text-sm font-medium">{selectedProject.title}</span>
-                    </Button>
-                  )}
-
-                  {/* PillNavigation - ALWAYS CENTERED */}
-                  <div className="flex-1 flex justify-center">
-                    <PillNavigation
-                      items={[
-                        { id: "docs", label: "Docs", icon: <FileText className="w-4 h-4" /> },
-                        { id: "knowledge", label: "Knowledge", icon: <Library className="w-4 h-4" /> },
-                        { id: "extensions", label: "Extensions", icon: <Puzzle className="w-4 h-4" /> },
-                        { id: "tasks", label: "Tasks", icon: <ListTodo className="w-4 h-4" /> },
-                      ]}
-                      activeSection={activeTab}
-                      onSectionClick={(id) => setActiveTab(id as string)}
-                      colorVariant="orange"
-                      size="small"
-                      showIcons={true}
-                      showText={true}
-                      hasSubmenus={false}
-                    />
-                  </div>
-                  <div className="flex-1" />
-                </div>
-
-                {/* Tab Content */}
-                <div>
-                  {activeTab === "docs" && <DocsTab project={selectedProject} />}
-                  {activeTab === "knowledge" && <KnowledgeTab projectId={selectedProject.id} />}
-                  {activeTab === "extensions" && <ExtensionsTab projectId={selectedProject.id} />}
-                  {activeTab === "tasks" && <TasksTab projectId={selectedProject.id} />}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Modals */}
-      <NewProjectModal
-        open={isNewProjectModalOpen}
-        onOpenChange={setIsNewProjectModalOpen}
-        onSuccess={() => refetchTaskCounts()}
-      />
-
-      {showDeleteConfirm && projectToDelete && (
-        <DeleteConfirmModal
-          itemName={projectToDelete.title}
-          onConfirm={confirmDeleteProject}
-          onCancel={cancelDeleteProject}
-          type="project"
-          open={showDeleteConfirm}
-          onOpenChange={setShowDeleteConfirm}
-        />
-      )}
-    </motion.div>
-  );
+			{showDeleteConfirm && projectToDelete && (
+				<DeleteConfirmModal
+					itemName={projectToDelete.title}
+					onConfirm={confirmDeleteProject}
+					onCancel={cancelDeleteProject}
+					type="project"
+					open={showDeleteConfirm}
+					onOpenChange={setShowDeleteConfirm}
+				/>
+			)}
+		</div>
+	);
 }
-
-// Sidebar Project Card - compact variant with StatPills
-interface SidebarProjectCardProps {
-  project: Project;
-  isSelected: boolean;
-  taskCounts: {
-    todo: number;
-    doing: number;
-    review: number;
-    done: number;
-  };
-  onSelect: () => void;
-}
-
-const SidebarProjectCard: React.FC<SidebarProjectCardProps> = ({ project, isSelected, taskCounts, onSelect }) => {
-  const optimistic = isOptimistic(project);
-
-  const getBackgroundClass = () => {
-    if (project.pinned)
-      return "bg-gradient-to-b from-purple-100/80 via-purple-50/30 to-purple-100/50 dark:from-purple-900/30 dark:via-purple-900/20 dark:to-purple-900/10";
-    if (isSelected)
-      return "bg-gradient-to-b from-white/70 via-purple-50/20 to-white/50 dark:from-white/5 dark:via-purple-900/5 dark:to-black/20";
-    return "bg-gradient-to-b from-white/80 to-white/60 dark:from-white/10 dark:to-black/30";
-  };
-
-  return (
-    <SelectableCard
-      isSelected={isSelected}
-      isPinned={project.pinned}
-      showAuroraGlow={isSelected}
-      onSelect={onSelect}
-      size="none"
-      blur="md"
-      className={cn("p-2", getBackgroundClass(), optimistic && "opacity-80 ring-1 ring-cyan-400/30")}
-    >
-      <div className="space-y-2">
-        {/* Title */}
-        <div className="flex items-center justify-between">
-          <h4
-            className={cn(
-              "font-medium text-sm line-clamp-1 flex-1",
-              isSelected ? "text-purple-700 dark:text-purple-300" : "text-gray-700 dark:text-gray-300",
-            )}
-          >
-            {project.title}
-          </h4>
-          <div className="flex items-center gap-1">
-            {project.pinned && (
-              <div
-                className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-500 dark:bg-purple-600 text-white text-[9px] font-bold rounded-full"
-                aria-label="Pinned"
-              >
-                <Pin className="w-2.5 h-2.5" aria-hidden="true" />
-              </div>
-            )}
-            <OptimisticIndicator isOptimistic={optimistic} />
-          </div>
-        </div>
-
-        {/* Status Pills - horizontal layout with icons */}
-        <div className="flex items-center gap-1.5">
-          <StatPill color="pink" value={taskCounts.todo} size="sm" icon={<ListTodo className="w-3 h-3" />} />
-          <StatPill
-            color="blue"
-            value={taskCounts.doing + taskCounts.review}
-            size="sm"
-            icon={<Activity className="w-3 h-3" />}
-          />
-          <StatPill color="green" value={taskCounts.done} size="sm" icon={<CheckCircle2 className="w-3 h-3" />} />
-        </div>
-      </div>
-    </SelectableCard>
-  );
-};
