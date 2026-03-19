@@ -32,14 +32,17 @@ The database contains 23 `archon_*` tables (1 GB of which is `archon_crawled_pag
 vector embeddings), plus ~20 non-Archon public tables (memecoin, brand_settings, etc.),
 auth schema, and Supabase system schemas.
 
-**All 12 schemas captured by `pg_dump -Fc -d postgres`:** `public`, `auth`, `storage`,
-`realtime`, `_realtime`, `extensions`, `graphql`, `graphql_public`, `pgbouncer`,
-`supabase_functions`, `vault`, `net`. Verified via test dump on 2026-03-18 (353 MB).
+**Only `archon_*` tables are backed up** via `pg_dump -Fc -t 'public.archon_*'`. Non-Archon
+tables, auth schema, and Supabase system schemas are NOT backed up — they belong to each
+machine's own Supabase instance. Verified via test dump on 2026-03-18 (352 MB).
 
-**Roles:** `pg_dump -Fc` does not include role definitions. A separate
-`pg_dumpall --globals-only` captures all roles (`supabase_admin`, `supabase_auth_admin`,
-`supabase_storage_admin`, `authenticator`, `pgbouncer`, etc.) and must be restored before
-the main dump.
+**Pre-restore prerequisites** are captured in `pre-restore.sql`: required extensions
+(`vector`, `pg_trgm`, `pgcrypto`) and custom enum types (`task_status`, `task_priority`).
+These must be applied before `pg_restore`.
+
+**Roles** are NOT backed up separately. The `pg_restore` uses `--no-owner --no-privileges`
+to skip ownership and permission assignments, avoiding "must be member of role" errors
+when restoring into a Supabase instance with different role configurations.
 
 ### Tier 2 — Important (loss = inconvenience, manual re-setup)
 
@@ -80,12 +83,10 @@ the main dump.
 ```
 archon-backup.sh (cron every 6 hours, or manual)
     │
-    ├─ 1a. pg_dumpall --globals-only via docker exec supabase-db
-    │      → ~/archon-backups/TIMESTAMP/roles.sql (~5 KB)
-    │
-    ├─ 1b. pg_dump -Fc -d postgres via docker exec supabase-db
-    │      all 12 schemas, compressed (~353 MB)
-    │      → ~/archon-backups/TIMESTAMP/archon.dump
+    ├─ 1. pg_dump -Fc -t 'public.archon_*' via docker exec supabase-db
+    │     only archon_* tables, compressed (~352 MB)
+    │     → ~/archon-backups/TIMESTAMP/archon.dump
+    │     + pre-restore.sql (extensions + custom enum types)
     │
     ├─ 2. Collect Tier 1 + Tier 2 files
     │     → ~/archon-backups/TIMESTAMP/env/
@@ -114,9 +115,8 @@ archon-restore.sh [backup_name]  (defaults to "latest")
     │
     ├─ 1. Validate backup exists, dump + roles.sql present, env files present
     │
-    ├─ 2. Place .env files (MUST happen before Supabase starts — see edge cases)
+    ├─ 2. Place Archon .env files (NOT localSupabase — it has its own config)
     │     archon.env → $ARCHON_DIR/.env
-    │     localsupabase.env → /home/winadmin/projects/localSupabase/.env
     │     postmanskill.env → $ARCHON_DIR/postmanSkill/.env
     │
     ├─ 3. Restore Claude state
@@ -125,23 +125,18 @@ archon-restore.sh [backup_name]  (defaults to "latest")
     │     Global settings → /home/winadmin/.claude/settings.json
     │     Memory → /home/winadmin/.claude/projects/.../memory/
     │
-    ├─ 4. Start Supabase
-    │     cd localSupabase && docker compose up -d
-    │     Wait for supabase-db healthy
+    ├─ 4. Verify Supabase is running (do NOT start/restart — it has its own data)
+    │     Confirm supabase-db is healthy
+    │     Ensure pgvector extension is available
     │
-    ├─ 5. Restore roles (must precede data restore)
-    │     docker exec -i supabase-db psql -U postgres < roles.sql
-    │     (Supabase init scripts create most roles; this catches any extras.
-    │      Duplicate role errors are expected and non-fatal — piped through
-    │      2>&1 and filtered in the log.)
-    │
-    ├─ 6. Restore database
+    ├─ 5. Restore archon_* tables
+    │     Run pre-restore.sql (extensions + custom enum types)
     │     docker cp archon.dump supabase-db:/tmp/archon.dump
     │     docker exec supabase-db pg_restore \
-    │       -U postgres -d postgres --clean --if-exists /tmp/archon.dump
+    │       -U postgres -d postgres --clean --if-exists \
+    │       --no-owner --no-privileges /tmp/archon.dump
     │     docker exec supabase-db rm /tmp/archon.dump
-    │     (Non-fatal warnings from Supabase pre-existing objects are expected.
-    │      The --clean flag drops and recreates objects from the dump.)
+    │     (Only archon_* tables are dropped/recreated. All other tables untouched.)
     │
     ├─ 7. Start Archon
     │     cd $ARCHON_DIR && docker compose up -d
@@ -164,8 +159,8 @@ Configurable via ARCHON_DIR env var to handle path differences between machines.
 ~/archon-backups/
 ├── backup.log
 └── YYYY-MM-DD_HHMMSS/
-    ├── archon.dump           (~353 MB compressed)
-    ├── roles.sql             (~5 KB)
+    ├── archon.dump           (~352 MB, archon_* tables only)
+    ├── pre-restore.sql       (extensions + custom types)
     ├── env/
     │   ├── archon.env
     │   ├── localsupabase.env
