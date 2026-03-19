@@ -12,6 +12,9 @@ interface DataCardProps extends React.HTMLAttributes<HTMLDivElement> {
   // Glass properties
   blur?: "none" | "sm" | "md" | "lg" | "xl";
   transparency?: "clear" | "light" | "medium" | "frosted" | "solid";
+
+  // Compact mode removes min-height constraint for smaller cards
+  compact?: boolean;
 }
 
 interface DataCardHeaderProps extends React.HTMLAttributes<HTMLDivElement> {}
@@ -27,6 +30,7 @@ export const DataCard = React.forwardRef<HTMLDivElement, DataCardProps>(
       glowColor = "none",
       blur = "md",
       transparency = "light",
+      compact = false,
       children,
       ...props
     },
@@ -43,7 +47,7 @@ export const DataCard = React.forwardRef<HTMLDivElement, DataCardProps>(
           className={cn(
             glassCard.base,
             glassCard.edgeColors[edgeColor].border || "border-gray-300/20 dark:border-white/10",
-            "min-h-[240px]",
+            !compact && "min-h-[240px]",
             className,
           )}
           {...props}
@@ -68,7 +72,8 @@ export const DataCard = React.forwardRef<HTMLDivElement, DataCardProps>(
           {/* Content wrapper with flex layout */}
           <div
             className={cn(
-              "flex flex-col min-h-[240px]",
+              "flex flex-col",
+              !compact && "min-h-[240px]",
               glassCard.blur[blur],
               glassCard.tints[edgeColor]?.light || glassCard.transparency[transparency],
             )}
@@ -86,7 +91,8 @@ export const DataCard = React.forwardRef<HTMLDivElement, DataCardProps>(
       <div
         ref={ref}
         className={cn(
-          "relative rounded-xl overflow-hidden min-h-[240px]",
+          "relative rounded-xl overflow-hidden",
+          !compact && "min-h-[240px]",
           glassCard.blur[blur],
           glassCard.transparency[transparency],
           "flex flex-col",
