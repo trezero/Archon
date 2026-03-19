@@ -115,6 +115,14 @@ async def list_projects(
             # Lightweight response doesn't need source formatting
             formatted_projects = result["projects"]
 
+        # Apply title search filter before enrichment to avoid unnecessary work
+        if q:
+            q_lower = q.lower()
+            formatted_projects = [
+                p for p in formatted_projects
+                if q_lower in (p.get("title") or "").lower()
+            ]
+
         # Enrich projects with system registration data
         project_ids = [p["id"] for p in formatted_projects]
         system_regs = project_service.get_system_registrations_for_projects(project_ids)
@@ -122,14 +130,6 @@ async def list_projects(
             regs = system_regs.get(project["id"], [])
             project["system_registrations"] = regs
             project["has_uncommitted_changes"] = any(r.get("git_dirty") for r in regs)
-
-        # Apply title search filter if provided
-        if q:
-            q_lower = q.lower()
-            formatted_projects = [
-                p for p in formatted_projects
-                if q_lower in (p.get("title") or "").lower()
-            ]
 
         # Monitor response size for optimization validation
         response_json = json.dumps(formatted_projects)
