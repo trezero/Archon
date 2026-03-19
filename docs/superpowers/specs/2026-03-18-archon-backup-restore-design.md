@@ -131,11 +131,17 @@ archon-restore.sh [backup_name]  (defaults to "latest")
     │
     ├─ 5. Restore roles (must precede data restore)
     │     docker exec -i supabase-db psql -U postgres < roles.sql
-    │     (Supabase init scripts create most roles; this catches any extras)
+    │     (Supabase init scripts create most roles; this catches any extras.
+    │      Duplicate role errors are expected and non-fatal — piped through
+    │      2>&1 and filtered in the log.)
     │
     ├─ 6. Restore database
-    │     docker exec -i supabase-db pg_restore \
-    │       -U postgres -d postgres --clean --if-exists
+    │     docker cp archon.dump supabase-db:/tmp/archon.dump
+    │     docker exec supabase-db pg_restore \
+    │       -U postgres -d postgres --clean --if-exists /tmp/archon.dump
+    │     docker exec supabase-db rm /tmp/archon.dump
+    │     (Non-fatal warnings from Supabase pre-existing objects are expected.
+    │      The --clean flag drops and recreates objects from the dump.)
     │
     ├─ 7. Start Archon
     │     cd $ARCHON_DIR && docker compose up -d
@@ -276,6 +282,13 @@ If the cron job fails silently, the RPO could be exceeded without anyone knowing
 backup script checks the age of the most recent remote backup after each run. If the
 newest backup is >12 hours old (2× the RPO), it logs a `STALE_BACKUP_WARNING`. A future
 enhancement could send this alert via webhook or email.
+
+### Backup directory permissions
+
+The backup directory contains `.env` files with secrets (Supabase service keys, vault
+encryption key, API keys). The backup script sets `chmod 700` on `~/archon-backups/` on
+both machines to restrict access to the owning user. rsync runs over SSH using the
+existing key-based authentication between the two machines.
 
 ## Files to Create
 
