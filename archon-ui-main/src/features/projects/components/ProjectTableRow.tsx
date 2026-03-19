@@ -67,7 +67,7 @@ export function ProjectTableRow({ project, taskCounts, isSelected, onSelect }: P
 
       {/* Project column (flex-1) */}
       <div className="flex-1 min-w-0 flex items-center gap-1.5">
-        <span className="text-sm text-gray-200 truncate">{project.title}</span>
+        <span className="text-sm text-[#c0c0d8] truncate">{project.title}</span>
         {project.pinned && (
           <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-600/20 text-purple-400 whitespace-nowrap shrink-0">
             PINNED
@@ -90,7 +90,7 @@ export function ProjectTableRow({ project, taskCounts, isSelected, onSelect }: P
       {/* Todo column (~w-16) */}
       <div className="w-16 flex-shrink-0 text-center text-sm">
         {taskCounts && taskCounts.todo > 0 ? (
-          <span className="text-pink-400">{taskCounts.todo}</span>
+          <span className="text-[#f472b6]">{taskCounts.todo}</span>
         ) : (
           <span className="text-gray-700">—</span>
         )}
@@ -99,7 +99,7 @@ export function ProjectTableRow({ project, taskCounts, isSelected, onSelect }: P
       {/* Doing column (~w-16) */}
       <div className="w-16 flex-shrink-0 text-center text-sm">
         {taskCounts && taskCounts.doing > 0 ? (
-          <span className="text-blue-400">{taskCounts.doing}</span>
+          <span className="text-[#93c5fd]">{taskCounts.doing}</span>
         ) : (
           <span className="text-gray-700">—</span>
         )}
@@ -108,7 +108,7 @@ export function ProjectTableRow({ project, taskCounts, isSelected, onSelect }: P
       {/* Done column (~w-16) */}
       <div className="w-16 flex-shrink-0 text-center text-sm">
         {taskCounts && taskCounts.done > 0 ? (
-          <span className="text-green-400">{taskCounts.done}</span>
+          <span className="text-[#86efac]">{taskCounts.done}</span>
         ) : (
           <span className="text-gray-700">—</span>
         )}

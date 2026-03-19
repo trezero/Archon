@@ -41,8 +41,8 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
     : "rounded-xl border border-white/[0.08] bg-gradient-to-br from-[rgba(20,18,35,0.9)] to-[rgba(15,13,28,0.9)] p-4 cursor-pointer transition-all duration-200 hover:border-white/15";
 
   const titleClass = isSelected
-    ? "text-[15px] font-semibold text-purple-50 leading-tight line-clamp-2"
-    : "text-[15px] font-semibold text-gray-300 leading-tight line-clamp-2";
+    ? "text-[15px] font-semibold text-[#f0eaff] leading-tight line-clamp-2"
+    : "text-[15px] font-semibold text-[#c0c0d8] leading-tight line-clamp-2";
 
   return (
     <div
@@ -85,17 +85,17 @@ export function ProjectGridCard({ project, taskCounts, isSelected, onSelect }: P
       {taskCounts && (taskCounts.todo > 0 || taskCounts.doing > 0 || taskCounts.done > 0) && (
         <div className="flex gap-2 mb-2">
           {taskCounts.todo > 0 && (
-            <span className="text-xs px-2 py-0.5 rounded bg-pink-500/12 text-pink-400">
+            <span className="text-xs px-2 py-0.5 rounded bg-pink-500/12 text-pink-300">
               {taskCounts.todo} todo
             </span>
           )}
           {taskCounts.doing > 0 && (
-            <span className="text-xs px-2 py-0.5 rounded bg-blue-500/12 text-blue-400">
+            <span className="text-xs px-2 py-0.5 rounded bg-blue-500/12 text-blue-300">
               {taskCounts.doing} doing
             </span>
           )}
           {taskCounts.done > 0 && (
-            <span className="text-xs px-2 py-0.5 rounded bg-green-500/12 text-green-400">
+            <span className="text-xs px-2 py-0.5 rounded bg-green-500/12 text-green-300">
               {taskCounts.done} done
             </span>
           )}
