@@ -223,15 +223,50 @@ export function WorkflowLogs({
     return undefined;
   }, [isRunning, conversationId, queryClient]);
 
+  // When DB messages arrive, prune SSE messages to avoid duplicates.
+  // DB is canonical for completed content. SSE messages may carry both completed
+  // tool calls (already in DB after flush) and in-progress ones (not yet in DB).
+  // We strip completed tools from SSE messages and drop fully-completed ones.
+  // This mirrors ChatInterface's hydration merge pattern.
+  useEffect(() => {
+    if (!queryMessages || queryMessages.length === 0) return;
+    setSseMessages(prev => {
+      let changed = false;
+      const result: ChatMessage[] = [];
+      for (const m of prev) {
+        if (m.isStreaming) {
+          // Actively streaming text — keep as-is (DB doesn't have this yet)
+          result.push(m);
+          continue;
+        }
+        const hasActiveTool = m.toolCalls?.some(tc => tc.duration === undefined && !tc.output);
+        if (!hasActiveTool) {
+          // All tools complete, not streaming — DB has this, drop it
+          changed = true;
+          continue;
+        }
+        // Has at least one in-progress tool — keep only the active tools,
+        // strip completed ones that are already in DB via persistence flush.
+        const activeTools = (m.toolCalls ?? []).filter(
+          tc => tc.duration === undefined && !tc.output
+        );
+        if (activeTools.length < (m.toolCalls?.length ?? 0)) {
+          changed = true;
+          result.push({ ...m, toolCalls: activeTools });
+        } else {
+          result.push(m);
+        }
+      }
+      return changed ? result : prev;
+    });
+  }, [queryMessages]);
+
   // Merge DB messages (canonical) with SSE-only messages (live streaming).
   //
-  // Strategy:
-  // - While running: SSE is the live source of truth (has tool spinners, streaming
-  //   text). Show SSE messages, and prepend any DB messages from BEFORE the SSE
-  //   session started (older messages not in SSE). This avoids duplicates where
-  //   DB and SSE have the same message at different completion stages.
-  // - After completion: DB is the sole source of truth. SSE state is discarded
-  //   to avoid signature collisions between multiple empty-content messages.
+  // Strategy: DB is always canonical for persisted content. SSE messages are
+  // pruned by the effect above whenever new DB data arrives, so only active
+  // (streaming / in-progress) SSE messages remain. This prevents duplicates
+  // where both DB and SSE contain the same completed tool calls.
   const messages = useMemo((): ChatMessage[] => {
     const dbMessages = queryMessages ?? [];
 
@@ -241,23 +276,44 @@ export function WorkflowLogs({
     // While running with no SSE data yet, show DB messages.
     if (sseMessages.length === 0) return dbMessages;
 
-    // While running with SSE data: merge DB + SSE using ID-based dedup.
-    // DB IDs are UUIDs; SSE IDs are `msg-${Date.now()}` — they never collide,
-    // so this effectively includes ALL messages from both sources. During active
-    // execution this may show a DB-persisted version alongside an SSE streaming
-    // version of recent content — this is intentional and harmless: the SSE
-    // version has live spinners (more useful), and after completion line 152
-    // switches to DB-only (clean, no duplicates).
-    //
-    // The old timestamp-based approach (`m.timestamp < earliestSseTs`) was broken:
-    // DB timestamps are server-side, SSE uses client-side Date.now(). For in-flight
-    // workflows these are concurrent, so the filter dropped all DB messages the
-    // moment the first SSE event arrived — causing logs to vanish. See issue #700.
+    // No DB messages yet — show SSE only.
     if (dbMessages.length === 0) return sseMessages;
 
-    const sseIds = new Set(sseMessages.map(m => m.id));
-    const uniqueDbMessages = dbMessages.filter(m => !sseIds.has(m.id));
-    const combined = [...uniqueDbMessages, ...sseMessages];
+    // Collect DB tool calls for dedup against SSE tools.
+    // SSE and DB compute durations independently (client vs server Date.now()),
+    // so durations can differ by a few ms. We match by name + duration ±500ms.
+    const dbTools: { name: string; duration: number }[] = [];
+    for (const dm of dbMessages) {
+      for (const tc of dm.toolCalls ?? []) {
+        if (tc.duration !== undefined) {
+          dbTools.push({ name: tc.name, duration: tc.duration });
+        }
+      }
+    }
+
+    const isInDb = (name: string, duration: number): boolean =>
+      dbTools.some(dt => dt.name === name && Math.abs(dt.duration - duration) < 500);
+
+    // Strip SSE tool calls that already appear in DB messages.
+    const dedupedSse: ChatMessage[] = [];
+    for (const m of sseMessages) {
+      if (!m.toolCalls?.length) {
+        if (m.isStreaming || m.content) dedupedSse.push(m);
+        continue;
+      }
+      const uniqueTools = m.toolCalls.filter(
+        tc => tc.duration === undefined || !isInDb(tc.name, tc.duration)
+      );
+      if (uniqueTools.length > 0 || m.isStreaming || m.content) {
+        dedupedSse.push({
+          ...m,
+          toolCalls: uniqueTools.length > 0 ? uniqueTools : undefined,
+        });
+      }
+    }
+
+    if (dedupedSse.length === 0) return dbMessages;
+    const combined = [...dbMessages, ...dedupedSse];
     combined.sort((a, b) => a.timestamp - b.timestamp);
     return combined;
   }, [queryMessages, sseMessages, isRunning, gracePolling]);
