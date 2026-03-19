@@ -15,14 +15,12 @@ export function WorkflowList(): React.ReactElement {
   const { codebases, selectedProjectId } = useProject();
   const [localProjectId, setLocalProjectId] = useState<string | null>(selectedProjectId);
 
-  // If the locally-selected project is deleted from the global list, fall back to the
-  // current global selection so the user isn't silently running on a stale project ID.
+  // Sync with the global project selection when it changes in the sidebar.
+  // Also handles the deleted-project fallback: if localProjectId is no longer in the list,
+  // the global selection (which may also be null) takes precedence.
   useEffect(() => {
-    if (!localProjectId || !codebases) return;
-    if (!codebases.some(cb => cb.id === localProjectId)) {
-      setLocalProjectId(selectedProjectId);
-    }
-  }, [codebases, localProjectId, selectedProjectId]);
+    setLocalProjectId(selectedProjectId);
+  }, [selectedProjectId]);
 
   const handleRun = async (workflowName: string): Promise<void> => {
     if (!runMessage.trim() || running) return;

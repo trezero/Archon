@@ -19,10 +19,14 @@ const SIDEBAR_DEFAULT = 260;
 const STORAGE_KEY = 'archon-sidebar-width';
 
 function getInitialWidth(): number {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored) {
-    const parsed = Number(stored);
-    if (parsed >= SIDEBAR_MIN && parsed <= SIDEBAR_MAX) return parsed;
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const parsed = Number(stored);
+      if (parsed >= SIDEBAR_MIN && parsed <= SIDEBAR_MAX) return parsed;
+    }
+  } catch {
+    // localStorage unavailable (Safari private mode, Firefox privacy settings)
   }
   return SIDEBAR_DEFAULT;
 }
@@ -47,10 +51,6 @@ export function Sidebar(): React.ReactElement {
   const addInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, String(width));
-  }, [width]);
-
   // Focus input when shown
   useEffect(() => {
     if (showAddInput) {
@@ -68,11 +68,14 @@ export function Sidebar(): React.ReactElement {
       document.body.style.userSelect = 'none';
       document.body.style.cursor = 'col-resize';
 
+      let currentWidth = startWidth; // tracks the final dragged value
+
       const onMouseMove = (moveEvent: MouseEvent): void => {
         const newWidth = Math.min(
           SIDEBAR_MAX,
           Math.max(SIDEBAR_MIN, startWidth + moveEvent.clientX - startX)
         );
+        currentWidth = newWidth; // keep in sync with latest dragged position
         setWidth(newWidth);
       };
 
@@ -82,6 +85,12 @@ export function Sidebar(): React.ReactElement {
         document.body.style.cursor = '';
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
+        // Persist only on mouseup to avoid 60-120Hz localStorage writes during drag
+        try {
+          localStorage.setItem(STORAGE_KEY, String(currentWidth)); // final dragged value
+        } catch {
+          // localStorage unavailable (Safari private mode, Firefox privacy settings)
+        }
       };
 
       document.addEventListener('mousemove', onMouseMove);
