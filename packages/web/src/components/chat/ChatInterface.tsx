@@ -5,7 +5,6 @@ import { Header } from '@/components/layout/Header';
 import { MessageList } from './MessageList';
 import { MessageInput, type MessageInputHandle } from './MessageInput';
 import { LockIndicator } from './LockIndicator';
-import { WorkflowProgressCard } from './WorkflowProgressCard';
 import { useSSE } from '@/hooks/useSSE';
 import {
   useWorkflowStore,
@@ -623,10 +622,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     [conversationId, isNewChat, navigate, onError, selectedProjectId, queryClient]
   );
 
-  const handleCancelWorkflow = useCallback((): void => {
-    void handleSend('/workflow cancel');
-  }, [handleSend]);
-
   const isStreaming = messages.some(m => m.isStreaming);
 
   return (
@@ -658,9 +653,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           }
         }}
       />
-      {activeWorkflow && (
-        <WorkflowProgressCard workflow={activeWorkflow} onCancel={handleCancelWorkflow} />
-      )}
       <LockIndicator locked={locked && hasSentMessage} queuePosition={queuePosition} />
       <MessageInput
         ref={inputRef}

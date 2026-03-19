@@ -278,7 +278,7 @@ describe('Workflow Executor', () => {
       expect(calls[0][2]).toEqual(
         expect.objectContaining({ category: 'workflow_status', segment: 'new' })
       );
-      // Steps are now shown visually in WorkflowProgressCard, not in the text notification
+      // Step details are omitted from the text notification
     });
 
     it('should execute each step and send notifications', async () => {

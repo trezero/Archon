@@ -2147,7 +2147,7 @@ export async function executeWorkflow(
       }
     }
 
-    // Add workflow start message (steps shown visually in WorkflowProgressCard)
+    // Add workflow start message (step details omitted from text notification)
     // Strip routing metadata from description (Use when:, Handles:, NOT for:, Capability:, Triggers:)
     const cleanDescription = (workflow.description ?? '')
       .split('\n')
