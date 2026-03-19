@@ -284,7 +284,7 @@ export function ChatPage(): React.ReactElement {
         </div>
 
         {/* Conversation list */}
-        <ScrollArea className="flex-1 px-2 pb-2">
+        <ScrollArea className="flex-1 min-h-0 px-2 pb-2">
           <div className="flex flex-col gap-0.5">
             {filtered && filtered.length > 0 ? (
               filtered.map(conv => (
