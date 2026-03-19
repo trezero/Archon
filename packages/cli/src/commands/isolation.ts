@@ -3,7 +3,13 @@
  */
 import * as isolationDb from '@archon/core/db/isolation-environments';
 import { createLogger } from '@archon/paths';
-import { toRepoPath, toBranchName, hasUncommittedChanges, toWorktreePath } from '@archon/git';
+import {
+  toRepoPath,
+  toBranchName,
+  hasUncommittedChanges,
+  toWorktreePath,
+  worktreeExists,
+} from '@archon/git';
 import { getIsolationProvider } from '@archon/isolation';
 import { cleanupMergedWorktrees, removeEnvironment } from '@archon/core/services/cleanup-service';
 
@@ -24,6 +30,37 @@ interface CodebaseInfo {
 }
 
 /**
+ * Reconcile DB state with filesystem — mark environments as destroyed
+ * if their worktree path no longer exists on disk.
+ * Returns the number of ghost entries cleaned up.
+ */
+async function reconcileGhosts(
+  envs: readonly {
+    id: string;
+    working_path: string;
+    branch_name: string | null;
+    workflow_id: string;
+  }[]
+): Promise<number> {
+  let reconciled = 0;
+  for (const env of envs) {
+    try {
+      const exists = await worktreeExists(toWorktreePath(env.working_path));
+      if (!exists) {
+        await isolationDb.updateStatus(env.id, 'destroyed');
+        getLog().info({ envId: env.id, path: env.working_path }, 'ghost_environment_reconciled');
+        console.log(`  Reconciled ghost: ${env.branch_name ?? env.workflow_id} (path missing)`);
+        reconciled++;
+      }
+    } catch (error) {
+      const err = error as Error;
+      getLog().warn({ err, envId: env.id, path: env.working_path }, 'ghost_reconciliation_failed');
+    }
+  }
+  return reconciled;
+}
+
+/**
  * List all active isolation environments
  */
 export async function isolationListCommand(): Promise<void> {
@@ -36,15 +73,23 @@ export async function isolationListCommand(): Promise<void> {
   }
 
   let totalEnvs = 0;
+  let totalGhosts = 0;
 
   for (const codebase of codebases) {
     const envs = await isolationDb.listByCodebaseWithAge(codebase.id);
 
     if (envs.length === 0) continue;
 
+    // Reconcile ghost entries before displaying
+    const ghosts = await reconcileGhosts(envs);
+    totalGhosts += ghosts;
+    const liveEnvs = ghosts > 0 ? await isolationDb.listByCodebaseWithAge(codebase.id) : envs;
+
+    if (liveEnvs.length === 0) continue;
+
     console.log(`\n${codebase.repository_url ?? codebase.default_cwd}:`);
 
-    for (const env of envs) {
+    for (const env of liveEnvs) {
       const age =
         env.days_since_activity !== null
           ? `${Math.floor(env.days_since_activity)}d ago`
@@ -56,7 +101,11 @@ export async function isolationListCommand(): Promise<void> {
       console.log(`    Type: ${env.workflow_type} | Platform: ${platform} | Last activity: ${age}`);
     }
 
-    totalEnvs += envs.length;
+    totalEnvs += liveEnvs.length;
+  }
+
+  if (totalGhosts > 0) {
+    console.log(`\nReconciled ${String(totalGhosts)} ghost environment(s) (missing from disk).`);
   }
 
   if (totalEnvs === 0) {
@@ -70,6 +119,13 @@ export async function isolationListCommand(): Promise<void> {
  * Cleanup stale isolation environments
  */
 export async function isolationCleanupCommand(daysStale = 7): Promise<void> {
+  // First, reconcile ghost entries (paths removed outside Archon)
+  const allActive = await isolationDb.listAllActiveWithCodebase();
+  const ghostCount = await reconcileGhosts(allActive);
+  if (ghostCount > 0) {
+    console.log(`Reconciled ${String(ghostCount)} ghost environment(s) (missing from disk).`);
+  }
+
   console.log(`Finding environments with no activity for ${String(daysStale)}+ days...`);
 
   const staleEnvs = await isolationDb.findStaleEnvironments(daysStale);
