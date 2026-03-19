@@ -2038,7 +2038,12 @@ export async function executeWorkflow(
   // Wrap execution in try-catch to ensure workflow is marked as failed on any error
   try {
     getLog().info(
-      { workflowName: workflow.name, workflowRunId: workflowRun.id },
+      {
+        workflowName: workflow.name,
+        workflowRunId: workflowRun.id,
+        hasIssueContext: !!issueContext,
+        issueContextLength: issueContext?.length ?? 0,
+      },
       'workflow_starting'
     );
     await logWorkflowStart(logDir, workflowRun.id, workflow.name, userMessage);

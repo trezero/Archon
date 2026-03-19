@@ -1268,6 +1268,8 @@ export async function executeDagWorkflow(
       workflowName: workflow.name,
       nodeCount: workflow.nodes.length,
       layerCount: layers.length,
+      hasIssueContext: !!issueContext,
+      issueContextLength: issueContext?.length ?? 0,
     },
     'dag_workflow_starting'
   );

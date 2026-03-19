@@ -483,7 +483,8 @@ export async function handleMessage(
         cwd,
         session,
         isolationHints,
-        conversation
+        conversation,
+        issueContext
       );
     } else {
       await handleBatchMode(
@@ -497,7 +498,8 @@ export async function handleMessage(
         cwd,
         session,
         isolationHints,
-        conversation
+        conversation,
+        issueContext
       );
     }
 
@@ -531,7 +533,8 @@ async function handleStreamMode(
   cwd: string,
   session: { id: string; assistant_session_id: string | null },
   isolationHints: HandleMessageContext['isolationHints'],
-  conversation: Conversation
+  conversation: Conversation,
+  issueContext?: string
 ): Promise<void> {
   const allMessages: string[] = [];
   let newSessionId: string | undefined;
@@ -601,7 +604,8 @@ async function handleStreamMode(
       workflows,
       commands.workflowInvocation,
       originalMessage,
-      isolationHints
+      isolationHints,
+      issueContext
     );
     return;
   }
@@ -639,7 +643,8 @@ async function handleBatchMode(
   cwd: string,
   session: { id: string; assistant_session_id: string | null },
   isolationHints: HandleMessageContext['isolationHints'],
-  conversation: Conversation
+  conversation: Conversation,
+  issueContext?: string
 ): Promise<void> {
   const allChunks: { type: string; content: string }[] = [];
   const assistantMessages: string[] = [];
@@ -730,7 +735,8 @@ async function handleBatchMode(
       workflows,
       commands.workflowInvocation,
       originalMessage,
-      isolationHints
+      isolationHints,
+      issueContext
     );
     return;
   }
@@ -766,7 +772,8 @@ async function handleWorkflowInvocationResult(
   workflows: readonly WorkflowDefinition[],
   invocation: WorkflowInvocation,
   originalMessage: string,
-  isolationHints: HandleMessageContext['isolationHints']
+  isolationHints: HandleMessageContext['isolationHints'],
+  issueContext?: string
 ): Promise<void> {
   const { workflowName, projectName, remainingMessage } = invocation;
 
@@ -786,6 +793,8 @@ async function handleWorkflowInvocationResult(
         source: invocation.synthesizedPrompt ? 'synthesized' : 'original',
         promptLength: workflowPrompt.length,
         workflowName,
+        hasIssueContext: !!issueContext,
+        issueContextLength: issueContext?.length ?? 0,
       },
       'workflow_prompt_resolved'
     );
