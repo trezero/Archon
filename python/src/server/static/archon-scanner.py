@@ -797,7 +797,7 @@ def _write_settings_local(project_path: str) -> None:
                     "hooks": [
                         {
                             "type": "command",
-                            "command": "~/.claude/plugins/archon-memory/scripts/observation_hook.sh",
+                            "command": 'test -f "$HOME/.claude/plugins/archon-memory/scripts/observation_hook.py" && "$HOME/.claude/plugins/archon-memory/.venv/bin/python" "$HOME/.claude/plugins/archon-memory/scripts/observation_hook.py" || true',
                         }
                     ],
                 }

@@ -121,8 +121,9 @@ set "BODY_FILE=%TEMP%\archon_body.json"
 set "CREATE_FILE=%TEMP%\archon_create.json"
 
 :: Write user inputs to temp files so they are never interpolated into PowerShell command strings
-echo !NEW_NAME!>"%NAME_FILE%"
-echo !NEW_DESC!>"%DESC_FILE%"
+:: Use echo( syntax to avoid "ECHO is off." when variable is empty
+(echo(!NEW_NAME!)>"%NAME_FILE%"
+(echo(!NEW_DESC!)>"%DESC_FILE%"
 
 :: Build JSON body by reading temp files inside PowerShell — no user input in the -Command string
 powershell -Command ^
@@ -259,17 +260,19 @@ if "!SKIP_PLUGIN_INSTALL!"=="true" goto :hooks_done
 set "GLOBAL_SETTINGS=%USERPROFILE%\.claude\settings.json"
 
 :: Determine Python executable and script paths for hooks
+:: Use forward slashes in hook paths — Claude Code on Windows uses Git Bash, not cmd.exe
+:: The PowerShell .Replace('\','/') normalizes any remaining backslashes before writing JSON.
 if "!INSTALL_SCOPE!"=="2" (
-    set "LC_PYTHON=!PLUGIN_DIR!\.venv\Scripts\python"
-    set "LC_SCRIPTS=!PLUGIN_DIR!\scripts"
-    set "PTU_PYTHON=!PLUGIN_DIR!\.venv\Scripts\python"
-    set "PTU_SCRIPTS=!PLUGIN_DIR!\scripts"
+    set "LC_PYTHON=!PLUGIN_DIR!/.venv/Scripts/python"
+    set "LC_SCRIPTS=!PLUGIN_DIR!/scripts"
+    set "PTU_PYTHON=!PLUGIN_DIR!/.venv/Scripts/python"
+    set "PTU_SCRIPTS=!PLUGIN_DIR!/scripts"
     set "PTU_SETTINGS=!GLOBAL_SETTINGS!"
 ) else (
-    set "LC_PYTHON=$CLAUDE_PROJECT_DIR\.claude\plugins\archon-memory\.venv\Scripts\python"
-    set "LC_SCRIPTS=$CLAUDE_PROJECT_DIR\.claude\plugins\archon-memory\scripts"
-    set "PTU_PYTHON=.claude\plugins\archon-memory\.venv\Scripts\python"
-    set "PTU_SCRIPTS=.claude\plugins\archon-memory\scripts"
+    set "LC_PYTHON=$CLAUDE_PROJECT_DIR/.claude/plugins/archon-memory/.venv/Scripts/python"
+    set "LC_SCRIPTS=$CLAUDE_PROJECT_DIR/.claude/plugins/archon-memory/scripts"
+    set "PTU_PYTHON=.claude/plugins/archon-memory/.venv/Scripts/python"
+    set "PTU_SCRIPTS=.claude/plugins/archon-memory/scripts"
     set "PTU_SETTINGS=!INSTALL_DIR!\settings.local.json"
 )
 
@@ -284,18 +287,20 @@ if "!INSTALL_SCOPE!"=="2" (
 echo Registering lifecycle hooks in global settings...
 set "LCPY_FILE=%TEMP%\archon_lcpy.txt"
 set "LCSC_FILE=%TEMP%\archon_lcsc.txt"
-echo !LC_PYTHON!>"%LCPY_FILE%"
-echo !LC_SCRIPTS!>"%LCSC_FILE%"
+(echo(!LC_PYTHON!)>"%LCPY_FILE%"
+(echo(!LC_SCRIPTS!)>"%LCSC_FILE%"
 
+:: Hook commands use bash syntax (test -f / &&) because Claude Code on Windows
+:: executes hooks via Git Bash, not cmd.exe.  Paths use forward slashes.
 powershell -Command ^
   "$settingsPath = '!GLOBAL_SETTINGS!'; " ^
-  "$pyPath = (Get-Content '%LCPY_FILE%').Trim(); " ^
-  "$scPath = (Get-Content '%LCSC_FILE%').Trim(); " ^
+  "$pyPath = (Get-Content '%LCPY_FILE%').Trim().Replace('\','/'); " ^
+  "$scPath = (Get-Content '%LCSC_FILE%').Trim().Replace('\','/'); " ^
   "if (Test-Path $settingsPath) { $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json } else { $settings = @{} }; " ^
   "if (-not $settings.hooks) { $settings | Add-Member -Force -NotePropertyName 'hooks' -NotePropertyValue @{} }; " ^
   "$hooks = $settings.hooks; " ^
-  "$ssHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('if exist \"' + $scPath + '/session_start_hook.py\" (\"' + $pyPath + '\" \"' + $scPath + '/session_start_hook.py\")'); timeout=10 }) }); " ^
-  "$stopHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('if exist \"' + $scPath + '/session_end_hook.py\" (\"' + $pyPath + '\" \"' + $scPath + '/session_end_hook.py\")'); timeout=30 }) }); " ^
+  "$ssHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('test -f \"' + $scPath + '/session_start_hook.py\" && \"' + $pyPath + '\" \"' + $scPath + '/session_start_hook.py\" || true'); timeout=10 }) }); " ^
+  "$stopHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('test -f \"' + $scPath + '/session_end_hook.py\" && \"' + $pyPath + '\" \"' + $scPath + '/session_end_hook.py\" || true'); timeout=30 }) }); " ^
   "$hooks | Add-Member -Force -NotePropertyName 'SessionStart' -NotePropertyValue $ssHook; " ^
   "$hooks | Add-Member -Force -NotePropertyName 'Stop' -NotePropertyValue $stopHook; " ^
   "$settings | ConvertTo-Json -Depth 10 | Set-Content $settingsPath"
@@ -305,17 +310,17 @@ echo       ^✓ SessionStart + Stop hooks registered globally
 echo Registering PostToolUse hook...
 set "PTUPY_FILE=%TEMP%\archon_ptupy.txt"
 set "PTUSC_FILE=%TEMP%\archon_ptusc.txt"
-echo !PTU_PYTHON!>"%PTUPY_FILE%"
-echo !PTU_SCRIPTS!>"%PTUSC_FILE%"
+(echo(!PTU_PYTHON!)>"%PTUPY_FILE%"
+(echo(!PTU_SCRIPTS!)>"%PTUSC_FILE%"
 
 powershell -Command ^
   "$settingsPath = '!PTU_SETTINGS!'; " ^
-  "$pyPath = (Get-Content '%PTUPY_FILE%').Trim(); " ^
-  "$scPath = (Get-Content '%PTUSC_FILE%').Trim(); " ^
+  "$pyPath = (Get-Content '%PTUPY_FILE%').Trim().Replace('\','/'); " ^
+  "$scPath = (Get-Content '%PTUSC_FILE%').Trim().Replace('\','/'); " ^
   "if (Test-Path $settingsPath) { $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json } else { $settings = @{} }; " ^
   "if (-not $settings.hooks) { $settings | Add-Member -Force -NotePropertyName 'hooks' -NotePropertyValue @{} }; " ^
   "$hooks = $settings.hooks; " ^
-  "$ptuHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('if exist \"' + $scPath + '/observation_hook.py\" (\"' + $pyPath + '\" \"' + $scPath + '/observation_hook.py\")'); timeout=5 }) }); " ^
+  "$ptuHook = @(@{ matcher=''; hooks=@(@{ type='command'; command=('test -f \"' + $scPath + '/observation_hook.py\" && \"' + $pyPath + '\" \"' + $scPath + '/observation_hook.py\" || true'); timeout=5 }) }); " ^
   "$hooks | Add-Member -Force -NotePropertyName 'PostToolUse' -NotePropertyValue $ptuHook; " ^
   "$settings | ConvertTo-Json -Depth 10 | Set-Content $settingsPath"
 
@@ -350,12 +355,12 @@ for /f "delims=" %%F in (%FINGERPRINT_FILE%) do set "MACHINE_FINGERPRINT=%%F"
 del "%FINGERPRINT_FILE%" 2>nul
 
 set "CONFIG_FILE=%TEMP%\archon_config_vals.txt"
-echo !ARCHON_API_URL!>"%TEMP%\archon_apiurl.txt"
-echo !ARCHON_MCP_URL!>"%TEMP%\archon_mcpurl.txt"
-echo !PROJECT_ID!>"%TEMP%\archon_pid.txt"
-echo !PROJECT_TITLE!>"%TEMP%\archon_ptitle.txt"
-echo !MACHINE_FINGERPRINT!>"%TEMP%\archon_mfp.txt"
-echo !INSTALL_SCOPE!>"%TEMP%\archon_scope.txt"
+(echo(!ARCHON_API_URL!)>"%TEMP%\archon_apiurl.txt"
+(echo(!ARCHON_MCP_URL!)>"%TEMP%\archon_mcpurl.txt"
+(echo(!PROJECT_ID!)>"%TEMP%\archon_pid.txt"
+(echo(!PROJECT_TITLE!)>"%TEMP%\archon_ptitle.txt"
+(echo(!MACHINE_FINGERPRINT!)>"%TEMP%\archon_mfp.txt"
+(echo(!INSTALL_SCOPE!)>"%TEMP%\archon_scope.txt"
 
 powershell -Command ^
   "$apiUrl  = (Get-Content '%TEMP%\archon_apiurl.txt').Trim(); " ^
@@ -391,8 +396,8 @@ set "SYSNAME_FILE=%TEMP%\archon_sysname.txt"
 set "PROJID_FILE=%TEMP%\archon_projid.txt"
 
 :: Write user-supplied values to temp files to avoid interpolation into PowerShell command strings
-echo !SYSTEM_NAME!>"%SYSNAME_FILE%"
-echo !PROJECT_ID!>"%PROJID_FILE%"
+(echo(!SYSTEM_NAME!)>"%SYSNAME_FILE%"
+(echo(!PROJECT_ID!)>"%PROJID_FILE%"
 
 powershell -Command ^
   "$sysName = (Get-Content '%SYSNAME_FILE%').Trim(); " ^

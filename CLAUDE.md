@@ -55,6 +55,23 @@ When a process should continue despite failures, it must **skip the failed item 
 - Never return None/null to indicate failure - raise an exception with details
 - For batch operations, always report both success count and detailed failure list
 
+### User-Facing Change Propagation
+
+After every code change, tell the user what steps are needed to see the effect on their running systems. Use this reference:
+
+| What changed | How to propagate |
+|---|---|
+| **Backend Python** (`python/src/server/`, `python/src/mcp_server/`) | Restart Docker: `docker compose restart archon-server archon-mcp` (or re-run `uv run python -m src.server.main` if running locally) |
+| **Frontend** (`archon-ui-main/`) | Auto-reloads if `npm run dev` is running; otherwise `npm run build` + refresh |
+| **Setup scripts** (`integrations/claude-code/setup/archonSetup.sh`, `archonSetup.bat`) | Re-download and re-run the script on each target machine. The scripts are served dynamically by the backend, so restart the backend first, then re-download via `curl <archon_api_url>/api/setup/script-sh` (or `/script-bat`). Running `/archon-setup` inside Claude Code does NOT re-run these — it only bootstraps extensions. |
+| **Scanner script** (`python/src/server/static/archon-scanner.py`) | Restart backend (script is served from static files), then re-run `/scan-projects` |
+| **Extensions / skills** (`integrations/claude-code/skills/`, `integrations/claude-code/plugins/`) | Restart backend, then run `/archon-setup` or `/archon-extension-sync` in each project |
+| **MCP tool definitions** (`python/src/mcp_server/features/`) | Restart Docker: `docker compose restart archon-mcp` |
+| **Hook commands** (written into `~/.claude/settings.json` by setup scripts) | Re-download and re-run the setup script (`archonSetup.sh` / `.bat`). Existing hook entries must be overwritten — the script handles this. |
+| **Docker Compose / Dockerfile** | `docker compose up --build -d` |
+| **Database migrations** (`python/src/server/migrations/`) | Run migration manually against Supabase |
+| **CLAUDE.md / ai_docs** | Takes effect on next Claude Code session (no restart needed) |
+
 ### Code Quality
 
 - Remove dead code immediately rather than maintaining it - no backward compatibility or legacy functions
