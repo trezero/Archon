@@ -103,10 +103,13 @@ export function ChatPage(): React.ReactElement {
     const map = new Map<string, 'running' | 'failed'>();
     if (!runs) return map;
     for (const run of runs) {
+      // For web runs, parent_conversation_id is the visible conversation in the sidebar.
+      // For CLI runs, conversation_id is the only conversation (no parent/worker split).
+      const key = run.parent_conversation_id ?? run.conversation_id;
       if (run.status === 'running') {
-        map.set(run.conversation_id, 'running');
-      } else if (run.status === 'failed' && !map.has(run.conversation_id)) {
-        map.set(run.conversation_id, 'failed');
+        map.set(key, 'running');
+      } else if (run.status === 'failed' && !map.has(key)) {
+        map.set(key, 'failed');
       }
     }
     return map;
