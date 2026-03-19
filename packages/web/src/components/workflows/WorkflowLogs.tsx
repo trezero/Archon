@@ -57,26 +57,55 @@ function hydrateMessages(
 
   const filtered = startedAt ? hydrated.filter(m => m.timestamp >= startedAt) : hydrated;
 
-  // Attach tool events from workflow_events table to their nearest preceding assistant message.
-  // During active execution, the persistence buffer may not have flushed assistant messages
-  // to the DB yet. In that case, tool events exist (in workflow_events table) but have no
-  // messages to attach to. We collect unattached events and create a synthetic message.
+  // Attach tool events from workflow_events table to assistant messages.
+  //
+  // Dedup strategy: Messages may already have tool calls from metadata (persisted by
+  // persistence.ts flush). Tool events from workflow_events cover the same tool calls
+  // but with different IDs (UUIDs vs msgId-tool-N) and different duration measurements.
+  // To avoid duplicates, we match tool events against metadata tool calls by name and
+  // timestamp proximity — if a metadata tool call with the same name exists within 60s
+  // of the tool event, we consider them the same and skip the event.
+  //
+  // During active execution before flush, no messages have metadata tool calls, so all
+  // tool events attach normally. After flush, metadata is authoritative and tool events
+  // are skipped. For partially-flushed state, only unmatched tool events are shown.
   if (toolEvents && toolEvents.length > 0) {
     const assistantMsgs = filtered.filter(m => m.role === 'assistant');
-    // Collect IDs of tool calls already present on messages (from metadata)
-    const existingToolIds = new Set<string>();
+
+    // Build a lookup of all metadata tool calls for dedup matching.
+    // Each entry records the tool name and the message timestamp (approximate start time).
+    const metadataTools: { name: string; timestamp: number }[] = [];
     for (const m of assistantMsgs) {
-      if (m.toolCalls) {
-        for (const tc of m.toolCalls) existingToolIds.add(tc.id);
+      if (m.toolCalls && m.toolCalls.length > 0) {
+        for (const tc of m.toolCalls) {
+          metadataTools.push({ name: tc.name, timestamp: tc.startedAt });
+        }
       }
     }
 
+    // Track which metadata tools have been "claimed" by a tool event match
+    // to prevent one metadata tool from deduping multiple distinct tool events.
+    const claimedMetadata = new Set<number>();
+
     const unattached: ToolCallDisplay[] = [];
     for (const te of toolEvents) {
-      // Skip if already hydrated from message metadata
-      if (existingToolIds.has(te.id)) continue;
+      const teTimestamp = new Date(ensureUtc(te.createdAt)).getTime();
 
-      const teTimestamp = new Date(te.createdAt).getTime();
+      // Check if this tool event matches an existing metadata tool call.
+      // Match by same name and timestamp within 60s (tool events fire at start,
+      // messages are created after completion, so timestamps can differ significantly).
+      let isDuplicate = false;
+      for (let i = 0; i < metadataTools.length; i++) {
+        if (claimedMetadata.has(i)) continue;
+        const mt = metadataTools[i];
+        if (mt.name === te.name && Math.abs(mt.timestamp - teTimestamp) < 60_000) {
+          isDuplicate = true;
+          claimedMetadata.add(i);
+          break;
+        }
+      }
+      if (isDuplicate) continue;
+
       // Find the last assistant message that started before this tool event
       let target: ChatMessage | undefined;
       for (const m of assistantMsgs) {
