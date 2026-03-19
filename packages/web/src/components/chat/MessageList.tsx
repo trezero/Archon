@@ -21,7 +21,7 @@ function WorkflowDispatchInline({
 }): React.ReactElement {
   const navigate = useNavigate();
 
-  const { data: runData } = useQuery({
+  const { data: runData, isError: isErrorRunData } = useQuery({
     queryKey: ['workflowRunByWorker', workerConversationId],
     queryFn: () => getWorkflowRunByWorker(workerConversationId),
     refetchInterval: (query): number | false => {
@@ -41,16 +41,17 @@ function WorkflowDispatchInline({
     }
   };
 
-  const statusIcon =
-    status === 'completed' ? (
-      <span className="text-success text-xs shrink-0">&#x2713;</span>
-    ) : status === 'failed' ? (
-      <span className="text-error text-xs shrink-0">&#x2717;</span>
-    ) : status === 'cancelled' ? (
-      <span className="text-text-secondary text-xs shrink-0">&#x2715;</span>
-    ) : (
-      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent shrink-0" />
-    );
+  const statusIcon = isErrorRunData ? (
+    <span className="text-error text-xs shrink-0">&#x26A0;</span>
+  ) : status === 'completed' ? (
+    <span className="text-success text-xs shrink-0">&#x2713;</span>
+  ) : status === 'failed' ? (
+    <span className="text-error text-xs shrink-0">&#x2717;</span>
+  ) : status === 'cancelled' ? (
+    <span className="text-text-secondary text-xs shrink-0">&#x2715;</span>
+  ) : (
+    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent shrink-0" />
+  );
 
   return (
     <button

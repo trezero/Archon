@@ -39,7 +39,13 @@ export function Sidebar(): React.ReactElement {
   const [projectsExpanded, setProjectsExpanded] = useState(false);
 
   const navigate = useNavigate();
-  const { selectedProjectId, setSelectedProjectId, codebases, isLoadingCodebases } = useProject();
+  const {
+    selectedProjectId,
+    setSelectedProjectId,
+    codebases,
+    isLoadingCodebases,
+    isErrorCodebases,
+  } = useProject();
 
   const selectedProject = codebases?.find(cb => cb.id === selectedProjectId) ?? null;
 
@@ -284,6 +290,9 @@ export function Sidebar(): React.ReactElement {
               searchQuery={searchQuery}
             />
           </div>
+        )}
+        {isErrorCodebases && (
+          <p className="px-2 text-[10px] text-error mt-1">Failed to load projects — retrying</p>
         )}
       </div>
 

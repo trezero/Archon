@@ -15,10 +15,15 @@ export function WorkflowInvoker({ codebaseId }: WorkflowInvokerProps): React.Rea
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: workflows } = useQuery({
+  const { data: workflows, isError: isErrorWorkflows } = useQuery({
     queryKey: ['workflows'],
     queryFn: () => listWorkflows(),
+    refetchInterval: 30_000,
   });
+
+  if (isErrorWorkflows) {
+    return <p className="mx-1 text-[10px] text-error">Failed to load workflows — retrying</p>;
+  }
 
   if (!workflows || workflows.length === 0) return null;
 
