@@ -178,28 +178,51 @@ export class MessagePersistence {
       this.assistantBuffer.delete(conversationId);
       return;
     }
-    this.assistantBuffer.delete(conversationId);
+
+    // Split: keep segments with in-flight tools (output pending) in the buffer
+    // so appendToolResult can still find them. Only flush completed segments.
+    const ready: BufferedSegment[] = [];
+    const pending: BufferedSegment[] = [];
+    for (const seg of buf.segments) {
+      const hasInflightTool = seg.toolCalls.some(
+        tc => tc.output === undefined && tc.duration === undefined
+      );
+      if (hasInflightTool) {
+        pending.push(seg);
+      } else {
+        ready.push(seg);
+      }
+    }
+
+    if (ready.length === 0) {
+      // All segments have in-flight tools — nothing to flush yet
+      return;
+    }
+
+    if (pending.length > 0) {
+      // Keep pending segments in the buffer for appendToolResult to find
+      buf.segments = pending;
+    } else {
+      this.assistantBuffer.delete(conversationId);
+    }
 
     const dbId = this.dbIdMap.get(conversationId);
     if (!dbId) {
-      getLog().warn(
-        { conversationId, segmentCount: buf.segments.length },
-        'assistant_persist_no_db_id'
-      );
+      getLog().warn({ conversationId, segmentCount: ready.length }, 'assistant_persist_no_db_id');
       // Restore buffer — dbId may arrive later (e.g., race with conversation creation).
-      // Merge with any segments that arrived since we cleared the map above.
+      // Merge ready segments back with any that arrived since we split.
       const existing = this.assistantBuffer.get(conversationId);
       if (existing) {
-        existing.segments.unshift(...buf.segments);
+        existing.segments.unshift(...ready);
       } else {
-        this.assistantBuffer.set(conversationId, buf);
+        this.assistantBuffer.set(conversationId, { segments: [...ready, ...pending] });
       }
       return;
     }
 
     // Finalize any remaining tool durations (last tool in each segment)
     const now = Date.now();
-    for (const seg of buf.segments) {
+    for (const seg of ready) {
       const lastTool = seg.toolCalls[seg.toolCalls.length - 1];
       if (lastTool && lastTool.duration === undefined) {
         lastTool.duration = now - lastTool.startedAt;
@@ -208,7 +231,7 @@ export class MessagePersistence {
 
     try {
       const { addMessage } = await import('@archon/core/db/messages');
-      for (const seg of buf.segments) {
+      for (const seg of ready) {
         if (!seg.content && seg.toolCalls.length === 0) continue;
         const toolCalls = seg.toolCalls.map(tc => ({
           name: tc.name,
