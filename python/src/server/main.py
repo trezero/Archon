@@ -19,6 +19,7 @@ from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api_routes.agent_chat_api import router as agent_chat_router
+from .api_routes.auto_research_api import router as auto_research_router
 from .api_routes.agent_work_orders_proxy import router as agent_work_orders_router
 from .api_routes.bug_report_api import router as bug_report_router
 from .api_routes.internal_api import router as internal_router
@@ -147,6 +148,16 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Failed to recover stale crawls on startup: {e}")
 
+        # Recover any auto-research jobs left in 'running' state after a restart
+        try:
+            from .config.database import get_supabase_client as _get_sb
+            from .services.auto_research_service import AutoResearchService
+
+            AutoResearchService.recover_stale_jobs(_get_sb())
+            api_logger.info("✅ Auto-research stale job recovery complete")
+        except Exception as e:
+            api_logger.warning(f"Auto-research stale job recovery failed (non-fatal): {e}")
+
         # MCP Client functionality removed from architecture
         # Agents now use MCP tools directly
 
@@ -238,6 +249,7 @@ app.include_router(materialization_router)
 app.include_router(leaveoff_router)
 app.include_router(postman_router)
 app.include_router(scanner_script_router)
+app.include_router(auto_research_router)
 
 
 # Root endpoint
