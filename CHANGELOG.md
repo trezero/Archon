@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-03-20
+
+Chat-first navigation redesign, DAG graph viewer, per-node MCP and skills, and extensive bug fixes across the web UI and workflow engine.
+
+### Added
+
+- **Chat-first layout redesign** with top-level tab navigation replacing sidebar nav (#666, #673)
+- **DAG workflow graph viewer** with split-panel layout for visual workflow inspection (#712)
+- **Per-node MCP servers** for DAG workflows — configure MCP server files per node with env var expansion (#688)
+- **Per-node skills** for DAG workflows — preload skills via AgentDefinition wrapping (#689)
+- **Default worktree isolation** for CLI workflows with auto-detected base branch (#692)
+- **Mission Control cards** with richer grouping by parent chat (#673)
+- **Tool result capture** via PostToolUse hook streamed live to Web UI
+- **Zustand state management** for workflow store, replacing manual state (#693)
+- **Welcoming empty chat state** with suppressed disconnected/no-project noise (#670)
+- Issue context details in workflow startup log events (#737)
+- Running workflow count in health endpoint (#718, #719)
+- Prerequisites section added to README quickstart
+
+### Changed
+
+- README restructured with content extracted to `/docs` directory
+- Shared executor infrastructure extracted from monolithic executor (#685)
+- Workflow discovery split into its own module for cleaner loading
+- Duplicated helpers extracted across executor, command-handler, and cleanup-service (#633)
+- Worktree-per-codebase limit removed
+- Deduplicated `setConversationDbId` pattern across adapters (#651)
+
+### Fixed
+
+- SSE race condition causing loading indicators to break after first workflow invocation
+- Tool call cards not rendering during live SSE streaming in chat (#754)
+- Standalone active workflows not grouped into shared grid (#755)
+- Conversation list not scrollable in sidebar (#747, #750)
+- Duplicate tool calls in WorkflowLogs from SSE+DB merge conflicts (#705, #720, #721)
+- Ghost DB entries in CLI isolation commands
+- Tool output lost across periodic flush in workflow logs
+- `conversationId` not URL-encoded in SSE EventSource for forge adapters (#658)
+- Claude SDK crash when invoked as root (#733)
+- Worktree sharing across conversations and web workers (#716)
+- Orphan conversation cleanup and rename error surfacing (#726)
+- Query error states missing from sidebar and context components (#727)
+- localStorage guard and background polling issues (#725)
+- Workflow builder black screen and DAG log filtering (#675)
+- Idle timeout not detecting stuck tool calls during execution (#649)
+- `commitAllChanges` failing on empty commits (#745)
+- Explicit base branch config now required for worktree creation (#686)
+- Subprocess-level retry added to CodexClient (#641)
+- Validate `cwd` query param against registered codebases (#630)
+- Server-internal paths redacted from `/api/config` response (#632)
+- SQLite conversations index missing `WHERE deleted_at IS NULL` (#629)
+
 ## [0.2.11] - 2026-03-16
 
 Git workflow and release automation.
