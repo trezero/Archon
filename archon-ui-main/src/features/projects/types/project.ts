@@ -92,6 +92,7 @@ export interface CreateProjectRequest {
   data?: ProjectData;
   technical_sources?: string[];
   business_sources?: string[];
+  parent_project_id?: string | null;
 }
 
 export interface UpdateProjectRequest {
@@ -105,6 +106,7 @@ export interface UpdateProjectRequest {
   technical_sources?: string[];
   business_sources?: string[];
   pinned?: boolean;
+  parent_project_id?: string | null;
 }
 
 // Utility types
@@ -121,4 +123,14 @@ export interface PaginatedResponse<T> {
   page: number;
   limit: number;
   hasMore: boolean;
+}
+
+/** Lightweight child project for SubProjectCard display */
+export interface ChildProject {
+  id: string;
+  title: string;
+  description?: string | null;
+  tags?: string[];
+  parent_project_id: string;
+  system_registrations?: ProjectSystemRegistration[];
 }
