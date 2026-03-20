@@ -10,7 +10,7 @@ import { ProjectTable } from "../components/ProjectTable";
 import { DocsTab } from "../documents/DocsTab";
 import { ExtensionsTab } from "../extensions/ExtensionsTab";
 import { useProjectFilters } from "../hooks/useProjectFilters";
-import { useDeleteProject, useProjects } from "../hooks/useProjectQueries";
+import { useDeleteProject, useProjects, useUpdateProject } from "../hooks/useProjectQueries";
 import { useSystems } from "../hooks/useSystemQueries";
 import { KnowledgeTab } from "../knowledge/KnowledgeTab";
 import { useTaskCounts } from "../tasks/hooks";
@@ -39,6 +39,14 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
 	const { data: projects = [], isLoading, error } = useProjects();
 	const { data: taskCounts = {}, refetch: refetchTaskCounts } = useTaskCounts();
 	const deleteProjectMutation = useDeleteProject();
+	const updateProjectMutation = useUpdateProject();
+
+	const handleTogglePin = useCallback(
+		(id: string, pinned: boolean) => {
+			updateProjectMutation.mutate({ projectId: id, updates: { pinned } });
+		},
+		[updateProjectMutation],
+	);
 
 	// Apply filters and sort
 	const filteredProjects = filters.filterProjects(projects as Project[]);
@@ -158,17 +166,21 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
 					) : filters.viewMode === "grid" ? (
 						<ProjectGrid
 							projects={sortedProjects}
+							allProjects={projects as Project[]}
 							taskCounts={taskCounts}
 							selectedProjectId={selectedProject?.id}
 							onSelectProject={handleProjectSelect}
+							onTogglePin={handleTogglePin}
 							groupByParent={filters.groupByParent}
 						/>
 					) : (
 						<ProjectTable
 							projects={sortedProjects}
+							allProjects={projects as Project[]}
 							taskCounts={taskCounts}
 							selectedProjectId={selectedProject?.id}
 							onSelectProject={handleProjectSelect}
+							onTogglePin={handleTogglePin}
 							sort={filters.sort}
 							toggleSort={filters.toggleSort}
 							groupByParent={filters.groupByParent}

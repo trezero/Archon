@@ -1,5 +1,5 @@
-import { ProjectGridCard } from "./ProjectGridCard";
 import type { Project } from "../types";
+import { ProjectGridCard } from "./ProjectGridCard";
 
 interface TaskCountMap {
   [projectId: string]: { todo: number; doing: number; done: number } | undefined;
@@ -7,25 +7,35 @@ interface TaskCountMap {
 
 interface ProjectGridProps {
   projects: Project[];
+  allProjects: Project[];
   taskCounts: TaskCountMap;
   selectedProjectId?: string;
   onSelectProject: (id: string) => void;
+  onTogglePin?: (id: string, pinned: boolean) => void;
   groupByParent: boolean;
 }
 
 export function ProjectGrid({
   projects,
+  allProjects,
   taskCounts,
   selectedProjectId,
   onSelectProject,
+  onTogglePin,
   groupByParent,
 }: ProjectGridProps) {
+  // Build child count map from the full project list
+  const childCountMap = new Map<string, number>();
+  for (const p of allProjects) {
+    if (p.parent_project_id) {
+      childCountMap.set(p.parent_project_id, (childCountMap.get(p.parent_project_id) ?? 0) + 1);
+    }
+  }
+  // Build parent title lookup
+  const projectTitleMap = new Map(allProjects.map((p) => [p.id, p.title]));
+
   if (projects.length === 0) {
-    return (
-      <div className="flex items-center justify-center py-16 text-gray-500 text-sm">
-        No projects found
-      </div>
-    );
+    return <div className="flex items-center justify-center py-16 text-gray-500 text-sm">No projects found</div>;
   }
 
   if (!groupByParent) {
@@ -38,6 +48,10 @@ export function ProjectGrid({
             taskCounts={taskCounts[project.id]}
             isSelected={project.id === selectedProjectId}
             onSelect={onSelectProject}
+            onTogglePin={onTogglePin}
+            childCount={childCountMap.get(project.id)}
+            parentTitle={project.parent_project_id ? projectTitleMap.get(project.parent_project_id) : undefined}
+            onSelectParent={onSelectProject}
           />
         ))}
       </div>
@@ -101,6 +115,10 @@ export function ProjectGrid({
                 taskCounts={taskCounts[parent.id]}
                 isSelected={parent.id === selectedProjectId}
                 onSelect={onSelectProject}
+                onTogglePin={onTogglePin}
+                childCount={childCountMap.get(parent.id)}
+                parentTitle={parent.parent_project_id ? projectTitleMap.get(parent.parent_project_id) : undefined}
+                onSelectParent={onSelectProject}
               />
               {children.map((child) => (
                 <ProjectGridCard
@@ -109,6 +127,10 @@ export function ProjectGrid({
                   taskCounts={taskCounts[child.id]}
                   isSelected={child.id === selectedProjectId}
                   onSelect={onSelectProject}
+                  onTogglePin={onTogglePin}
+                  childCount={childCountMap.get(child.id)}
+                  parentTitle={child.parent_project_id ? projectTitleMap.get(child.parent_project_id) : undefined}
+                  onSelectParent={onSelectProject}
                 />
               ))}
             </div>
@@ -124,6 +146,10 @@ export function ProjectGrid({
           taskCounts={taskCounts[project.id]}
           isSelected={project.id === selectedProjectId}
           onSelect={onSelectProject}
+          onTogglePin={onTogglePin}
+          childCount={childCountMap.get(project.id)}
+          parentTitle={project.parent_project_id ? projectTitleMap.get(project.parent_project_id) : undefined}
+          onSelectParent={onSelectProject}
         />
       ))}
 
@@ -141,6 +167,10 @@ export function ProjectGrid({
                 taskCounts={taskCounts[project.id]}
                 isSelected={project.id === selectedProjectId}
                 onSelect={onSelectProject}
+                onTogglePin={onTogglePin}
+                childCount={childCountMap.get(project.id)}
+                parentTitle={project.parent_project_id ? projectTitleMap.get(project.parent_project_id) : undefined}
+                onSelectParent={onSelectProject}
               />
             ))}
           </div>
