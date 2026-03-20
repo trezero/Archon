@@ -870,6 +870,81 @@ async def get_project_features(project_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
+class ProjectStatsResponse(BaseModel):
+    """Task count statistics for a project."""
+
+    project_id: str = Field(..., description="Project identifier")
+    todo: int = Field(0, description="Number of tasks in 'todo' status")
+    doing: int = Field(0, description="Number of tasks in 'doing' status")
+    review: int = Field(0, description="Number of tasks in 'review' status")
+    done: int = Field(0, description="Number of tasks in 'done' status")
+    total: int = Field(0, description="Total number of tasks across all statuses")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "project_id": "proj_abc123",
+                "todo": 5,
+                "doing": 2,
+                "review": 1,
+                "done": 12,
+                "total": 20,
+            }
+        }
+    )
+
+
+@router.get(
+    "/projects/{project_id}/stats",
+    response_model=ProjectStatsResponse,
+    status_code=http_status.HTTP_200_OK,
+    tags=["projects"],
+    responses={
+        404: {"description": "Project not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def get_project_stats(project_id: str) -> ProjectStatsResponse:
+    """Get task count statistics for a project, grouped by status."""
+    try:
+        logfire.info(f"Getting project stats | project_id={project_id}")
+
+        # Verify project exists
+        project_service = ProjectService()
+        success, result = project_service.get_project(project_id)
+        if not success:
+            if "not found" in result.get("error", "").lower():
+                raise HTTPException(status_code=404, detail=result)
+            else:
+                raise HTTPException(status_code=500, detail=result)
+
+        # Get task counts for this project
+        task_service = TaskService()
+        success, counts = task_service.get_all_project_task_counts()
+        if not success:
+            raise HTTPException(status_code=500, detail=counts)
+
+        project_counts = counts.get(project_id, {"todo": 0, "doing": 0, "review": 0, "done": 0})
+
+        stats = ProjectStatsResponse(
+            project_id=project_id,
+            todo=project_counts.get("todo", 0),
+            doing=project_counts.get("doing", 0),
+            review=project_counts.get("review", 0),
+            done=project_counts.get("done", 0),
+            total=sum(project_counts.values()),
+        )
+
+        logfire.info(f"Project stats retrieved | project_id={project_id} | total={stats.total}")
+        return stats
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logfire.error(f"Failed to get project stats | error={str(e)} | project_id={project_id}")
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
 @router.get(
     "/projects/{project_id}/tasks",
     status_code=http_status.HTTP_200_OK,
