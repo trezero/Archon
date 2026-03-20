@@ -7,7 +7,7 @@ separating business logic from transport-specific code.
 """
 
 # Removed direct logging import - using unified config
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from src.server.utils import get_supabase_client
@@ -203,7 +203,7 @@ class ProjectService:
             self.supabase_client.table("archon_project_system_registrations")
             .update({
                 "git_dirty": git_dirty,
-                "git_dirty_checked_at": datetime.now(timezone.utc).isoformat(),
+                "git_dirty_checked_at": datetime.now(UTC).isoformat(),
             })
             .eq("project_id", project_id)
             .eq("system_id", system_id)
@@ -467,3 +467,27 @@ class ProjectService:
         except Exception as e:
             logger.error(f"Error updating project: {e}")
             return False, {"error": f"Error updating project: {str(e)}"}
+
+    def get_project_children(
+        self, parent_id: str
+    ) -> tuple[bool, dict[str, Any]]:
+        """
+        Get lightweight child projects for a parent project.
+
+        Returns only fields needed by SubProjectCard:
+        id, title, description, tags, parent_project_id
+        """
+        try:
+            response = (
+                self.supabase_client.table("archon_projects")
+                .select("id, title, description, tags, parent_project_id")
+                .eq("parent_project_id", parent_id)
+                .execute()
+            )
+
+            children = response.data or []
+            return True, {"children": children}
+
+        except Exception as e:
+            logger.error(f"Error fetching children for project {parent_id}: {e}")
+            return False, {"error": f"Error fetching project children: {str(e)}"}

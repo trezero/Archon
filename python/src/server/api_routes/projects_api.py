@@ -9,7 +9,7 @@ Handles:
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import format_datetime
 from typing import Any
 
@@ -26,6 +26,7 @@ from ..utils.etag_utils import check_etag, generate_etag
 logger = get_logger(__name__)
 
 # Service imports
+from ..services.knowledge import KnowledgeSummaryService
 from ..services.projects import (
     ProjectCreationService,
     ProjectService,
@@ -34,7 +35,6 @@ from ..services.projects import (
 )
 from ..services.projects.document_service import DocumentService
 from ..services.projects.versioning_service import VersioningService
-from ..services.knowledge import KnowledgeSummaryService
 
 # Using HTTP polling for real-time updates
 
@@ -427,7 +427,7 @@ async def update_project(project_id: str, request: UpdateProjectRequest):
             update_fields["data"] = request.data
         if request.pinned is not None:
             update_fields["pinned"] = request.pinned
-        if request.parent_project_id is not None:
+        if "parent_project_id" in request.model_fields_set:
             update_fields["parent_project_id"] = request.parent_project_id
         if request.metadata is not None:
             update_fields["metadata"] = request.metadata
@@ -525,6 +525,37 @@ async def update_project(project_id: str, request: UpdateProjectRequest):
     except Exception as e:
         logfire.error(f"Project update failed | project_id={project_id} | error={str(e)}")
         raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.get("/projects/{project_id}/children")
+async def get_project_children(project_id: str):
+    """Get lightweight child projects for a parent project."""
+    try:
+        supabase_client = get_supabase_client()
+        project_service = ProjectService(supabase_client)
+
+        success, result = project_service.get_project_children(project_id)
+
+        if not success:
+            raise HTTPException(status_code=500, detail=result.get("error", "Failed to fetch children"))
+
+        # Enrich children with system_registrations
+        # get_system_registrations_for_projects returns dict[str, list[dict]]
+        # mapping project_id -> list of registration dicts directly
+        children = result.get("children", [])
+        if children:
+            child_ids = [c["id"] for c in children]
+            reg_map = project_service.get_system_registrations_for_projects(child_ids)
+            for child in children:
+                child["system_registrations"] = reg_map.get(child["id"], [])
+
+        return {"children": children}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logfire.error(f"Failed to get project children | error={str(e)} | project_id={project_id}")
+        raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
 @router.delete("/projects/{project_id}")
@@ -636,7 +667,7 @@ async def list_project_tasks(
                     parsed_updated = None
 
             if parsed_updated is not None:
-                parsed_updated = parsed_updated.astimezone(timezone.utc)
+                parsed_updated = parsed_updated.astimezone(UTC)
                 if last_modified_dt is None or parsed_updated > last_modified_dt:
                     last_modified_dt = parsed_updated
 
@@ -667,7 +698,7 @@ async def list_project_tasks(
             response.headers["ETag"] = current_etag
             response.headers["Cache-Control"] = "no-cache, must-revalidate"
             response.headers["Last-Modified"] = format_datetime(
-                last_modified_dt or datetime.now(timezone.utc)
+                last_modified_dt or datetime.now(UTC)
             )
             logfire.debug(f"Tasks unchanged, returning 304 | project_id={project_id} | etag={current_etag}")
             return None
@@ -676,7 +707,7 @@ async def list_project_tasks(
         response.headers["ETag"] = current_etag
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
         response.headers["Last-Modified"] = format_datetime(
-            last_modified_dt or datetime.now(timezone.utc)
+            last_modified_dt or datetime.now(UTC)
         )
 
         logfire.debug(
