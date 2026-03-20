@@ -7,7 +7,7 @@ import { callAPIWithETag } from "../../shared/api/apiClient";
 import { formatZodErrors, ValidationError } from "../../shared/types/errors";
 import { validateCreateProject, validateUpdateProject } from "../schemas";
 import { formatRelativeTime } from "../shared/api";
-import type { CreateProjectRequest, Project, ProjectFeatures, UpdateProjectRequest } from "../types";
+import type { ChildProject, CreateProjectRequest, Project, ProjectFeatures, UpdateProjectRequest } from "../types";
 
 export const projectService = {
   /**
@@ -172,6 +172,21 @@ export const projectService = {
       return response;
     } catch (error) {
       console.error(`Failed to get features for project ${projectId}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get lightweight child projects for a parent
+   */
+  async getProjectChildren(projectId: string): Promise<ChildProject[]> {
+    try {
+      const response = await callAPIWithETag<{ children: ChildProject[] }>(
+        `/api/projects/${projectId}/children`,
+      );
+      return response.children || [];
+    } catch (error) {
+      console.error(`Failed to get children for project ${projectId}:`, error);
       throw error;
     }
   },

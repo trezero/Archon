@@ -9,7 +9,7 @@ import {
 } from "@/features/shared/utils/optimistic";
 import { DISABLED_QUERY_KEY, STALE_TIMES } from "../../shared/config/queryPatterns";
 import { projectService } from "../services";
-import type { CreateProjectRequest, Project, UpdateProjectRequest } from "../types";
+import type { ChildProject, CreateProjectRequest, Project, UpdateProjectRequest } from "../types";
 
 // Query keys factory for better organization
 export const projectKeys = {
@@ -17,6 +17,7 @@ export const projectKeys = {
   lists: () => [...projectKeys.all, "list"] as const,
   detail: (id: string) => [...projectKeys.all, "detail", id] as const,
   features: (id: string) => [...projectKeys.all, id, "features"] as const,
+  children: (id: string) => [...projectKeys.all, id, "children"] as const,
   // Documents keys moved to documentKeys in documents feature
   // Tasks keys moved to taskKeys in tasks feature
 };
@@ -39,6 +40,17 @@ export function useProjectFeatures(projectId: string | undefined) {
   return useQuery<Awaited<ReturnType<typeof projectService.getProjectFeatures>>>({
     queryKey: projectId ? projectKeys.features(projectId) : DISABLED_QUERY_KEY,
     queryFn: () => (projectId ? projectService.getProjectFeatures(projectId) : Promise.reject("No project ID")),
+    enabled: !!projectId,
+    staleTime: STALE_TIMES.normal,
+  });
+}
+
+// Fetch child projects for a parent
+export function useProjectChildren(projectId: string | undefined) {
+  return useQuery<ChildProject[]>({
+    queryKey: projectId ? projectKeys.children(projectId) : DISABLED_QUERY_KEY,
+    queryFn: () =>
+      projectId ? projectService.getProjectChildren(projectId) : Promise.reject("No project ID"),
     enabled: !!projectId,
     staleTime: STALE_TIMES.normal,
   });
@@ -201,6 +213,38 @@ export function useDeleteProject() {
       // Also remove the project's feature queries
       queryClient.removeQueries({ queryKey: projectKeys.features(projectId), exact: false });
       showToast("Project deleted successfully", "success");
+    },
+  });
+}
+
+// Set or clear a project's parent (for manage modal + parent dropdown)
+export function useSetParentProject() {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      parentProjectId,
+    }: {
+      projectId: string;
+      parentProjectId: string | null;
+    }) => projectService.updateProject(projectId, { parent_project_id: parentProjectId }),
+
+    onSuccess: (_data, variables) => {
+      // Invalidate lists (parent indicators change) and all children queries.
+      // We can't know the old parent when unlinking, so invalidate broadly.
+      queryClient.invalidateQueries({ queryKey: projectKeys.lists() });
+      queryClient.invalidateQueries({
+        predicate: (query) =>
+          Array.isArray(query.queryKey) && query.queryKey.includes("children"),
+      });
+
+      const action = variables.parentProjectId ? "linked" : "unlinked";
+      showToast(`Project ${action} successfully`, "success");
+    },
+    onError: () => {
+      showToast("Failed to update parent project", "error");
     },
   });
 }

@@ -12,6 +12,7 @@ export type * from "../documents/types";
 export type * from "../tasks/types";
 // Core project types (vertical slice architecture)
 export type {
+  ChildProject,
   CreateProjectRequest,
   MCPToolResponse,
   PaginatedResponse,
