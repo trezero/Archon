@@ -1490,6 +1490,45 @@ CREATE INDEX IF NOT EXISTS idx_project_system_reg_project ON archon_project_syst
 CREATE INDEX IF NOT EXISTS idx_project_system_reg_system  ON archon_project_system_registrations(system_id);
 
 -- =====================================================
+-- Auto-Research Optimization Engine
+-- =====================================================
+
+-- Tracks long-running optimization jobs that iteratively improve prompts
+-- against an eval suite, recording the best-found payload and score.
+CREATE TABLE IF NOT EXISTS auto_research_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    eval_suite_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',  -- running, completed, failed, cancelled
+    target_file TEXT NOT NULL,
+    baseline_payload TEXT NOT NULL,
+    baseline_score FLOAT,
+    best_payload TEXT,
+    best_score FLOAT,
+    max_iterations INT NOT NULL,
+    completed_iterations INT NOT NULL DEFAULT 0,
+    model TEXT,
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+);
+
+-- Stores per-iteration results for an auto-research job, including the
+-- evaluated payload, score, detailed signals, and frontier status.
+CREATE TABLE IF NOT EXISTS auto_research_iterations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_id UUID REFERENCES auto_research_jobs(id) ON DELETE CASCADE,
+    iteration_number INT NOT NULL,
+    payload TEXT NOT NULL,
+    scalar_score FLOAT NOT NULL,
+    signals JSONB NOT NULL,
+    is_frontier BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_auto_research_jobs_status ON auto_research_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_auto_research_iterations_job_id ON auto_research_iterations(job_id);
+
+-- =====================================================
 -- SETUP COMPLETE
 -- =====================================================
 -- Your Archon database is now fully configured!
