@@ -98,7 +98,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   const [locked, setLocked] = useState(false);
   const [queuePosition, setQueuePosition] = useState<number | undefined>();
   const [sending, setSending] = useState(false);
-  const [hasSentMessage, setHasSentMessage] = useState(false);
+  const [hasSentMessage, setHasSentMessage] = useState(() => isSendInFlight());
   const inputRef = useRef<MessageInputHandle>(null);
   const messageIdCounter = useRef(0);
   const conversationIdRef = useRef(conversationId);
@@ -640,6 +640,10 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             void queryClient.invalidateQueries({ queryKey: ['conversations'] });
           }, 2000);
         }
+        // Invalidate workflow run queries so sidebar pulsating dot and dashboard
+        // update promptly without waiting for the 10-second polling interval
+        void queryClient.invalidateQueries({ queryKey: ['workflow-runs-status'] });
+        void queryClient.invalidateQueries({ queryKey: ['workflowRuns'] });
       } catch (error) {
         console.error('[Chat] Failed to send message', { error });
         onError({

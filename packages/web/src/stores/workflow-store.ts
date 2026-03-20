@@ -68,7 +68,13 @@ let pollingSubscription: (() => void) | null = null;
 const pollInFlight = new Set<string>();
 
 function invalidateWorkflowQueries(): void {
-  const keys = ['workflow-runs', 'workflowRuns', 'conversations', 'workflowMessages'];
+  const keys = [
+    'workflow-runs',
+    'workflowRuns',
+    'workflow-runs-status',
+    'conversations',
+    'workflowMessages',
+  ];
   for (const key of keys) {
     queryClient.invalidateQueries({ queryKey: [key] }).catch((err: unknown) => {
       console.warn('[WorkflowStore] Failed to invalidate query cache', {
