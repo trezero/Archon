@@ -1,0 +1,106 @@
+{
+  "id": "planning_prompt_v1",
+  "name": "Agent Work Orders Planning Prompt",
+  "description": "Evaluates how well the planning prompt produces actionable, detailed implementation plans from feature requests",
+  "target_file": ".claude/commands/agent-work-orders/planning.md",
+  "model": null,
+  "mutation_guidance": "Improve clarity, specificity, and actionability of instructions. Plans should have clearly numbered steps, identify specific files to create or modify, include testing requirements, and appropriately scope work to match the request complexity. Focus on making the prompt produce better structured output without changing its core purpose.",
+  "test_cases": [
+    {
+      "id": "tc_simple_crud",
+      "name": "Simple CRUD REST API",
+      "input": "Create a REST API for managing a todo list with SQLite storage. The API should support creating, reading, updating, and deleting todo items. Each item has a title, description, and completion status.",
+      "signals": {
+        "has_numbered_steps": {
+          "weight": 1.0,
+          "critical": false,
+          "description": "Plan has clearly numbered implementation steps in a logical order"
+        },
+        "identifies_files": {
+          "weight": 2.0,
+          "critical": true,
+          "description": "Plan identifies specific files to create or modify with file paths"
+        },
+        "includes_data_model": {
+          "weight": 1.5,
+          "critical": false,
+          "description": "Plan defines the data model or schema for todo items"
+        },
+        "includes_testing": {
+          "weight": 1.0,
+          "critical": false,
+          "description": "Plan includes a step for writing or running tests"
+        },
+        "scope_matches_request": {
+          "weight": 1.0,
+          "critical": false,
+          "description": "Plan scope is appropriate for a simple CRUD API - not over-engineered"
+        }
+      }
+    },
+    {
+      "id": "tc_react_component",
+      "name": "React Dashboard Component",
+      "input": "Build a React dashboard component that displays a grid of metric cards. Each card shows a title, current value, and a trend indicator (up/down arrow with percentage). The component should accept an array of metric objects as props.",
+      "signals": {
+        "has_numbered_steps": {
+          "weight": 1.0,
+          "critical": false,
+          "description": "Plan has clearly numbered implementation steps"
+        },
+        "identifies_files": {
+          "weight": 2.0,
+          "critical": true,
+          "description": "Plan identifies specific component files and their locations"
+        },
+        "defines_props_interface": {
+          "weight": 1.5,
+          "critical": false,
+          "description": "Plan defines the TypeScript props interface or prop types"
+        },
+        "includes_styling": {
+          "weight": 1.0,
+          "critical": false,
+          "description": "Plan addresses styling approach (CSS modules, Tailwind, etc.)"
+        },
+        "includes_testing": {
+          "weight": 1.0,
+          "critical": false,
+          "description": "Plan includes component testing"
+        }
+      }
+    },
+    {
+      "id": "tc_cli_tool",
+      "name": "CLI File Processing Tool",
+      "input": "Create a Python CLI tool that reads CSV files, filters rows based on a column value, and outputs the results to a new CSV file. The tool should accept command-line arguments for input file, output file, column name, and filter value.",
+      "signals": {
+        "has_numbered_steps": {
+          "weight": 1.0,
+          "critical": false,
+          "description": "Plan has clearly numbered implementation steps"
+        },
+        "identifies_files": {
+          "weight": 2.0,
+          "critical": true,
+          "description": "Plan identifies the main script file and any supporting modules"
+        },
+        "handles_cli_args": {
+          "weight": 1.5,
+          "critical": false,
+          "description": "Plan specifies how CLI arguments will be parsed (argparse, click, etc.)"
+        },
+        "considers_error_cases": {
+          "weight": 1.0,
+          "critical": false,
+          "description": "Plan considers error handling for missing files, bad column names, etc."
+        },
+        "includes_testing": {
+          "weight": 1.0,
+          "critical": false,
+          "description": "Plan includes testing the CLI tool"
+        }
+      }
+    }
+  ]
+}
