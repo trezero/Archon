@@ -1,0 +1,230 @@
+<h2>Ecosystem Navigation: 3 Approaches</h2>
+<p class="subtitle">How child projects appear on a parent's detail page + how relationships are managed</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Inline Card Strip + Edit Modal</h3>
+      <p><strong>Child grid:</strong> Horizontal strip of minimal cards above tabs. Scrollable if many children.</p>
+      <p><strong>Management:</strong> "Manage Sub-Projects" button opens a modal with search-to-add and remove buttons.</p>
+      <p><strong>Pros:</strong> Clean separation. Management is tucked away. Minimal changes to existing layout.</p>
+      <p><strong>Cons:</strong> Horizontal scroll can hide children. Modal adds a layer of indirection for management.</p>
+
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header">Parent Detail Page — Approach A</div>
+        <div class="mockup-body" style="background:#0d1117;padding:16px;font-family:system-ui;color:#c9d1d9">
+          <!-- Header -->
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div>
+              <span style="color:#8b5cf6;font-size:18px;font-weight:600">RecipeRaiders Ecosystem</span>
+              <span style="background:#1e1b4b;color:#a78bfa;padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px">5 sub-projects</span>
+            </div>
+            <button style="background:#21262d;color:#8b949e;border:1px solid #30363d;padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer">Manage Sub-Projects</button>
+          </div>
+
+          <!-- Child strip -->
+          <div style="display:flex;gap:8px;overflow-x:auto;padding:8px 0;margin-bottom:16px;border-bottom:1px solid #21262d">
+            <div style="min-width:160px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;cursor:pointer">
+              <div style="font-size:13px;font-weight:500;color:#e6edf3">RecipeRaiders</div>
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <span style="background:#1a3a2a;color:#3fb950;padding:1px 6px;border-radius:4px;font-size:10px">macOS</span>
+                <span style="background:#1a2940;color:#58a6ff;padding:1px 6px;border-radius:4px;font-size:10px">WSL</span>
+              </div>
+            </div>
+            <div style="min-width:160px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;cursor:pointer">
+              <div style="font-size:13px;font-weight:500;color:#e6edf3">BrandAmbassador</div>
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <span style="background:#1a3a2a;color:#3fb950;padding:1px 6px;border-radius:4px;font-size:10px">macOS</span>
+              </div>
+            </div>
+            <div style="min-width:160px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;cursor:pointer">
+              <div style="font-size:13px;font-weight:500;color:#e6edf3">RecipeRaiders-Marketing</div>
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <span style="background:#1a3a2a;color:#3fb950;padding:1px 6px;border-radius:4px;font-size:10px">macOS</span>
+              </div>
+            </div>
+            <div style="min-width:160px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;cursor:pointer">
+              <div style="font-size:13px;font-weight:500;color:#e6edf3;white-space:nowrap">reciperaiders-repdash</div>
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <span style="background:#1a3a2a;color:#3fb950;padding:1px 6px;border-radius:4px;font-size:10px">macOS</span>
+              </div>
+            </div>
+            <div style="min-width:160px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;cursor:pointer">
+              <div style="font-size:13px;font-weight:500;color:#e6edf3">reciperaiders-spa</div>
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <span style="background:#1a3a2a;color:#3fb950;padding:1px 6px;border-radius:4px;font-size:10px">macOS</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tabs -->
+          <div style="display:flex;gap:16px;border-bottom:1px solid #21262d;padding-bottom:8px;margin-bottom:12px">
+            <span style="color:#8b5cf6;border-bottom:2px solid #8b5cf6;padding-bottom:8px;font-size:13px">Overview</span>
+            <span style="color:#8b949e;font-size:13px">Tasks</span>
+            <span style="color:#8b949e;font-size:13px">Documents</span>
+            <span style="color:#8b949e;font-size:13px">Knowledge</span>
+          </div>
+          <div style="color:#8b949e;font-size:13px;padding:20px 0">Project overview content, description, metadata...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Card Grid + Inline Actions</h3>
+      <p><strong>Child grid:</strong> Wrapped grid (not scrolling) of minimal cards above tabs. 3-4 columns like the main projects view.</p>
+      <p><strong>Management:</strong> "+" button to add children (search popover). "×" on each card to unlink. On any project card elsewhere: right-click → "Set Parent..."</p>
+      <p><strong>Pros:</strong> All children visible at once. Direct manipulation — no modal needed. Feels native.</p>
+      <p><strong>Cons:</strong> Can push tabs down if many children. "×" buttons always visible might feel destructive.</p>
+
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header">Parent Detail Page — Approach B</div>
+        <div class="mockup-body" style="background:#0d1117;padding:16px;font-family:system-ui;color:#c9d1d9">
+          <!-- Header -->
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div>
+              <span style="color:#8b5cf6;font-size:18px;font-weight:600">RecipeRaiders Ecosystem</span>
+              <span style="background:#1e1b4b;color:#a78bfa;padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px">5 sub-projects</span>
+            </div>
+          </div>
+
+          <!-- Child grid -->
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #21262d">
+            <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;cursor:pointer;position:relative">
+              <span style="position:absolute;top:6px;right:8px;color:#484f58;font-size:11px;cursor:pointer">&times;</span>
+              <div style="font-size:13px;font-weight:500;color:#e6edf3">RecipeRaiders</div>
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <span style="background:#1a3a2a;color:#3fb950;padding:1px 6px;border-radius:4px;font-size:10px">macOS</span>
+                <span style="background:#1a2940;color:#58a6ff;padding:1px 6px;border-radius:4px;font-size:10px">WSL</span>
+              </div>
+            </div>
+            <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;cursor:pointer;position:relative">
+              <span style="position:absolute;top:6px;right:8px;color:#484f58;font-size:11px;cursor:pointer">&times;</span>
+              <div style="font-size:13px;font-weight:500;color:#e6edf3">BrandAmbassador</div>
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <span style="background:#1a3a2a;color:#3fb950;padding:1px 6px;border-radius:4px;font-size:10px">macOS</span>
+              </div>
+            </div>
+            <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;cursor:pointer;position:relative">
+              <span style="position:absolute;top:6px;right:8px;color:#484f58;font-size:11px;cursor:pointer">&times;</span>
+              <div style="font-size:13px;font-weight:500;color:#e6edf3">RecipeRaiders-Marketing</div>
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <span style="background:#1a3a2a;color:#3fb950;padding:1px 6px;border-radius:4px;font-size:10px">macOS</span>
+              </div>
+            </div>
+            <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;cursor:pointer;position:relative">
+              <span style="position:absolute;top:6px;right:8px;color:#484f58;font-size:11px;cursor:pointer">&times;</span>
+              <div style="font-size:13px;font-weight:500;color:#e6edf3">reciperaiders-repdash</div>
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <span style="background:#1a3a2a;color:#3fb950;padding:1px 6px;border-radius:4px;font-size:10px">macOS</span>
+              </div>
+            </div>
+            <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;cursor:pointer;position:relative">
+              <span style="position:absolute;top:6px;right:8px;color:#484f58;font-size:11px;cursor:pointer">&times;</span>
+              <div style="font-size:13px;font-weight:500;color:#e6edf3">reciperaiders-spa</div>
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <span style="background:#1a3a2a;color:#3fb950;padding:1px 6px;border-radius:4px;font-size:10px">macOS</span>
+              </div>
+            </div>
+            <!-- Add button -->
+            <div style="background:transparent;border:1px dashed #30363d;border-radius:8px;padding:10px 14px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#484f58;font-size:13px">
+              + Add sub-project
+            </div>
+          </div>
+
+          <!-- Tabs -->
+          <div style="display:flex;gap:16px;border-bottom:1px solid #21262d;padding-bottom:8px;margin-bottom:12px">
+            <span style="color:#8b5cf6;border-bottom:2px solid #8b5cf6;padding-bottom:8px;font-size:13px">Overview</span>
+            <span style="color:#8b949e;font-size:13px">Tasks</span>
+            <span style="color:#8b949e;font-size:13px">Documents</span>
+            <span style="color:#8b949e;font-size:13px">Knowledge</span>
+          </div>
+          <div style="color:#8b949e;font-size:13px;padding:20px 0">Project overview content, description, metadata...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Collapsible Section + Modal Management</h3>
+      <p><strong>Child grid:</strong> Collapsible "Sub-Projects" section above tabs. Starts expanded but can be collapsed to save space.</p>
+      <p><strong>Management:</strong> Gear icon in section header opens a management modal. "Set Parent" available from project edit form.</p>
+      <p><strong>Pros:</strong> User controls visibility. Scales to many children without pushing tabs off-screen. Clean.</p>
+      <p><strong>Cons:</strong> Collapsed state might make children forgettable. Extra click to manage.</p>
+
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header">Parent Detail Page — Approach C</div>
+        <div class="mockup-body" style="background:#0d1117;padding:16px;font-family:system-ui;color:#c9d1d9">
+          <!-- Header -->
+          <div style="margin-bottom:12px">
+            <span style="color:#8b5cf6;font-size:18px;font-weight:600">RecipeRaiders Ecosystem</span>
+          </div>
+
+          <!-- Collapsible section -->
+          <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:16px;overflow:hidden">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #21262d;cursor:pointer">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="color:#8b949e;font-size:12px">&#9660;</span>
+                <span style="color:#e6edf3;font-size:13px;font-weight:500">Sub-Projects</span>
+                <span style="background:#1e1b4b;color:#a78bfa;padding:1px 6px;border-radius:10px;font-size:10px">5</span>
+              </div>
+              <span style="color:#484f58;font-size:14px;cursor:pointer">&#9881;</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px">
+              <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:8px 12px;cursor:pointer">
+                <div style="font-size:12px;font-weight:500;color:#e6edf3">RecipeRaiders</div>
+                <div style="display:flex;gap:4px;margin-top:4px">
+                  <span style="background:#1a3a2a;color:#3fb950;padding:1px 5px;border-radius:3px;font-size:9px">macOS</span>
+                  <span style="background:#1a2940;color:#58a6ff;padding:1px 5px;border-radius:3px;font-size:9px">WSL</span>
+                </div>
+              </div>
+              <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:8px 12px;cursor:pointer">
+                <div style="font-size:12px;font-weight:500;color:#e6edf3">BrandAmbassador</div>
+                <div style="display:flex;gap:4px;margin-top:4px">
+                  <span style="background:#1a3a2a;color:#3fb950;padding:1px 5px;border-radius:3px;font-size:9px">macOS</span>
+                </div>
+              </div>
+              <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:8px 12px;cursor:pointer">
+                <div style="font-size:12px;font-weight:500;color:#e6edf3">RR-Marketing</div>
+                <div style="display:flex;gap:4px;margin-top:4px">
+                  <span style="background:#1a3a2a;color:#3fb950;padding:1px 5px;border-radius:3px;font-size:9px">macOS</span>
+                </div>
+              </div>
+              <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:8px 12px;cursor:pointer">
+                <div style="font-size:12px;font-weight:500;color:#e6edf3">repdash</div>
+                <div style="display:flex;gap:4px;margin-top:4px">
+                  <span style="background:#1a3a2a;color:#3fb950;padding:1px 5px;border-radius:3px;font-size:9px">macOS</span>
+                </div>
+              </div>
+              <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:8px 12px;cursor:pointer">
+                <div style="font-size:12px;font-weight:500;color:#e6edf3">reciperaiders-spa</div>
+                <div style="display:flex;gap:4px;margin-top:4px">
+                  <span style="background:#1a3a2a;color:#3fb950;padding:1px 5px;border-radius:3px;font-size:9px">macOS</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tabs -->
+          <div style="display:flex;gap:16px;border-bottom:1px solid #21262d;padding-bottom:8px;margin-bottom:12px">
+            <span style="color:#8b5cf6;border-bottom:2px solid #8b5cf6;padding-bottom:8px;font-size:13px">Overview</span>
+            <span style="color:#8b949e;font-size:13px">Tasks</span>
+            <span style="color:#8b949e;font-size:13px">Documents</span>
+            <span style="color:#8b949e;font-size:13px">Knowledge</span>
+          </div>
+          <div style="color:#8b949e;font-size:13px;padding:20px 0">Project overview content, description, metadata...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px;padding:16px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:8px">
+  <h3 style="color:#a78bfa;margin:0 0 8px">Recommendation: Approach C</h3>
+  <p style="margin:0;font-size:14px">Collapsible section scales best — ecosystems could have 2 or 20 children. The collapse toggle prevents layout thrashing while keeping children discoverable. The gear icon for management keeps the UI clean without hiding the capability.</p>
+</div>

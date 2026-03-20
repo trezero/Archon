@@ -1,0 +1,229 @@
+<h2>Toolbar + Adaptive Grid — Layout Mockup</h2>
+<p class="subtitle">Full projects view with filter bar, grid of compact cards, and project detail below</p>
+
+<!-- Mockup of the full page -->
+<div class="mockup" style="max-width: 1100px; margin: 0 auto;">
+  <div class="mockup-header">Projects View — Grid Mode (Active filter ON)</div>
+  <div class="mockup-body" style="background: #0d0d1a; padding: 0; font-family: system-ui, -apple-system, sans-serif; color: #e0e0f0;">
+
+    <!-- FILTER BAR -->
+    <div style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid rgba(139,92,246,0.15); background: rgba(15,15,30,0.9); flex-wrap: wrap;">
+
+      <!-- Active Toggle - prominent, glowing when on -->
+      <button style="display: flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 20px; border: 1px solid rgba(139,92,246,0.6); background: linear-gradient(135deg, rgba(139,92,246,0.25), rgba(79,70,229,0.15)); color: #c4b5fd; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 0 12px rgba(139,92,246,0.3), inset 0 0 8px rgba(139,92,246,0.1);">
+        <span style="width: 8px; height: 8px; border-radius: 50%; background: #a78bfa; box-shadow: 0 0 6px #a78bfa;"></span>
+        Active
+      </button>
+
+      <!-- Divider -->
+      <div style="width: 1px; height: 24px; background: rgba(139,92,246,0.2);"></div>
+
+      <!-- System Filter -->
+      <select style="padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #a0a0c0; font-size: 13px; cursor: pointer;">
+        <option>All Systems</option>
+        <option>WIN-AI-PC</option>
+        <option>MacBookPro_M1</option>
+        <option>WSL-Ubuntu</option>
+      </select>
+
+      <!-- Tags Filter -->
+      <select style="padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #a0a0c0; font-size: 13px; cursor: pointer;">
+        <option>All Tags</option>
+        <option>work</option>
+        <option>personal</option>
+        <option>client-acme</option>
+      </select>
+
+      <!-- Group by Parent -->
+      <button style="display: flex; align-items: center; gap: 4px; padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #707090; font-size: 13px; cursor: pointer;">
+        <span style="font-size: 11px;">⊞</span> Group
+      </button>
+
+      <!-- Spacer -->
+      <div style="flex: 1;"></div>
+
+      <!-- Search -->
+      <div style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); min-width: 180px;">
+        <span style="color: #707090; font-size: 13px;">&#x1F50D;</span>
+        <span style="color: #505070; font-size: 13px;">Search projects...</span>
+      </div>
+
+      <!-- View Toggle -->
+      <div style="display: flex; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); overflow: hidden;">
+        <button style="padding: 6px 10px; background: rgba(139,92,246,0.2); color: #c4b5fd; border: none; font-size: 12px; cursor: pointer;">▦</button>
+        <button style="padding: 6px 10px; background: rgba(255,255,255,0.03); color: #707090; border: none; border-left: 1px solid rgba(255,255,255,0.1); font-size: 12px; cursor: pointer;">☰</button>
+      </div>
+
+      <!-- New Project -->
+      <button style="padding: 6px 14px; border-radius: 8px; border: 1px solid rgba(139,92,246,0.3); background: linear-gradient(135deg, rgba(139,92,246,0.15), rgba(79,70,229,0.1)); color: #c4b5fd; font-size: 13px; cursor: pointer;">+ New</button>
+    </div>
+
+    <!-- RESULTS COUNT -->
+    <div style="padding: 8px 16px 4px; color: #707090; font-size: 12px;">
+      Showing 8 active projects <span style="color: #505070;">· 24 total</span>
+    </div>
+
+    <!-- PROJECT GRID -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; padding: 8px 16px 16px;">
+
+      <!-- Card 1 - Selected, has uncommitted changes -->
+      <div style="border-radius: 12px; border: 1px solid rgba(139,92,246,0.4); background: linear-gradient(135deg, rgba(30,20,60,0.9), rgba(20,15,40,0.9)); padding: 14px; cursor: pointer; box-shadow: 0 0 20px rgba(139,92,246,0.15); position: relative;">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+          <span style="font-size: 14px; font-weight: 600; color: #f0eaff; line-height: 1.3;">Archon</span>
+          <span style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: rgba(139,92,246,0.2); color: #a78bfa;">PINNED</span>
+        </div>
+        <!-- System badge -->
+        <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: rgba(59,130,246,0.15); color: #93c5fd; border: 1px solid rgba(59,130,246,0.2);">WIN-AI-PC</span>
+          <span style="font-size: 10px; color: #606080;">+2</span>
+          <!-- Uncommitted indicator -->
+          <span style="margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.5);" title="Uncommitted changes"></span>
+        </div>
+        <!-- Task pills - compact -->
+        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(236,72,153,0.12); color: #f472b6;">3 todo</span>
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(59,130,246,0.12); color: #93c5fd;">2 doing</span>
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(34,197,94,0.12); color: #86efac;">12 done</span>
+        </div>
+        <!-- Last activity -->
+        <div style="font-size: 10px; color: #606080;">2 hours ago</div>
+      </div>
+
+      <!-- Card 2 - Uncommitted on different system -->
+      <div style="border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); background: linear-gradient(135deg, rgba(20,18,35,0.9), rgba(15,13,28,0.9)); padding: 14px; cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+          <span style="font-size: 14px; font-weight: 600; color: #c0c0d8; line-height: 1.3;">RecipeRaiders</span>
+          <span style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: rgba(139,92,246,0.2); color: #a78bfa;">PINNED</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: rgba(34,197,94,0.12); color: #86efac; border: 1px solid rgba(34,197,94,0.15);">MacBookPro_M1</span>
+          <span style="margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.5);" title="Uncommitted changes"></span>
+        </div>
+        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(236,72,153,0.12); color: #f472b6;">7 todo</span>
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(59,130,246,0.12); color: #93c5fd;">1 doing</span>
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(34,197,94,0.12); color: #86efac;">4 done</span>
+        </div>
+        <div style="font-size: 10px; color: #606080;">5 hours ago</div>
+      </div>
+
+      <!-- Card 3 - Clean -->
+      <div style="border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); background: linear-gradient(135deg, rgba(20,18,35,0.9), rgba(15,13,28,0.9)); padding: 14px; cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+          <span style="font-size: 14px; font-weight: 600; color: #c0c0d8; line-height: 1.3;">API Gateway</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: rgba(59,130,246,0.15); color: #93c5fd; border: 1px solid rgba(59,130,246,0.2);">WIN-AI-PC</span>
+        </div>
+        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(236,72,153,0.12); color: #f472b6;">1 todo</span>
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(34,197,94,0.12); color: #86efac;">8 done</span>
+        </div>
+        <div style="font-size: 10px; color: #606080;">1 day ago</div>
+      </div>
+
+      <!-- Card 4 -->
+      <div style="border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); background: linear-gradient(135deg, rgba(20,18,35,0.9), rgba(15,13,28,0.9)); padding: 14px; cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+          <span style="font-size: 14px; font-weight: 600; color: #c0c0d8; line-height: 1.3;">ML Pipeline</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: rgba(234,88,12,0.15); color: #fdba74; border: 1px solid rgba(234,88,12,0.2);">WSL-Ubuntu</span>
+          <span style="font-size: 10px; color: #606080;">+1</span>
+        </div>
+        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(59,130,246,0.12); color: #93c5fd;">3 doing</span>
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(34,197,94,0.12); color: #86efac;">15 done</span>
+        </div>
+        <div style="font-size: 10px; color: #606080;">3 hours ago</div>
+      </div>
+
+      <!-- Card 5 -->
+      <div style="border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); background: linear-gradient(135deg, rgba(20,18,35,0.9), rgba(15,13,28,0.9)); padding: 14px; cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+          <span style="font-size: 14px; font-weight: 600; color: #c0c0d8; line-height: 1.3;">Client Portal</span>
+          <span style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: rgba(139,92,246,0.2); color: #a78bfa;">PINNED</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: rgba(34,197,94,0.12); color: #86efac; border: 1px solid rgba(34,197,94,0.15);">MacBookPro_M1</span>
+        </div>
+        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(236,72,153,0.12); color: #f472b6;">5 todo</span>
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(59,130,246,0.12); color: #93c5fd;">1 doing</span>
+        </div>
+        <div style="font-size: 10px; color: #606080;">30 min ago</div>
+      </div>
+
+      <!-- Card 6 -->
+      <div style="border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); background: linear-gradient(135deg, rgba(20,18,35,0.9), rgba(15,13,28,0.9)); padding: 14px; cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+          <span style="font-size: 14px; font-weight: 600; color: #c0c0d8; line-height: 1.3;">Design System</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: rgba(59,130,246,0.15); color: #93c5fd; border: 1px solid rgba(59,130,246,0.2);">WIN-AI-PC</span>
+        </div>
+        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(34,197,94,0.12); color: #86efac;">22 done</span>
+        </div>
+        <div style="font-size: 10px; color: #606080;">2 days ago</div>
+      </div>
+
+      <!-- Card 7 -->
+      <div style="border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); background: linear-gradient(135deg, rgba(20,18,35,0.9), rgba(15,13,28,0.9)); padding: 14px; cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+          <span style="font-size: 14px; font-weight: 600; color: #c0c0d8; line-height: 1.3;">Auth Service</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: rgba(234,88,12,0.15); color: #fdba74; border: 1px solid rgba(234,88,12,0.2);">WSL-Ubuntu</span>
+        </div>
+        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(236,72,153,0.12); color: #f472b6;">2 todo</span>
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(34,197,94,0.12); color: #86efac;">6 done</span>
+        </div>
+        <div style="font-size: 10px; color: #606080;">4 hours ago</div>
+      </div>
+
+      <!-- Card 8 -->
+      <div style="border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); background: linear-gradient(135deg, rgba(20,18,35,0.9), rgba(15,13,28,0.9)); padding: 14px; cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+          <span style="font-size: 14px; font-weight: 600; color: #c0c0d8; line-height: 1.3;">Data Viz Dashboard</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: rgba(59,130,246,0.15); color: #93c5fd; border: 1px solid rgba(59,130,246,0.2);">WIN-AI-PC</span>
+        </div>
+        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(236,72,153,0.12); color: #f472b6;">4 todo</span>
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(59,130,246,0.12); color: #93c5fd;">2 doing</span>
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(34,197,94,0.12); color: #86efac;">9 done</span>
+        </div>
+        <div style="font-size: 10px; color: #606080;">6 hours ago</div>
+      </div>
+
+    </div>
+
+    <!-- LEGEND -->
+    <div style="padding: 8px 16px 12px; display: flex; gap: 16px; align-items: center; border-top: 1px solid rgba(255,255,255,0.05);">
+      <span style="font-size: 10px; color: #505070; display: flex; align-items: center; gap: 4px;">
+        <span style="width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; display: inline-block;"></span>
+        Uncommitted changes
+      </span>
+      <span style="font-size: 10px; color: #505070; display: flex; align-items: center; gap: 4px;">
+        <span style="display: inline-block; padding: 1px 5px; border-radius: 3px; background: rgba(59,130,246,0.15); color: #93c5fd; font-size: 9px;">SYS</span>
+        Primary system
+      </span>
+      <span style="font-size: 10px; color: #505070;">+N = additional systems</span>
+    </div>
+
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top: 1.5rem;">Key elements: glowing Active toggle (top-left), system color badges per card, amber dot for uncommitted changes, compact task pills, last activity timestamp. Grid reflows 3-5 columns based on viewport width.</p>
+
+<h3 style="margin-top: 2rem;">What to focus on:</h3>
+<ul style="color: #888; font-size: 14px; line-height: 1.8;">
+  <li>Filter bar layout and the Active toggle prominence</li>
+  <li>Card density — is this the right amount of info per card?</li>
+  <li>System badge colors (blue=Windows, green=Mac, orange=Linux/WSL)</li>
+  <li>Uncommitted changes amber dot placement</li>
+  <li>Overall feel — does this work for 8 projects? How about 25?</li>
+</ul>

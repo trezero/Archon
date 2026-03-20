@@ -1,0 +1,49 @@
+<h2>Projects View Redesign — Two Approaches</h2>
+<p class="subtitle">Both share the same filter bar and data; the difference is layout philosophy</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Toolbar + Adaptive Grid</h3>
+      <p>Horizontal filter/action bar at the top (Active toggle, system dropdown, tags, search, view toggle). Below it, a responsive CSS grid of compact cards that reflows based on window width. Table view replaces the grid entirely when toggled. Clean, flat, modern — like GitHub repos or Notion databases.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Maximum screen real estate for project cards</li>
+          <li>Familiar pattern (GitHub, Linear, Notion)</li>
+          <li>Scales from 5 to 50+ projects naturally</li>
+          <li>Simple mental model — one area, one set of controls</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Filter bar takes vertical space</li>
+          <li>No persistent project detail without clicking into one</li>
+          <li>Less visual hierarchy between active vs inactive</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Sidebar List + Main Stage</h3>
+      <p>Left sidebar becomes a filterable, scrollable project list (compact rows, not cards). Filter controls live at the top of the sidebar. Right side is the "stage" — selected project's details (tasks, docs, knowledge, extensions). The sidebar stays visible while you work in a project.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Always see your project list while working in one</li>
+          <li>Fast switching — click sidebar item, stage updates</li>
+          <li>Natural for "I have 25 projects and jump between them"</li>
+          <li>Similar to VS Code explorer, Slack channels, email clients</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Sidebar takes ~250-300px permanently</li>
+          <li>Project cards lose visual richness (compact list items)</li>
+          <li>Grid/table toggle only applies to the sidebar list</li>
+          <li>More complex layout (sidebar + stage coordination)</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top: 2rem;">Pick the one that feels right, or tell me if you want a hybrid. I'll mock up the winner in detail next.</p>
