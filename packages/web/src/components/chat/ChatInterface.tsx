@@ -142,8 +142,26 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             return hydrated;
           }
           const sendActive = isSendInFlight();
-          const activeStreaming = prev.filter(m => m.isStreaming && (m.content || sendActive));
-          return [...hydrated, ...activeStreaming];
+          // Preserve SSE-only messages: streaming text OR messages with tool calls not yet in DB.
+          // Tool-call messages keep isStreaming:true while the stream is active so the
+          // loading indicator persists; the toolCalls clause below ensures they also
+          // survive hydration regardless of isStreaming state.
+          // Note: dedup below relies on SSE messages using 'msg-{timestamp}' IDs that
+          // never match DB-assigned IDs. Keep SSE IDs synthetic to preserve this invariant.
+          const activeSSE = prev.filter(
+            m =>
+              (m.isStreaming && (m.content || sendActive)) ||
+              (m.toolCalls && m.toolCalls.length > 0)
+          );
+          if (activeSSE.length === 0) return hydrated;
+          // Merge: DB is canonical, append SSE-only messages that aren't yet in DB.
+          // Identify which SSE messages are already covered by hydrated DB data to avoid dupes.
+          const hydratedIds = new Set(hydrated.map(m => m.id));
+          const sseOnly = activeSSE.filter(m => !hydratedIds.has(m.id));
+          if (sseOnly.length === 0) return hydrated;
+          const merged = [...hydrated, ...sseOnly];
+          merged.sort((a, b) => a.timestamp - b.timestamp);
+          return merged;
         });
         setHasSentMessage(true);
       })
@@ -321,9 +339,9 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   const onToolCall = useCallback(
     (name: string, input: Record<string, unknown>, toolCallId?: string): void => {
       setMessages(prev => {
+        const now = Date.now();
         const last = prev[prev.length - 1];
         if (last?.role === 'assistant') {
-          const now = Date.now();
           // Mark any previous running tools as complete (agent moved on)
           const updatedExistingTools = (last.toolCalls ?? []).map(tc =>
             !tc.output && tc.duration === undefined ? { ...tc, duration: now - tc.startedAt } : tc
@@ -339,12 +357,32 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             ...prev.slice(0, -1),
             {
               ...last,
-              isStreaming: false,
+              isStreaming: true,
               toolCalls: [...updatedExistingTools, newTool],
             },
           ];
         }
-        return prev;
+        // No assistant message to attach to (e.g. REST hydration replaced state with only
+        // user messages before this SSE event arrived). Create a synthetic one — mirrors
+        // the WorkflowLogs.tsx pattern (lines 354-371).
+        const newTool: ToolCallDisplay = {
+          id: toolCallId ?? `msg-${String(now)}-tool-0`,
+          name,
+          input,
+          startedAt: now,
+          isExpanded: false,
+        };
+        return [
+          ...prev,
+          {
+            id: `msg-${String(now)}`,
+            role: 'assistant' as const,
+            content: '',
+            timestamp: now,
+            isStreaming: true,
+            toolCalls: [newTool],
+          },
+        ];
       });
     },
     []
