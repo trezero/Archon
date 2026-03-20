@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
-import { listWorkflows, createConversation, runWorkflow } from '@/lib/api';
+import { listWorkflows, createConversation, runWorkflow, deleteConversation } from '@/lib/api';
 
 interface WorkflowInvokerProps {
   codebaseId?: string;
@@ -15,10 +15,15 @@ export function WorkflowInvoker({ codebaseId }: WorkflowInvokerProps): React.Rea
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: workflows } = useQuery({
+  const { data: workflows, isError: isErrorWorkflows } = useQuery({
     queryKey: ['workflows'],
     queryFn: () => listWorkflows(),
+    refetchInterval: 30_000,
   });
+
+  if (isErrorWorkflows) {
+    return <p className="mx-1 text-[10px] text-error">Failed to load workflows — retrying</p>;
+  }
 
   if (!workflows || workflows.length === 0) return null;
 
@@ -26,14 +31,26 @@ export function WorkflowInvoker({ codebaseId }: WorkflowInvokerProps): React.Rea
     if (!selectedWorkflow || !message.trim() || running) return;
     setRunning(true);
     setError(null);
+    let conversationId: string | undefined;
+    let workflowStarted = false;
     try {
-      const { conversationId } = await createConversation(codebaseId ?? undefined);
+      ({ conversationId } = await createConversation(codebaseId ?? undefined));
       await runWorkflow(selectedWorkflow, conversationId, message.trim());
+      workflowStarted = true;
       setSelectedWorkflow(null);
       setMessage('');
       navigate(`/chat/${conversationId}`);
     } catch (err) {
+      console.error('[WorkflowInvoker] Failed to start workflow', { err });
       setError(err instanceof Error ? err.message : 'Failed to start workflow');
+      if (conversationId !== undefined && !workflowStarted) {
+        void deleteConversation(conversationId).catch((cleanupErr: unknown) => {
+          console.warn('[WorkflowInvoker] Failed to clean up orphan conversation', {
+            conversationId,
+            error: cleanupErr,
+          });
+        });
+      }
     } finally {
       setRunning(false);
     }
@@ -71,6 +88,8 @@ export function WorkflowInvoker({ codebaseId }: WorkflowInvokerProps): React.Rea
               }
             }}
             placeholder="Enter message..."
+            name="workflow-message"
+            autoComplete="off"
             disabled={running}
             className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary placeholder:text-text-tertiary focus:border-primary focus:outline-none disabled:opacity-50"
             autoFocus

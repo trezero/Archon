@@ -7,13 +7,14 @@ import { streamSSE } from 'hono/streaming';
 import { cors } from 'hono/cors';
 import type { WebAdapter } from '../adapters/web';
 import { rm, readFile, writeFile, unlink, mkdir } from 'fs/promises';
-import { normalize, join } from 'path';
+import { normalize, join, sep } from 'path';
 import type { Context } from 'hono';
 import type { ConversationLockManager } from '@archon/core';
 import {
   handleMessage,
   getDatabaseType,
   loadConfig,
+  toSafeConfig,
   cloneRepository,
   registerRepository,
   ConversationNotFoundError,
@@ -70,6 +71,19 @@ export function registerApiRoutes(
     return c.json({ error: message, ...(detail ? { detail } : {}) }, status);
   }
 
+  /**
+   * Validate that a caller-supplied `cwd` is rooted at a registered codebase path.
+   * This prevents path traversal — callers cannot read/write outside known project roots.
+   */
+  async function validateCwd(cwd: string): Promise<boolean> {
+    const codebases = await codebaseDb.listCodebases();
+    const normalizedCwd = normalize(cwd);
+    return codebases.some(cb => {
+      const base = normalize(cb.default_cwd);
+      return normalizedCwd === base || normalizedCwd.startsWith(base + sep);
+    });
+  }
+
   // CORS for Web UI — allow-all is fine for a single-developer tool.
   // Override with WEB_UI_ORIGIN env var to restrict if exposing publicly.
   app.use('/api/*', cors({ origin: process.env.WEB_UI_ORIGIN || '*' }));
@@ -80,8 +94,13 @@ export function registerApiRoutes(
     message: string
   ): Promise<{ accepted: boolean; status: string }> {
     const result = await lockManager.acquireLock(conversationId, async () => {
+      // Emit lock:true at handler start so the UI knows processing has begun.
+      // Fire-and-forget — if no SSE stream is connected yet, the event is buffered.
+      webAdapter.emitLockEvent(conversationId, true);
       try {
-        await handleMessage(webAdapter, conversationId, message);
+        await handleMessage(webAdapter, conversationId, message, {
+          isolationHints: { workflowType: 'thread', workflowId: conversationId },
+        });
       } catch (error) {
         getLog().error({ err: error, conversationId }, 'handle_message_failed');
         try {
@@ -514,8 +533,13 @@ export function registerApiRoutes(
       const cwd = c.req.query('cwd');
       let workingDir = cwd;
 
-      // Fallback to first codebase's default_cwd
-      if (!workingDir) {
+      // Validate caller-supplied cwd against registered codebase paths
+      if (cwd) {
+        if (!(await validateCwd(cwd))) {
+          return apiError(c, 400, 'Invalid cwd: must match a registered codebase path');
+        }
+      } else {
+        // Fallback to first codebase's default_cwd
         const codebases = await codebaseDb.listCodebases();
         if (codebases.length > 0) {
           workingDir = codebases[0].default_cwd;
@@ -792,7 +816,11 @@ export function registerApiRoutes(
     try {
       const cwd = c.req.query('cwd');
       let workingDir = cwd;
-      if (!workingDir) {
+      if (cwd) {
+        if (!(await validateCwd(cwd))) {
+          return apiError(c, 400, 'Invalid cwd: must match a registered codebase path');
+        }
+      } else {
         const codebases = await codebaseDb.listCodebases();
         if (codebases.length > 0) workingDir = codebases[0].default_cwd;
       }
@@ -870,7 +898,11 @@ export function registerApiRoutes(
 
     const cwd = c.req.query('cwd');
     let workingDir = cwd;
-    if (!workingDir) {
+    if (cwd) {
+      if (!(await validateCwd(cwd))) {
+        return apiError(c, 400, 'Invalid cwd: must match a registered codebase path');
+      }
+    } else {
       const codebases = await codebaseDb.listCodebases();
       if (codebases.length > 0) workingDir = codebases[0].default_cwd;
     }
@@ -935,7 +967,11 @@ export function registerApiRoutes(
 
     const cwd = c.req.query('cwd');
     let workingDir = cwd;
-    if (!workingDir) {
+    if (cwd) {
+      if (!(await validateCwd(cwd))) {
+        return apiError(c, 400, 'Invalid cwd: must match a registered codebase path');
+      }
+    } else {
       const codebases = await codebaseDb.listCodebases();
       if (codebases.length > 0) workingDir = codebases[0].default_cwd;
     }
@@ -963,7 +999,11 @@ export function registerApiRoutes(
     try {
       const cwd = c.req.query('cwd');
       let workingDir = cwd;
-      if (!workingDir) {
+      if (cwd) {
+        if (!(await validateCwd(cwd))) {
+          return apiError(c, 400, 'Invalid cwd: must match a registered codebase path');
+        }
+      } else {
         const codebases = await codebaseDb.listCodebases();
         if (codebases.length > 0) workingDir = codebases[0].default_cwd;
       }
@@ -1020,12 +1060,12 @@ export function registerApiRoutes(
     }
   });
 
-  // GET /api/config - Read-only configuration
+  // GET /api/config - Read-only configuration (safe subset only — no filesystem paths)
   app.get('/api/config', async c => {
     try {
       const config = await loadConfig();
       return c.json({
-        config,
+        config: toSafeConfig(config),
         database: getDatabaseType(),
       });
     } catch (error) {
@@ -1035,11 +1075,14 @@ export function registerApiRoutes(
   });
 
   // GET /api/health - Health check with web adapter info
-  app.get('/api/health', c => {
+  app.get('/api/health', async c => {
+    const stats = lockManager.getStats();
+    const runningWorkflows = await workflowDb.countRunningWorkflows();
     return c.json({
       status: 'ok',
       adapter: 'web',
-      concurrency: lockManager.getStats(),
+      concurrency: stats,
+      runningWorkflows,
     });
   });
 }

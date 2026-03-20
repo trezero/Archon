@@ -25,7 +25,13 @@ mock.module('./config-loader', () => ({
   readConfigFile: mockReadConfigFile,
 }));
 
-import { loadGlobalConfig, loadRepoConfig, loadConfig, clearConfigCache } from './config-loader';
+import {
+  loadGlobalConfig,
+  loadRepoConfig,
+  loadConfig,
+  clearConfigCache,
+  toSafeConfig,
+} from './config-loader';
 
 describe('config-loader', () => {
   const originalEnv: Record<string, string | undefined> = {};
@@ -353,6 +359,49 @@ worktree:
 
       expect(config.paths.workspaces).toBe(join(homedir(), '.archon', 'workspaces'));
       expect(config.paths.worktrees).toBe(join(homedir(), '.archon', 'worktrees'));
+    });
+  });
+
+  describe('toSafeConfig', () => {
+    test('strips paths from MergedConfig', async () => {
+      mockReadConfigFile.mockResolvedValue('');
+      const config = await loadConfig();
+      const safe = toSafeConfig(config);
+      expect(safe).not.toHaveProperty('paths');
+    });
+
+    test('strips entire commands object from MergedConfig', async () => {
+      mockReadConfigFile.mockResolvedValue('');
+      const config = await loadConfig();
+      const safe = toSafeConfig(config);
+      expect(safe).not.toHaveProperty('commands');
+    });
+
+    test('strips additionalDirectories from assistants.codex', async () => {
+      mockReadConfigFile.mockResolvedValue(`
+assistants:
+  codex:
+    additionalDirectories:
+      - /sensitive/path
+`);
+      const config = await loadConfig();
+      const safe = toSafeConfig(config);
+      expect(safe.assistants.codex).not.toHaveProperty('additionalDirectories');
+    });
+
+    test('preserves non-sensitive fields', async () => {
+      mockReadConfigFile.mockResolvedValue('defaultAssistant: codex');
+      const config = await loadConfig();
+      const safe = toSafeConfig(config);
+      expect(typeof safe.botName).toBe('string');
+      expect(safe.assistant).toBe('codex');
+      expect(safe.streaming).toBeDefined();
+      expect(safe.concurrency).toBeDefined();
+      expect(safe.defaults).toBeDefined();
+      expect(safe.assistants).toBeDefined();
+      expect(safe.assistants.claude).toBeDefined();
+      expect(safe.assistants.codex).toBeDefined();
+      expect(safe.assistants.codex).not.toHaveProperty('additionalDirectories');
     });
   });
 });

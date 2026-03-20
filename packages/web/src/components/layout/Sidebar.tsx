@@ -1,17 +1,7 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
-import { NavLink, useNavigate, Link } from 'react-router';
-import {
-  Plus,
-  Settings,
-  Loader2,
-  Workflow,
-  Hammer,
-  ChevronDown,
-  FolderGit2,
-  MessageSquarePlus,
-  LayoutDashboard,
-} from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate, Link } from 'react-router';
+import { Plus, Loader2, ChevronDown, FolderGit2, MessageSquarePlus } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
@@ -21,8 +11,7 @@ import { ProjectDetail } from '@/components/sidebar/ProjectDetail';
 import { AllConversationsView } from '@/components/sidebar/AllConversationsView';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useProject } from '@/contexts/ProjectContext';
-import { addCodebase, listWorkflowRuns } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { addCodebase } from '@/lib/api';
 
 const SIDEBAR_MIN = 240;
 const SIDEBAR_MAX = 400;
@@ -30,21 +19,17 @@ const SIDEBAR_DEFAULT = 260;
 const STORAGE_KEY = 'archon-sidebar-width';
 
 function getInitialWidth(): number {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored) {
-    const parsed = Number(stored);
-    if (parsed >= SIDEBAR_MIN && parsed <= SIDEBAR_MAX) return parsed;
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const parsed = Number(stored);
+      if (parsed >= SIDEBAR_MIN && parsed <= SIDEBAR_MAX) return parsed;
+    }
+  } catch {
+    // localStorage unavailable (Safari private mode, Firefox privacy settings)
   }
   return SIDEBAR_DEFAULT;
 }
-
-const navLinkClass = ({ isActive }: { isActive: boolean }): string =>
-  cn(
-    'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150',
-    isActive
-      ? 'border-l-2 border-primary bg-accent-muted text-primary'
-      : 'text-text-secondary hover:bg-surface-elevated hover:text-text-primary'
-  );
 
 export function Sidebar(): React.ReactElement {
   const [searchQuery, setSearchQuery] = useState('');
@@ -54,7 +39,13 @@ export function Sidebar(): React.ReactElement {
   const [projectsExpanded, setProjectsExpanded] = useState(false);
 
   const navigate = useNavigate();
-  const { selectedProjectId, setSelectedProjectId, codebases, isLoadingCodebases } = useProject();
+  const {
+    selectedProjectId,
+    setSelectedProjectId,
+    codebases,
+    isLoadingCodebases,
+    isErrorCodebases,
+  } = useProject();
 
   const selectedProject = codebases?.find(cb => cb.id === selectedProjectId) ?? null;
 
@@ -65,10 +56,6 @@ export function Sidebar(): React.ReactElement {
   const [addError, setAddError] = useState<string | null>(null);
   const addInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, String(width));
-  }, [width]);
 
   // Focus input when shown
   useEffect(() => {
@@ -87,11 +74,14 @@ export function Sidebar(): React.ReactElement {
       document.body.style.userSelect = 'none';
       document.body.style.cursor = 'col-resize';
 
+      let currentWidth = startWidth; // tracks the final dragged value
+
       const onMouseMove = (moveEvent: MouseEvent): void => {
         const newWidth = Math.min(
           SIDEBAR_MAX,
           Math.max(SIDEBAR_MIN, startWidth + moveEvent.clientX - startX)
         );
+        currentWidth = newWidth; // keep in sync with latest dragged position
         setWidth(newWidth);
       };
 
@@ -101,6 +91,12 @@ export function Sidebar(): React.ReactElement {
         document.body.style.cursor = '';
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
+        // Persist only on mouseup to avoid 60-120Hz localStorage writes during drag
+        try {
+          localStorage.setItem(STORAGE_KEY, String(currentWidth)); // final dragged value
+        } catch {
+          // localStorage unavailable (Safari private mode, Firefox privacy settings)
+        }
       };
 
       document.addEventListener('mousemove', onMouseMove);
@@ -173,13 +169,6 @@ export function Sidebar(): React.ReactElement {
     setSelectedProjectId(null);
     navigate('/chat');
   }, [navigate, setSelectedProjectId]);
-
-  const { data: runningRuns } = useQuery({
-    queryKey: ['workflowRuns', { status: 'running' }],
-    queryFn: () => listWorkflowRuns({ status: 'running', limit: 1 }),
-    refetchInterval: 10_000,
-  });
-  const hasRunning = (runningRuns?.length ?? 0) > 0;
 
   useKeyboardShortcuts(shortcuts);
 
@@ -302,6 +291,9 @@ export function Sidebar(): React.ReactElement {
             />
           </div>
         )}
+        {isErrorCodebases && (
+          <p className="px-2 text-[10px] text-error mt-1">Failed to load projects — retrying</p>
+        )}
       </div>
 
       <Separator className="bg-border" />
@@ -326,33 +318,6 @@ export function Sidebar(): React.ReactElement {
         </div>
       )}
 
-      <Separator className="bg-border" />
-
-      {/* Navigation */}
-      <nav className="flex flex-col gap-1 p-2">
-        <NavLink to="/" end className={navLinkClass}>
-          <LayoutDashboard className="h-4 w-4" />
-          Mission Control
-          {hasRunning && (
-            <span className="ml-auto flex h-2 w-2 rounded-full bg-primary animate-pulse" />
-          )}
-        </NavLink>
-        <NavLink to="/workflows" end className={navLinkClass}>
-          <Workflow className="h-4 w-4" />
-          Workflows
-        </NavLink>
-        <NavLink to="/workflows/builder" className={navLinkClass}>
-          <Hammer className="h-4 w-4" />
-          Workflow Builder
-          <span className="ml-auto rounded-full bg-accent-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
-            Beta
-          </span>
-        </NavLink>
-        <NavLink to="/settings" className={navLinkClass}>
-          <Settings className="h-4 w-4" />
-          Settings
-        </NavLink>
-      </nav>
       {/* Resize handle */}
       <div
         onMouseDown={handleMouseDown}

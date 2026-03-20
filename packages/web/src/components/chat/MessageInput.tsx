@@ -1,4 +1,11 @@
-import { useState, useRef, useCallback, type KeyboardEvent } from 'react';
+import {
+  useState,
+  useRef,
+  useCallback,
+  forwardRef,
+  useImperativeHandle,
+  type KeyboardEvent,
+} from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -8,13 +15,22 @@ interface MessageInputProps {
   disabledReason?: string;
 }
 
-export function MessageInput({
-  onSend,
-  disabled,
-  disabledReason,
-}: MessageInputProps): React.ReactElement {
+export interface MessageInputHandle {
+  focus: () => void;
+}
+
+const messageInput = forwardRef<MessageInputHandle, MessageInputProps>(function MessageInputInner(
+  { onSend, disabled, disabledReason }: MessageInputProps,
+  ref
+): React.ReactElement {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    focus: (): void => {
+      textareaRef.current?.focus();
+    },
+  }));
 
   const handleSend = useCallback((): void => {
     const trimmed = value.trim();
@@ -72,4 +88,6 @@ export function MessageInput({
       </div>
     </div>
   );
-}
+});
+
+export { messageInput as MessageInput };

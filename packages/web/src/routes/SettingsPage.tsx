@@ -45,9 +45,7 @@ export function SettingsPage(): React.ReactElement {
                   </div>
                   <div>
                     <span className="text-text-secondary">Active: </span>
-                    <span className="text-text-primary font-medium">
-                      {health.concurrency.active}
-                    </span>
+                    <span className="text-text-primary font-medium">{health.runningWorkflows}</span>
                   </div>
                   <div>
                     <span className="text-text-secondary">Queued: </span>

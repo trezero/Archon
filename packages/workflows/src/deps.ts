@@ -27,6 +27,7 @@ export type WorkflowMessageChunk =
   | { type: 'thinking'; content: string }
   | { type: 'result'; sessionId?: string; tokens?: WorkflowTokenUsage; structuredOutput?: unknown }
   | { type: 'tool'; toolName: string; toolInput?: Record<string, unknown> }
+  | { type: 'tool_result'; toolName: string; toolOutput: string }
   | { type: 'workflow_dispatch'; workerConversationId: string; workflowName: string };
 
 export interface WorkflowMessageMetadata {
@@ -68,6 +69,46 @@ export interface WorkflowAssistantOptions {
       }[]
     >
   >;
+  /**
+   * MCP server configuration. Structural match for Record<string, McpServerConfig>.
+   * Discriminated union mirrors the SDK types so that WorkflowAssistantOptions is
+   * assignable to AssistantRequestOptions without casts.
+   * @archon/workflows must not depend on @anthropic-ai/claude-agent-sdk.
+   * Claude only — ignored for Codex.
+   */
+  mcpServers?: Record<
+    string,
+    | { type?: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
+    | { type: 'sse'; url: string; headers?: Record<string, string> }
+    | { type: 'http'; url: string; headers?: Record<string, string> }
+  >;
+  /**
+   * Tools to auto-allow without permission prompts.
+   * Used for MCP tool wildcards (e.g., 'mcp__github__*').
+   * Claude only — ignored for Codex.
+   */
+  allowedTools?: string[];
+  /**
+   * Custom subagent definitions. Structural match for Record<string, AgentDefinition>.
+   * Used when a DAG node has skills — the node is wrapped in an AgentDefinition.
+   * @archon/workflows must not depend on @anthropic-ai/claude-agent-sdk.
+   * Claude only — ignored for Codex.
+   */
+  agents?: Record<
+    string,
+    {
+      description: string;
+      prompt: string;
+      tools?: string[];
+      model?: string;
+      skills?: string[];
+    }
+  >;
+  /**
+   * Name of the agent definition to use for the main thread.
+   * References a key in `agents`. Claude only.
+   */
+  agent?: string;
   abortSignal?: AbortSignal;
   /**
    * When false (default), skips writing session transcript to ~/.claude/projects/.

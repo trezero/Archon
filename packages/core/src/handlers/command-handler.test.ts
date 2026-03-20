@@ -411,6 +411,18 @@ describe('CommandHandler', () => {
       expect(result.command).toBe('command-invoke');
       expect(result.args).toEqual(['plan', '']);
     });
+
+    test('should return empty command for non-slash-prefixed input (Windows Git Bash path expansion)', () => {
+      const result = parseCommand('C:/Program Files/Git/status');
+      expect(result.command).toBe('');
+      expect(result.args).toEqual([]);
+    });
+
+    test('should return empty command for plain word without slash', () => {
+      const result = parseCommand('status');
+      expect(result.command).toBe('');
+      expect(result.args).toEqual([]);
+    });
   });
 
   describe('handleCommand', () => {

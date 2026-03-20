@@ -16,13 +16,13 @@ export function AllConversationsView({
   const navigate = useNavigate();
   const { codebases } = useProject();
 
-  const { data: conversations } = useQuery({
+  const { data: conversations, isError: isErrorConversations } = useQuery({
     queryKey: ['conversations'],
     queryFn: () => listConversations(),
     refetchInterval: 10_000,
   });
 
-  const { data: runs } = useQuery({
+  const { data: runs, isError: isErrorRuns } = useQuery({
     queryKey: ['workflow-runs-status'],
     queryFn: () => listWorkflowRuns({ limit: 50 }),
     refetchInterval: 10_000,
@@ -30,16 +30,19 @@ export function AllConversationsView({
 
   const conversationStatusMap = useMemo((): Map<string, 'running' | 'failed'> => {
     const map = new Map<string, 'running' | 'failed'>();
-    if (!runs) return map;
+    if (!runs || isErrorRuns) return map; // skip silently on error — status badges are secondary UI
     for (const run of runs) {
+      // For web runs, parent_conversation_id is the visible conversation in the sidebar.
+      // For CLI runs, conversation_id is the only conversation (no parent/worker split).
+      const key = run.parent_conversation_id ?? run.conversation_id;
       if (run.status === 'running') {
-        map.set(run.conversation_id, 'running');
-      } else if (run.status === 'failed' && !map.has(run.conversation_id)) {
-        map.set(run.conversation_id, 'failed');
+        map.set(key, 'running');
+      } else if (run.status === 'failed' && !map.has(key)) {
+        map.set(key, 'failed');
       }
     }
     return map;
-  }, [runs]);
+  }, [runs, isErrorRuns]);
 
   const codebaseMap = new Map<string, CodebaseResponse>();
   if (codebases) {
@@ -72,7 +75,9 @@ export function AllConversationsView({
           All Conversations
         </span>
         <div className="mt-1 flex flex-col gap-0.5">
-          {filtered && filtered.length > 0 ? (
+          {isErrorConversations ? (
+            <span className="px-1 text-xs text-error">Failed to load — retrying</span>
+          ) : filtered && filtered.length > 0 ? (
             filtered.map(conv => (
               <ConversationItem
                 key={conv.id}

@@ -33,11 +33,14 @@ Run AI-powered workflows from your terminal.
 # List available workflows (requires git repository)
 archon workflow list --cwd /path/to/repo
 
-# Run a workflow
+# Run a workflow (auto-creates isolated worktree by default)
 archon workflow run assist --cwd /path/to/repo "Explain the authentication flow"
 
-# Run in isolated worktree
+# Explicit branch name for the worktree
 archon workflow run plan --cwd /path/to/repo --branch feature-auth "Add OAuth support"
+
+# Opt out of isolation (run in live checkout)
+archon workflow run assist --cwd /path/to/repo --no-worktree "Quick question"
 ```
 
 **Note:** Workflow and isolation commands require running from within a git repository. Running from subdirectories automatically resolves to the repo root. The `version` and `help` commands work anywhere.
@@ -83,18 +86,22 @@ archon workflow run plan --cwd /path/to/repo --branch feature-x "Add caching"
 | Flag | Effect |
 |------|--------|
 | `--cwd <path>` | Target directory (required for most use cases) |
-| `--branch <name>` | Create/reuse worktree for branch |
-| `--from <branch>`, `--from-branch <branch>` | Start point for new branch when using `--branch` |
-| `--no-worktree` | Checkout branch directly (no worktree) |
+| `--branch <name>` | Explicit branch name for the worktree |
+| `--from <branch>`, `--from-branch <branch>` | Override base branch (start-point for worktree) |
+| `--no-worktree` | Opt out of isolation — run directly in live checkout |
+| `--resume` | Resume from last failed run |
 
-**With `--branch`:**
-- Creates worktree at `~/.archon/worktrees/<repo>/<branch>/`
-- Reuses existing worktree if healthy
+**Default (no flags):**
+- Creates worktree with auto-generated branch (`archon/task-<workflow>-<timestamp>`)
 - Auto-registers codebase if in a git repo
 
-**Without `--branch`:**
-- Runs in target directory directly
-- No isolation
+**With `--branch`:**
+- Creates/reuses worktree at `~/.archon/worktrees/<repo>/<branch>/`
+- Reuses existing worktree if healthy
+
+**With `--no-worktree`:**
+- Runs in target directory directly (no isolation)
+- Mutually exclusive with `--branch` and `--from`
 
 ### `isolation list`
 
@@ -179,16 +186,19 @@ Both work transparently. Most users never need to configure a database.
 ## Examples
 
 ```bash
-# Quick question about code
+# Quick question (auto-isolated in archon/task-assist-<timestamp>)
 archon workflow run assist --cwd ~/projects/my-app "How does error handling work here?"
 
-# Plan a feature (no code changes)
+# Quick question without isolation
+archon workflow run assist --cwd ~/projects/my-app --no-worktree "How does error handling work here?"
+
+# Plan a feature (auto-isolated)
 archon workflow run plan --cwd ~/projects/my-app "Add rate limiting to the API"
 
-# Implement on isolated branch
+# Implement with explicit branch name
 archon workflow run implement --cwd ~/projects/my-app --branch feature-rate-limit "Add rate limiting"
 
-# Branch from a specific source branch instead of main
+# Branch from a specific source branch instead of auto-detected default
 archon workflow run implement --cwd ~/projects/my-app --branch test-adapters --from feature/extract-adapters "Test adapter changes"
 
 # Check worktrees after work session

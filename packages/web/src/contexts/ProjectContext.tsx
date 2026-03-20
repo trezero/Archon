@@ -10,6 +10,7 @@ interface ProjectContextValue {
   setSelectedProjectId: (id: string | null) => void;
   codebases: CodebaseResponse[] | undefined;
   isLoadingCodebases: boolean;
+  isErrorCodebases: boolean;
 }
 
 const projectContext = createContext<ProjectContextValue | null>(null);
@@ -23,7 +24,11 @@ export function ProjectProvider({ children }: { children: React.ReactNode }): Re
     }
   });
 
-  const { data: codebases, isLoading: isLoadingCodebases } = useQuery({
+  const {
+    data: codebases,
+    isLoading: isLoadingCodebases,
+    isError: isErrorCodebases,
+  } = useQuery({
     queryKey: ['codebases'],
     queryFn: listCodebases,
     refetchInterval: 30_000,
@@ -53,7 +58,13 @@ export function ProjectProvider({ children }: { children: React.ReactNode }): Re
 
   return (
     <projectContext.Provider
-      value={{ selectedProjectId, setSelectedProjectId, codebases, isLoadingCodebases }}
+      value={{
+        selectedProjectId,
+        setSelectedProjectId,
+        codebases,
+        isLoadingCodebases,
+        isErrorCodebases,
+      }}
     >
       {children}
     </projectContext.Provider>

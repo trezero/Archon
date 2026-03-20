@@ -37,6 +37,7 @@ import type {
   WorktreeEnvironment,
 } from '../types';
 import { isPRIsolationRequest } from '../types';
+import type { WorktreeCreateConfig } from '../types';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -423,21 +424,20 @@ export class WorktreeProvider implements IIsolationProvider {
   generateBranchName(request: IsolationRequest): string {
     switch (request.workflowType) {
       case 'issue':
-        return `issue-${request.identifier}`;
+        return `archon/issue-${request.identifier}`;
       case 'pr':
-        // Type narrowing: request is PRIsolationRequest here
-        // Same-repo PRs use actual branch, fork PRs use synthetic branch
+        // Same-repo PRs use actual branch (already exists on remote), fork PRs use synthetic
         if (!request.isForkPR) {
           return request.prBranch;
         }
-        return `pr-${request.identifier}-review`;
+        return `archon/pr-${request.identifier}-review`;
       case 'review':
-        return `review-${request.identifier}`;
+        return `archon/review-${request.identifier}`;
       case 'thread':
         // Use short hash for arbitrary thread IDs (Slack, Discord)
-        return `thread-${this.shortHash(request.identifier)}`;
+        return `archon/thread-${this.shortHash(request.identifier)}`;
       case 'task':
-        return `task-${this.slugify(request.identifier)}`;
+        return `archon/task-${this.slugify(request.identifier)}`;
     }
   }
 
@@ -532,11 +532,17 @@ export class WorktreeProvider implements IIsolationProvider {
   ): Promise<{ warnings: string[] }> {
     const repoPath = request.canonicalRepoPath;
 
-    const worktreeConfig = await this.loadConfig(repoPath).catch(error => {
-      getLog().error({ err: error, repoPath }, 'repo_config_load_failed');
-      return null;
-    });
+    let worktreeConfig: WorktreeCreateConfig | null;
+    try {
+      worktreeConfig = await this.loadConfig(repoPath);
+    } catch (error) {
+      const err = error as Error;
+      getLog().error({ err, repoPath }, 'repo_config_load_failed');
+      throw new Error(`Failed to load config: ${err.message}`);
+    }
 
+    // Sync uses only the configured base branch (or auto-detects via getDefaultBranch).
+    // request.fromBranch is the start-point for worktree creation, not a sync target.
     const baseBranch = await this.syncWorkspaceBeforeCreate(repoPath, worktreeConfig?.baseBranch);
 
     const worktreeBase = getWorktreeBase(repoPath);

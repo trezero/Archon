@@ -221,6 +221,21 @@ export interface DagNodeBase {
    * Claude only — Codex nodes emit a warning and ignore this field.
    */
   hooks?: WorkflowNodeHooks;
+  /**
+   * Path to MCP server config JSON file (relative to cwd).
+   * The JSON must follow the SDK's Record<string, McpServerConfig> format.
+   * Environment variables ($VAR_NAME) in env/headers values are expanded from
+   * process.env at execution time (not load time) — secrets stay out of YAML.
+   * Claude only — Codex nodes emit a warning and ignore this field.
+   */
+  mcp?: string;
+  /**
+   * Skill names to preload into this node's agent context.
+   * Skills must be installed in .claude/skills/ (loaded via settingSources: ['project']).
+   * The node is wrapped in an AgentDefinition with these skills + 'Skill' auto-added to allowedTools.
+   * Claude only — Codex nodes emit a warning and ignore this field.
+   */
+  skills?: string[];
 }
 
 /**

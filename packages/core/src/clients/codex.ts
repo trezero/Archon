@@ -94,6 +94,40 @@ function buildModelAccessMessage(model?: string): string {
   return `❌ Model "${selectedModel}" is not available for your account.\n\n${fixLine}\n\n${workflowLine}`;
 }
 
+/** Max retries for transient failures (3 = 4 total attempts).
+ *  Mirrors ClaudeClient retry logic — Codex process crashes are similarly intermittent. */
+const MAX_SUBPROCESS_RETRIES = 3;
+
+/** Delay between retries in milliseconds */
+const RETRY_BASE_DELAY_MS = 2000;
+
+/** Patterns indicating rate limiting in error messages */
+const RATE_LIMIT_PATTERNS = ['rate limit', 'too many requests', '429', 'overloaded'];
+
+/** Patterns indicating auth issues in error messages */
+const AUTH_PATTERNS = [
+  'credit balance',
+  'unauthorized',
+  'authentication',
+  'invalid token',
+  '401',
+  '403',
+];
+
+/** Patterns indicating a transient process crash (worth retrying) */
+const SUBPROCESS_CRASH_PATTERNS = ['exited with code', 'killed', 'signal', 'codex exec'];
+
+function classifyCodexError(
+  errorMessage: string
+): 'rate_limit' | 'auth' | 'crash' | 'model_access' | 'unknown' {
+  if (isModelAccessError(errorMessage)) return 'model_access';
+  const m = errorMessage.toLowerCase();
+  if (RATE_LIMIT_PATTERNS.some(p => m.includes(p))) return 'rate_limit';
+  if (AUTH_PATTERNS.some(p => m.includes(p))) return 'auth';
+  if (SUBPROCESS_CRASH_PATTERNS.some(p => m.includes(p))) return 'crash';
+  return 'unknown';
+}
+
 function extractUsageFromCodexEvent(event: unknown): TokenUsage | undefined {
   const usage =
     (event as { usage?: unknown })?.usage ??
@@ -208,205 +242,267 @@ export class CodexClient implements IAssistantClient {
     }
 
     let lastTodoListSignature: string | undefined;
+    let lastError: Error | undefined;
 
-    try {
-      // Run streamed query (this IS async)
-      const result = await thread.runStreamed(prompt);
+    for (let attempt = 0; attempt <= MAX_SUBPROCESS_RETRIES; attempt++) {
+      // Check abort signal before each attempt
+      if (options?.abortSignal?.aborted) {
+        throw new Error('Query aborted');
+      }
 
-      // Process streaming events
-      for await (const event of result.events) {
-        // Check abort signal between events
-        if (options?.abortSignal?.aborted) {
-          getLog().info('query_aborted_between_events');
-          break;
-        }
-
-        // Log progress for item.started (visibility fix for Codex appearing to hang)
-        if (event.type === 'item.started') {
-          const item = event.item;
-          getLog().debug(
-            { eventType: event.type, itemType: item.type, itemId: item.id },
-            'item_started'
-          );
-        }
-
-        // Handle error events
-        if (event.type === 'error') {
-          getLog().error({ message: event.message }, 'stream_error');
-          // Don't send MCP timeout errors (they're optional)
-          if (!event.message.includes('MCP client')) {
-            yield { type: 'system', content: `⚠️ ${event.message}` };
+      // On retries, create a fresh thread (crashed thread is invalid)
+      if (attempt > 0) {
+        getLog().debug({ cwd, attempt }, 'starting_new_thread');
+        try {
+          thread = codex.startThread(threadOptions);
+        } catch (startError) {
+          const err = startError as Error;
+          if (isModelAccessError(err.message)) {
+            throw new Error(buildModelAccessMessage(options?.model));
           }
+          throw new Error(`Codex query failed: ${err.message}`);
+        }
+      }
+
+      try {
+        // Run streamed query (this IS async)
+        const result = await thread.runStreamed(prompt);
+
+        // Process streaming events
+        for await (const event of result.events) {
+          // Check abort signal between events
+          if (options?.abortSignal?.aborted) {
+            getLog().info('query_aborted_between_events');
+            break;
+          }
+
+          // Log progress for item.started (visibility fix for Codex appearing to hang)
+          if (event.type === 'item.started') {
+            const item = event.item;
+            getLog().debug(
+              { eventType: event.type, itemType: item.type, itemId: item.id },
+              'item_started'
+            );
+          }
+
+          // Handle error events
+          if (event.type === 'error') {
+            getLog().error({ message: event.message }, 'stream_error');
+            // Don't send MCP timeout errors (they're optional)
+            if (!event.message.includes('MCP client')) {
+              yield { type: 'system', content: `⚠️ ${event.message}` };
+            }
+            continue;
+          }
+
+          // Handle turn failed events
+          if (event.type === 'turn.failed') {
+            const errorObj = event.error as { message?: string } | undefined;
+            const errorMessage = errorObj?.message ?? 'Unknown error';
+            getLog().error({ errorMessage }, 'turn_failed');
+            yield {
+              type: 'system',
+              content: `❌ Turn failed: ${errorMessage}`,
+            };
+            break;
+          }
+
+          // Handle item.completed events - map to MessageChunk types
+          if (event.type === 'item.completed') {
+            const item = event.item;
+
+            // Log progress with context for debugging
+            const logContext: Record<string, unknown> = {
+              eventType: event.type,
+              itemType: item.type,
+              itemId: item.id,
+            };
+            if (item.type === 'command_execution' && item.command) {
+              logContext.command = item.command;
+            }
+            getLog().debug(logContext, 'item_completed');
+
+            switch (item.type) {
+              case 'agent_message':
+                // Agent text response
+                if (item.text) {
+                  yield { type: 'assistant', content: item.text };
+                }
+                break;
+
+              case 'command_execution':
+                // Tool/command execution
+                if (item.command) {
+                  yield { type: 'tool', toolName: item.command };
+                }
+                break;
+
+              case 'reasoning':
+                // Agent reasoning/thinking
+                if (item.text) {
+                  yield { type: 'thinking', content: item.text };
+                }
+                break;
+
+              case 'web_search':
+                if (item.query) {
+                  yield { type: 'tool', toolName: `🔍 Searching: ${item.query}` };
+                } else {
+                  getLog().debug({ itemId: item.id }, 'web_search_missing_query');
+                }
+                break;
+
+              case 'todo_list':
+                if (Array.isArray(item.items) && item.items.length > 0) {
+                  const normalizedItems = item.items.map(t => ({
+                    text: typeof t.text === 'string' ? t.text : '(unnamed task)',
+                    completed: t.completed ?? false,
+                  }));
+                  const signature = JSON.stringify(normalizedItems);
+                  if (signature !== lastTodoListSignature) {
+                    lastTodoListSignature = signature;
+                    const taskList = normalizedItems
+                      .map(t => `${t.completed ? '✅' : '⬜'} ${t.text}`)
+                      .join('\n');
+                    yield { type: 'system', content: `📋 Tasks:\n${taskList}` };
+                  }
+                } else {
+                  getLog().debug({ itemId: item.id }, 'todo_list_empty_or_invalid');
+                }
+                break;
+
+              case 'file_change': {
+                const statusIcon = item.status === 'failed' ? '❌' : '✅';
+                const rawError = 'error' in item ? (item as { error?: unknown }).error : undefined;
+                const fileErrorMessage =
+                  typeof rawError === 'string'
+                    ? rawError
+                    : typeof rawError === 'object' && rawError !== null && 'message' in rawError
+                      ? String((rawError as { message: unknown }).message)
+                      : undefined;
+
+                if (Array.isArray(item.changes) && item.changes.length > 0) {
+                  const changeList = item.changes
+                    .map(c => {
+                      const icon = c.kind === 'add' ? '➕' : c.kind === 'delete' ? '➖' : '📝';
+                      return `${icon} ${c.path ?? '(unknown file)'}`;
+                    })
+                    .join('\n');
+                  const errorSuffix =
+                    item.status === 'failed' && fileErrorMessage ? `\n${fileErrorMessage}` : '';
+                  yield {
+                    type: 'system',
+                    content: `${statusIcon} File changes:\n${changeList}${errorSuffix}`,
+                  };
+                } else if (item.status === 'failed') {
+                  getLog().warn(
+                    { itemId: item.id, status: item.status },
+                    'file_change_failed_no_changes'
+                  );
+                  const failMsg = fileErrorMessage
+                    ? `❌ File change failed: ${fileErrorMessage}`
+                    : '❌ File change failed';
+                  yield { type: 'system', content: failMsg };
+                } else {
+                  getLog().debug(
+                    { itemId: item.id, status: item.status },
+                    'file_change_no_changes'
+                  );
+                }
+                break;
+              }
+
+              case 'mcp_tool_call': {
+                const toolInfo =
+                  item.server && item.tool
+                    ? `${item.server}/${item.tool}`
+                    : (item.tool ?? item.server ?? 'MCP tool');
+
+                if (item.status === 'failed') {
+                  getLog().warn(
+                    { server: item.server, tool: item.tool, error: item.error, itemId: item.id },
+                    'mcp_tool_call_failed'
+                  );
+                  const message = item.error?.message
+                    ? `⚠️ MCP ${toolInfo} failed: ${item.error.message}`
+                    : `⚠️ MCP ${toolInfo} failed`;
+                  yield { type: 'system', content: message };
+                } else if (item.status !== 'completed') {
+                  yield { type: 'tool', toolName: `🔌 MCP: ${toolInfo}` };
+                }
+                break;
+              }
+
+              // Other item types are ignored (like file edits, etc.)
+            }
+          }
+
+          // Handle turn.completed event
+          if (event.type === 'turn.completed') {
+            getLog().debug('turn_completed');
+            // Yield result with thread ID for persistence
+            const usage = extractUsageFromCodexEvent(event);
+            if (!usage) {
+              getLog().debug({ eventType: event.type }, 'usage_not_provided');
+            }
+            yield {
+              type: 'result',
+              sessionId: thread.id ?? undefined,
+              ...(usage ? { tokens: usage } : {}),
+            };
+            // CRITICAL: Break out of event loop - turn is complete!
+            // Without this, the loop waits for stream to end (causes 90s timeout)
+            break;
+          }
+        }
+        return; // Success - exit retry loop
+      } catch (error) {
+        const err = error as Error;
+
+        // Don't retry aborted queries
+        if (options?.abortSignal?.aborted) {
+          throw new Error('Query aborted');
+        }
+
+        const errorClass = classifyCodexError(err.message);
+        getLog().error(
+          { err, errorClass, attempt, maxRetries: MAX_SUBPROCESS_RETRIES },
+          'query_error'
+        );
+
+        // Model access errors are never retryable
+        if (errorClass === 'model_access') {
+          throw new Error(buildModelAccessMessage(options?.model));
+        }
+
+        // Auth errors won't resolve on retry
+        if (errorClass === 'auth') {
+          const enrichedError = new Error(`Codex auth error: ${err.message}`);
+          enrichedError.cause = error;
+          throw enrichedError;
+        }
+
+        // Retry transient failures (rate limit, crash)
+        if (
+          attempt < MAX_SUBPROCESS_RETRIES &&
+          (errorClass === 'rate_limit' || errorClass === 'crash')
+        ) {
+          const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+          getLog().info({ attempt, delayMs, errorClass }, 'retrying_query');
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          lastError = err;
           continue;
         }
 
-        // Handle turn failed events
-        if (event.type === 'turn.failed') {
-          const errorObj = event.error as { message?: string } | undefined;
-          const errorMessage = errorObj?.message ?? 'Unknown error';
-          getLog().error({ errorMessage }, 'turn_failed');
-          yield {
-            type: 'system',
-            content: `❌ Turn failed: ${errorMessage}`,
-          };
-          break;
-        }
-
-        // Handle item.completed events - map to MessageChunk types
-        if (event.type === 'item.completed') {
-          const item = event.item;
-
-          // Log progress with context for debugging
-          const logContext: Record<string, unknown> = {
-            eventType: event.type,
-            itemType: item.type,
-            itemId: item.id,
-          };
-          if (item.type === 'command_execution' && item.command) {
-            logContext.command = item.command;
-          }
-          getLog().debug(logContext, 'item_completed');
-
-          switch (item.type) {
-            case 'agent_message':
-              // Agent text response
-              if (item.text) {
-                yield { type: 'assistant', content: item.text };
-              }
-              break;
-
-            case 'command_execution':
-              // Tool/command execution
-              if (item.command) {
-                yield { type: 'tool', toolName: item.command };
-              }
-              break;
-
-            case 'reasoning':
-              // Agent reasoning/thinking
-              if (item.text) {
-                yield { type: 'thinking', content: item.text };
-              }
-              break;
-
-            case 'web_search':
-              if (item.query) {
-                yield { type: 'tool', toolName: `🔍 Searching: ${item.query}` };
-              } else {
-                getLog().debug({ itemId: item.id }, 'web_search_missing_query');
-              }
-              break;
-
-            case 'todo_list':
-              if (Array.isArray(item.items) && item.items.length > 0) {
-                const normalizedItems = item.items.map(t => ({
-                  text: typeof t.text === 'string' ? t.text : '(unnamed task)',
-                  completed: t.completed ?? false,
-                }));
-                const signature = JSON.stringify(normalizedItems);
-                if (signature !== lastTodoListSignature) {
-                  lastTodoListSignature = signature;
-                  const taskList = normalizedItems
-                    .map(t => `${t.completed ? '✅' : '⬜'} ${t.text}`)
-                    .join('\n');
-                  yield { type: 'system', content: `📋 Tasks:\n${taskList}` };
-                }
-              } else {
-                getLog().debug({ itemId: item.id }, 'todo_list_empty_or_invalid');
-              }
-              break;
-
-            case 'file_change': {
-              const statusIcon = item.status === 'failed' ? '❌' : '✅';
-              const rawError = 'error' in item ? (item as { error?: unknown }).error : undefined;
-              const fileErrorMessage =
-                typeof rawError === 'string'
-                  ? rawError
-                  : typeof rawError === 'object' && rawError !== null && 'message' in rawError
-                    ? String((rawError as { message: unknown }).message)
-                    : undefined;
-
-              if (Array.isArray(item.changes) && item.changes.length > 0) {
-                const changeList = item.changes
-                  .map(c => {
-                    const icon = c.kind === 'add' ? '➕' : c.kind === 'delete' ? '➖' : '📝';
-                    return `${icon} ${c.path ?? '(unknown file)'}`;
-                  })
-                  .join('\n');
-                const errorSuffix =
-                  item.status === 'failed' && fileErrorMessage ? `\n${fileErrorMessage}` : '';
-                yield {
-                  type: 'system',
-                  content: `${statusIcon} File changes:\n${changeList}${errorSuffix}`,
-                };
-              } else if (item.status === 'failed') {
-                getLog().warn(
-                  { itemId: item.id, status: item.status },
-                  'file_change_failed_no_changes'
-                );
-                const failMsg = fileErrorMessage
-                  ? `❌ File change failed: ${fileErrorMessage}`
-                  : '❌ File change failed';
-                yield { type: 'system', content: failMsg };
-              } else {
-                getLog().debug({ itemId: item.id, status: item.status }, 'file_change_no_changes');
-              }
-              break;
-            }
-
-            case 'mcp_tool_call': {
-              const toolInfo =
-                item.server && item.tool
-                  ? `${item.server}/${item.tool}`
-                  : (item.tool ?? item.server ?? 'MCP tool');
-
-              if (item.status === 'failed') {
-                getLog().warn(
-                  { server: item.server, tool: item.tool, error: item.error, itemId: item.id },
-                  'mcp_tool_call_failed'
-                );
-                const message = item.error?.message
-                  ? `⚠️ MCP ${toolInfo} failed: ${item.error.message}`
-                  : `⚠️ MCP ${toolInfo} failed`;
-                yield { type: 'system', content: message };
-              } else if (item.status !== 'completed') {
-                yield { type: 'tool', toolName: `🔌 MCP: ${toolInfo}` };
-              }
-              break;
-            }
-
-            // Other item types are ignored (like file edits, etc.)
-          }
-        }
-
-        // Handle turn.completed event
-        if (event.type === 'turn.completed') {
-          getLog().debug('turn_completed');
-          // Yield result with thread ID for persistence
-          const usage = extractUsageFromCodexEvent(event);
-          if (!usage) {
-            getLog().debug({ eventType: event.type }, 'usage_not_provided');
-          }
-          yield {
-            type: 'result',
-            sessionId: thread.id ?? undefined,
-            ...(usage ? { tokens: usage } : {}),
-          };
-          // CRITICAL: Break out of event loop - turn is complete!
-          // Without this, the loop waits for stream to end (causes 90s timeout)
-          break;
-        }
+        // Final failure - enrich and throw
+        const enrichedError = new Error(`Codex ${errorClass}: ${err.message}`);
+        enrichedError.cause = error;
+        throw enrichedError;
       }
-    } catch (error) {
-      const err = error as Error;
-      getLog().error({ err }, 'query_error');
-
-      if (isModelAccessError(err.message)) {
-        throw new Error(buildModelAccessMessage(options?.model));
-      }
-
-      throw new Error(`Codex query failed: ${err.message}`);
     }
+
+    // Should not reach here, but handle defensively
+    throw lastError ?? new Error('Codex query failed after retries');
   }
 
   /**

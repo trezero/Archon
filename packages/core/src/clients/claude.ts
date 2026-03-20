@@ -13,7 +13,12 @@
  * - CLAUDE_USE_GLOBAL_AUTH=false: Use explicit tokens from env vars
  * - Not set: Auto-detect - use tokens if present in env, otherwise global auth
  */
-import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
+import {
+  query,
+  type Options,
+  type HookCallback,
+  type HookCallbackMatcher,
+} from '@anthropic-ai/claude-agent-sdk';
 import {
   type AssistantRequestOptions,
   type IAssistantClient,
@@ -198,6 +203,18 @@ function classifySubprocessError(
  * Implements generic IAssistantClient interface
  */
 export class ClaudeClient implements IAssistantClient {
+  constructor() {
+    // Claude Code SDK silently rejects bypassPermissions when running as root (UID 0).
+    // Check once at construction time so the error surfaces early, not on first query.
+    // process.getuid is undefined on Windows, so optional chaining is required.
+    if (process.getuid?.() === 0) {
+      throw new Error(
+        'Claude Code SDK does not support bypassPermissions when running as root (UID 0). ' +
+          'Run as a non-root user, or use the Dockerfile which creates a non-root appuser.'
+      );
+    }
+  }
+
   /**
    * Send a query to Claude and stream responses.
    * Includes retry logic for transient failures (up to 3 retries with exponential backoff).
@@ -222,6 +239,7 @@ export class ClaudeClient implements IAssistantClient {
       }
 
       const stderrLines: string[] = [];
+      const toolResultQueue: { toolName: string; toolOutput: string }[] = [];
 
       // Create per-attempt abort controller and wire to caller's signal
       const controller = new AbortController();
@@ -250,6 +268,17 @@ export class ClaudeClient implements IAssistantClient {
           : {}),
         // Pass hooks for per-node SDK hook callbacks
         ...(requestOptions?.hooks !== undefined ? { hooks: requestOptions.hooks } : {}),
+        // Pass MCP servers for per-node MCP support (Claude Agent SDK v0.2.74+)
+        ...(requestOptions?.mcpServers !== undefined
+          ? { mcpServers: requestOptions.mcpServers }
+          : {}),
+        // Pass allowedTools for MCP tool wildcards (e.g., 'mcp__github__*')
+        ...(requestOptions?.allowedTools !== undefined
+          ? { allowedTools: requestOptions.allowedTools }
+          : {}),
+        // Pass agents/agent for per-node skill scoping via AgentDefinition wrapping
+        ...(requestOptions?.agents !== undefined ? { agents: requestOptions.agents } : {}),
+        ...(requestOptions?.agent !== undefined ? { agent: requestOptions.agent } : {}),
         // Skip writing session transcripts to ~/.claude/projects/ — Archon manages its own
         // session persistence. persistSession: false reduces disk I/O and keeps the session
         // directory clean. Claude Agent SDK v0.2.74+.
@@ -260,6 +289,32 @@ export class ClaudeClient implements IAssistantClient {
         allowDangerouslySkipPermissions: true,
         systemPrompt: { type: 'preset', preset: 'claude_code' },
         settingSources: ['project'],
+        // Merge user-provided hooks with our PostToolUse capture hook
+        hooks: {
+          ...(requestOptions?.hooks ?? {}),
+          PostToolUse: [
+            ...((requestOptions?.hooks?.PostToolUse ?? []) as HookCallbackMatcher[]),
+            {
+              hooks: [
+                (async (input: Record<string, unknown>): Promise<{ continue: true }> => {
+                  const toolName = (input as { tool_name?: string }).tool_name ?? 'unknown';
+                  const toolResponse = (input as { tool_response?: unknown }).tool_response;
+                  const output =
+                    typeof toolResponse === 'string'
+                      ? toolResponse
+                      : JSON.stringify(toolResponse ?? '');
+                  // Truncate large outputs (e.g., file reads) to prevent DB bloat
+                  const maxLen = 10_000;
+                  toolResultQueue.push({
+                    toolName,
+                    toolOutput: output.length > maxLen ? output.slice(0, maxLen) + '...' : output,
+                  });
+                  return { continue: true };
+                }) as HookCallback,
+              ],
+            },
+          ],
+        },
         stderr: (data: string) => {
           const output = data.trim();
           if (!output) return;
@@ -296,6 +351,14 @@ export class ClaudeClient implements IAssistantClient {
 
       try {
         for await (const msg of query({ prompt, options })) {
+          // Drain tool results captured by PostToolUse hook before processing the next message
+          while (toolResultQueue.length > 0) {
+            const tr = toolResultQueue.shift();
+            if (tr) {
+              yield { type: 'tool_result', toolName: tr.toolName, toolOutput: tr.toolOutput };
+            }
+          }
+
           if (msg.type === 'assistant') {
             const message = msg as { message: { content: ContentBlock[] } };
             const content = message.message.content;
@@ -310,6 +373,21 @@ export class ClaudeClient implements IAssistantClient {
                   toolInput: block.input ?? {},
                 };
               }
+            }
+          } else if (msg.type === 'system') {
+            // Check MCP server connection status from system/init
+            const sysMsg = msg as {
+              subtype?: string;
+              mcp_servers?: { name: string; status: string }[];
+            };
+            if (sysMsg.subtype === 'init' && sysMsg.mcp_servers) {
+              const failed = sysMsg.mcp_servers.filter(s => s.status !== 'connected');
+              if (failed.length > 0) {
+                const names = failed.map(s => `${s.name} (${s.status})`).join(', ');
+                yield { type: 'system', content: `MCP server connection failed: ${names}` };
+              }
+            } else {
+              getLog().debug({ subtype: sysMsg.subtype }, 'claude.system_message_unhandled');
             }
           } else if (msg.type === 'result') {
             const resultMsg = msg as {
@@ -326,6 +404,13 @@ export class ClaudeClient implements IAssistantClient {
                 ? { structuredOutput: resultMsg.structured_output }
                 : {}),
             };
+          }
+        }
+        // Drain any remaining tool results from the hook queue
+        while (toolResultQueue.length > 0) {
+          const tr = toolResultQueue.shift();
+          if (tr) {
+            yield { type: 'tool_result', toolName: tr.toolName, toolOutput: tr.toolOutput };
           }
         }
         return; // Success - exit retry loop

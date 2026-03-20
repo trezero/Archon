@@ -3,11 +3,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { MessageList } from './MessageList';
-import { MessageInput } from './MessageInput';
+import { MessageInput, type MessageInputHandle } from './MessageInput';
 import { LockIndicator } from './LockIndicator';
-import { WorkflowProgressCard } from './WorkflowProgressCard';
 import { useSSE } from '@/hooks/useSSE';
-import { useWorkflowStatus } from '@/hooks/useWorkflowStatus';
+import {
+  useWorkflowStore,
+  selectActiveWorkflow,
+  workflowSSEHandlers,
+} from '@/stores/workflow-store';
 import {
   sendMessage as apiSendMessage,
   listConversations,
@@ -30,10 +33,16 @@ import {
   setSendInFlight,
 } from '@/lib/message-cache';
 import { useProject } from '@/contexts/ProjectContext';
+import { ensureUtc } from '@/lib/format';
 
 function mapMessageRow(row: MessageResponse): ChatMessage {
   let meta: {
-    toolCalls?: { name: string; input: Record<string, unknown>; duration?: number }[];
+    toolCalls?: {
+      name: string;
+      input: Record<string, unknown>;
+      duration?: number;
+      output?: string;
+    }[];
     error?: ErrorDisplay;
     workflowDispatch?: { workerConversationId: string; workflowName: string };
     workflowResult?: { workflowName: string; runId: string };
@@ -68,7 +77,7 @@ function mapMessageRow(row: MessageResponse): ChatMessage {
     error: meta.error,
     workflowDispatch: meta.workflowDispatch,
     workflowResult: meta.workflowResult,
-    timestamp: new Date(row.created_at).getTime(),
+    timestamp: new Date(ensureUtc(row.created_at)).getTime(),
     isStreaming: false,
   };
 }
@@ -89,7 +98,8 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   const [locked, setLocked] = useState(false);
   const [queuePosition, setQueuePosition] = useState<number | undefined>();
   const [sending, setSending] = useState(false);
-  const [hasSentMessage, setHasSentMessage] = useState(false);
+  const [hasSentMessage, setHasSentMessage] = useState(() => isSendInFlight());
+  const inputRef = useRef<MessageInputHandle>(null);
   const messageIdCounter = useRef(0);
   const conversationIdRef = useRef(conversationId);
   const messagesRef = useRef(messages);
@@ -99,7 +109,8 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
-  const { activeWorkflow, hydrateWorkflow, handlers: workflowHandlers } = useWorkflowStatus();
+  const activeWorkflow = useWorkflowStore(selectActiveWorkflow);
+  const hydrateWorkflow = useWorkflowStore(s => s.hydrateWorkflow);
 
   // Sync messages to cache for persistence across navigation
   useEffect(() => {
@@ -131,8 +142,26 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             return hydrated;
           }
           const sendActive = isSendInFlight();
-          const activeStreaming = prev.filter(m => m.isStreaming && (m.content || sendActive));
-          return [...hydrated, ...activeStreaming];
+          // Preserve SSE-only messages: streaming text OR messages with tool calls not yet in DB.
+          // Tool-call messages keep isStreaming:true while the stream is active so the
+          // loading indicator persists; the toolCalls clause below ensures they also
+          // survive hydration regardless of isStreaming state.
+          // Note: dedup below relies on SSE messages using 'msg-{timestamp}' IDs that
+          // never match DB-assigned IDs. Keep SSE IDs synthetic to preserve this invariant.
+          const activeSSE = prev.filter(
+            m =>
+              (m.isStreaming && (m.content || sendActive)) ||
+              (m.toolCalls && m.toolCalls.length > 0)
+          );
+          if (activeSSE.length === 0) return hydrated;
+          // Merge: DB is canonical, append SSE-only messages that aren't yet in DB.
+          // Identify which SSE messages are already covered by hydrated DB data to avoid dupes.
+          const hydratedIds = new Set(hydrated.map(m => m.id));
+          const sseOnly = activeSSE.filter(m => !hydratedIds.has(m.id));
+          if (sseOnly.length === 0) return hydrated;
+          const merged = [...hydrated, ...sseOnly];
+          merged.sort((a, b) => a.timestamp - b.timestamp);
+          return merged;
         });
         setHasSentMessage(true);
       })
@@ -185,7 +214,6 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       .then(result => {
         if (!result) return;
         const run = result.run;
-        const ensureUtc = (ts: string): string => (ts.endsWith('Z') ? ts : ts + 'Z');
         hydrateWorkflow({
           runId: run.id,
           workflowName: run.workflow_name,
@@ -311,9 +339,9 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   const onToolCall = useCallback(
     (name: string, input: Record<string, unknown>, toolCallId?: string): void => {
       setMessages(prev => {
+        const now = Date.now();
         const last = prev[prev.length - 1];
         if (last?.role === 'assistant') {
-          const now = Date.now();
           // Mark any previous running tools as complete (agent moved on)
           const updatedExistingTools = (last.toolCalls ?? []).map(tc =>
             !tc.output && tc.duration === undefined ? { ...tc, duration: now - tc.startedAt } : tc
@@ -329,12 +357,32 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             ...prev.slice(0, -1),
             {
               ...last,
-              isStreaming: false,
+              isStreaming: true,
               toolCalls: [...updatedExistingTools, newTool],
             },
           ];
         }
-        return prev;
+        // No assistant message to attach to (e.g. REST hydration replaced state with only
+        // user messages before this SSE event arrived). Create a synthetic one — mirrors
+        // the WorkflowLogs.tsx pattern (lines 354-371).
+        const newTool: ToolCallDisplay = {
+          id: toolCallId ?? `msg-${String(now)}-tool-0`,
+          name,
+          input,
+          startedAt: now,
+          isExpanded: false,
+        };
+        return [
+          ...prev,
+          {
+            id: `msg-${String(now)}`,
+            role: 'assistant' as const,
+            content: '',
+            timestamp: now,
+            isStreaming: true,
+            toolCalls: [newTool],
+          },
+        ];
       });
     },
     []
@@ -362,7 +410,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         const msg = prev[targetIdx];
         const updatedTools = msg.toolCalls?.map(tc => {
           if (toolCallId ? tc.id === toolCallId : tc.name === name && tc.duration === undefined) {
-            return { ...tc, output: output || tc.output, duration };
+            return { ...tc, output: output !== undefined ? output : tc.output, duration };
           }
           return tc;
         });
@@ -532,7 +580,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     onWorkflowDispatch,
     onWarning,
     onRetract,
-    ...workflowHandlers,
+    ...workflowSSEHandlers,
   });
 
   const handleSend = useCallback(
@@ -592,6 +640,10 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
             void queryClient.invalidateQueries({ queryKey: ['conversations'] });
           }, 2000);
         }
+        // Invalidate workflow run queries so sidebar pulsating dot and dashboard
+        // update promptly without waiting for the 10-second polling interval
+        void queryClient.invalidateQueries({ queryKey: ['workflow-runs-status'] });
+        void queryClient.invalidateQueries({ queryKey: ['workflowRuns'] });
       } catch (error) {
         console.error('[Chat] Failed to send message', { error });
         onError({
@@ -612,19 +664,15 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     [conversationId, isNewChat, navigate, onError, selectedProjectId, queryClient]
   );
 
-  const handleCancelWorkflow = useCallback((): void => {
-    void handleSend('/workflow cancel');
-  }, [handleSend]);
-
   const isStreaming = messages.some(m => m.isStreaming);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <Header
-        title={headerTitle}
+        title={isNewChat ? 'New Chat' : headerTitle}
         subtitle={headerSubtitle}
         projectName={currentCodebase?.name ?? contextCodebase?.name}
-        connected={connected}
+        connected={isNewChat ? undefined : connected}
       />
       {(conversationsError || codebasesError) && (
         <div className="flex gap-2 px-4 py-1">
@@ -634,12 +682,22 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           {codebasesError && <span className="text-xs text-red-400">Failed to load projects</span>}
         </div>
       )}
-      <MessageList messages={messages} isStreaming={isStreaming} />
-      {activeWorkflow && (
-        <WorkflowProgressCard workflow={activeWorkflow} onCancel={handleCancelWorkflow} />
-      )}
+      <MessageList
+        messages={messages}
+        isStreaming={isStreaming}
+        isNewChat={isNewChat}
+        projectName={currentCodebase?.name ?? contextCodebase?.name}
+        onQuickAction={(action): void => {
+          if (action === 'focus') {
+            inputRef.current?.focus();
+          } else {
+            void handleSend(action);
+          }
+        }}
+      />
       <LockIndicator locked={locked && hasSentMessage} queuePosition={queuePosition} />
       <MessageInput
+        ref={inputRef}
         onSend={handleSend}
         disabled={
           sending ||

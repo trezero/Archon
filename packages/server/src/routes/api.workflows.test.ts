@@ -230,6 +230,7 @@ describe('GET /api/workflows/:name', () => {
       const app = new Hono();
       registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
+      mockListCodebases.mockImplementationOnce(async () => [{ default_cwd: testDir }]);
       const response = await app.request(`/api/workflows/custom?cwd=${testDir}`);
       expect(response.status).toBe(200);
       const body = (await response.json()) as {
@@ -243,6 +244,19 @@ describe('GET /api/workflows/:name', () => {
     } finally {
       await rm(testDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('GET /api/workflows/:name - cwd validation', () => {
+  test('returns 400 when cwd is not a registered codebase path', async () => {
+    const app = new Hono();
+    registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
+
+    // default mock returns /tmp/project; /etc/secrets is not registered
+    const response = await app.request('/api/workflows/archon-assist?cwd=/etc/secrets');
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('Invalid cwd');
   });
 });
 
@@ -322,6 +336,7 @@ describe('PUT /api/workflows/:name', () => {
       const app = new Hono();
       registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
+      mockListCodebases.mockImplementationOnce(async () => [{ default_cwd: testDir }]);
       const response = await app.request(`/api/workflows/my-workflow?cwd=${testDir}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -395,6 +410,7 @@ describe('DELETE /api/workflows/:name', () => {
       const app = new Hono();
       registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
+      mockListCodebases.mockImplementationOnce(async () => [{ default_cwd: testDir }]);
       const response = await app.request(`/api/workflows/to-delete?cwd=${testDir}`, {
         method: 'DELETE',
       });
@@ -405,6 +421,70 @@ describe('DELETE /api/workflows/:name', () => {
     } finally {
       await rm(testDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('GET /api/workflows - cwd validation', () => {
+  test('returns 400 when cwd is not a registered codebase path', async () => {
+    const app = new Hono();
+    registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
+
+    // default mock returns /tmp/project; /etc is not registered
+    const response = await app.request('/api/workflows?cwd=/etc');
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('Invalid cwd');
+  });
+
+  test('accepts cwd matching a registered codebase path', async () => {
+    const app = new Hono();
+    registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
+
+    // default mock returns /tmp/project
+    const response = await app.request('/api/workflows?cwd=/tmp/project');
+    expect(response.status).toBe(200);
+  });
+});
+
+describe('PUT /api/workflows/:name - cwd validation', () => {
+  test('returns 400 when cwd is not a registered codebase path', async () => {
+    const app = new Hono();
+    registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
+
+    const response = await app.request('/api/workflows/my-workflow?cwd=/etc/secrets', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ definition: { name: 'my-workflow', description: 'test', steps: [] } }),
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('Invalid cwd');
+  });
+});
+
+describe('DELETE /api/workflows/:name - cwd validation', () => {
+  test('returns 400 when cwd is not a registered codebase path', async () => {
+    const app = new Hono();
+    registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
+
+    const response = await app.request('/api/workflows/some-workflow?cwd=/etc/secrets', {
+      method: 'DELETE',
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('Invalid cwd');
+  });
+});
+
+describe('GET /api/commands - cwd validation', () => {
+  test('returns 400 when cwd is not a registered codebase path', async () => {
+    const app = new Hono();
+    registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
+
+    const response = await app.request('/api/commands?cwd=/etc/secrets');
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('Invalid cwd');
   });
 });
 

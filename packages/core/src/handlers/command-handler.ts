@@ -17,7 +17,6 @@ import {
   cleanupMergedWorktrees,
   cleanupStaleWorktrees,
   getWorktreeStatusBreakdown,
-  MAX_WORKTREES_PER_CODEBASE,
 } from '../services/cleanup-service';
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '@archon/paths';
 import { loadConfig } from '../config/config-loader';
@@ -230,11 +229,31 @@ async function listRepositories(workspacePath: string): Promise<RepoEntry[]> {
   return repos.sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
+/**
+ * Find a repository by identifier using priority matching:
+ * 1. Exact full path match (e.g., "octocat/Hello-World")
+ * 2. Exact repo name match (e.g., "Hello-World")
+ * 3. Prefix match on full path
+ * 4. Prefix match on repo name
+ */
+function findRepository(repos: RepoEntry[], identifier: string): RepoEntry | undefined {
+  return (
+    repos.find(r => r.displayName === identifier) ??
+    repos.find(r => r.repoName === identifier) ??
+    repos.find(r => r.displayName.startsWith(identifier)) ??
+    repos.find(r => r.repoName.startsWith(identifier))
+  );
+}
+
 export function parseCommand(text: string): { command: string; args: string[] } {
   // Match quoted strings or non-whitespace sequences
   const matches = text.match(/"[^"]+"|'[^']+'|\S+/g) ?? [];
 
   if (matches.length === 0 || !matches[0]) {
+    return { command: '', args: [] };
+  }
+
+  if (!matches[0].startsWith('/')) {
     return { command: '', args: [] };
   }
 
@@ -382,7 +401,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
       if (codebase) {
         try {
           const breakdown = await getWorktreeStatusBreakdown(codebase.id, codebase.default_cwd);
-          msg += `\n\nWorktrees: ${String(breakdown.total)}/${String(breakdown.limit)}`;
+          msg += `\n\nWorktrees: ${String(breakdown.total)} active`;
           if (breakdown.merged > 0 || breakdown.stale > 0) {
             if (breakdown.merged > 0) {
               msg += `\n  • ${String(breakdown.merged)} merged (can auto-remove)`;
@@ -760,16 +779,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
         if (!isNaN(num) && num >= 1 && num <= repos.length) {
           targetRepo = repos[num - 1];
         } else {
-          // Match priority:
-          // 1. Exact full path match (e.g., "octocat/Hello-World")
-          // 2. Exact repo name match (e.g., "Hello-World")
-          // 3. Prefix match on full path
-          // 4. Prefix match on repo name
-          targetRepo =
-            repos.find(r => r.displayName === identifier) ??
-            repos.find(r => r.repoName === identifier) ??
-            repos.find(r => r.displayName.startsWith(identifier)) ??
-            repos.find(r => r.repoName.startsWith(identifier));
+          targetRepo = findRepository(repos, identifier);
         }
 
         if (!targetRepo) {
@@ -908,16 +918,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
         if (!isNaN(num) && num >= 1 && num <= repos.length) {
           targetRepo = repos[num - 1];
         } else {
-          // Match priority:
-          // 1. Exact full path match (e.g., "octocat/Hello-World")
-          // 2. Exact repo name match (e.g., "Hello-World")
-          // 3. Prefix match on full path
-          // 4. Prefix match on repo name
-          targetRepo =
-            repos.find(r => r.displayName === identifier) ??
-            repos.find(r => r.repoName === identifier) ??
-            repos.find(r => r.displayName.startsWith(identifier)) ??
-            repos.find(r => r.repoName.startsWith(identifier));
+          targetRepo = findRepository(repos, identifier);
         }
 
         if (!targetRepo) {
@@ -1255,7 +1256,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
 
             // Show updated count
             const count = await isolationEnvDb.countActiveByCodebase(conversation.codebase_id);
-            msg += `\nWorktrees: ${String(count)}/${String(MAX_WORKTREES_PER_CODEBASE)}`;
+            msg += `\nWorktrees: ${String(count)} active`;
 
             return { success: true, message: msg.trim() };
           } catch (error) {
@@ -1596,38 +1597,10 @@ Use /load-commands .archon/commands to register commands.`,
       }
     }
 
-    default: {
-      // Check for deprecated commands and give helpful guidance
-      const deprecatedCommands = [
-        'clone',
-        'repos',
-        'repo',
-        'repo-remove',
-        'codebase-switch',
-        'setcwd',
-        'getcwd',
-        'command-set',
-        'command-invoke',
-        'load-commands',
-        'commands',
-        'template-add',
-        'template-list',
-        'templates',
-        'template-delete',
-        'worktree',
-        'init',
-        'reset-context',
-      ];
-      if (deprecatedCommands.includes(command)) {
-        return {
-          success: false,
-          message: `The \`/${command}\` command has been replaced by the orchestrator.\n\nJust describe what you need in natural language — the orchestrator handles project management, workflows, and routing automatically.\n\nType /help for available commands.`,
-        };
-      }
+    default:
       return {
         success: false,
         message: `Unknown command: /${command}\n\nType /help to see available commands.`,
       };
-    }
   }
 }

@@ -15,6 +15,7 @@ export default tseslint.config(
       'workspace/**',
       'worktrees/**',
       '.claude/worktrees/**',
+      '.claude/skills/**',
       '**/*.js',
       '*.mjs',
       '**/*.test.ts',

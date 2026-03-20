@@ -254,16 +254,19 @@ async function main(): Promise<number> {
               return 1;
             }
             const userMessage = positionals.slice(3).join(' ') || '';
-            if (fromBranch !== undefined && branchName === undefined) {
-              console.error('Error: --from/--from-branch requires --branch to be specified.');
-              return 1;
-            }
             if (branchName !== undefined && noWorktree) {
               console.error(
                 'Error: --branch and --no-worktree are mutually exclusive.\n' +
                   '  --branch creates an isolated worktree (safe).\n' +
-                  '  --no-worktree checks out directly in your repo (no isolation).\n' +
+                  '  --no-worktree runs directly in your repo (no isolation).\n' +
                   'Use one or the other.'
+              );
+              return 1;
+            }
+            if (noWorktree && fromBranch !== undefined) {
+              console.error(
+                'Error: --from/--from-branch has no effect with --no-worktree.\n' +
+                  'Remove --from or drop --no-worktree.'
               );
               return 1;
             }
@@ -275,11 +278,7 @@ async function main(): Promise<number> {
               );
               return 1;
             }
-            // Conditionally construct options to satisfy discriminated union
-            const options =
-              branchName !== undefined
-                ? { branchName, fromBranch, noWorktree }
-                : { resume: resumeFlag };
+            const options = { branchName, fromBranch, noWorktree, resume: resumeFlag };
             await workflowRunCommand(effectiveCwd, workflowName, userMessage, options);
             break;
           }

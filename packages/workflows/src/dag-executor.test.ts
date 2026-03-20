@@ -31,9 +31,11 @@ import {
   checkTriggerRule,
   substituteNodeOutputRefs,
   executeDagWorkflow,
+  loadMcpConfig,
 } from './dag-executor';
 import type { DagNode, BashNode, NodeOutput, WorkflowRun } from './types';
-import { discoverWorkflows } from './loader';
+import { discoverWorkflows } from './workflow-discovery';
+import { parseWorkflow } from './loader';
 import { isDagWorkflow } from './types';
 import type { WorkflowDeps, IWorkflowPlatform, WorkflowConfig } from './deps';
 import type { IWorkflowStore } from './store';
@@ -1936,5 +1938,371 @@ describe('executeDagWorkflow -- tool_completed event emission', () => {
     const completedEvents = createEventCalls.filter(([arg]) => arg.event_type === 'tool_completed');
 
     expect(completedEvents.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadMcpConfig — per-node MCP server config loading (#445)
+// ---------------------------------------------------------------------------
+
+describe('loadMcpConfig', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-mcp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(testDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it('loads and parses a valid MCP config JSON', async () => {
+    const config = { github: { command: 'npx', args: ['-y', '@mcp/server-github'] } };
+    await writeFile(join(testDir, 'mcp.json'), JSON.stringify(config));
+
+    const result = await loadMcpConfig('mcp.json', testDir);
+    expect(result.serverNames).toEqual(['github']);
+    expect(result.servers).toEqual(config);
+    expect(result.missingVars).toEqual([]);
+  });
+
+  it('loads multiple servers from one config', async () => {
+    const config = {
+      github: { command: 'npx', args: ['-y', '@mcp/server-github'] },
+      postgres: { command: 'npx', args: ['-y', '@mcp/server-postgres'] },
+    };
+    await writeFile(join(testDir, 'multi.json'), JSON.stringify(config));
+
+    const result = await loadMcpConfig('multi.json', testDir);
+    expect(result.serverNames).toEqual(['github', 'postgres']);
+  });
+
+  it('expands $VAR_NAME in env values from process.env', async () => {
+    process.env.TEST_MCP_TOKEN_445 = 'secret123';
+    const config = { github: { command: 'npx', env: { TOKEN: '$TEST_MCP_TOKEN_445' } } };
+    await writeFile(join(testDir, 'mcp.json'), JSON.stringify(config));
+
+    const result = await loadMcpConfig('mcp.json', testDir);
+    const server = result.servers.github as Record<string, unknown>;
+    expect(server.env).toEqual({ TOKEN: 'secret123' });
+
+    delete process.env.TEST_MCP_TOKEN_445;
+  });
+
+  it('expands $VAR_NAME in headers values', async () => {
+    process.env.TEST_API_KEY_445 = 'key456';
+    const config = {
+      api: {
+        type: 'http',
+        url: 'https://example.com',
+        headers: { Authorization: 'Bearer $TEST_API_KEY_445' },
+      },
+    };
+    await writeFile(join(testDir, 'mcp.json'), JSON.stringify(config));
+
+    const result = await loadMcpConfig('mcp.json', testDir);
+    const server = result.servers.api as Record<string, unknown>;
+    expect(server.headers).toEqual({ Authorization: 'Bearer key456' });
+
+    delete process.env.TEST_API_KEY_445;
+  });
+
+  it('replaces undefined env vars with empty string and reports them', async () => {
+    delete process.env.NONEXISTENT_VAR_445;
+    const config = { svc: { command: 'npx', env: { KEY: '$NONEXISTENT_VAR_445' } } };
+    await writeFile(join(testDir, 'mcp.json'), JSON.stringify(config));
+
+    const result = await loadMcpConfig('mcp.json', testDir);
+    const server = result.servers.svc as Record<string, unknown>;
+    expect(server.env).toEqual({ KEY: '' });
+    expect(result.missingVars).toContain('NONEXISTENT_VAR_445');
+  });
+
+  it('does not expand vars in command or args fields', async () => {
+    process.env.TEST_CMD_445 = 'should-not-expand';
+    const config = { svc: { command: '$TEST_CMD_445', args: ['$TEST_CMD_445'] } };
+    await writeFile(join(testDir, 'mcp.json'), JSON.stringify(config));
+
+    const result = await loadMcpConfig('mcp.json', testDir);
+    const server = result.servers.svc as Record<string, unknown>;
+    expect(server.command).toBe('$TEST_CMD_445');
+    expect(server.args).toEqual(['$TEST_CMD_445']);
+
+    delete process.env.TEST_CMD_445;
+  });
+
+  it('resolves absolute paths as-is', async () => {
+    const config = { svc: { command: 'npx' } };
+    const absPath = join(testDir, 'abs.json');
+    await writeFile(absPath, JSON.stringify(config));
+
+    const result = await loadMcpConfig(absPath, '/some/other/dir');
+    expect(result.serverNames).toEqual(['svc']);
+  });
+
+  it('throws on missing file', async () => {
+    await expect(loadMcpConfig('nonexistent.json', testDir)).rejects.toThrow(
+      'MCP config file not found'
+    );
+  });
+
+  it('throws on invalid JSON', async () => {
+    await writeFile(join(testDir, 'bad.json'), 'not json');
+    await expect(loadMcpConfig('bad.json', testDir)).rejects.toThrow('not valid JSON');
+  });
+
+  it('throws on non-object JSON (array)', async () => {
+    await writeFile(join(testDir, 'arr.json'), '[]');
+    await expect(loadMcpConfig('arr.json', testDir)).rejects.toThrow('must be a JSON object');
+  });
+
+  it('throws on non-object JSON (string)', async () => {
+    await writeFile(join(testDir, 'str.json'), '"hello"');
+    await expect(loadMcpConfig('str.json', testDir)).rejects.toThrow('must be a JSON object');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Skills — executor-level behavior (#446)
+// ---------------------------------------------------------------------------
+
+describe('executeDagWorkflow -- skills options', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-exec-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'My command prompt for $USER_MESSAGE');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'DAG AI response' };
+      yield { type: 'result', sessionId: 'dag-session-id' };
+    });
+  });
+
+  afterEach(async () => {
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('passes agents/agent/allowedTools to sendQuery when node has skills', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-skills',
+        nodes: [{ id: 'review', command: 'my-cmd', skills: ['codebase-search', 'test-runner'] }],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    expect(mockSendQueryDag.mock.calls.length).toBeGreaterThan(0);
+    const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+    // agents contains the agent definition
+    const agents = optionsArg?.agents as Record<string, Record<string, unknown>>;
+    expect(agents).toBeDefined();
+    expect(agents['dag-node-review']).toBeDefined();
+    expect(agents['dag-node-review'].skills).toEqual(['codebase-search', 'test-runner']);
+    // tools always includes 'Skill' explicitly
+    expect(agents['dag-node-review'].tools).toEqual(['Skill']);
+    // agent references the key
+    expect(optionsArg?.agent).toBe('dag-node-review');
+    // allowedTools includes 'Skill' for the parent session
+    expect(optionsArg?.allowedTools).toContain('Skill');
+  });
+
+  it('appends Skill to existing allowed_tools list when node has both', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-skills-tools',
+        nodes: [
+          {
+            id: 'review',
+            command: 'my-cmd',
+            skills: ['codebase-search'],
+            allowed_tools: ['Read', 'Grep'],
+          },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    expect(mockSendQueryDag.mock.calls.length).toBeGreaterThan(0);
+    const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+    const agents = optionsArg?.agents as Record<string, Record<string, unknown>>;
+    // Agent tools = allowed_tools + Skill
+    expect(agents['dag-node-review'].tools).toEqual(['Read', 'Grep', 'Skill']);
+    // Parent session also gets Skill
+    expect(optionsArg?.allowedTools).toContain('Skill');
+  });
+
+  it('warns user when Codex DAG node has skills and does not pass agents', async () => {
+    mockGetAssistantClientDag.mockReturnValue({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'codex',
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-codex-skills',
+        nodes: [
+          { id: 'review', command: 'my-cmd', provider: 'codex', skills: ['codebase-search'] },
+        ],
+      },
+      workflowRun,
+      'codex',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      { ...minimalConfig, assistant: 'codex' }
+    );
+
+    // Warning sent to user
+    const sendMessage = platform.sendMessage as ReturnType<typeof mock>;
+    const messages = sendMessage.mock.calls.map((call: unknown[]) => call[1] as string);
+    const warning = messages.find(m => m.includes('skills') && m.includes('Codex'));
+    expect(warning).toBeDefined();
+
+    // No agents/agent passed to Codex sendQuery
+    if (mockSendQueryDag.mock.calls.length > 0) {
+      const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+      expect(optionsArg?.agents).toBeUndefined();
+      expect(optionsArg?.agent).toBeUndefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Skills — loader validation via discoverWorkflows (#446)
+// ---------------------------------------------------------------------------
+
+describe('skills field validation via parseWorkflow', () => {
+  it('parses valid skills array on a DAG node', () => {
+    const yaml = `
+name: test-skills
+description: test
+nodes:
+  - id: review
+    prompt: "Review the code"
+    skills:
+      - codebase-search
+      - test-runner
+`;
+    const result = parseWorkflow(yaml, 'test.yaml');
+    expect(result.error).toBeNull();
+    expect(result.workflow).not.toBeNull();
+    const wf = result.workflow!;
+    if (!isDagWorkflow(wf)) throw new Error('Expected DAG workflow');
+    expect(wf.nodes[0].skills).toEqual(['codebase-search', 'test-runner']);
+  });
+
+  it('rejects non-string skills array entries', () => {
+    const yaml = `
+name: bad-skills
+description: test
+nodes:
+  - id: review
+    prompt: "Review"
+    skills:
+      - 123
+`;
+    const result = parseWorkflow(yaml, 'bad.yaml');
+    expect(result.error).not.toBeNull();
+    expect(result.error!.error).toContain('skills');
+  });
+
+  it('rejects empty skills array', () => {
+    const yaml = `
+name: empty-skills
+description: test
+nodes:
+  - id: review
+    prompt: "Review"
+    skills: []
+`;
+    const result = parseWorkflow(yaml, 'empty.yaml');
+    expect(result.error).not.toBeNull();
+    expect(result.error!.error).toContain('skills');
+  });
+
+  it('ignores skills on bash nodes with warning', () => {
+    const yaml = `
+name: bash-skills
+description: test
+nodes:
+  - id: lint
+    bash: "echo lint"
+    skills:
+      - should-be-ignored
+`;
+    const result = parseWorkflow(yaml, 'bash-skills.yaml');
+    expect(result.error).toBeNull();
+    expect(result.workflow).not.toBeNull();
+    const wf = result.workflow!;
+    if (!isDagWorkflow(wf)) throw new Error('Expected DAG workflow');
+    // Bash nodes don't get the skills field
+    expect(wf.nodes[0].skills).toBeUndefined();
+  });
+
+  it('node with no skills has undefined skills field', () => {
+    const yaml = `
+name: no-skills
+description: test
+nodes:
+  - id: basic
+    prompt: "Do something"
+`;
+    const result = parseWorkflow(yaml, 'no-skills.yaml');
+    expect(result.error).toBeNull();
+    const wf = result.workflow!;
+    if (!isDagWorkflow(wf)) throw new Error('Expected DAG workflow');
+    expect(wf.nodes[0].skills).toBeUndefined();
   });
 });

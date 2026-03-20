@@ -11,6 +11,18 @@ Start Archon from the **feature branch** (this worktree) and use browser automat
 
 **CRITICAL**: You MUST clean up ALL spawned processes before finishing. Record PIDs and kill them in Phase 4. Orphaned processes from previous E2E runs may still be running — check and kill them first.
 
+**CRITICAL — SESSION ISOLATION**: This workflow runs in parallel with other validate-pr instances.
+You MUST use `--session $WORKFLOW_ID` on EVERY `agent-browser` command to isolate your browser session.
+Example: `agent-browser --session $WORKFLOW_ID open "http://..."`, `agent-browser --session $WORKFLOW_ID snapshot -i`, etc.
+
+**ABSOLUTELY FORBIDDEN — NEVER DO ANY OF THESE**:
+- `taskkill //F //IM chrome.exe` or ANY variant that kills chrome by image name — this kills the USER's browser
+- `taskkill //F //IM node.exe` or `taskkill //F //IM bun.exe` — this kills Claude Code, the Archon server, and all other workflows
+- `pkill chrome`, `pkill node`, `pkill bun`, or any broad process-name kill
+- `agent-browser close` without `--session $WORKFLOW_ID` — this kills OTHER workflows' browser sessions
+- Any "kill everything" or "kill all" escalation pattern — if agent-browser isn't working, SKIP E2E testing and note it in your report
+- If agent-browser fails to connect after 2 attempts, STOP trying and write your findings based on code review only
+
 ---
 
 ## Phase 0: Kill Orphaned Processes from Previous E2E Run
@@ -176,18 +188,18 @@ fi
 ### 3.2 Core Browser Workflow
 
 ```bash
-# 1. Open the Archon UI
+# 1. Open the Archon UI (ALWAYS use --session)
 FRONTEND_PORT=$(cat $ARTIFACTS_DIR/.frontend-port | tr -d '\n')
-agent-browser open "http://localhost:$FRONTEND_PORT"
+agent-browser --session $WORKFLOW_ID open "http://localhost:$FRONTEND_PORT"
 
 # 2. Wait for the app to load
-agent-browser wait --load networkidle
+agent-browser --session $WORKFLOW_ID wait --load networkidle
 
 # 3. Get interactive elements
-agent-browser snapshot -i
+agent-browser --session $WORKFLOW_ID snapshot -i
 
 # 4. Take a screenshot of initial state
-agent-browser screenshot "$ARTIFACTS_DIR/e2e-feature-01-initial.png"
+agent-browser --session $WORKFLOW_ID screenshot "$ARTIFACTS_DIR/e2e-feature-01-initial.png"
 ```
 
 ### 3.3 Re-Run All Test Cases from Main
@@ -210,10 +222,10 @@ Beyond just checking the bug is fixed, validate the overall experience:
 3. **Visual quality** — no layout issues, colors correct, text readable
 4. **Responsiveness** — resize the viewport, check different sizes:
    ```bash
-   agent-browser set viewport 1920 1080
-   agent-browser screenshot "$ARTIFACTS_DIR/e2e-feature-desktop.png"
-   agent-browser set viewport 768 1024
-   agent-browser screenshot "$ARTIFACTS_DIR/e2e-feature-tablet.png"
+   agent-browser --session $WORKFLOW_ID set viewport 1920 1080
+   agent-browser --session $WORKFLOW_ID screenshot "$ARTIFACTS_DIR/e2e-feature-desktop.png"
+   agent-browser --session $WORKFLOW_ID set viewport 768 1024
+   agent-browser --session $WORKFLOW_ID screenshot "$ARTIFACTS_DIR/e2e-feature-tablet.png"
    ```
 5. **No regressions** — other features near the fix still work correctly
 
@@ -235,7 +247,8 @@ curl -s "http://localhost:$BACKEND_PORT/api/conversations" | head -c 500
 ### 4.1 Close Browser
 
 ```bash
-agent-browser close 2>/dev/null || true
+# ALWAYS use --session to only close YOUR browser, not other workflows'
+agent-browser --session $WORKFLOW_ID close 2>/dev/null || true
 ```
 
 ### 4.2 Stop Feature Branch Archon (Cross-Platform)

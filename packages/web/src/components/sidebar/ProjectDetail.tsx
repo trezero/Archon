@@ -39,13 +39,13 @@ export function ProjectDetail({
 }: ProjectDetailProps): React.ReactElement {
   const navigate = useNavigate();
 
-  const { data: conversations } = useQuery({
+  const { data: conversations, isError: isErrorConversations } = useQuery({
     queryKey: ['conversations', { codebaseId }],
     queryFn: () => listConversations(codebaseId),
     refetchInterval: 10_000,
   });
 
-  const { data: runs } = useQuery({
+  const { data: runs, isError: isErrorRuns } = useQuery({
     queryKey: ['workflow-runs', { codebaseId }],
     queryFn: () => listWorkflowRuns({ codebaseId, limit: 20 }),
     refetchInterval: 10_000,
@@ -55,10 +55,13 @@ export function ProjectDetail({
     const map = new Map<string, 'running' | 'failed'>();
     if (!runs) return map;
     for (const run of runs) {
+      // For web runs, parent_conversation_id is the visible conversation in the sidebar.
+      // For CLI runs, conversation_id is the only conversation (no parent/worker split).
+      const key = run.parent_conversation_id ?? run.conversation_id;
       if (run.status === 'running') {
-        map.set(run.conversation_id, 'running');
-      } else if (run.status === 'failed' && !map.has(run.conversation_id)) {
-        map.set(run.conversation_id, 'failed');
+        map.set(key, 'running');
+      } else if (run.status === 'failed' && !map.has(key)) {
+        map.set(key, 'failed');
       }
     }
     return map;
@@ -114,7 +117,9 @@ export function ProjectDetail({
           Conversations
         </span>
         <div className="mt-1 flex flex-col gap-0.5">
-          {filteredConversations && filteredConversations.length > 0 ? (
+          {isErrorConversations ? (
+            <span className="px-1 text-xs text-error">Failed to load — retrying</span>
+          ) : filteredConversations && filteredConversations.length > 0 ? (
             filteredConversations.map(conv => (
               <ConversationItem
                 key={conv.id}
@@ -134,7 +139,9 @@ export function ProjectDetail({
           Workflow Runs
         </span>
         <div className="mt-1 flex flex-col gap-0.5">
-          {sortedRuns && sortedRuns.length > 0 ? (
+          {isErrorRuns ? (
+            <span className="px-1 text-xs text-error">Failed to load — retrying</span>
+          ) : sortedRuns && sortedRuns.length > 0 ? (
             sortedRuns.map(run => (
               <button
                 key={run.id}

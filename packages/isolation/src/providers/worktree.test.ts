@@ -40,7 +40,7 @@ describe('WorktreeProvider', () => {
   let getCanonicalRepoPathSpy: Mock<typeof git.getCanonicalRepoPath>;
 
   beforeEach(() => {
-    mockConfigLoader = async () => ({});
+    mockConfigLoader = async () => ({ baseBranch: 'main' });
     provider = new WorktreeProvider(mockConfigLoader);
     execSpy = spyOn(git, 'execFileAsync');
     mkdirSpy = spyOn(git, 'mkdirAsync');
@@ -85,7 +85,7 @@ describe('WorktreeProvider', () => {
         workflowType: 'issue',
         identifier: '42',
       };
-      expect(provider.generateBranchName(request)).toBe('issue-42');
+      expect(provider.generateBranchName(request)).toBe('archon/issue-42');
     });
 
     test('generates actual branch name for same-repo PR workflows', () => {
@@ -109,7 +109,7 @@ describe('WorktreeProvider', () => {
         prBranch: 'feature/auth',
         isForkPR: true,
       };
-      expect(provider.generateBranchName(request)).toBe('pr-123-review');
+      expect(provider.generateBranchName(request)).toBe('archon/pr-123-review');
     });
 
     test('generates review-N for review workflows', () => {
@@ -119,7 +119,7 @@ describe('WorktreeProvider', () => {
         workflowType: 'review',
         identifier: '456',
       };
-      expect(provider.generateBranchName(request)).toBe('review-456');
+      expect(provider.generateBranchName(request)).toBe('archon/review-456');
     });
 
     test('generates thread-{hash} for thread workflows', () => {
@@ -130,7 +130,7 @@ describe('WorktreeProvider', () => {
         identifier: 'C123:1234567890.123456',
       };
       const name = provider.generateBranchName(request);
-      expect(name).toMatch(/^thread-[a-f0-9]{8}$/);
+      expect(name).toMatch(/^archon\/thread-[a-f0-9]{8}$/);
     });
 
     test('generates consistent hash for same identifier', () => {
@@ -168,7 +168,7 @@ describe('WorktreeProvider', () => {
         workflowType: 'task',
         identifier: 'add-dark-mode',
       };
-      expect(provider.generateBranchName(request)).toBe('task-add-dark-mode');
+      expect(provider.generateBranchName(request)).toBe('archon/task-add-dark-mode');
     });
 
     test('slugifies task identifiers properly', () => {
@@ -178,7 +178,7 @@ describe('WorktreeProvider', () => {
         workflowType: 'task',
         identifier: 'Add Dark Mode!!!',
       };
-      expect(provider.generateBranchName(request)).toBe('task-add-dark-mode');
+      expect(provider.generateBranchName(request)).toBe('archon/task-add-dark-mode');
     });
   });
 
@@ -194,7 +194,7 @@ describe('WorktreeProvider', () => {
       const env = await provider.create(baseRequest);
 
       expect(env.provider).toBe('worktree');
-      expect(env.branchName).toBe('issue-42');
+      expect(env.branchName).toBe('archon/issue-42');
       expect(env.workingPath).toContain('issue-42');
       expect(env.status).toBe('active');
 
@@ -208,7 +208,7 @@ describe('WorktreeProvider', () => {
           'add',
           expect.any(String),
           '-b',
-          'issue-42',
+          'archon/issue-42',
           'origin/main',
         ]),
         expect.any(Object)
@@ -251,7 +251,7 @@ describe('WorktreeProvider', () => {
           'add',
           expect.any(String),
           '-b',
-          'task-test-adapters',
+          'archon/task-test-adapters',
           'feature/extract-adapters',
         ]),
         expect.any(Object)
@@ -262,7 +262,8 @@ describe('WorktreeProvider', () => {
       const alreadyExistsError = new Error('fatal: branch already exists') as Error & {
         stderr: string;
       };
-      alreadyExistsError.stderr = "fatal: a branch named 'task-test-adapters' already exists";
+      alreadyExistsError.stderr =
+        "fatal: a branch named 'archon/task-test-adapters' already exists";
 
       // First call (worktree add -b) fails with "already exists"
       execSpy.mockRejectedValueOnce(alreadyExistsError);
@@ -275,7 +276,7 @@ describe('WorktreeProvider', () => {
       };
 
       await expect(provider.create(request)).rejects.toThrow(
-        'Branch "task-test-adapters" already exists. Cannot create it from "feature/extract-adapters".'
+        'Branch "archon/task-test-adapters" already exists. Cannot create it from "feature/extract-adapters".'
       );
     });
 
@@ -283,7 +284,8 @@ describe('WorktreeProvider', () => {
       const alreadyExistsError = new Error('fatal: branch already exists') as Error & {
         stderr: string;
       };
-      alreadyExistsError.stderr = "fatal: a branch named 'task-test-adapters' already exists";
+      alreadyExistsError.stderr =
+        "fatal: a branch named 'archon/task-test-adapters' already exists";
 
       // First call fails, second succeeds (fallback)
       execSpy.mockRejectedValueOnce(alreadyExistsError);
@@ -300,7 +302,14 @@ describe('WorktreeProvider', () => {
       // Fallback call should not include a start-point
       expect(execSpy).toHaveBeenCalledWith(
         'git',
-        ['-C', '/workspace/repo', 'worktree', 'add', expect.any(String), 'task-test-adapters'],
+        [
+          '-C',
+          '/workspace/repo',
+          'worktree',
+          'add',
+          expect.any(String),
+          'archon/task-test-adapters',
+        ],
         expect.any(Object)
       );
     });
@@ -517,10 +526,12 @@ describe('WorktreeProvider', () => {
         callCount++;
         // First worktree add call fails (branch exists)
         if (callCount === 1 && args.includes('-b')) {
-          const error = new Error('fatal: A branch named issue-42 already exists.') as Error & {
+          const error = new Error(
+            'fatal: A branch named archon/issue-42 already exists.'
+          ) as Error & {
             stderr?: string;
           };
-          error.stderr = 'fatal: A branch named issue-42 already exists.';
+          error.stderr = 'fatal: A branch named archon/issue-42 already exists.';
           throw error;
         }
         return { stdout: '', stderr: '' };
@@ -538,7 +549,7 @@ describe('WorktreeProvider', () => {
           'add',
           expect.any(String),
           '-b',
-          'issue-42',
+          'archon/issue-42',
         ]),
         expect.any(Object)
       );
@@ -552,7 +563,7 @@ describe('WorktreeProvider', () => {
           'worktree',
           'add',
           expect.any(String),
-          'issue-42',
+          'archon/issue-42',
         ]),
         expect.any(Object)
       );
@@ -1332,6 +1343,7 @@ describe('WorktreeProvider', () => {
 
     test('copies configured files after worktree creation', async () => {
       const configLoader: RepoConfigLoader = async () => ({
+        baseBranch: 'main',
         copyFiles: ['.env.example -> .env', '.vscode/settings.json'],
       });
       provider = new WorktreeProvider(configLoader);
@@ -1367,6 +1379,7 @@ describe('WorktreeProvider', () => {
 
     test('calls copyWorktreeFiles with default .archon when copyFiles is empty', async () => {
       const configLoader: RepoConfigLoader = async () => ({
+        baseBranch: 'main',
         copyFiles: [],
       });
       provider = new WorktreeProvider(configLoader);
@@ -1383,7 +1396,7 @@ describe('WorktreeProvider', () => {
       );
     });
 
-    test('does not fail worktree creation if config load fails', async () => {
+    test('throws with config error details when config load fails and no fromBranch', async () => {
       const configLoader: RepoConfigLoader = async () => {
         throw new Error('Config load failed');
       };
@@ -1391,20 +1404,15 @@ describe('WorktreeProvider', () => {
 
       copyWorktreeFilesSpy.mockResolvedValue([]);
 
-      // Should not throw
-      const env = await provider.create(baseRequest);
-      expect(env.workingPath).toContain('issue-42');
-
-      // Should still attempt to copy default .archon (graceful degradation)
-      expect(copyWorktreeFilesSpy).toHaveBeenCalledWith(
-        '/.archon/workspaces/owner/repo',
-        expect.stringContaining('issue-42'),
-        ['.archon']
+      // Should throw with the actual config error, not generic "no base branch"
+      await expect(provider.create(baseRequest)).rejects.toThrow(
+        'Failed to load config: Config load failed'
       );
     });
 
     test('does not fail worktree creation if file copying fails', async () => {
       const configLoader: RepoConfigLoader = async () => ({
+        baseBranch: 'main',
         copyFiles: ['.env'],
       });
       provider = new WorktreeProvider(configLoader);
@@ -1449,6 +1457,7 @@ describe('WorktreeProvider', () => {
     test('should merge .archon default with user copyFiles config', async () => {
       // Mock: User config with additional files
       const configLoader: RepoConfigLoader = async () => ({
+        baseBranch: 'main',
         copyFiles: ['.env', '.vscode'],
       });
       provider = new WorktreeProvider(configLoader);
@@ -1474,6 +1483,7 @@ describe('WorktreeProvider', () => {
     test('should deduplicate .archon if user explicitly includes it', async () => {
       // Mock: User config explicitly includes .archon
       const configLoader: RepoConfigLoader = async () => ({
+        baseBranch: 'main',
         copyFiles: ['.archon', '.env'],
       });
       provider = new WorktreeProvider(configLoader);
@@ -1491,7 +1501,7 @@ describe('WorktreeProvider', () => {
       expect(archonCount).toBe(1);
     });
 
-    test('should copy default .archon even if config loading fails', async () => {
+    test('throws with config error details when config loading fails and no fromBranch', async () => {
       // Mock: Config loading throws error
       const configLoader: RepoConfigLoader = async () => {
         throw new Error('Config parse error');
@@ -1500,13 +1510,9 @@ describe('WorktreeProvider', () => {
 
       copyWorktreeFilesSpy.mockResolvedValue([{ source: '.archon', destination: '.archon' }]);
 
-      await provider.create(baseRequest);
-
-      // Verify .archon was still copied (graceful degradation)
-      expect(copyWorktreeFilesSpy).toHaveBeenCalledWith(
-        '/.archon/workspaces/owner/repo',
-        expect.stringContaining('issue-42'),
-        ['.archon']
+      // Should throw with the actual config error, not generic "no base branch"
+      await expect(provider.create(baseRequest)).rejects.toThrow(
+        'Failed to load config: Config parse error'
       );
     });
   });
@@ -1796,25 +1802,74 @@ describe('WorktreeProvider', () => {
           'add',
           expect.any(String),
           '-b',
-          'issue-42',
+          'archon/issue-42',
           'origin/develop',
         ]),
         expect.any(Object)
       );
     });
 
-    test('syncs workspace before creating worktree using repo default', async () => {
-      // Ensure worktree doesn't exist
+    test('auto-detects base branch when no baseBranch configured and no fromBranch', async () => {
       worktreeExistsSpy.mockResolvedValue(false);
-      syncWorkspaceSpy.mockImplementation(async (repoPath, branchOverride) => {
-        const resolvedBranch = branchOverride ?? (await git.getDefaultBranch(repoPath));
-        return { branch: resolvedBranch, synced: true };
-      });
+      const configLoader: RepoConfigLoader = async () => ({});
+      provider = new WorktreeProvider(configLoader);
 
       await provider.create(baseRequest);
 
+      // syncWorkspace called with undefined → triggers auto-detect via getDefaultBranch
       expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', undefined);
-      expect(getDefaultBranchSpy).toHaveBeenCalledWith('/workspace/owner/repo');
+    });
+
+    test('auto-detects base branch when fromBranch is set but no baseBranch configured', async () => {
+      worktreeExistsSpy.mockResolvedValue(false);
+      const configLoader: RepoConfigLoader = async () => ({});
+      provider = new WorktreeProvider(configLoader);
+
+      const request: IsolationRequest = {
+        ...baseRequest,
+        workflowType: 'task',
+        identifier: 'test-feature',
+        fromBranch: 'dev',
+      };
+
+      await provider.create(request);
+
+      // fromBranch is the start-point for the branch, not for sync — sync auto-detects
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', undefined);
+    });
+
+    test('uses configuredBaseBranch over fromBranch when both are set', async () => {
+      worktreeExistsSpy.mockResolvedValue(false);
+      const configLoader: RepoConfigLoader = async () => ({ baseBranch: 'main' });
+      provider = new WorktreeProvider(configLoader);
+
+      const request: IsolationRequest = {
+        ...baseRequest,
+        workflowType: 'task',
+        identifier: 'test-feature',
+        fromBranch: 'dev',
+      };
+
+      await provider.create(request);
+
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', 'main');
+    });
+
+    test('auto-detects when fromBranch is set but workflowType is not task and no baseBranch', async () => {
+      worktreeExistsSpy.mockResolvedValue(false);
+      const configLoader: RepoConfigLoader = async () => ({});
+      provider = new WorktreeProvider(configLoader);
+
+      // baseRequest has workflowType 'issue', not 'task' — fromBranch is ignored, auto-detects
+      const request: IsolationRequest = {
+        ...baseRequest,
+        fromBranch: 'dev',
+      };
+
+      await provider.create(request);
+
+      // fromBranch is ignored for non-task types, so syncWorkspace gets undefined → auto-detect
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', undefined);
     });
 
     test('passes configured base branch to workspace sync when provided', async () => {
@@ -1839,7 +1894,7 @@ describe('WorktreeProvider', () => {
       );
     });
 
-    test('continues worktree creation when repo config fails to load', async () => {
+    test('throws with config error details when repo config fails to load and no fromBranch', async () => {
       const configLoader: RepoConfigLoader = async () => {
         throw new Error('Config error');
       };
@@ -1847,10 +1902,9 @@ describe('WorktreeProvider', () => {
 
       worktreeExistsSpy.mockResolvedValue(false);
 
-      const env = await provider.create(baseRequest);
-
-      expect(env.workingPath).toContain('issue-42');
-      expect(env.status).toBe('active');
+      await expect(provider.create(baseRequest)).rejects.toThrow(
+        'Failed to load config: Config error'
+      );
     });
 
     test('throws error when configured base branch does not exist', async () => {

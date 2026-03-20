@@ -16,16 +16,30 @@ export interface SSEWriter {
 /** Grace period (ms) before firing onCleanup after stream removal. */
 const RECONNECT_GRACE_MS = 5_000;
 
+/** Max time (ms) to hold buffered events waiting for a stream to connect. */
+const EVENT_BUFFER_TTL_MS = 3_000;
+
+/** Max events to buffer per conversation before oldest are dropped. */
+const EVENT_BUFFER_MAX = 50;
+
+interface BufferedEvent {
+  data: string;
+  timestamp: number;
+}
+
 export class SSETransport {
   private streams = new Map<string, SSEWriter>();
   private cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private zombieReaperHandle: ReturnType<typeof setInterval> | null = null;
+  private eventBuffer = new Map<string, BufferedEvent[]>();
+  private bufferCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private onCleanup?: (conversationId: string) => void) {}
 
   /**
    * Register an SSE stream for a conversation.
    * Closes any existing stream (browser refresh / new tab replaces old).
+   * Replays any buffered events that arrived before the stream connected.
    */
   registerStream(conversationId: string, stream: SSEWriter): void {
     const existing = this.streams.get(conversationId);
@@ -41,6 +55,23 @@ export class SSETransport {
     if (pendingCleanup) {
       clearTimeout(pendingCleanup);
       this.cleanupTimers.delete(conversationId);
+    }
+
+    // Replay buffered events that arrived before the stream connected
+    const buffered = this.eventBuffer.get(conversationId);
+    if (buffered && buffered.length > 0) {
+      const now = Date.now();
+      const valid = buffered.filter(e => now - e.timestamp < EVENT_BUFFER_TTL_MS);
+      this.clearBuffer(conversationId);
+      if (valid.length > 0) {
+        getLog().debug({ conversationId, count: valid.length }, 'sse_buffer_replay');
+        for (const event of valid) {
+          if (stream.closed) break;
+          stream.writeSSE({ data: event.data }).catch((e: unknown) => {
+            getLog().warn({ conversationId, err: e }, 'sse_buffer_replay_failed');
+          });
+        }
+      }
     }
   }
 
@@ -97,6 +128,11 @@ export class SSETransport {
       clearTimeout(timer);
     }
     this.cleanupTimers.clear();
+    this.eventBuffer.clear();
+    for (const timer of this.bufferCleanupTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.bufferCleanupTimers.clear();
     getLog().info('web.adapter_stopped');
   }
 
@@ -116,9 +152,9 @@ export class SSETransport {
       }
     } else if (stream?.closed) {
       this.streams.delete(conversationId);
-      getLog().debug({ conversationId }, 'sse_event_dropped_no_stream');
+      this.bufferEvent(conversationId, event);
     } else {
-      getLog().debug({ conversationId }, 'sse_event_dropped_no_stream');
+      this.bufferEvent(conversationId, event);
     }
   }
 
@@ -144,7 +180,41 @@ export class SSETransport {
         });
       });
     } else {
-      getLog().debug({ conversationId }, 'sse_event_dropped_no_stream');
+      this.bufferEvent(conversationId, event);
+    }
+  }
+
+  /**
+   * Buffer an event for later replay when a stream connects.
+   * Events expire after EVENT_BUFFER_TTL_MS and are capped at EVENT_BUFFER_MAX per conversation.
+   */
+  private bufferEvent(conversationId: string, data: string): void {
+    let buf = this.eventBuffer.get(conversationId);
+    if (!buf) {
+      buf = [];
+      this.eventBuffer.set(conversationId, buf);
+    }
+    buf.push({ data, timestamp: Date.now() });
+    // Cap buffer size — drop oldest if over limit
+    if (buf.length > EVENT_BUFFER_MAX) {
+      buf.shift();
+    }
+    // Schedule auto-cleanup so buffers don't leak for conversations that never connect
+    if (!this.bufferCleanupTimers.has(conversationId)) {
+      const timer = setTimeout(() => {
+        this.clearBuffer(conversationId);
+      }, EVENT_BUFFER_TTL_MS + 500);
+      this.bufferCleanupTimers.set(conversationId, timer);
+    }
+    getLog().debug({ conversationId, buffered: buf.length }, 'sse_event_buffered');
+  }
+
+  private clearBuffer(conversationId: string): void {
+    this.eventBuffer.delete(conversationId);
+    const timer = this.bufferCleanupTimers.get(conversationId);
+    if (timer) {
+      clearTimeout(timer);
+      this.bufferCleanupTimers.delete(conversationId);
     }
   }
 

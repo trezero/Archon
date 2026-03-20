@@ -91,6 +91,7 @@ const DEFAULT_CONFIG: WorkflowConfig = {
   assistants: { claude: {}, codex: {} },
   commands: {},
   defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+  baseBranch: 'main',
 };
 
 /** Create a mock IWorkflowStore with default implementations */
@@ -277,7 +278,7 @@ describe('Workflow Executor', () => {
       expect(calls[0][2]).toEqual(
         expect.objectContaining({ category: 'workflow_status', segment: 'new' })
       );
-      // Steps are now shown visually in WorkflowProgressCard, not in the text notification
+      // Step details are omitted from the text notification
     });
 
     it('should execute each step and send notifications', async () => {
@@ -541,41 +542,73 @@ describe('Workflow Executor', () => {
       expect(callArg).toContain('results.md');
     });
 
-    it('should substitute $BASE_BRANCH from getDefaultBranch fallback', async () => {
+    it('should error when $BASE_BRANCH is referenced but config.baseBranch is not set', async () => {
       const commandsDir = join(testDir, '.archon', 'commands');
       await writeFile(join(commandsDir, 'branch-test.md'), 'git rebase origin/$BASE_BRANCH');
 
-      // Mock getDefaultBranch to return a specific branch
-      getDefaultBranchSpy.mockResolvedValue('develop');
+      mockLoadConfig.mockResolvedValue({
+        assistant: 'claude' as const,
+        assistants: { claude: {}, codex: {} },
+        commands: {},
+        defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+        // baseBranch intentionally omitted to test error case
+      });
 
-      const callCountBefore = mockSendQuery.mock.calls.length;
+      // Also make auto-detection fail so baseBranch stays empty
+      getDefaultBranchSpy.mockRejectedValueOnce(new Error('Not a git repo'));
 
       const workflow: WorkflowDefinition = {
-        name: 'base-branch-workflow',
-        description: 'Test $BASE_BRANCH substitution',
+        name: 'no-base-branch-workflow',
+        description: 'Test missing baseBranch error',
         steps: [{ command: 'branch-test' }],
       };
 
-      await executeWorkflow(
+      const result = await executeWorkflow(
         mockDeps,
         mockPlatform,
         'conv-123',
         testDir,
         workflow,
-        'Run rebase',
+        'Run something',
         'db-conv-id'
       );
 
-      expect(mockSendQuery.mock.calls.length).toBeGreaterThan(callCountBefore);
-      const callArg = mockSendQuery.mock.calls[callCountBefore][0] as string;
-      // $BASE_BRANCH should be replaced with the resolved branch name
-      expect(callArg).not.toContain('$BASE_BRANCH');
-      expect(callArg).toContain('origin/develop');
-      // getDefaultBranch should have been called since config has no baseBranch
-      expect(getDefaultBranchSpy).toHaveBeenCalledWith(testDir);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No base branch could be resolved');
     });
 
-    it('should use config.baseBranch over getDefaultBranch when configured', async () => {
+    it('should succeed without baseBranch when workflow does not reference $BASE_BRANCH', async () => {
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'simple-cmd.md'), 'Do something simple');
+
+      mockLoadConfig.mockResolvedValue({
+        assistant: 'claude' as const,
+        assistants: { claude: {}, codex: {} },
+        commands: {},
+        defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+        // baseBranch intentionally omitted
+      });
+
+      const workflow: WorkflowDefinition = {
+        name: 'no-base-branch-ok-workflow',
+        description: 'Workflow that does not use $BASE_BRANCH',
+        steps: [{ command: 'simple-cmd' }],
+      };
+
+      const result = await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'Run something',
+        'db-conv-id'
+      );
+
+      expect(result.success).toBe(true);
+    });
+
+    it('should substitute $BASE_BRANCH from config.baseBranch', async () => {
       const commandsDir = join(testDir, '.archon', 'commands');
       await writeFile(join(commandsDir, 'branch-test.md'), 'git rebase origin/$BASE_BRANCH');
 
@@ -588,14 +621,11 @@ describe('Workflow Executor', () => {
         baseBranch: 'staging',
       });
 
-      // Reset getDefaultBranch call count
-      getDefaultBranchSpy.mockClear();
-
       const callCountBefore = mockSendQuery.mock.calls.length;
 
       const workflow: WorkflowDefinition = {
         name: 'config-branch-workflow',
-        description: 'Test config baseBranch takes precedence',
+        description: 'Test config baseBranch substitution',
         steps: [{ command: 'branch-test' }],
       };
 
@@ -611,11 +641,48 @@ describe('Workflow Executor', () => {
 
       expect(mockSendQuery.mock.calls.length).toBeGreaterThan(callCountBefore);
       const callArg = mockSendQuery.mock.calls[callCountBefore][0] as string;
-      // $BASE_BRANCH should use config value, not getDefaultBranch
+      // $BASE_BRANCH should use config value
       expect(callArg).not.toContain('$BASE_BRANCH');
       expect(callArg).toContain('origin/staging');
-      // getDefaultBranch should NOT have been called
-      expect(getDefaultBranchSpy).not.toHaveBeenCalled();
+    });
+
+    it('should substitute $BASE_BRANCH using auto-detected default branch when config.baseBranch is not set', async () => {
+      const commandsDir = join(testDir, '.archon', 'commands');
+      await writeFile(join(commandsDir, 'branch-auto.md'), 'git rebase origin/$BASE_BRANCH');
+
+      mockLoadConfig.mockResolvedValue({
+        assistant: 'claude' as const,
+        assistants: { claude: {}, codex: {} },
+        commands: {},
+        defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+        // baseBranch intentionally omitted — auto-detect should kick in
+      });
+
+      // Override the default mock to return 'develop' for this test
+      getDefaultBranchSpy.mockResolvedValueOnce('develop');
+
+      const callCountBefore = mockSendQuery.mock.calls.length;
+
+      const workflow: WorkflowDefinition = {
+        name: 'auto-detect-branch-workflow',
+        description: 'Test auto-detected baseBranch substitution',
+        steps: [{ command: 'branch-auto' }],
+      };
+
+      await executeWorkflow(
+        mockDeps,
+        mockPlatform,
+        'conv-123',
+        testDir,
+        workflow,
+        'Run rebase',
+        'db-conv-id'
+      );
+
+      expect(mockSendQuery.mock.calls.length).toBeGreaterThan(callCountBefore);
+      const callArg = mockSendQuery.mock.calls[callCountBefore][0] as string;
+      expect(callArg).not.toContain('$BASE_BRANCH');
+      expect(callArg).toContain('origin/develop');
     });
 
     it('should handle codebase_id being undefined', async () => {
@@ -932,6 +999,7 @@ describe('Workflow Executor', () => {
         assistants: { claude: {}, codex: {} },
         commands: {},
         defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+        baseBranch: 'main',
       });
 
       const workflow: WorkflowDefinition = {
@@ -992,6 +1060,7 @@ describe('Workflow Executor', () => {
         assistants: { claude: {}, codex: {} },
         commands: {},
         defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+        baseBranch: 'main',
       });
 
       const workflow: WorkflowDefinition = {
@@ -1051,6 +1120,7 @@ describe('Workflow Executor', () => {
         },
         commands: {},
         defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+        baseBranch: 'main',
       });
 
       const workflow: WorkflowDefinition = {
@@ -1155,6 +1225,7 @@ describe('Workflow Executor', () => {
         assistants: { claude: {}, codex: {} },
         commands: {},
         defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+        baseBranch: 'main',
       });
       mockGetAssistantClient.mockReturnValue({ sendQuery: mockSendQuery, getType: () => 'codex' });
 
@@ -1192,6 +1263,7 @@ describe('Workflow Executor', () => {
         assistants: { claude: {}, codex: {} },
         commands: {},
         defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+        baseBranch: 'main',
       });
       mockGetAssistantClient.mockReturnValue({ sendQuery: mockSendQuery, getType: () => 'codex' });
 
@@ -4226,6 +4298,7 @@ describe('app defaults command loading', () => {
       assistants: { claude: {}, codex: {} },
       commands: {},
       defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+      baseBranch: 'main',
     });
   });
 
@@ -4301,6 +4374,7 @@ describe('app defaults command loading', () => {
       assistants: { claude: {}, codex: {} },
       commands: {},
       defaults: { loadDefaultCommands: false, loadDefaultWorkflows: true },
+      baseBranch: 'main',
     });
 
     // Try to load a real app default command - should fail since app defaults disabled
@@ -4376,6 +4450,7 @@ describe('app defaults command loading', () => {
         assistants: { claude: {}, codex: {} },
         commands: {},
         defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+        baseBranch: 'main',
       });
 
       // Use a known bundled command name
@@ -4415,6 +4490,7 @@ describe('app defaults command loading', () => {
         assistants: { claude: {}, codex: {} },
         commands: {},
         defaults: { loadDefaultCommands: true, loadDefaultWorkflows: true },
+        baseBranch: 'main',
       });
 
       const workflow: WorkflowDefinition = {
@@ -4456,6 +4532,7 @@ describe('app defaults command loading', () => {
         concurrency: { maxConversations: 10 },
         commands: { autoLoad: true },
         defaults: { copyDefaults: true, loadDefaultCommands: false, loadDefaultWorkflows: true },
+        baseBranch: 'main',
       });
 
       // Use a known bundled command name, but defaults are disabled

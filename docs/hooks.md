@@ -304,3 +304,8 @@ need context injection, input modification, or post-tool-use reactions.
 ## SDK Reference
 
 Refer to the [Anthropic Claude Agent SDK documentation](https://docs.anthropic.com/en/docs/claude-code/sdk) for the authoritative `SyncHookJSONOutput` type, hook event reference, and matcher patterns.
+
+## Related
+
+- [Per-Node MCP Servers](./mcp-servers.md) — `mcp:` field for external tool access
+- [Per-Node Skills](./skills.md) — `skills:` field for domain knowledge injection

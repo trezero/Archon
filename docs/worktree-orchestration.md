@@ -1,6 +1,6 @@
 # Worktree Orchestration
 
-> **Note**: This document describes the current architecture. See `docs/worktree-orchestration-research.md` for the planned unified architecture (Phase 2.5+) which centralizes all isolation logic in the orchestrator.
+> **Note**: All isolation is centralized in the orchestrator (`validateAndResolveIsolation`). Every adapter passes `isolationHints` with a conversation-scoped `workflowId`. Web background workers each resolve their own worktree. See `docs/worktree-orchestration-research.md` for additional research.
 
 ## Storage Location
 
@@ -23,10 +23,15 @@ Detection order in `getWorktreeBase()`:
 ┌─────────────────────────────────────────────────────────────────┐
 │                        ENTRY POINTS                             │
 ├─────────────────────────────────────────────────────────────────┤
-│  GitHub Adapter          │  Command Handler (/worktree)         │
-│  - Issue/PR webhooks     │  - /worktree create <branch>         │
-│  - Auto-create on @bot   │  - /worktree remove [--force]        │
-│  - Auto-cleanup on close │  - /worktree list / orphans          │
+│  GitHub Adapter          │  Chat Adapters                       │
+│  - Issue/PR webhooks     │  - Slack (per thread)                │
+│  - Auto-create on @bot   │  - Discord (per channel/thread)      │
+│  - Auto-cleanup on close │  - Telegram (per chat)               │
+│                          │  - Web (per conversation + per worker)│
+│  CLI                     │                                      │
+│  - Default: auto-isolate │  Command Handler (/worktree)         │
+│  - --no-worktree opt-out │  - /worktree create <branch>         │
+│  - --branch override     │  - /worktree remove [--force]        │
 └────────────┬─────────────┴────────────────┬─────────────────────┘
              │                              │
              ▼                              ▼
@@ -66,11 +71,11 @@ interface IsolationRequest {
 
 | Workflow            | Identifier      | Branch Name              |
 | ------------------- | --------------- | ------------------------ |
-| issue               | `"42"`          | `issue-42`               |
-| pr (same-repo)      | `"123"`         | `feature/auth` (actual)  |
-| pr (fork)           | `"123"`         | `pr-123-review`          |
-| task                | `"my-feature"`  | `task-my-feature`        |
-| thread              | `"C123:ts.123"` | `thread-a1b2c3d4` (hash) |
+| issue               | `"42"`          | `archon/issue-42`               |
+| pr (same-repo)      | `"123"`         | `feature/auth` (actual branch)  |
+| pr (fork)           | `"123"`         | `archon/pr-123-review`          |
+| task                | `"my-feature"`  | `archon/task-my-feature`        |
+| thread              | `"C123:ts.123"` | `archon/thread-a1b2c3d4` (hash) |
 
 ## Creation Flow
 
@@ -93,7 +98,7 @@ IsolationRequest
        ▼
 ┌──────────────────────────────────────────────────┐
 │ SYNC WORKSPACE (before creating worktree)        │
-│   Branch: config worktree.baseBranch or auto     │
+│   Branch: worktree.baseBranch or auto-detected   │
 │   git fetch origin <branch>                      │
 │   git reset --hard origin/<branch>               │
 │   (skipped if uncommitted changes)               │
@@ -240,17 +245,24 @@ Issue #42: "Fix login bug"
 ```sql
 conversations
 ├── id
-├── platform_conversation_id   -- "owner/repo#42"
-├── cwd                        -- Current working directory
-├── worktree_path              -- LEGACY (keep for compatibility)
-├── isolation_env_id           -- NEW: worktree path as ID
-└── isolation_provider         -- NEW: 'worktree' | 'container' | ...
-```
+├── platform_conversation_id   -- "owner/repo#42", "C01:1234.5678", "web-conv-123"
+├── cwd                        -- Current working directory (worktree path when isolated)
+├── codebase_id                -- FK to codebases
+└── isolation_env_id           -- FK to isolation_environments
 
-Lookup pattern:
-
-```typescript
-const envId = conversation.isolation_env_id ?? conversation.worktree_path;
+isolation_environments
+├── id                         -- UUID
+├── codebase_id                -- FK to codebases
+├── workflow_type              -- 'issue' | 'pr' | 'review' | 'thread' | 'task'
+├── workflow_id                -- Issue number, conversation ID, worker ID, etc.
+├── provider                   -- 'worktree'
+├── working_path               -- Filesystem path to worktree
+├── branch_name                -- Git branch name (e.g., archon/issue-42)
+├── status                     -- 'active' | 'destroyed'
+├── created_at
+├── created_by_platform
+└── metadata                   -- JSONB
+-- Partial unique: (codebase_id, workflow_type, workflow_id) WHERE status = 'active'
 ```
 
 ## Skill Symbiosis
@@ -278,97 +290,41 @@ App checks: findWorktreeByBranch("feature/auth")
 
 ## Key Files
 
-| File                                  | Purpose                                                         |
-| ------------------------------------- | --------------------------------------------------------------- |
-| `src/isolation/types.ts`              | `IIsolationProvider`, `IsolationRequest`, `IsolatedEnvironment`, `DestroyResult` |
-| `src/isolation/providers/worktree.ts` | `WorktreeProvider` implementation                               |
-| `src/isolation/index.ts`              | `getIsolationProvider()` factory                                |
-| `@archon/git` (`packages/git/src/`)   | `getWorktreeBase()`, `listWorktrees()`, `syncWorkspace()`, `getDefaultBranch()`, low-level git ops |
-| `src/adapters/github.ts`              | Webhook handling, `cleanupPRWorktree()`                         |
-| `src/handlers/command-handler.ts`     | `/worktree` command handling                                    |
+| File                                                | Purpose                                                         |
+| --------------------------------------------------- | --------------------------------------------------------------- |
+| `packages/isolation/src/types.ts`                   | `IIsolationProvider`, `IsolationRequest`, `IsolatedEnvironment`, `DestroyResult` |
+| `packages/isolation/src/providers/worktree.ts`      | `WorktreeProvider` implementation                               |
+| `packages/isolation/src/resolver.ts`                | `IsolationResolver` — 7-step resolution (reuse, linked, adopt, create) |
+| `packages/isolation/src/factory.ts`                 | `getIsolationProvider()` factory                                |
+| `packages/core/src/orchestrator/orchestrator.ts`    | `validateAndResolveIsolation()`, `dispatchBackgroundWorkflow()` — central isolation authority |
+| `packages/git/src/`                                 | `getWorktreeBase()`, `listWorktrees()`, `syncWorkspace()`, `getDefaultBranch()` |
+| `packages/adapters/src/forge/github/adapter.ts`     | Webhook handling, `IsolationHints` for issues/PRs               |
+| `packages/server/src/index.ts`                      | Chat adapter message handlers (pass `isolationHints`)           |
+| `packages/cli/src/commands/workflow.ts`              | CLI isolation (bypasses resolver, calls provider directly)      |
 
 ---
 
-## Planned Architecture (Phase 2.5+)
+## Isolation by Adapter
 
-The current architecture has isolation logic split between the GitHub adapter and orchestrator. Phase 2.5 will unify all isolation in the orchestrator.
+All adapters pass `isolationHints` with the conversation ID as `workflowId`, giving each conversation its own worktree. Web background workers resolve their own isolation per dispatch.
 
-### Target Architecture
+| Adapter | `workflowType` | `workflowId` | Isolation granularity |
+|---------|----------------|--------------|----------------------|
+| GitHub (issue) | `'issue'` | Issue number | Per issue |
+| GitHub (PR) | `'pr'` | PR number | Per PR |
+| Slack | `'thread'` | Thread ID (`channel:thread_ts`) | Per thread |
+| Discord | `'thread'` | Channel/thread ID | Per channel/thread |
+| Telegram | `'thread'` | Chat ID | Per chat |
+| Web (direct) | `'thread'` | Conversation ID | Per conversation |
+| Web (background worker) | `'thread'` | Worker ID (`web-worker-{ts}-{rand}`) | Per workflow dispatch |
+| CLI | `'task'` | Branch name or auto-generated | Per workflow run |
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        ALL ADAPTERS (Thin)                               │
-│  GitHub, Slack, Discord, Telegram                                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│  ✓ Parse platform events                                                │
-│  ✓ Detect @mentions                                                     │
-│  ✓ Build context + IsolationHints                                       │
-│  ✓ Call handleMessage(platform, convId, message, context, hints)        │
-│  ✓ Trigger cleanup events (GitHub only: close/merge)                    │
-│  ✗ NO worktree creation                                                 │
-│  ✗ NO isolation UX messages                                             │
-└───────────────────────────────────┬─────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         ORCHESTRATOR (Authority)                         │
-├─────────────────────────────────────────────────────────────────────────┤
-│  validateAndResolveIsolation():                                         │
-│  1. Validate existing isolation (cwd exists?)                           │
-│  2. Check for reuse (same workflow_type + workflow_id)                  │
-│  3. Check linked issues for sharing                                     │
-│  4. Check for skill adoption (findWorktreeByBranch)                     │
-│  5. Create new if needed                                                │
-│  6. Send UX message                                                     │
-│  7. Update database                                                     │
-└───────────────────────────────────┬─────────────────────────────────────┘
-                                    │
-                    ┌───────────────┴───────────────┐
-                    ▼                               ▼
-┌───────────────────────────────┐   ┌───────────────────────────────────┐
-│      ISOLATION PROVIDER        │   │        CLEANUP SERVICE             │
-│  (WorktreeProvider)            │   │  src/services/cleanup-service.ts   │
-├───────────────────────────────┤   ├───────────────────────────────────┤
-│  create() → IsolatedEnv        │   │  onConversationClosed()           │
-│  destroy()                     │   │  runScheduledCleanup()            │
-│  get() / list()               │   │  removeEnvironment() - graceful   │
-│  adopt()                       │   │  isBranchMerged() - git-first     │
-│                                │   │  hasUncommittedChanges()          │
-└───────────────────────────────┘   └───────────────────────────────────┘
-```
+### Web Background Workers
 
-### New Database Schema
+Web workflows are fire-and-forget via `dispatchBackgroundWorkflow`. Each worker:
+1. Gets a unique conversation ID (`web-worker-{ts}-{rand}`)
+2. Resolves its own isolation via `validateAndResolveIsolation` with the worker ID
+3. Gets its own worktree — no sharing with parent or other workers
+4. Isolation failure is fatal — workflow does not fall back to shared workspace
 
-```sql
--- Work-centric isolation (independent lifecycle)
-CREATE TABLE remote_agent_isolation_environments (
-  id                    UUID PRIMARY KEY,
-  codebase_id           UUID REFERENCES remote_agent_codebases(id),
-  workflow_type         TEXT NOT NULL,    -- 'issue', 'pr', 'thread', 'task'
-  workflow_id           TEXT NOT NULL,    -- '42', 'thread-abc123'
-  provider              TEXT DEFAULT 'worktree',
-  working_path          TEXT NOT NULL,
-  branch_name           TEXT NOT NULL,
-  status                TEXT DEFAULT 'active',
-  created_at            TIMESTAMP DEFAULT NOW(),
-  created_by_platform   TEXT,
-  metadata              JSONB DEFAULT '{}',
-  UNIQUE (codebase_id, workflow_type, workflow_id)
-);
-
--- Conversations link to environments (many-to-one)
-ALTER TABLE remote_agent_conversations
-  ADD COLUMN isolation_env_id UUID REFERENCES remote_agent_isolation_environments(id);
-```
-
-### Implementation Phases
-
-| Phase | Description                                 | Status  |
-| ----- | ------------------------------------------- | ------- |
-| 2.5   | Unified Isolation Architecture              | Planned |
-| 3A    | Force-Thread Response Model (Slack/Discord) | Planned |
-| 3C    | Git-Based Cleanup Scheduler                 | Planned |
-| 3D    | Limits and User Feedback                    | Planned |
-| 4     | Drop Legacy Columns                         | Planned |
-
-See `docs/worktree-orchestration-research.md` for detailed implementation plans.
+See `docs/worktree-orchestration-research.md` for additional research and future plans.

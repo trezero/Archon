@@ -1,5 +1,6 @@
 ---
 description: Analyze implementation against plan for process improvements
+argument-hint: "[plan-file] [execution-report-file]"
 ---
 
 # System Review
@@ -28,19 +29,19 @@ Perform a meta-level analysis of how well the implementation followed the plan a
 You will analyze four key artifacts:
 
 **Plan Command:**
-Read this to understand the planning process and what instructions guide plan creation.
-.claude/commands/plan-feature.md
+Read this to understand the planning process:
+`.claude/commands/plan-feature.md`
 
 **Generated Plan:**
-Read this to understand what the agent was SUPPOSED to do.
+Read this to understand what the agent was SUPPOSED to do:
 Plan file: $1
 
 **Execute Command:**
-Read this to understand the execution process and what instructions guide implementation.
-.claude/commands/execute.md
+Read this to understand the execution process:
+`.claude/commands/execute.md`
 
 **Execution Report:**
-Read this to understand what the agent ACTUALLY did and why.
+Read this to understand what the agent ACTUALLY did and why:
 Execution report: $2
 
 ## Analysis Workflow
@@ -138,10 +139,12 @@ root_cause: [unclear plan | missing context | etc]
 
 Assess adherence to documented patterns:
 
-- [ ] Followed codebase architecture
-- [ ] Used documented patterns (from CLAUDE.md)
-- [ ] Applied testing patterns correctly
-- [ ] Met validation requirements
+- [ ] Followed monorepo package boundaries
+- [ ] Used documented import patterns (import type, no import * as core)
+- [ ] Applied testing patterns correctly (mock.module() isolation)
+- [ ] Met validation requirements (type-check + lint + test)
+- [ ] Respected CLAUDE.md conventions
+- [ ] Consulted relevant `.claude/rules/` files for domain context
 
 #### System Improvement Actions
 
@@ -163,7 +166,7 @@ Based on analysis, recommend specific actions:
 
 - [ ] `/[command-name]` for [manual process repeated 3+ times]
 
-**Update Execute Command ($3):**
+**Update Execute Command:**
 
 - [ ] Add [validation step] to execution checklist
 

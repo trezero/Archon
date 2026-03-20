@@ -154,7 +154,15 @@ export async function commitAllChanges(
     await execFileAsync('git', ['-C', workingPath, 'add', '-A'], { timeout: 10000 });
     await execFileAsync('git', ['-C', workingPath, 'commit', '-m', message], { timeout: 10000 });
   } catch (error) {
-    const err = error as Error & { stderr?: string };
+    const err = error as Error & { stderr?: string; stdout?: string };
+    // git commit exits with code 1 and writes "nothing to commit" to stdout (not stderr)
+    // when git add -A normalizes line endings (e.g. CRLF→LF on Windows) and the result
+    // is identical to HEAD. Treat this as a no-op, not a failure.
+    const combinedOutput = `${err.stdout ?? ''} ${err.stderr ?? ''}`;
+    if (combinedOutput.toLowerCase().includes('nothing to commit')) {
+      getLog().debug({ workingPath }, 'commit_all_changes_nothing_to_commit');
+      return false;
+    }
     getLog().error({ workingPath, err, stderr: err.stderr }, 'commit_all_changes_failed');
     throw new Error(
       `Failed to commit changes in ${workingPath}: ${err.stderr?.trim() || err.message}`

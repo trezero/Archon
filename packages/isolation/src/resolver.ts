@@ -27,11 +27,7 @@ import type {
   ResolveRequest,
 } from './types';
 import type { IIsolationStore } from './store';
-import {
-  classifyIsolationError,
-  isKnownIsolationError,
-  formatWorktreeLimitMessage,
-} from './errors';
+import { classifyIsolationError, isKnownIsolationError } from './errors';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -51,11 +47,9 @@ export interface IsolationResolverDeps {
     makeRoom: (codebaseId: string, repoPath: string) => Promise<{ removedCount: number }>;
     getBreakdown: (codebaseId: string, repoPath: string) => Promise<WorktreeStatusBreakdown>;
   };
-  maxWorktreesPerCodebase?: number;
   staleThresholdDays?: number;
 }
 
-const DEFAULT_MAX_WORKTREES = 25;
 const DEFAULT_STALE_THRESHOLD_DAYS = 14;
 
 /**
@@ -67,26 +61,18 @@ const DEFAULT_STALE_THRESHOLD_DAYS = 14;
  * 3. Workflow reuse (same codebase + workflow identity)
  * 4. Linked issue sharing (cross-conversation)
  * 5. PR branch adoption (skill symbiosis)
- * 6. Limit check with auto-cleanup
- * 7. Create new worktree
+ * 6. Create new worktree
  */
 export class IsolationResolver {
   private readonly store: IIsolationStore;
   private readonly provider: IIsolationProvider;
-  private readonly cleanup: IsolationResolverDeps['cleanup'];
-  private readonly maxWorktrees: number;
   private readonly staleThresholdDays: number;
 
   constructor(deps: IsolationResolverDeps) {
     this.store = deps.store;
     this.provider = deps.provider;
-    this.cleanup = deps.cleanup;
-    this.maxWorktrees = deps.maxWorktreesPerCodebase ?? DEFAULT_MAX_WORKTREES;
     this.staleThresholdDays = deps.staleThresholdDays ?? DEFAULT_STALE_THRESHOLD_DAYS;
 
-    if (this.maxWorktrees <= 0) {
-      throw new Error(`maxWorktreesPerCodebase must be positive, got ${String(this.maxWorktrees)}`);
-    }
     if (this.staleThresholdDays <= 0) {
       throw new Error(
         `staleThresholdDays must be positive, got ${String(this.staleThresholdDays)}`
@@ -145,20 +131,15 @@ export class IsolationResolver {
       if (adopted) return adopted;
     }
 
-    // 6. Check worktree limit and attempt auto-cleanup
+    // 6. Create new environment
     const canonicalPath = await getCanonicalRepoPath(codebase.defaultCwd);
-    const limitCheck = await this.checkLimitAndCleanup(codebase, canonicalPath);
-    if (limitCheck.blocked) return limitCheck.blocked;
-
-    // 7. Create new environment
     return this.createNewEnvironment(
       codebase,
       workflowType,
       workflowId,
       hints,
       canonicalPath,
-      request.platformType,
-      limitCheck.autoCleanedCount
+      request.platformType
     );
   }
 
@@ -270,57 +251,6 @@ export class IsolationResolver {
   }
 
   /**
-   * Check worktree limit; attempt auto-cleanup if at limit.
-   * Returns `{ blocked }` with a resolution if we can't make room,
-   * or `{ blocked: null, autoCleanedCount? }` to continue to creation.
-   */
-  private async checkLimitAndCleanup(
-    codebase: ResolveRequest['codebase'] & object,
-    canonicalPath: RepoPath
-  ): Promise<{ blocked: IsolationResolution } | { blocked: null; autoCleanedCount?: number }> {
-    const count = await this.store.countActiveByCodebase(codebase.id);
-    if (count < this.maxWorktrees) {
-      return { blocked: null }; // Under limit, proceed
-    }
-
-    getLog().warn(
-      { count, limit: this.maxWorktrees, codebaseId: codebase.id },
-      'worktree_limit_reached'
-    );
-
-    // Attempt auto-cleanup
-    if (this.cleanup) {
-      const cleanupResult = await this.cleanup.makeRoom(codebase.id, canonicalPath);
-
-      if (cleanupResult.removedCount > 0) {
-        // Re-check count after cleanup
-        const newCount = await this.store.countActiveByCodebase(codebase.id);
-        if (newCount < this.maxWorktrees) {
-          return { blocked: null, autoCleanedCount: cleanupResult.removedCount };
-        }
-      }
-
-      // Still at limit — get breakdown for user message
-      const breakdown = await this.cleanup.getBreakdown(codebase.id, canonicalPath);
-      const userMessage = formatWorktreeLimitMessage(
-        codebase.name,
-        breakdown,
-        this.staleThresholdDays
-      );
-      return { blocked: { status: 'blocked', reason: 'limit_reached', userMessage } };
-    }
-
-    // No cleanup callback — block immediately
-    return {
-      blocked: {
-        status: 'blocked',
-        reason: 'limit_reached',
-        userMessage: `Worktree limit reached (${String(count)}/${String(this.maxWorktrees)}) for **${codebase.name}**. No auto-cleanup available.`,
-      },
-    };
-  }
-
-  /**
    * Best-effort mark a stale environment as destroyed.
    * Logs errors but never throws - stale cleanup should not block resolution.
    */
@@ -345,8 +275,7 @@ export class IsolationResolver {
     workflowId: string,
     hints: IsolationHints | undefined,
     canonicalPath: RepoPath,
-    platformType: string,
-    autoCleanedCount?: number
+    platformType: string
   ): Promise<IsolationResolution> {
     // Construct request based on workflow type
     const baseRequest = {
@@ -468,7 +397,7 @@ export class IsolationResolver {
       status: 'resolved',
       env,
       cwd: env.working_path,
-      method: { type: 'created', autoCleanedCount },
+      method: { type: 'created' },
       ...(isolatedEnv.warnings && isolatedEnv.warnings.length > 0
         ? { warnings: isolatedEnv.warnings }
         : {}),

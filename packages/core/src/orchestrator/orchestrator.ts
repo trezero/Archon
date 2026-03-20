@@ -47,12 +47,12 @@ import {
 import * as db from '../db/conversations';
 import { createIsolationStore } from '../db/isolation-environments';
 import { toError } from '../utils/error';
+import { getCodebase } from '../db/codebases';
 import { executeWorkflow, type WorkflowDefinition } from '@archon/workflows';
 import { createWorkflowDeps } from '../workflows/store-adapter';
 import {
   cleanupToMakeRoom,
   getWorktreeStatusBreakdown,
-  MAX_WORKTREES_PER_CODEBASE,
   STALE_THRESHOLD_DAYS,
 } from '../services/cleanup-service';
 import { loadRepoConfig } from '../config/config-loader';
@@ -89,7 +89,6 @@ function getResolver(): IsolationResolver {
         },
         getBreakdown: getWorktreeStatusBreakdown,
       },
-      maxWorktreesPerCodebase: MAX_WORKTREES_PER_CODEBASE,
       staleThresholdDays: STALE_THRESHOLD_DAYS,
     });
   }
@@ -266,7 +265,7 @@ export async function dispatchBackgroundWorkflow(
   // 1. Generate worker conversation ID
   const workerPlatformId = `web-worker-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
-  // 2. Create worker conversation in DB (inherit context from parent)
+  // 2. Create worker conversation in DB
   const workerConv = await db.getOrCreateConversation('web', workerPlatformId);
   await db.updateConversation(workerConv.id, {
     cwd: ctx.cwd,
@@ -274,7 +273,36 @@ export async function dispatchBackgroundWorkflow(
     hidden: true,
   });
 
-  // 3. Notify parent chat that workflow is dispatching
+  // 3. Resolve isolation for this worker (each background workflow gets its own worktree).
+  // Isolation failure is fatal — never run a workflow in a shared/parent worktree.
+  let workerCwd: string;
+  if (ctx.codebaseId) {
+    const codebase = await getCodebase(ctx.codebaseId);
+    if (!codebase) {
+      throw new Error(
+        `Cannot dispatch workflow "${workflow.name}": codebase ${ctx.codebaseId} not found`
+      );
+    }
+    const result = await validateAndResolveIsolation(
+      workerConv,
+      codebase,
+      ctx.platform,
+      workerPlatformId,
+      { workflowType: 'thread', workflowId: workerPlatformId }
+    );
+    workerCwd = result.cwd;
+    await db.updateConversation(workerConv.id, { cwd: workerCwd }).catch((e: unknown) => {
+      getLog().warn(
+        { err: toError(e), workerPlatformId },
+        'orchestrator.worker_cwd_persist_failed'
+      );
+    });
+  } else {
+    // No codebase — run in parent's cwd (no isolation needed for non-repo workflows)
+    workerCwd = ctx.cwd;
+  }
+
+  // 4. Notify parent chat that workflow is dispatching
   await ctx.platform.sendMessage(
     ctx.conversationId,
     `🚀 Dispatching workflow: **${workflow.name}** (background)`,
@@ -297,18 +325,18 @@ export async function dispatchBackgroundWorkflow(
     });
   }
 
-  // 4. Set up DB ID mapping for worker (needed for message persistence)
+  // 5. Set up DB ID mapping for worker (needed for message persistence)
   if (webAdapter) {
     webAdapter.setConversationDbId(workerPlatformId, workerConv.id);
   }
 
-  // 5. Set up event bridge (worker events → parent SSE stream)
+  // 6. Set up event bridge (worker events → parent SSE stream)
   let unsubscribeBridge: (() => void) | undefined;
   if (webAdapter) {
     unsubscribeBridge = webAdapter.setupEventBridge(workerPlatformId, ctx.conversationId);
   }
 
-  // 6. Pre-create workflow run row so the UI can fetch it immediately.
+  // 7. Pre-create workflow run row so the UI can fetch it immediately.
   // Without this, navigating to the execution page before executeWorkflow's
   // async setup completes would 404 (row doesn't exist yet for 1-5 seconds).
   const workflowDeps = createWorkflowDeps();
@@ -319,7 +347,7 @@ export async function dispatchBackgroundWorkflow(
       conversation_id: workerConv.id,
       codebase_id: ctx.codebaseId,
       user_message: ctx.originalMessage,
-      working_path: ctx.cwd,
+      working_path: workerCwd,
       metadata: ctx.issueContext ? { github_context: ctx.issueContext } : {},
       parent_conversation_id: ctx.conversationDbId,
     });
@@ -329,7 +357,7 @@ export async function dispatchBackgroundWorkflow(
     // Non-fatal: executeWorkflow will create its own row as fallback
   }
 
-  // 7. Fire-and-forget: run workflow in background
+  // 8. Fire-and-forget: run workflow in background
   void (async (): Promise<void> => {
     try {
       try {
@@ -337,7 +365,7 @@ export async function dispatchBackgroundWorkflow(
           workflowDeps,
           ctx.platform,
           workerPlatformId,
-          ctx.cwd,
+          workerCwd,
           workflow,
           ctx.originalMessage,
           workerConv.id,

@@ -83,7 +83,12 @@ export { cloneRepository, registerRepository, type RegisterResult } from './hand
 // =============================================================================
 // Config
 // =============================================================================
-export { type GlobalConfig, type RepoConfig, type MergedConfig } from './config/config-types';
+export {
+  type GlobalConfig,
+  type RepoConfig,
+  type MergedConfig,
+  type SafeConfig,
+} from './config/config-types';
 
 export {
   readConfigFile,
@@ -92,6 +97,7 @@ export {
   loadConfig,
   clearConfigCache,
   logConfig,
+  toSafeConfig,
 } from './config/config-loader';
 
 // =============================================================================

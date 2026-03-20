@@ -8,9 +8,11 @@ import {
   listCodebases,
   getHealth,
   type DashboardCounts,
+  type DashboardRunResponse,
 } from '@/lib/api';
 import type { WorkflowRunStatus } from '@/lib/types';
 import { StatusSummaryBar } from '@/components/dashboard/StatusSummaryBar';
+import { WorkflowRunGroup } from '@/components/dashboard/WorkflowRunGroup';
 import { WorkflowRunCard } from '@/components/dashboard/WorkflowRunCard';
 import { WorkflowHistoryTable } from '@/components/dashboard/WorkflowHistoryTable';
 
@@ -188,6 +190,40 @@ export function DashboardPage(): React.ReactElement {
     [runs]
   );
 
+  /**
+   * Group active runs by parent_platform_id.
+   * Multi-run groups (2+ runs from the same chat) get their own row with a header.
+   * Singleton groups (1 run) are collected into a shared grid so they sit side-by-side.
+   */
+  const { multiRunGroups, singletonRuns } = useMemo(() => {
+    const groups = new Map<
+      string,
+      { parentPlatformId: string | null; runs: DashboardRunResponse[] }
+    >();
+    for (const run of activeRuns) {
+      const key = run.parent_platform_id ?? '__standalone__';
+      const existing = groups.get(key);
+      if (existing) {
+        existing.runs.push(run);
+      } else {
+        groups.set(key, {
+          parentPlatformId: run.parent_platform_id,
+          runs: [run],
+        });
+      }
+    }
+    const multi: { parentPlatformId: string | null; runs: DashboardRunResponse[] }[] = [];
+    const singles: DashboardRunResponse[] = [];
+    for (const group of groups.values()) {
+      if (group.runs.length > 1) {
+        multi.push(group);
+      } else {
+        singles.push(group.runs[0]);
+      }
+    }
+    return { multiRunGroups: multi, singletonRuns: singles };
+  }, [activeRuns]);
+
   const historyRuns = useMemo(
     () =>
       runs.filter(
@@ -268,9 +304,23 @@ export function DashboardPage(): React.ReactElement {
             {activeRuns.length > 0 && (
               <section>
                 <h2 className="mb-3 text-sm font-semibold text-text-secondary">Active Workflows</h2>
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {activeRuns.map(run => (
-                    <WorkflowRunCard key={run.id} run={run} onCancel={handleCancel} />
+                <div className="space-y-6">
+                  {/* Singleton runs (1 per chat or standalone) share a single grid */}
+                  {singletonRuns.length > 0 && (
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      {singletonRuns.map(run => (
+                        <WorkflowRunCard key={run.id} run={run} onCancel={handleCancel} />
+                      ))}
+                    </div>
+                  )}
+                  {/* Multi-run groups get their own row with a chat header */}
+                  {multiRunGroups.map(group => (
+                    <WorkflowRunGroup
+                      key={group.parentPlatformId ?? 'standalone'}
+                      parentPlatformId={group.parentPlatformId}
+                      runs={group.runs}
+                      onCancel={handleCancel}
+                    />
                   ))}
                 </div>
               </section>

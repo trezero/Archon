@@ -126,10 +126,9 @@ export interface RepoConfig {
     baseBranch?: string;
 
     /**
-     * Files/directories to copy from main repo to new worktrees
-     * Git-ignored files (like .env) aren't included in worktrees by default.
-     * Supports "source -> destination" syntax for renaming.
-     * @example [".env.example -> .env", ".env", "data/fixtures/"]
+     * Git-ignored files/directories to copy from main repo to new worktrees.
+     * Tracked files are already in worktrees — only use this for git-ignored files.
+     * @example [".env", ".archon", "data/fixtures/"]
      */
     copyFiles?: string[];
   };
@@ -202,7 +201,34 @@ export interface MergedConfig {
   /**
    * Base branch from repo config (worktree.baseBranch).
    * Used for $BASE_BRANCH substitution in workflow commands.
-   * When undefined, the executor auto-detects the default branch from git.
+   * When undefined, workflows referencing $BASE_BRANCH will fail with an error.
    */
   baseBranch?: string;
+}
+
+/**
+ * Safe subset of MergedConfig suitable for sending to web clients.
+ * Excludes filesystem paths and any other server-internal fields.
+ */
+export interface SafeConfig {
+  botName: string;
+  assistant: 'claude' | 'codex';
+  assistants: {
+    claude: Pick<AssistantDefaults, 'model'>;
+    codex: Pick<AssistantDefaults, 'model' | 'modelReasoningEffort' | 'webSearchMode'>;
+  };
+  streaming: {
+    telegram: 'stream' | 'batch';
+    discord: 'stream' | 'batch';
+    slack: 'stream' | 'batch';
+    github: 'stream' | 'batch';
+  };
+  concurrency: {
+    maxConversations: number;
+  };
+  defaults: {
+    copyDefaults: boolean;
+    loadDefaultCommands: boolean;
+    loadDefaultWorkflows: boolean;
+  };
 }

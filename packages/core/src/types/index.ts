@@ -3,6 +3,7 @@
  */
 import type { TransitionTrigger } from '../state/session-transitions';
 import type { WorkflowDefinition } from '@archon/workflows';
+import type { McpServerConfig, AgentDefinition } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 
 /**
@@ -188,6 +189,7 @@ export type MessageChunk =
   | { type: 'thinking'; content: string }
   | { type: 'result'; sessionId?: string; tokens?: TokenUsage }
   | { type: 'tool'; toolName: string; toolInput?: Record<string, unknown> }
+  | { type: 'tool_result'; toolName: string; toolOutput: string }
   | { type: 'workflow_dispatch'; workerConversationId: string; workflowName: string };
 
 import type { ModelReasoningEffort, WebSearchMode } from '@archon/workflows';
@@ -233,6 +235,20 @@ export interface AssistantRequestOptions {
       }[]
     >
   >;
+  /**
+   * MCP server configuration passed to Claude Agent SDK Options.mcpServers.
+   * Uses SDK type directly — @archon/core already depends on the SDK.
+   * Claude only — Codex ignores this.
+   */
+  mcpServers?: Record<string, McpServerConfig>;
+  /** Tools to auto-allow without permission prompts (e.g., MCP tool wildcards).
+   *  Passed to Claude Agent SDK Options.allowedTools. Claude only. */
+  allowedTools?: string[];
+  /** Custom subagent definitions passed to Claude Agent SDK Options.agents.
+   *  Used for per-node skill scoping via AgentDefinition wrapping. Claude only. */
+  agents?: Record<string, AgentDefinition>;
+  /** Name of agent definition for the main thread. References a key in `agents`. Claude only. */
+  agent?: string;
   /**
    * Abort signal for cancelling in-flight AI requests.
    * When aborted, the AI client should terminate the subprocess/query gracefully.
