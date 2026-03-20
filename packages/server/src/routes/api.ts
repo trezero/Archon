@@ -94,6 +94,9 @@ export function registerApiRoutes(
     message: string
   ): Promise<{ accepted: boolean; status: string }> {
     const result = await lockManager.acquireLock(conversationId, async () => {
+      // Emit lock:true at handler start so the UI knows processing has begun.
+      // Fire-and-forget — if no SSE stream is connected yet, the event is buffered.
+      webAdapter.emitLockEvent(conversationId, true);
       try {
         await handleMessage(webAdapter, conversationId, message, {
           isolationHints: { workflowType: 'thread', workflowId: conversationId },
