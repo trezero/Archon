@@ -61,9 +61,18 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
 		? (projects as Project[]).some((p) => p.parent_project_id === selectedProject.id)
 		: false;
 
+	const selectedIsChild = !!selectedProject?.parent_project_id;
+
 	const selectedParentTitle = selectedProject?.parent_project_id
 		? (projects as Project[]).find((p) => p.id === selectedProject.parent_project_id)?.title
 		: undefined;
+
+	// The strip parent ID: either the selected project (if it's a parent) or its parent (if it's a child)
+	const stripParentId = selectedIsParent
+		? selectedProject?.id
+		: selectedIsChild
+			? selectedProject?.parent_project_id
+			: undefined;
 
 	// Handle project selection by ID
 	const handleProjectSelect = useCallback(
@@ -201,10 +210,11 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
 				</div>
 			)}
 
-			{/* Sub-projects strip for parent projects */}
-			{selectedProject && selectedIsParent && (
+			{/* Sub-projects strip — visible when a parent or any of its children is selected */}
+			{selectedProject && stripParentId && (
 				<SubProjectsStrip
-					parentProjectId={selectedProject.id}
+					parentProjectId={stripParentId}
+					selectedProjectId={selectedProject.id}
 					onSelectProject={handleProjectSelect}
 					onManage={() => setIsManageSubProjectsOpen(true)}
 				/>

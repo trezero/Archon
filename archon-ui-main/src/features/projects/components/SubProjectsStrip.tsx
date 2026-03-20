@@ -6,11 +6,12 @@ import { SubProjectCard } from "./SubProjectCard";
 
 interface SubProjectsStripProps {
   parentProjectId: string;
+  selectedProjectId?: string;
   onSelectProject: (id: string) => void;
   onManage: () => void;
 }
 
-export function SubProjectsStrip({ parentProjectId, onSelectProject, onManage }: SubProjectsStripProps) {
+export function SubProjectsStrip({ parentProjectId, selectedProjectId, onSelectProject, onManage }: SubProjectsStripProps) {
   const { data: children, isLoading, error } = useProjectChildren(parentProjectId);
 
   // Hide strip entirely when no children and not loading
@@ -45,7 +46,7 @@ export function SubProjectsStrip({ parentProjectId, onSelectProject, onManage }:
           <div className={cn("overflow-x-auto scrollbar-hide")}>
             <div className="flex gap-2 min-w-max">
               {children.map((child) => (
-                <SubProjectCard key={child.id} project={child} onSelect={onSelectProject} />
+                <SubProjectCard key={child.id} project={child} isSelected={child.id === selectedProjectId} onSelect={onSelectProject} />
               ))}
             </div>
           </div>
