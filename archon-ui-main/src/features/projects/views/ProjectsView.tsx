@@ -3,10 +3,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { DeleteConfirmModal } from "../../ui/components/DeleteConfirmModal";
 import { PillNavigation } from "../../ui/primitives";
+import { ManageSubProjectsModal } from "../components/ManageSubProjectsModal";
 import { NewProjectModal } from "../components/NewProjectModal";
 import { ProjectFilterBar } from "../components/ProjectFilterBar";
 import { ProjectGrid } from "../components/ProjectGrid";
 import { ProjectTable } from "../components/ProjectTable";
+import { SubProjectsStrip } from "../components/SubProjectsStrip";
 import { DocsTab } from "../documents/DocsTab";
 import { ExtensionsTab } from "../extensions/ExtensionsTab";
 import { useProjectFilters } from "../hooks/useProjectFilters";
@@ -32,6 +34,7 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
 	const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 	const [projectToDelete, setProjectToDelete] = useState<{ id: string; title: string } | null>(null);
+	const [isManageSubProjectsOpen, setIsManageSubProjectsOpen] = useState(false);
 
 	// Hooks
 	const filters = useProjectFilters();
@@ -52,6 +55,15 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
 	const filteredProjects = filters.filterProjects(projects as Project[]);
 	const sortedProjects = filters.sortProjects(filteredProjects, filters.viewMode);
 	const availableTags = filters.extractTags(projects as Project[]);
+
+	// Derived parent/child info for the selected project
+	const selectedIsParent = selectedProject
+		? (projects as Project[]).some((p) => p.parent_project_id === selectedProject.id)
+		: false;
+
+	const selectedParentTitle = selectedProject?.parent_project_id
+		? (projects as Project[]).find((p) => p.id === selectedProject.parent_project_id)?.title
+		: undefined;
 
 	// Handle project selection by ID
 	const handleProjectSelect = useCallback(
@@ -189,9 +201,36 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
 				</div>
 			)}
 
+			{/* Sub-projects strip for parent projects */}
+			{selectedProject && selectedIsParent && (
+				<SubProjectsStrip
+					parentProjectId={selectedProject.id}
+					onSelectProject={handleProjectSelect}
+					onManage={() => setIsManageSubProjectsOpen(true)}
+				/>
+			)}
+
 			{/* Project detail tabs */}
 			{selectedProject && (
 				<div className="flex-1 min-h-0 overflow-y-auto mt-4">
+					{/* Breadcrumb for child projects */}
+					{selectedParentTitle && selectedProject?.parent_project_id && (
+						<div className="flex items-center gap-1.5 text-sm text-gray-500 mb-2 px-1">
+							<button
+								type="button"
+								className="hover:text-cyan-400 transition-colors truncate max-w-[200px]"
+								onClick={() => {
+									if (selectedProject.parent_project_id) {
+										handleProjectSelect(selectedProject.parent_project_id);
+									}
+								}}
+							>
+								{selectedParentTitle}
+							</button>
+							<span className="text-gray-600">&rsaquo;</span>
+							<span className="text-gray-400 truncate">{selectedProject.title}</span>
+						</div>
+					)}
 					<div className="flex items-center justify-between mb-6">
 						<div className="flex-1" />
 						<PillNavigation
@@ -235,6 +274,15 @@ export function ProjectsView({ className = "", "data-id": dataId }: ProjectsView
 					type="project"
 					open={showDeleteConfirm}
 					onOpenChange={setShowDeleteConfirm}
+				/>
+			)}
+
+			{selectedProject && (
+				<ManageSubProjectsModal
+					parentProjectId={selectedProject.id}
+					parentTitle={selectedProject.title}
+					open={isManageSubProjectsOpen}
+					onOpenChange={setIsManageSubProjectsOpen}
 				/>
 			)}
 		</div>
