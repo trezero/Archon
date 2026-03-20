@@ -58,3 +58,88 @@ After discovery, you should know:
 - Postman integration availability (yes/no)
 
 Proceed to Phase 2 (Mode Detection).
+
+## Phase 2: Mode Detection
+
+Determine which mode to run based on context:
+
+- **Intercept mode** — You are mid-task building a feature and need to create or modify endpoints. The skill was triggered by the frontmatter matching your current work context (creating route handlers, working in files with `APIRouter()`). Go to Phase 3.
+- **Retrofit mode** — The user explicitly asked to document, audit, or review existing endpoints (e.g., "document all API endpoints", "audit the projects API", "generate API docs for this repo"). Go to Phase 4.
+- **Ambiguous** — Ask the user: *"Should I apply documentation standards to the endpoints you're building (intercept), or audit and fix existing endpoints (retrofit)?"*
+
+## Documentation Standards
+
+Both modes enforce these standards. An endpoint is "fully documented" when ALL of the following are present.
+
+### Route Decorator Requirements
+
+Every route decorator (`@router.get`, `@router.post`, etc.) MUST have:
+
+| Parameter | Rule | Example |
+|-----------|------|---------|
+| `response_model` | Pydantic model defining the response shape | `response_model=ProjectResponse` |
+| `status_code` | Explicit HTTP status code | `status_code=201` for POST, `200` for GET, `204` for DELETE |
+| `tags` | At least one tag for Swagger UI grouping | `tags=["projects"]` |
+| `description` | One-line summary (alternative to docstring) | `description="Create a new project"` |
+| `responses` | Error responses the endpoint can return | `responses={404: {"description": "Not found"}}` |
+
+The endpoint function MUST have:
+- A **docstring** OR the decorator must have a `description` parameter — one-line summary of what the endpoint does
+- **Type hints** on all parameters
+- **Return type annotation** matching the `response_model`
+
+### Pydantic Model Requirements
+
+Every request and response model MUST have:
+
+**All fields** use `Field()` with a `description`:
+```python
+# Required field
+title: str = Field(..., description="The project title")
+
+# Optional field
+description: str | None = Field(None, description="Optional project summary")
+```
+
+**Response models** include an example:
+
+Pydantic v2:
+```python
+class ProjectResponse(BaseModel):
+    id: str = Field(..., description="Unique project identifier")
+    title: str = Field(..., description="The project title")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "proj_abc123",
+                "title": "My Project"
+            }
+        }
+    )
+```
+
+Pydantic v1:
+```python
+class ProjectResponse(BaseModel):
+    id: str = Field(..., description="Unique project identifier")
+    title: str = Field(..., description="The project title")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "id": "proj_abc123",
+                "title": "My Project"
+            }
+        }
+```
+
+Use whichever version was detected during Project Discovery (Phase 1, Step 5).
+
+### What This Skill Does NOT Enforce
+
+- Docstring format or length beyond "exists and is non-empty"
+- Specific tag naming conventions (use what the project already uses, or the feature name)
+- Authentication/authorization patterns
+- Service layer implementation details
+- Test coverage
