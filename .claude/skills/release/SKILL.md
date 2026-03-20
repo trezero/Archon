@@ -152,7 +152,7 @@ EOF
 
 Return the PR URL to the user.
 
-### Step 9: Tag and Sync After Merge
+### Step 9: Tag, Release, and Sync After Merge
 
 After the PR is merged (either by the user or via `gh pr merge`):
 
@@ -164,13 +164,18 @@ git fetch origin main
 git tag vx.y.z origin/main
 git push origin vx.y.z
 
+# Create a GitHub Release from the tag (uses changelog content as release notes)
+gh release create vx.y.z --title "vx.y.z" --notes "{changelog section content without the ## header}"
+
 # Sync dev with main so both branches are identical
 git checkout dev
 git pull origin main
 git push origin dev
 ```
 
-If the user merges the PR themselves and comes back, still offer to tag and sync.
+The GitHub Release is distinct from the git tag — without it, the release won't appear on the repository's Releases page. Always create it.
+
+If the user merges the PR themselves and comes back, still offer to tag, release, and sync.
 
 ## Important Rules
 
