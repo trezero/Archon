@@ -351,3 +351,98 @@ If version cannot be determined, default to Pydantic v2.
 Detected in Phase 1, Step 4. Follow whatever convention the project uses:
 - If models are inline in route files → define new models in the same route file
 - If models are in separate `schemas.py` or `models.py` files → create models there
+
+## Reference Patterns
+
+These patterns are absorbed from the former `fastapi-patterns` skill. Apply them automatically when writing endpoint code — do not present them as a reference guide to the user.
+
+### CRUD Endpoint Patterns
+
+Standard HTTP method mapping:
+
+| Operation | Method | Status Code | Example Path |
+|-----------|--------|-------------|--------------|
+| List | GET | 200 | `/api/projects` |
+| Get one | GET | 200 | `/api/projects/{id}` |
+| Create | POST | 201 | `/api/projects` |
+| Update (full) | PUT | 200 | `/api/projects/{id}` |
+| Update (partial) | PATCH | 200 | `/api/projects/{id}` |
+| Delete | DELETE | 204 | `/api/projects/{id}` |
+
+### Pydantic Schema Hierarchy
+
+When a resource needs multiple representations, follow this hierarchy:
+
+```python
+class ProjectBase(BaseModel):
+    """Shared fields."""
+    title: str = Field(..., description="The project title")
+    description: str | None = Field(None, description="Optional summary")
+
+class ProjectCreate(ProjectBase):
+    """Fields required for creation (no id, no timestamps)."""
+    pass
+
+class ProjectUpdate(BaseModel):
+    """All fields optional for partial updates."""
+    title: str | None = Field(None, description="New title")
+    description: str | None = Field(None, description="New summary")
+
+class ProjectResponse(ProjectBase):
+    """Full representation with server-generated fields."""
+    id: str = Field(..., description="Unique identifier")
+    created_at: str = Field(..., description="ISO 8601 creation timestamp")
+    updated_at: str = Field(..., description="ISO 8601 last update timestamp")
+```
+
+Only create the models that are actually needed. If an endpoint only reads data, only create the Response model. YAGNI.
+
+### Exception Handling
+
+Use `HTTPException` with specific status codes and descriptive messages:
+
+```python
+from fastapi import HTTPException, status
+
+# 404 — resource not found
+raise HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND,
+    detail=f"Project {project_id} not found"
+)
+
+# 409 — conflict
+raise HTTPException(
+    status_code=status.HTTP_409_CONFLICT,
+    detail=f"Project with title '{title}' already exists"
+)
+
+# 422 — validation (usually handled by Pydantic automatically)
+```
+
+Document these in the route decorator's `responses` parameter:
+```python
+@router.get(
+    "/{project_id}",
+    response_model=ProjectResponse,
+    responses={
+        404: {"description": "Project not found"},
+    },
+)
+```
+
+### Dependency Injection
+
+When the project uses `Depends()` for service injection, follow the existing pattern:
+
+```python
+from fastapi import Depends
+
+@router.get("/", response_model=list[ProjectResponse])
+async def list_projects(
+    service: ProjectService = Depends(get_project_service),
+) -> list[ProjectResponse]:
+    """List all projects."""
+    return await service.list_all()
+```
+
+Only use `Depends()` if the project already uses this pattern. Do not introduce dependency injection into a project that doesn't use it.
