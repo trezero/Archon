@@ -48,6 +48,45 @@ archon workflow run archon-idea-to-pr --branch feat/dark-mode "Add dark mode to 
 
 ## Quickstart
 
+<details>
+<summary><b>Prerequisites</b> — Node.js, Claude Code, and the GitHub CLI</summary>
+
+**Node.js** (v18+) — [nodejs.org](https://nodejs.org/)
+
+```bash
+# macOS/Linux (via nvm, recommended)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+nvm install --lts
+
+# Windows (via winget)
+winget install OpenJS.NodeJS.LTS
+```
+
+**GitHub CLI** — [cli.github.com](https://cli.github.com/)
+
+```bash
+# macOS
+brew install gh
+
+# Windows (via winget)
+winget install GitHub.cli
+
+# Linux (Debian/Ubuntu)
+sudo apt install gh
+```
+
+**Claude Code** — [code.claude.com](https://code.claude.com/docs/en/getting-started)
+
+```bash
+# macOS/Linux/WSL
+curl -fsSL https://claude.ai/install.sh | bash
+
+# Windows (PowerShell)
+irm https://claude.ai/install.ps1 | iex
+```
+
+</details>
+
 ### AI-Assisted Setup (recommended, 2 min)
 
 ```bash
