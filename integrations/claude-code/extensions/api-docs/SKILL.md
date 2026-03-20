@@ -143,3 +143,81 @@ Use whichever version was detected during Project Discovery (Phase 1, Step 5).
 - Authentication/authorization patterns
 - Service layer implementation details
 - Test coverage
+
+## Phase 3: Intercept Mode
+
+Intercept mode is invisible. The developer asks for a feature, and the endpoints come out fully documented. This is a quality standard, not a workflow step.
+
+### Workflow
+
+#### Step 1: Apply documentation standards inline
+
+As you write the endpoint, bake in all documentation standards from the start. Do not write a bare endpoint and fix it later — write it correctly the first time:
+
+```python
+from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, Field, ConfigDict
+
+router = APIRouter(prefix="/projects", tags=["projects"])
+
+class CreateProjectRequest(BaseModel):
+    title: str = Field(..., description="The project title")
+    description: str | None = Field(None, description="Optional project summary")
+
+class ProjectResponse(BaseModel):
+    id: str = Field(..., description="Unique project identifier")
+    title: str = Field(..., description="The project title")
+    description: str | None = Field(None, description="Optional project summary")
+    created_at: str = Field(..., description="ISO 8601 creation timestamp")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "proj_abc123",
+                "title": "My Project",
+                "description": "A sample project",
+                "created_at": "2026-01-15T10:30:00Z"
+            }
+        }
+    )
+
+@router.post(
+    "/",
+    response_model=ProjectResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["projects"],
+    responses={
+        422: {"description": "Validation error in request body"},
+    },
+)
+async def create_project(request: CreateProjectRequest) -> ProjectResponse:
+    """Create a new project."""
+    return await project_service.create(request)
+```
+
+Adapt this pattern to the project's conventions discovered in Phase 1 (Pydantic version, model location, import style).
+
+#### Step 2: Full slice scaffolding (when applicable)
+
+If creating a new endpoint and the supporting service method does not exist:
+
+1. **Create service method stub** — In the service file discovered during Phase 1, add a stub method:
+   ```python
+   async def create(self, request: CreateProjectRequest) -> dict:
+       """Create a new project."""
+       raise NotImplementedError("TODO: implement")
+   ```
+2. **Create service file if needed** — If no service file exists for this feature, create one following the closest existing service file's pattern (imports, class structure, constructor).
+3. **Wire router if needed** — If this is a brand new feature router, add `app.include_router(...)` to the app entry point found in Phase 1.
+
+**Skip scaffolding entirely if:**
+- The project does not have a service layer (no service files found in Phase 1)
+- The endpoint is being added to an existing feature that already has services wired up
+
+#### Step 3: Postman handoff
+
+After the endpoint is written and committed, follow the Postman Integration instructions in Phase 5.
+
+#### Step 4: Continue
+
+Resume the developer's original task. Do not produce a report or prompt for review — the endpoint is already documented.
