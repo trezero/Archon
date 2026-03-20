@@ -11,9 +11,16 @@ import {
   DialogTitle,
 } from "../../ui/primitives/dialog";
 import { Input } from "../../ui/primitives/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../ui/primitives/select";
 import { cn } from "../../ui/primitives/styles";
-import { useCreateProject } from "../hooks/useProjectQueries";
-import type { CreateProjectRequest } from "../types";
+import { useCreateProject, useProjects } from "../hooks/useProjectQueries";
+import type { CreateProjectRequest, Project } from "../types";
 
 interface NewProjectModalProps {
   open: boolean;
@@ -31,6 +38,13 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ open, onOpenCh
   });
 
   const createProjectMutation = useCreateProject();
+
+  const { data: allProjects = [] } = useProjects();
+
+  // Eligible parents: projects without a parent of their own (single-level constraint)
+  const eligibleParents = (allProjects as Project[]).filter(
+    (p) => !p.parent_project_id,
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,6 +129,35 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ open, onOpenCh
                   "disabled:opacity-50 disabled:cursor-not-allowed",
                 )}
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Parent Project
+              </label>
+              <Select
+                value={formData.parent_project_id ?? "__none__"}
+                onValueChange={(val) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    parent_project_id: val === "__none__" ? undefined : val,
+                  }))
+                }
+              >
+                <SelectTrigger color="cyan" className="w-full">
+                  <SelectValue placeholder="None (standalone)" />
+                </SelectTrigger>
+                <SelectContent color="cyan">
+                  <SelectItem value="__none__" color="cyan">
+                    None (standalone)
+                  </SelectItem>
+                  {eligibleParents.map((p) => (
+                    <SelectItem key={p.id} value={p.id} color="cyan">
+                      {p.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
