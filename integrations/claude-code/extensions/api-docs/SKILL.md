@@ -295,3 +295,59 @@ After all fixes are applied, follow the Postman Integration instructions in Phas
 ### Step 6: Summary
 
 *"Documented {endpoint_count} endpoints across {file_count} files. Postman collection entries generated for all endpoints."*
+
+## Phase 5: Postman Integration
+
+This phase runs after endpoint work in either mode. It is a behavioral handoff — follow the postman-integration skill's own rules to create collection entries.
+
+### Step 1: Check availability
+
+Is the postman-integration skill available in the current session? If not, output:
+*"Postman integration not available — skipping collection generation. Install the postman-integration skill to enable this."*
+and skip to the end.
+
+### Step 2: Gather endpoint data
+
+For each new or modified endpoint, collect:
+- HTTP method and full path (e.g., `GET /api/projects/{project_id}/stats`)
+- Description (from the docstring)
+- Request body schema (from the Pydantic request model fields and descriptions)
+- Response body example (from `json_schema_extra` or `schema_extra`)
+- Path parameters with descriptions (from function signature type hints)
+- Query parameters with descriptions (from function signature defaults)
+- Expected status codes — success (from `status_code`) and errors (from `responses`)
+
+### Step 3: Follow postman-integration rules
+
+With the endpoint data gathered, follow the postman-integration skill's workflow:
+
+1. Call `find_postman()` to determine the sync mode (API mode, Git mode, or disabled)
+2. **API mode:** Call `manage_postman(action="add_request")` with the endpoint data for each endpoint
+3. **Git mode:** Write `.request.yaml` files to the `postman/` directory following the postman-integration skill's YAML schema and folder structure
+4. **Disabled:** Skip silently
+
+This skill does NOT own Postman collection structure, naming, or sync logic. Follow the postman-integration skill's rules exactly.
+
+## Edge Cases
+
+### Complex response types
+- `list[Item]` → Use `response_model=list[ItemResponse]`
+- Raw `dict` return → Create a typed Pydantic response model to replace it
+- Union types → Use Pydantic discriminated unions where possible
+
+### Existing partial documentation
+Retrofit mode preserves existing documentation. Only fill gaps — never overwrite existing docstrings, field descriptions, or model examples.
+
+### No service layer
+If the project has no service files (none found in Phase 1), skip all service scaffolding in Intercept mode. Only create the route handler and Pydantic models.
+
+### Pydantic v1 vs v2
+Detected in Phase 1, Step 5. Use the appropriate syntax throughout:
+- **v2:** `model_config = ConfigDict(...)`, `json_schema_extra`, `Field(...)`
+- **v1:** `class Config`, `schema_extra`, `Field(...)`
+If version cannot be determined, default to Pydantic v2.
+
+### Models inline vs separate files
+Detected in Phase 1, Step 4. Follow whatever convention the project uses:
+- If models are inline in route files → define new models in the same route file
+- If models are in separate `schemas.py` or `models.py` files → create models there
