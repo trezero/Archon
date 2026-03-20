@@ -76,7 +76,7 @@ ask() {
     printf "  %s%s%s: " "$C_MAGENTA" "$prompt" "$C_RESET" >&2
   fi
 
-  read -r answer || true
+  read -r answer < /dev/tty || true
   printf "%s\n" "${answer:-$default}"
 }
 
@@ -88,14 +88,77 @@ check_dependency() {
 }
 
 url_encode() {
-  python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$1"
+  "$PYTHON" -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$1"
 }
 
 # ── Dependency checks ────────────────────────────────────────────────────────
 
 check_dependency curl
-check_dependency python3
 check_dependency claude
+
+# ── Detect best Python ──────────────────────────────────────────────────────
+# Priority: user's default `python` first (matches `which python`), then python3,
+# then versioned candidates. We prefer 3.10+ but fall back to any Python 3.
+
+PYTHON=""
+PYTHON_FALLBACK=""
+for candidate in python python3 python3.13 python3.12 python3.11 python3.10; do
+  if command -v "$candidate" &>/dev/null; then
+    PY_IS_3=$("$candidate" -c "import sys; print(sys.version_info[0] == 3)" 2>/dev/null || echo "False")
+    if [ "$PY_IS_3" = "True" ]; then
+      PY_GE_310=$("$candidate" -c "import sys; print(sys.version_info >= (3,10))" 2>/dev/null || echo "False")
+      if [ "$PY_GE_310" = "True" ]; then
+        PYTHON="$candidate"
+        break
+      elif [ -z "$PYTHON_FALLBACK" ]; then
+        PYTHON_FALLBACK="$candidate"
+      fi
+    fi
+  fi
+done
+
+# Fall back to any Python 3 if no 3.10+ found
+if [ -z "$PYTHON" ]; then
+  PYTHON="$PYTHON_FALLBACK"
+fi
+
+if [ -z "$PYTHON" ]; then
+  ui_error "Python 3 is required but not installed."
+  ui_info "Install Python 3.10 from: https://www.python.org/downloads/release/python-31011/"
+  exit 1
+fi
+
+# ── Python version check (3.10+ recommended) ───────────────────────────────
+
+PY_VERSION=$("$PYTHON" -c "import sys; v=sys.version_info; print(f'{v.major}.{v.minor}')" 2>/dev/null || echo "unknown")
+PY_OK=$("$PYTHON" -c "import sys; print(sys.version_info >= (3,10))" 2>/dev/null || echo "False")
+
+if [ "$PY_OK" != "True" ]; then
+  echo
+  ui_warn "Python $PY_VERSION detected ($(command -v "$PYTHON")) — Python 3.10+ is required."
+  ui_info "The scanner and plugin system need Python 3.10+."
+  echo
+  if [ "$(uname)" = "Darwin" ]; then
+    if command -v brew &>/dev/null; then
+      ui_info "Install with Homebrew:  brew install python@3.10"
+    else
+      ui_info "Install from: https://www.python.org/downloads/release/python-31011/"
+    fi
+  elif [ -f /etc/debian_version ] || command -v apt &>/dev/null; then
+    ui_info "Install with apt:  sudo apt install python3.10"
+  elif command -v dnf &>/dev/null; then
+    ui_info "Install with dnf:  sudo dnf install python3.10"
+  else
+    ui_info "Install from: https://www.python.org/downloads/release/python-31011/"
+  fi
+  echo
+  CONTINUE=$(ask "Continue anyway? (y/N)" "N")
+  if [ "${CONTINUE,,}" != "y" ]; then
+    ui_info "Install Python 3.10+ and re-run this script."
+    exit 0
+  fi
+  echo
+fi
 
 # ── Start ────────────────────────────────────────────────────────────────────
 
@@ -140,25 +203,25 @@ PROJECT_TITLE=""
 
 ui_info "Searching for \"$DIR_NAME\"..."
 SEARCH_RESULT=$(curl -sf "$API_BASE/api/projects?include_content=false&q=$(url_encode "$DIR_NAME")" 2>/dev/null || echo '{"projects":[]}')
-MATCH_COUNT=$(python3 -c "import json,sys; print(len(json.loads(sys.argv[1]).get('projects',[])))" "$SEARCH_RESULT")
+MATCH_COUNT=$("$PYTHON" -c "import json,sys; print(len(json.loads(sys.argv[1]).get('projects',[])))" "$SEARCH_RESULT")
 
 if [ "$MATCH_COUNT" -eq 1 ]; then
   # Exactly one match — use it automatically
-  PROJECT_ID=$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['projects'][0]['id'])" "$SEARCH_RESULT")
-  PROJECT_TITLE=$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['projects'][0]['title'])" "$SEARCH_RESULT")
+  PROJECT_ID=$("$PYTHON" -c "import json,sys; print(json.loads(sys.argv[1])['projects'][0]['id'])" "$SEARCH_RESULT")
+  PROJECT_TITLE=$("$PYTHON" -c "import json,sys; print(json.loads(sys.argv[1])['projects'][0]['title'])" "$SEARCH_RESULT")
   ui_success "Matched: $PROJECT_TITLE"
 
 elif [ "$MATCH_COUNT" -eq 0 ]; then
   # No match — create a project automatically using the directory name
   ui_info "No match found. Creating project \"$DIR_NAME\"..."
-  CREATE_PAYLOAD=$(python3 -c "import json,sys; print(json.dumps({'title': sys.argv[1]}))" "$DIR_NAME")
+  CREATE_PAYLOAD=$("$PYTHON" -c "import json,sys; print(json.dumps({'title': sys.argv[1]}))" "$DIR_NAME")
   TMPFILE=$(mktemp)
   HTTP_STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$API_BASE/api/projects" \
     -H "Content-Type: application/json" \
     -d "$CREATE_PAYLOAD" 2>/dev/null || echo "000")
   CREATE_RESULT=$(cat "$TMPFILE" 2>/dev/null || echo "")
   rm -f "$TMPFILE"
-  PROJECT_ID=$(python3 -c "
+  PROJECT_ID=$("$PYTHON" -c "
 import json, sys
 raw = sys.argv[1].strip()
 if not raw:
@@ -180,7 +243,7 @@ else:
 else
   # Multiple matches — show list and let user pick
   printf "  %sMultiple matches found — select one:%s\n" "$C_BOLD" "$C_RESET"
-  python3 - "$SEARCH_RESULT" <<'PYEOF'
+  "$PYTHON" - "$SEARCH_RESULT" <<'PYEOF'
 import json, sys
 projects = json.loads(sys.argv[1]).get("projects", [])[:10]
 for i, p in enumerate(projects, 1):
@@ -192,8 +255,8 @@ PYEOF
     if echo "$SELECTION" | grep -qE '^[0-9]+$'; then
       IDX=$((SELECTION - 1))
       # List endpoint returns 'id'; the create endpoint returns 'project_id' — these are intentionally different
-      PROJECT_ID=$(python3 -c "import json,sys; ps=json.loads(sys.argv[1]).get('projects',[]); print(ps[$IDX]['id'] if $IDX < len(ps) else '')" "$SEARCH_RESULT")
-      PROJECT_TITLE=$(python3 -c "import json,sys; ps=json.loads(sys.argv[1]).get('projects',[]); print(ps[$IDX]['title'] if $IDX < len(ps) else '')" "$SEARCH_RESULT")
+      PROJECT_ID=$("$PYTHON" -c "import json,sys; ps=json.loads(sys.argv[1]).get('projects',[]); print(ps[$IDX]['id'] if $IDX < len(ps) else '')" "$SEARCH_RESULT")
+      PROJECT_TITLE=$("$PYTHON" -c "import json,sys; ps=json.loads(sys.argv[1]).get('projects',[]); print(ps[$IDX]['title'] if $IDX < len(ps) else '')" "$SEARCH_RESULT")
       if [ -z "$PROJECT_ID" ]; then
         ui_warn "Invalid selection."
       else
@@ -308,7 +371,7 @@ if [ "$SKIP_PLUGIN_INSTALL" = "false" ]; then
       ui_info "Creating plugin virtual environment..."
       # Use the best available Python (>=3.10 required for tree-sitter 0.24+)
       BEST_PYTHON=""
-      for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+      for candidate in python3.13 python3.12 python3.11 python3.10 python3 python; do
         if command -v "$candidate" &>/dev/null; then
           PY_VER=$("$candidate" -c "import sys; print(sys.version_info[:2] >= (3,10))" 2>/dev/null)
           if [ "$PY_VER" = "True" ]; then
@@ -320,7 +383,7 @@ if [ "$SKIP_PLUGIN_INSTALL" = "false" ]; then
 
       if [ -z "$BEST_PYTHON" ]; then
         ui_warn "Python 3.10+ required for plugin. Found only:"
-        python3 --version 2>&1 | sed 's/^/    /'
+        "$PYTHON" --version 2>&1 | sed 's/^/    /'
         ui_info "Install Python 3.10+ and re-run this script."
       elif "$BEST_PYTHON" -m venv "$VENV_DIR" 2>/dev/null; then
         ui_success "Created venv ($($BEST_PYTHON --version 2>&1))"
@@ -341,7 +404,7 @@ if [ "$SKIP_PLUGIN_INSTALL" = "false" ]; then
         fi
       else
         ui_warn "Could not create venv. Falling back to system pip..."
-        if python3 -m pip install -q -r "$REQUIREMENTS" 2>/dev/null; then
+        if "$PYTHON" -m pip install -q -r "$REQUIREMENTS" 2>/dev/null; then
           ui_success "Plugin dependencies installed (system-wide)"
         else
           ui_warn "Could not install plugin dependencies. Run manually:"
@@ -356,11 +419,11 @@ if [ "$SKIP_PLUGIN_INSTALL" = "false" ]; then
 fi
 
 # Determine the Python executable for plugin scripts
-# Prefer venv python if available, fall back to system python3
+# Prefer venv python if available, fall back to detected system python
 if [ -x "$PLUGIN_DIR/.venv/bin/python" ]; then
   PLUGIN_PYTHON="$PLUGIN_DIR/.venv/bin/python"
 else
-  PLUGIN_PYTHON="python3"
+  PLUGIN_PYTHON="$PYTHON"
 fi
 
 # ── Register hooks in Claude Code settings ──────────────────────────────────
@@ -389,10 +452,10 @@ if [ "$SKIP_PLUGIN_INSTALL" = "false" ]; then
     PTU_SCRIPTS="$PLUGIN_DIR/scripts"
   fi
 
-  # Fall back to system python3 if venv doesn't exist
+  # Fall back to detected system python if venv doesn't exist
   if [ ! -x "$PLUGIN_DIR/.venv/bin/python" ] && [ "$INSTALL_SCOPE_LABEL" != "project" ]; then
-    LIFECYCLE_PYTHON="python3"
-    PTU_PYTHON="python3"
+    LIFECYCLE_PYTHON="$PYTHON"
+    PTU_PYTHON="$PYTHON"
   fi
 
   # Helper: merge archon hooks into a settings file
@@ -400,7 +463,7 @@ if [ "$SKIP_PLUGIN_INSTALL" = "false" ]; then
     local target_file="$1"
     shift
     # Remaining args are event:command pairs
-    python3 - "$target_file" "$@" <<'PYEOF'
+    "$PYTHON" - "$target_file" "$@" <<'PYEOF'
 import json, sys
 from pathlib import Path
 
@@ -487,7 +550,7 @@ echo
 # ── Write archon-config.json ─────────────────────────────────────────────────
 
 mkdir -p "$INSTALL_DIR"
-machine_fingerprint=$(python3 -c "import hashlib,socket,os; print(hashlib.md5((socket.gethostname()+str(os.getuid())).encode()).hexdigest()[:16])")
+machine_fingerprint=$("$PYTHON" -c "import hashlib,socket,os; print(hashlib.md5((socket.gethostname()+str(os.getuid())).encode()).hexdigest()[:16])")
 
 cat > "$INSTALL_DIR/archon-config.json" << CONFIGEOF
 {
@@ -539,7 +602,7 @@ else
   EXISTING="{}"
 fi
 
-python3 - "$EXISTING" "$SYSTEM_NAME" "$PROJECT_ID" <<'PYEOF'
+"$PYTHON" - "$EXISTING" "$SYSTEM_NAME" "$PROJECT_ID" <<'PYEOF'
 import json, sys
 state = json.loads(sys.argv[1])
 state["system_name"] = sys.argv[2]

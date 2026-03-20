@@ -190,6 +190,20 @@ manage_extensions(action="upload", extension_content="<content>")
 ```
 If validation has errors, show them and ask user to fix.
 
+### 3e. Update slash commands
+
+Download the latest command files from the Archon server so slash commands like
+`/scan-projects` and `/archon-setup` stay up to date without re-running the setup script.
+
+Read `archon_mcp_url` from `.claude/archon-config.json` (or `~/.claude/archon-config.json`).
+
+```bash
+mkdir -p ~/.claude/commands && curl -sf "<archon_mcp_url>/archon-setup/commands.tar.gz" | tar xz -C ~/.claude/commands/
+```
+
+If the download fails, warn the user but continue:
+> "Could not update slash commands from Archon server. Existing commands will continue to work."
+
 ---
 
 ## Phase 4: Update State
@@ -215,7 +229,8 @@ Merge with existing state — do not overwrite other fields.
 > - Removed: <list or 'none'>
 > - Updated: <list or 'none'>
 > - Uploaded: <list or 'none'>
-> - Skipped: <list or 'none'>"
+> - Skipped: <list or 'none'>
+> - Slash commands: updated"
 
 ---
 

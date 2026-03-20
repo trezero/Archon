@@ -30,6 +30,41 @@ where curl >nul 2>&1 || (echo Error: curl is required. Install from https://curl
 where claude >nul 2>&1 || (echo Error: claude CLI not found. Install Claude Code first. & exit /b 1)
 where powershell >nul 2>&1 || (echo Error: PowerShell is required. & exit /b 1)
 
+:: Check Python availability and version (3.10+ required)
+set "PYTHON_CMD="
+where python3 >nul 2>&1 && set "PYTHON_CMD=python3"
+if not defined PYTHON_CMD (
+    where python >nul 2>&1 && set "PYTHON_CMD=python"
+)
+if not defined PYTHON_CMD (
+    echo.
+    echo  Error: Python is not installed.
+    echo    Install Python 3.10 from: https://www.python.org/downloads/release/python-31011/
+    echo    Or run: winget install Python.Python.3.10
+    exit /b 1
+)
+
+set "PY_VERSION="
+set "PY_OK="
+for /f "delims=" %%V in ('!PYTHON_CMD! -c "import sys; v=sys.version_info; print(f'{v.major}.{v.minor}')" 2^>nul') do set "PY_VERSION=%%V"
+for /f "delims=" %%V in ('!PYTHON_CMD! -c "import sys; print(sys.version_info >= (3,10))" 2^>nul') do set "PY_OK=%%V"
+
+if not "!PY_OK!"=="True" (
+    echo.
+    echo  ! Python !PY_VERSION! detected -- Python 3.10+ is required.
+    echo    The scanner and plugin system need Python 3.10+.
+    echo.
+    echo    Install with:  winget install Python.Python.3.10
+    echo    Or download:   https://www.python.org/downloads/release/python-31011/
+    echo.
+    set /p "PY_CONTINUE=  Continue anyway? (y/N): "
+    if /i not "!PY_CONTINUE!"=="y" (
+        echo  Install Python 3.10+ and re-run this script.
+        exit /b 0
+    )
+    echo.
+)
+
 :: -- Step 1/4: System name --------------------------------------------------
 echo [1/4] System name
 set "SYSTEM_NAME=%COMPUTERNAME%"
@@ -218,7 +253,7 @@ if %errorlevel%==0 (
     :: Create fresh venv and install Python dependencies
     if exist "!PLUGIN_DIR!\requirements.txt" (
         echo Creating plugin virtual environment...
-        python3 -m venv "!PLUGIN_DIR!\.venv" 2>nul
+        !PYTHON_CMD! -m venv "!PLUGIN_DIR!\.venv" 2>nul
         if exist "!PLUGIN_DIR!\.venv\Scripts\python.exe" (
             echo       ^✓ Created venv
             "!PLUGIN_DIR!\.venv\Scripts\pip.exe" install -q --upgrade pip 2>nul
@@ -237,7 +272,7 @@ if %errorlevel%==0 (
             )
         ) else (
             echo       ^! Could not create venv. Falling back to system pip...
-            python3 -m pip install -q -r "!PLUGIN_DIR!\requirements.txt" 2>nul
+            !PYTHON_CMD! -m pip install -q -r "!PLUGIN_DIR!\requirements.txt" 2>nul
             if %errorlevel%==0 (
                 echo       ^✓ Plugin dependencies installed ^(system-wide^)
             ) else (
@@ -276,11 +311,11 @@ if "!INSTALL_SCOPE!"=="2" (
     set "PTU_SETTINGS=!INSTALL_DIR!\settings.local.json"
 )
 
-:: Fall back to system python3 if venv doesn't exist (global scope only)
+:: Fall back to detected system python if venv doesn't exist (global scope only)
 if "!INSTALL_SCOPE!"=="2" (
     if not exist "!PLUGIN_DIR!\.venv\Scripts\python.exe" (
-        set "LC_PYTHON=python3"
-        set "PTU_PYTHON=python3"
+        set "LC_PYTHON=!PYTHON_CMD!"
+        set "PTU_PYTHON=!PYTHON_CMD!"
     )
 )
 

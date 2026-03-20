@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 archon-scanner.py — Archon Local Project Scanner
 
@@ -19,8 +20,17 @@ Usage:
         Print scanner version.
 
 This script runs on the user's machine (NOT inside Docker). It uses Python
-stdlib only and supports Python 3.8+.
+stdlib only and requires Python 3.10+.
 """
+
+import sys
+if sys.version_info < (3, 10):
+    print(
+        f"WARNING: Python {sys.version_info.major}.{sys.version_info.minor} detected. "
+        "Python 3.10+ is recommended for the Archon scanner.\n"
+        "Install Python 3.10: https://www.python.org/downloads/",
+        file=sys.stderr,
+    )
 
 import argparse
 import configparser
@@ -28,7 +38,6 @@ import hashlib
 import json
 import os
 import re
-import sys
 import tarfile
 import uuid
 from datetime import datetime, timezone
@@ -83,7 +92,8 @@ README_EXCERPT_LENGTH = 5000
 GITIGNORE_ENTRIES = [
     "# Archon", ".claude/plugins/", ".claude/skills/",
     ".claude/archon-config.json", ".claude/archon-state.json",
-    ".claude/archon-memory-buffer.jsonl", ".claude/settings.local.json", ".archon/",
+    ".claude/archon-memory-buffer.jsonl", ".claude/settings.local.json",
+    ".mcp.json", ".archon/",
 ]
 
 
@@ -773,15 +783,47 @@ def _write_config_files(proj: dict, extensions_hash: str | None) -> None:
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(archon_config, f, indent=4)
 
-    archon_state = {
+    archon_state: dict = {
         "system_fingerprint": system_fingerprint,
         "system_name": proj.get("system_name", ""),
         "archon_project_id": project_id,
     }
+    system_id = proj.get("system_id")
+    if system_id:
+        archon_state["system_id"] = system_id
 
     state_path = os.path.join(claude_dir, "archon-state.json")
     with open(state_path, "w", encoding="utf-8") as f:
         json.dump(archon_state, f, indent=4)
+
+
+def _write_mcp_json(project_path: str, mcp_url: str) -> None:
+    """Write .mcp.json with the Archon MCP server configuration.
+
+    This enables Claude Code to connect to the Archon MCP server when
+    opening the project, matching what `claude mcp add --transport http`
+    would produce.
+    """
+    mcp_json_path = os.path.join(project_path, ".mcp.json")
+
+    # Merge with existing config if present
+    existing: dict = {}
+    if os.path.isfile(mcp_json_path):
+        try:
+            with open(mcp_json_path, "r", encoding="utf-8", errors="replace") as f:
+                existing = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+
+    servers = existing.setdefault("mcpServers", {})
+    servers["archon"] = {
+        "type": "http",
+        "url": f"{mcp_url}/mcp",
+    }
+
+    with open(mcp_json_path, "w", encoding="utf-8") as f:
+        json.dump(existing, f, indent=2)
+        f.write("\n")
 
 
 def _write_settings_local(project_path: str) -> None:
@@ -895,6 +937,12 @@ def apply_configs(payload: dict, extensions_tarball: str | None = None) -> dict:
         try:
             _write_config_files(proj, extensions_hash)
             _write_settings_local(project_path)
+
+            # Write .mcp.json so Claude Code auto-connects to Archon MCP
+            mcp_url = proj.get("archon_mcp_url", "")
+            if mcp_url:
+                _write_mcp_json(project_path, mcp_url)
+
             _update_gitignore(project_path)
 
             if extensions_tarball and os.path.isfile(extensions_tarball):

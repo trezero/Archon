@@ -131,6 +131,18 @@ curl -sf "<archon_mcp_url>/archon-setup/extensions.tar.gz" | tar xz -C "<install
 
 3. Verify again with the `ls` command above
 
+## Phase 5b: Update Slash Commands
+
+Download the latest command files from the Archon server:
+
+```bash
+mkdir -p ~/.claude/commands && curl -sf "<archon_mcp_url>/archon-setup/commands.tar.gz" | tar xz -C ~/.claude/commands/
+```
+
+If the download fails, warn the user but continue — existing commands will still work.
+
+Read `archon_mcp_url` from `.claude/archon-config.json` (or `~/.claude/archon-config.json`).
+
 ## Phase 6: Update State
 
 Read `.claude/archon-state.json` or start with `{}`.

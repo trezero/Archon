@@ -314,7 +314,11 @@ grep -rn "from \"./styles\"" [path]/primitives --include="*.tsx" --files-without
 
 ### Archon Components
 - **Card** - For all glassmorphism effects
-- **DataCard** - Cards with header/content/footer slots
+- **DataCard** - Cards with header/content/footer slots. Use `compact` prop for smaller cards (removes min-h-[240px]).
+- **StatPill** - Rounded counter with neon glow (pink/blue/green/orange/cyan/purple/gray)
+- **Select/SelectTrigger/SelectContent/SelectItem** - Radix dropdown with glass styling and color variants
+- **ComboBox** - Searchable select with custom value creation
+- **DropdownMenu** - Radix context/action menu with glass styling
 - **PillNavigation** - Tab navigation (NEVER create custom)
 - **styles.ts** - Central styling definitions (ALWAYS import)
 
@@ -324,6 +328,9 @@ grep -rn "from \"./styles\"" [path]/primitives --include="*.tsx" --files-without
 - **All primitive props must affect rendering** - No unused props
 - **Use glassCard for card styling** - edgeColors, variants, tints, sizes
 - **Use glassmorphism for general styling** - background, border, shadow, animation
+- **Cards must always show colored borders** - Derive edgeColor from data (e.g. system name hash). Never leave cards grey/uncolored.
+- **Use Select primitive for dropdowns** - Never use raw `<select>` elements. Use the Radix Select with color variant props.
+- **Use StatPill for counters** - Never use custom inline spans for numeric indicators.
 
 ### Anti-Patterns
 ```tsx
@@ -337,12 +344,43 @@ grep -rn "from \"./styles\"" [path]/primitives --include="*.tsx" --files-without
 
 // ❌ Primitive with unused prop
 interface CardProps { glowColor?: string } // But never used in return!
+
+// ❌ Raw select element
+<select className="px-3 py-1.5 rounded-lg border ...">
+  <option>All tags</option>
+</select>
+
+// ❌ Custom inline stat spans instead of StatPill
+<span className="text-xs px-2 py-0.5 rounded bg-pink-500/12 text-pink-300">3 todo</span>
+
+// ❌ Cards without visible color (grey = disabled)
+<DataCard edgePosition="none"> // No edge = no color = looks disabled
+
+// ❌ Card color based on OS string detection
+if (os.includes("win")) return "blue"; // Fragile, breaks for custom system names
 ```
 
 ### Good Examples
 ```tsx
 // ✅ Use Card primitive
 <Card blur="lg" transparency="light" edgePosition="top" edgeColor="cyan">
+
+// ✅ Compact DataCard for grids
+<DataCard edgePosition="top" edgeColor="purple" compact blur="md">
+
+// ✅ StatPill for counters
+<StatPill color="pink" value="3 todo" size="sm" />
+
+// ✅ Radix Select for dropdowns
+<Select value={val} onValueChange={setVal}>
+  <SelectTrigger color="cyan"><SelectValue placeholder="All systems" /></SelectTrigger>
+  <SelectContent color="cyan">
+    <SelectItem value="opt1" color="cyan">Option 1</SelectItem>
+  </SelectContent>
+</Select>
+
+// ✅ Derive card color from data (deterministic hash)
+const edgeColor = resolveEdgeColor(systemName); // Always vibrant, never grey
 
 // ✅ Use PillNavigation
 <PillNavigation items={...} colorVariant="orange" />

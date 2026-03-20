@@ -922,6 +922,38 @@ async def http_download_extensions(request: Request):
     )
 
 
+async def http_download_commands(request: Request):
+    """Return all Claude Code slash commands as a compressed tar archive.
+
+    Bundles every .md file from integrations/claude-code/commands/ so that
+    extension sync and /archon-setup can refresh stale command files on
+    existing machines without re-running the full setup script.
+    """
+    import io
+    import tarfile
+
+    from starlette.responses import Response
+
+    for parent in Path(__file__).resolve().parents:
+        commands_dir = parent / "integrations" / "claude-code" / "commands"
+        if commands_dir.is_dir():
+            md_files = sorted(commands_dir.glob("*.md"))
+            if not md_files:
+                return JSONResponse({"error": "no command files found"}, status_code=404)
+
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+                for md_file in md_files:
+                    tar.add(md_file, arcname=md_file.name)
+            buf.seek(0)
+            return Response(
+                content=buf.read(),
+                media_type="application/gzip",
+                headers={"Content-Disposition": 'attachment; filename="commands.tar.gz"'},
+            )
+    return JSONResponse({"error": "commands directory not found"}, status_code=404)
+
+
 # Register setup endpoints
 try:
     mcp.custom_route("/archon-setup.sh", methods=["GET"])(http_archon_setup_sh)
@@ -933,6 +965,7 @@ try:
     mcp.custom_route("/archon-setup/plugin-manifest", methods=["GET"])(http_plugin_manifest)
     mcp.custom_route("/archon-setup/plugin/archon-memory.tar.gz", methods=["GET"])(http_download_plugin)
     mcp.custom_route("/archon-setup/extensions.tar.gz", methods=["GET"])(http_download_extensions)
+    mcp.custom_route("/archon-setup/commands.tar.gz", methods=["GET"])(http_download_commands)
     logger.info("✓ Plugin and extension distribution endpoints registered")
 except Exception as e:
     logger.error(f"✗ Failed to register setup endpoints: {e}")
