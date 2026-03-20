@@ -216,7 +216,7 @@ If creating a new endpoint and the supporting service method does not exist:
 
 #### Step 3: Postman handoff
 
-After the endpoint is written and committed, follow the Postman Integration instructions in Phase 5.
+After the endpoint is written, follow the Postman Integration instructions in Phase 5.
 
 #### Step 4: Continue
 
@@ -240,7 +240,7 @@ For each endpoint in scope, check against the Documentation Standards. For each 
 2. Does it have an explicit `status_code`?
 3. Does it have `tags`?
 4. Does it have `responses` for error codes?
-5. Does the function have a docstring?
+5. Does the function have a docstring or does the decorator have a `description` parameter?
 6. Does the function have type hints on all parameters?
 7. Does it have a return type annotation?
 8. Do all Pydantic request/response model fields use `Field(description=...)`?
