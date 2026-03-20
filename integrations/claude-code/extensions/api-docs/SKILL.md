@@ -221,3 +221,77 @@ After the endpoint is written and committed, follow the Postman Integration inst
 #### Step 4: Continue
 
 Resume the developer's original task. Do not produce a report or prompt for review — the endpoint is already documented.
+
+## Phase 4: Retrofit Mode
+
+Retrofit mode is a bulk operation for documenting existing endpoints. Run once to bring a codebase up to standard.
+
+### Step 1: Determine scope
+
+Based on the user's request:
+- **Whole repo** — Use all route files found during Phase 1
+- **Specific feature** — Match route files by feature name (e.g., "projects" → files containing "project" in the path or router prefix)
+
+### Step 2: Scan for documentation gaps
+
+For each endpoint in scope, check against the Documentation Standards. For each endpoint, check:
+
+1. Does the route decorator have `response_model`?
+2. Does it have an explicit `status_code`?
+3. Does it have `tags`?
+4. Does it have `responses` for error codes?
+5. Does the function have a docstring?
+6. Does the function have type hints on all parameters?
+7. Does it have a return type annotation?
+8. Do all Pydantic request/response model fields use `Field(description=...)`?
+9. Do response models have examples (`json_schema_extra` or `schema_extra`)?
+
+Tally:
+- Total endpoints found
+- Number with at least one gap
+- Number of files affected
+- Breakdown by gap type
+
+### Step 3: Report to user
+
+Present the findings:
+
+*"Found {gap_count} documentation gaps across {file_count} files ({endpoint_count} endpoints). Want a dry-run report first, or should I fix them all?"*
+
+**If the user asks for a dry-run report**, produce a table:
+
+```
+| File | Endpoint | Missing |
+|------|----------|---------|
+| projects_api.py | GET /api/projects | response_model, responses |
+| projects_api.py | POST /api/projects | Field descriptions, json_schema_extra |
+| knowledge_api.py | GET /api/knowledge/search | response_model, status_code |
+```
+
+After the dry run, ask: *"Fix all, or skip?"*
+
+### Step 4: Fix in place
+
+For each endpoint with gaps, edit the file to add what's missing:
+
+1. **Missing `response_model`** — Read the endpoint's return statement to infer the response shape. Create a Pydantic response model with `Field(description=...)` on every field and an example. Add `response_model=ModelName` to the decorator.
+2. **Missing `status_code`** — Add based on HTTP method: `201` for POST (create), `200` for GET/PUT/PATCH, `204` for DELETE.
+3. **Missing `tags`** — Infer from the router prefix or file name. Add `tags=["feature_name"]`.
+4. **Missing `responses`** — Check the function body for `HTTPException` raises. Add a `responses` dict documenting each error status code.
+5. **Missing docstring** — Write a one-line summary based on the function name and HTTP method.
+6. **Missing type hints** — Add type annotations based on usage.
+7. **Missing return type** — Add annotation matching the `response_model`.
+8. **Missing `Field(description=...)`** — Add descriptions to all Pydantic model fields. Infer descriptions from field names.
+9. **Missing examples** — Add `json_schema_extra` (v2) or `schema_extra` (v1) with realistic sample data.
+
+**Preserve existing documentation** — only fill gaps. Do not overwrite existing docstrings, descriptions, or field annotations.
+
+**Report progress** on large operations: *"Fixed 8/23 endpoints (projects_api.py complete, starting tasks_api.py...)"*
+
+### Step 5: Postman handoff
+
+After all fixes are applied, follow the Postman Integration instructions in Phase 5 for all endpoints in scope.
+
+### Step 6: Summary
+
+*"Documented {endpoint_count} endpoints across {file_count} files. Postman collection entries generated for all endpoints."*
