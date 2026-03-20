@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 from fastapi import status as http_status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 # Removed direct logging import - using unified config
 # Set up standard logger for background tasks
@@ -42,53 +42,252 @@ router = APIRouter(prefix="/api", tags=["projects"])
 
 
 class CreateProjectRequest(BaseModel):
-    title: str
-    description: str | None = None
-    github_repo: str | None = None
-    docs: list[Any] | None = None
-    features: list[Any] | None = None
-    data: list[Any] | None = None
-    technical_sources: list[str] | None = None  # List of knowledge source IDs
-    business_sources: list[str] | None = None  # List of knowledge source IDs
-    pinned: bool | None = None  # Whether this project should be pinned to top
-    parent_project_id: str | None = None  # Parent project for hierarchy
-    metadata: dict[str, Any] | None = None  # Key-value metadata
-    tags: list[str] | None = None  # Filterable tags
+    title: str = Field(..., description="The project title")
+    description: str | None = Field(None, description="Optional project description")
+    github_repo: str | None = Field(None, description="Associated GitHub repository URL")
+    docs: list[Any] | None = Field(None, description="Project documentation content")
+    features: list[Any] | None = Field(None, description="Project features list")
+    data: list[Any] | None = Field(None, description="Project data content")
+    technical_sources: list[str] | None = Field(None, description="List of knowledge source IDs for technical sources")
+    business_sources: list[str] | None = Field(None, description="List of knowledge source IDs for business sources")
+    pinned: bool | None = Field(None, description="Whether this project should be pinned to top")
+    parent_project_id: str | None = Field(None, description="Parent project ID for hierarchy")
+    metadata: dict[str, Any] | None = Field(None, description="Key-value metadata")
+    tags: list[str] | None = Field(None, description="Filterable tags")
 
 
 class UpdateProjectRequest(BaseModel):
-    title: str | None = None
-    description: str | None = None  # Add description field
-    github_repo: str | None = None
-    docs: list[Any] | None = None
-    features: list[Any] | None = None
-    data: list[Any] | None = None
-    technical_sources: list[str] | None = None  # List of knowledge source IDs
-    business_sources: list[str] | None = None  # List of knowledge source IDs
-    pinned: bool | None = None  # Whether this project is pinned to top
-    parent_project_id: str | None = None  # Parent project for hierarchy
-    metadata: dict[str, Any] | None = None  # Key-value metadata
-    tags: list[str] | None = None  # Filterable tags
+    title: str | None = Field(None, description="Updated project title")
+    description: str | None = Field(None, description="Updated project description")
+    github_repo: str | None = Field(None, description="Updated GitHub repository URL")
+    docs: list[Any] | None = Field(None, description="Updated documentation content")
+    features: list[Any] | None = Field(None, description="Updated features list")
+    data: list[Any] | None = Field(None, description="Updated data content")
+    technical_sources: list[str] | None = Field(None, description="List of knowledge source IDs for technical sources")
+    business_sources: list[str] | None = Field(None, description="List of knowledge source IDs for business sources")
+    pinned: bool | None = Field(None, description="Whether this project is pinned to top")
+    parent_project_id: str | None = Field(None, description="Parent project ID for hierarchy")
+    metadata: dict[str, Any] | None = Field(None, description="Key-value metadata")
+    tags: list[str] | None = Field(None, description="Filterable tags")
 
 
 class CreateTaskRequest(BaseModel):
-    project_id: str
-    title: str
-    description: str | None = None
-    status: str | None = "todo"
-    assignee: str | None = "User"
-    task_order: int | None = 0
-    priority: str | None = "medium"
-    feature: str | None = None
+    project_id: str = Field(..., description="ID of the project this task belongs to")
+    title: str = Field(..., description="Task title")
+    description: str | None = Field(None, description="Optional task description")
+    status: str | None = Field("todo", description="Initial task status (todo, doing, review, done)")
+    assignee: str | None = Field("User", description="Task assignee (User, Archon, AI IDE Agent)")
+    task_order: int | None = Field(0, description="Sort order within the task list")
+    priority: str | None = Field("medium", description="Task priority (low, medium, high)")
+    feature: str | None = Field(None, description="Feature tag for grouping tasks")
 
 
-@router.get("/projects")
+# ==================== RESPONSE MODELS ====================
+
+
+class ProjectSummary(BaseModel):
+    """Lightweight project representation."""
+
+    id: str = Field(..., description="Unique project identifier")
+    title: str = Field(..., description="Project title")
+    description: str | None = Field(None, description="Project description")
+    github_repo: str | None = Field(None, description="Associated GitHub repository URL")
+    pinned: bool = Field(False, description="Whether this project is pinned")
+    created_at: str | None = Field(None, description="ISO 8601 creation timestamp")
+    model_config = ConfigDict(extra="allow")
+
+
+class ProjectListResponse(BaseModel):
+    projects: list[dict[str, Any]] = Field(..., description="List of project objects")
+    timestamp: str = Field(..., description="ISO 8601 response timestamp")
+    count: int = Field(..., description="Total number of projects")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "projects": [{"id": "proj_abc", "title": "My Project"}],
+                "timestamp": "2026-01-15T10:30:00Z",
+                "count": 1,
+            }
+        }
+    )
+
+
+class ProjectCreateResponse(BaseModel):
+    project_id: str = Field(..., description="ID of the created project")
+    project: dict[str, Any] | None = Field(None, description="Full project object")
+    status: str = Field(..., description="Creation status")
+    message: str = Field(..., description="Human-readable status message")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "project_id": "proj_abc123",
+                "project": {"id": "proj_abc123", "title": "My Project"},
+                "status": "completed",
+                "message": "Project 'My Project' created successfully",
+            }
+        }
+    )
+
+
+class SchemaHealth(BaseModel):
+    projects_table: bool = Field(..., description="Whether the projects table exists")
+    tasks_table: bool = Field(..., description="Whether the tasks table exists")
+    valid: bool = Field(..., description="Whether the schema is fully valid")
+
+
+class ProjectHealthResponse(BaseModel):
+    status: str = Field(..., description="Health status: 'healthy', 'schema_missing', or 'error'")
+    service: str = Field(..., description="Service name")
+    schema_info: SchemaHealth = Field(..., alias="schema", description="Schema validation details")
+    error: str | None = Field(None, description="Error message if status is 'error'")
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "status": "healthy",
+                "service": "projects",
+                "schema": {"projects_table": True, "tasks_table": True, "valid": True},
+            }
+        },
+    )
+
+
+class ProjectChildrenResponse(BaseModel):
+    children: list[dict[str, Any]] = Field(..., description="List of child project objects")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"children": [{"id": "proj_child1", "title": "Child Project"}]}
+        }
+    )
+
+
+class ProjectDeleteResponse(BaseModel):
+    message: str = Field(..., description="Deletion confirmation message")
+    deleted_tasks: int = Field(0, description="Number of tasks deleted with the project")
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"message": "Project deleted successfully", "deleted_tasks": 5}}
+    )
+
+
+class TaskCreateResponse(BaseModel):
+    message: str = Field(..., description="Creation confirmation message")
+    task: dict[str, Any] = Field(..., description="The created task object")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "message": "Task created successfully",
+                "task": {"id": "task_abc", "title": "Fix bug", "status": "todo"},
+            }
+        }
+    )
+
+
+class PaginationInfo(BaseModel):
+    total: int = Field(..., description="Total number of items")
+    page: int = Field(..., description="Current page number")
+    per_page: int = Field(..., description="Items per page")
+    pages: int = Field(..., description="Total number of pages")
+
+
+class TaskListResponse(BaseModel):
+    tasks: list[dict[str, Any]] = Field(..., description="List of task objects")
+    pagination: PaginationInfo = Field(..., description="Pagination metadata")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "tasks": [{"id": "task_abc", "title": "Fix bug", "status": "todo"}],
+                "pagination": {"total": 1, "page": 1, "per_page": 10, "pages": 1},
+            }
+        }
+    )
+
+
+class TaskUpdateResponse(BaseModel):
+    message: str = Field(..., description="Update confirmation message")
+    task: dict[str, Any] = Field(..., description="The updated task object")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "message": "Task updated successfully",
+                "task": {"id": "task_abc", "title": "Fix bug", "status": "doing"},
+            }
+        }
+    )
+
+
+class TaskDeleteResponse(BaseModel):
+    message: str = Field(..., description="Archive confirmation message")
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"message": "Task archived successfully"}}
+    )
+
+
+class DocumentCreateResponse(BaseModel):
+    message: str = Field(..., description="Creation confirmation message")
+    document: dict[str, Any] = Field(..., description="The created document object")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "message": "Document created successfully",
+                "document": {"id": "doc_abc", "title": "Design Doc", "document_type": "spec"},
+            }
+        }
+    )
+
+
+class DocumentUpdateResponse(BaseModel):
+    message: str = Field(..., description="Update confirmation message")
+    document: dict[str, Any] = Field(..., description="The updated document object")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "message": "Document updated successfully",
+                "document": {"id": "doc_abc", "title": "Updated Doc"},
+            }
+        }
+    )
+
+
+class DocumentDeleteResponse(BaseModel):
+    message: str = Field(..., description="Deletion confirmation message")
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"message": "Document deleted successfully"}}
+    )
+
+
+class VersionCreateResponse(BaseModel):
+    message: str = Field(..., description="Creation confirmation message")
+    version: dict[str, Any] = Field(..., description="The created version object")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "message": "Version created successfully",
+                "version": {"id": "ver_abc", "version_number": 1, "field_name": "docs"},
+            }
+        }
+    )
+
+
+class VersionRestoreResponse(BaseModel):
+    message: str = Field(..., description="Restore confirmation message")
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={"example": {"message": "Successfully restored docs to version 3"}},
+    )
+
+
+@router.get(
+    "/projects",
+    response_model=ProjectListResponse,
+    status_code=http_status.HTTP_200_OK,
+    responses={500: {"description": "Internal server error"}},
+)
 async def list_projects(
     response: Response,
     include_content: bool = True,
     q: str | None = None,
-    if_none_match: str | None = Header(None)
-):
+    if_none_match: str | None = Header(None),
+) -> ProjectListResponse | None:
     """
     List all projects.
     
@@ -183,8 +382,16 @@ async def list_projects(
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.post("/projects")
-async def create_project(request: CreateProjectRequest):
+@router.post(
+    "/projects",
+    response_model=ProjectCreateResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    responses={
+        422: {"description": "Validation error"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def create_project(request: CreateProjectRequest) -> ProjectCreateResponse:
     """Create a new project with streaming progress."""
     # Validate title
     if not request.title:
@@ -241,8 +448,13 @@ async def create_project(request: CreateProjectRequest):
 
 
 
-@router.get("/projects/health")
-async def projects_health():
+@router.get(
+    "/projects/health",
+    response_model=ProjectHealthResponse,
+    status_code=http_status.HTTP_200_OK,
+    responses={500: {"description": "Internal server error"}},
+)
+async def projects_health() -> dict[str, Any]:
     """Health check for projects API and database schema validation."""
     try:
         logfire.info("Projects health check requested")
@@ -304,11 +516,15 @@ async def projects_health():
         }
 
 
-@router.get("/projects/task-counts")
+@router.get(
+    "/projects/task-counts",
+    status_code=http_status.HTTP_200_OK,
+    responses={500: {"description": "Internal server error"}},
+)
 async def get_all_task_counts(
     request: Request,
     response: Response,
-):
+) -> dict[str, Any] | None:
     """
     Get task counts for all projects in a single batch query.
     Optimized endpoint to avoid N+1 query problem.
@@ -365,8 +581,15 @@ async def get_all_task_counts(
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.get("/projects/{project_id}")
-async def get_project(project_id: str):
+@router.get(
+    "/projects/{project_id}",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        404: {"description": "Project not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def get_project(project_id: str) -> dict[str, Any]:
     """Get a specific project."""
     try:
         logfire.info(f"Getting project | project_id={project_id}")
@@ -405,8 +628,15 @@ async def get_project(project_id: str):
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.put("/projects/{project_id}")
-async def update_project(project_id: str, request: UpdateProjectRequest):
+@router.put(
+    "/projects/{project_id}",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        404: {"description": "Project not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def update_project(project_id: str, request: UpdateProjectRequest) -> dict[str, Any]:
     """Update a project with comprehensive Logfire monitoring."""
     try:
         supabase_client = get_supabase_client()
@@ -527,8 +757,13 @@ async def update_project(project_id: str, request: UpdateProjectRequest):
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.get("/projects/{project_id}/children")
-async def get_project_children(project_id: str):
+@router.get(
+    "/projects/{project_id}/children",
+    response_model=ProjectChildrenResponse,
+    status_code=http_status.HTTP_200_OK,
+    responses={500: {"description": "Internal server error"}},
+)
+async def get_project_children(project_id: str) -> ProjectChildrenResponse:
     """Get lightweight child projects for a parent project."""
     try:
         supabase_client = get_supabase_client()
@@ -558,8 +793,16 @@ async def get_project_children(project_id: str):
         raise HTTPException(status_code=500, detail={"error": str(e)}) from e
 
 
-@router.delete("/projects/{project_id}")
-async def delete_project(project_id: str):
+@router.delete(
+    "/projects/{project_id}",
+    response_model=ProjectDeleteResponse,
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        404: {"description": "Project not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def delete_project(project_id: str) -> ProjectDeleteResponse:
     """Delete a project and all its tasks."""
     try:
         logfire.info(f"Deleting project | project_id={project_id}")
@@ -590,8 +833,15 @@ async def delete_project(project_id: str):
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.get("/projects/{project_id}/features")
-async def get_project_features(project_id: str):
+@router.get(
+    "/projects/{project_id}/features",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        404: {"description": "Project not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def get_project_features(project_id: str) -> dict[str, Any]:
     """Get features from a project's features JSONB field."""
     try:
         logfire.info(f"Getting project features | project_id={project_id}")
@@ -620,14 +870,93 @@ async def get_project_features(project_id: str):
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.get("/projects/{project_id}/tasks")
+class ProjectStatsResponse(BaseModel):
+    """Task count statistics for a project."""
+
+    project_id: str = Field(..., description="Project identifier")
+    todo: int = Field(0, description="Number of tasks in 'todo' status")
+    doing: int = Field(0, description="Number of tasks in 'doing' status")
+    review: int = Field(0, description="Number of tasks in 'review' status")
+    done: int = Field(0, description="Number of tasks in 'done' status")
+    total: int = Field(0, description="Total number of tasks across all statuses")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "project_id": "proj_abc123",
+                "todo": 5,
+                "doing": 2,
+                "review": 1,
+                "done": 12,
+                "total": 20,
+            }
+        }
+    )
+
+
+@router.get(
+    "/projects/{project_id}/stats",
+    response_model=ProjectStatsResponse,
+    status_code=http_status.HTTP_200_OK,
+    tags=["projects"],
+    responses={
+        404: {"description": "Project not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def get_project_stats(project_id: str) -> ProjectStatsResponse:
+    """Get task count statistics for a project, grouped by status."""
+    try:
+        logfire.info(f"Getting project stats | project_id={project_id}")
+
+        # Verify project exists
+        project_service = ProjectService()
+        success, result = project_service.get_project(project_id)
+        if not success:
+            if "not found" in result.get("error", "").lower():
+                raise HTTPException(status_code=404, detail=result)
+            else:
+                raise HTTPException(status_code=500, detail=result)
+
+        # Get task counts for this project
+        task_service = TaskService()
+        success, counts = task_service.get_all_project_task_counts()
+        if not success:
+            raise HTTPException(status_code=500, detail=counts)
+
+        project_counts = counts.get(project_id, {"todo": 0, "doing": 0, "review": 0, "done": 0})
+
+        stats = ProjectStatsResponse(
+            project_id=project_id,
+            todo=project_counts.get("todo", 0),
+            doing=project_counts.get("doing", 0),
+            review=project_counts.get("review", 0),
+            done=project_counts.get("done", 0),
+            total=sum(project_counts.values()),
+        )
+
+        logfire.info(f"Project stats retrieved | project_id={project_id} | total={stats.total}")
+        return stats
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logfire.error(f"Failed to get project stats | error={str(e)} | project_id={project_id}")
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.get(
+    "/projects/{project_id}/tasks",
+    status_code=http_status.HTTP_200_OK,
+    responses={500: {"description": "Internal server error"}},
+)
 async def list_project_tasks(
     project_id: str,
     request: Request,
     response: Response,
     include_archived: bool = False,
-    exclude_large_fields: bool = False
-):
+    exclude_large_fields: bool = False,
+) -> list[dict[str, Any]] | None:
     """List all tasks for a specific project with ETag support for efficient polling."""
     try:
         # Get If-None-Match header for ETag comparison
@@ -726,8 +1055,17 @@ async def list_project_tasks(
 # Remove the complex /tasks endpoint - it's not needed and breaks things
 
 
-@router.post("/tasks")
-async def create_task(request: CreateTaskRequest):
+@router.post(
+    "/tasks",
+    response_model=TaskCreateResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    tags=["tasks"],
+    responses={
+        400: {"description": "Invalid task data"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def create_task(request: CreateTaskRequest) -> TaskCreateResponse:
     """Create a new task with automatic reordering."""
     try:
         # Use TaskService to create the task
@@ -760,7 +1098,13 @@ async def create_task(request: CreateTaskRequest):
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.get("/tasks")
+@router.get(
+    "/tasks",
+    response_model=TaskListResponse,
+    status_code=http_status.HTTP_200_OK,
+    tags=["tasks"],
+    responses={500: {"description": "Internal server error"}},
+)
 async def list_tasks(
     status: str | None = None,
     project_id: str | None = None,
@@ -768,8 +1112,8 @@ async def list_tasks(
     page: int = 1,
     per_page: int = 10,
     exclude_large_fields: bool = False,
-    q: str | None = None,  # Search query parameter
-):
+    q: str | None = None,
+) -> TaskListResponse:
     """List tasks with optional filters including status, project, and keyword search."""
     try:
         logfire.info(
@@ -841,8 +1185,16 @@ async def list_tasks(
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.get("/tasks/{task_id}")
-async def get_task(task_id: str):
+@router.get(
+    "/tasks/{task_id}",
+    status_code=http_status.HTTP_200_OK,
+    tags=["tasks"],
+    responses={
+        404: {"description": "Task not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def get_task(task_id: str) -> dict[str, Any]:
     """Get a specific task by ID."""
     try:
         # Use TaskService to get the task
@@ -871,45 +1223,54 @@ async def get_task(task_id: str):
 
 
 class UpdateTaskRequest(BaseModel):
-    title: str | None = None
-    description: str | None = None
-    status: str | None = None
-    assignee: str | None = None
-    task_order: int | None = None
-    priority: str | None = None
-    feature: str | None = None
+    title: str | None = Field(None, description="Updated task title")
+    description: str | None = Field(None, description="Updated task description")
+    status: str | None = Field(None, description="Updated task status (todo, doing, review, done)")
+    assignee: str | None = Field(None, description="Updated task assignee")
+    task_order: int | None = Field(None, description="Updated sort order")
+    priority: str | None = Field(None, description="Updated task priority (low, medium, high)")
+    feature: str | None = Field(None, description="Updated feature tag")
 
 
 class CreateDocumentRequest(BaseModel):
-    document_type: str
-    title: str
-    content: dict[str, Any] | None = None
-    tags: list[str] | None = None
-    author: str | None = None
+    document_type: str = Field(..., description="Document type (e.g., spec, design, notes)")
+    title: str = Field(..., description="Document title")
+    content: dict[str, Any] | None = Field(None, description="Document content as JSON")
+    tags: list[str] | None = Field(None, description="Document tags for categorization")
+    author: str | None = Field(None, description="Document author")
 
 
 class UpdateDocumentRequest(BaseModel):
-    title: str | None = None
-    content: dict[str, Any] | None = None
-    tags: list[str] | None = None
-    author: str | None = None
+    title: str | None = Field(None, description="Updated document title")
+    content: dict[str, Any] | None = Field(None, description="Updated document content as JSON")
+    tags: list[str] | None = Field(None, description="Updated document tags")
+    author: str | None = Field(None, description="Updated document author")
 
 
 class CreateVersionRequest(BaseModel):
-    field_name: str
-    content: dict[str, Any]
-    change_summary: str | None = None
-    change_type: str | None = "update"
-    document_id: str | None = None
-    created_by: str | None = "system"
+    field_name: str = Field(..., description="JSONB field name to version (docs, features, data)")
+    content: dict[str, Any] = Field(..., description="Content snapshot to store as the version")
+    change_summary: str | None = Field(None, description="Human-readable summary of what changed")
+    change_type: str | None = Field("update", description="Type of change (create, update, delete)")
+    document_id: str | None = Field(None, description="Associated document ID if versioning a specific document")
+    created_by: str | None = Field("system", description="Who created this version")
 
 
 class RestoreVersionRequest(BaseModel):
-    restored_by: str | None = "system"
+    restored_by: str | None = Field("system", description="Who initiated the restore")
 
 
-@router.put("/tasks/{task_id}")
-async def update_task(task_id: str, request: UpdateTaskRequest):
+@router.put(
+    "/tasks/{task_id}",
+    response_model=TaskUpdateResponse,
+    status_code=http_status.HTTP_200_OK,
+    tags=["tasks"],
+    responses={
+        404: {"description": "Task not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def update_task(task_id: str, request: UpdateTaskRequest) -> TaskUpdateResponse:
     """Update a task."""
     try:
         # Build update fields dictionary
@@ -954,8 +1315,18 @@ async def update_task(task_id: str, request: UpdateTaskRequest):
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.delete("/tasks/{task_id}")
-async def delete_task(task_id: str):
+@router.delete(
+    "/tasks/{task_id}",
+    response_model=TaskDeleteResponse,
+    status_code=http_status.HTTP_200_OK,
+    tags=["tasks"],
+    responses={
+        404: {"description": "Task not found"},
+        409: {"description": "Task already archived"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def delete_task(task_id: str) -> TaskDeleteResponse:
     """Archive a task (soft delete)."""
     try:
         # Use TaskService to archive the task
@@ -984,8 +1355,17 @@ async def delete_task(task_id: str):
 # MCP endpoints for task operations
 
 
-@router.put("/mcp/tasks/{task_id}/status")
-async def mcp_update_task_status(task_id: str, status: str):
+@router.put(
+    "/mcp/tasks/{task_id}/status",
+    response_model=TaskUpdateResponse,
+    status_code=http_status.HTTP_200_OK,
+    tags=["tasks"],
+    responses={
+        404: {"description": "Task not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def mcp_update_task_status(task_id: str, status: str) -> TaskUpdateResponse:
     """Update task status via MCP tools."""
     try:
         logfire.info(f"MCP task status update | task_id={task_id} | status={status}")
@@ -1025,8 +1405,15 @@ async def mcp_update_task_status(task_id: str, status: str):
 # ==================== DOCUMENT MANAGEMENT ENDPOINTS ====================
 
 
-@router.get("/projects/{project_id}/docs")
-async def list_project_documents(project_id: str, include_content: bool = False):
+@router.get(
+    "/projects/{project_id}/docs",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        404: {"description": "Project not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def list_project_documents(project_id: str, include_content: bool = False) -> dict[str, Any]:
     """
     List all documents for a specific project.
     
@@ -1063,8 +1450,17 @@ async def list_project_documents(project_id: str, include_content: bool = False)
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.post("/projects/{project_id}/docs")
-async def create_project_document(project_id: str, request: CreateDocumentRequest):
+@router.post(
+    "/projects/{project_id}/docs",
+    response_model=DocumentCreateResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Project not found"},
+        400: {"description": "Invalid document data"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def create_project_document(project_id: str, request: CreateDocumentRequest) -> DocumentCreateResponse:
     """Create a new document for a project."""
     try:
         logfire.info(
@@ -1101,8 +1497,15 @@ async def create_project_document(project_id: str, request: CreateDocumentReques
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.get("/projects/{project_id}/docs/{doc_id}")
-async def get_project_document(project_id: str, doc_id: str):
+@router.get(
+    "/projects/{project_id}/docs/{doc_id}",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        404: {"description": "Document not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def get_project_document(project_id: str, doc_id: str) -> dict[str, Any]:
     """Get a specific document from a project."""
     try:
         logfire.info(f"Getting document | project_id={project_id} | doc_id={doc_id}")
@@ -1130,8 +1533,16 @@ async def get_project_document(project_id: str, doc_id: str):
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.put("/projects/{project_id}/docs/{doc_id}")
-async def update_project_document(project_id: str, doc_id: str, request: UpdateDocumentRequest):
+@router.put(
+    "/projects/{project_id}/docs/{doc_id}",
+    response_model=DocumentUpdateResponse,
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        404: {"description": "Document not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def update_project_document(project_id: str, doc_id: str, request: UpdateDocumentRequest) -> DocumentUpdateResponse:
     """Update a document in a project."""
     try:
         logfire.info(f"Updating document | project_id={project_id} | doc_id={doc_id}")
@@ -1170,8 +1581,16 @@ async def update_project_document(project_id: str, doc_id: str, request: UpdateD
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.delete("/projects/{project_id}/docs/{doc_id}")
-async def delete_project_document(project_id: str, doc_id: str):
+@router.delete(
+    "/projects/{project_id}/docs/{doc_id}",
+    response_model=DocumentDeleteResponse,
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        404: {"description": "Document not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def delete_project_document(project_id: str, doc_id: str) -> DocumentDeleteResponse:
     """Delete a document from a project."""
     try:
         logfire.info(f"Deleting document | project_id={project_id} | doc_id={doc_id}")
@@ -1202,8 +1621,15 @@ async def delete_project_document(project_id: str, doc_id: str):
 # ==================== VERSION MANAGEMENT ENDPOINTS ====================
 
 
-@router.get("/projects/{project_id}/versions")
-async def list_project_versions(project_id: str, field_name: str = None):
+@router.get(
+    "/projects/{project_id}/versions",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        404: {"description": "Project not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def list_project_versions(project_id: str, field_name: str = None) -> dict[str, Any]:
     """List version history for a project's JSONB fields."""
     try:
         logfire.info(
@@ -1233,8 +1659,17 @@ async def list_project_versions(project_id: str, field_name: str = None):
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.post("/projects/{project_id}/versions")
-async def create_project_version(project_id: str, request: CreateVersionRequest):
+@router.post(
+    "/projects/{project_id}/versions",
+    response_model=VersionCreateResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Project not found"},
+        400: {"description": "Invalid version data"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def create_project_version(project_id: str, request: CreateVersionRequest) -> VersionCreateResponse:
     """Create a version snapshot for a project's JSONB field."""
     try:
         logfire.info(
@@ -1272,8 +1707,15 @@ async def create_project_version(project_id: str, request: CreateVersionRequest)
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.get("/projects/{project_id}/versions/{field_name}/{version_number}")
-async def get_project_version(project_id: str, field_name: str, version_number: int):
+@router.get(
+    "/projects/{project_id}/versions/{field_name}/{version_number}",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        404: {"description": "Version not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def get_project_version(project_id: str, field_name: str, version_number: int) -> dict[str, Any]:
     """Get a specific version's content."""
     try:
         logfire.info(
@@ -1307,10 +1749,18 @@ async def get_project_version(project_id: str, field_name: str, version_number: 
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
-@router.post("/projects/{project_id}/versions/{field_name}/{version_number}/restore")
+@router.post(
+    "/projects/{project_id}/versions/{field_name}/{version_number}/restore",
+    response_model=VersionRestoreResponse,
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        404: {"description": "Version not found"},
+        500: {"description": "Internal server error"},
+    },
+)
 async def restore_project_version(
     project_id: str, field_name: str, version_number: int, request: RestoreVersionRequest
-):
+) -> VersionRestoreResponse:
     """Restore a project's JSONB field to a specific version."""
     try:
         logfire.info(

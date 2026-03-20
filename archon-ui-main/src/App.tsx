@@ -16,6 +16,7 @@ import { ProjectPage } from './pages/ProjectPage';
 import StyleGuidePage from './pages/StyleGuidePage';
 import { AgentWorkOrdersPage } from './pages/AgentWorkOrdersPage';
 import { AgentWorkOrderDetailPage } from './pages/AgentWorkOrderDetailPage';
+import AutoResearchPage from './pages/AutoResearchPage';
 import { DisconnectScreenOverlay } from './components/DisconnectScreenOverlay';
 import { ErrorBoundaryWithBugReport } from './components/bug-report/ErrorBoundaryWithBugReport';
 import { MigrationBanner } from './components/ui/MigrationBanner';
@@ -53,6 +54,7 @@ const AppRoutes = () => {
       ) : (
         <Route path="/agent-work-orders" element={<Navigate to="/" replace />} />
       )}
+      <Route path="/auto-research" element={<AutoResearchPage />} />
     </Routes>
   );
 };
