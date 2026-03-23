@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   ReactFlow,
   addEdge,
@@ -84,6 +84,7 @@ interface WorkflowCanvasProps {
   setEdges: React.Dispatch<React.SetStateAction<Edge[]>>;
   onNodeSelect: (nodeId: string | null) => void;
   onDirty: () => void;
+  onPushSnapshot?: () => void;
   commands: CommandEntry[];
 }
 
@@ -101,6 +102,7 @@ export function WorkflowCanvas({
   setEdges,
   onNodeSelect,
   onDirty,
+  onPushSnapshot,
   commands,
 }: WorkflowCanvasProps): React.ReactElement {
   const { screenToFlowPosition } = useReactFlow();
@@ -169,14 +171,33 @@ export function WorkflowCanvas({
     [screenToFlowPosition, setNodes, onDirty]
   );
 
+  // Track whether we've already pushed a snapshot for the current drag gesture
+  const dragSnapshotPushed = useRef(false);
+
   const handleNodesChange: OnNodesChange<DagFlowNode> = useCallback(
     changes => {
+      // Push snapshot at the start of a drag (before state changes)
+      const hasDragStart = changes.some(
+        c => c.type === 'position' && 'dragging' in c && c.dragging === true
+      );
+      const hasDragEnd = changes.some(
+        c => c.type === 'position' && 'dragging' in c && c.dragging === false
+      );
+
+      if (hasDragStart && !dragSnapshotPushed.current) {
+        dragSnapshotPushed.current = true;
+        onPushSnapshot?.();
+      }
+      if (hasDragEnd) {
+        dragSnapshotPushed.current = false;
+      }
+
       onNodesChange(changes);
       if (changes.some(c => c.type !== 'select')) {
         onDirty();
       }
     },
-    [onNodesChange, onDirty]
+    [onNodesChange, onDirty, onPushSnapshot]
   );
 
   const handleEdgesChange: OnEdgesChange = useCallback(
@@ -189,8 +210,15 @@ export function WorkflowCanvas({
     [onEdgesChange, onDirty]
   );
 
+  // Clean up click timer on unmount
+  useEffect(() => {
+    return (): void => {
+      if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    };
+  }, []);
+
   // Manual double-click detection — ReactFlow v12 has no onPaneDoubleClick prop.
-  // The 300ms threshold must match the setTimeout delay to avoid both firing.
+  const DOUBLE_CLICK_MS = 300;
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastClickRef = useRef<{ time: number; x: number; y: number }>({ time: 0, x: 0, y: 0 });
 
@@ -199,7 +227,7 @@ export function WorkflowCanvas({
       const now = Date.now();
       const last = lastClickRef.current;
       const isDoubleClick =
-        now - last.time < 300 &&
+        now - last.time < DOUBLE_CLICK_MS &&
         Math.abs(e.clientX - last.x) < 10 &&
         Math.abs(e.clientY - last.y) < 10;
 
@@ -222,7 +250,7 @@ export function WorkflowCanvas({
           onNodeSelect(null);
           setQuickAddPosition(null);
           clickTimerRef.current = null;
-        }, 300);
+        }, DOUBLE_CLICK_MS);
       }
     },
     [screenToFlowPosition, onNodeSelect]

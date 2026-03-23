@@ -7,7 +7,6 @@ import type { CommandEntry } from '@/lib/api';
 interface NodeLibraryProps {
   commands: CommandEntry[];
   isLoading: boolean;
-  visible: boolean;
 }
 
 const NODE_TYPE_COLORS: Record<string, string> = {
@@ -86,11 +85,7 @@ function CollapsibleSection({
   );
 }
 
-export function NodeLibrary({
-  commands,
-  isLoading,
-  visible,
-}: NodeLibraryProps): React.ReactElement | null {
+export function NodeLibrary({ commands, isLoading }: NodeLibraryProps): React.ReactElement {
   const [search, setSearch] = useState('');
 
   const categories = useMemo(() => categorizeCommands(commands), [commands]);
@@ -110,8 +105,6 @@ export function NodeLibrary({
     !search.trim() ||
     'prompt'.includes(search.toLowerCase()) ||
     'bash'.includes(search.toLowerCase());
-
-  if (!visible) return null;
 
   return (
     <div className="flex flex-col h-full overflow-hidden border-r border-border bg-surface">

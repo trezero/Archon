@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Box, FileText, Terminal, Zap, Plug, ChevronRight } from 'lucide-react';
 import type { CommandEntry } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useClickOutside } from '@/hooks/useClickOutside';
 import { CommandPicker } from './CommandPicker';
 
 interface QuickAddPickerProps {
@@ -27,17 +28,7 @@ export function QuickAddPicker({
   const [subView, setSubView] = useState<SubView>('main');
   const [inputValue, setInputValue] = useState('');
 
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent): void {
-      if (containerRef.current && !containerRef.current.contains(e.target as HTMLElement)) {
-        onClose();
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return (): void => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [onClose]);
+  useClickOutside(containerRef, onClose);
 
   useEffect(() => {
     if ((subView === 'skill' || subView === 'mcp') && inputRef.current) {

@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Search } from 'lucide-react';
 import type { CommandEntry } from '@/lib/api';
 import { categorizeCommands } from '@/lib/command-categories';
 import { cn } from '@/lib/utils';
+import { useClickOutside } from '@/hooks/useClickOutside';
 
 interface CommandPickerProps {
   commands: CommandEntry[];
@@ -24,17 +25,7 @@ export function CommandPicker({
     inputRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent): void {
-      if (containerRef.current && !containerRef.current.contains(e.target as HTMLElement)) {
-        onClose();
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return (): void => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [onClose]);
+  useClickOutside(containerRef, onClose);
 
   const filteredCommands = searchQuery
     ? commands.filter(cmd => cmd.name.toLowerCase().includes(searchQuery.toLowerCase()))

@@ -99,6 +99,49 @@ export function dagNodesToReactFlow(dagNodes: readonly DagNode[]): {
 }
 
 /**
+ * Check if the graph has a cycle using Kahn's algorithm.
+ * Returns true if a cycle exists.
+ */
+export function hasCycle(
+  nodeIds: Set<string>,
+  edges: { source: string; target: string }[]
+): boolean {
+  const inDegree = new Map<string, number>();
+  const adjacency = new Map<string, string[]>();
+
+  for (const id of nodeIds) {
+    inDegree.set(id, 0);
+    adjacency.set(id, []);
+  }
+
+  for (const edge of edges) {
+    if (nodeIds.has(edge.source) && nodeIds.has(edge.target) && edge.source !== edge.target) {
+      inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1);
+      adjacency.get(edge.source)?.push(edge.target);
+    }
+  }
+
+  const queue: string[] = [];
+  for (const [id, degree] of inDegree) {
+    if (degree === 0) queue.push(id);
+  }
+
+  let visited = 0;
+  let head = 0;
+  while (head < queue.length) {
+    const current = queue[head++];
+    visited++;
+    for (const neighbor of adjacency.get(current) ?? []) {
+      const newDegree = (inDegree.get(neighbor) ?? 1) - 1;
+      inDegree.set(neighbor, newDegree);
+      if (newDegree === 0) queue.push(neighbor);
+    }
+  }
+
+  return visited < nodeIds.size;
+}
+
+/**
  * Compute topological layer index for each node using Kahn's algorithm (BFS).
  * Nodes with zero in-degree start at layer 0; each node's layer is the maximum
  * depth across all incoming paths (not simply parent + 1 for convergent paths).

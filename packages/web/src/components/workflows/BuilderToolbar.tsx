@@ -55,7 +55,7 @@ const MODE_LABELS: Record<BuilderMode, string> = {
 const VIEW_MODE_LABELS: readonly { value: ViewMode; label: string }[] = [
   { value: 'hidden', label: 'Visual' },
   { value: 'split', label: 'Split' },
-  { value: 'full', label: 'Code' },
+  { value: 'full', label: 'YAML' },
 ];
 
 export function BuilderToolbar({
@@ -277,6 +277,12 @@ export function BuilderToolbar({
           </Button>
         </div>
       </div>
+
+      {workflowsError && (
+        <div className="px-4 py-1.5 text-xs text-error bg-surface-inset border-b border-border">
+          Failed to load workflow list. The load dropdown may be empty.
+        </div>
+      )}
 
       {/* Mode switch confirmation */}
       <AlertDialog

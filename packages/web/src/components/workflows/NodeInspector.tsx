@@ -105,17 +105,7 @@ function ToolsInput({
         type="text"
         value={text}
         onChange={(e): void => {
-          const v = e.target.value;
-          if (!v.trim()) {
-            onChange(undefined);
-          } else {
-            onChange(
-              v
-                .split(',')
-                .map(s => s.trim())
-                .filter(Boolean)
-            );
-          }
+          onChange(parseToolsList(e.target.value));
         }}
         placeholder="tool1, tool2..."
         className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
@@ -632,6 +622,61 @@ function ToolsTab({
   );
 }
 
+function JsonTextareaField({
+  label,
+  value,
+  placeholder,
+  rows,
+  onCommit,
+}: {
+  label: string;
+  value: Record<string, unknown> | undefined;
+  placeholder: string;
+  rows: number;
+  onCommit: (parsed: Record<string, unknown> | undefined) => void;
+}): React.ReactElement {
+  const [text, setText] = useState(value ? JSON.stringify(value, null, 2) : '');
+  const [error, setError] = useState<string | null>(null);
+
+  const handleChange = useCallback(
+    (raw: string): void => {
+      setText(raw);
+      if (!raw.trim()) {
+        setError(null);
+        onCommit(undefined);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        setError(null);
+        onCommit(parsed);
+      } catch (e) {
+        if (e instanceof SyntaxError) {
+          setError(e.message);
+        } else {
+          throw e;
+        }
+      }
+    },
+    [onCommit]
+  );
+
+  return (
+    <Field label={label}>
+      <textarea
+        value={text}
+        onChange={(e): void => {
+          handleChange(e.target.value);
+        }}
+        rows={rows}
+        placeholder={placeholder}
+        className={cn(textareaClass, 'min-h-[100px]')}
+      />
+      {error && <p className="text-[10px] text-error">{error}</p>}
+    </Field>
+  );
+}
+
 function AdvancedTab({
   node,
   onUpdate,
@@ -641,66 +686,17 @@ function AdvancedTab({
   onUpdate: (updates: Partial<DagNodeData>) => void;
   onDelete: () => void;
 }): React.ReactElement {
-  const [outputFormatText, setOutputFormatText] = useState(
-    node.output_format ? JSON.stringify(node.output_format, null, 2) : ''
-  );
-  const [outputFormatError, setOutputFormatError] = useState<string | null>(null);
-
-  const [hooksText, setHooksText] = useState(node.hooks ? JSON.stringify(node.hooks, null, 2) : '');
-  const [hooksError, setHooksError] = useState<string | null>(null);
-
-  const handleOutputFormatChange = useCallback(
-    (text: string): void => {
-      setOutputFormatText(text);
-      if (!text.trim()) {
-        setOutputFormatError(null);
-        onUpdate({ output_format: undefined });
-        return;
-      }
-      try {
-        const parsed = JSON.parse(text) as Record<string, unknown>;
-        setOutputFormatError(null);
-        onUpdate({ output_format: parsed });
-      } catch (e) {
-        setOutputFormatError(e instanceof SyntaxError ? e.message : 'Invalid JSON');
-      }
-    },
-    [onUpdate]
-  );
-
-  const handleHooksChange = useCallback(
-    (text: string): void => {
-      setHooksText(text);
-      if (!text.trim()) {
-        setHooksError(null);
-        onUpdate({ hooks: undefined });
-        return;
-      }
-      try {
-        const parsed = JSON.parse(text) as Record<string, unknown>;
-        setHooksError(null);
-        onUpdate({ hooks: parsed });
-      } catch (e) {
-        setHooksError(e instanceof SyntaxError ? e.message : 'Invalid JSON');
-      }
-    },
-    [onUpdate]
-  );
-
   return (
     <div className="flex flex-col gap-3 p-3">
-      <Field label="Output Format (JSON Schema)">
-        <textarea
-          value={outputFormatText}
-          onChange={(e): void => {
-            handleOutputFormatChange(e.target.value);
-          }}
-          rows={5}
-          placeholder='{"type": "object", "properties": {...}}'
-          className={cn(textareaClass, 'min-h-[100px]')}
-        />
-        {outputFormatError && <p className="text-[10px] text-error">{outputFormatError}</p>}
-      </Field>
+      <JsonTextareaField
+        label="Output Format (JSON Schema)"
+        value={node.output_format}
+        placeholder='{"type": "object", "properties": {...}}'
+        rows={5}
+        onCommit={(v): void => {
+          onUpdate({ output_format: v });
+        }}
+      />
 
       <Field label="Skills">
         <input
@@ -729,18 +725,15 @@ function AdvancedTab({
         </p>
       </Field>
 
-      <Field label="Hooks (SDK SyncHookJSONOutput)">
-        <textarea
-          value={hooksText}
-          onChange={(e): void => {
-            handleHooksChange(e.target.value);
-          }}
-          rows={5}
-          placeholder='{"PreToolUse": [{"matcher": "Bash", "response": {...}}]}'
-          className={cn(textareaClass, 'min-h-[100px]')}
-        />
-        {hooksError && <p className="text-[10px] text-error">{hooksError}</p>}
-      </Field>
+      <JsonTextareaField
+        label="Hooks (SDK SyncHookJSONOutput)"
+        value={node.hooks as Record<string, unknown> | undefined}
+        placeholder='{"PreToolUse": [{"matcher": "Bash", "response": {...}}]}'
+        rows={5}
+        onCommit={(v): void => {
+          onUpdate({ hooks: v });
+        }}
+      />
 
       <div className="border-t border-border pt-3 mt-2">
         <Button variant="destructive" size="sm" onClick={onDelete} className="w-full">
@@ -815,7 +808,7 @@ function DagInspector({
 
           {!isBash && (
             <TabsContent value="advanced">
-              <AdvancedTab node={node} onUpdate={onUpdate} onDelete={onDelete} />
+              <AdvancedTab key={node.id} node={node} onUpdate={onUpdate} onDelete={onDelete} />
             </TabsContent>
           )}
         </ScrollArea>

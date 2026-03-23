@@ -101,7 +101,6 @@ export function useBuilderKeyboard(actions: BuilderKeyboardActions, enabled = tr
           actions.onAddBash();
           break;
         case 'Delete':
-        case 'Backspace':
           actions.onDeleteSelected();
           break;
         case 'f':

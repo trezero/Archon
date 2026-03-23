@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { DagFlowNode } from '@/components/workflows/DagNodeComponent';
 import type { Edge } from '@xyflow/react';
+import { hasCycle } from '@/lib/dag-layout';
 
 export interface ValidationIssue {
   severity: 'error' | 'warning' | 'info';
@@ -112,39 +113,7 @@ function getDebouncedIssues(
   }
 
   // 4. Cycle detection via Kahn's algorithm
-  const inDegree = new Map<string, number>();
-  const adjacency = new Map<string, string[]>();
-
-  for (const id of nodeIds) {
-    inDegree.set(id, 0);
-    adjacency.set(id, []);
-  }
-
-  for (const edge of edges) {
-    if (nodeIds.has(edge.source) && nodeIds.has(edge.target) && edge.source !== edge.target) {
-      inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1);
-      adjacency.get(edge.source)?.push(edge.target);
-    }
-  }
-
-  const queue: string[] = [];
-  for (const [id, degree] of inDegree) {
-    if (degree === 0) queue.push(id);
-  }
-
-  let visited = 0;
-  let head = 0;
-  while (head < queue.length) {
-    const current = queue[head++];
-    visited++;
-    for (const neighbor of adjacency.get(current) ?? []) {
-      const newDegree = (inDegree.get(neighbor) ?? 1) - 1;
-      inDegree.set(neighbor, newDegree);
-      if (newDegree === 0) queue.push(neighbor);
-    }
-  }
-
-  if (visited < nodeIds.size) {
+  if (hasCycle(nodeIds, edges)) {
     issues.push({
       severity: 'error',
       message: 'Cycle detected in workflow graph',

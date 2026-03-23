@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { ReactFlowProvider, useNodesState, useEdgesState, useViewport } from '@xyflow/react';
+import type { Edge } from '@xyflow/react';
 import type {
   WorkflowDefinition,
   WorkflowStep,
@@ -68,7 +69,8 @@ function WorkflowBuilderInner(): React.ReactElement {
 
   // DAG state
   const [nodes, setNodes, onNodesChange] = useNodesState<DagFlowNode>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-arguments -- TSC infers never[] without explicit Edge
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   // Sequential state
@@ -175,10 +177,13 @@ function WorkflowBuilderInner(): React.ReactElement {
 
         setHasUnsavedChanges(false);
       } catch (err) {
-        console.error('[WorkflowBuilder] Failed to load workflow:', err);
-        setValidationErrors([
-          `Failed to load workflow: ${err instanceof Error ? err.message : String(err)}`,
-        ]);
+        const error = err instanceof Error ? err : new Error(String(err));
+        console.error('[workflow-builder] workflow.load_failed', {
+          workflowName: name,
+          cwd,
+          error,
+        });
+        setValidationErrors([`Failed to load workflow: ${error.message}`]);
       }
     },
     [cwd, setNodes, setEdges]
@@ -271,10 +276,9 @@ function WorkflowBuilderInner(): React.ReactElement {
       }
       setValidationPanelOpen(true);
     } catch (err) {
-      console.error('[WorkflowBuilder] Validation request failed:', err);
-      setValidationErrors([
-        `Validation request failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
-      ]);
+      const error = err instanceof Error ? err : new Error('Unknown error');
+      console.error('[workflow-builder] workflow.validate_failed', { workflowName, error });
+      setValidationErrors([`Validation request failed: ${error.message}`]);
     }
   }, [buildDefinition]);
 
@@ -294,8 +298,9 @@ function WorkflowBuilderInner(): React.ReactElement {
       await saveWorkflow(workflowName.trim(), def, cwd);
       setHasUnsavedChanges(false);
     } catch (err) {
-      console.error('[WorkflowBuilder] Save failed:', err);
-      setValidationErrors([`Save failed: ${err instanceof Error ? err.message : 'Unknown error'}`]);
+      const error = err instanceof Error ? err : new Error('Unknown error');
+      console.error('[workflow-builder] workflow.save_failed', { workflowName, cwd, error });
+      setValidationErrors([`Save failed: ${error.message}`]);
       setValidationPanelOpen(true);
     }
   }, [buildDefinition, workflowName, cwd]);
@@ -308,8 +313,9 @@ function WorkflowBuilderInner(): React.ReactElement {
       await runWorkflow(workflowName.trim(), conversationId, '');
       navigate(`/chat/${conversationId}`);
     } catch (err) {
-      console.error('[WorkflowBuilder] Run failed:', err);
-      setValidationErrors([`Run failed: ${err instanceof Error ? err.message : 'Unknown error'}`]);
+      const error = err instanceof Error ? err : new Error('Unknown error');
+      console.error('[workflow-builder] workflow.run_failed', { workflowName, error });
+      setValidationErrors([`Run failed: ${error.message}`]);
       setValidationPanelOpen(true);
     }
   }, [workflowName, hasUnsavedChanges, selectedProjectId, navigate]);
@@ -349,16 +355,16 @@ function WorkflowBuilderInner(): React.ReactElement {
     return [...serverIssues, ...validationIssues];
   }, [validationErrors, validationIssues]);
 
-  // Keyboard shortcuts
-  useBuilderKeyboard(
-    {
-      onSave: () => void handleSave(),
+  // Keyboard shortcuts — stabilize actions object to avoid re-registering handler on every render
+  const keyboardActions = useMemo(
+    () => ({
+      onSave: (): void => void handleSave(),
       onUndo: handleUndo,
       onRedo: handleRedo,
-      onToggleLibrary: () => {
+      onToggleLibrary: (): void => {
         setShowLibrary(v => !v);
       },
-      onToggleYaml: () => {
+      onToggleYaml: (): void => {
         setYamlViewMode(v => {
           const modes: ViewMode[] = ['hidden', 'split', 'full'];
           const idx = modes.indexOf(v);
@@ -366,7 +372,7 @@ function WorkflowBuilderInner(): React.ReactElement {
         });
       },
       onToggleValidation: handleToggleValidationPanel,
-      onAddPrompt: () => {
+      onAddPrompt: (): void => {
         if (mode !== 'dag') return;
         const id = `node-${crypto.randomUUID()}`;
         const newNode: DagFlowNode = {
@@ -379,7 +385,7 @@ function WorkflowBuilderInner(): React.ReactElement {
         setNodes(nds => [...nds, newNode]);
         markDirty();
       },
-      onAddBash: () => {
+      onAddBash: (): void => {
         if (mode !== 'dag') return;
         const id = `node-${crypto.randomUUID()}`;
         const newNode: DagFlowNode = {
@@ -392,12 +398,12 @@ function WorkflowBuilderInner(): React.ReactElement {
         setNodes(nds => [...nds, newNode]);
         markDirty();
       },
-      onDeleteSelected: () => {
+      onDeleteSelected: (): void => {
         if (selectedNodeId && mode === 'dag') {
           handleNodeDelete();
         }
       },
-      onDuplicateSelected: () => {
+      onDuplicateSelected: (): void => {
         if (!selectedNodeId || mode !== 'dag') return;
         const sourceNode = nodes.find(n => n.id === selectedNodeId);
         if (!sourceNode) return;
@@ -412,9 +418,23 @@ function WorkflowBuilderInner(): React.ReactElement {
         setNodes(nds => [...nds, newNode]);
         markDirty();
       },
-    },
-    true
+    }),
+    [
+      handleSave,
+      handleUndo,
+      handleRedo,
+      handleToggleValidationPanel,
+      handleNodeDelete,
+      mode,
+      nodes,
+      edges,
+      selectedNodeId,
+      pushSnapshot,
+      setNodes,
+      markDirty,
+    ]
   );
+  useBuilderKeyboard(keyboardActions, true);
 
   const selectedNode = selectedNodeId ? nodes.find(n => n.id === selectedNodeId) : null;
 
@@ -471,9 +491,9 @@ function WorkflowBuilderInner(): React.ReactElement {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left panel: Node Library (DAG mode only) */}
-        {mode === 'dag' && (
+        {mode === 'dag' && showLibrary && (
           <div className="w-52 shrink-0 h-full overflow-hidden">
-            <NodeLibrary commands={commandList} isLoading={commandsLoading} visible={showLibrary} />
+            <NodeLibrary commands={commandList} isLoading={commandsLoading} />
           </div>
         )}
 
@@ -494,6 +514,9 @@ function WorkflowBuilderInner(): React.ReactElement {
                     setEdges={setEdges}
                     onNodeSelect={setSelectedNodeId}
                     onDirty={markDirty}
+                    onPushSnapshot={(): void => {
+                      pushSnapshot({ nodes, edges });
+                    }}
                     commands={commandList}
                   />
                 )}

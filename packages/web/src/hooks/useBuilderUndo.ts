@@ -16,7 +16,7 @@ interface UndoActions {
 }
 
 function deepClone(state: UndoState): UndoState {
-  return JSON.parse(JSON.stringify(state)) as UndoState;
+  return structuredClone(state);
 }
 
 export function useBuilderUndo(maxEntries = 100): UndoActions {

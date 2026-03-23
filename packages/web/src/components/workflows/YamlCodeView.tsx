@@ -183,7 +183,9 @@ export function serializeToYaml(def: WorkflowDefinition): string {
   const lines: string[] = [];
 
   lines.push(`name: ${def.name}`);
-  lines.push(`description: ${serializeValue(def.description, 0)}`);
+  if (def.description) {
+    lines.push(`description: ${serializeValue(def.description, 0)}`);
+  }
 
   if (def.provider) {
     lines.push(`provider: ${def.provider}`);
