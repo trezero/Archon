@@ -7,13 +7,13 @@ interface BuilderKeyboardActions {
   onToggleLibrary: () => void;
   onToggleYaml: () => void;
   onToggleValidation: () => void;
-  onQuickAdd: () => void;
   onAddPrompt: () => void;
   onAddBash: () => void;
   onDeleteSelected: () => void;
   onDuplicateSelected: () => void;
-  onFitView: () => void;
-  onSelectAll: () => void;
+  onQuickAdd?: () => void;
+  onFitView?: () => void;
+  onSelectAll?: () => void;
 }
 
 function isInputTarget(e: KeyboardEvent): boolean {
@@ -79,12 +79,12 @@ export function useBuilderKeyboard(actions: BuilderKeyboardActions, enabled = tr
         }
         if (e.key === '0') {
           e.preventDefault();
-          actions.onFitView();
+          actions.onFitView?.();
           return;
         }
         if (e.key === 'a') {
           e.preventDefault();
-          actions.onSelectAll();
+          actions.onSelectAll?.();
           return;
         }
       }
@@ -92,7 +92,7 @@ export function useBuilderKeyboard(actions: BuilderKeyboardActions, enabled = tr
       // Single-key shortcuts
       switch (e.key) {
         case 'n':
-          actions.onQuickAdd();
+          actions.onQuickAdd?.();
           break;
         case 'p':
           actions.onAddPrompt();
@@ -105,7 +105,7 @@ export function useBuilderKeyboard(actions: BuilderKeyboardActions, enabled = tr
           actions.onDeleteSelected();
           break;
         case 'f':
-          actions.onFitView();
+          actions.onFitView?.();
           break;
       }
     },

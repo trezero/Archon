@@ -1,8 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ReactFlowProvider, useNodesState, useEdgesState } from '@xyflow/react';
-import type { Edge } from '@xyflow/react';
+import { ReactFlowProvider, useNodesState, useEdgesState, useViewport } from '@xyflow/react';
 import type {
   WorkflowDefinition,
   WorkflowStep,
@@ -63,15 +62,13 @@ function WorkflowBuilderInner(): React.ReactElement {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
-  // New V2 state
   const [yamlViewMode, setYamlViewMode] = useState<ViewMode>('hidden');
   const [validationPanelOpen, setValidationPanelOpen] = useState(false);
   const [showLibrary, setShowLibrary] = useState(true);
 
   // DAG state
   const [nodes, setNodes, onNodesChange] = useNodesState<DagFlowNode>([]);
-  const initialEdges: Edge[] = [];
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   // Sequential state
@@ -93,10 +90,9 @@ function WorkflowBuilderInner(): React.ReactElement {
   });
   const commandList: CommandEntry[] = commands ?? [];
 
-  // Undo/Redo
   const { pushSnapshot, undo, redo } = useBuilderUndo();
+  const { zoom } = useViewport();
 
-  // Validation
   const validationIssues = useBuilderValidation(
     mode,
     workflowName,
@@ -197,7 +193,10 @@ function WorkflowBuilderInner(): React.ReactElement {
     }
   }, [editName, loadWorkflow]);
 
-  // Node operations
+  const handleToggleValidationPanel = useCallback((): void => {
+    setValidationPanelOpen(v => !v);
+  }, []);
+
   const handleNodeUpdate = useCallback(
     (updates: Partial<DagNodeData>): void => {
       setNodes(nds =>
@@ -217,7 +216,6 @@ function WorkflowBuilderInner(): React.ReactElement {
     markDirty();
   }, [selectedNodeId, setNodes, setEdges, markDirty, pushSnapshot, nodes, edges]);
 
-  // Sequential operations
   const handleStepUpdate = useCallback(
     (updates: Partial<SingleStep>): void => {
       if (selectedStepIndex === null) return;
@@ -298,6 +296,7 @@ function WorkflowBuilderInner(): React.ReactElement {
     } catch (err) {
       console.error('[WorkflowBuilder] Save failed:', err);
       setValidationErrors([`Save failed: ${err instanceof Error ? err.message : 'Unknown error'}`]);
+      setValidationPanelOpen(true);
     }
   }, [buildDefinition, workflowName, cwd]);
 
@@ -311,6 +310,7 @@ function WorkflowBuilderInner(): React.ReactElement {
     } catch (err) {
       console.error('[WorkflowBuilder] Run failed:', err);
       setValidationErrors([`Run failed: ${err instanceof Error ? err.message : 'Unknown error'}`]);
+      setValidationPanelOpen(true);
     }
   }, [workflowName, hasUnsavedChanges, selectedProjectId, navigate]);
 
@@ -330,11 +330,6 @@ function WorkflowBuilderInner(): React.ReactElement {
       setEdges(state.edges);
     }
   }, [redo, setNodes, setEdges]);
-
-  // Focus node (from validation panel)
-  const handleFocusNode = useCallback((nodeId: string): void => {
-    setSelectedNodeId(nodeId);
-  }, []);
 
   // Convert validation issues to string array for toolbar display
   const toolbarValidationErrors = useMemo(
@@ -364,14 +359,13 @@ function WorkflowBuilderInner(): React.ReactElement {
         setShowLibrary(v => !v);
       },
       onToggleYaml: () => {
-        setYamlViewMode(v => (v === 'hidden' ? 'split' : v === 'split' ? 'full' : 'hidden'));
+        setYamlViewMode(v => {
+          const modes: ViewMode[] = ['hidden', 'split', 'full'];
+          const idx = modes.indexOf(v);
+          return modes[(idx + 1) % modes.length];
+        });
       },
-      onToggleValidation: () => {
-        setValidationPanelOpen(v => !v);
-      },
-      onQuickAdd: () => {
-        /* handled by canvas double-click */
-      },
+      onToggleValidation: handleToggleValidationPanel,
       onAddPrompt: () => {
         if (mode !== 'dag') return;
         const id = `node-${crypto.randomUUID()}`;
@@ -417,12 +411,6 @@ function WorkflowBuilderInner(): React.ReactElement {
         pushSnapshot({ nodes, edges });
         setNodes(nds => [...nds, newNode]);
         markDirty();
-      },
-      onFitView: () => {
-        /* handled by react flow controls */
-      },
-      onSelectAll: () => {
-        /* handled by react flow */
       },
     },
     true
@@ -590,10 +578,8 @@ function WorkflowBuilderInner(): React.ReactElement {
       <ValidationPanel
         issues={allValidationIssues}
         isOpen={validationPanelOpen}
-        onToggle={(): void => {
-          setValidationPanelOpen(v => !v);
-        }}
-        onFocusNode={handleFocusNode}
+        onToggle={handleToggleValidationPanel}
+        onFocusNode={setSelectedNodeId}
       />
 
       {/* Status Bar */}
@@ -604,10 +590,8 @@ function WorkflowBuilderInner(): React.ReactElement {
         errorCount={errorCount}
         warningCount={warningCount}
         hasUnsavedChanges={hasUnsavedChanges}
-        zoomLevel={100}
-        onValidationClick={(): void => {
-          setValidationPanelOpen(v => !v);
-        }}
+        zoomLevel={Math.round(zoom * 100)}
+        onValidationClick={handleToggleValidationPanel}
       />
     </div>
   );

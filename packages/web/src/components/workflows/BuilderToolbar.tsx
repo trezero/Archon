@@ -113,9 +113,13 @@ export function BuilderToolbar({
               if (e.target.value) onLoadWorkflow(e.target.value);
             }}
             className="rounded-md border border-border bg-surface px-1.5 py-1 text-xs text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent w-[72px] shrink-0"
-            title="Load workflow"
+            title={
+              workflowsError
+                ? 'Failed to load workflows — check server connection'
+                : 'Load workflow'
+            }
           >
-            <option value="">{workflowsError ? 'Error' : 'Load...'}</option>
+            <option value="">{workflowsError ? 'Load failed' : 'Load...'}</option>
             {(workflows ?? []).map(wf => (
               <option key={wf.name} value={wf.name}>
                 {wf.name}

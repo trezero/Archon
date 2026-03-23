@@ -153,16 +153,14 @@ function getDebouncedIssues(
   }
 
   // 5. Broken $nodeId.output references
-  const outputRefPattern = /\$(\w+)\.output/g;
   for (const node of nodes) {
     const textsToScan: string[] = [];
     if (node.data.when) textsToScan.push(node.data.when);
     if (node.data.promptText) textsToScan.push(node.data.promptText);
 
     for (const text of textsToScan) {
+      const outputRefPattern = /\$(\w+)\.output/g;
       let match: RegExpExecArray | null;
-      // Reset lastIndex for each text scan
-      outputRefPattern.lastIndex = 0;
       while ((match = outputRefPattern.exec(text)) !== null) {
         const referencedId = match[1];
         if (!nodeIds.has(referencedId)) {

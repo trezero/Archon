@@ -100,7 +100,8 @@ export function dagNodesToReactFlow(dagNodes: readonly DagNode[]): {
 
 /**
  * Compute topological layer index for each node using Kahn's algorithm (BFS).
- * Nodes with zero in-degree start at layer 0; each subsequent layer increments by 1.
+ * Nodes with zero in-degree start at layer 0; each node's layer is the maximum
+ * depth across all incoming paths (not simply parent + 1 for convergent paths).
  */
 export function computeTopologicalLayers(nodes: DagFlowNode[], edges: Edge[]): Map<string, number> {
   const layers = new Map<string, number>();

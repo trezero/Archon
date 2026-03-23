@@ -30,7 +30,7 @@ bun run start    # Server serves both API and Web UI on port 3090
 - Conversation management (create, switch, rename, delete, persist across sessions)
 - Project/codebase browsing and management (clone, register, remove)
 - Workflow invocation from UI with real-time progress tracking
-- Visual Workflow Builder with drag-and-drop canvas for DAG, sequential step list, and loop config
+- Visual Workflow Builder with drag-and-drop DAG canvas, sequential step list, and loop config; includes YAML code view (Visual/Split/Code toggle), tabbed node inspector, validation panel, undo/redo, and keyboard shortcuts
 - Lock indicator showing when the agent is working
 - Connected/disconnected status indicator
 - Message history persistence across page refreshes

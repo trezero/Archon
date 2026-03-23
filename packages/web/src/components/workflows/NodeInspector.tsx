@@ -9,8 +9,6 @@ import type { DagNodeData } from './DagNodeComponent';
 import type { CommandEntry } from '@/lib/api';
 import type { SingleStep, ParallelBlock } from '@archon/workflows/types';
 
-// ── Props types ──
-
 /** New DAG-mode inspector props (tabbed right panel). */
 export interface NodeInspectorProps {
   node: DagNodeData;
@@ -20,7 +18,7 @@ export interface NodeInspectorProps {
   onClose: () => void;
 }
 
-/** @deprecated Legacy props — kept for backward compat with WorkflowBuilder until Task 15 rewrites it. */
+/** @deprecated Legacy props — kept until SequentialEditor/LoopEditor callers are rewritten to use new props. */
 interface DagInspectorLegacyProps {
   mode: 'dag';
   node: DagNodeData;
@@ -50,13 +48,11 @@ interface ParallelBlockInspectorProps {
   onDelete: () => void;
 }
 
-/** @deprecated Legacy discriminated union — kept for backward compat. */
+/** @deprecated Legacy discriminated union — kept until SequentialEditor/LoopEditor are rewritten. */
 type LegacyNodeInspectorProps =
   | DagInspectorLegacyProps
   | SequentialInspectorProps
   | ParallelBlockInspectorProps;
-
-// ── Shared input styling ──
 
 const inputClass =
   'w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent';
@@ -69,7 +65,13 @@ const labelClass = 'text-[10px] text-text-tertiary uppercase tracking-wide';
 const textareaClass =
   'w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text-primary font-mono placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent resize-y';
 
-// ── Field wrapper ──
+function parseToolsList(value: string): string[] | undefined {
+  if (!value.trim()) return undefined;
+  return value
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
 
 function Field({
   label,
@@ -85,8 +87,6 @@ function Field({
     </div>
   );
 }
-
-// ── Shared tools input (used by legacy inspectors) ──
 
 function ToolsInput({
   label,
@@ -124,17 +124,19 @@ function ToolsInput({
   );
 }
 
-// ── Tools mode type ──
-
 type ToolsMode = 'none' | 'allow' | 'deny';
+
+const TOOLS_MODE_LABELS: Record<ToolsMode, string> = {
+  none: 'Default',
+  allow: 'Allow',
+  deny: 'Deny',
+};
 
 function resolveToolsMode(node: DagNodeData): ToolsMode {
   if (node.allowed_tools !== undefined) return 'allow';
   if (node.denied_tools !== undefined) return 'deny';
   return 'none';
 }
-
-// ── Tag list for dependencies ──
 
 function DependencyTags({
   values,
@@ -215,8 +217,6 @@ function DependencyTags({
     </div>
   );
 }
-
-// ── General Tab ──
 
 function GeneralTab({
   node,
@@ -367,8 +367,6 @@ function GeneralTab({
     </div>
   );
 }
-
-// ── Execution Tab ──
 
 function ExecutionTab({
   node,
@@ -538,8 +536,6 @@ function ExecutionTab({
   );
 }
 
-// ── Tools Tab ──
-
 const TOOL_PRESETS: readonly {
   label: string;
   allowed: string[];
@@ -568,14 +564,6 @@ function ToolsTab({
     }
   };
 
-  const parseToolsList = (value: string): string[] | undefined => {
-    if (!value.trim()) return undefined;
-    return value
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean);
-  };
-
   return (
     <div className="flex flex-col gap-3 p-3">
       <Field label="Mode">
@@ -594,7 +582,7 @@ function ToolsTab({
                   : 'bg-surface-elevated text-text-secondary hover:text-text-primary'
               )}
             >
-              {mode === 'none' ? 'Default' : mode === 'allow' ? 'Allow' : 'Deny'}
+              {TOOLS_MODE_LABELS[mode]}
             </button>
           ))}
         </div>
@@ -643,8 +631,6 @@ function ToolsTab({
     </div>
   );
 }
-
-// ── Advanced Tab ──
 
 function AdvancedTab({
   node,
@@ -700,14 +686,6 @@ function AdvancedTab({
     },
     [onUpdate]
   );
-
-  const parseToolsList = (value: string): string[] | undefined => {
-    if (!value.trim()) return undefined;
-    return value
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean);
-  };
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -772,8 +750,6 @@ function AdvancedTab({
     </div>
   );
 }
-
-// ── DAG Inspector (new tabbed layout) ──
 
 function DagInspector({
   node,
@@ -848,8 +824,6 @@ function DagInspector({
   );
 }
 
-// ── Legacy Sequential Inspector ──
-
 function SequentialInspector({
   step,
   stepIndex,
@@ -923,8 +897,6 @@ function SequentialInspector({
     </div>
   );
 }
-
-// ── Legacy Parallel Block Inspector ──
 
 function ParallelBlockInspector({
   block,
@@ -1069,8 +1041,6 @@ function ParallelBlockInspector({
   );
 }
 
-// ── Main export (supports both new and legacy props) ──
-
 /**
  * NodeInspector supports two calling patterns:
  * 1. New: `<NodeInspector node={...} commands={...} onUpdate={...} onDelete={...} onClose={...} />`
@@ -1085,7 +1055,6 @@ export function NodeInspector(
       return (
         <div className="border-t border-border px-4 py-3">
           <div className="flex flex-wrap gap-3 items-start">
-            {/* Legacy DAG: flat layout without tabs (matches old behavior) */}
             <DagInspector
               node={props.node}
               commands={props.commands}

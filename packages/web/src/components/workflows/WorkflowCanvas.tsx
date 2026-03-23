@@ -23,6 +23,12 @@ import { QuickAddPicker } from './QuickAddPicker';
 
 export { dagNodesToReactFlow } from '@/lib/dag-layout';
 
+function resolveNodeLabel(nodeType: 'command' | 'prompt' | 'bash', commandName: string): string {
+  if (nodeType === 'command') return commandName;
+  if (nodeType === 'bash') return 'Shell';
+  return 'Prompt';
+}
+
 export function reactFlowToDagNodes(rfNodes: DagFlowNode[], rfEdges: Edge[]): DagNode[] {
   return rfNodes.map(node => {
     const deps = rfEdges.filter(e => e.target === node.id).map(e => e.source);
@@ -144,7 +150,7 @@ export function WorkflowCanvas({
       const id = `node-${crypto.randomUUID()}`;
 
       const nodeType = type as 'command' | 'prompt' | 'bash';
-      const label = nodeType === 'command' ? command : nodeType === 'bash' ? 'Shell' : 'Prompt';
+      const label = resolveNodeLabel(nodeType, command);
 
       const newNode: DagFlowNode = {
         id,
@@ -183,6 +189,8 @@ export function WorkflowCanvas({
     [onEdgesChange, onDirty]
   );
 
+  // Manual double-click detection — ReactFlow v12 has no onPaneDoubleClick prop.
+  // The 300ms threshold must match the setTimeout delay to avoid both firing.
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastClickRef = useRef<{ time: number; x: number; y: number }>({ time: 0, x: 0, y: 0 });
 
@@ -198,12 +206,10 @@ export function WorkflowCanvas({
       lastClickRef.current = { time: now, x: e.clientX, y: e.clientY };
 
       if (isDoubleClick) {
-        // Cancel the pending single-click
         if (clickTimerRef.current) {
           clearTimeout(clickTimerRef.current);
           clickTimerRef.current = null;
         }
-        // Double click: show QuickAddPicker
         const wrapperEl = (e.target as HTMLElement).closest('.react-flow');
         const rect = wrapperEl?.getBoundingClientRect() ?? { left: 0, top: 0 };
         const flowPos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
@@ -212,7 +218,6 @@ export function WorkflowCanvas({
           flow: flowPos,
         });
       } else {
-        // Delay single-click to allow double-click detection
         clickTimerRef.current = setTimeout(() => {
           onNodeSelect(null);
           setQuickAddPosition(null);
@@ -231,8 +236,7 @@ export function WorkflowCanvas({
       if (!quickAddPosition) return;
 
       const id = `node-${crypto.randomUUID()}`;
-      const label =
-        type === 'command' ? (options?.commandName ?? '') : type === 'bash' ? 'Shell' : 'Prompt';
+      const label = resolveNodeLabel(type, options?.commandName ?? '');
 
       const newNode: DagFlowNode = {
         id,

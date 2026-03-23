@@ -1,4 +1,3 @@
-import { useState, useCallback } from 'react';
 import type {
   WorkflowDefinition,
   DagNode,
@@ -7,12 +6,10 @@ import type {
 } from '@archon/workflows/types';
 import { isDagWorkflow, isParallelBlock } from '@archon/workflows/types';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
 
 interface YamlCodeViewProps {
   definition: WorkflowDefinition | null;
   mode: 'split' | 'full';
-  onApply?: (yamlText: string) => void;
 }
 
 /** Serialize a single value — handles strings with newlines, objects, arrays. */
@@ -47,15 +44,6 @@ function serializeValue(value: unknown, currentIndent: number): string {
   }
   if (Array.isArray(value)) {
     if (value.length === 0) return '[]';
-    if (value.every(v => typeof v === 'string')) {
-      return (
-        '\n' +
-        value
-          .map(v => ' '.repeat(currentIndent + 2) + '- ' + serializeValue(v, currentIndent + 4))
-          .join('\n')
-      );
-    }
-    // Complex array items
     return (
       '\n' +
       value
@@ -232,56 +220,25 @@ export function serializeToYaml(def: WorkflowDefinition): string {
   return lines.join('\n') + '\n';
 }
 
-export function YamlCodeView({ definition, mode, onApply }: YamlCodeViewProps): React.ReactElement {
+export function YamlCodeView({ definition, mode }: YamlCodeViewProps): React.ReactElement {
   const yamlText = definition ? serializeToYaml(definition) : '';
-  const [editableText, setEditableText] = useState(yamlText);
 
-  const handleApply = useCallback(() => {
-    onApply?.(editableText);
-  }, [editableText, onApply]);
-
-  if (mode === 'split') {
-    return (
-      <div className="flex h-full flex-col bg-surface-inset">
-        <pre
-          className={cn(
-            'flex-1 overflow-auto p-4',
-            'font-mono text-xs leading-relaxed text-text-primary',
-            'whitespace-pre-wrap break-words'
-          )}
-        >
-          {yamlText || '# No workflow definition'}
-        </pre>
-      </div>
-    );
-  }
-
-  // Full (editable) mode
   return (
     <div className="flex h-full flex-col bg-surface-inset">
-      {/* Header with warning and Apply button */}
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <span className="text-xs text-warning">
-          Editing YAML directly. Click Apply to sync with visual editor.
-        </span>
-        <Button variant="secondary" size="xs" onClick={handleApply}>
-          Apply Changes
-        </Button>
-      </div>
-
-      {/* Editable textarea */}
-      <textarea
+      {mode === 'full' && (
+        <div className="flex items-center border-b border-border px-3 py-2">
+          <span className="text-xs text-text-tertiary">Read-only YAML preview</span>
+        </div>
+      )}
+      <pre
         className={cn(
-          'flex-1 resize-none bg-transparent p-4',
+          'flex-1 overflow-auto p-4',
           'font-mono text-xs leading-relaxed text-text-primary',
-          'outline-none'
+          'whitespace-pre-wrap break-words'
         )}
-        value={editableText}
-        onChange={(e): void => {
-          setEditableText(e.target.value);
-        }}
-        spellCheck={false}
-      />
+      >
+        {yamlText || '# No workflow definition'}
+      </pre>
     </div>
   );
 }

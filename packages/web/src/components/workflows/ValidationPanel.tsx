@@ -1,15 +1,7 @@
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
-
-export interface ValidationIssue {
-  severity: 'error' | 'warning' | 'info';
-  message: string;
-  nodeId?: string;
-  stepIndex?: number;
-  field?: string;
-  suggestion?: string;
-}
+import type { ValidationIssue } from '@/hooks/useBuilderValidation';
 
 interface ValidationPanelProps {
   issues: ValidationIssue[];
