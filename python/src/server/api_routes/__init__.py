@@ -9,7 +9,7 @@ This package organizes the API into logical modules:
 - projects_api: Project and task management with streaming
 """
 
-from .agent_chat_api import router as agent_chat_router
+from .chat_api import router as chat_router
 from .internal_api import router as internal_router
 from .knowledge_api import router as knowledge_router
 from .mcp_api import router as mcp_router
@@ -22,7 +22,7 @@ __all__ = [
     "mcp_router",
     "knowledge_router",
     "projects_router",
-    "agent_chat_router",
+    "chat_router",
     "internal_router",
     "providers_router",
 ]
