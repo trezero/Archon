@@ -22,6 +22,7 @@ import {
 import type { ConversationResponse, CodebaseResponse, MessageResponse } from '@/lib/api';
 import type {
   ChatMessage,
+  FileAttachment,
   ToolCallDisplay,
   ErrorDisplay,
   WorkflowDispatchEvent,
@@ -46,6 +47,7 @@ function mapMessageRow(row: MessageResponse): ChatMessage {
     error?: ErrorDisplay;
     workflowDispatch?: { workerConversationId: string; workflowName: string };
     workflowResult?: { workflowName: string; runId: string };
+    files?: { id?: string; name: string; mimeType: string; size: number }[];
   } = {};
   try {
     meta = JSON.parse(row.metadata) as typeof meta;
@@ -77,6 +79,12 @@ function mapMessageRow(row: MessageResponse): ChatMessage {
     error: meta.error,
     workflowDispatch: meta.workflowDispatch,
     workflowResult: meta.workflowResult,
+    files: meta.files?.map((f, i) => ({
+      id: f.id ?? `${row.id}-file-${String(i)}`,
+      name: f.name,
+      mimeType: f.mimeType,
+      size: f.size,
+    })),
     timestamp: new Date(ensureUtc(row.created_at)).getTime(),
     isStreaming: false,
   };
@@ -609,13 +617,25 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   });
 
   const handleSend = useCallback(
-    async (message: string): Promise<void> => {
+    async (message: string, uploadedFiles?: File[]): Promise<void> => {
+      // Build lightweight attachment metadata for optimistic UI display
+      const fileAttachments: FileAttachment[] | undefined =
+        uploadedFiles && uploadedFiles.length > 0
+          ? uploadedFiles.map(f => ({
+              id: crypto.randomUUID(),
+              name: f.name,
+              mimeType: f.type,
+              size: f.size,
+            }))
+          : undefined;
+
       // Add user message + thinking indicator to UI immediately
       const userMsg: ChatMessage = {
         id: nextId(),
         role: 'user',
         content: message,
         timestamp: Date.now(),
+        ...(fileAttachments ? { files: fileAttachments } : {}),
       };
       const thinkingMsg: ChatMessage = {
         id: `thinking-${String(Date.now())}`,
@@ -669,7 +689,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       }
 
       try {
-        await apiSendMessage(targetConversationId, message);
+        await apiSendMessage(targetConversationId, message, uploadedFiles);
         // Invalidate conversations cache once after first non-command message
         // so the auto-generated title appears in the sidebar immediately
         if (!hasTriggeredTitleRefresh.current && !message.startsWith('/')) {

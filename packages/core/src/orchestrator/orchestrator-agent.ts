@@ -14,6 +14,7 @@ import type {
   Conversation,
   Codebase,
   AssistantRequestOptions,
+  AttachedFile,
 } from '../types';
 import { ConversationNotFoundError } from '../types';
 import * as db from '../db/conversations';
@@ -446,7 +447,8 @@ function buildFullPrompt(
   workflows: readonly WorkflowDefinition[],
   message: string,
   issueContext: string | undefined,
-  threadContext: string | undefined
+  threadContext: string | undefined,
+  attachedFiles?: AttachedFile[]
 ): string {
   const scopedCodebase = conversation.codebase_id
     ? codebases.find(c => c.id === conversation.codebase_id)
@@ -458,6 +460,14 @@ function buildFullPrompt(
 
   const contextSuffix = issueContext ? '\n\n---\n\n## Additional Context\n\n' + issueContext : '';
 
+  const fileSuffix =
+    attachedFiles && attachedFiles.length > 0
+      ? '\n\n---\n\n## Attached Files\n\nThe user has uploaded the following files. Use your file reading tools (Read, View) to access them:\n\n' +
+        attachedFiles
+          .map(f => `- ${f.name} (${f.mimeType}, ${String(f.size)} bytes): ${f.path}`)
+          .join('\n')
+      : '';
+
   if (threadContext) {
     return (
       systemPrompt +
@@ -465,11 +475,12 @@ function buildFullPrompt(
       threadContext +
       '\n\n---\n\n## Current Request\n\n' +
       message +
-      contextSuffix
+      contextSuffix +
+      fileSuffix
     );
   }
 
-  return systemPrompt + '\n\n---\n\n## User Message\n\n' + message + contextSuffix;
+  return systemPrompt + '\n\n---\n\n## User Message\n\n' + message + contextSuffix + fileSuffix;
 }
 
 // ─── Main Handler ───────────────────────────────────────────────────────────
@@ -486,7 +497,8 @@ export async function handleMessage(
   message: string,
   context?: HandleMessageContext
 ): Promise<void> {
-  const { issueContext, threadContext, parentConversationId, isolationHints } = context ?? {};
+  const { issueContext, threadContext, parentConversationId, isolationHints, attachedFiles } =
+    context ?? {};
   try {
     getLog().debug({ conversationId }, 'orchestrator_message_received');
 
@@ -719,7 +731,8 @@ export async function handleMessage(
       workflows,
       message,
       issueContext,
-      threadContext
+      threadContext,
+      attachedFiles
     );
     const cwd = getArchonWorkspacesPath();
 

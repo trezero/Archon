@@ -82,10 +82,18 @@ export const listMessagesQuerySchema = z.object({
 /** GET /api/conversations/:id/messages response. */
 export const messageListResponseSchema = z.array(messageSchema).openapi('MessageListResponse');
 
-/** POST /api/conversations/:id/message request body. */
+/** POST /api/conversations/:id/message JSON request body. */
 export const sendMessageBodySchema = z
   .object({ message: z.string().min(1) })
   .openapi('SendMessageBody');
+
+/** POST /api/conversations/:id/message multipart request body (file uploads). */
+export const sendMessageMultipartSchema = z
+  .object({
+    message: z.string().min(1),
+    files: z.array(z.string().openapi({ format: 'binary' })).optional(),
+  })
+  .openapi('SendMessageMultipartBody');
 
 /** Response for dispatch endpoints (send message, run workflow). */
 export const dispatchResponseSchema = z

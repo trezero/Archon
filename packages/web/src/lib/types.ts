@@ -175,6 +175,13 @@ export type SSEEvent =
  * with persisted data (content, toolCalls). When loading from the API, display
  * fields default to their inactive states.
  */
+export interface FileAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -183,6 +190,7 @@ export interface ChatMessage {
   error?: ErrorDisplay;
   timestamp: number;
   isStreaming?: boolean;
+  files?: FileAttachment[];
   workflowDispatch?: {
     workerConversationId: string;
     workflowName: string;

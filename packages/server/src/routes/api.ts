@@ -8,9 +8,10 @@ import { cors } from 'hono/cors';
 import type { WebAdapter } from '../adapters/web';
 import { rm, readFile, writeFile, unlink, mkdir } from 'fs/promises';
 import { readFileSync } from 'fs';
-import { normalize, join, sep } from 'path';
+import { normalize, join, sep, basename } from 'path';
+import { randomUUID } from 'crypto';
 import type { Context } from 'hono';
-import type { ConversationLockManager, GlobalConfig } from '@archon/core';
+import type { ConversationLockManager, AttachedFile, HandleMessageContext, GlobalConfig } from '@archon/core';
 import {
   handleMessage,
   getDatabaseType,
@@ -31,6 +32,7 @@ import {
   getDefaultWorkflowsPath,
   getArchonWorkspacesPath,
   getRunArtifactsPath,
+  getArchonHome,
 } from '@archon/paths';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import { parseWorkflow } from '@archon/workflows/loader';
@@ -88,6 +90,7 @@ import {
   messageListResponseSchema,
   listMessagesQuerySchema,
   sendMessageBodySchema,
+  sendMessageMultipartSchema,
   dispatchResponseSchema,
 } from './schemas/conversation.schemas';
 import {
@@ -365,11 +368,14 @@ const sendMessageRoute = createRoute({
   method: 'post',
   path: '/api/conversations/{id}/message',
   tags: ['Conversations'],
-  summary: 'Send a message to a conversation',
+  summary: 'Send a message (JSON or multipart with file uploads)',
   request: {
     params: conversationIdParamsSchema,
     body: {
-      content: { 'application/json': { schema: sendMessageBodySchema } },
+      content: {
+        'application/json': { schema: sendMessageBodySchema },
+        'multipart/form-data': { schema: sendMessageMultipartSchema },
+      },
       required: true,
     },
   },
@@ -773,9 +779,13 @@ export function registerApiRoutes(
   app.use('/api/*', cors({ origin: process.env.WEB_UI_ORIGIN || '*' }));
 
   // Shared lock/dispatch/error handling for message and workflow endpoints
+  /** Maximum allowed upload size per file (10 MB) */
+  const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
   async function dispatchToOrchestrator(
     conversationId: string,
-    message: string
+    message: string,
+    extraContext?: Omit<HandleMessageContext, 'isolationHints'>
   ): Promise<{ accepted: boolean; status: string }> {
     const result = await lockManager.acquireLock(conversationId, async () => {
       // Emit lock:true at handler start so the UI knows processing has begun.
@@ -784,6 +794,7 @@ export function registerApiRoutes(
       try {
         await handleMessage(webAdapter, conversationId, message, {
           isolationHints: { workflowType: 'thread', workflowId: conversationId },
+          ...extraContext,
         });
       } catch (error) {
         getLog().error({ err: error, conversationId }, 'handle_message_failed');
@@ -981,9 +992,69 @@ export function registerApiRoutes(
   });
 
   // POST /api/conversations/:id/message - Send message
+  // Manual body parsing: multipart uses parseBody(), JSON uses req.json().
   registerOpenApiRoute(sendMessageRoute, async c => {
     const conversationId = c.req.param('id') ?? '';
-    const { message } = getValidatedBody(c, sendMessageBodySchema);
+
+    let message: string;
+    const savedFiles: AttachedFile[] = [];
+
+    const contentType = c.req.header('content-type') ?? '';
+
+    if (contentType.includes('multipart/form-data')) {
+      let body: Record<string, string | File | (string | File)[]>;
+      try {
+        body = await c.req.parseBody({ all: true });
+      } catch {
+        return c.json({ error: 'Invalid multipart form data' }, 400);
+      }
+
+      const rawMessage = body.message;
+      if (typeof rawMessage !== 'string' || !rawMessage) {
+        return c.json({ error: 'message must be a non-empty string' }, 400);
+      }
+      message = rawMessage;
+
+      const rawFiles = body.files;
+      const fileList: (string | File)[] = Array.isArray(rawFiles)
+        ? rawFiles
+        : rawFiles !== undefined
+          ? [rawFiles]
+          : [];
+      const uploadDir = join(getArchonHome(), 'artifacts', 'uploads', conversationId);
+
+      for (const entry of fileList) {
+        if (!(entry instanceof File)) continue;
+        if (entry.size > MAX_UPLOAD_BYTES) {
+          return c.json({ error: `File "${entry.name}" exceeds the 10 MB size limit` }, 400);
+        }
+        await mkdir(uploadDir, { recursive: true });
+        const fileId = randomUUID();
+        const safeName = basename(entry.name).replace(/[^a-zA-Z0-9._-]/g, '_');
+        const filePath = join(uploadDir, `${fileId}_${safeName}`);
+        await writeFile(filePath, Buffer.from(await entry.arrayBuffer()));
+        savedFiles.push({
+          path: filePath,
+          name: entry.name,
+          mimeType: entry.type,
+          size: entry.size,
+        });
+      }
+
+      getLog().info({ conversationId, fileCount: savedFiles.length }, 'message.files_uploaded');
+    } else {
+      let body: { message?: unknown };
+      try {
+        body = await c.req.json();
+      } catch {
+        return c.json({ error: 'Invalid JSON in request body' }, 400);
+      }
+
+      if (typeof body.message !== 'string' || !body.message) {
+        return c.json({ error: 'message must be a non-empty string' }, 400);
+      }
+      message = body.message;
+    }
 
     // Look up conversation for message persistence
     let conv: Awaited<ReturnType<typeof conversationDb.findConversationByPlatformId>> = null;
@@ -995,8 +1066,21 @@ export function registerApiRoutes(
 
     // Persist user message and pass DB ID to adapter for assistant message persistence
     if (conv) {
+      const fileMeta =
+        savedFiles.length > 0
+          ? savedFiles.map(f => ({
+              name: f.name,
+              mimeType: f.mimeType,
+              size: f.size,
+              path: f.path,
+            }))
+          : undefined;
       try {
-        await messageDb.addMessage(conv.id, 'user', message);
+        if (fileMeta) {
+          await messageDb.addMessage(conv.id, 'user', message, { files: fileMeta });
+        } else {
+          await messageDb.addMessage(conv.id, 'user', message);
+        }
       } catch (e: unknown) {
         getLog().error({ err: e, conversationId: conv.id }, 'message_persistence_failed');
         try {
@@ -1015,7 +1099,8 @@ export function registerApiRoutes(
       webAdapter.setConversationDbId(conversationId, conv.id);
     }
 
-    const result = await dispatchToOrchestrator(conversationId, message);
+    const extraContext = savedFiles.length > 0 ? { attachedFiles: savedFiles } : undefined;
+    const result = await dispatchToOrchestrator(conversationId, message, extraContext);
     return c.json(result);
   });
 

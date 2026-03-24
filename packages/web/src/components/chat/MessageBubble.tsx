@@ -4,7 +4,8 @@ import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
-import type { ChatMessage } from '@/lib/types';
+import { Paperclip } from 'lucide-react';
+import type { ChatMessage, FileAttachment } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 // Hoisted to module scope to prevent new references on every render
@@ -108,22 +109,38 @@ function MessageBubbleRaw({ message }: MessageBubbleProps): React.ReactElement {
         )}
       >
         {isUser ? (
-          <div className="flex items-start gap-2">
-            <p className="text-sm text-text-primary whitespace-pre-wrap flex-1">
-              {message.content}
-            </p>
-            <button
-              onClick={copyMessage}
-              className="shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-text-tertiary hover:text-text-primary"
-              title="Copy message"
-              aria-label={copied ? 'Copied' : 'Copy message'}
-            >
-              {copied ? (
-                <Check className="h-3.5 w-3.5 text-success" />
-              ) : (
-                <Copy className="h-3.5 w-3.5" />
-              )}
-            </button>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-start gap-2">
+              <p className="text-sm text-text-primary whitespace-pre-wrap flex-1">
+                {message.content}
+              </p>
+              <button
+                onClick={copyMessage}
+                className="shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-text-tertiary hover:text-text-primary"
+                title="Copy message"
+                aria-label={copied ? 'Copied' : 'Copy message'}
+              >
+                {copied ? (
+                  <Check className="h-3.5 w-3.5 text-success" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </div>
+            {message.files && message.files.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {message.files.map((file: FileAttachment) => (
+                  <div
+                    key={file.id}
+                    className="flex items-center gap-1 rounded-md bg-black/10 px-1.5 py-0.5 text-xs text-text-secondary"
+                    title={file.name}
+                  >
+                    <Paperclip className="h-3 w-3 shrink-0" />
+                    <span className="max-w-[120px] truncate">{file.name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <div className="chat-markdown max-w-none text-sm text-text-primary">
