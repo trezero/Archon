@@ -103,14 +103,18 @@ import {
   codebaseEnvironmentsResponseSchema,
 } from './schemas/config.schemas';
 
-// Read app version once at module load (root package.json is 3 levels up from src/routes/)
+// Read app version once at module load (root package.json is 4 levels up from src/routes/)
 let appVersion = 'unknown';
 try {
-  const pkgContent = readFileSync(join(import.meta.dir, '../../../package.json'), 'utf-8');
-  const pkg = JSON.parse(pkgContent) as { version: string };
-  appVersion = pkg.version;
-} catch {
+  const pkgContent = readFileSync(join(import.meta.dir, '../../../../package.json'), 'utf-8');
+  const pkg = JSON.parse(pkgContent) as { version?: string };
+  appVersion = pkg.version ?? 'unknown';
+} catch (err) {
   // package.json not found (binary build or unusual install)
+  getLog().debug(
+    { err, path: join(import.meta.dir, '../../../../package.json') },
+    'api.version_read_failed'
+  );
 }
 
 type WorkflowSource = 'project' | 'bundled';
