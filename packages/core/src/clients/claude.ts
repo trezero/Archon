@@ -199,6 +199,14 @@ function classifySubprocessError(
 }
 
 /**
+ * Returns the current process UID, or undefined on platforms that don't support it (e.g. Windows).
+ * Exported for testing — spyOn(claudeModule, 'getProcessUid') works cross-platform.
+ */
+export function getProcessUid(): number | undefined {
+  return typeof process.getuid === 'function' ? process.getuid() : undefined;
+}
+
+/**
  * Claude AI assistant client
  * Implements generic IAssistantClient interface
  */
@@ -206,8 +214,7 @@ export class ClaudeClient implements IAssistantClient {
   constructor() {
     // Claude Code SDK silently rejects bypassPermissions when running as root (UID 0).
     // Check once at construction time so the error surfaces early, not on first query.
-    // process.getuid is undefined on Windows, so optional chaining is required.
-    if (process.getuid?.() === 0) {
+    if (getProcessUid() === 0) {
       throw new Error(
         'Claude Code SDK does not support bypassPermissions when running as root (UID 0). ' +
           'Run as a non-root user, or use the Dockerfile which creates a non-root appuser.'
@@ -266,8 +273,7 @@ export class ClaudeClient implements IAssistantClient {
         ...(requestOptions?.outputFormat !== undefined
           ? { outputFormat: requestOptions.outputFormat }
           : {}),
-        // Pass hooks for per-node SDK hook callbacks
-        ...(requestOptions?.hooks !== undefined ? { hooks: requestOptions.hooks } : {}),
+        // Note: hooks are merged below (line with `hooks: { ... }`) — not spread here
         // Pass MCP servers for per-node MCP support (Claude Agent SDK v0.2.74+)
         ...(requestOptions?.mcpServers !== undefined
           ? { mcpServers: requestOptions.mcpServers }

@@ -135,14 +135,19 @@ export class MessagePersistence {
       getLog().warn({ conversationId, name }, 'tool_result_dropped_no_buffer');
       return;
     }
+    let matched = false;
     for (let i = buf.segments.length - 1; i >= 0; i--) {
       const seg = buf.segments[i];
       const tc = [...seg.toolCalls].reverse().find(t => t.name === name && t.output === undefined);
       if (tc) {
         tc.output = output;
         tc.duration = duration;
+        matched = true;
         break;
       }
+    }
+    if (!matched) {
+      getLog().warn({ conversationId, name }, 'tool_result_no_matching_tool_call');
     }
   }
 
@@ -177,6 +182,17 @@ export class MessagePersistence {
     if (!buf || buf.segments.length === 0) {
       this.assistantBuffer.delete(conversationId);
       return;
+    }
+
+    // Pre-set `duration` on the last tool in each segment so terminal tool calls
+    // (those that never receive an appendToolResult) don't satisfy the
+    // `output === undefined && duration === undefined` in-flight condition below.
+    const preNow = Date.now();
+    for (const seg of buf.segments) {
+      const lastTool = seg.toolCalls[seg.toolCalls.length - 1];
+      if (lastTool && lastTool.duration === undefined) {
+        lastTool.duration = preNow - lastTool.startedAt;
+      }
     }
 
     // Split: keep segments with in-flight tools (output pending) in the buffer
@@ -215,7 +231,8 @@ export class MessagePersistence {
       if (existing) {
         existing.segments.unshift(...ready);
       } else {
-        this.assistantBuffer.set(conversationId, { segments: [...ready, ...pending] });
+        // pending is always empty here (non-empty pending keeps the buffer alive above)
+        this.assistantBuffer.set(conversationId, { segments: [...ready] });
       }
       return;
     }

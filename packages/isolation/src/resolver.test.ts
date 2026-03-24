@@ -104,7 +104,6 @@ describe('IsolationResolver', () => {
     return new IsolationResolver({
       store: makeMockStore(),
       provider: makeMockProvider(),
-      maxWorktreesPerCodebase: 25,
       staleThresholdDays: 14,
       ...overrides,
     });
@@ -319,80 +318,6 @@ describe('IsolationResolver', () => {
     );
   });
 
-  test('limit reached, cleanup succeeds — returns created with autoCleanedCount', async () => {
-    let countCalls = 0;
-    const resolver = createResolver({
-      store: makeMockStore({
-        countActiveByCodebase: async () => {
-          countCalls++;
-          return countCalls === 1 ? 25 : 20; // At limit first, then under after cleanup
-        },
-      }),
-      cleanup: {
-        makeRoom: async () => ({ removedCount: 5 }),
-        getBreakdown: async () => ({
-          total: 25,
-          merged: 5,
-          stale: 3,
-          active: 17,
-          limit: 25,
-          mergedEnvs: [],
-          staleEnvs: [],
-          activeEnvs: [],
-        }),
-      },
-    });
-
-    const result = await resolver.resolve({
-      existingEnvId: null,
-      codebase: defaultCodebase,
-      hints: { workflowType: 'issue', workflowId: '200' },
-      platformType: 'web',
-    });
-
-    expect(result.status).toBe('resolved');
-    if (result.status === 'resolved') {
-      expect(result.method.type).toBe('created');
-      if (result.method.type === 'created') {
-        expect(result.method.autoCleanedCount).toBe(5);
-      }
-    }
-  });
-
-  test('limit reached, cleanup fails — returns blocked', async () => {
-    const resolver = createResolver({
-      store: makeMockStore({
-        countActiveByCodebase: async () => 25,
-      }),
-      cleanup: {
-        makeRoom: async () => ({ removedCount: 0 }),
-        getBreakdown: async () => ({
-          total: 25,
-          merged: 0,
-          stale: 2,
-          active: 23,
-          limit: 25,
-          mergedEnvs: [],
-          staleEnvs: [],
-          activeEnvs: [],
-        }),
-      },
-    });
-
-    const result = await resolver.resolve({
-      existingEnvId: null,
-      codebase: defaultCodebase,
-      hints: { workflowType: 'issue', workflowId: '300' },
-      platformType: 'web',
-    });
-
-    expect(result.status).toBe('blocked');
-    if (result.status === 'blocked') {
-      expect(result.reason).toBe('limit_reached');
-      expect(result.userMessage).toContain('Worktree limit reached');
-    }
-  });
-
   test('creation error — returns blocked with creation_failed', async () => {
     const resolver = createResolver({
       provider: {
@@ -414,28 +339,6 @@ describe('IsolationResolver', () => {
     if (result.status === 'blocked') {
       expect(result.reason).toBe('creation_failed');
       expect(result.userMessage).toContain('Permission denied');
-    }
-  });
-
-  test('no cleanup provided, at limit — returns blocked immediately', async () => {
-    const resolver = createResolver({
-      store: makeMockStore({
-        countActiveByCodebase: async () => 25,
-      }),
-      cleanup: undefined,
-    });
-
-    const result = await resolver.resolve({
-      existingEnvId: null,
-      codebase: defaultCodebase,
-      hints: { workflowType: 'issue', workflowId: '500' },
-      platformType: 'web',
-    });
-
-    expect(result.status).toBe('blocked');
-    if (result.status === 'blocked') {
-      expect(result.reason).toBe('limit_reached');
-      expect(result.userMessage).toContain('No auto-cleanup available');
     }
   });
 
@@ -726,28 +629,6 @@ describe('IsolationResolver', () => {
   });
 
   // --- Constructor validation tests ---
-
-  test('throws on zero maxWorktreesPerCodebase', () => {
-    expect(
-      () =>
-        new IsolationResolver({
-          store: makeMockStore(),
-          provider: makeMockProvider(),
-          maxWorktreesPerCodebase: 0,
-        })
-    ).toThrow('maxWorktreesPerCodebase must be positive, got 0');
-  });
-
-  test('throws on negative maxWorktreesPerCodebase', () => {
-    expect(
-      () =>
-        new IsolationResolver({
-          store: makeMockStore(),
-          provider: makeMockProvider(),
-          maxWorktreesPerCodebase: -5,
-        })
-    ).toThrow('maxWorktreesPerCodebase must be positive, got -5');
-  });
 
   test('throws on zero staleThresholdDays', () => {
     expect(

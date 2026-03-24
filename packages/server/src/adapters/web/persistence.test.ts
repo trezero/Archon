@@ -315,6 +315,25 @@ describe('MessagePersistence', () => {
     });
   });
 
+  describe('flush — pre-finalization of terminal tool calls', () => {
+    test('flushes segment when last tool call never received a result', async () => {
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      persistence.appendText('conv-1', 'running tool');
+      persistence.appendToolCall('conv-1', { name: 'bash', input: { command: 'ls' } });
+      // No appendToolResult — simulates terminal tool call at turn end
+
+      await persistence.flush('conv-1');
+
+      // The segment must be flushed (not held as pending)
+      expect(mockAddMessage).toHaveBeenCalledTimes(1);
+      const metadata = mockAddMessage.mock.calls[0][3] as {
+        toolCalls?: { name: string; duration?: number }[];
+      };
+      // Duration must be set (pre-finalized), not undefined
+      expect(metadata?.toolCalls?.[0]?.duration).toBeGreaterThanOrEqual(0);
+    });
+  });
+
   describe('finalizeRunningTools', () => {
     test('sets duration on the last running tool', async () => {
       persistence.setConversationDbId('conv-1', 'db-uuid-1');

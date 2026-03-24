@@ -97,6 +97,7 @@ archon complete <branch> --force   # skip uncommitted-changes check
 | `archon-resolve-conflicts` | Resolve merge conflicts |
 | `archon-ralph-fresh` | Iterate through PRD stories (stateless) |
 | `archon-ralph-stateful` | Iterate through PRD stories (with memory) |
+| `archon-refactor-safely` | Safely decompose large files with type-check hooks and behavior verification |
 | `archon-test-loop` | Run tests in a loop until passing |
 
 ---

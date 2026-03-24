@@ -15,7 +15,7 @@ This document captures the design decisions for a **unified isolation architectu
 | **Threading model**        | ALL bot responses → thread                    | Never pollute main channel                   |
 | **Cleanup service**        | Separate service, git-first                   | Clean separation; git is source of truth     |
 | **Cross-platform linking** | Automatic via linkedIssues                    | PR→Issue linking; worktrees are cheap        |
-| **Limits**                 | 25 worktrees/codebase (configurable)          | Mental model limit, not resource constraint  |
+| **Limits**                 | Not yet implemented (planned: 25/codebase)    | Mental model limit, not resource constraint  |
 
 **Implementation phases**:
 
@@ -907,14 +907,16 @@ Options:
 
 **Checklist**:
 
-- [x] Add limit check in orchestrator before creating new isolation
-- [x] Attempt auto-cleanup of merged branches when limit hit
-- [x] If auto-cleanup insufficient, show limit message with options
-- [x] Add `/worktree cleanup merged` command
-- [x] Add `/worktree cleanup stale` command
-- [x] Update `/status` to show worktree count and breakdown
-- [x] Test: Hit limit → helpful message shown
-- [x] Test: Auto-cleanup makes room → continue without user action
+> Note: Limit enforcement was not carried through to implementation; `maxWorktreesPerCodebase` was removed from `IsolationResolver` as dead code.
+
+- [ ] Add limit check in orchestrator before creating new isolation
+- [ ] Attempt auto-cleanup of merged branches when limit hit
+- [ ] If auto-cleanup insufficient, show limit message with options
+- [ ] Add `/worktree cleanup merged` command
+- [ ] Add `/worktree cleanup stale` command
+- [ ] Update `/status` to show worktree count and breakdown
+- [ ] Test: Hit limit → helpful message shown
+- [ ] Test: Auto-cleanup makes room → continue without user action
 
 ### Phase 4: Schema Cleanup
 

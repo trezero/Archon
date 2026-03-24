@@ -17,6 +17,7 @@ mock.module('@anthropic-ai/claude-agent-sdk', () => ({
 }));
 
 import { ClaudeClient } from './claude';
+import * as claudeModule from './claude';
 
 describe('ClaudeClient', () => {
   let client: ClaudeClient;
@@ -32,7 +33,7 @@ describe('ClaudeClient', () => {
 
   describe('constructor', () => {
     test('throws when running as root (UID 0)', () => {
-      const spy = spyOn(process, 'getuid').mockReturnValue(0);
+      const spy = spyOn(claudeModule, 'getProcessUid').mockReturnValue(0);
       expect(() => new ClaudeClient()).toThrow(
         'does not support bypassPermissions when running as root'
       );
@@ -40,7 +41,13 @@ describe('ClaudeClient', () => {
     });
 
     test('does not throw for non-root user', () => {
-      const spy = spyOn(process, 'getuid').mockReturnValue(1000);
+      const spy = spyOn(claudeModule, 'getProcessUid').mockReturnValue(1000);
+      expect(() => new ClaudeClient()).not.toThrow();
+      spy.mockRestore();
+    });
+
+    test('does not throw when process.getuid is unavailable (Windows)', () => {
+      const spy = spyOn(claudeModule, 'getProcessUid').mockReturnValue(undefined);
       expect(() => new ClaudeClient()).not.toThrow();
       spy.mockRestore();
     });
