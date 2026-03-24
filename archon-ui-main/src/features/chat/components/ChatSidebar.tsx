@@ -6,7 +6,7 @@
  */
 
 import { Expand, X } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getDefaultChatModel } from "../../../components/settings/ChatModelSettings";
 import { cn } from "../../../lib/utils";
@@ -47,12 +47,10 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
   const { streamingMessage, toolResults, isStreaming, sendMessage } = useSSEStream();
 
   // Auto-select first conversation if none active
-  const effectiveConversationId = useMemo(() => {
-    if (activeConversationId) return activeConversationId;
-    if (conversations && conversations.length > 0) {
-      return conversations[0].id;
+  useEffect(() => {
+    if (!activeConversationId && conversations && conversations.length > 0) {
+      setActiveConversationId(conversations[0].id);
     }
-    return undefined;
   }, [activeConversationId, conversations]);
 
   const handleCreateConversation = useCallback(async () => {
@@ -76,18 +74,18 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
   );
 
   const handleSend = useCallback(
-    (content: string) => {
-      if (!effectiveConversationId) {
-        // Create a conversation first, then send
-        createConversation.mutateAsync({}).then((newConv) => {
-          setActiveConversationId(newConv.id);
-          sendMessage(newConv.id, content, model);
-        });
-        return;
+    async (content: string) => {
+      let convId = activeConversationId;
+
+      if (!convId) {
+        const newConv = await createConversation.mutateAsync({});
+        convId = newConv.id;
+        setActiveConversationId(convId);
       }
-      sendMessage(effectiveConversationId, content, model);
+
+      sendMessage(convId, content, model);
     },
-    [effectiveConversationId, sendMessage, model, createConversation],
+    [activeConversationId, sendMessage, model, createConversation],
   );
 
   const handleExpand = useCallback(() => {
@@ -151,7 +149,7 @@ export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
           <div className="border-b border-white/10 max-h-[300px] overflow-hidden">
             <ConversationList
               conversations={conversations}
-              activeId={effectiveConversationId}
+              activeId={activeConversationId}
               onSelect={(id) => {
                 setActiveConversationId(id);
                 setShowConversationList(false);

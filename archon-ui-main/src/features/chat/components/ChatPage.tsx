@@ -4,7 +4,7 @@
  * Left: ConversationList | Center: MessageStream + ChatInput | Right: ConversationContext
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getDefaultChatModel } from "../../../components/settings/ChatModelSettings";
 import { cn } from "../../../lib/utils";
 import {
@@ -40,6 +40,13 @@ export function ChatPage() {
   // Streaming
   const { streamingMessage, toolResults, isStreaming, sendMessage } = useSSEStream();
 
+  // Auto-select first conversation on load (or when conversations change and none is selected)
+  useEffect(() => {
+    if (!activeConversationId && conversations && conversations.length > 0) {
+      setActiveConversationId(conversations[0].id);
+    }
+  }, [activeConversationId, conversations]);
+
   const handleCreateConversation = useCallback(async () => {
     try {
       const newConv = await createConversation.mutateAsync({});
@@ -60,15 +67,17 @@ export function ChatPage() {
   );
 
   const handleSend = useCallback(
-    (content: string) => {
-      if (!activeConversationId) {
-        createConversation.mutateAsync({}).then((newConv) => {
-          setActiveConversationId(newConv.id);
-          sendMessage(newConv.id, content, model);
-        });
-        return;
+    async (content: string) => {
+      let convId = activeConversationId;
+
+      if (!convId) {
+        // Create conversation first, wait for it, then send
+        const newConv = await createConversation.mutateAsync({});
+        convId = newConv.id;
+        setActiveConversationId(convId);
       }
-      sendMessage(activeConversationId, content, model);
+
+      sendMessage(convId, content, model);
     },
     [activeConversationId, sendMessage, model, createConversation],
   );
