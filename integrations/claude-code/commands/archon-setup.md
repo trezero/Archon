@@ -143,6 +143,73 @@ If the download fails, warn the user but continue — existing commands will sti
 
 Read `archon_mcp_url` from `.claude/archon-config.json` (or `~/.claude/archon-config.json`).
 
+## Phase 5c: CLAUDE.md Rules Integration
+
+Ensure the project's `CLAUDE.md` includes the recommended Archon rules for ambient
+knowledge base behavior.
+
+1. Read `archon_mcp_url` from `.claude/archon-config.json` (fall back to `~/.claude/archon-config.json`).
+
+2. Download the Archon rules snippet:
+
+```bash
+curl -sf "<archon_mcp_url>/archon-setup/claude-md-snippet.md"
+```
+
+Store the result as `<snippet>`. If the download fails, warn and skip this phase.
+
+3. Check the state of `CLAUDE.md` in the project root:
+
+**Case A — `CLAUDE.md` does not exist:**
+
+Create `CLAUDE.md` with the snippet wrapped in sentinel markers:
+
+```markdown
+<!-- archon-rules-start -->
+<snippet content here>
+<!-- archon-rules-end -->
+```
+
+Report: `Created CLAUDE.md with Archon knowledge base rules.`
+
+**Case B — `CLAUDE.md` exists and contains `<!-- archon-rules-start -->`:**
+
+The Archon rules section is already present. Replace everything between
+`<!-- archon-rules-start -->` and `<!-- archon-rules-end -->` (inclusive of
+markers) with the latest snippet wrapped in the same markers. Preserve all
+content before and after the markers exactly as-is.
+
+Report: `Updated Archon rules section in CLAUDE.md to latest version.`
+
+**Case C — `CLAUDE.md` exists but does NOT contain `<!-- archon-rules-start -->`:**
+
+This is the intelligent merge case. The setup script may have appended the rules
+as a raw block, or the user may have manually written equivalent guidance.
+
+Perform the following:
+
+1. Read the full existing `CLAUDE.md` content.
+2. Read the `<snippet>` content.
+3. Check whether the existing content already covers Archon-equivalent guidance
+   (e.g., mentions `rag_search_knowledge_base`, `/archon-memory`, Archon KB
+   status checks). If equivalent guidance exists, remove it to avoid duplication.
+4. Determine the best insertion point — typically a new top-level section at the
+   end of the file, or grouped with other tool/integration sections if they exist.
+5. Write the merged `CLAUDE.md` using the Edit or Write tool. The Archon rules
+   **must** be wrapped in the sentinel markers:
+
+```markdown
+<!-- archon-rules-start -->
+<snippet content here>
+<!-- archon-rules-end -->
+```
+
+6. Report: `Merged Archon rules into existing CLAUDE.md.`
+
+**Important:** Never delete or modify the user's custom instructions. Only add
+or replace the Archon-specific section. When in doubt about whether existing
+content is Archon-related, leave it in place and add the new section separately.
+
 ## Phase 6: Update State
 
 Read `.claude/archon-state.json` or start with `{}`.

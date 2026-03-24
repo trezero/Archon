@@ -786,6 +786,15 @@ async def http_scan_projects_md(request: Request) -> PlainTextResponse:
     return PlainTextResponse(content)
 
 
+async def http_claude_md_snippet(request: Request) -> PlainTextResponse:
+    """Serve the recommended Archon CLAUDE.md rules snippet."""
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "integrations" / "claude-code" / "claude-md-snippet.md"
+        if candidate.exists():
+            return PlainTextResponse(candidate.read_text())
+    return PlainTextResponse("", status_code=404)
+
+
 def _render_setup_sh(api_url: str, mcp_url: str) -> str:
     """Generate archonSetup.sh with API and MCP URLs injected."""
     for parent in Path(__file__).resolve().parents:
@@ -966,6 +975,7 @@ try:
     mcp.custom_route("/archon-setup/plugin/archon-memory.tar.gz", methods=["GET"])(http_download_plugin)
     mcp.custom_route("/archon-setup/extensions.tar.gz", methods=["GET"])(http_download_extensions)
     mcp.custom_route("/archon-setup/commands.tar.gz", methods=["GET"])(http_download_commands)
+    mcp.custom_route("/archon-setup/claude-md-snippet.md", methods=["GET"])(http_claude_md_snippet)
     logger.info("✓ Plugin and extension distribution endpoints registered")
 except Exception as e:
     logger.error(f"✗ Failed to register setup endpoints: {e}")
