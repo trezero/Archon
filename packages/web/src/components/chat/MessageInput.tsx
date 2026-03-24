@@ -11,19 +11,85 @@ import {
 import { ArrowUp, Loader2, Paperclip, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-const ACCEPTED_MIME_TYPES = [
+/** Binary (non-text) MIME types explicitly accepted */
+const ACCEPTED_BINARY_MIME_TYPES = new Set([
   'image/png',
   'image/jpeg',
   'image/gif',
   'image/webp',
   'application/pdf',
-  'text/plain',
-  'text/markdown',
-  'text/x-python',
-  'text/javascript',
-  'text/typescript',
-  'application/json',
-];
+]);
+
+/**
+ * Extensions listed in the file-picker's `accept` attribute.
+ * Covers all file types Claude Code supports: images, PDFs, and text/code files.
+ */
+const ACCEPTED_EXTENSIONS = [
+  // Images (also accepted via MIME type above)
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  // Documents
+  '.pdf',
+  // Text / markup
+  '.md',
+  '.txt',
+  '.csv',
+  '.xml',
+  '.html',
+  '.htm',
+  // Data / config
+  '.json',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.ini',
+  '.cfg',
+  '.conf',
+  '.env',
+  '.log',
+  // Web
+  '.css',
+  '.js',
+  '.jsx',
+  '.ts',
+  '.tsx',
+  '.mjs',
+  '.cjs',
+  // Systems / scripting
+  '.py',
+  '.rb',
+  '.go',
+  '.java',
+  '.c',
+  '.cpp',
+  '.cc',
+  '.cxx',
+  '.h',
+  '.hpp',
+  '.cs',
+  '.php',
+  '.sh',
+  '.bash',
+  '.zsh',
+  '.fish',
+  '.rs',
+  '.swift',
+  '.kt',
+  '.scala',
+  '.r',
+  '.sql',
+].join(',');
+
+/** Returns true if the file type is accepted (any text/* or an explicitly allowed binary). */
+function isAcceptedFileType(file: File): boolean {
+  if (file.type.startsWith('text/')) return true;
+  // application/json and similar structured-text types
+  if (file.type === 'application/json') return true;
+  return ACCEPTED_BINARY_MIME_TYPES.has(file.type);
+}
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_FILES = 5;
@@ -74,7 +140,7 @@ const messageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
           setFileError(`"${file.name}" exceeds the 10 MB size limit`);
           continue;
         }
-        if (!ACCEPTED_MIME_TYPES.includes(file.type)) {
+        if (!isAcceptedFileType(file)) {
           setFileError(`"${file.name}" is not a supported file type`);
           continue;
         }
@@ -203,7 +269,7 @@ const messageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
             ref={fileInputRef}
             type="file"
             multiple
-            accept={ACCEPTED_MIME_TYPES.join(',')}
+            accept={ACCEPTED_EXTENSIONS}
             className="hidden"
             onChange={handleFilePickerChange}
             disabled={disabled}

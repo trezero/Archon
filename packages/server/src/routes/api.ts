@@ -783,20 +783,26 @@ export function registerApiRoutes(
   const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
   /** Maximum number of files per message (enforced server-side) */
   const MAX_FILES_PER_MESSAGE = 5;
-  /** Allowed MIME types for uploaded files (server-side allowlist) */
-  const ALLOWED_UPLOAD_MIME_TYPES = new Set([
+  /**
+   * Binary (non-text) MIME types explicitly allowed for upload.
+   * All text/* types are accepted separately via isAllowedUploadType().
+   */
+  const ALLOWED_UPLOAD_BINARY_MIME_TYPES = new Set([
     'image/png',
     'image/jpeg',
     'image/gif',
     'image/webp',
     'application/pdf',
-    'text/plain',
-    'text/markdown',
-    'text/x-python',
-    'text/javascript',
-    'text/typescript',
+    // application/json is a structured text type browsers may report for .json files
     'application/json',
   ]);
+
+  /** Returns true if the MIME type is allowed for upload. */
+  function isAllowedUploadType(mimeType: string): boolean {
+    // All text/* types are acceptable (covers .md, .py, .rs, .go, .sh, .yaml, etc.)
+    if (mimeType.startsWith('text/')) return true;
+    return ALLOWED_UPLOAD_BINARY_MIME_TYPES.has(mimeType);
+  }
 
   async function dispatchToOrchestrator(
     conversationId: string,
@@ -1088,7 +1094,7 @@ export function registerApiRoutes(
         // Server-side MIME type allowlist (client-side accept= is not a security boundary;
         // entry.type is the Content-Type supplied by the client and is not verified against
         // actual file contents — suitable for a single-developer self-hosted tool)
-        if (!ALLOWED_UPLOAD_MIME_TYPES.has(entry.type)) {
+        if (!isAllowedUploadType(entry.type)) {
           return c.json(
             { error: `File "${entry.name}" has an unsupported type: ${entry.type}` },
             400
