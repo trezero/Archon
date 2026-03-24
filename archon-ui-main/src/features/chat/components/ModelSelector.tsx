@@ -15,9 +15,12 @@ interface ModelSelectorProps {
 }
 
 const AVAILABLE_MODELS = [
-  { id: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
-  { id: "claude-opus-4-20250514", label: "Claude Opus 4" },
-  { id: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku" },
+  { id: "openai:gpt-4o", label: "GPT-4o" },
+  { id: "openai:gpt-4.1", label: "GPT-4.1" },
+  { id: "openai:gpt-4.1-mini", label: "GPT-4.1 Mini" },
+  { id: "anthropic:claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
+  { id: "anthropic:claude-opus-4-20250514", label: "Claude Opus 4" },
+  { id: "anthropic:claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku" },
 ];
 
 /** Get a short display name for a model ID */
