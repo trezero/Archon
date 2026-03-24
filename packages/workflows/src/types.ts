@@ -190,8 +190,9 @@ export interface DagNodeBase {
   /** Force fresh session for this node (ignores any prior session). */
   context?: 'fresh';
   /**
-   * JSON Schema for structured output. Claude SDK enforces this via outputFormat.
-   * Only supported for Claude nodes. Codex nodes log a warning and ignore this field.
+   * JSON Schema for structured output.
+   * Claude: enforced via outputFormat SDK option.
+   * Codex: enforced via outputSchema TurnOptions (v0.116.0+).
    */
   output_format?: Record<string, unknown>;
   /**

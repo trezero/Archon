@@ -215,8 +215,9 @@ export interface AssistantRequestOptions {
    */
   disallowedTools?: string[];
   /**
-   * Structured output schema. Claude Agent SDK enforces this via outputFormat option.
-   * Only supported by Claude — ignored by Codex (caller must not set for Codex nodes).
+   * Structured output schema.
+   * Claude: passed as outputFormat option to Claude Agent SDK.
+   * Codex: passed as outputSchema in TurnOptions to Codex SDK (v0.116.0+).
    * Shape: { type: 'json_schema', schema: <JSON Schema object> }
    */
   outputFormat?: { type: 'json_schema'; schema: Record<string, unknown> };

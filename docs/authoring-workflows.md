@@ -280,7 +280,7 @@ webSearchMode: live              # Codex only
 nodes:
   - id: classify                 # Unique node ID (used for dependency refs and $id.output)
     command: classify-issue      # Loads from .archon/commands/classify-issue.md
-    output_format:               # Optional: enforce structured JSON output (Claude only)
+    output_format:               # Optional: enforce structured JSON output (Claude + Codex)
       type: object
       properties:
         type:
@@ -324,7 +324,7 @@ nodes:
 | `depends_on` | string[] | `[]` | Node IDs that must complete before this node runs |
 | `when` | string | — | Condition expression. Node is skipped if false |
 | `trigger_rule` | string | `all_success` | Join semantics when multiple upstreams exist |
-| `output_format` | object | — | JSON Schema for structured output. Claude only — Codex nodes ignore this |
+| `output_format` | object | — | JSON Schema for structured output. Supported for Claude and Codex nodes |
 | `context` | `'fresh'` | — | Force a fresh AI session for this node |
 | `provider` | `'claude'` \| `'codex'` | inherited | Per-node provider override |
 | `model` | string | inherited | Per-node model override |
@@ -380,7 +380,7 @@ Variable substitution order:
 
 ### `output_format` for Structured JSON
 
-Use `output_format` to enforce JSON output from a Claude node. The schema is passed to the Claude Agent SDK's `outputFormat` option; the SDK's `structured_output` result is used directly as the node's output (rather than the streamed text), ensuring clean JSON for `when:` conditions and `$nodeId.output` substitution:
+Use `output_format` to enforce JSON output from an AI node. For Claude, the schema is passed via the SDK's `outputFormat` option and `structured_output` is used directly. For Codex (v0.116.0+), the schema is passed via `TurnOptions.outputSchema` and the agent's inline JSON response is used. Both ensure clean JSON for `when:` conditions and `$nodeId.output` substitution:
 
 ```yaml
 nodes:
@@ -398,7 +398,6 @@ nodes:
       required: [type]
 ```
 
-- Only supported for Claude nodes. Codex nodes log a warning and ignore `output_format`
 - The output is captured as a JSON string and available via `$classify.output` (full JSON) or `$classify.output.type` (field access)
 - Use `output_format` when downstream nodes need to branch on specific values via `when:`
 
@@ -1075,7 +1074,7 @@ Before deploying a workflow:
 5. **Parallel execution** - Step `parallel:` blocks and DAG nodes in the same layer both run concurrently
 6. **Loops need signals** - Use `<promise>COMPLETE</promise>` to exit
 7. **DAG branching** - `when:` conditions and `trigger_rule` control which nodes run
-8. **`output_format`** - Enforce structured JSON output from Claude nodes for reliable branching
+8. **`output_format`** - Enforce structured JSON output from AI nodes for reliable branching
 9. **`allowed_tools` / `denied_tools`** - Restrict which tools a node or step can use (Claude only, enforced at SDK level)
 10. **`retry:`** - All steps/nodes auto-retry transient errors (default: 2 retries, 3 s backoff); configure per-step with `retry:` block
 11. **`hooks`** — Attach static SDK hook callbacks to individual Claude nodes for tool control and context injection (see [docs/hooks.md](./hooks.md))

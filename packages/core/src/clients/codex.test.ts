@@ -6,11 +6,14 @@ mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
 }));
 
+/** Default usage matching Codex SDK's Usage type (required on TurnCompletedEvent) */
+const defaultUsage = { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 };
+
 // Create mock runStreamed first (before it's referenced)
 const mockRunStreamed = mock(() =>
   Promise.resolve({
     events: (async function* () {
-      yield { type: 'turn.completed' };
+      yield { type: 'turn.completed', usage: defaultUsage };
     })(),
   })
 );
@@ -70,7 +73,7 @@ describe('CodexClient', () => {
             type: 'item.completed',
             item: { type: 'agent_message', text: 'Hello from Codex!' },
           };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -81,7 +84,11 @@ describe('CodexClient', () => {
 
       expect(chunks).toHaveLength(2);
       expect(chunks[0]).toEqual({ type: 'assistant', content: 'Hello from Codex!' });
-      expect(chunks[1]).toEqual({ type: 'result', sessionId: 'new-thread-id' });
+      expect(chunks[1]).toEqual({
+        type: 'result',
+        sessionId: 'new-thread-id',
+        tokens: { input: 10, output: 5 },
+      });
     });
 
     test('yields tool events from command_execution items', async () => {
@@ -91,7 +98,7 @@ describe('CodexClient', () => {
             type: 'item.completed',
             item: { type: 'command_execution', command: 'npm test' },
           };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -110,7 +117,7 @@ describe('CodexClient', () => {
             type: 'item.completed',
             item: { type: 'reasoning', text: 'Let me think about this...' },
           };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -126,7 +133,7 @@ describe('CodexClient', () => {
       mockRunStreamed.mockResolvedValue({
         events: (async function* () {
           yield { type: 'item.completed', item: { type: 'web_search', query: 'codex sdk' } };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -151,7 +158,7 @@ describe('CodexClient', () => {
         events: (async function* () {
           yield { type: 'item.completed', item: todoItem };
           yield { type: 'item.completed', item: todoItem };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -187,7 +194,7 @@ describe('CodexClient', () => {
         events: (async function* () {
           yield { type: 'item.completed', item: todoV1 };
           yield { type: 'item.completed', item: todoV2 };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -222,7 +229,7 @@ describe('CodexClient', () => {
               ],
             },
           };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -249,7 +256,7 @@ describe('CodexClient', () => {
               changes: [{ kind: 'update', path: 'src/locked.ts' }],
             },
           };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -275,7 +282,7 @@ describe('CodexClient', () => {
               error: { message: 'Disk full' },
             },
           };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -301,7 +308,7 @@ describe('CodexClient', () => {
             type: 'item.completed',
             item: { type: 'file_change', status: 'failed' },
           };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -333,7 +340,7 @@ describe('CodexClient', () => {
               error: { message: 'Permission denied' },
             },
           };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -368,7 +375,7 @@ describe('CodexClient', () => {
             type: 'item.completed',
             item: { type: 'mcp_tool_call', status: 'in_progress' },
           };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -389,7 +396,7 @@ describe('CodexClient', () => {
             type: 'item.completed',
             item: { type: 'mcp_tool_call', server: 'db', tool: 'query', status: 'failed' },
           };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -411,7 +418,7 @@ describe('CodexClient', () => {
             type: 'item.completed',
             item: { type: 'mcp_tool_call', server: 'fs', tool: 'readFile', status: 'completed' },
           };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -422,13 +429,17 @@ describe('CodexClient', () => {
 
       // Only the result — completed MCP calls should not yield a duplicate tool event
       expect(chunks).toHaveLength(1);
-      expect(chunks[0]).toEqual({ type: 'result', sessionId: 'new-thread-id' });
+      expect(chunks[0]).toEqual({
+        type: 'result',
+        sessionId: 'new-thread-id',
+        tokens: { input: 10, output: 5 },
+      });
     });
 
     test('creates new thread with sandbox/network settings', async () => {
       mockRunStreamed.mockResolvedValue({
         events: (async function* () {
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -451,7 +462,7 @@ describe('CodexClient', () => {
     test('resumes existing thread with sandbox/network settings', async () => {
       mockRunStreamed.mockResolvedValue({
         events: (async function* () {
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -482,7 +493,7 @@ describe('CodexClient', () => {
 
       mockRunStreamed.mockResolvedValue({
         events: (async function* () {
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -512,13 +523,17 @@ describe('CodexClient', () => {
         type: 'system',
         content: expect.stringContaining('Could not resume previous session'),
       });
-      expect(chunks[1]).toEqual({ type: 'result', sessionId: 'fallback-thread' });
+      expect(chunks[1]).toEqual({
+        type: 'result',
+        sessionId: 'fallback-thread',
+        tokens: { input: 10, output: 5 },
+      });
     });
 
     test('passes model and codex options to thread options', async () => {
       mockRunStreamed.mockResolvedValue({
         events: (async function* () {
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -542,11 +557,74 @@ describe('CodexClient', () => {
       );
     });
 
+    test('passes outputFormat schema as outputSchema in TurnOptions', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield { type: 'turn.completed', usage: defaultUsage };
+        })(),
+      });
+
+      const schema = {
+        type: 'object',
+        properties: { summary: { type: 'string' } },
+        required: ['summary'],
+      };
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test prompt', '/workspace', undefined, {
+        outputFormat: { type: 'json_schema', schema },
+      })) {
+        chunks.push(chunk);
+      }
+
+      expect(mockRunStreamed).toHaveBeenCalledWith(
+        'test prompt',
+        expect.objectContaining({ outputSchema: schema })
+      );
+    });
+
+    test('passes abortSignal as signal in TurnOptions', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield { type: 'turn.completed', usage: defaultUsage };
+        })(),
+      });
+
+      const controller = new AbortController();
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test prompt', '/workspace', undefined, {
+        abortSignal: controller.signal,
+      })) {
+        chunks.push(chunk);
+      }
+
+      expect(mockRunStreamed).toHaveBeenCalledWith(
+        'test prompt',
+        expect.objectContaining({ signal: controller.signal })
+      );
+    });
+
+    test('passes empty TurnOptions when no outputFormat or abortSignal', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield { type: 'turn.completed', usage: defaultUsage };
+        })(),
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test prompt', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(mockRunStreamed).toHaveBeenCalledWith('test prompt', {});
+    });
+
     test('breaks on turn.completed event', async () => {
       mockRunStreamed.mockResolvedValue({
         events: (async function* () {
           yield { type: 'item.completed', item: { type: 'agent_message', text: 'Before turn' } };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
           // This should NOT be yielded due to break
           yield { type: 'item.completed', item: { type: 'agent_message', text: 'After turn' } };
         })(),
@@ -560,7 +638,7 @@ describe('CodexClient', () => {
       // Only first message and result should be yielded
       expect(chunks).toHaveLength(2);
       expect(chunks[0]).toEqual({ type: 'assistant', content: 'Before turn' });
-      expect(chunks[1]).toEqual({ type: 'result', sessionId: 'new-thread-id' });
+      expect(chunks[1]).toMatchObject({ type: 'result', sessionId: 'new-thread-id' });
     });
 
     test('logs progress for item.started and item.completed events', async () => {
@@ -571,7 +649,7 @@ describe('CodexClient', () => {
             type: 'item.completed',
             item: { id: 'item-1', type: 'command_execution', command: 'npm test' },
           };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -602,7 +680,7 @@ describe('CodexClient', () => {
       mockRunStreamed.mockResolvedValue({
         events: (async function* () {
           yield { type: 'error', message: 'Something went wrong' };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -622,7 +700,7 @@ describe('CodexClient', () => {
       mockRunStreamed.mockResolvedValue({
         events: (async function* () {
           yield { type: 'error', message: 'MCP client connection timeout' };
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -633,7 +711,11 @@ describe('CodexClient', () => {
 
       // Should only have the result, not the MCP error
       expect(chunks).toHaveLength(1);
-      expect(chunks[0]).toEqual({ type: 'result', sessionId: 'new-thread-id' });
+      expect(chunks[0]).toEqual({
+        type: 'result',
+        sessionId: 'new-thread-id',
+        tokens: { input: 10, output: 5 },
+      });
 
       // Error is still logged even though not sent to user
       expect(mockLogger.error).toHaveBeenCalledWith(
@@ -749,7 +831,7 @@ describe('CodexClient', () => {
             type: 'item.completed',
             item: { type: 'file_change', status: 'completed', changes: [] },
           }; // empty changes
-          yield { type: 'turn.completed' };
+          yield { type: 'turn.completed', usage: defaultUsage };
         })(),
       });
 
@@ -760,7 +842,11 @@ describe('CodexClient', () => {
 
       // Only the result should be yielded
       expect(chunks).toHaveLength(1);
-      expect(chunks[0]).toEqual({ type: 'result', sessionId: 'new-thread-id' });
+      expect(chunks[0]).toEqual({
+        type: 'result',
+        sessionId: 'new-thread-id',
+        tokens: { input: 10, output: 5 },
+      });
     });
 
     describe('retry behavior', () => {
@@ -793,7 +879,7 @@ describe('CodexClient', () => {
                 type: 'item.completed',
                 item: { type: 'agent_message', text: 'Recovered!' },
               };
-              yield { type: 'turn.completed' };
+              yield { type: 'turn.completed', usage: defaultUsage };
             })(),
           });
         });

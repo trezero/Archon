@@ -362,23 +362,6 @@ async function resolveNodeProviderAndModel(
     );
   }
 
-  // Warn if Codex node has output_format (unsupported)
-  if (provider === 'codex' && node.output_format) {
-    getLog().warn({ nodeId: node.id }, 'dag_node_output_format_ignored_codex');
-    const outputFormatDelivered = await safeSendMessage(
-      platform,
-      conversationId,
-      `Warning: Node '${node.id}' has output_format set but uses Codex — output_format is ignored. Use a Claude node for structured output.`,
-      { workflowId: workflowRunId, nodeName: node.id }
-    );
-    if (!outputFormatDelivered) {
-      getLog().error(
-        { nodeId: node.id, workflowRunId },
-        'dag_node_output_format_warning_delivery_failed'
-      );
-    }
-  }
-
   // Warn if Codex node has allowed_tools or denied_tools (unsupported per-call)
   if (
     provider === 'codex' &&
@@ -446,6 +429,9 @@ async function resolveNodeProviderAndModel(
       webSearchMode: config.assistants.codex.webSearchMode,
       additionalDirectories: config.assistants.codex.additionalDirectories,
     };
+    if (node.output_format) {
+      options.outputFormat = { type: 'json_schema', schema: node.output_format };
+    }
   } else {
     const claudeOptions: WorkflowAssistantOptions = {};
     if (model) claudeOptions.model = model;
@@ -946,6 +932,25 @@ async function executeNodeInternal(
           );
         }
         getLog().debug({ nodeId: node.id, streamingMode }, 'dag.structured_output_override');
+      } else if (provider === 'codex') {
+        // Codex returns structured output inline in agent_message text
+        // (already accumulated in nodeOutputText). Validate it is valid JSON
+        // so downstream $nodeId.output.field references can parse it.
+        try {
+          JSON.parse(nodeOutputText);
+          getLog().debug({ nodeId: node.id }, 'dag.codex_structured_output_valid_json');
+        } catch {
+          getLog().warn(
+            { nodeId: node.id, outputPreview: nodeOutputText.slice(0, 200) },
+            'dag.codex_structured_output_not_json'
+          );
+          await safeSendMessage(
+            platform,
+            conversationId,
+            `Warning: Node '${node.id}' requested output_format but Codex returned non-JSON output. Downstream conditions referencing \`$${node.id}.output.field\` may not evaluate correctly.`,
+            nodeContext
+          );
+        }
       } else {
         getLog().warn(
           { nodeId: node.id, workflowRunId: workflowRun.id },

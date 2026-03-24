@@ -5,7 +5,12 @@
  * With Bun runtime, we can directly import ESM packages without the
  * dynamic import workaround that was needed for CommonJS/Node.js.
  */
-import { Codex } from '@openai/codex-sdk';
+import {
+  Codex,
+  type ThreadOptions,
+  type TurnOptions,
+  type TurnCompletedEvent,
+} from '@openai/codex-sdk';
 import {
   type AssistantRequestOptions,
   type IAssistantClient,
@@ -35,24 +40,11 @@ function getCodex(): Codex {
   return codexInstance;
 }
 
-/** Thread options type for Codex SDK */
-interface CodexThreadOptions {
-  workingDirectory: string;
-  skipGitRepoCheck: boolean;
-  sandboxMode: 'danger-full-access';
-  networkAccessEnabled: boolean;
-  approvalPolicy: 'never';
-  model?: string;
-  modelReasoningEffort?: AssistantRequestOptions['modelReasoningEffort'];
-  webSearchMode?: AssistantRequestOptions['webSearchMode'];
-  additionalDirectories?: string[];
-}
-
 /**
  * Build thread options for Codex SDK
  * Extracted to avoid duplication across thread creation paths
  */
-function buildThreadOptions(cwd: string, options?: AssistantRequestOptions): CodexThreadOptions {
+function buildThreadOptions(cwd: string, options?: AssistantRequestOptions): ThreadOptions {
   return {
     workingDirectory: cwd,
     skipGitRepoCheck: true,
@@ -128,44 +120,14 @@ function classifyCodexError(
   return 'unknown';
 }
 
-function extractUsageFromCodexEvent(event: unknown): TokenUsage | undefined {
-  const usage =
-    (event as { usage?: unknown })?.usage ??
-    (event as { response?: { usage?: unknown } })?.response?.usage;
-  if (!usage || typeof usage !== 'object') return undefined;
-
-  const usageObj = usage as Record<string, unknown>;
-  const input =
-    typeof usageObj.input_tokens === 'number'
-      ? usageObj.input_tokens
-      : typeof usageObj.prompt_tokens === 'number'
-        ? usageObj.prompt_tokens
-        : typeof usageObj.input === 'number'
-          ? usageObj.input
-          : undefined;
-  const output =
-    typeof usageObj.output_tokens === 'number'
-      ? usageObj.output_tokens
-      : typeof usageObj.completion_tokens === 'number'
-        ? usageObj.completion_tokens
-        : typeof usageObj.output === 'number'
-          ? usageObj.output
-          : undefined;
-  const total =
-    typeof usageObj.total_tokens === 'number'
-      ? usageObj.total_tokens
-      : typeof usageObj.total === 'number'
-        ? usageObj.total
-        : undefined;
-  const cost = typeof usageObj.cost === 'number' ? usageObj.cost : undefined;
-
-  if (input === undefined || output === undefined) return undefined;
-
+function extractUsageFromCodexEvent(event: TurnCompletedEvent): TokenUsage {
+  if (!event.usage) {
+    getLog().warn({ eventType: event.type }, 'codex.usage_null_on_turn_completed');
+    return { input: 0, output: 0 };
+  }
   return {
-    input,
-    output,
-    ...(total !== undefined ? { total } : {}),
-    ...(cost !== undefined ? { cost } : {}),
+    input: event.usage.input_tokens,
+    output: event.usage.output_tokens,
   };
 }
 
@@ -265,8 +227,17 @@ export class CodexClient implements IAssistantClient {
       }
 
       try {
+        // Build per-turn options (structured output schema, abort signal)
+        const turnOptions: TurnOptions = {};
+        if (options?.outputFormat) {
+          turnOptions.outputSchema = options.outputFormat.schema;
+        }
+        if (options?.abortSignal) {
+          turnOptions.signal = options.abortSignal;
+        }
+
         // Run streamed query (this IS async)
-        const result = await thread.runStreamed(prompt);
+        const result = await thread.runStreamed(prompt, turnOptions);
 
         // Process streaming events
         for await (const event of result.events) {
@@ -442,13 +413,10 @@ export class CodexClient implements IAssistantClient {
             getLog().debug('turn_completed');
             // Yield result with thread ID for persistence
             const usage = extractUsageFromCodexEvent(event);
-            if (!usage) {
-              getLog().debug({ eventType: event.type }, 'usage_not_provided');
-            }
             yield {
               type: 'result',
               sessionId: thread.id ?? undefined,
-              ...(usage ? { tokens: usage } : {}),
+              tokens: usage,
             };
             // CRITICAL: Break out of event loop - turn is complete!
             // Without this, the loop waits for stream to end (causes 90s timeout)

@@ -1399,6 +1399,125 @@ describe('executeDagWorkflow -- output_format structured output', () => {
     const secondCallPrompt = mockSendQueryDag.mock.calls[1][0] as string;
     expect(secondCallPrompt).toContain('plain text response');
   });
+
+  it('passes outputFormat to Codex nodes and uses inline JSON response', async () => {
+    // Codex returns structured output inline as agent_message text (no structuredOutput field)
+    const classifyJson = { run_code_review: 'true', run_tests: 'false' };
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'codex',
+    }));
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: JSON.stringify(classifyJson) };
+      yield { type: 'result', sessionId: 'codex-sid-1' };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('codex-output-fmt-run', {
+      user_message: 'classify this PR',
+    });
+
+    const nodes: DagNode[] = [
+      {
+        id: 'classify',
+        command: 'classify',
+        output_format: {
+          type: 'object',
+          properties: {
+            run_code_review: { type: 'string', enum: ['true', 'false'] },
+            run_tests: { type: 'string', enum: ['true', 'false'] },
+          },
+        },
+      },
+      {
+        id: 'review',
+        prompt: 'Review the code',
+        depends_on: ['classify'],
+        when: "$classify.output.run_code_review == 'true'",
+      },
+      {
+        id: 'test',
+        prompt: 'Run tests',
+        depends_on: ['classify'],
+        when: "$classify.output.run_tests == 'true'",
+      },
+    ];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-codex-fmt',
+      testDir,
+      { name: 'codex-output-fmt', nodes },
+      workflowRun,
+      'codex',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // classify + review = 2 calls (test node skipped because run_tests == 'false')
+    expect(mockSendQueryDag.mock.calls.length).toBe(2);
+
+    // Verify outputFormat was passed to the Codex client (4th arg = options)
+    const classifyOptions = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+    expect(classifyOptions.outputFormat).toEqual({
+      type: 'json_schema',
+      schema: nodes[0].output_format,
+    });
+  });
+
+  it('does not warn about missing structuredOutput for Codex nodes', async () => {
+    // Codex returns structured output inline — no structuredOutput field on result
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'codex',
+    }));
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: '{"status":"ok"}' };
+      yield { type: 'result', sessionId: 'codex-sid-2' };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('codex-no-warn-run', {
+      user_message: 'check it',
+    });
+
+    const nodes: DagNode[] = [
+      {
+        id: 'check',
+        command: 'classify',
+        output_format: { type: 'object', properties: { status: { type: 'string' } } },
+      },
+    ];
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-codex-no-warn',
+      testDir,
+      { name: 'codex-no-warn', nodes },
+      workflowRun,
+      'codex',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // Verify no "structured output missing" warning was sent to the user
+    const sendCalls = (platform.sendMessage as Mock<(...args: unknown[]) => Promise<void>>).mock
+      .calls;
+    const warningMessages = sendCalls
+      .map(call => call[1] as string)
+      .filter(msg => typeof msg === 'string' && msg.includes('did not return structured output'));
+    expect(warningMessages).toHaveLength(0);
+  });
 });
 
 describe('executeDagWorkflow -- when condition parse errors (fail-closed)', () => {
