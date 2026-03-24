@@ -61,6 +61,7 @@ Transform Archon into a dynamic, graph-based AI orchestration engine that:
 | **Pattern discovery trigger** | Scheduled batch (nightly) + on-demand analysis | Multi-day patterns don't need real-time detection; nightly batch + on-demand gives 90% value at 30% complexity |
 | **Communication protocol** | Hybrid REST + SSE — REST for state mutations, SSE for real-time notifications | REST for reliability, SSE for speed; graceful degradation if SSE disconnects; matches existing Archon patterns |
 | **Telegram bot strategy** | Route approval messages through remote-agent's existing Telegram adapter, not a separate Archon bot | Reuses existing infrastructure; avoids user managing two bots per project |
+| **HITL payload format** | A2UI components — approval payloads rendered as structured JSON component specs (StatCards, ComparisonTables, etc.) instead of raw markdown | Rich visual approvals in UI; Telegram still gets text summary + link. Companion spec covers full A2UI integration. |
 
 ---
 
@@ -77,6 +78,7 @@ Transform Archon into a dynamic, graph-based AI orchestration engine that:
 │  MCP Clients     │    │  HITL Router             │    │                     │
 │                  │    │  Orchestration API        │    │  Archon Local       │
 │                  │    │  Pattern Discovery        │    │  Executor (Python)  │
+│                  │    │  Generative UI (A2UI)     │    │                     │
 │                  │    │                          │    │                     │
 └─────────────────┘    └──────────────────────────┘    │  Future: Codex,     │
                               │                        │  Gemini CLI, etc.   │
@@ -209,10 +211,10 @@ python/src/server/services/workflow/
 
 | Type | UI Payload | Telegram Payload |
 |------|-----------|-----------------|
-| `plan_review` | Full plan markdown, file tree, estimated scope | Summary + link to full plan in UI |
-| `pr_review` | Diff view, commit list, PR description preview | Stats (files changed, +/-) + link |
-| `deploy_gate` | Environment details, rollback plan, test results | Environment + test summary + link |
-| `custom` | Rendered from node output (markdown/JSON) | Node output summary + link |
+| `plan_review` | A2UI components: ExecutiveSummary, StepCard list for plan steps, StatCard for estimated scope, CodeBlock for key changes | Summary + link to full plan in UI |
+| `pr_review` | A2UI components: StatCard (files changed, insertions/deletions), ComparisonTable (before/after), CodeBlock for key diffs, ProgressRing for test coverage | Stats (files changed, +/-) + link |
+| `deploy_gate` | A2UI components: StatCard (environment, build status), ChecklistItem list for pre-deploy checks, CalloutCard for warnings | Environment + test summary + link |
+| `custom` | A2UI components rendered from node output — component specs stored in approval payload JSON | Node output summary + link |
 
 ### HITL Router Architecture
 
@@ -239,6 +241,14 @@ Channels only implement the **send** side. All resolution converges on a single 
 ### Telegram Integration
 
 Archon sends approval requests to the remote-agent via REST, which forwards them through its existing Telegram adapter. The remote-agent's `callback_query` handler calls Archon's approval REST endpoint. No new Telegram bot needed in Archon.
+
+### A2UI Integration
+
+Approval payloads use the A2UI (Agent-to-UI) component format — a JSON specification where each element maps to a registered React component in the Archon frontend. This enables rich, structured approval views (dashboards with stats, tables, code blocks, progress indicators) instead of raw markdown rendering.
+
+The A2UI component library, renderer, and generation service are defined in a companion spec: `docs/superpowers/specs/2026-03-24-generative-ui-integration-design.md`.
+
+When a workflow node produces output for an approval gate, the orchestration engine routes the raw output through the A2UI generation service, which uses an LLM to select and populate appropriate visual components. The resulting component array is stored in the `approval_requests.payload` column and pushed to the UI via SSE.
 
 ### File Location
 
@@ -581,7 +591,7 @@ python/src/server/services/pattern_discovery/
 - UNIQUE(workflow_run_id, node_id)
 
 **031: approval_requests**
-- id (uuid PK), workflow_run_id (FK → workflow_runs), node_id (text), approval_type (text), payload (jsonb), status (pending|approved|rejected|expired), channels_notified (text[]), resolved_by (text nullable), resolved_via (text nullable), resolved_comment (text nullable), telegram_message_id (text nullable), expires_at, created_at, resolved_at
+- id (uuid PK), workflow_run_id (FK → workflow_runs), node_id (text), approval_type (text), payload (jsonb) — A2UI component array for rich UI rendering; structured as [{type: "a2ui.ComponentName", id, props, zone?}, ...], status (pending|approved|rejected|expired), channels_notified (text[]), resolved_by (text nullable), resolved_via (text nullable), resolved_comment (text nullable), telegram_message_id (text nullable), expires_at, created_at, resolved_at
 - INDEX on (status), (workflow_run_id)
 
 **032: execution_backends**
