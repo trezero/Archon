@@ -679,7 +679,7 @@ def _extract_gradle_deps(path):
 
 - [ ] **Step 7: Run scan mode tests**
 
-Run: `cd /home/winadmin/projects/archon && python python/src/server/static/archon-scanner.py --scan ~/projects`
+Run: `cd /home/winadmin/projects/Trinity/archon && python python/src/server/static/archon-scanner.py --scan ~/projects`
 
 Expected: JSON output with detected projects from the real projects directory. Verify structure matches the spec schema.
 
@@ -1116,7 +1116,7 @@ class TestInfraMarkers:
 
 - [ ] **Step 2: Run scan tests**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/test_archon_scanner.py -v --tb=short -k "not Apply"`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/test_archon_scanner.py -v --tb=short -k "not Apply"`
 
 Expected: All scan tests pass.
 
@@ -1343,7 +1343,7 @@ class TestTomlParsing:
 
 - [ ] **Step 4: Run all tests**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/test_archon_scanner.py -v --tb=short`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/test_archon_scanner.py -v --tb=short`
 
 Expected: All tests pass.
 
@@ -1473,17 +1473,17 @@ rm -rf python/tests/server/services/scanner/
 
 - [ ] **Step 5: Verify no broken imports**
 
-Run: `cd /home/winadmin/projects/archon && uv run python -c "from src.server.main import app; print('OK')"`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run python -c "from src.server.main import app; print('OK')"`
 
 Expected: `OK` — no import errors.
 
-Run: `cd /home/winadmin/projects/archon && uv run python -c "from src.mcp_server.mcp_server import mcp; print('OK')"`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run python -c "from src.mcp_server.mcp_server import mcp; print('OK')"`
 
 Expected: `OK` — no import errors.
 
 - [ ] **Step 6: Run existing tests to verify nothing broke**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/ -v --tb=short --ignore=python/tests/test_archon_scanner.py -x`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/ -v --tb=short --ignore=python/tests/test_archon_scanner.py -x`
 
 Expected: All existing tests pass (scanner tests already removed in Step 4).
 
@@ -1738,13 +1738,13 @@ No new files. This task verifies the complete flow works.
 - [ ] **Step 1: Run all tests**
 
 ```bash
-cd /home/winadmin/projects/archon && uv run pytest python/tests/test_archon_scanner.py -v --tb=short
+cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/test_archon_scanner.py -v --tb=short
 ```
 
 Expected: All scanner script tests pass.
 
 ```bash
-cd /home/winadmin/projects/archon && uv run pytest python/tests/ -v --tb=short -x --ignore=python/tests/test_archon_scanner.py
+cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/ -v --tb=short -x --ignore=python/tests/test_archon_scanner.py
 ```
 
 Expected: All existing tests pass.

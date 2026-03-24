@@ -218,7 +218,7 @@ async def test_create_record(service, mock_supabase):
 
 **Step 3: Run tests to verify they fail**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/server/services/test_materialization_service.py -v`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/server/services/test_materialization_service.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'src.server.services.knowledge.materialization_service'`
 
 **Step 4: Implement MaterializationService (DB operations only)**
@@ -362,7 +362,7 @@ $$ LANGUAGE plpgsql;
 
 **Step 5: Run tests to verify they pass**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/server/services/test_materialization_service.py -v`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/server/services/test_materialization_service.py -v`
 Expected: All 5 tests PASS
 
 **Step 6: Commit**
@@ -433,7 +433,7 @@ def test_synthesizer_agent_custom_model():
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/agents/test_synthesizer_agent.py -v`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/agents/test_synthesizer_agent.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
 **Step 3: Implement SynthesizerAgent**
@@ -556,7 +556,7 @@ class SynthesizerAgent(BaseAgent[SynthesizerDeps, str]):
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/agents/test_synthesizer_agent.py -v`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/agents/test_synthesizer_agent.py -v`
 Expected: All 4 tests PASS
 
 **Step 5: Commit**
@@ -653,7 +653,7 @@ async def test_generate_unique_filename(service, temp_project):
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/server/services/test_indexer_service.py -v`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/server/services/test_indexer_service.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
 **Step 3: Implement IndexerService**
@@ -779,7 +779,7 @@ class IndexerService:
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/server/services/test_indexer_service.py -v`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/server/services/test_indexer_service.py -v`
 Expected: All 7 tests PASS
 
 **Step 5: Commit**
@@ -880,7 +880,7 @@ async def test_materialize_returns_no_content_when_search_empty(
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/server/services/test_materialization_pipeline.py -v`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/server/services/test_materialization_pipeline.py -v`
 Expected: FAIL — `materialize` method not found or import errors
 
 **Step 3: Add the `materialize()` orchestration method**
@@ -1063,7 +1063,7 @@ from .indexer_service import IndexerService
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/server/services/test_materialization_pipeline.py -v`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/server/services/test_materialization_pipeline.py -v`
 Expected: All 2 tests PASS
 
 **Step 5: Commit**
@@ -1135,7 +1135,7 @@ def test_execute_materialization_endpoint(client):
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/server/api_routes/test_materialization_api.py -v`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/server/api_routes/test_materialization_api.py -v`
 Expected: FAIL — import error or 404
 
 **Step 3: Implement the API routes**
@@ -1253,7 +1253,7 @@ Add to `python/src/server/main.py`:
 
 **Step 5: Run tests to verify they pass**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/server/api_routes/test_materialization_api.py -v`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/server/api_routes/test_materialization_api.py -v`
 Expected: All 2 tests PASS
 
 **Step 6: Commit**
@@ -1808,17 +1808,17 @@ git commit -m "feat: integrate MaterializationList into KnowledgeView"
 
 **Step 1: Run backend tests**
 
-Run: `cd /home/winadmin/projects/archon && uv run pytest python/tests/ -v --tb=short`
+Run: `cd /home/winadmin/projects/Trinity/archon && uv run pytest python/tests/ -v --tb=short`
 Expected: All tests PASS including new materialization tests
 
 **Step 2: Run frontend type check**
 
-Run: `cd /home/winadmin/projects/archon/archon-ui-main && npx tsc --noEmit`
+Run: `cd /home/winadmin/projects/Trinity/archon/archon-ui-main && npx tsc --noEmit`
 Expected: No TypeScript errors
 
 **Step 3: Run linters**
 
-Run: `cd /home/winadmin/projects/archon && make lint`
+Run: `cd /home/winadmin/projects/Trinity/archon && make lint`
 Expected: No linting errors
 
 **Step 4: Commit any fixes**
@@ -1833,7 +1833,7 @@ git commit -m "fix: address linting and type errors"
 
 **Step 1: Start services**
 
-Run: `cd /home/winadmin/projects/archon && docker compose up --build -d`
+Run: `cd /home/winadmin/projects/Trinity/archon && docker compose up --build -d`
 
 **Step 2: Apply migration**
 

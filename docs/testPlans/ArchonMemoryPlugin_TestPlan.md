@@ -265,13 +265,13 @@ After choosing `[1]`, verify in the file system that `~/.claude/plugins/cache/th
 Run in a terminal to confirm nothing regressed:
 
 ```bash
-cd /home/winadmin/projects/archon/python
+cd /home/winadmin/projects/Trinity/archon/python
 uv run pytest tests/ -q
 # Expected: 948+ passed, 0 failed
 ```
 
 ```bash
-cd /home/winadmin/projects/archon/integrations/claude-code/plugins/archon-memory
+cd /home/winadmin/projects/Trinity/archon/integrations/claude-code/plugins/archon-memory
 python -m pytest tests/ -q
 # Expected: 98 passed, 0 failed
 ```

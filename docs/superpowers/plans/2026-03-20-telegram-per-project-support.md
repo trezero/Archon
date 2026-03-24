@@ -432,7 +432,7 @@ git commit -m "docs: add per-project bot setup guide to README"
 
 - [ ] **Step 3: Test two projects simultaneously**
 
-1. Open Terminal 1: `cd ~/projects/archon && claude --channels plugin:telegram@claude-plugins-official`
+1. Open Terminal 1: `cd ~/projects/Trinity/archon && claude --channels plugin:telegram@claude-plugins-official`
 2. Open Terminal 2: a different project with a different bot token configured
 3. DM each bot and verify messages route to the correct session
 

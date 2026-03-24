@@ -318,7 +318,7 @@ Add the same reporting block at the end of `main()`, after context is gathered b
 
 - [ ] **Step 4: Test session end hook locally**
 
-Run: `cd /home/winadmin/projects/archon && python integrations/claude-code/plugins/archon-memory/scripts/session_end_hook.py`
+Run: `cd /home/winadmin/projects/Trinity/archon && python integrations/claude-code/plugins/archon-memory/scripts/session_end_hook.py`
 Expected: Should print git status report line to stderr (or "not configured" if Archon is down)
 
 - [ ] **Step 5: Commit**

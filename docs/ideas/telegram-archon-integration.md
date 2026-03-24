@@ -16,7 +16,7 @@ Add an optional step to the Archon setup process that configures a per-project T
 A convenience wrapper (shell script or alias) that simplifies launching Claude Code with project-specific configuration:
 
 ```bash
-claudePro archon        # cd ~/projects/archon && claude
+claudePro archon        # cd ~/projects/Trinity/archon && claude
 claudePro rr            # cd ~/projects/reciperaiders && claude
 ```
 

@@ -13,7 +13,7 @@ Claude Code in user projects (e.g., RecipeRaiders, reciperaiders-spa) does not a
 
 ### Why it is broken
 
-The LeaveOff Point Protocol instructions exist only in Archon's own `CLAUDE.md` (at `/home/winadmin/projects/archon/CLAUDE.md`, section "## LeaveOff Point Protocol"). That file is only loaded when Claude Code is working inside the Archon repository itself. User projects have their own `CLAUDE.md` (or none at all) and never see these instructions.
+The LeaveOff Point Protocol instructions exist only in Archon's own `CLAUDE.md` (at `/home/winadmin/projects/Trinity/archon/CLAUDE.md`, section "## LeaveOff Point Protocol"). That file is only loaded when Claude Code is working inside the Archon repository itself. User projects have their own `CLAUDE.md` (or none at all) and never see these instructions.
 
 ### What already works
 
