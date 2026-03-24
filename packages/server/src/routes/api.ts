@@ -781,6 +781,22 @@ export function registerApiRoutes(
   // Shared lock/dispatch/error handling for message and workflow endpoints
   /** Maximum allowed upload size per file (10 MB) */
   const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+  /** Maximum number of files per message (enforced server-side) */
+  const MAX_FILES_PER_MESSAGE = 5;
+  /** Allowed MIME types for uploaded files (server-side allowlist) */
+  const ALLOWED_UPLOAD_MIME_TYPES = new Set([
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+    'application/pdf',
+    'text/plain',
+    'text/markdown',
+    'text/x-python',
+    'text/javascript',
+    'text/typescript',
+    'application/json',
+  ]);
 
   async function dispatchToOrchestrator(
     conversationId: string,
@@ -996,6 +1012,12 @@ export function registerApiRoutes(
   registerOpenApiRoute(sendMessageRoute, async c => {
     const conversationId = c.req.param('id') ?? '';
 
+    // Reject conversation IDs that could be used for path traversal when building
+    // the upload directory. Web conversation IDs are alphanumeric with hyphens only.
+    if (!/^[\w-]+$/.test(conversationId)) {
+      return c.json({ error: 'Invalid conversation ID' }, 400);
+    }
+
     let message: string;
     const savedFiles: AttachedFile[] = [];
 
@@ -1021,10 +1043,29 @@ export function registerApiRoutes(
         : rawFiles !== undefined
           ? [rawFiles]
           : [];
-      const uploadDir = join(getArchonHome(), 'artifacts', 'uploads', conversationId);
 
-      for (const entry of fileList) {
-        if (!(entry instanceof File)) continue;
+      // Enforce server-side file count limit
+      const fileEntries = fileList.filter((e): e is File => e instanceof File);
+      if (fileEntries.length > MAX_FILES_PER_MESSAGE) {
+        return c.json({ error: `Maximum ${String(MAX_FILES_PER_MESSAGE)} files per message` }, 400);
+      }
+
+      const archonHome = getArchonHome();
+      const uploadDir = join(archonHome, 'artifacts', 'uploads', conversationId);
+
+      // Guard against path traversal in conversationId (belt-and-suspenders after regex above)
+      if (!uploadDir.startsWith(archonHome + sep)) {
+        return c.json({ error: 'Invalid conversation ID' }, 400);
+      }
+
+      for (const entry of fileEntries) {
+        // Server-side MIME type allowlist (client-side accept= is not a security boundary)
+        if (!ALLOWED_UPLOAD_MIME_TYPES.has(entry.type)) {
+          return c.json(
+            { error: `File "${entry.name}" has an unsupported type: ${entry.type}` },
+            400
+          );
+        }
         if (entry.size > MAX_UPLOAD_BYTES) {
           return c.json({ error: `File "${entry.name}" exceeds the 10 MB size limit` }, 400);
         }
@@ -1035,7 +1076,8 @@ export function registerApiRoutes(
         await writeFile(filePath, Buffer.from(await entry.arrayBuffer()));
         savedFiles.push({
           path: filePath,
-          name: entry.name,
+          // Use safeName for display to avoid prompt injection via crafted filenames
+          name: safeName || fileId,
           mimeType: entry.type,
           size: entry.size,
         });
@@ -1101,6 +1143,13 @@ export function registerApiRoutes(
 
     const extraContext = savedFiles.length > 0 ? { attachedFiles: savedFiles } : undefined;
     const result = await dispatchToOrchestrator(conversationId, message, extraContext);
+
+    // Clean up uploaded files now that the AI has read them during handleMessage.
+    // Errors are intentionally swallowed — a cleanup failure must not affect the response.
+    for (const f of savedFiles) {
+      await unlink(f.path).catch(() => undefined);
+    }
+
     return c.json(result);
   });
 
