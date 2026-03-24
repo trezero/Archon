@@ -212,79 +212,8 @@ async def list_agents():
     return {"agents": agents_info, "total": len(agents_info)}
 
 
-@app.post("/agents/{agent_type}/stream")
-async def stream_agent(agent_type: str, request: AgentRequest):
-    """
-    Stream responses from an agent using Server-Sent Events (SSE).
-
-    This endpoint streams the agent's response in real-time, allowing
-    for a more interactive experience.
-    """
-    # Get the requested agent
-    if agent_type not in app.state.agents:
-        raise HTTPException(status_code=400, detail=f"Unknown agent type: {agent_type}")
-
-    agent = app.state.agents[agent_type]
-
-    async def generate() -> AsyncGenerator[str, None]:
-        try:
-            # Prepare dependencies based on agent type
-            # Import dependency classes
-            if agent_type == "rag":
-                from .rag_agent import RagDependencies
-
-                deps = RagDependencies(
-                    source_filter=request.context.get("source_filter") if request.context else None,
-                    match_count=request.context.get("match_count", 5) if request.context else 5,
-                    project_id=request.context.get("project_id") if request.context else None,
-                )
-            elif agent_type == "document":
-                from .document_agent import DocumentDependencies
-
-                deps = DocumentDependencies(
-                    project_id=request.context.get("project_id") if request.context else None,
-                    user_id=request.context.get("user_id") if request.context else None,
-                )
-            else:
-                # Default dependencies
-                from .base_agent import ArchonDependencies
-
-                deps = ArchonDependencies()
-
-            # Use PydanticAI's run_stream method
-            # run_stream returns an async context manager directly
-            async with agent.run_stream(request.prompt, deps) as stream:
-                # Stream text chunks as they arrive
-                async for chunk in stream.stream_text():
-                    event_data = json.dumps({"type": "stream_chunk", "content": chunk})
-                    yield f"data: {event_data}\n\n"
-
-                # Get the final structured result
-                try:
-                    final_result = await stream.get_data()
-                    event_data = json.dumps({"type": "stream_complete", "content": final_result})
-                    yield f"data: {event_data}\n\n"
-                except Exception:
-                    # If we can't get structured data, just send completion
-                    event_data = json.dumps({"type": "stream_complete", "content": ""})
-                    yield f"data: {event_data}\n\n"
-
-        except Exception as e:
-            logger.error(f"Error streaming {agent_type} agent: {e}")
-            event_data = json.dumps({"type": "error", "error": str(e)})
-            yield f"data: {event_data}\n\n"
-
-    # Return SSE response
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",  # Disable Nginx buffering
-        },
-    )
-
-
+# IMPORTANT: Chat stream must be declared BEFORE the generic /agents/{agent_type}/stream
+# route, otherwise FastAPI matches {agent_type}="chat" and validates against AgentRequest.
 @app.post("/agents/chat/stream")
 async def stream_chat(request: Request):
     """SSE streaming endpoint for the chat interface.
@@ -399,6 +328,79 @@ async def stream_chat(request: Request):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/agents/{agent_type}/stream")
+async def stream_agent(agent_type: str, request: AgentRequest):
+    """
+    Stream responses from an agent using Server-Sent Events (SSE).
+
+    This endpoint streams the agent's response in real-time, allowing
+    for a more interactive experience.
+    """
+    # Get the requested agent
+    if agent_type not in app.state.agents:
+        raise HTTPException(status_code=400, detail=f"Unknown agent type: {agent_type}")
+
+    agent = app.state.agents[agent_type]
+
+    async def generate() -> AsyncGenerator[str, None]:
+        try:
+            # Prepare dependencies based on agent type
+            # Import dependency classes
+            if agent_type == "rag":
+                from .rag_agent import RagDependencies
+
+                deps = RagDependencies(
+                    source_filter=request.context.get("source_filter") if request.context else None,
+                    match_count=request.context.get("match_count", 5) if request.context else 5,
+                    project_id=request.context.get("project_id") if request.context else None,
+                )
+            elif agent_type == "document":
+                from .document_agent import DocumentDependencies
+
+                deps = DocumentDependencies(
+                    project_id=request.context.get("project_id") if request.context else None,
+                    user_id=request.context.get("user_id") if request.context else None,
+                )
+            else:
+                # Default dependencies
+                from .base_agent import ArchonDependencies
+
+                deps = ArchonDependencies()
+
+            # Use PydanticAI's run_stream method
+            # run_stream returns an async context manager directly
+            async with agent.run_stream(request.prompt, deps) as stream:
+                # Stream text chunks as they arrive
+                async for chunk in stream.stream_text():
+                    event_data = json.dumps({"type": "stream_chunk", "content": chunk})
+                    yield f"data: {event_data}\n\n"
+
+                # Get the final structured result
+                try:
+                    final_result = await stream.get_data()
+                    event_data = json.dumps({"type": "stream_complete", "content": final_result})
+                    yield f"data: {event_data}\n\n"
+                except Exception:
+                    # If we can't get structured data, just send completion
+                    event_data = json.dumps({"type": "stream_complete", "content": ""})
+                    yield f"data: {event_data}\n\n"
+
+        except Exception as e:
+            logger.error(f"Error streaming {agent_type} agent: {e}")
+            event_data = json.dumps({"type": "error", "error": str(e)})
+            yield f"data: {event_data}\n\n"
+
+    # Return SSE response
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # Disable Nginx buffering
         },
     )
 
