@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
+import { Pencil } from 'lucide-react';
 import { listWorkflows, createConversation, runWorkflow, deleteConversation } from '@/lib/api';
 import type { WorkflowDefinition } from '@archon/workflows/types';
 import { Button } from '@/components/ui/button';
@@ -103,6 +104,16 @@ export function WorkflowList(): React.ReactElement {
               >
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-sm text-text-primary">{wf.name}</span>
+                  <Link
+                    to={`/workflows/builder?edit=${encodeURIComponent(wf.name)}`}
+                    onClick={(e): void => {
+                      e.stopPropagation();
+                    }}
+                    className="flex items-center gap-1 text-xs text-text-tertiary hover:text-primary transition-colors"
+                  >
+                    <Pencil className="size-3" />
+                    Edit
+                  </Link>
                 </div>
                 {wf.description && (
                   <p className="text-xs text-text-secondary mt-1 line-clamp-2">{wf.description}</p>
