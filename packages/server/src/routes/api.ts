@@ -7,6 +7,7 @@ import { streamSSE } from 'hono/streaming';
 import { cors } from 'hono/cors';
 import type { WebAdapter } from '../adapters/web';
 import { rm, readFile, writeFile, unlink, mkdir } from 'fs/promises';
+import { readFileSync } from 'fs';
 import { normalize, join, sep } from 'path';
 import type { Context } from 'hono';
 import type { ConversationLockManager, GlobalConfig } from '@archon/core';
@@ -101,6 +102,16 @@ import {
   configResponseSchema,
   codebaseEnvironmentsResponseSchema,
 } from './schemas/config.schemas';
+
+// Read app version once at module load (root package.json is 3 levels up from src/routes/)
+let appVersion = 'unknown';
+try {
+  const pkgContent = readFileSync(join(import.meta.dir, '../../../package.json'), 'utf-8');
+  const pkg = JSON.parse(pkgContent) as { version: string };
+  appVersion = pkg.version;
+} catch {
+  // package.json not found (binary build or unusual install)
+}
 
 type WorkflowSource = 'project' | 'bundled';
 
@@ -712,6 +723,7 @@ const getHealthRoute = createRoute({
               adapter: z.string(),
               concurrency: z.record(z.unknown()),
               runningWorkflows: z.number(),
+              version: z.string().optional(),
             })
             .openapi('HealthResponse'),
         },
@@ -2021,6 +2033,7 @@ export function registerApiRoutes(
         activeConversationIds: allActiveIds,
       },
       runningWorkflows: runningWorkflowRows.length,
+      version: appVersion,
     });
   });
 }
