@@ -29,6 +29,7 @@ import {
   getDefaultCommandsPath,
   getDefaultWorkflowsPath,
   getArchonWorkspacesPath,
+  getRunArtifactsPath,
 } from '@archon/paths';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import { parseWorkflow } from '@archon/workflows/loader';
@@ -1937,6 +1938,84 @@ export function registerApiRoutes(
       getLog().error({ err }, 'commands.list_failed');
       return apiError(c, 500, 'Failed to list commands');
     }
+  });
+
+  // GET /api/artifacts/:runId/* - Serve workflow artifact file contents
+  // The wildcard captures the filename (e.g. "plan.md", "subdir/report.md").
+  // Path traversal is blocked: any segment containing ".." is rejected.
+  app.get('/api/artifacts/:runId/*', async c => {
+    const runId = c.req.param('runId');
+    const rawFilename = c.req.param('*');
+
+    // Block path traversal: reject if any segment is ".." or contains null bytes
+    if (
+      !rawFilename ||
+      rawFilename.includes('\0') ||
+      rawFilename.split('/').some(s => s === '..')
+    ) {
+      return apiError(c, 400, 'Invalid filename');
+    }
+
+    // Normalize and ensure relative (no leading slash)
+    const filename = normalize(rawFilename).replace(/^[/\\]+/, '');
+    if (!filename) {
+      return apiError(c, 400, 'Invalid filename');
+    }
+
+    let run: Awaited<ReturnType<typeof workflowDb.getWorkflowRun>>;
+    try {
+      run = await workflowDb.getWorkflowRun(runId);
+    } catch (error) {
+      getLog().error({ err: error, runId }, 'artifacts.run_lookup_failed');
+      return apiError(c, 500, 'Failed to look up workflow run');
+    }
+
+    if (!run?.working_path) {
+      return apiError(c, 404, 'Workflow run not found');
+    }
+
+    // Derive owner/repo from working_path (must be under ~/.archon/workspaces/owner/repo/...)
+    const workspacesPath = getArchonWorkspacesPath();
+    const normalizedWorkingPath = normalize(run.working_path);
+    if (!normalizedWorkingPath.startsWith(normalize(workspacesPath) + sep)) {
+      return apiError(c, 404, 'Artifact not available: working path not in workspaces');
+    }
+    const relative = normalizedWorkingPath.substring(normalize(workspacesPath).length + 1);
+    const parts = relative.split(sep).filter(p => p.length > 0);
+    if (parts.length < 2) {
+      return apiError(c, 404, 'Artifact not available: could not determine owner/repo');
+    }
+    const [owner, repo] = parts;
+
+    const artifactDir = getRunArtifactsPath(owner, repo, runId);
+    const filePath = join(artifactDir, filename);
+
+    // Final safety check: ensure resolved path stays within artifact directory
+    if (
+      !normalize(filePath).startsWith(normalize(artifactDir) + sep) &&
+      normalize(filePath) !== normalize(artifactDir)
+    ) {
+      return apiError(c, 400, 'Invalid filename');
+    }
+
+    let content: string;
+    try {
+      content = await readFile(filePath, 'utf-8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return apiError(c, 404, 'Artifact file not found');
+      }
+      getLog().error({ err, runId, filename }, 'artifacts.read_failed');
+      return apiError(c, 500, 'Failed to read artifact file');
+    }
+
+    const contentType = filename.endsWith('.md')
+      ? 'text/markdown; charset=utf-8'
+      : 'text/plain; charset=utf-8';
+    return new Response(content, {
+      status: 200,
+      headers: { 'Content-Type': contentType },
+    });
   });
 
   // GET /api/config - Read-only configuration (safe subset only — no filesystem paths)
