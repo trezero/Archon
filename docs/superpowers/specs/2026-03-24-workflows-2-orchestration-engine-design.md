@@ -94,6 +94,20 @@ Transform Archon into a dynamic, graph-based AI orchestration engine that:
 - **Backend → Archon**: REST (register, report step result)
 - **Archon → Backend**: SSE (next nodes, resume signals)
 
+### Architectural Note: SSE as a New Pattern
+
+Archon's main server (`python/src/server/`) currently uses HTTP polling with smart intervals and has no SSE endpoints. The agent work orders service (port 8053) uses SSE for log streaming via `sse_starlette`, but that is a separate microservice.
+
+This design introduces SSE to the main Archon server for workflow events and backend communication. This is an intentional architectural evolution — workflows require lower-latency push notifications than polling provides (especially for HITL resume signals to backends).
+
+**Fallback behavior**: All SSE streams are notification-only. If an SSE connection drops:
+- **Backends**: Fall back to polling `GET /api/workflows/nodes?state=queued&backend_id={id}` on a 5-second interval until SSE reconnects.
+- **UI clients**: Fall back to polling `GET /api/workflows/{run_id}` on a 5-second interval (same smart polling pattern used elsewhere in Archon).
+
+SSE is an optimization for latency, not a correctness requirement. The system functions correctly with polling alone.
+
+The ARCHITECTURE.md should be updated when this feature ships to document SSE as a supported communication pattern for real-time workflow events.
+
 ---
 
 ## 4. DAG Orchestration Engine
@@ -148,6 +162,15 @@ The core function is **re-entrant** — called after every node completion or ap
 - `when:` conditions use same `$node.output` syntax as remote-agent's condition evaluator
 - `trigger_rule` matches remote-agent's existing rules
 - Condition evaluation is fail-closed (unparseable expression → skip the node)
+
+### Concurrency Control
+
+`evaluate_dag()` is re-entrant — multiple backends may report results concurrently, triggering simultaneous evaluations. To prevent race conditions (duplicate `queued` transitions, missed node activations):
+
+- Use a **PostgreSQL advisory lock** on `workflow_run_id` so only one `evaluate_dag()` runs per workflow at a time
+- Concurrent callers wait briefly (up to 2 seconds) for the lock, then return — the lock holder's evaluation will process their result
+- The advisory lock is released when evaluation completes
+- This is lightweight (no row-level locking) and scoped per-workflow (different workflows evaluate in parallel)
 
 ### File Location
 
@@ -284,12 +307,45 @@ Body: {
 - `POST /api/workflows/nodes/{id}/progress` — Progress update
 - `POST /api/workflows/nodes/{id}/result` — Report completion/failure
 
+### Authentication
+
+- **UI-facing endpoints** (`/api/workflows`, `/api/workflows/approvals`): Same authentication as all other Archon API endpoints (no additional auth for single-user beta)
+- **Backend protocol endpoints** (`/api/workflows/backends/*`, `/api/workflows/nodes/*`): Authenticated via `Authorization: Bearer {token}` header. Token is generated during backend registration (`POST /api/workflows/backends/register`), returned to the backend, and stored as `auth_token_hash` (bcrypt) in the `execution_backends` table
+
+### Error Handling
+
+All workflow API endpoints follow Archon's existing error handling patterns — custom exceptions in `python/src/server/exceptions.py` processed by exception handlers in `main.py`. Error responses use the existing format.
+
 **Workflow Definitions** (UI editor):
 - `GET /api/workflows/definitions` — List all definitions
 - `POST /api/workflows/definitions` — Create new definition
 - `PUT /api/workflows/definitions/{id}` — Update (versioned)
 - `DELETE /api/workflows/definitions/{id}` — Soft delete
 - `POST /api/workflows/definitions/{id}/export` — Export as YAML file
+
+### SSE Event Schema
+
+All SSE streams use named events with JSON `data` payloads and sequential `id` fields for reconnection via `Last-Event-ID`. A 256-event replay buffer is maintained per stream.
+
+**Backend SSE events** (`/api/workflows/backends/{id}/events`):
+
+| Event Type | Data Payload | When Fired |
+|---|---|---|
+| `node_ready` | `{workflow_run_id, node, context}` (see payload below) | Node transitions to `queued` |
+| `workflow_cancel` | `{workflow_run_id, reason}` | User cancels workflow |
+| `approval_resolved` | `{workflow_run_id, node_id, decision}` | HITL gate resolved |
+| `heartbeat` | `{timestamp}` | Every 15 seconds |
+
+**Client SSE events** (`/api/workflows/{run_id}/events`):
+
+| Event Type | Data Payload | When Fired |
+|---|---|---|
+| `node_state_changed` | `{node_id, previous_state, new_state, output?}` | Any node state transition |
+| `run_status_changed` | `{status, previous_status}` | Workflow run status change |
+| `approval_requested` | `{approval_id, node_id, approval_type, summary}` | HITL gate hit |
+| `approval_resolved` | `{approval_id, decision, resolved_by, resolved_via}` | HITL gate resolved |
+| `node_progress` | `{node_id, message}` | Backend reports progress |
+| `heartbeat` | `{timestamp}` | Every 15 seconds |
 
 ### Node Ready Payload
 
@@ -418,10 +474,9 @@ Import/export: Upload YAML from `.archon/workflows/` → parsed into form. Expor
 
 ### Command Library
 
-Resolution order for commands referenced by nodes:
+Resolution order for commands referenced by nodes (applies to the **Archon Local Executor** backend only — the remote-agent backend resolves commands using its own `CommandRouter`):
 1. Check Supabase `workflow_commands` table
 2. Fall back to filesystem `.md` files
-3. Fall back to remote-agent's `.archon/commands/`
 
 UI provides markdown editor with preview, variable placeholder hints, version history, and "fork from built-in" to customize defaults.
 
@@ -438,7 +493,11 @@ archon-ui-main/src/features/workflows/
 │   ├── WorkflowEditor.tsx   # Split-pane editor
 │   ├── NodeForm.tsx         # Individual node editing
 │   ├── YamlPanel.tsx        # Live YAML preview/editor
-│   └── CommandEditor.tsx    # Markdown command editor
+│   ├── CommandEditor.tsx    # Markdown command editor
+│   ├── WorkflowRunView.tsx  # Live workflow execution view
+│   ├── ApprovalList.tsx     # Pending approvals list
+│   ├── ApprovalDetail.tsx   # Full approval payload + diff view
+│   └── SuggestedWorkflows.tsx # Pattern discovery suggestions
 ├── hooks/
 │   └── useWorkflowQueries.ts
 ├── services/
@@ -501,6 +560,8 @@ python/src/server/services/pattern_discovery/
 
 ### New Tables (Migrations 027–034)
 
+> **Note**: Migration numbering starts at 027 based on the current state of `migration/0.1.0/` (last migration is 026). If other feature branches land migrations before this one, adjust numbering accordingly. Verify against the actual migration directory at implementation time.
+
 **027: workflow_definitions**
 - id (uuid PK), name, description, project_id (FK → archon_projects, nullable), yaml_content (text), parsed_definition (jsonb), version (int), is_latest (bool), tags (text[]), origin (text), created_at, deleted_at
 - UNIQUE(name, project_id, version)
@@ -510,8 +571,9 @@ python/src/server/services/pattern_discovery/
 - UNIQUE(name, project_id, version)
 
 **029: workflow_runs**
-- id (uuid PK), definition_id (FK → workflow_definitions), project_id (FK → archon_projects), status (pending|running|paused|completed|failed|cancelled), triggered_by (text), trigger_context (jsonb), backend_id (FK → execution_backends, nullable), started_at, completed_at, created_at
+- id (uuid PK), definition_id (FK → workflow_definitions), project_id (FK → archon_projects), status (pending|running|paused|completed|failed|cancelled), triggered_by (text), trigger_context (jsonb), started_at, completed_at, created_at
 - INDEX on (status), (project_id, status)
+- Note: No run-level `backend_id` — node-level `claimed_by_backend_id` is sufficient since parallel nodes may be claimed by different backends
 
 **030: workflow_nodes**
 - id (uuid PK), workflow_run_id (FK → workflow_runs), node_id (text), state (pending|queued|running|waiting_approval|completed|failed|skipped|cancelled), claimed_by_backend_id (FK → execution_backends, nullable), output (text), error (text nullable), session_id (text nullable), started_at, completed_at
@@ -526,12 +588,12 @@ python/src/server/services/pattern_discovery/
 - id (uuid PK), name (UNIQUE), base_url, auth_token_hash (text), capabilities (text[]), supported_node_types (text[]), max_concurrent_nodes (int), status (healthy|unhealthy|disconnected), last_heartbeat_at, registered_at
 
 **033: activity_events**
-- id (uuid PK), event_type (commit|conversation|workflow_run), project_id (FK nullable), repo_url (text), intent_summary (text nullable), intent_embedding (vector(1536) nullable), metadata (jsonb), created_at
+- id (uuid PK), event_type (commit|conversation|workflow_run), project_id (FK nullable), repo_url (text), intent_summary (text nullable), intent_embedding (vector, nullable — dimension matches Archon's configured embedding model), metadata (jsonb), created_at
 - INDEX on (event_type, created_at)
 - ivfflat INDEX on intent_embedding
 
 **034: discovered_patterns**
-- id (uuid PK), pattern_name, description, cluster_embedding (vector(1536)), source_event_ids (uuid[]), repos_involved (text[]), frequency_score (float), cross_repo_score (float), final_score (float), suggested_yaml (text), status (pending_review|accepted|dismissed|expired), accepted_workflow_id (FK → workflow_definitions, nullable), discovered_at
+- id (uuid PK), pattern_name, description, cluster_embedding (vector — same dimension as intent_embedding), source_event_ids (uuid[] — intentionally denormalized for query performance; the analysis service handles missing events gracefully), repos_involved (text[]), frequency_score (float), cross_repo_score (float), final_score (float), suggested_yaml (text), status (pending_review|accepted|dismissed|expired), accepted_workflow_id (FK → workflow_definitions, nullable), discovered_at
 - INDEX on (status, final_score DESC)
 
 ### Entity Relationships
@@ -549,8 +611,7 @@ workflow_definitions
 
 workflow_runs
   ├─← workflow_nodes.workflow_run_id
-  ├─← approval_requests.workflow_run_id
-  └─→ execution_backends.id (via backend_id)
+  └─← approval_requests.workflow_run_id
 
 workflow_nodes
   └─→ execution_backends.id (via claimed_by_backend_id)
@@ -611,3 +672,29 @@ Location: `packages/core/src/archon-bridge/` in the remote-coding-agent repo.
 **Isolation**: Reuses existing `IsolationResolver` for worktree lifecycle — Archon doesn't need to know about isolation details.
 
 **Key principle**: The bridge is an **additive** module. The remote-agent's existing orchestrator, adapters, and workflow engine remain untouched. Users can still use the remote-agent standalone without Archon.
+
+### Node State Mapping
+
+Archon uses 8 node states; the remote-agent uses 5. The bridge translates between them:
+
+| Archon State | Remote-Agent State | Bridge Behavior |
+|---|---|---|
+| `pending` | `pending` | Direct mapping |
+| `queued` | _(no equivalent)_ | Archon-only. Bridge claims the node and creates a `pending` execution in the remote-agent |
+| `running` | `running` | Direct mapping. Remote-agent reports `running` → bridge relays to Archon |
+| `waiting_approval` | _(no equivalent)_ | Archon-only. Bridge does not involve the remote-agent — approval is handled entirely by Archon + HITL Router |
+| `completed` | `completed` | Direct mapping |
+| `failed` | `failed` | Direct mapping |
+| `skipped` | `skipped` | Direct mapping |
+| `cancelled` | _(no equivalent)_ | Archon-only. Bridge sends cancellation signal to remote-agent, which terminates the running process |
+
+### Required Remote-Agent Development
+
+The Telegram approval flow requires new development in the remote-coding-agent (the existing Telegram adapter does not have inline keyboard or `callback_query` support):
+
+1. **Inline keyboard support**: Extend `TelegramAdapter.sendMessage()` to accept `reply_markup` with `InlineKeyboardMarkup` for approve/reject buttons
+2. **Callback query handler**: Add a Telegraf `bot.on('callback_query')` handler that extracts `approval_id` and `decision` from callback data
+3. **Archon callback endpoint**: The callback handler calls Archon's `POST /api/workflows/approvals/{id}/resolve` REST endpoint
+4. **Bridge approval dispatch**: New method on the bridge that receives approval requests from Archon and formats them as Telegram messages with inline keyboards
+
+This is scoped as a separate sub-task within the remote-agent repo, independent of the Archon-side implementation.
