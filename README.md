@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <em>Power up your AI coding assistants with your own custom knowledge base and task management as an MCP server</em>
+  <em>Power up your AI coding assistants with your own custom knowledge base, task management, and AI chat assistant as an MCP server</em>
 </p>
 
 <p align="center">
@@ -31,8 +31,8 @@ Archon is the **command center** for AI coding assistants. For you, it's a sleek
 - **Smart search capabilities** with advanced RAG strategies and project-scoped filtering
 - **Programmatic ingestion** — coding agents can ingest local project docs into the knowledge base via MCP tools
 - **Task management** integrated with your knowledge base
+- **AI Chat Assistant** — a built-in chat interface that understands your projects, priorities, and goals to help you brainstorm, prioritize, and manage work
 - **Real-time updates** as you add new content and collaborate with your coding assistant on tasks
-- **Much more** coming soon to build Archon into an integrated environment for all context engineering
 
 This new vision for Archon replaces the old one (the agenteer). Archon used to be the AI agent that builds other agents, and now you can use Archon to do that and more.
 
@@ -118,7 +118,8 @@ Once everything is running:
 1. **Test Web Crawling**: Go to http://localhost:3737 → Knowledge Base → "Crawl Website" → Enter a doc URL (such as https://ai.pydantic.dev/llms.txt)
 2. **Test Document Upload**: Knowledge Base → Upload a PDF
 3. **Test Projects**: Projects → Create a new project and add tasks
-4. **Integrate with your AI coding assistant**: MCP Dashboard → Copy connection config for your AI coding assistant 
+4. **Test Chat**: Click the floating Archon button (bottom-right) or navigate to `/chat` — the AI assistant can search your knowledge base, analyze projects, and help prioritize work (requires the agents service: `docker compose --profile agents up -d`)
+5. **Integrate with your AI coding assistant**: MCP Dashboard → Copy connection config for your AI coding assistant
 
 ## 🤖 Coding Agent Integration
 
@@ -298,7 +299,7 @@ The reset script safely removes all tables, functions, triggers, and policies wi
 | **Web Interface**          | archon-ui                  | http://localhost:3737 | Main dashboard and controls                |
 | **API Service**            | archon-server              | http://localhost:8181 | Web crawling, document processing          |
 | **MCP Server**             | archon-mcp                 | http://localhost:8051 | Model Context Protocol interface           |
-| **Agents Service**         | archon-agents              | http://localhost:8052 | AI/ML operations, reranking                |
+| **Agents Service**         | archon-agents              | http://localhost:8052 | AI chat, agents, SSE streaming             |
 | **Agent Work Orders** *(optional)* | archon-agent-work-orders | http://localhost:8053 | Workflow execution with Claude Code CLI    |  
 
 ## Upgrading
@@ -350,13 +351,27 @@ To upgrade Archon to the latest version:
 
 - **Hierarchical Projects**: Organize work with projects, features, and tasks in a structured workflow
 - **AI-Assisted Creation**: Generate project requirements and tasks using integrated AI agents
+- **Project Enrichment**: Add goals, relevance, and AI-suggested categories to projects for better prioritization
 - **Document Management**: Version-controlled documents with collaborative editing capabilities
 - **Progress Tracking**: Real-time updates and status management across all project activities
 
-### 🔄 Real-time Collaboration
+### 💬 AI Chat Assistant
 
-- **WebSocket Updates**: Live progress tracking for crawling, processing, and AI operations
-- **Multi-user Support**: Collaborative knowledge building and project management
+- **Interactive Chat Interface**: Built-in AI assistant accessible via a floating sidebar or a dedicated `/chat` page
+- **Project Awareness**: Chat with context about your projects, tasks, knowledge base, and session history
+- **Prioritization Engine**: Ask "What should I work on?" and get recommendations based on momentum, strategic alignment, dependencies, and effort matching
+- **Cross-Project Synergy**: Discover how your projects could work together or share patterns
+- **User Profile & Onboarding**: AI-guided onboarding builds your profile so the assistant understands your role, goals, and priorities
+- **Configurable Models**: Choose between Claude, GPT, and other providers per conversation
+- **Advisor & Action Mode**: Read-only advisor by default, with an unlockable action mode that can create tasks, update projects, and more (with approval)
+- **Tool-Use Visibility**: See what the AI is searching and analyzing in real-time via collapsible tool cards
+- **Persistent & Searchable History**: All conversations are saved and full-text searchable
+- **SSE Streaming**: Token-by-token streaming with heartbeat keepalive for responsive interactions
+
+### 🔄 Real-time Updates
+
+- **HTTP Polling**: Smart, visibility-aware polling with ETag caching for bandwidth efficiency
+- **SSE Streaming**: Server-sent events for chat responses and agent operations
 - **Background Processing**: Asynchronous operations that don't block the user interface
 - **Health Monitoring**: Built-in service health checks and automatic reconnection
 
@@ -370,11 +385,12 @@ Archon uses true microservices architecture with clear separation of concerns:
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Frontend UI   │    │  Server (API)   │    │   MCP Server    │    │ Agents Service  │
 │                 │    │                 │    │                 │    │                 │
-│  React + Vite   │◄──►│    FastAPI +    │◄──►│    Lightweight  │◄──►│   PydanticAI    │
-│  Port 3737      │    │    SocketIO     │    │    HTTP Wrapper │    │   Port 8052     │
-│                 │    │    Port 8181    │    │    Port 8051    │    │                 │
+│  React + Vite   │◄──►│    FastAPI      │◄──►│    Lightweight  │◄──►│   PydanticAI    │
+│  TanStack Query │    │    REST APIs    │    │    HTTP Wrapper │    │   ChatAgent     │
+│  Port 3737      │    │    Port 8181    │    │    Port 8051    │    │   Port 8052     │
 └─────────────────┘    └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                        │                        │                        │
+         │   SSE (chat stream)    │                        │                        │
          └────────────────────────┼────────────────────────┼────────────────────────┘
                                   │                        │
                          ┌─────────────────┐               │
@@ -390,17 +406,18 @@ Archon uses true microservices architecture with clear separation of concerns:
 
 | Service                  | Location                       | Purpose                          | Key Features                                                       |
 | ------------------------ | ------------------------------ | -------------------------------- | ------------------------------------------------------------------ |
-| **Frontend**             | `archon-ui-main/`              | Web interface and dashboard      | React, TypeScript, TailwindCSS, Socket.IO client                   |
-| **Server**               | `python/src/server/`           | Core business logic and APIs     | FastAPI, service layer, Socket.IO broadcasts, all ML/AI operations |
-| **MCP Server**           | `python/src/mcp/`              | MCP protocol interface           | Lightweight HTTP wrapper, MCP tools, session management            |
-| **Agents**               | `python/src/agents/`           | PydanticAI agent hosting         | Document and RAG agents, streaming responses                       |
+| **Frontend**             | `archon-ui-main/`              | Web interface and dashboard      | React, TypeScript, TailwindCSS, TanStack Query                     |
+| **Server**               | `python/src/server/`           | Core business logic and APIs     | FastAPI, service layer, REST APIs, ML/AI operations                |
+| **MCP Server**           | `python/src/mcp_server/`       | MCP protocol interface           | Lightweight HTTP wrapper, MCP tools, session management            |
+| **Agents**               | `python/src/agents/`           | PydanticAI agent hosting         | ChatAgent, RAG/Document agents, SSE streaming                      |
 | **Agent Work Orders** *(optional)* | `python/src/agent_work_orders/` | Workflow execution engine | Claude Code CLI automation, repository management, SSE updates |
 
 ### Communication Patterns
 
-- **HTTP-based**: All inter-service communication uses HTTP APIs
-- **Socket.IO**: Real-time updates from Server to Frontend
-- **MCP Protocol**: AI clients connect to MCP Server via SSE or stdio
+- **HTTP-based**: All inter-service communication uses REST APIs
+- **SSE Streaming**: Real-time chat responses from Agent Service to Frontend
+- **HTTP Polling**: Smart, visibility-aware polling with ETag caching for data freshness
+- **MCP Protocol**: AI clients connect to MCP Server via streamable HTTP
 - **No Direct Imports**: Services are truly independent with no shared code dependencies
 
 ### Key Architectural Benefits
