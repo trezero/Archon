@@ -1885,6 +1885,7 @@ export async function executeWorkflow(
 
   // Resume detection and concurrent-run checks (skip when run was pre-created by caller)
   let resumeFromStepIndex: number | undefined;
+  let dagPriorCompletedNodes: Map<string, string> | undefined;
   let workflowRun: WorkflowRun | undefined = preCreatedRun;
 
   if (preCreatedRun) {
@@ -1997,6 +1998,64 @@ export async function executeWorkflow(
           '❌ **Workflow failed**: Found a prior run to resume but could not activate it (database error). Please try again later.'
         );
         return { success: false, error: 'Database error resuming workflow run' };
+      }
+    } else if (resumableRun && isDagWorkflow(workflow)) {
+      // DAG workflows don't use current_step_index for progress tracking (it stays 0).
+      // This branch is only reached when current_step_index is 0 or null.
+      // Load completed node outputs from the prior run's events.
+      let priorNodes: Map<string, string>;
+      try {
+        priorNodes = await deps.store.getCompletedDagNodeOutputs(resumableRun.id);
+      } catch (error) {
+        const err = error as Error;
+        getLog().warn(
+          { err, workflowName: workflow.name, resumableRunId: resumableRun.id },
+          'workflow.dag_resume_node_outputs_failed'
+        );
+        // Intentional: fall back to empty map (fresh start) if prior node outputs can't be loaded.
+        // getCompletedDagNodeOutputs threw unexpectedly — safe to degrade rather than abort the run.
+        priorNodes = new Map();
+        await safeSendMessage(
+          platform,
+          conversationId,
+          '⚠️ Could not load prior node outputs for resume (database error). Starting a fresh DAG run instead.'
+        );
+      }
+      if (priorNodes.size > 0) {
+        try {
+          workflowRun = await deps.store.resumeWorkflowRun(resumableRun.id);
+          dagPriorCompletedNodes = priorNodes;
+          getLog().info(
+            {
+              workflowRunId: workflowRun.id,
+              priorCompletedCount: priorNodes.size,
+            },
+            'workflow.dag_resuming'
+          );
+          await safeSendMessage(
+            platform,
+            conversationId,
+            `▶️ **Resuming** DAG workflow \`${workflow.name}\` — skipping ${String(priorNodes.size)} already-completed node(s).\n\nNote: AI session context from prior nodes is not restored. Nodes that depend on prior context may need to re-read artifacts.`
+          );
+        } catch (error) {
+          const err = error as Error;
+          getLog().error(
+            { err, workflowName: workflow.name, resumableRunId: resumableRun.id },
+            'workflow_resume_activate_failed'
+          );
+          await sendCriticalMessage(
+            platform,
+            conversationId,
+            '❌ **Workflow failed**: Found a prior DAG run to resume but could not activate it (database error). Please try again later.'
+          );
+          return { success: false, error: 'Database error resuming DAG workflow run' };
+        }
+      } else {
+        // Found prior failed DAG run but no nodes completed — not worth resuming
+        getLog().info(
+          { workflowRunId: resumableRun.id },
+          'workflow.dag_resume_skipped_no_completed_nodes'
+        );
       }
     } else if (resumableRun) {
       // Found a prior failed run but no steps completed (current_step_index=0) — not worth resuming
@@ -2196,7 +2255,8 @@ export async function executeWorkflow(
         baseBranch,
         config,
         configuredCommandFolder,
-        issueContext
+        issueContext,
+        dagPriorCompletedNodes
       );
       // executeDagWorkflow throws on fatal errors; check DB status for result
       const finalStatus = await deps.store.getWorkflowRun(workflowRun.id);

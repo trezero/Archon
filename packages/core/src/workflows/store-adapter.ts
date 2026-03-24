@@ -55,6 +55,7 @@ export function createWorkflowStore(): IWorkflowStore {
         );
       }
     },
+    getCompletedDagNodeOutputs: workflowEventDb.getCompletedDagNodeOutputs,
     getCodebase: codebaseDb.getCodebase,
   };
 }

@@ -87,6 +87,7 @@ function createMockStore(): IWorkflowStore {
     completeWorkflowRun: mock(() => Promise.resolve()),
     failWorkflowRun: mock(() => Promise.resolve()),
     createWorkflowEvent: mock(() => Promise.resolve()),
+    getCompletedDagNodeOutputs: mock(() => Promise.resolve(new Map<string, string>())),
     getCodebase: mock(() => Promise.resolve(null)),
   };
 }
@@ -2423,5 +2424,267 @@ nodes:
     const wf = result.workflow!;
     if (!isDagWorkflow(wf)) throw new Error('Expected DAG workflow');
     expect(wf.nodes[0].skills).toBeUndefined();
+  });
+});
+
+describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `dag-resume-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'step1.md'), 'Step 1 prompt');
+    await writeFile(join(commandsDir, 'step2.md'), 'Step 2 prompt using $step1.output');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'AI response' };
+      yield { type: 'result', sessionId: 'session-id' };
+    });
+  });
+
+  afterEach(async () => {
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('skips nodes that appear in priorCompletedNodes', async () => {
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    const priorCompletedNodes = new Map([['step1', 'prior step1 output']]);
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-resume',
+      testDir,
+      {
+        name: 'two-step',
+        nodes: [
+          { id: 'step1', command: 'step1' },
+          { id: 'step2', command: 'step2', depends_on: ['step1'] },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig,
+      undefined,
+      undefined,
+      priorCompletedNodes
+    );
+
+    // Only step2 should have been executed (step1 was skipped)
+    expect(mockSendQueryDag.mock.calls.length).toBe(1);
+  });
+
+  it('pre-populates nodeOutputs so downstream nodes can use $nodeId.output', async () => {
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    let capturedPrompt = '';
+    mockSendQueryDag.mockImplementation(function* (prompt: string) {
+      capturedPrompt = prompt;
+      yield { type: 'assistant', content: 'step2 result' };
+      yield { type: 'result', sessionId: 'session-id' };
+    });
+
+    const priorCompletedNodes = new Map([['step1', 'hello from prior run']]);
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-resume',
+      testDir,
+      {
+        name: 'two-step',
+        nodes: [
+          { id: 'step1', command: 'step1' },
+          { id: 'step2', prompt: 'Use this: $step1.output', depends_on: ['step1'] },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig,
+      undefined,
+      undefined,
+      priorCompletedNodes
+    );
+
+    // The prompt sent to AI should contain the prior run's output
+    expect(capturedPrompt).toContain('hello from prior run');
+  });
+
+  it('emits node_skipped_prior_success event for resumed nodes', async () => {
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('resume-run-id');
+
+    const priorCompletedNodes = new Map([['step1', 'prior output']]);
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-resume',
+      testDir,
+      {
+        name: 'two-step',
+        nodes: [
+          { id: 'step1', command: 'step1' },
+          { id: 'step2', command: 'step2', depends_on: ['step1'] },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig,
+      undefined,
+      undefined,
+      priorCompletedNodes
+    );
+
+    const eventCalls = (store.createWorkflowEvent as ReturnType<typeof mock>).mock.calls;
+    const skippedEvent = eventCalls.find(
+      (call: unknown[]) =>
+        (call[0] as { event_type: string }).event_type === 'node_skipped_prior_success' &&
+        (call[0] as { step_name: string }).step_name === 'step1'
+    );
+    expect(skippedEvent).toBeDefined();
+  });
+
+  it('runs all nodes when priorCompletedNodes is empty', async () => {
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-resume',
+      testDir,
+      {
+        name: 'two-step',
+        nodes: [
+          { id: 'step1', command: 'step1' },
+          { id: 'step2', command: 'step2', depends_on: ['step1'] },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig,
+      undefined,
+      undefined,
+      new Map()
+    );
+
+    // Both nodes should execute
+    expect(mockSendQueryDag.mock.calls.length).toBe(2);
+  });
+
+  it('stores node_output in node_completed event data for bash nodes', async () => {
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('bash-output-persist-run');
+
+    const bashNode: BashNode = { id: 'stats', bash: 'echo "bash output"' };
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-bash-output',
+      testDir,
+      { name: 'bash-output-test', nodes: [bashNode] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    const eventCalls = (store.createWorkflowEvent as ReturnType<typeof mock>).mock.calls;
+    const completedEvent = eventCalls.find(
+      (call: unknown[]) =>
+        (call[0] as { event_type: string }).event_type === 'node_completed' &&
+        (call[0] as { step_name: string }).step_name === 'stats'
+    );
+    expect(completedEvent).toBeDefined();
+    expect((completedEvent![0] as { data: { node_output: string } }).data.node_output).toContain(
+      'bash output'
+    );
+  });
+
+  it('stores node_output in node_completed event data for AI nodes', async () => {
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('output-persist-run');
+
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'the node output text' };
+      yield { type: 'result', sessionId: 'sid' };
+    });
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-output',
+      testDir,
+      { name: 'single-node', nodes: [{ id: 'step1', command: 'step1' }] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    const eventCalls = (store.createWorkflowEvent as ReturnType<typeof mock>).mock.calls;
+    const completedEvent = eventCalls.find(
+      (call: unknown[]) =>
+        (call[0] as { event_type: string }).event_type === 'node_completed' &&
+        (call[0] as { step_name: string }).step_name === 'step1'
+    );
+    expect(completedEvent).toBeDefined();
+    expect((completedEvent![0] as { data: { node_output: string } }).data.node_output).toBe(
+      'the node output text'
+    );
   });
 });

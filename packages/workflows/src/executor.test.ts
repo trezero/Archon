@@ -108,6 +108,7 @@ function createMockStore(overrides?: Partial<IWorkflowStore>): IWorkflowStore {
     completeWorkflowRun: mock(() => Promise.resolve()),
     failWorkflowRun: mock(() => Promise.resolve()),
     createWorkflowEvent: mock(() => Promise.resolve()),
+    getCompletedDagNodeOutputs: mock(() => Promise.resolve(new Map<string, string>())),
     getCodebase: mock(() => Promise.resolve(null)),
     ...overrides,
   };
@@ -4737,6 +4738,135 @@ describe('app defaults command loading', () => {
           (call[1] as string).includes('Could not check for a prior run to resume')
       );
       expect(warnMessages.length).toBeGreaterThan(0);
+    });
+
+    it('resumes a prior failed DAG run when completed nodes exist', async () => {
+      const priorRun: WorkflowRun = {
+        ...DEFAULT_WORKFLOW_RUN,
+        id: 'dag-prior-run-id',
+        current_step_index: 0,
+        status: 'failed' as const,
+        working_path: testDir,
+      };
+      const resumedRun: WorkflowRun = { ...priorRun, status: 'running' as const };
+
+      (localStore.findResumableRun as ReturnType<typeof mock>).mockResolvedValue(priorRun);
+      (localStore.resumeWorkflowRun as ReturnType<typeof mock>).mockResolvedValue(resumedRun);
+      (localStore.getCompletedDagNodeOutputs as ReturnType<typeof mock>).mockResolvedValue(
+        new Map([['node-a', 'output-a']])
+      );
+
+      const dagWorkflow: WorkflowDefinition = {
+        name: 'test-workflow',
+        provider: 'claude',
+        nodes: [
+          { id: 'node-a', prompt: 'do thing a' },
+          { id: 'node-b', prompt: 'do thing b', depends_on: ['node-a'] },
+        ],
+      };
+
+      await executeWorkflow(
+        localDeps,
+        localPlatform,
+        'conv-123',
+        testDir,
+        dagWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // No createWorkflowRun — resume used existing run
+      expect((localStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(0);
+      expect((localStore.resumeWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(1);
+
+      // Resume message sent to user
+      const msgs = (localPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const resumeMsg = msgs.find(
+        (c: unknown[]) =>
+          typeof c[1] === 'string' && (c[1] as string).includes('▶️ **Resuming** DAG')
+      );
+      expect(resumeMsg).toBeDefined();
+      expect(resumeMsg![1] as string).toContain('skipping 1 already-completed node(s)');
+    });
+
+    it('starts a fresh DAG run when prior failed run has no completed nodes', async () => {
+      const priorRun: WorkflowRun = {
+        ...DEFAULT_WORKFLOW_RUN,
+        id: 'dag-prior-run-id',
+        current_step_index: 0,
+        status: 'failed' as const,
+        working_path: testDir,
+      };
+
+      (localStore.findResumableRun as ReturnType<typeof mock>).mockResolvedValue(priorRun);
+      (localStore.getCompletedDagNodeOutputs as ReturnType<typeof mock>).mockResolvedValue(
+        new Map()
+      );
+
+      const dagWorkflow: WorkflowDefinition = {
+        name: 'test-workflow',
+        provider: 'claude',
+        nodes: [{ id: 'node-a', prompt: 'do thing a' }],
+      };
+
+      await executeWorkflow(
+        localDeps,
+        localPlatform,
+        'conv-123',
+        testDir,
+        dagWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      // Fresh run created (no completed nodes → not worth resuming)
+      expect((localStore.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(1);
+      expect((localStore.resumeWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(0);
+    });
+
+    it('returns error when DAG resumeWorkflowRun throws', async () => {
+      const priorRun: WorkflowRun = {
+        ...DEFAULT_WORKFLOW_RUN,
+        id: 'dag-prior-run-id',
+        current_step_index: 0,
+        status: 'failed' as const,
+        working_path: testDir,
+      };
+
+      (localStore.findResumableRun as ReturnType<typeof mock>).mockResolvedValue(priorRun);
+      (localStore.getCompletedDagNodeOutputs as ReturnType<typeof mock>).mockResolvedValue(
+        new Map([['node-a', 'output-a']])
+      );
+      (localStore.resumeWorkflowRun as ReturnType<typeof mock>).mockRejectedValue(
+        new Error('DB down')
+      );
+
+      const dagWorkflow: WorkflowDefinition = {
+        name: 'test-workflow',
+        provider: 'claude',
+        nodes: [{ id: 'node-a', prompt: 'do thing a' }],
+      };
+
+      const result = await executeWorkflow(
+        localDeps,
+        localPlatform,
+        'conv-123',
+        testDir,
+        dagWorkflow,
+        'User message',
+        'db-conv-id'
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Database error resuming DAG workflow run');
+
+      // Error message sent to user
+      const sendCalls = (localPlatform.sendMessage as ReturnType<typeof mock>).mock.calls;
+      const errorMessages = sendCalls.filter(
+        (call: unknown[]) =>
+          typeof call[1] === 'string' && (call[1] as string).includes('could not activate it')
+      );
+      expect(errorMessages.length).toBeGreaterThan(0);
     });
   });
 });

@@ -19,6 +19,7 @@ export type WorkflowEventType =
   | 'node_completed'
   | 'node_failed'
   | 'node_skipped'
+  | 'node_skipped_prior_success'
   | 'parallel_agent_started'
   | 'parallel_agent_completed'
   | 'parallel_agent_failed'
@@ -68,6 +69,16 @@ export interface IWorkflowStore {
     step_name?: string;
     data?: Record<string, unknown>;
   }): Promise<void>;
+
+  /**
+   * Return a map of nodeId → output for all node_completed events
+   * from a prior DAG workflow run. Used for DAG resume: the executor
+   * pre-populates nodeOutputs so completed nodes are skipped on re-run.
+   *
+   * Returns an empty map when no completed nodes exist.
+   * Throws on DB error — caller (executor.ts) owns the degradation policy.
+   */
+  getCompletedDagNodeOutputs(workflowRunId: string): Promise<Map<string, string>>;
 
   // Codebase lookup (for path resolution)
   getCodebase(id: string): Promise<{

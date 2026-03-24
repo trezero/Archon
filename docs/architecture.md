@@ -1063,7 +1063,10 @@ remote_agent_workflow_runs
 remote_agent_workflow_events
 ├── id (UUID)
 ├── workflow_run_id (UUID → remote_agent_workflow_runs.id)
-├── event_type (VARCHAR) -- 'step-start' | 'step-complete' | 'step-fail' | 'artifact' | 'error'
+├── event_type (VARCHAR) -- see WorkflowEventType in packages/workflows/src/store.ts
+│                       -- e.g. 'workflow_started' | 'step_started' | 'step_completed' | 'step_failed'
+│                       --    | 'node_started' | 'node_completed' | 'node_failed' | 'node_skipped'
+│                       --    | 'node_skipped_prior_success' | 'parallel_agent_started' | ...
 ├── step_index (INTEGER)
 ├── step_name (VARCHAR)
 ├── data (JSONB) -- Event-specific data (artifacts, error messages, etc.)

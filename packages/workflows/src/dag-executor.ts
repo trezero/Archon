@@ -1035,7 +1035,7 @@ async function executeNodeInternal(
         workflow_run_id: workflowRun.id,
         event_type: 'node_completed',
         step_name: node.id,
-        data: { duration_ms: duration },
+        data: { duration_ms: duration, node_output: nodeOutputText },
       })
       .catch((err: Error) => {
         getLog().error(
@@ -1187,7 +1187,7 @@ async function executeBashNode(
         workflow_run_id: workflowRun.id,
         event_type: 'node_completed',
         step_name: node.id,
-        data: { duration_ms: duration, type: 'bash' },
+        data: { duration_ms: duration, type: 'bash', node_output: output },
       })
       .catch((err: Error) => {
         getLog().error(
@@ -1266,11 +1266,24 @@ export async function executeDagWorkflow(
   baseBranch: string,
   config: WorkflowConfig,
   configuredCommandFolder?: string,
-  issueContext?: string
+  issueContext?: string,
+  priorCompletedNodes?: Map<string, string>
 ): Promise<void> {
   const dagStartTime = Date.now();
   const layers = buildTopologicalLayers(workflow.nodes);
   const nodeOutputs = new Map<string, NodeOutput>();
+
+  // Pre-populate nodeOutputs from prior run so already-completed nodes are
+  // treated as done for trigger-rule and $nodeId.output substitution purposes.
+  if (priorCompletedNodes && priorCompletedNodes.size > 0) {
+    for (const [nodeId, output] of priorCompletedNodes) {
+      nodeOutputs.set(nodeId, { state: 'completed', output });
+    }
+    getLog().info(
+      { workflowRunId: workflowRun.id, priorCompletedCount: priorCompletedNodes.size },
+      'dag.workflow_resume_prepopulated'
+    );
+  }
 
   getLog().info(
     {
@@ -1299,6 +1312,42 @@ export async function executeDagWorkflow(
     const layerResults = await Promise.allSettled(
       layer.map(async (node): Promise<{ nodeId: string; output: NodeOutput }> => {
         try {
+          // 0. Skip if this node completed successfully in a prior run (resume path)
+          if (priorCompletedNodes?.has(node.id)) {
+            getLog().info({ nodeId: node.id }, 'dag.node_skipped_prior_success');
+            await logNodeSkip(logDir, workflowRun.id, node.id, 'prior_success').catch(
+              (err: Error) => {
+                getLog().warn({ err, nodeId: node.id }, 'dag.node_skip_log_write_failed');
+              }
+            );
+            deps.store
+              .createWorkflowEvent({
+                workflow_run_id: workflowRun.id,
+                event_type: 'node_skipped_prior_success',
+                step_name: node.id,
+                data: { reason: 'prior_success' },
+              })
+              .catch((err: Error) => {
+                getLog().error(
+                  { err, workflowRunId: workflowRun.id, eventType: 'node_skipped_prior_success' },
+                  'workflow_event_persist_failed'
+                );
+              });
+            const emitterPrior = getWorkflowEventEmitter();
+            emitterPrior.emit({
+              type: 'node_skipped',
+              runId: workflowRun.id,
+              nodeId: node.id,
+              nodeName: node.command ?? node.id,
+              reason: 'prior_success',
+            });
+            // Return the pre-populated output (already in nodeOutputs)
+            return {
+              nodeId: node.id,
+              output: nodeOutputs.get(node.id) ?? { state: 'skipped' as const, output: '' },
+            };
+          }
+
           // 1. Evaluate trigger rule
           const triggerDecision = checkTriggerRule(node, nodeOutputs);
           if (triggerDecision === 'skip') {

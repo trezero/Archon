@@ -509,10 +509,31 @@ SDK subprocess retry (claude.ts)  — 3 total attempts, 2 s base backoff
     ↓ only if all SDK retries exhausted
 Step/node retry (executor / dag-executor)  — default 2 retries, 3 s base backoff
     ↓ only if all step retries exhausted
-Workflow fails → user can --resume
+Workflow fails → steps: user can --resume | nodes: next invocation auto-resumes
 ```
 
 This means a single transient crash may trigger up to **3 SDK retries** before a single step retry attempt is consumed.
+
+> **DAG resume**: For `nodes:` (DAG) workflows, resume is automatic — the next invocation detects the prior failed run and skips already-completed nodes. No `--resume` flag is needed. See [DAG Resume on Failure](#dag-resume-on-failure) below.
+
+---
+
+## DAG Resume on Failure
+
+When a `nodes:` (DAG) workflow fails, the next invocation automatically resumes from where it left off — no `--resume` flag required.
+
+**How it works:**
+
+1. On each invocation, Archon checks for a prior failed run of the same workflow in the same conversation.
+2. If found, it loads the `node_completed` events from that run to determine which nodes finished successfully.
+3. Completed nodes are skipped; only failed and not-yet-run nodes are executed.
+4. You receive a platform message like: `▶️ Resuming DAG workflow — skipping 3 already-completed node(s).`
+
+**Known limitation**: AI session context from prior nodes is not restored. If a downstream node relies on in-context knowledge from a prior run's session (rather than artifacts), it may need to re-read those artifacts explicitly.
+
+**Fresh start**: If zero nodes completed in the prior run, Archon starts fresh (no nodes to skip).
+
+**Contrast with `steps:` workflows**: Sequential (`steps:`) workflows use the `--resume` flag to restart from a specific step. DAG workflows handle this automatically at the node level.
 
 ---
 

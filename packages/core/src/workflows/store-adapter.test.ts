@@ -27,8 +27,10 @@ mock.module('../db/workflows', () => ({
 }));
 
 const mockCreateWorkflowEvent = mock(() => Promise.resolve());
+const mockGetCompletedDagNodeOutputs = mock(() => Promise.resolve(new Map<string, string>()));
 mock.module('../db/workflow-events', () => ({
   createWorkflowEvent: mockCreateWorkflowEvent,
+  getCompletedDagNodeOutputs: mockGetCompletedDagNodeOutputs,
 }));
 
 const mockGetCodebase = mock(() => Promise.resolve(null));
@@ -61,6 +63,7 @@ describe('createWorkflowStore', () => {
       'completeWorkflowRun',
       'failWorkflowRun',
       'createWorkflowEvent',
+      'getCompletedDagNodeOutputs',
       'getCodebase',
     ];
     for (const method of requiredMethods) {
@@ -95,6 +98,15 @@ describe('createWorkflowStore', () => {
         step_name: 'test-step',
       })
     ).resolves.toBeUndefined();
+  });
+
+  test('delegates getCompletedDagNodeOutputs to DB', async () => {
+    const expected = new Map([['step1', 'output text']]);
+    mockGetCompletedDagNodeOutputs.mockResolvedValueOnce(expected);
+    const store = createWorkflowStore();
+    const result = await store.getCompletedDagNodeOutputs('run-123');
+    expect(result).toBe(expected);
+    expect(mockGetCompletedDagNodeOutputs).toHaveBeenCalledWith('run-123');
   });
 
   test('delegates getCodebase to DB', async () => {

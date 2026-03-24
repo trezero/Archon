@@ -6,6 +6,7 @@
  *
  * All write operations use fire-and-forget pattern (catch + log, never throw)
  * because workflow execution must not fail due to event logging.
+ * Read operations also throw on error — callers own the degradation policy.
  */
 import { pool, getDialect } from './connection';
 import { createLogger } from '@archon/paths';
@@ -111,4 +112,41 @@ export async function listRecentEvents(
     );
     throw new Error(`Failed to list recent workflow events: ${(error as Error).message}`);
   }
+}
+
+/**
+ * Return a map of nodeId → output for all node_completed events in a workflow run.
+ * Used by the DAG executor to restore node outputs when resuming a failed run.
+ * Throws on DB error — caller owns the degradation policy.
+ */
+export async function getCompletedDagNodeOutputs(
+  workflowRunId: string
+): Promise<Map<string, string>> {
+  const result = await pool.query<{
+    step_name: string | null;
+    data: string | Record<string, unknown>;
+  }>(
+    `SELECT step_name, data FROM remote_agent_workflow_events
+     WHERE workflow_run_id = $1 AND event_type = 'node_completed'
+     ORDER BY created_at ASC`,
+    [workflowRunId]
+  );
+  const outputs = new Map<string, string>();
+  for (const row of result.rows) {
+    if (!row.step_name) continue;
+    let data: Record<string, unknown>;
+    try {
+      data = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+    } catch (parseErr) {
+      getLog().warn(
+        { err: parseErr as Error, runId: workflowRunId, stepName: row.step_name },
+        'db.workflow_dag_node_output_parse_failed'
+      );
+      continue;
+    }
+    if (typeof data.node_output === 'string') {
+      outputs.set(row.step_name, data.node_output);
+    }
+  }
+  return outputs;
 }

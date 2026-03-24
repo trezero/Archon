@@ -25,7 +25,12 @@ mock.module('./connection', () => ({
   getDialect: () => mockPostgresDialect,
 }));
 
-import { createWorkflowEvent, listWorkflowEvents, listRecentEvents } from './workflow-events';
+import {
+  createWorkflowEvent,
+  listWorkflowEvents,
+  listRecentEvents,
+  getCompletedDagNodeOutputs,
+} from './workflow-events';
 
 describe('workflow-events', () => {
   beforeEach(() => {
@@ -181,6 +186,98 @@ describe('workflow-events', () => {
       await expect(listRecentEvents('run-456', new Date())).rejects.toThrow(
         'Failed to list recent workflow events: connection lost'
       );
+    });
+  });
+
+  describe('getCompletedDagNodeOutputs', () => {
+    test('returns map of nodeId → output from node_completed events', async () => {
+      mockQuery.mockResolvedValueOnce(
+        createQueryResult([
+          { step_name: 'node-a', data: { node_output: 'output A' } },
+          { step_name: 'node-b', data: { node_output: 'output B' } },
+        ])
+      );
+
+      const result = await getCompletedDagNodeOutputs('run-123');
+
+      expect(result.size).toBe(2);
+      expect(result.get('node-a')).toBe('output A');
+      expect(result.get('node-b')).toBe('output B');
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('node_completed'), [
+        'run-123',
+      ]);
+    });
+
+    test('parses JSON string data (SQLite path)', async () => {
+      mockQuery.mockResolvedValueOnce(
+        createQueryResult([
+          { step_name: 'node-a', data: JSON.stringify({ node_output: 'parsed output' }) },
+        ])
+      );
+
+      const result = await getCompletedDagNodeOutputs('run-456');
+
+      expect(result.size).toBe(1);
+      expect(result.get('node-a')).toBe('parsed output');
+    });
+
+    test('skips rows with null step_name', async () => {
+      mockQuery.mockResolvedValueOnce(
+        createQueryResult([
+          { step_name: null, data: { node_output: 'should be skipped' } },
+          { step_name: 'node-a', data: { node_output: 'kept' } },
+        ])
+      );
+
+      const result = await getCompletedDagNodeOutputs('run-789');
+
+      expect(result.size).toBe(1);
+      expect(result.get('node-a')).toBe('kept');
+    });
+
+    test('skips rows where node_output is not a string', async () => {
+      mockQuery.mockResolvedValueOnce(
+        createQueryResult([
+          { step_name: 'node-a', data: { node_output: 123 } },
+          { step_name: 'node-b', data: { duration_ms: 500 } },
+          { step_name: 'node-c', data: { node_output: 'valid' } },
+        ])
+      );
+
+      const result = await getCompletedDagNodeOutputs('run-filter');
+
+      expect(result.size).toBe(1);
+      expect(result.get('node-c')).toBe('valid');
+    });
+
+    test('skips corrupt JSON rows without losing other rows', async () => {
+      mockQuery.mockResolvedValueOnce(
+        createQueryResult([
+          { step_name: 'node-a', data: { node_output: 'good first' } },
+          { step_name: 'node-b', data: '{bad json' },
+          { step_name: 'node-c', data: { node_output: 'good last' } },
+        ])
+      );
+
+      const result = await getCompletedDagNodeOutputs('run-corrupt');
+
+      expect(result.size).toBe(2);
+      expect(result.get('node-a')).toBe('good first');
+      expect(result.get('node-c')).toBe('good last');
+    });
+
+    test('returns empty map when no events exist', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      const result = await getCompletedDagNodeOutputs('run-empty');
+
+      expect(result.size).toBe(0);
+    });
+
+    test('throws on DB query error', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('connection refused'));
+
+      await expect(getCompletedDagNodeOutputs('run-error')).rejects.toThrow('connection refused');
     });
   });
 });
