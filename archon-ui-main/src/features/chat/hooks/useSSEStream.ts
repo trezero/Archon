@@ -159,8 +159,19 @@ export function useSSEStream(): UseSSEStreamReturn {
         controllerRef.current = null;
       };
 
+      // Build conversation history from cached messages for context
+      const cachedMessages: ChatMessage[] = queryClient.getQueryData(chatKeys.messages(conversationId)) || [];
+      const conversationHistory = cachedMessages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role, content: m.content || "" }));
+
       controllerRef.current = chatService.streamMessage(
-        { conversation_id: conversationId, content, model },
+        {
+          conversation_id: conversationId,
+          content,
+          model,
+          conversation_history: conversationHistory,
+        },
         handleEvent,
         handleError,
       );

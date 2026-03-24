@@ -155,4 +155,5 @@ export interface SendMessageRequest {
   content: string;
   model?: string | null;
   metadata?: Record<string, unknown> | null;
+  conversation_history?: Array<{ role: string; content: string }>;
 }

@@ -295,7 +295,7 @@ async def stream_chat(request: Request):
     """
     body = await request.json()
     conversation_id = body["conversation_id"]
-    message = body["message"]
+    message = body.get("message") or body.get("content", "")
     user_profile = body.get("user_profile", {})
     project_id = body.get("project_id")
     action_mode = body.get("action_mode", False)
