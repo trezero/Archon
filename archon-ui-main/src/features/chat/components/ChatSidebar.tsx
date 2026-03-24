@@ -8,6 +8,7 @@
 import { Expand, X } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { getDefaultChatModel } from "../../../components/settings/ChatModelSettings";
 import { cn } from "../../../lib/utils";
 import {
   useAgentHealth,
@@ -29,7 +30,7 @@ interface ChatSidebarProps {
 export function ChatSidebar({ isOpen, onClose }: ChatSidebarProps) {
   const navigate = useNavigate();
   const [activeConversationId, setActiveConversationId] = useState<string | undefined>();
-  const [model, setModel] = useState("claude-sonnet-4-20250514");
+  const [model, setModel] = useState(getDefaultChatModel);
   const [actionMode, setActionMode] = useState(false);
   const [showConversationList, setShowConversationList] = useState(false);
 

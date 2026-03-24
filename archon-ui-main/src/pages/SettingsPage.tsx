@@ -13,6 +13,7 @@ import {
   Info,
   Database,
   User,
+  Cpu,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "../features/shared/hooks/useToast";
@@ -27,6 +28,7 @@ import { ButtonPlayground } from "../components/settings/ButtonPlayground";
 import { CollapsibleSettingsCard } from "../components/ui/CollapsibleSettingsCard";
 import { BugReportButton } from "../components/bug-report/BugReportButton";
 import { ProfileSettings } from "../components/settings/ProfileSettings";
+import { ChatModelSettings } from "../components/settings/ChatModelSettings";
 import {
   credentialsService,
   RagSettings,
@@ -183,6 +185,19 @@ export const SettingsPage = () => {
               defaultExpanded={false}
             >
               <ProfileSettings />
+            </CollapsibleSettingsCard>
+          </motion.div>
+
+          {/* Chat Model */}
+          <motion.div variants={itemVariants}>
+            <CollapsibleSettingsCard
+              title="Chat Model"
+              icon={Cpu}
+              accentColor="blue"
+              storageKey="chat-model"
+              defaultExpanded={false}
+            >
+              <ChatModelSettings />
             </CollapsibleSettingsCard>
           </motion.div>
 

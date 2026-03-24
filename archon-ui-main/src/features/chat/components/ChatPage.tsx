@@ -5,6 +5,7 @@
  */
 
 import { useCallback, useState } from "react";
+import { getDefaultChatModel } from "../../../components/settings/ChatModelSettings";
 import { cn } from "../../../lib/utils";
 import {
   useAgentHealth,
@@ -22,7 +23,7 @@ import { MessageStream } from "./MessageStream";
 
 export function ChatPage() {
   const [activeConversationId, setActiveConversationId] = useState<string | undefined>();
-  const [model, setModel] = useState("claude-sonnet-4-20250514");
+  const [model, setModel] = useState(getDefaultChatModel);
   const [actionMode, setActionMode] = useState(false);
   const [contextOpen, setContextOpen] = useState(true);
 
