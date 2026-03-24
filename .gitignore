@@ -9,6 +9,7 @@ __pycache__
 .claude/plugins/
 .claude/settings.local.json
 .archon/
+.playwright-mcp/
 
 PRPs/local
 PRPs/completed/
