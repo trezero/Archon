@@ -31,9 +31,9 @@ The chat system spans three layers following Approach 2 (Agent Service Integrati
 
 ```
 Frontend (archon-ui-main)
-    ↕ REST (persistence) + SSE (streaming)
+    ↕ REST + SSE (all via single API surface)
 Main Server (port 8181)
-    ↕ HTTP (AI requests)
+    ↕ HTTP (AI requests + SSE proxy)
 Agent Service (port 8052)
     ↕ PydanticAI
 AI Provider (Claude, OpenAI, etc.)
@@ -47,39 +47,45 @@ AI Provider (Claude, OpenAI, etc.)
 - Full `/chat` page for deep conversations
 - Conversation list, message stream, tool-use display
 - SSE client for streaming responses
+- All requests go to Main Server only — frontend never talks directly to Agent Service
 
-**Main Server** (port 8181) — Data & persistence layer:
+**Main Server** (port 8181) — Data, persistence & SSE proxy:
 - New chat API routes for CRUD: conversations, messages, user profile
 - Database tables for persistent, searchable chat history
-- No AI logic — storage and retrieval only
-- Proxies chat requests to agent service
+- No AI logic — storage, retrieval, and proxying only
+- **SSE Proxy**: the streaming endpoint (`POST /api/chat/stream`) saves the user message, makes a streaming request to the Agent Service, and proxies the SSE stream back to the Frontend. On stream completion, the Main Server saves the assistant message to the database. This keeps all DB write logic in the Main Server and eliminates the need for the Agent Service to call back.
 
 **Agent Service** (port 8052) — AI & streaming layer:
-- New ChatAgent (PydanticAI) with tools that use `MCPClient` for all data operations (consistent with existing RAG/Document agents)
+- New ChatAgent (PydanticAI) with tools that use `MCPClient` for all data read operations (consistent with existing RAG/Document agents)
 - SSE streaming endpoint for real-time token and tool-use events
 - Orchestrates existing agents (RAG, Document, Synthesizer) as sub-tools
 - Model routing: dispatches to user's configured provider
-- Persists assistant messages to Main Server on stream completion (server-side, not frontend-driven)
+- Returns the complete assistant message content in the `message_complete` event for the Main Server to persist
 
-### Data Flow
+### Data Flow (Strict Proxy Pattern)
 
-1. User sends message → Frontend POSTs to Main Server (saves user message)
-2. Main Server forwards to Agent Service with conversation context
-3. Agent Service runs ChatAgent, which calls MCP tools via `MCPClient` for all data operations (projects, tasks, knowledge, sessions)
-4. Agent Service streams SSE events back to Frontend (text deltas, tool use, etc.)
-5. On stream completion, Agent Service POSTs the final assistant message to Main Server for persistence (server-side — not dependent on the frontend)
-6. Agent Service sends `message_complete` event with `persisted: true` confirming the message was saved
+1. User sends message → Frontend POSTs to Main Server (`POST /api/chat/stream`)
+2. Main Server saves user message to database
+3. Main Server opens a streaming HTTP request to Agent Service (`POST /agents/chat/stream`)
+4. Agent Service runs ChatAgent, which calls MCP tools via `MCPClient` for data reads (projects, tasks, knowledge, sessions)
+5. Agent Service streams SSE events back to Main Server, which proxies them through to Frontend
+6. On `message_complete`, Main Server saves the assistant message (content, tool_calls, model_used, token_count) to the database
+7. Main Server forwards the `message_complete` event to Frontend with `persisted: true`
 
-This ensures message persistence even if the browser tab is closed mid-stream. The frontend treats `message_complete` as confirmation that the message is safely stored.
+This pattern ensures:
+- **Clean DB separation**: only the Main Server writes to the database
+- **Reliable persistence**: messages are saved server-side regardless of frontend state
+- **Single API surface**: Frontend only needs to know about port 8181, no multi-origin complexity
+- **No Vite proxy changes needed**: all traffic goes through the existing API proxy
 
-### Frontend-to-Agent Service Connectivity
+### SSE Proxy Implementation
 
-The frontend currently uses a Vite proxy for API calls to the main server. For SSE streaming to the agent service (port 8052), the Vite dev proxy must be extended:
-
-- Add a `/agents/*` proxy rule in `vite.config.ts` targeting `http://localhost:8052`
-- SSE-specific proxy configuration: disable buffering (`headers: { 'X-Accel-Buffering': 'no' }`) and set `changeOrigin: true`
-- In Docker/production mode, the frontend's nginx config or Docker network handles routing
-- The chat service (`chatService.ts`) uses a separate base URL constant for agent service endpoints, configurable via environment variable
+The Main Server's `/api/chat/stream` endpoint uses FastAPI's `StreamingResponse` to proxy the SSE stream:
+- Opens an `httpx.AsyncClient` streaming connection to the Agent Service
+- Iterates over the SSE event stream, forwarding each event to the Frontend
+- Intercepts the `message_complete` event to extract and persist the assistant message
+- Handles Agent Service disconnection gracefully (sends an `error` event to Frontend)
+- Disables response buffering via `Cache-Control: no-cache` and `X-Accel-Buffering: no` headers
 
 ### Agent Service Unavailability
 
@@ -91,7 +97,11 @@ The agent service runs under the `agents` Docker profile and may not be enabled.
 
 ### Existing Code Cleanup
 
-The existing `python/src/server/api_routes/agent_chat_api.py` (in-memory session stub) and `archon-ui-main/src/services/agentChatService.ts` (polling-based service) must be deleted and replaced by the new implementation. Per CLAUDE.md: "Remove dead code immediately."
+The following existing files must be deleted and replaced by the new implementation. Per CLAUDE.md: "Remove dead code immediately."
+
+- `python/src/server/api_routes/agent_chat_api.py` — in-memory session stub
+- `archon-ui-main/src/services/agentChatService.ts` — polling-based service
+- `archon-ui-main/src/components/agent-chat/ArchonChatPanel.tsx` — legacy chat panel component (replaced by `features/chat/` vertical slice)
 
 ## Database Schema
 
@@ -147,11 +157,21 @@ CREATE TRIGGER chat_messages_search_vector_trigger
 
 #### user_profile (singleton table)
 
-This is a single-row table — Archon is a local-only, single-user application. The service layer enforces singleton semantics via upsert logic (`INSERT ... ON CONFLICT DO UPDATE`). A well-known fixed ID (`00000000-0000-0000-0000-000000000001`) is used. The backend creates the default row on first access if it does not exist.
+This is a single-row table — Archon is a local-only, single-user application. The singleton constraint is enforced at the database level using an integer PK with a CHECK constraint, making it impossible to insert additional rows:
+
+```sql
+CREATE TABLE user_profile (
+  id integer PRIMARY KEY DEFAULT 1,
+  -- ... columns ...
+  CONSTRAINT user_profile_singleton CHECK (id = 1)
+);
+```
+
+The service layer uses upsert logic (`INSERT ... ON CONFLICT DO UPDATE`). The backend creates the default row on first access if it does not exist.
 
 | Column | Type | Description |
 |---|---|---|
-| id | uuid, PK, default fixed UUID | Profile identifier (singleton) |
+| id | integer, PK, default 1 | Singleton enforced by CHECK (id = 1) |
 | display_name | text | User's name |
 | bio | text | Who you are, what you do |
 | long_term_goals | jsonb | Array of stated goals |
@@ -362,7 +382,7 @@ Triggered by questions like:
 
 ### Endpoint
 
-`POST /agents/chat/stream` on the Agent Service (port 8052)
+`POST /api/chat/stream` on the Main Server (port 8181), which proxies to `POST /agents/chat/stream` on the Agent Service (port 8052)
 
 ### Event Types
 
@@ -385,8 +405,9 @@ Triggered by questions like:
 4. On approve: `POST /agents/chat/confirm-action` with `action_id`
 5. On deny: `POST /agents/chat/deny-action` with `action_id` — AI adjusts its response
 6. If no response within 5 minutes, action is auto-denied and the AI is notified
-7. If the SSE connection drops, pending actions are preserved in-memory; on reconnection, any pending `action_request` events are re-sent
-8. Only one action can be pending per conversation at a time
+7. If the SSE connection drops but the Agent Service is still running, pending actions are preserved in-memory; on reconnection, any pending `action_request` events are re-sent
+8. If the Agent Service restarts (e.g., Docker restart), all in-memory pending actions are lost. This is by design — a service restart implicitly cancels all pending actions. The user simply re-prompts the AI if they still want the action taken.
+9. Only one action can be pending per conversation at a time
 
 ## Frontend UI
 
@@ -536,11 +557,14 @@ Assistant messages require Markdown rendering. `react-markdown` is already insta
 - ChatAgent does not send all messages to the AI every turn
 - Strategy: last N messages (configurable, default ~20) + summary of earlier messages
 - The existing SynthesizerAgent compresses older messages when conversation exceeds the window
+- **This compression is strictly ephemeral** — it is used only for constructing the LLM prompt payload. The `chat_messages` table always retains the raw, uncompressed message history. Users can scroll back through the full conversation in the UI regardless of what the AI "remembers" in its context window.
 - Keeps costs and latency down while maintaining conversational coherence
 
 ## API Endpoints
 
-### Main Server (port 8181) — Persistence
+### Main Server (port 8181) — All Frontend-Facing Endpoints
+
+The Frontend only talks to the Main Server. Streaming and action approval are proxied to the Agent Service.
 
 | Method | Path | Description |
 |---|---|---|
@@ -550,17 +574,22 @@ Assistant messages require Markdown rendering. `react-markdown` is already insta
 | PUT | `/api/chat/conversations/{id}` | Update conversation (title, model, action mode) |
 | DELETE | `/api/chat/conversations/{id}` | Soft delete conversation |
 | GET | `/api/chat/conversations/{id}/messages` | Get messages (paginated) |
-| POST | `/api/chat/conversations/{id}/messages` | Save a message |
+| POST | `/api/chat/conversations/{id}/messages` | Save a message (used for user messages) |
+| POST | `/api/chat/stream` | **SSE Proxy**: saves user message, proxies SSE from Agent Service, persists assistant message on completion |
+| POST | `/api/chat/confirm-action` | Proxy to Agent Service: approve pending action |
+| POST | `/api/chat/deny-action` | Proxy to Agent Service: deny pending action |
 | GET | `/api/chat/messages/search` | Full-text search across all messages |
 | GET | `/api/chat/profile` | Get user profile |
 | PUT | `/api/chat/profile` | Update user profile |
 | GET | `/api/chat/categories` | List distinct project categories (for autocomplete) |
 
-### Agent Service (port 8052) — AI Processing
+### Agent Service (port 8052) — Internal Endpoints (not exposed to Frontend)
+
+These endpoints are called only by the Main Server, never directly by the Frontend.
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/agents/chat/stream` | Send message + receive SSE stream |
+| POST | `/agents/chat/stream` | Run ChatAgent and return SSE stream |
 | POST | `/agents/chat/confirm-action` | Approve a pending action |
 | POST | `/agents/chat/deny-action` | Deny a pending action |
 
