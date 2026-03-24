@@ -416,6 +416,59 @@ for %%G in (".claude/plugins/" ".claude/skills/" ".claude/archon-config.json" ".
     findstr /x /c:"%%~G" .gitignore >nul 2>&1 || echo %%~G>>.gitignore
 )
 
+:: -- Inject Archon rules into CLAUDE.md ------------------------------------
+echo Configuring CLAUDE.md project rules...
+set "SNIPPET_FILE=%TEMP%\archon_claude_md_snippet.md"
+curl -sf "%ARCHON_MCP_URL%/archon-setup/claude-md-snippet.md" -o "%SNIPPET_FILE%" 2>nul
+
+if %errorlevel%==0 if exist "%SNIPPET_FILE%" (
+    set "MARKER_START=<!-- archon-rules-start -->"
+    set "MARKER_END=<!-- archon-rules-end -->"
+
+    if not exist "CLAUDE.md" (
+        :: No CLAUDE.md — create with Archon rules
+        powershell -Command ^
+            "$ms = '<!-- archon-rules-start -->'; " ^
+            "$me = '<!-- archon-rules-end -->'; " ^
+            "$snippet = Get-Content '%SNIPPET_FILE%' -Raw; " ^
+            "($ms + [Environment]::NewLine + $snippet.TrimEnd() + [Environment]::NewLine + $me + [Environment]::NewLine) | Set-Content 'CLAUDE.md' -NoNewline"
+        echo       ^✓ Created CLAUDE.md with Archon rules
+    ) else (
+        :: CLAUDE.md exists — check if markers already present
+        findstr /c:"<!-- archon-rules-start -->" "CLAUDE.md" >nul 2>&1
+        if !errorlevel!==0 (
+            :: Markers found — replace section between markers
+            powershell -Command ^
+                "$ms = '<!-- archon-rules-start -->'; " ^
+                "$me = '<!-- archon-rules-end -->'; " ^
+                "$snippet = Get-Content '%SNIPPET_FILE%' -Raw; " ^
+                "$content = Get-Content 'CLAUDE.md' -Raw; " ^
+                "$si = $content.IndexOf($ms); " ^
+                "$ei = $content.IndexOf($me) + $me.Length; " ^
+                "if ($ei -lt $content.Length -and $content[$ei] -eq [char]10) { $ei++ }; " ^
+                "if ($ei -lt $content.Length -and $content[$ei] -eq [char]13) { $ei++ }; " ^
+                "$updated = $content.Substring(0, $si) + $ms + [Environment]::NewLine + $snippet.TrimEnd() + [Environment]::NewLine + $me + [Environment]::NewLine + $content.Substring($ei); " ^
+                "$updated | Set-Content 'CLAUDE.md' -NoNewline"
+            echo       ^✓ Updated Archon rules in CLAUDE.md
+        ) else (
+            :: No markers — append with markers
+            powershell -Command ^
+                "$ms = '<!-- archon-rules-start -->'; " ^
+                "$me = '<!-- archon-rules-end -->'; " ^
+                "$snippet = Get-Content '%SNIPPET_FILE%' -Raw; " ^
+                "$append = [Environment]::NewLine + [Environment]::NewLine + $ms + [Environment]::NewLine + $snippet.TrimEnd() + [Environment]::NewLine + $me + [Environment]::NewLine; " ^
+                "$append | Add-Content 'CLAUDE.md' -NoNewline"
+            echo       ^✓ Appended Archon rules to CLAUDE.md
+            echo         Run /archon-setup in Claude Code for intelligent merge with existing rules.
+        )
+    )
+) else (
+    echo       ^! Could not download CLAUDE.md snippet. Skipping rules injection.
+    echo         Run /archon-setup in Claude Code to configure project rules.
+)
+del "%SNIPPET_FILE%" 2>nul
+echo.
+
 :: -- Step 4/4: Install slash commands ---------------------------------------
 echo [4/4] Installing slash commands...
 if not exist "%USERPROFILE%\.claude\commands" mkdir "%USERPROFILE%\.claude\commands"

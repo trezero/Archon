@@ -580,6 +580,57 @@ done
 ui_success "Updated .gitignore with Archon local paths."
 echo
 
+# ── Inject Archon rules into CLAUDE.md ──────────────────────────────────────
+
+CLAUDE_MD="CLAUDE.md"
+MARKER_START="<!-- archon-rules-start -->"
+MARKER_END="<!-- archon-rules-end -->"
+
+ui_info "Configuring CLAUDE.md project rules..."
+SNIPPET=$(curl -sf "${ARCHON_MCP_URL}/archon-setup/claude-md-snippet.md" 2>/dev/null || echo "")
+
+if [ -n "$SNIPPET" ]; then
+  if [ ! -f "$CLAUDE_MD" ]; then
+    # No CLAUDE.md — create with Archon rules
+    {
+      printf "%s\n" "$MARKER_START"
+      printf "%s\n" "$SNIPPET"
+      printf "%s\n" "$MARKER_END"
+    } > "$CLAUDE_MD"
+    ui_success "Created CLAUDE.md with Archon rules"
+  elif grep -qF "$MARKER_START" "$CLAUDE_MD"; then
+    # Archon section already present — replace between markers with latest snippet
+    "$PYTHON" - "$CLAUDE_MD" "$MARKER_START" "$MARKER_END" "$SNIPPET" <<'PYEOF'
+import sys
+path, ms, me, snippet = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+with open(path) as f:
+    content = f.read()
+si = content.index(ms)
+ei = content.index(me) + len(me)
+# Consume one trailing newline after end marker if present
+if ei < len(content) and content[ei] == "\n":
+    ei += 1
+updated = content[:si] + ms + "\n" + snippet + "\n" + me + "\n" + content[ei:]
+with open(path, "w") as f:
+    f.write(updated)
+PYEOF
+    ui_success "Updated Archon rules in CLAUDE.md"
+  else
+    # CLAUDE.md exists without Archon section — append with markers
+    {
+      printf "\n\n%s\n" "$MARKER_START"
+      printf "%s\n" "$SNIPPET"
+      printf "%s\n" "$MARKER_END"
+    } >> "$CLAUDE_MD"
+    ui_success "Appended Archon rules to CLAUDE.md"
+    ui_info "Run /archon-setup in Claude Code for intelligent merge with existing rules."
+  fi
+else
+  ui_warn "Could not download CLAUDE.md snippet. Skipping rules injection."
+  ui_info "Run /archon-setup in Claude Code to configure project rules."
+fi
+echo
+
 # ── Step 4/4: Install /archon-setup command ─────────────────────────────────
 
 ui_step 4 "Install slash commands"
