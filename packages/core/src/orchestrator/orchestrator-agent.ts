@@ -417,11 +417,31 @@ export async function handleMessage(
     // 2. Check for deterministic commands
     if (message.startsWith('/')) {
       const { command } = commandHandler.parseCommand(message);
-      const deterministicCommands = ['help', 'status', 'reset', 'workflow', 'register-project'];
+      const deterministicCommands = [
+        'help',
+        'status',
+        'reset',
+        'workflow',
+        'register-project',
+        'update-project',
+        'remove-project',
+      ];
 
       if (deterministicCommands.includes(command)) {
         if (command === 'register-project') {
           const result = await handleRegisterProject(message, platform, conversationId);
+          await platform.sendMessage(conversationId, result);
+          return;
+        }
+
+        if (command === 'update-project') {
+          const result = await handleUpdateProject(message);
+          await platform.sendMessage(conversationId, result);
+          return;
+        }
+
+        if (command === 'remove-project') {
+          const result = await handleRemoveProject(message);
           await platform.sendMessage(conversationId, result);
           return;
         }
@@ -898,6 +918,65 @@ async function handleRegisterProject(
 
   getLog().info({ name: projectName, path: projectPath, id: codebase.id }, 'project_registered');
   return `Project "${projectName}" registered successfully!\nPath: ${projectPath}\nID: ${codebase.id}`;
+}
+
+/**
+ * Handle /update-project command.
+ * Updates the path for an existing registered project.
+ */
+async function handleUpdateProject(message: string): Promise<string> {
+  const { args } = commandHandler.parseCommand(message);
+  if (args.length < 2) {
+    return 'Usage: /update-project <name> <new-path>';
+  }
+
+  const [projectName, ...pathParts] = args;
+  const newPath = pathParts.join(' ');
+
+  // Validate path exists
+  if (!existsSync(newPath)) {
+    return `Path does not exist: ${newPath}`;
+  }
+
+  // Find existing codebase by name
+  const existing = await codebaseDb.listCodebases();
+  const codebase = existing.find(c => c.name.toLowerCase() === projectName.toLowerCase());
+
+  if (!codebase) {
+    return `Project "${projectName}" not found. Use /register-project to create it.`;
+  }
+
+  await codebaseDb.updateCodebase(codebase.id, { default_cwd: newPath });
+  getLog().info(
+    { name: projectName, oldPath: codebase.default_cwd, newPath, id: codebase.id },
+    'project_updated'
+  );
+  return `Project "${projectName}" updated.\nOld path: ${codebase.default_cwd}\nNew path: ${newPath}`;
+}
+
+/**
+ * Handle /remove-project command.
+ * Deletes a registered project from the database.
+ */
+async function handleRemoveProject(message: string): Promise<string> {
+  const { args } = commandHandler.parseCommand(message);
+  if (args.length < 1) {
+    return 'Usage: /remove-project <name>';
+  }
+
+  const projectName = args[0];
+
+  // Find existing codebase by name
+  const existing = await codebaseDb.listCodebases();
+  const codebase = existing.find(c => c.name.toLowerCase() === projectName.toLowerCase());
+
+  if (!codebase) {
+    return `Project "${projectName}" not found.`;
+  }
+
+  await codebaseDb.deleteCodebase(codebase.id);
+  getLog().info({ name: projectName, id: codebase.id }, 'project_removed');
+  return `Project "${projectName}" removed.\nPath was: ${codebase.default_cwd}`;
 }
 
 /**
