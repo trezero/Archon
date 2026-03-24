@@ -55,22 +55,42 @@ AI Provider (Claude, OpenAI, etc.)
 - Proxies chat requests to agent service
 
 **Agent Service** (port 8052) — AI & streaming layer:
-- New ChatAgent (PydanticAI) with tools that call back to main server
+- New ChatAgent (PydanticAI) with tools that use `MCPClient` for all data operations (consistent with existing RAG/Document agents)
 - SSE streaming endpoint for real-time token and tool-use events
 - Orchestrates existing agents (RAG, Document, Synthesizer) as sub-tools
 - Model routing: dispatches to user's configured provider
+- Persists assistant messages to Main Server on stream completion (server-side, not frontend-driven)
 
 ### Data Flow
 
 1. User sends message → Frontend POSTs to Main Server (saves user message)
 2. Main Server forwards to Agent Service with conversation context
-3. Agent Service runs ChatAgent, which may call tools (back to Main Server for data)
+3. Agent Service runs ChatAgent, which calls MCP tools via `MCPClient` for all data operations (projects, tasks, knowledge, sessions)
 4. Agent Service streams SSE events back to Frontend (text deltas, tool use, etc.)
-5. On stream completion, Frontend POSTs final assistant message to Main Server for persistence
+5. On stream completion, Agent Service POSTs the final assistant message to Main Server for persistence (server-side — not dependent on the frontend)
+6. Agent Service sends `message_complete` event with `persisted: true` confirming the message was saved
+
+This ensures message persistence even if the browser tab is closed mid-stream. The frontend treats `message_complete` as confirmation that the message is safely stored.
+
+### Agent Service Unavailability
+
+The agent service runs under the `agents` Docker profile and may not be enabled. When unavailable:
+- Frontend checks agent service health on chat open (`GET /agents/health`)
+- If unavailable, the chat UI shows: "Enable the agents service to use chat: `docker compose --profile agents up -d`"
+- The floating chat button shows a subtle indicator (dimmed/grayed) when the agent service is down
+- Conversation history remains browsable via Main Server even when agents are offline
+
+### Existing Code Cleanup
+
+The existing `python/src/server/api_routes/agent_chat_api.py` (in-memory session stub) and `archon-ui-main/src/services/agentChatService.ts` (polling-based service) must be deleted and replaced by the new implementation. Per CLAUDE.md: "Remove dead code immediately."
 
 ## Database Schema
 
-### New Tables (Migration 025)
+### Migration 025: Project Enrichment Columns
+
+Adds optional columns to the existing `archon_projects` table. Separated from the chat tables to allow independent use and reduce migration risk.
+
+### Migration 026: Chat Tables
 
 #### chat_conversations
 
@@ -80,10 +100,11 @@ AI Provider (Claude, OpenAI, etc.)
 | title | text | Auto-generated or user-editable title |
 | project_id | uuid, nullable, FK → archon_projects | Null = global chat |
 | conversation_type | text | "global" or "project" |
-| model_config | jsonb | Model provider, temperature, etc. |
+| model_config | jsonb | Model identifier string only (e.g., `"anthropic:claude-sonnet-4-6"`) and optional parameters (temperature, etc.). Never stores API keys — those are resolved from `CredentialService` at runtime. |
 | action_mode | boolean, default false | Advisor vs. agent mode |
 | created_at | timestamptz | Creation time |
 | updated_at | timestamptz | Last activity time |
+| deleted_at | timestamptz, nullable | Soft delete timestamp (null = active) |
 | metadata | jsonb | Flexible storage for future needs |
 
 #### chat_messages
@@ -99,13 +120,29 @@ AI Provider (Claude, OpenAI, etc.)
 | model_used | text, nullable | Which model generated this response |
 | token_count | integer, nullable | Usage tracking |
 | created_at | timestamptz | Message timestamp |
-| search_vector | tsvector | Full-text search vector |
+| search_vector | tsvector | Full-text search vector (auto-populated by trigger) |
 
-#### user_profile
+The `search_vector` column is populated automatically by a database trigger on INSERT and UPDATE:
+```sql
+CREATE FUNCTION chat_messages_search_vector_update() RETURNS trigger AS $$
+BEGIN
+  NEW.search_vector := to_tsvector('english', COALESCE(NEW.content, ''));
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER chat_messages_search_vector_trigger
+  BEFORE INSERT OR UPDATE ON chat_messages
+  FOR EACH ROW EXECUTE FUNCTION chat_messages_search_vector_update();
+```
+
+#### user_profile (singleton table)
+
+This is a single-row table — Archon is a local-only, single-user application. The service layer enforces singleton semantics via upsert logic (`INSERT ... ON CONFLICT DO UPDATE`). A well-known fixed ID (`00000000-0000-0000-0000-000000000001`) is used. The backend creates the default row on first access if it does not exist.
 
 | Column | Type | Description |
 |---|---|---|
-| id | uuid, PK | Profile identifier |
+| id | uuid, PK, default fixed UUID | Profile identifier (singleton) |
 | display_name | text | User's name |
 | bio | text | Who you are, what you do |
 | long_term_goals | jsonb | Array of stated goals |
@@ -141,7 +178,8 @@ AI Provider (Claude, OpenAI, etc.)
 
 ```python
 @dataclass
-class ChatDependencies:
+class ChatDependencies(ArchonDependencies):
+    # Inherits from ArchonDependencies: request_id, user_id, trace_id
     conversation_id: str
     project_id: str | None  # None for global chat
     user_profile: dict       # From user_profile table
@@ -332,10 +370,14 @@ Triggered by questions like:
 
 ### Action Approval Flow
 
-1. Agent Service sends `action_request` event
-2. Frontend renders approve/deny buttons inline
-3. On approve: `POST /agents/chat/confirm-action`
-4. On deny: `POST /agents/chat/deny-action` — AI adjusts its response
+1. Agent Service sends `action_request` event with a unique `action_id`
+2. Pending action is stored in-memory on the agent service with a 5-minute TTL
+3. Frontend renders approve/deny buttons inline
+4. On approve: `POST /agents/chat/confirm-action` with `action_id`
+5. On deny: `POST /agents/chat/deny-action` with `action_id` — AI adjusts its response
+6. If no response within 5 minutes, action is auto-denied and the AI is notified
+7. If the SSE connection drops, pending actions are preserved in-memory; on reconnection, any pending `action_request` events are re-sent
+8. Only one action can be pending per conversation at a time
 
 ## Frontend UI
 
@@ -401,6 +443,45 @@ Follows existing Tron aesthetic from `features/ui/primitives/styles.ts`:
 - Tool cards: subtle cyan border glow
 - Action requests: amber/orange glow to draw attention
 
+## TanStack Query Integration
+
+### Query Key Factory
+
+```typescript
+// features/chat/hooks/useChatQueries.ts
+export const chatKeys = {
+  all: ["chat"] as const,
+  conversations: () => [...chatKeys.all, "conversations"] as const,
+  conversationDetail: (id: string) => [...chatKeys.all, "conversations", id] as const,
+  messages: (conversationId: string) => [...chatKeys.all, "messages", conversationId] as const,
+  profile: () => [...chatKeys.all, "profile"] as const,
+  categories: () => [...chatKeys.all, "categories"] as const,
+  search: (query: string) => [...chatKeys.all, "search", query] as const,
+};
+```
+
+### Stale Times
+
+| Query | Stale Time | Rationale |
+|---|---|---|
+| Conversation list | `STALE_TIMES.normal` (30s) | Changes when conversations are created/renamed |
+| Conversation detail | `STALE_TIMES.normal` (30s) | Metadata changes infrequently |
+| Messages | `STALE_TIMES.static` (Infinity) | Messages are append-only; new messages arrive via SSE, not polling |
+| Profile | `STALE_TIMES.static` (Infinity) | Only changes when user explicitly edits |
+| Categories | `STALE_TIMES.rare` (5min) | Changes only when projects are categorized |
+| Search results | `STALE_TIMES.normal` (30s) | Fresh results on each search |
+
+### SSE and Query Cache Interaction
+
+- **Streaming messages** are held in local React state (not the query cache) during streaming
+- On `message_complete` (with `persisted: true`), the finalized message is appended to the query cache via `queryClient.setQueryData(chatKeys.messages(conversationId), ...)`
+- This avoids cache thrashing during streaming while ensuring the query cache reflects persisted state
+- Conversation list is invalidated after new messages to update `updated_at` sort order
+
+### Markdown Rendering
+
+Assistant messages require a Markdown rendering library. Add `react-markdown` with `rehype-highlight` (for syntax-highlighted code blocks) and `remark-gfm` (for tables, strikethrough). Code blocks include a copy-to-clipboard button implemented as a custom component.
+
 ## Model Configuration
 
 ### Settings Page — Global Defaults
@@ -438,7 +519,7 @@ Follows existing Tron aesthetic from `features/ui/primitives/styles.ts`:
 - **Rename**: user can edit conversation titles
 - **Sort**: by last activity (`updated_at`)
 - **Filter**: all, global only, specific project
-- **Delete**: soft delete (marks as deleted, purgeable later)
+- **Delete**: soft delete via `deleted_at` timestamp (follows existing task archival pattern), purgeable later
 - **No limit**: database handles scale
 
 ### Context Window Management
@@ -473,5 +554,7 @@ Follows existing Tron aesthetic from `features/ui/primitives/styles.ts`:
 | POST | `/agents/chat/stream` | Send message + receive SSE stream |
 | POST | `/agents/chat/confirm-action` | Approve a pending action |
 | POST | `/agents/chat/deny-action` | Deny a pending action |
-| POST | `/agents/chat/onboarding/stream` | Start/continue onboarding interview |
-| POST | `/agents/chat/suggest-category` | Get AI category suggestion for a project |
+
+Onboarding is handled as a regular conversation with a special system prompt (triggered when `user_profile.onboarding_completed` is false or when the user sends `/onboarding`). No separate endpoint needed.
+
+Category suggestions are handled exclusively via the `suggest_project_category()` ChatAgent tool during conversation — no standalone endpoint.
