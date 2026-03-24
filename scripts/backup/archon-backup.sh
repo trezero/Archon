@@ -15,10 +15,13 @@ REMOTE_HOST="winadmin@172.16.1.222"
 REMOTE_BACKUP_DIR="~/archon-backups"
 LOCAL_BACKUP_DIR="$HOME/archon-backups"
 LOG_FILE="$LOCAL_BACKUP_DIR/backup.log"
-ARCHON_DIR="/home/winadmin/projects/archon"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ARCHON_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LOCAL_SUPABASE_DIR="/home/winadmin/projects/localSupabase"
 GLOBAL_CLAUDE_DIR="/home/winadmin/.claude"
-MEMORY_DIR="$GLOBAL_CLAUDE_DIR/projects/-home-winadmin-projects-archon/memory"
+# Claude Code project memory uses the absolute path with slashes replaced by dashes
+ARCHON_PATH_SLUG="$(echo "$ARCHON_DIR" | sed 's|^/||; s|/|-|g')"
+MEMORY_DIR="$GLOBAL_CLAUDE_DIR/projects/-${ARCHON_PATH_SLUG}/memory"
 DB_CONTAINER="supabase-db"
 RETENTION_COUNT=28
 STALE_THRESHOLD_HOURS=12
