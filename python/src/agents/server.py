@@ -19,11 +19,13 @@ from typing import Any
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 # Import our PydanticAI agents
+from .chat_agent import ChatDependencies, create_chat_agent
 from .document_agent import DocumentAgent
 from .rag_agent import RagAgent
 
@@ -279,6 +281,124 @@ async def stream_agent(agent_type: str, request: AgentRequest):
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",  # Disable Nginx buffering
+        },
+    )
+
+
+@app.post("/agents/chat/stream")
+async def stream_chat(request: Request):
+    """SSE streaming endpoint for the chat interface.
+
+    Receives the user message, persists it via Main Server, runs the ChatAgent
+    with streaming, and emits SSE events (message_start, text_delta,
+    message_complete, error, heartbeat).
+    """
+    body = await request.json()
+    conversation_id = body["conversation_id"]
+    message = body["message"]
+    user_profile = body.get("user_profile", {})
+    project_id = body.get("project_id")
+    action_mode = body.get("action_mode", False)
+    model = body.get("model", "openai:gpt-4o")
+    conversation_history = body.get("conversation_history", [])
+
+    api_url = os.environ.get("ARCHON_API_URL", "http://localhost:8181")
+
+    # Persist the user message via Main Server REST API
+    async with httpx.AsyncClient(timeout=30) as http_client:
+        await http_client.post(
+            f"{api_url}/api/chat/conversations/{conversation_id}/messages",
+            json={"role": "user", "content": message},
+        )
+
+    # Build ChatDependencies for this request
+    deps = ChatDependencies(
+        conversation_id=conversation_id,
+        project_id=project_id,
+        user_profile=user_profile,
+        action_mode=action_mode,
+        model_override=model,
+        conversation_history=conversation_history,
+    )
+
+    agent = create_chat_agent(model=model)
+
+    # Convert conversation history into PydanticAI message objects (last 20 messages).
+    # TODO: Replace fixed-window truncation with SynthesizerAgent that summarizes older
+    # messages into a compressed context block, preserving key decisions and facts while
+    # staying within the model's context window budget.
+    pydantic_messages: list[ModelMessage] = []
+    for msg in conversation_history[-20:]:
+        if msg.get("role") == "user":
+            pydantic_messages.append(ModelRequest(parts=[UserPromptPart(content=msg["content"])]))
+        elif msg.get("role") == "assistant":
+            pydantic_messages.append(ModelResponse(parts=[TextPart(content=msg["content"])]))
+
+    async def generate() -> AsyncGenerator[str, None]:
+        try:
+            yield f"data: {json.dumps({'type': 'message_start', 'conversation_id': conversation_id})}\n\n"
+
+            full_content = ""
+            last_heartbeat = asyncio.get_event_loop().time()
+
+            async with agent.run_stream(
+                message, deps=deps, message_history=pydantic_messages
+            ) as stream:
+                async for chunk in stream.stream_text(delta=True):
+                    full_content += chunk
+                    yield f"data: {json.dumps({'type': 'text_delta', 'delta': chunk})}\n\n"
+
+                    # Emit heartbeat comment every 15 seconds during long-running streams
+                    now = asyncio.get_event_loop().time()
+                    if now - last_heartbeat > 15:
+                        yield ": heartbeat\n\n"
+                        last_heartbeat = now
+
+            # Persist the assistant message via Main Server
+            saved_msg: dict = {}
+            async with httpx.AsyncClient(timeout=30) as http_client:
+                save_response = await http_client.post(
+                    f"{api_url}/api/chat/conversations/{conversation_id}/messages",
+                    json={
+                        "role": "assistant",
+                        "content": full_content,
+                        "model_used": model,
+                    },
+                )
+                save_data = save_response.json()
+                saved_msg = save_data.get("message", {})
+
+            # Auto-generate conversation title from the first exchange
+            if len(conversation_history) == 0:
+                try:
+                    title_prompt = (
+                        f"Generate a short title (max 6 words) for a conversation that starts with: "
+                        f"{message[:200]}"
+                    )
+                    title_agent = create_chat_agent(model=model)
+                    title_result = await title_agent.run(title_prompt, deps=deps)
+                    title = title_result.data.strip('"').strip()[:100]
+                    async with httpx.AsyncClient(timeout=10) as http_client:
+                        await http_client.patch(
+                            f"{api_url}/api/chat/conversations/{conversation_id}",
+                            json={"title": title},
+                        )
+                except Exception as title_err:
+                    logger.warning(f"Failed to auto-generate conversation title: {title_err}")
+
+            yield f"data: {json.dumps({'type': 'message_complete', 'message_id': saved_msg.get('id', ''), 'model_used': model, 'persisted': True})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Chat stream error: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e), 'retryable': True})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         },
     )
 

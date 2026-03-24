@@ -123,6 +123,9 @@ class ProjectService:
                         "docs": project.get("docs", []),
                         "features": project.get("features", []),
                         "data": project.get("data", []),
+                        "project_goals": project.get("project_goals", []),
+                        "project_relevance": project.get("project_relevance", ""),
+                        "project_category": project.get("project_category", ""),
                     })
             else:
                 # Lightweight response for MCP - fetch all data but only return metadata + stats
@@ -153,6 +156,9 @@ class ProjectService:
                         "parent_project_id": project.get("parent_project_id"),
                         "metadata": project.get("metadata", {}),
                         "tags": project.get("tags", []),
+                        "project_goals": project.get("project_goals", []),
+                        "project_relevance": project.get("project_relevance", ""),
+                        "project_category": project.get("project_category", ""),
                         "stats": {
                             "docs_count": docs_count,
                             "features_count": features_count,
@@ -433,6 +439,9 @@ class ProjectService:
                 "parent_project_id",
                 "metadata",
                 "tags",
+                "project_goals",
+                "project_relevance",
+                "project_category",
             ]
 
             for field in allowed_fields:

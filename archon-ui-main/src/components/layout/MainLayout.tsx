@@ -1,7 +1,9 @@
 import { AlertCircle, WifiOff } from "lucide-react";
 import type React from "react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { ChatSidebar } from "../../features/chat/components/ChatSidebar";
+import { useAgentHealth } from "../../features/chat/hooks/useChatQueries";
 import { useToast } from "../../features/shared/hooks/useToast";
 import { cn } from "../../lib/utils";
 import { credentialsService } from "../../services/credentialsService";
@@ -65,6 +67,8 @@ export function MainLayout({ children, className }: MainLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { showToast } = useToast();
+  const [chatSidebarOpen, setChatSidebarOpen] = useState(false);
+  const { data: agentHealthy } = useAgentHealth();
 
   // Backend health monitoring with TanStack Query
   const {
@@ -150,23 +154,38 @@ export function MainLayout({ children, className }: MainLayoutProps) {
         </div>
       </div>
 
-      {/* TEMPORARY: Floating Chat Button (disabled) - from old layout */}
+      {/* Floating Chat Button */}
       <div className="fixed bottom-6 right-6 z-50 group">
         <button
           type="button"
-          disabled
-          className="w-14 h-14 rounded-full flex items-center justify-center backdrop-blur-md bg-gradient-to-b from-gray-100/80 to-gray-50/60 dark:from-gray-700/30 dark:to-gray-800/30 shadow-[0_0_10px_rgba(156,163,175,0.3)] dark:shadow-[0_0_10px_rgba(156,163,175,0.3)] cursor-not-allowed opacity-60 overflow-hidden border border-gray-300 dark:border-gray-600"
-          aria-label="Knowledge Assistant - Coming Soon"
+          onClick={() => setChatSidebarOpen(true)}
+          className={cn(
+            "w-14 h-14 rounded-full flex items-center justify-center overflow-hidden transition-all duration-300",
+            "backdrop-blur-md border",
+            agentHealthy === false
+              ? "bg-gradient-to-b from-gray-100/80 to-gray-50/60 dark:from-gray-700/30 dark:to-gray-800/30 border-gray-300 dark:border-gray-600 opacity-60"
+              : "bg-gradient-to-b from-cyan-100/80 to-cyan-50/60 dark:from-cyan-900/30 dark:to-gray-800/30 border-cyan-300 dark:border-cyan-500/40 shadow-[0_0_15px_rgba(6,182,212,0.3)] hover:shadow-[0_0_25px_rgba(6,182,212,0.5)] hover:scale-105",
+          )}
+          aria-label="Open Archon Chat"
         >
-          <img src="/logo-neon.png" alt="Archon" className="w-7 h-7 grayscale opacity-50" />
+          <img
+            src="/logo-neon.png"
+            alt="Archon"
+            className={cn("w-7 h-7 transition-all duration-300", agentHealthy === false && "grayscale opacity-50")}
+          />
         </button>
         {/* Tooltip */}
         <div className="absolute bottom-full right-0 mb-2 px-3 py-2 bg-gray-800 dark:bg-gray-900 text-white text-sm rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
-          <div className="font-medium">Coming Soon</div>
-          <div className="text-xs text-gray-300">Knowledge Assistant is under development</div>
+          <div className="font-medium">Archon Chat</div>
+          <div className="text-xs text-gray-300">
+            {agentHealthy === false ? "Agent service unavailable" : "Open knowledge assistant"}
+          </div>
           <div className="absolute bottom-0 right-6 transform translate-y-1/2 rotate-45 w-2 h-2 bg-gray-800 dark:bg-gray-900"></div>
         </div>
       </div>
+
+      {/* Chat Sidebar */}
+      <ChatSidebar isOpen={chatSidebarOpen} onClose={() => setChatSidebarOpen(false)} />
     </div>
   );
 }

@@ -360,6 +360,34 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
           console.log('⚠️ [VITE PROXY] Agent Work Orders proxy disabled via AGENT_WORK_ORDERS_ENABLED=false');
         }
         
+        // Agent service proxy for chat SSE streams (must come before /api catch-all)
+        proxyConfig['/agents'] = {
+          target: isDocker ? 'http://archon-agents:8052' : 'http://localhost:8052',
+          changeOrigin: true,
+          configure: (proxy: any, _options: any) => {
+            const targetUrl = isDocker ? 'http://archon-agents:8052' : 'http://localhost:8052';
+
+            proxy.on('error', (err: Error, req: any, res: any) => {
+              console.log('[VITE PROXY ERROR - Agents]:', err.message);
+              console.log('[VITE PROXY ERROR - Agents] Target:', targetUrl);
+              console.log('[VITE PROXY ERROR - Agents] Request:', req.url);
+
+              if (!res.headersSent) {
+                res.writeHead(503, {
+                  'Content-Type': 'application/json',
+                  'X-Service-Unavailable': 'agents'
+                });
+                res.end(JSON.stringify({
+                  error: 'Service Unavailable',
+                  message: 'Agent service is not available',
+                  service: 'agents',
+                  target: targetUrl
+                }));
+              }
+            });
+          }
+        };
+
         // Archon setup script download proxy (served by MCP server)
         const mcpPort = env.ARCHON_MCP_PORT || '8051';
         proxyConfig['/archon-setup'] = {
