@@ -323,7 +323,10 @@ async def stream_chat(request: Request):
 
     agent = create_chat_agent(model=model)
 
-    # Convert conversation history into PydanticAI message objects (last 20 messages)
+    # Convert conversation history into PydanticAI message objects (last 20 messages).
+    # TODO: Replace fixed-window truncation with SynthesizerAgent that summarizes older
+    # messages into a compressed context block, preserving key decisions and facts while
+    # staying within the model's context window budget.
     pydantic_messages: list[ModelMessage] = []
     for msg in conversation_history[-20:]:
         if msg.get("role") == "user":

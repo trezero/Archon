@@ -158,4 +158,43 @@ def create_chat_agent(model: str = "openai:gpt-4o") -> Agent[ChatDependencies, s
         })
         return await chat_tools.tool_suggest_project_category(project_name, description, existing)
 
+    # Prioritization and synergy analysis tools
+    @agent.tool
+    async def get_prioritization_context(ctx: RunContext[ChatDependencies]) -> str:
+        """Gather all projects, recent sessions, and active tasks to recommend what to work on next."""
+        return await chat_tools.tool_get_prioritization_context()
+
+    @agent.tool
+    async def analyze_project_synergies(ctx: RunContext[ChatDependencies]) -> str:
+        """Analyze all projects for shared technologies, overlapping goals, and consolidation opportunities."""
+        return await chat_tools.tool_analyze_project_synergies()
+
+    # Action mode tools — guarded by ctx.deps.action_mode
+    @agent.tool
+    async def create_task(
+        ctx: RunContext[ChatDependencies], project_id: str, title: str, description: str = ""
+    ) -> str:
+        """Create a new task in a project. Requires action mode to be enabled."""
+        if not ctx.deps.action_mode:
+            return "Action mode is not enabled. Ask the user to enable action mode to create tasks."
+        return await chat_tools.tool_create_task(project_id, title, description)
+
+    @agent.tool
+    async def update_task(
+        ctx: RunContext[ChatDependencies], task_id: str, status: str = "", title: str = ""
+    ) -> str:
+        """Update an existing task's status or title. Requires action mode to be enabled."""
+        if not ctx.deps.action_mode:
+            return "Action mode is not enabled. Ask the user to enable action mode to update tasks."
+        return await chat_tools.tool_update_task(task_id, status=status or None, title=title or None)
+
+    @agent.tool
+    async def create_document(
+        ctx: RunContext[ChatDependencies], project_id: str, title: str, content: str
+    ) -> str:
+        """Create a new document in a project. Requires action mode to be enabled."""
+        if not ctx.deps.action_mode:
+            return "Action mode is not enabled. Ask the user to enable action mode to create documents."
+        return await chat_tools.tool_create_document(project_id, title, content)
+
     return agent
