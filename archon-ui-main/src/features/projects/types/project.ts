@@ -71,6 +71,11 @@ export interface Project {
   system_registrations?: ProjectSystemRegistration[];
   has_uncommitted_changes?: boolean;
 
+  // Enrichment fields for AI prioritization
+  project_goals?: string[];
+  project_relevance?: string;
+  project_category?: string;
+
   // Extended UI properties
   description?: string;
   progress?: number;
@@ -93,6 +98,9 @@ export interface CreateProjectRequest {
   technical_sources?: string[];
   business_sources?: string[];
   parent_project_id?: string | null;
+  project_goals?: string[];
+  project_relevance?: string;
+  project_category?: string;
 }
 
 export interface UpdateProjectRequest {
@@ -107,6 +115,9 @@ export interface UpdateProjectRequest {
   business_sources?: string[];
   pinned?: boolean;
   parent_project_id?: string | null;
+  project_goals?: string[];
+  project_relevance?: string;
+  project_category?: string;
 }
 
 // Utility types
