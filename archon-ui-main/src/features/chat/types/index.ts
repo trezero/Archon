@@ -35,8 +35,11 @@ export interface ChatMessage {
 export interface UserProfile {
   id: string;
   display_name: string | null;
+  bio: string | null;
+  long_term_goals: string[] | null;
+  current_priorities: string[] | null;
   preferences: Record<string, unknown> | null;
-  context: Record<string, unknown> | null;
+  onboarding_completed: boolean;
   created_at: string;
   updated_at: string;
 }

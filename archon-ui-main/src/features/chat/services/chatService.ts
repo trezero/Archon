@@ -69,14 +69,16 @@ export const chatService = {
   // ─── User Profile ─────────────────────────────────────────────────────────
 
   async getProfile(): Promise<UserProfile> {
-    return callAPIWithETag<UserProfile>("/api/chat/profile");
+    const response = await callAPIWithETag<{ profile: UserProfile }>("/api/chat/profile");
+    return response.profile;
   },
 
   async updateProfile(data: Partial<UserProfile>): Promise<UserProfile> {
-    return callAPIWithETag<UserProfile>("/api/chat/profile", {
-      method: "PUT",
+    const response = await callAPIWithETag<{ profile: UserProfile }>("/api/chat/profile", {
+      method: "PATCH",
       body: JSON.stringify(data),
     });
+    return response.profile;
   },
 
   // ─── Categories ───────────────────────────────────────────────────────────
