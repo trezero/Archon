@@ -72,10 +72,19 @@ AI Provider (Claude, OpenAI, etc.)
 
 This ensures message persistence even if the browser tab is closed mid-stream. The frontend treats `message_complete` as confirmation that the message is safely stored.
 
+### Frontend-to-Agent Service Connectivity
+
+The frontend currently uses a Vite proxy for API calls to the main server. For SSE streaming to the agent service (port 8052), the Vite dev proxy must be extended:
+
+- Add a `/agents/*` proxy rule in `vite.config.ts` targeting `http://localhost:8052`
+- SSE-specific proxy configuration: disable buffering (`headers: { 'X-Accel-Buffering': 'no' }`) and set `changeOrigin: true`
+- In Docker/production mode, the frontend's nginx config or Docker network handles routing
+- The chat service (`chatService.ts`) uses a separate base URL constant for agent service endpoints, configurable via environment variable
+
 ### Agent Service Unavailability
 
 The agent service runs under the `agents` Docker profile and may not be enabled. When unavailable:
-- Frontend checks agent service health on chat open (`GET /agents/health`)
+- Frontend checks agent service health on chat open (`GET http://localhost:8052/health`)
 - If unavailable, the chat UI shows: "Enable the agents service to use chat: `docker compose --profile agents up -d`"
 - The floating chat button shows a subtle indicator (dimmed/grayed) when the agent service is down
 - Conversation history remains browsable via Main Server even when agents are offline
@@ -364,7 +373,7 @@ Triggered by questions like:
 | `tool_start` | `{ tool_name, tool_args }` | AI is invoking a tool |
 | `tool_result` | `{ tool_name, result_summary, duration_ms }` | Tool completed |
 | `action_request` | `{ action, details, requires_approval }` | AI wants to take an action |
-| `message_complete` | `{ message_id, model_used, token_count }` | Response finished |
+| `message_complete` | `{ message_id, model_used, token_count, persisted }` | Response finished, `persisted: true` confirms server-side save |
 | `error` | `{ error, retryable }` | Something went wrong |
 | `heartbeat` | (comment line, no data) | Keepalive every 15 seconds |
 
@@ -480,7 +489,7 @@ export const chatKeys = {
 
 ### Markdown Rendering
 
-Assistant messages require a Markdown rendering library. Add `react-markdown` with `rehype-highlight` (for syntax-highlighted code blocks) and `remark-gfm` (for tables, strikethrough). Code blocks include a copy-to-clipboard button implemented as a custom component.
+Assistant messages require Markdown rendering. `react-markdown` is already installed in the project, but two new npm dependencies are needed: `rehype-highlight` (for syntax-highlighted code blocks) and `remark-gfm` (for tables, strikethrough). These plugins should be applied only within the chat feature's `MessageBubble.tsx` component (not globally) to avoid affecting existing Markdown renderers in `StepHistoryCard.tsx`, `ContentViewer.tsx`, etc. Code blocks include a copy-to-clipboard button implemented as a custom component.
 
 ## Model Configuration
 
@@ -519,7 +528,7 @@ Assistant messages require a Markdown rendering library. Add `react-markdown` wi
 - **Rename**: user can edit conversation titles
 - **Sort**: by last activity (`updated_at`)
 - **Filter**: all, global only, specific project
-- **Delete**: soft delete via `deleted_at` timestamp (follows existing task archival pattern), purgeable later
+- **Delete**: soft delete via `deleted_at` timestamp (simpler than the task archival pattern which uses separate `archived`/`archived_at`/`archived_by` columns — conversations only need a timestamp), purgeable later
 - **No limit**: database handles scale
 
 ### Context Window Management
