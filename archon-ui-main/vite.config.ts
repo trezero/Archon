@@ -361,6 +361,13 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
         }
         
         // Agent service proxy for chat SSE streams (must come before /api catch-all)
+        // The agent service registers routes at /agents/chat/stream etc.
+        // but /agents/health needs to map to /health on the service
+        proxyConfig['/agents/health'] = {
+          target: isDocker ? 'http://archon-agents:8052' : 'http://localhost:8052',
+          changeOrigin: true,
+          rewrite: () => '/health',
+        };
         proxyConfig['/agents'] = {
           target: isDocker ? 'http://archon-agents:8052' : 'http://localhost:8052',
           changeOrigin: true,
