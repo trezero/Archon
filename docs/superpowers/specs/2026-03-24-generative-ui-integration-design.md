@@ -45,7 +45,7 @@ Integrating A2UI into Archon enables:
 
 ### Critical Constraint: DRY
 
-**The Second Brain repo is the single source of truth for ALL A2UI code.** Archon never duplicates components, renderers, or generation logic. It imports from the Second Brain via path aliases (frontend) and HTTP service calls (backend). Archon's role is thin glue code that connects its data flows to the Second Brain's rendering and generation capabilities.
+**The Second Brain repo is the single source of truth for ALL A2UI code.** Archon never duplicates components, renderers, or generation logic. It consumes the Second Brain's pre-built component library (frontend) and calls it over HTTP (backend). Archon's role is thin glue code that connects its data flows to the Second Brain's rendering and generation capabilities.
 
 ---
 
@@ -53,12 +53,12 @@ Integrating A2UI into Archon enables:
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **Frontend component sharing** | Vite path alias (`@a2ui`) pointing to Second Brain's source directory | No npm packages, no file copying, no duplication. Changes in Second Brain are immediately available in Archon's dev server. |
+| **Frontend component sharing** | Pre-built library (`@trinity/a2ui`) consumed as a local dependency | Second Brain builds its A2UI components into a distributable bundle. Archon references it via `"file:../../second-brain-research-dashboard/frontend"` in `package.json`. All internal `@/` aliases resolve at the Second Brain's build time, producing clean exports. |
 | **Backend generation** | HTTP service call to Second Brain's FastAPI container | Generation logic (LLM pipeline, content analysis, layout selection) stays in the Second Brain. Archon sends content, receives components. |
 | **LLM orchestration** | Second Brain service uses its own PydanticAI setup; Archon does not inject its agent infrastructure | The A2UI generation pipeline is self-contained. Forcing Archon's agent infrastructure onto it creates tight coupling for no benefit. Archon controls what content to send and when, not how the LLM generates components. |
 | **Docker deployment** | Second Brain added as a service in Archon's `docker-compose.yml` under a `trinity` profile | Opt-in. Users without the Second Brain repo run Archon standalone with no impact. Single `docker compose --profile trinity up` starts everything. |
 | **Graceful degradation** | A2UI is always a UX enhancement, never a blocking dependency | If the service is unavailable, Archon renders raw markdown. No workflow blocks, no errors surfaced to users. |
-| **Type sharing** | Frontend: import via path alias. Backend: minimal Pydantic models matching the JSON schema | TypeScript types come from the source. Python models are the protocol's Python representation, not a duplication of logic. |
+| **Type sharing** | Frontend: import from `@trinity/a2ui` package. Backend: minimal Pydantic models matching the JSON schema | TypeScript types come from the library's bundled declarations. Python models are the protocol's Python representation, not a duplication of logic. |
 | **Storage** | A2UI component arrays stored as JSONB in existing columns | No new tables. Approval payloads, chat messages, and knowledge results use existing or minimally extended schemas. |
 | **React version gap** | Pin shared React peer dependency; use compatibility boundary if needed | Archon runs React 18, Second Brain runs React 19. The A2UI components use standard React patterns that work in both versions. If breakage occurs, a thin compatibility wrapper isolates the boundary. |
 
@@ -66,16 +66,35 @@ Integrating A2UI into Archon enables:
 
 ## 3. Integration Architecture
 
-### Frontend Integration (Path Alias)
+### Frontend Integration (Pre-Built Library)
 
-Archon's Vite config adds a path alias to import A2UI components directly from the Second Brain's source directory. No build step, no npm package, no file copying.
+The Second Brain builds its A2UI components into a distributable library bundle that Archon consumes as a local dependency. This avoids the `@/` alias collision problem: the Second Brain's ~40 component files import from `@/components/ui/card`, `@/lib/utils`, etc. using the `@/` alias, which resolves to the Second Brain's own `src/` at its build time. If Archon tried to import the raw source, Vite would resolve `@/` to Archon's `src/`, breaking every import.
 
-**`archon-ui-main/vite.config.ts`** — add alias:
+#### Second Brain Build Step
 
-```typescript
-resolve: {
-  alias: {
-    '@a2ui': path.resolve(__dirname, '../../second-brain-research-dashboard/frontend/src')
+The Second Brain adds a library build target to its Vite config:
+
+```bash
+# In second-brain-research-dashboard/frontend/
+vite build --mode lib
+```
+
+This produces:
+- `dist/a2ui.js` — Bundled ESM module with all A2UI components
+- `dist/a2ui.d.ts` — TypeScript declarations
+
+The library entry point exports: `A2UIRenderer`, `A2UIRendererList`, `a2uiCatalog`, `isComponentRegistered`, and all component types.
+
+The library build externalizes `react`, `react-dom`, `framer-motion`, and `lucide-react` so the host app provides its own versions (see Compatibility Considerations below).
+
+#### Archon Consumes the Library
+
+**`archon-ui-main/package.json`** — add local dependency:
+
+```json
+{
+  "dependencies": {
+    "@trinity/a2ui": "file:../../second-brain-research-dashboard/frontend"
   }
 }
 ```
@@ -83,35 +102,23 @@ resolve: {
 This enables any Archon component to import directly:
 
 ```typescript
-import { A2UIRenderer, A2UIRendererList } from '@a2ui/components/A2UIRenderer'
-import { a2uiCatalog } from '@a2ui/lib/a2ui-catalog'
+import { A2UIRenderer, A2UIRendererList } from '@trinity/a2ui'
+import { a2uiCatalog } from '@trinity/a2ui'
 ```
+
+No Vite alias configuration is needed. No `tsconfig.json` path mapping is needed. The `@trinity/a2ui` package resolves through standard Node module resolution, and TypeScript picks up the bundled `.d.ts` declarations automatically.
 
 #### Compatibility Considerations
 
-**React versions**: Archon uses React 18; the Second Brain uses React 19. The A2UI components use standard patterns (functional components, hooks, JSX) that are forward-compatible. If a React 19-only API is used in a component, Archon wraps the import in a compatibility boundary that catches and falls back gracefully. In practice, the A2UI component catalog avoids React 19-specific features (Actions, `use()`, etc.) because it was built for broad compatibility.
+**React versions**: Archon uses React 18; the Second Brain uses React 19. The library build externalizes `react` and `react-dom`, so Archon provides its own React 18 at runtime. The A2UI components use standard patterns (functional components, hooks, JSX) that are forward-compatible. If a React 19-only API is used in a component, Archon wraps the import in a compatibility boundary that catches and falls back gracefully. In practice, the A2UI component catalog avoids React 19-specific features (Actions, `use()`, etc.) because it was built for broad compatibility.
 
-**Tailwind CSS**: Both repos use Tailwind with dark themes. Archon's `tailwind.config.ts` must include the Second Brain component directory in its `content` paths so that Tailwind generates classes used by A2UI components:
+**framer-motion**: The library build externalizes `framer-motion` so Archon provides its own version. The Second Brain uses framer-motion v12; Archon uses v11. `framer-motion` should be listed as a peer dependency of `@trinity/a2ui`. Only `A2UIRendererList` uses framer-motion (for stagger animations). If version incompatibility causes runtime issues, Archon's thin `A2UIDisplay.tsx` wrapper can re-implement the stagger animation using Archon's own framer-motion v11, bypassing the library's `A2UIRendererList` for that specific behavior.
 
-```typescript
-content: [
-  './src/**/*.{ts,tsx}',
-  '../../second-brain-research-dashboard/frontend/src/components/**/*.{ts,tsx}',
-  '../../second-brain-research-dashboard/frontend/src/lib/**/*.{ts,tsx}',
-]
-```
+**lucide-react**: The Second Brain uses `lucide-react` ^0.563; Archon uses ^0.441. The library build externalizes `lucide-react` so the host app provides icons. If icon names were added between versions, missing icons render as empty spans (graceful degradation). Archon should upgrade `lucide-react` when convenient to close the gap.
 
-**TypeScript**: Archon's `tsconfig.json` needs a path mapping that mirrors the Vite alias:
+**Tailwind CSS**: Both repos use Tailwind v4 with dark themes. With the pre-built library approach, Tailwind classes used by A2UI components are resolved at the Second Brain's build time. Archon does not need to add Second Brain source directories to its content paths. However, Second Brain's custom animations (`scroll`, `shimmer`, `fade-in`) must be replicated in Archon's `tailwind.config.js` or the library must inline them as CSS keyframes in the bundle.
 
-```json
-{
-  "compilerOptions": {
-    "paths": {
-      "@a2ui/*": ["../../second-brain-research-dashboard/frontend/src/*"]
-    }
-  }
-}
-```
+**`cn()` utility**: The `clsx`/`tailwind-merge` utility `cn()` is bundled within the `@trinity/a2ui` library. No cross-repo dependency on this function.
 
 ### Backend Integration (HTTP Service)
 
@@ -140,7 +147,7 @@ The Second Brain runs as a FastAPI service in Docker. Archon calls it over HTTP 
         "summary": "Adds token bucket rate limiting to all API endpoints...",
         "highlights": ["3 files modified", "Redis-backed", "Per-user limits"]
       },
-      "zone": "header"
+      "zone": "hero"
     },
     {
       "type": "a2ui.StepCard",
@@ -150,7 +157,7 @@ The Second Brain runs as a FastAPI service in Docker. Archon calls it over HTTP 
         "title": "Add Redis dependency",
         "description": "Install redis-py and configure connection pool"
       },
-      "zone": "main"
+      "zone": "content"
     }
   ],
   "analysis": {
@@ -160,6 +167,18 @@ The Second Brain runs as a FastAPI service in Docker. Archon calls it over HTTP 
   }
 }
 ```
+
+#### Required Second Brain Development
+
+The Second Brain does not currently expose a standalone A2UI generation endpoint. The following work must be completed in the Second Brain repo before Archon can integrate:
+
+1. **New REST endpoint**: `POST /api/a2ui/generate` — Accepts `content`, `context`, and `content_type` fields; returns an A2UI component array and analysis metadata (schema shown above). This requires decoupling the generation logic from the AG-UI streaming protocol so it can be called as a standalone request/response operation.
+
+2. **Dockerfile**: Add a production Dockerfile to the Second Brain repo for containerized deployment. The image runs the FastAPI backend and exposes the A2UI generation endpoint. Must include a `/health` endpoint for Docker healthchecks.
+
+3. **Port configuration**: Expose on port 8054 by default, configurable via `A2UI_PORT` environment variable.
+
+4. **Externalized LLM config**: Accept `OPENROUTER_API_KEY` as an environment variable (already used internally) so the container can be configured via Archon's Docker Compose environment block.
 
 #### A2UI Service Adapter in Archon
 
@@ -221,7 +240,7 @@ When a workflow node hits `waiting_approval` state (see [Workflows 2.0 spec, Sec
 3. `a2ui_service` sends content to `POST http://trinity-a2ui:8054/api/a2ui/generate`
 4. Second Brain's LLM pipeline analyzes content and returns an A2UI component array
 5. Component array stored in `approval_requests.payload` (JSONB column, already defined in Workflows 2.0 schema)
-6. Archon UI receives the approval via SSE, renders components using `A2UIRenderer` (imported from Second Brain via `@a2ui` alias)
+6. Archon UI receives the approval via SSE, renders components using `A2UIRenderer` (imported from `@trinity/a2ui`)
 7. Telegram receives a text summary with approve/reject buttons and a link to the full UI view (Telegram cannot render React components)
 
 **Approval type mapping** (from Workflows 2.0 spec):
@@ -290,14 +309,14 @@ The A2UI component spec (`A2UIComponent` type) is the contract between the Secon
 
 ### TypeScript (Frontend)
 
-The Second Brain defines the canonical TypeScript types. Archon imports them via the `@a2ui` path alias:
+The Second Brain defines the canonical TypeScript types. Archon imports them from the `@trinity/a2ui` package:
 
 ```typescript
 // In any Archon component
-import type { A2UIComponent, A2UILayout } from '@a2ui/types/a2ui'
+import type { A2UIComponent } from '@trinity/a2ui'
 ```
 
-No type duplication. If the Second Brain adds a new component type, Archon picks it up automatically on the next dev server restart.
+No type duplication. Layout information is inline within the `A2UIComponent` type (the `layout` and `zone` fields). If the Second Brain adds a new component type, Archon picks it up after rebuilding the library.
 
 ### Python (Backend)
 
@@ -310,7 +329,8 @@ class A2UIComponent(BaseModel):
     props: dict[str, Any]              # Component-specific props
     children: list["A2UIComponent"] | None = None
     layout: dict[str, Any] | None = None
-    zone: str | None = None            # "header", "main", "sidebar"
+    zone: str | None = None            # SemanticZone: "hero", "content", "resources"
+    styling: dict[str, Any] | None = None  # Optional component styling overrides
 
 class A2UIGenerationRequest(BaseModel):
     content: str
@@ -333,10 +353,10 @@ This is not duplication of logic. It is the Python representation of the same JS
 | Location | Column | Change | Notes |
 |---|---|---|---|
 | `approval_requests.payload` | JSONB | No change | Already defined in Workflows 2.0 schema (migration 031). Contains A2UI component arrays. |
-| Chat messages table | `a2ui_components` | Add nullable JSONB column | New column on existing table. Null when A2UI is unavailable or content doesn't warrant rich rendering. |
+| `chat_messages` | `a2ui_components` | Add nullable JSONB column | Migration 035. Null when A2UI is unavailable or content doesn't warrant rich rendering. |
 | Knowledge results | _(none)_ | No storage | Rendered on-the-fly from search results. Not persisted. |
 
-The `a2ui_components` column addition to the chat messages table is a single migration. It is nullable and has no default, so existing rows are unaffected.
+The `a2ui_components` column addition to the `chat_messages` table is migration 035. The column is nullable with no default, so existing rows are unaffected.
 
 ---
 
@@ -347,11 +367,11 @@ The `a2ui_components` column addition to the chat messages table is a single mig
 ```
 archon-ui-main/src/features/generative-ui/
 ├── components/
-│   └── A2UIDisplay.tsx          # Wrapper that imports A2UIRenderer from Second Brain
+│   └── A2UIDisplay.tsx          # Wrapper that imports A2UIRenderer from @trinity/a2ui
 ├── hooks/
 │   └── useA2UIGeneration.ts     # Hook to request A2UI generation from backend
 └── types/
-    └── index.ts                 # Re-exports types from @a2ui path alias
+    └── index.ts                 # Re-exports types from @trinity/a2ui package
 ```
 
 This directory is intentionally thin. It is glue code, not a component library.
@@ -359,7 +379,7 @@ This directory is intentionally thin. It is glue code, not a component library.
 ### `A2UIDisplay.tsx`
 
 Wrapper component that handles:
-- Importing `A2UIRenderer` from `@a2ui/components/A2UIRenderer`
+- Importing `A2UIRenderer` from `@trinity/a2ui`
 - Error boundary around the renderer (if a component fails, falls back to raw content)
 - Loading state while components are being generated
 - Empty state when no components are available
@@ -423,10 +443,10 @@ Each phase is independently deployable. The system degrades gracefully at every 
 
 **Goal**: Second Brain running as a Docker service, Vite alias configured, thin adapter in place.
 
+- Complete Required Second Brain Development (see Section 3): `POST /api/a2ui/generate` endpoint, Dockerfile, port config
 - Add `trinity-a2ui` service to `docker-compose.yml` under `trinity` profile
-- Add `@a2ui` path alias to `vite.config.ts`
-- Add `@a2ui/*` path mapping to `tsconfig.json`
-- Add Second Brain component directory to Tailwind `content` paths
+- Add `"@trinity/a2ui": "file:../../second-brain-research-dashboard/frontend"` to Archon's `package.json`
+- Replicate Second Brain's custom Tailwind animations (`scroll`, `shimmer`, `fade-in`) in Archon's `tailwind.config.js`
 - Create `python/src/server/services/generative_ui/` with `a2ui_client.py`, `a2ui_models.py`, `a2ui_service.py`
 - Create `archon-ui-main/src/features/generative-ui/` with `A2UIDisplay.tsx`, `useA2UIGeneration.ts`, `types/index.ts`
 - Verify: `A2UIRenderer` renders a hardcoded component array in a test page
@@ -445,7 +465,7 @@ Each phase is independently deployable. The system degrades gracefully at every 
 
 **Goal**: Chat messages optionally rendered with A2UI components.
 
-- Add `a2ui_components` nullable JSONB column to chat messages table (migration)
+- Add `a2ui_components` nullable JSONB column to `chat_messages` table (migration 035)
 - Chat backend calls `a2ui_service.generate_chat_components()` for messages with structured content
 - Chat frontend renders `A2UIDisplay` when `a2ui_components` is present
 - Add raw/rich toggle per message
@@ -479,18 +499,17 @@ python/src/server/services/generative_ui/
 ```
 archon-ui-main/src/features/generative-ui/
 ├── components/
-│   └── A2UIDisplay.tsx      # Wrapper around Second Brain's A2UIRenderer
+│   └── A2UIDisplay.tsx      # Wrapper around @trinity/a2ui's A2UIRenderer
 ├── hooks/
 │   └── useA2UIGeneration.ts # TanStack Query mutation hook
 └── types/
-    └── index.ts             # Re-exports from @a2ui path alias
+    └── index.ts             # Re-exports from @trinity/a2ui package
 ```
 
 ### Configuration
 
 ```
-archon-ui-main/vite.config.ts       # @a2ui path alias
-archon-ui-main/tsconfig.json        # @a2ui/* path mapping
-archon-ui-main/tailwind.config.ts   # Second Brain content paths
+archon-ui-main/package.json         # @trinity/a2ui local dependency
+archon-ui-main/tailwind.config.js   # Custom animation replicas (scroll, shimmer, fade-in)
 docker-compose.yml                  # trinity-a2ui service (trinity profile)
 ```
