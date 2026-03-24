@@ -39,7 +39,7 @@ def create_chat_agent(model: str = "openai:gpt-4o") -> Agent[ChatDependencies, s
     agent = Agent(
         model=model,
         deps_type=ChatDependencies,
-        result_type=str,
+        output_type=str,
         retries=2,
     )
 
