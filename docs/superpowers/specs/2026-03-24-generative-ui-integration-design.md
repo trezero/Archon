@@ -108,6 +108,21 @@ import { a2uiCatalog } from '@trinity/a2ui'
 
 No Vite alias configuration is needed. No `tsconfig.json` path mapping is needed. The `@trinity/a2ui` package resolves through standard Node module resolution, and TypeScript picks up the bundled `.d.ts` declarations automatically.
 
+**Development workflow (HMR)**: Vite does not automatically watch `node_modules` or symlinked local packages for changes. When developing A2UI components in the Second Brain repo:
+1. Run `npm run build:lib -- --watch` in the Second Brain frontend to continuously rebuild on changes
+2. In Archon's `vite.config.ts`, add the Second Brain dist path to the watcher:
+   ```typescript
+   server: {
+     watch: {
+       // Watch the pre-built library for changes during development
+       ignored: ['!**/node_modules/@trinity/a2ui/**']
+     }
+   }
+   ```
+3. Vite will detect the updated `dist/a2ui.js` and trigger HMR in Archon
+
+This gives a fast development loop: edit component in Second Brain → auto-rebuild → Archon hot-reloads.
+
 #### Compatibility Considerations
 
 **React versions**: Archon uses React 18; the Second Brain uses React 19. The library build externalizes `react` and `react-dom`, so Archon provides its own React 18 at runtime. The A2UI components use standard patterns (functional components, hooks, JSX) that are forward-compatible. If a React 19-only API is used in a component, Archon wraps the import in a compatibility boundary that catches and falls back gracefully. In practice, the A2UI component catalog avoids React 19-specific features (Actions, `use()`, etc.) because it was built for broad compatibility.
@@ -117,6 +132,12 @@ No Vite alias configuration is needed. No `tsconfig.json` path mapping is needed
 **lucide-react**: The Second Brain uses `lucide-react` ^0.563; Archon uses ^0.441. The library build externalizes `lucide-react` so the host app provides icons. If icon names were added between versions, missing icons render as empty spans (graceful degradation). Archon should upgrade `lucide-react` when convenient to close the gap.
 
 **Tailwind CSS**: Both repos use Tailwind v4 with dark themes. With the pre-built library approach, Tailwind classes used by A2UI components are resolved at the Second Brain's build time. Archon does not need to add Second Brain source directories to its content paths. However, Second Brain's custom animations (`scroll`, `shimmer`, `fade-in`) must be replicated in Archon's `tailwind.config.js` or the library must inline them as CSS keyframes in the bundle.
+
+**Tailwind theme variable alignment**: The `@trinity/a2ui` library outputs Tailwind utility classes that reference CSS custom properties (e.g., `bg-primary`, `text-muted-foreground`). At runtime, these resolve against Archon's `globals.css` theme variables, not the Second Brain's. This is usually desirable — components inherit Archon's visual theme. However:
+
+- **Missing variables**: If Second Brain defines theme variables that Archon does not (e.g., `--chart-1`, `--ring`), components using those classes will render with no color. Audit Second Brain's `globals.css` for custom properties and ensure Archon's CSS defines them.
+- **Hardcoded values**: Some A2UI components may use hardcoded hex/HSL values instead of theme variables. These will not adapt to Archon's theme. Flag and replace during integration testing.
+- **Dark mode**: Both repos use dark themes, but HSL values may differ. Verify visual consistency by rendering each component type in Archon's theme during Phase 2 integration testing.
 
 **`cn()` utility**: The `clsx`/`tailwind-merge` utility `cn()` is bundled within the `@trinity/a2ui` library. No cross-repo dependency on this function.
 
@@ -274,6 +295,14 @@ When RAG search returns results:
 3. Knowledge UI renders results as RepoCards, CodeBlocks, LinkCards, KeyTakeaways
 4. Richer than current plain-text display, with structured navigation and visual hierarchy
 5. Results are rendered on-the-fly, not stored — regenerated each time the query runs
+
+**Latency mitigation**: RAG search results are rendered in two passes:
+1. **Immediate**: Raw text results render instantly in the UI using existing markdown display (no A2UI service call)
+2. **Async enhancement**: In the background, the frontend calls `useA2UIGeneration` to request component generation. When the A2UI service responds, components fade in and replace the markdown view
+
+This ensures search feels instant while A2UI components load asynchronously. If the A2UI service is slow or unavailable, the user still has the full text results immediately.
+
+**Alternative for high-traffic deployments**: Pre-generate A2UI representations at document ingestion time (when chunks are embedded). Store the component arrays alongside the document chunks in Supabase. At query time, return pre-generated components directly — zero LLM latency. This trades storage space for query speed.
 
 ---
 
