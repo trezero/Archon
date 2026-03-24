@@ -801,7 +801,8 @@ export function registerApiRoutes(
   async function dispatchToOrchestrator(
     conversationId: string,
     message: string,
-    extraContext?: Omit<HandleMessageContext, 'isolationHints'>
+    extraContext?: Omit<HandleMessageContext, 'isolationHints'>,
+    filesToCleanup?: { files: AttachedFile[]; uploadDir: string }
   ): Promise<{ accepted: boolean; status: string }> {
     const result = await lockManager.acquireLock(conversationId, async () => {
       // Emit lock:true at handler start so the UI knows processing has begun.
@@ -829,6 +830,29 @@ export function registerApiRoutes(
         }
       } finally {
         await webAdapter.emitLockEvent(conversationId, false);
+        // Clean up uploaded files AFTER handleMessage completes so the AI subprocess
+        // has had a chance to read them. Doing this in the HTTP handler's finally block
+        // would delete files while the fire-and-forget lock handler is still running.
+        if (filesToCleanup) {
+          for (const f of filesToCleanup.files) {
+            await unlink(f.path).catch((err: NodeJS.ErrnoException) => {
+              if (err.code !== 'ENOENT') {
+                getLog().warn({ err, filePath: f.path, conversationId }, 'upload.cleanup_failed');
+              }
+            });
+          }
+          // Remove the now-empty upload directory for this conversation.
+          await rm(filesToCleanup.uploadDir, { recursive: true, force: true }).catch(
+            (err: NodeJS.ErrnoException) => {
+              if (err.code !== 'ENOENT') {
+                getLog().warn(
+                  { err, uploadDir: filesToCleanup.uploadDir, conversationId },
+                  'upload.dir_cleanup_failed'
+                );
+              }
+            }
+          );
+        }
       }
     });
 
@@ -1020,6 +1044,7 @@ export function registerApiRoutes(
 
     let message: string;
     const savedFiles: AttachedFile[] = [];
+    let uploadDir = '';
 
     const contentType = c.req.header('content-type') ?? '';
 
@@ -1051,7 +1076,7 @@ export function registerApiRoutes(
       }
 
       const archonHome = getArchonHome();
-      const uploadDir = join(archonHome, 'artifacts', 'uploads', conversationId);
+      uploadDir = join(archonHome, 'artifacts', 'uploads', conversationId);
 
       // Guard against path traversal in conversationId (belt-and-suspenders after regex above)
       if (!uploadDir.startsWith(archonHome + sep)) {
@@ -1155,20 +1180,17 @@ export function registerApiRoutes(
     }
 
     const extraContext = savedFiles.length > 0 ? { attachedFiles: savedFiles } : undefined;
-    try {
-      const result = await dispatchToOrchestrator(conversationId, message, extraContext);
-      return c.json(result);
-    } finally {
-      // Clean up uploaded files. ENOENT is silently ignored (already removed).
-      // Unexpected errors are logged so disk leaks are detectable.
-      for (const f of savedFiles) {
-        await unlink(f.path).catch((err: NodeJS.ErrnoException) => {
-          if (err.code !== 'ENOENT') {
-            getLog().warn({ err, filePath: f.path, conversationId }, 'upload.cleanup_failed');
-          }
-        });
-      }
-    }
+    // Pass savedFiles to dispatchToOrchestrator so cleanup happens inside the lock handler,
+    // AFTER handleMessage completes — not in the HTTP handler's finally block where the
+    // fire-and-forget lock callback may still be running and the AI has not yet read the files.
+    const filesToCleanup = savedFiles.length > 0 ? { files: savedFiles, uploadDir } : undefined;
+    const result = await dispatchToOrchestrator(
+      conversationId,
+      message,
+      extraContext,
+      filesToCleanup
+    );
+    return c.json(result);
   });
 
   // GET /api/stream/__dashboard__ — multiplexed dashboard SSE (all workflow events)

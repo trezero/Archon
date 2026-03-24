@@ -49,7 +49,7 @@ const messageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
   ref
 ): React.ReactElement {
   const [value, setValue] = useState('');
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<{ file: File; id: string }[]>([]);
   const [dragging, setDragging] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -78,21 +78,21 @@ const messageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
           setFileError(`"${file.name}" is not a supported file type`);
           continue;
         }
-        combined.push(file);
+        combined.push({ file, id: crypto.randomUUID() });
       }
       return combined;
     });
   }, []);
 
-  const removeFile = useCallback((index: number): void => {
-    setFiles(prev => prev.filter((_, i) => i !== index));
+  const removeFile = useCallback((id: string): void => {
+    setFiles(prev => prev.filter(f => f.id !== id));
     setFileError(null);
   }, []);
 
   const handleSend = useCallback((): void => {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
-    onSend(trimmed, files.length > 0 ? files : undefined);
+    onSend(trimmed, files.length > 0 ? files.map(f => f.file) : undefined);
     setValue('');
     setFiles([]);
     setFileError(null);
@@ -169,9 +169,9 @@ const messageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
         {/* File preview chips */}
         {files.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {files.map((file, index) => (
+            {files.map(({ file, id }) => (
               <div
-                key={index}
+                key={id}
                 className="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-text-secondary"
               >
                 <span className="max-w-[140px] truncate" title={file.name}>
@@ -181,7 +181,7 @@ const messageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
                 <button
                   type="button"
                   onClick={() => {
-                    removeFile(index);
+                    removeFile(id);
                   }}
                   className="ml-1 text-text-tertiary hover:text-text-primary"
                   aria-label={`Remove ${file.name}`}
