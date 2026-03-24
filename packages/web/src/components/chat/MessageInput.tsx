@@ -24,7 +24,7 @@ const ACCEPTED_BINARY_MIME_TYPES = new Set([
  * Extensions listed in the file-picker's `accept` attribute.
  * Covers all file types Claude Code supports: images, PDFs, and text/code files.
  */
-const ACCEPTED_EXTENSIONS = [
+const ACCEPTED_EXTENSIONS_LIST = [
   // Images (also accepted via MIME type above)
   '.png',
   '.jpg',
@@ -81,14 +81,27 @@ const ACCEPTED_EXTENSIONS = [
   '.scala',
   '.r',
   '.sql',
-].join(',');
+];
+
+/** Comma-separated string for the file input `accept` attribute */
+const ACCEPTED_EXTENSIONS = ACCEPTED_EXTENSIONS_LIST.join(',');
+
+/** Set for O(1) extension lookup in validation */
+const ACCEPTED_EXTENSIONS_SET = new Set(ACCEPTED_EXTENSIONS_LIST);
 
 /** Returns true if the file type is accepted (any text/* or an explicitly allowed binary). */
 function isAcceptedFileType(file: File): boolean {
   if (file.type.startsWith('text/')) return true;
-  // application/json and similar structured-text types
   if (file.type === 'application/json') return true;
-  return ACCEPTED_BINARY_MIME_TYPES.has(file.type);
+  if (ACCEPTED_BINARY_MIME_TYPES.has(file.type)) return true;
+  // Browsers assign empty MIME types to many code/config extensions (.md, .py, .rs, etc.)
+  // Fall back to checking the file extension from the accepted list
+  const dotIndex = file.name.lastIndexOf('.');
+  if (dotIndex !== -1) {
+    const ext = file.name.slice(dotIndex).toLowerCase();
+    return ACCEPTED_EXTENSIONS_SET.has(ext);
+  }
+  return false;
 }
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
