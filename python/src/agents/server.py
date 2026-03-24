@@ -223,7 +223,7 @@ async def stream_chat(request: Request):
     message_complete, error, heartbeat).
     """
     body = await request.json()
-    conversation_id = body["conversation_id"]
+    conversation_id = body.get("conversation_id", "")
     message = body.get("message") or body.get("content", "")
     user_profile = body.get("user_profile", {})
     project_id = body.get("project_id")
@@ -237,12 +237,13 @@ async def stream_chat(request: Request):
     default_api_url = "http://archon-server:8181" if is_docker else "http://localhost:8181"
     api_url = os.environ.get("ARCHON_API_URL", default_api_url)
 
-    # Persist the user message via Main Server REST API
-    async with httpx.AsyncClient(timeout=30) as http_client:
-        await http_client.post(
-            f"{api_url}/api/chat/conversations/{conversation_id}/messages",
-            json={"role": "user", "content": message},
-        )
+    # Persist the user message via Main Server REST API (skip if no conversation)
+    if conversation_id:
+        async with httpx.AsyncClient(timeout=30) as http_client:
+            await http_client.post(
+                f"{api_url}/api/chat/conversations/{conversation_id}/messages",
+                json={"role": "user", "content": message},
+            )
 
     # Build ChatDependencies for this request
     deps = ChatDependencies(
@@ -289,20 +290,21 @@ async def stream_chat(request: Request):
 
             # Persist the assistant message via Main Server
             saved_msg: dict = {}
-            async with httpx.AsyncClient(timeout=30) as http_client:
-                save_response = await http_client.post(
-                    f"{api_url}/api/chat/conversations/{conversation_id}/messages",
-                    json={
-                        "role": "assistant",
-                        "content": full_content,
-                        "model_used": model,
-                    },
-                )
-                save_data = save_response.json()
-                saved_msg = save_data.get("message", {})
+            if conversation_id:
+                async with httpx.AsyncClient(timeout=30) as http_client:
+                    save_response = await http_client.post(
+                        f"{api_url}/api/chat/conversations/{conversation_id}/messages",
+                        json={
+                            "role": "assistant",
+                            "content": full_content,
+                            "model_used": model,
+                        },
+                    )
+                    save_data = save_response.json()
+                    saved_msg = save_data.get("message", {})
 
             # Auto-generate conversation title from the first exchange
-            if len(conversation_history) == 0:
+            if conversation_id and len(conversation_history) == 0:
                 try:
                     title_prompt = (
                         f"Generate a short title (max 6 words) for a conversation that starts with: "
