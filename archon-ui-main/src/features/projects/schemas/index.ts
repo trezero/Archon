@@ -18,6 +18,9 @@ export const CreateProjectSchema = z.object({
   business_sources: z.array(z.string()).optional(),
   pinned: z.boolean().optional(),
   parent_project_id: z.string().uuid().nullable().optional(),
+  project_goals: z.array(z.string()).optional(),
+  project_relevance: z.string().max(2000, "Relevance must be less than 2000 characters").optional(),
+  project_category: z.string().max(100, "Category must be less than 100 characters").optional(),
 });
 
 export const UpdateProjectSchema = CreateProjectSchema.partial();

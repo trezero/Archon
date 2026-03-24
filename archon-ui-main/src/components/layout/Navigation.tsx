@@ -1,4 +1,4 @@
-import { BookOpen, Bot, Palette, Settings, Sparkles } from "lucide-react";
+import { BookOpen, Bot, MessageSquare, Palette, Settings, Sparkles } from "lucide-react";
 import type React from "react";
 import { Link, useLocation } from "react-router-dom";
 // TEMPORARY: Use old SettingsContext until settings are migrated
@@ -44,6 +44,12 @@ export function Navigation({ className }: NavigationProps) {
       path: "/auto-research",
       icon: <Sparkles className="h-5 w-5" />,
       label: "Auto Research",
+      enabled: true,
+    },
+    {
+      path: "/chat",
+      icon: <MessageSquare className="h-5 w-5" />,
+      label: "Chat",
       enabled: true,
     },
     {

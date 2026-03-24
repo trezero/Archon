@@ -5,6 +5,7 @@
  */
 
 export { NewProjectModal } from "./NewProjectModal";
+export { ProjectAboutSection } from "./ProjectAboutSection";
 export { ProjectFilterBar } from "./ProjectFilterBar";
 export { ProjectGrid } from "./ProjectGrid";
 export { ProjectGridCard } from "./ProjectGridCard";

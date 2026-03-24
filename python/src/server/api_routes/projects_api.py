@@ -54,6 +54,9 @@ class CreateProjectRequest(BaseModel):
     parent_project_id: str | None = Field(None, description="Parent project ID for hierarchy")
     metadata: dict[str, Any] | None = Field(None, description="Key-value metadata")
     tags: list[str] | None = Field(None, description="Filterable tags")
+    project_goals: list[str] | None = Field(None, description="Project goals for AI prioritization")
+    project_relevance: str | None = Field(None, description="How this project relates to the user's overall objectives")
+    project_category: str | None = Field(None, description="Project category for grouping and analysis")
 
 
 class UpdateProjectRequest(BaseModel):
@@ -69,6 +72,9 @@ class UpdateProjectRequest(BaseModel):
     parent_project_id: str | None = Field(None, description="Parent project ID for hierarchy")
     metadata: dict[str, Any] | None = Field(None, description="Key-value metadata")
     tags: list[str] | None = Field(None, description="Filterable tags")
+    project_goals: list[str] | None = Field(None, description="Project goals for AI prioritization")
+    project_relevance: str | None = Field(None, description="How this project relates to the user's overall objectives")
+    project_category: str | None = Field(None, description="Project category for grouping and analysis")
 
 
 class CreateTaskRequest(BaseModel):
@@ -419,6 +425,12 @@ async def create_project(request: CreateProjectRequest) -> ProjectCreateResponse
             kwargs["metadata"] = request.metadata
         if request.tags is not None:
             kwargs["tags"] = request.tags
+        if request.project_goals is not None:
+            kwargs["project_goals"] = request.project_goals
+        if request.project_relevance is not None:
+            kwargs["project_relevance"] = request.project_relevance
+        if request.project_category is not None:
+            kwargs["project_category"] = request.project_category
 
         # Create project directly with AI assistance
         project_service = ProjectCreationService()
@@ -663,6 +675,12 @@ async def update_project(project_id: str, request: UpdateProjectRequest) -> dict
             update_fields["metadata"] = request.metadata
         if request.tags is not None:
             update_fields["tags"] = request.tags
+        if request.project_goals is not None:
+            update_fields["project_goals"] = request.project_goals
+        if request.project_relevance is not None:
+            update_fields["project_relevance"] = request.project_relevance
+        if request.project_category is not None:
+            update_fields["project_category"] = request.project_category
 
         # Create version snapshots for JSONB fields before updating
         if update_fields:
