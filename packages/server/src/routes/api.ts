@@ -1058,8 +1058,11 @@ export function registerApiRoutes(
         return c.json({ error: 'Invalid conversation ID' }, 400);
       }
 
+      // Validate all files before writing any to disk
       for (const entry of fileEntries) {
-        // Server-side MIME type allowlist (client-side accept= is not a security boundary)
+        // Server-side MIME type allowlist (client-side accept= is not a security boundary;
+        // entry.type is the Content-Type supplied by the client and is not verified against
+        // actual file contents — suitable for a single-developer self-hosted tool)
         if (!ALLOWED_UPLOAD_MIME_TYPES.has(entry.type)) {
           return c.json(
             { error: `File "${entry.name}" has an unsupported type: ${entry.type}` },
@@ -1069,18 +1072,31 @@ export function registerApiRoutes(
         if (entry.size > MAX_UPLOAD_BYTES) {
           return c.json({ error: `File "${entry.name}" exceeds the 10 MB size limit` }, 400);
         }
+      }
+
+      // Write files; on any failure clean up already-written files and surface the error
+      try {
         await mkdir(uploadDir, { recursive: true });
-        const fileId = randomUUID();
-        const safeName = basename(entry.name).replace(/[^a-zA-Z0-9._-]/g, '_');
-        const filePath = join(uploadDir, `${fileId}_${safeName}`);
-        await writeFile(filePath, Buffer.from(await entry.arrayBuffer()));
-        savedFiles.push({
-          path: filePath,
-          // Use safeName for display to avoid prompt injection via crafted filenames
-          name: safeName || fileId,
-          mimeType: entry.type,
-          size: entry.size,
-        });
+        for (const entry of fileEntries) {
+          const fileId = randomUUID();
+          const safeName = basename(entry.name).replace(/[^a-zA-Z0-9._-]/g, '_');
+          const filePath = join(uploadDir, `${fileId}_${safeName}`);
+          await writeFile(filePath, Buffer.from(await entry.arrayBuffer()));
+          savedFiles.push({
+            path: filePath,
+            // Use safeName for display to avoid prompt injection via crafted filenames
+            name: safeName || fileId,
+            mimeType: entry.type,
+            size: entry.size,
+          });
+        }
+      } catch (writeErr: unknown) {
+        // Roll back any files written before the failure
+        for (const f of savedFiles) {
+          await unlink(f.path).catch(() => undefined);
+        }
+        getLog().error({ err: writeErr, conversationId }, 'upload.write_failed');
+        return c.json({ error: 'Failed to save uploaded file. Check available disk space.' }, 500);
       }
 
       getLog().info({ conversationId, fileCount: savedFiles.length }, 'message.files_uploaded');
@@ -1108,14 +1124,11 @@ export function registerApiRoutes(
 
     // Persist user message and pass DB ID to adapter for assistant message persistence
     if (conv) {
+      // Omit path from persisted metadata — the on-disk file is ephemeral and will be
+      // deleted after the AI processes it; storing stale paths would confuse future readers.
       const fileMeta =
         savedFiles.length > 0
-          ? savedFiles.map(f => ({
-              name: f.name,
-              mimeType: f.mimeType,
-              size: f.size,
-              path: f.path,
-            }))
+          ? savedFiles.map(f => ({ name: f.name, mimeType: f.mimeType, size: f.size }))
           : undefined;
       try {
         if (fileMeta) {
@@ -1142,15 +1155,20 @@ export function registerApiRoutes(
     }
 
     const extraContext = savedFiles.length > 0 ? { attachedFiles: savedFiles } : undefined;
-    const result = await dispatchToOrchestrator(conversationId, message, extraContext);
-
-    // Clean up uploaded files now that the AI has read them during handleMessage.
-    // Errors are intentionally swallowed — a cleanup failure must not affect the response.
-    for (const f of savedFiles) {
-      await unlink(f.path).catch(() => undefined);
+    try {
+      const result = await dispatchToOrchestrator(conversationId, message, extraContext);
+      return c.json(result);
+    } finally {
+      // Clean up uploaded files. ENOENT is silently ignored (already removed).
+      // Unexpected errors are logged so disk leaks are detectable.
+      for (const f of savedFiles) {
+        await unlink(f.path).catch((err: NodeJS.ErrnoException) => {
+          if (err.code !== 'ENOENT') {
+            getLog().warn({ err, filePath: f.path, conversationId }, 'upload.cleanup_failed');
+          }
+        });
+      }
     }
-
-    return c.json(result);
   });
 
   // GET /api/stream/__dashboard__ — multiplexed dashboard SSE (all workflow events)

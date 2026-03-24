@@ -201,7 +201,8 @@ const messageBubble = memo(MessageBubbleRaw, (prev, next) => {
     prev.message.toolCalls === next.message.toolCalls &&
     prev.message.error === next.message.error &&
     prev.message.workflowDispatch === next.message.workflowDispatch &&
-    prev.message.workflowResult === next.message.workflowResult
+    prev.message.workflowResult === next.message.workflowResult &&
+    prev.message.files === next.message.files
   );
 });
 
