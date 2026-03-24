@@ -1,0 +1,267 @@
+<h2>Section 4: Workflow Editor & YAML Schema</h2>
+<p class="subtitle">UI-driven workflow authoring with YAML-native storage, compatible with remote-agent format</p>
+
+<div class="section">
+  <h3>Unified YAML Schema</h3>
+  <div class="mockup">
+    <div class="mockup-header">Extended WorkflowDefinition — Archon additions in green</div>
+    <div class="mockup-body" style="padding:20px; font-family:monospace; font-size:11px; color:#ccc;">
+      <pre style="margin:0;">name: implement-feature
+description: "Full feature implementation with plan review gate"
+provider: claude
+model: sonnet
+
+<span style="color:#888;"># ── Remote-agent compatible fields ──</span>
+nodes:
+  - id: create-branch
+    command: create-branch
+    context: fresh
+
+  - id: planning
+    command: planning
+    depends_on: [create-branch]
+
+  <span style="color:#6f8;">- id: plan-review                          # ← HITL gate node</span>
+    <span style="color:#6f8;">prompt: "Summarize the plan for approval"</span>
+    <span style="color:#6f8;">depends_on: [planning]</span>
+    <span style="color:#6f8;">approval:                                  # ← NEW: Archon extension</span>
+      <span style="color:#6f8;">required: true</span>
+      <span style="color:#6f8;">type: plan_review</span>
+      <span style="color:#6f8;">ttl_hours: 24</span>
+      <span style="color:#6f8;">channels: [ui, telegram]</span>
+
+  - id: execute
+    command: execute
+    depends_on: [plan-review]
+
+  - id: commit
+    command: commit
+    depends_on: [execute]
+
+  - id: create-pr
+    command: create-pr
+    depends_on: [commit]
+
+  <span style="color:#6f8;">- id: pr-review                             # ← Second HITL gate</span>
+    <span style="color:#6f8;">prompt: "Summarize changes for PR review"</span>
+    <span style="color:#6f8;">depends_on: [create-pr]</span>
+    <span style="color:#6f8;">approval:</span>
+      <span style="color:#6f8;">required: true</span>
+      <span style="color:#6f8;">type: pr_review</span>
+      <span style="color:#6f8;">ttl_hours: 48</span>
+
+  <span style="color:#888;"># ── Conditional branching (same syntax as remote-agent) ──</span>
+  - id: classify-issue
+    prompt: "Classify this as BUG or FEATURE. Output JSON: {type: '...'}"
+    output_format: {type: "object", properties: {type: {type: "string"}}}
+
+  - id: hotfix-path
+    command: hotfix
+    depends_on: [classify-issue]
+    when: "$classify-issue.output.type == 'BUG'"
+
+  - id: feature-path
+    command: planning
+    depends_on: [classify-issue]
+    when: "$classify-issue.output.type == 'FEATURE'"
+
+<span style="color:#888;"># ── Archon-only metadata (ignored by remote-agent) ──</span>
+<span style="color:#6f8;">archon:</span>
+  <span style="color:#6f8;">project_id: proj_xyz                       # Scope to Archon project</span>
+  <span style="color:#6f8;">tags: [feature, full-pipeline]</span>
+  <span style="color:#6f8;">icon: rocket                               # UI display icon</span>
+  <span style="color:#6f8;">suggested_by: pattern_discovery            # Origin tracking</span></pre>
+    </div>
+  </div>
+
+  <div style="margin-top:12px; padding:12px; background:rgba(255,200,0,0.05); border:1px solid rgba(255,200,0,0.15); border-radius:8px; font-size:12px;">
+    <strong style="color:#fa0;">Compatibility strategy:</strong> The <code>approval:</code> block and <code>archon:</code> metadata are Archon extensions. The remote-agent's YAML parser ignores unknown fields, so the same file works in both systems — the remote-agent simply skips the approval gates and runs straight through. This means exported workflows are immediately usable in both contexts.
+  </div>
+</div>
+
+<div class="section">
+  <h3>Supabase Storage Model</h3>
+  <div class="mockup">
+    <div class="mockup-header">workflow_definitions table</div>
+    <div class="mockup-body" style="padding:20px; font-size:11px;">
+      <table style="width:100%; border-collapse:collapse; font-family:monospace;">
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.1); color:#0cf;">
+          <td style="padding:8px;">Column</td>
+          <td style="padding:8px;">Type</td>
+          <td style="padding:8px;">Notes</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">id</td>
+          <td style="padding:6px; color:#888;">uuid</td>
+          <td style="padding:6px; color:#666;">PK</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">name</td>
+          <td style="padding:6px; color:#888;">text</td>
+          <td style="padding:6px; color:#666;">Unique per project scope (null = global)</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">description</td>
+          <td style="padding:6px; color:#888;">text</td>
+          <td style="padding:6px; color:#666;">Human-readable description</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">project_id</td>
+          <td style="padding:6px; color:#888;">uuid | null</td>
+          <td style="padding:6px; color:#666;">FK → archon_projects. Null = global workflow</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">yaml_content</td>
+          <td style="padding:6px; color:#888;">text</td>
+          <td style="padding:6px; color:#666;">Full YAML source (canonical storage format)</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">parsed_definition</td>
+          <td style="padding:6px; color:#888;">jsonb</td>
+          <td style="padding:6px; color:#666;">Parsed YAML for fast queries (auto-generated)</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">version</td>
+          <td style="padding:6px; color:#888;">integer</td>
+          <td style="padding:6px; color:#666;">Auto-incrementing per name+project scope</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">is_latest</td>
+          <td style="padding:6px; color:#888;">boolean</td>
+          <td style="padding:6px; color:#666;">Only one version is latest per name+project</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">tags</td>
+          <td style="padding:6px; color:#888;">text[]</td>
+          <td style="padding:6px; color:#666;">Searchable tags for filtering in UI</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">origin</td>
+          <td style="padding:6px; color:#888;">text</td>
+          <td style="padding:6px; color:#666;">user_created | imported | pattern_discovery</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">created_at</td>
+          <td style="padding:6px; color:#888;">timestamptz</td>
+          <td style="padding:6px; color:#666;"></td>
+        </tr>
+        <tr>
+          <td style="padding:6px; color:#ccc;">deleted_at</td>
+          <td style="padding:6px; color:#888;">timestamptz | null</td>
+          <td style="padding:6px; color:#666;">Soft delete</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>UI Editor — Form-Based Workflow Builder</h3>
+  <div class="mockup">
+    <div class="mockup-header">Workflow Editor Page — Conceptual Layout</div>
+    <div class="mockup-body" style="padding:20px; font-size:12px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <!-- Left: Form -->
+        <div style="border:1px solid rgba(0,200,255,0.2); border-radius:8px; padding:16px;">
+          <div style="color:#0cf; font-weight:bold; margin-bottom:12px;">Form Panel (left side)</div>
+
+          <div style="background:rgba(0,200,255,0.05); padding:8px; border-radius:4px; margin-bottom:8px;">
+            <div style="color:#888; font-size:10px; text-transform:uppercase; margin-bottom:4px;">Workflow Metadata</div>
+            <div style="color:#aaa; font-size:11px;">Name, description, provider, model, tags</div>
+          </div>
+
+          <div style="background:rgba(0,200,255,0.05); padding:8px; border-radius:4px; margin-bottom:8px;">
+            <div style="color:#888; font-size:10px; text-transform:uppercase; margin-bottom:4px;">Node List</div>
+            <div style="color:#aaa; font-size:11px;">
+              Sortable list of nodes. Each node expandable:<br>
+              • ID, type (command/prompt/bash)<br>
+              • depends_on (multi-select from other nodes)<br>
+              • when: condition (text input with syntax help)<br>
+              • trigger_rule (dropdown)<br>
+              • approval gate toggle + config<br>
+              • model/provider overrides<br>
+              [+ Add Node] button at bottom
+            </div>
+          </div>
+
+          <div style="background:rgba(0,200,255,0.05); padding:8px; border-radius:4px;">
+            <div style="color:#888; font-size:10px; text-transform:uppercase; margin-bottom:4px;">Actions</div>
+            <div style="color:#aaa; font-size:11px;">
+              [Save] [Validate YAML] [Export .yaml] [Run Workflow]
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: YAML preview -->
+        <div style="border:1px solid rgba(0,255,100,0.2); border-radius:8px; padding:16px;">
+          <div style="color:#6f8; font-weight:bold; margin-bottom:12px;">YAML Panel (right side)</div>
+
+          <div style="background:rgba(0,0,0,0.3); padding:12px; border-radius:4px; font-family:monospace; font-size:10px; color:#aaa; line-height:1.6;">
+            <div style="color:#6f8; margin-bottom:8px;">Live-updating YAML preview</div>
+            name: implement-feature<br>
+            description: "..."<br>
+            provider: claude<br>
+            <br>
+            nodes:<br>
+            &nbsp;&nbsp;- id: create-branch<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;command: create-branch<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;context: fresh<br>
+            <br>
+            &nbsp;&nbsp;- id: planning<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;command: planning<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;depends_on: [create-branch]<br>
+            <span style="color:#555;">...</span>
+          </div>
+
+          <div style="margin-top:8px; color:#888; font-size:11px;">
+            Editable — changes sync back to form.<br>
+            Bidirectional: form ↔ YAML always in sync.<br>
+            Syntax highlighting + validation errors inline.
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px; padding:12px; background:rgba(255,200,0,0.05); border:1px solid rgba(255,200,0,0.15); border-radius:8px; font-size:11px;">
+        <strong style="color:#fa0;">Import flow:</strong> Users can paste or upload a YAML file from .archon/workflows/ → parsed into form fields → saved to Supabase. <strong>Export flow:</strong> Download button generates a clean YAML file (strips archon: metadata block) compatible with remote-agent's .archon/workflows/ directory.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Command Library</h3>
+  <div class="mockup">
+    <div class="mockup-header">Managing reusable commands referenced by workflow nodes</div>
+    <div class="mockup-body" style="padding:20px; font-size:12px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div>
+          <div style="color:#0cf; font-weight:bold; margin-bottom:8px;">Current: Filesystem .md files</div>
+          <div style="color:#aaa; font-size:11px; line-height:1.6;">
+            <code>python/.claude/commands/agent-work-orders/</code><br>
+            • create-branch.md<br>
+            • planning.md<br>
+            • execute.md<br>
+            • commit.md<br>
+            • create-pr.md<br>
+            • prp-review.md<br><br>
+            <span style="color:#888;">Static files, no UI editing, no versioning</span>
+          </div>
+        </div>
+        <div>
+          <div style="color:#6f8; font-weight:bold; margin-bottom:8px;">New: DB-backed with fallback</div>
+          <div style="color:#aaa; font-size:11px; line-height:1.6;">
+            <strong>Resolution order:</strong><br>
+            1. Check Supabase <code>workflow_commands</code> table<br>
+            2. Fall back to filesystem .md files<br>
+            3. Fall back to remote-agent's .archon/commands/<br><br>
+            <strong>UI features:</strong><br>
+            • Markdown editor with preview<br>
+            • Variable placeholder hints ($1, $2, $ARGUMENTS)<br>
+            • Version history (same pattern as workflow defs)<br>
+            • "Fork from built-in" to customize defaults
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

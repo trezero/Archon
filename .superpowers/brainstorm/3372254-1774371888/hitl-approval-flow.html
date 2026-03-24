@@ -1,0 +1,198 @@
+<h2>Section 2: HITL Router & Approval Flow</h2>
+<p class="subtitle">Channel-agnostic approval system supporting Archon UI and Telegram</p>
+
+<div class="section">
+  <h3>Approval Request Lifecycle</h3>
+  <div class="mockup">
+    <div class="mockup-header">End-to-End Flow — From DAG Pause to Resume</div>
+    <div class="mockup-body" style="padding:24px; font-family:monospace; font-size:12px; line-height:1.8; color:#ccc;">
+      <pre style="margin:0; white-space:pre-wrap;">
+<span style="color:#c8f; font-weight:bold;">PHASE 1: PAUSE</span>
+<span style="color:#6f8;">1.</span> evaluate_dag() encounters node with approval_required: true
+<span style="color:#6f8;">2.</span> Node marked 'waiting_approval' in workflow_nodes table
+<span style="color:#6f8;">3.</span> Workflow run status updated to 'paused'
+<span style="color:#6f8;">4.</span> Create approval_request row in Supabase:
+   {id, workflow_run_id, node_id, approval_type, payload, status: 'pending',
+    created_at, expires_at, approved_by, approved_via, resolved_at}
+<span style="color:#6f8;">5.</span> HITL Router dispatches to all configured channels:
+
+<span style="color:#0cf; font-weight:bold;">   → Archon UI (SSE):</span>
+     Fire event: {type: 'approval_requested', approval_id, workflow_run_id,
+                  node_id, approval_type, payload}
+     UI renders rich approval view (plan diff, code preview, etc.)
+     Approve/Reject buttons call REST: POST /api/workflows/approvals/{id}/resolve
+
+<span style="color:#0cf; font-weight:bold;">   → Telegram (Bot API):</span>
+     Send message to project's chat_id:
+       "🔍 Approval needed: [workflow_name] — [node_name]"
+       "[summary — first 500 chars of payload]"
+       "View full details: https://archon.local/workflows/{run_id}/approvals/{id}"
+       InlineKeyboard: [✅ Approve] [❌ Reject]
+     Telegram callback_query handler calls same REST endpoint
+
+<span style="color:#c8f; font-weight:bold;">PHASE 2: WAIT</span>
+<span style="color:#6f8;">6.</span> Workflow run is suspended — no further nodes evaluated
+<span style="color:#6f8;">7.</span> Approval request has configurable TTL (default: 24h)
+<span style="color:#6f8;">8.</span> If TTL expires → auto-reject, mark node 'failed', resume DAG evaluation
+<span style="color:#6f8;">9.</span> Periodic heartbeat SSE keeps UI updated on wait duration
+
+<span style="color:#c8f; font-weight:bold;">PHASE 3: RESUME</span>
+<span style="color:#6f8;">10.</span> User approves via ANY channel → REST endpoint:
+    POST /api/workflows/approvals/{id}/resolve
+    Body: {decision: 'approved'|'rejected', comment?: string, channel: 'ui'|'telegram'}
+<span style="color:#6f8;">11.</span> approval_request updated: status='resolved', approved_by, approved_via, resolved_at
+<span style="color:#6f8;">12.</span> IF approved:
+    • Node transitions: waiting_approval → queued
+    • evaluate_dag() re-invoked — resumes topological walk
+    • SSE fired to all channels: {type: 'approval_resolved', decision: 'approved'}
+    • Telegram: edit original message to show "✅ Approved by [user] via [channel]"
+<span style="color:#6f8;">13.</span> IF rejected:
+    • Node transitions: waiting_approval → failed (with rejection reason)
+    • evaluate_dag() re-invoked — downstream nodes evaluated per trigger_rules
+    • SSE + Telegram notified of rejection</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Approval Types</h3>
+  <div class="mockup">
+    <div class="mockup-header">What Can Be Approved</div>
+    <div class="mockup-body" style="padding:20px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; font-size:12px;">
+        <div style="background:rgba(0,255,100,0.05); border:1px solid rgba(0,255,100,0.15); border-radius:8px; padding:12px;">
+          <div style="color:#6f8; font-weight:bold; margin-bottom:6px;">plan_review</div>
+          <div style="color:#aaa; font-size:11px; margin-bottom:8px;">Review an implementation plan before execution begins</div>
+          <div style="color:#888; font-size:11px;">
+            <strong>UI payload:</strong> Full plan markdown, file tree, estimated scope<br>
+            <strong>Telegram:</strong> Summary + link to full plan in UI
+          </div>
+        </div>
+        <div style="background:rgba(0,200,255,0.05); border:1px solid rgba(0,200,255,0.15); border-radius:8px; padding:12px;">
+          <div style="color:#0cf; font-weight:bold; margin-bottom:6px;">pr_review</div>
+          <div style="color:#aaa; font-size:11px; margin-bottom:8px;">Review changes before creating a pull request</div>
+          <div style="color:#888; font-size:11px;">
+            <strong>UI payload:</strong> Diff view, commit list, PR description preview<br>
+            <strong>Telegram:</strong> Stats (files changed, insertions/deletions) + link
+          </div>
+        </div>
+        <div style="background:rgba(255,200,0,0.05); border:1px solid rgba(255,200,0,0.15); border-radius:8px; padding:12px;">
+          <div style="color:#fa0; font-weight:bold; margin-bottom:6px;">deploy_gate</div>
+          <div style="color:#aaa; font-size:11px; margin-bottom:8px;">Approve before deploying or merging to protected branch</div>
+          <div style="color:#888; font-size:11px;">
+            <strong>UI payload:</strong> Environment details, rollback plan, test results<br>
+            <strong>Telegram:</strong> Environment + test pass/fail summary + link
+          </div>
+        </div>
+        <div style="background:rgba(255,100,0,0.05); border:1px solid rgba(255,100,0,0.15); border-radius:8px; padding:12px;">
+          <div style="color:#f84; font-weight:bold; margin-bottom:6px;">custom</div>
+          <div style="color:#aaa; font-size:11px; margin-bottom:8px;">User-defined approval gate with custom payload</div>
+          <div style="color:#888; font-size:11px;">
+            <strong>UI payload:</strong> Rendered from node's output (markdown/JSON)<br>
+            <strong>Telegram:</strong> Node output summary + link
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>HITL Router Architecture</h3>
+  <div class="mockup">
+    <div class="mockup-header">Channel-Agnostic Dispatch</div>
+    <div class="mockup-body" style="padding:24px; font-family:monospace; font-size:12px;">
+      <div style="text-align:center; margin-bottom:20px;">
+        <div style="display:inline-block; padding:12px 24px; background:rgba(0,255,100,0.1); border:2px solid rgba(0,255,100,0.3); border-radius:8px;">
+          <strong style="color:#6f8;">HITLRouter</strong><br>
+          <span style="color:#888; font-size:11px;">python/src/server/services/workflow/hitl_router.py</span>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:center; gap:8px; margin-bottom:20px;">
+        <span style="color:#555;">dispatches to →</span>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
+        <div style="border:1px solid rgba(0,200,255,0.2); border-radius:8px; padding:12px; text-align:center;">
+          <div style="color:#0cf; font-weight:bold; margin-bottom:4px;">UIChannel</div>
+          <div style="color:#888; font-size:11px;">Fires SSE event to connected browsers. Renders rich approval payload.</div>
+        </div>
+        <div style="border:1px solid rgba(0,200,255,0.2); border-radius:8px; padding:12px; text-align:center;">
+          <div style="color:#0cf; font-weight:bold; margin-bottom:4px;">TelegramChannel</div>
+          <div style="color:#888; font-size:11px;">Sends bot message via Telegram Bot API. Handles callback_query for inline buttons.</div>
+        </div>
+        <div style="border:1px solid rgba(150,150,150,0.2); border-radius:8px; padding:12px; text-align:center;">
+          <div style="color:#888; font-weight:bold; margin-bottom:4px;">Future: SlackChannel</div>
+          <div style="color:#666; font-size:11px;">Same pattern — implement ApprovalChannel interface.</div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px; padding:12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; font-size:11px;">
+        <strong style="color:#aaa;">Interface contract:</strong>
+        <pre style="margin:8px 0 0 0; color:#ccc;">
+class ApprovalChannel(Protocol):
+    async def send_approval_request(
+        self,
+        approval: ApprovalRequest,
+        project: Project,
+    ) -> None: ...
+
+    async def notify_resolution(
+        self,
+        approval: ApprovalRequest,
+        decision: str,
+        resolved_by: str,
+    ) -> None: ...</pre>
+      </div>
+
+      <div style="margin-top:12px; padding:8px 12px; background:rgba(255,200,0,0.08); border:1px solid rgba(255,200,0,0.15); border-radius:6px; font-size:11px;">
+        <strong style="color:#fa0;">Key design choice:</strong> All channels converge on the same REST endpoint for resolution.
+        The HITL Router doesn't handle responses — it only dispatches. Resolution is always:
+        <code style="color:#0cf;">POST /api/workflows/approvals/{id}/resolve</code>
+        This makes adding channels trivial — you only implement the send side.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Telegram Integration Detail</h3>
+  <div class="mockup">
+    <div class="mockup-header">How Archon Talks to the Per-Project Telegram Bot</div>
+    <div class="mockup-body" style="padding:20px; font-size:12px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div>
+          <div style="color:#0cf; font-weight:bold; margin-bottom:8px;">Sending Approval Requests</div>
+          <div style="color:#aaa; font-size:11px; line-height:1.6;">
+            1. TelegramChannel looks up project's <code>telegram_chat_id</code> from Supabase<br>
+            2. Builds message: summary + inline keyboard buttons<br>
+            3. Calls Telegram Bot API: <code>sendMessage</code> with <code>reply_markup</code><br>
+            4. Stores Telegram <code>message_id</code> in approval_request metadata<br>
+            5. On resolution: calls <code>editMessageText</code> to update the original message
+          </div>
+        </div>
+        <div>
+          <div style="color:#0cf; font-weight:bold; margin-bottom:8px;">Receiving Approvals</div>
+          <div style="color:#aaa; font-size:11px; line-height:1.6;">
+            1. User taps inline button in Telegram<br>
+            2. Telegram sends <code>callback_query</code> to bot<br>
+            3. Bot extracts <code>approval_id</code> + <code>decision</code> from callback data<br>
+            4. Bot calls Archon REST: <code>POST /api/workflows/approvals/{id}/resolve</code><br>
+            5. Archon processes approval, fires SSE, resumes DAG<br>
+            6. Bot answers callback_query with confirmation toast
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px; padding:12px; background:rgba(200,100,255,0.05); border:1px solid rgba(200,100,255,0.15); border-radius:8px;">
+        <div style="color:#c8f; font-weight:bold; margin-bottom:6px; font-size:11px;">CRITICAL: Where does the Telegram bot run?</div>
+        <div style="color:#aaa; font-size:11px; line-height:1.6;">
+          The remote-coding-agent already runs per-project Telegram bots. Two options:<br><br>
+          <strong style="color:#6f8;">Option 1 (Recommended):</strong> Archon sends approval requests to the remote-agent via REST, which forwards them through its existing Telegram adapter. The remote-agent's callback_query handler calls Archon's approval REST endpoint. <em>No new Telegram bot needed in Archon.</em><br><br>
+          <strong style="color:#888;">Option 2:</strong> Archon runs its own Telegram bot for approvals only. Separate from the remote-agent's per-project bots. More infrastructure to manage.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

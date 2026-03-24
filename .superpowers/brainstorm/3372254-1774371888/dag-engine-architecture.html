@@ -1,0 +1,174 @@
+<h2>Section 1: DAG Orchestration Engine</h2>
+<p class="subtitle">The core state machine that drives all workflow execution</p>
+
+<div class="section">
+  <h3>System Architecture Overview</h3>
+  <div class="mockup">
+    <div class="mockup-header">Archon Workflows 2.0 — Component Map</div>
+    <div class="mockup-body" style="padding:24px; font-family:monospace; font-size:12px; line-height:1.6;">
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:20px;">
+        <!-- Column 1: Clients -->
+        <div style="border:1px solid rgba(0,200,255,0.3); border-radius:8px; padding:12px;">
+          <div style="color:#0cf; font-weight:bold; margin-bottom:8px; font-size:13px;">CLIENTS</div>
+          <div style="background:rgba(0,200,255,0.08); padding:8px; border-radius:4px; margin-bottom:6px;">
+            🌐 Archon Web UI<br>
+            <span style="color:#888; font-size:11px;">Rich approval views, DAG visualizer, workflow editor</span>
+          </div>
+          <div style="background:rgba(0,200,255,0.08); padding:8px; border-radius:4px; margin-bottom:6px;">
+            📱 Telegram Bot<br>
+            <span style="color:#888; font-size:11px;">Approve/reject buttons, status notifications</span>
+          </div>
+          <div style="background:rgba(0,200,255,0.08); padding:8px; border-radius:4px;">
+            🔌 MCP Clients<br>
+            <span style="color:#888; font-size:11px;">IDE integration, CLI tools</span>
+          </div>
+        </div>
+        <!-- Column 2: Archon Core -->
+        <div style="border:2px solid rgba(0,255,100,0.4); border-radius:8px; padding:12px; background:rgba(0,255,100,0.03);">
+          <div style="color:#6f8; font-weight:bold; margin-bottom:8px; font-size:13px;">ARCHON CORE (Python)</div>
+          <div style="background:rgba(0,255,100,0.08); padding:8px; border-radius:4px; margin-bottom:6px; border-left:3px solid #6f8;">
+            <strong>DAG Engine</strong><br>
+            <span style="color:#888; font-size:11px;">State machine, topological sort, condition eval, HITL pause/resume</span>
+          </div>
+          <div style="background:rgba(0,255,100,0.08); padding:8px; border-radius:4px; margin-bottom:6px; border-left:3px solid #6f8;">
+            <strong>Workflow Registry</strong><br>
+            <span style="color:#888; font-size:11px;">YAML parser, Supabase storage, version history</span>
+          </div>
+          <div style="background:rgba(0,255,100,0.08); padding:8px; border-radius:4px; margin-bottom:6px; border-left:3px solid #6f8;">
+            <strong>HITL Router</strong><br>
+            <span style="color:#888; font-size:11px;">Channel-agnostic approval dispatch (UI, Telegram, API)</span>
+          </div>
+          <div style="background:rgba(0,255,100,0.08); padding:8px; border-radius:4px; margin-bottom:6px; border-left:3px solid #6f8;">
+            <strong>Orchestration API</strong><br>
+            <span style="color:#888; font-size:11px;">REST endpoints + SSE streams</span>
+          </div>
+          <div style="background:rgba(255,200,0,0.08); padding:8px; border-radius:4px; border-left:3px solid #fa0;">
+            <strong>Pattern Discovery</strong><br>
+            <span style="color:#888; font-size:11px;">Batch analysis, embedding, clustering</span>
+          </div>
+        </div>
+        <!-- Column 3: Execution Backends -->
+        <div style="border:1px solid rgba(255,100,0,0.3); border-radius:8px; padding:12px;">
+          <div style="color:#f84; font-weight:bold; margin-bottom:8px; font-size:13px;">EXECUTION BACKENDS</div>
+          <div style="background:rgba(255,100,0,0.08); padding:8px; border-radius:4px; margin-bottom:6px;">
+            🤖 Remote-Coding-Agent<br>
+            <span style="color:#888; font-size:11px;">TypeScript, Claude Agent SDK, worktree isolation</span>
+          </div>
+          <div style="background:rgba(255,100,0,0.08); padding:8px; border-radius:4px; margin-bottom:6px;">
+            ⚙️ Archon Local Executor<br>
+            <span style="color:#888; font-size:11px;">Python, Claude CLI subprocess, git worktrees</span>
+          </div>
+          <div style="background:rgba(255,100,0,0.08); padding:8px; border-radius:4px;">
+            🔮 Future Backends<br>
+            <span style="color:#888; font-size:11px;">Codex, Gemini CLI, containerized agents</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Data Flow Arrows -->
+      <div style="border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:12px; background:rgba(255,255,255,0.02);">
+        <div style="color:#aaa; font-weight:bold; margin-bottom:8px; font-size:13px;">DATA FLOW</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; font-size:11px;">
+          <div>
+            <span style="color:#0cf;">Client → Archon:</span> REST (start workflow, approve, reject)<br>
+            <span style="color:#0cf;">Archon → Client:</span> SSE (state changes, approval requests)
+          </div>
+          <div>
+            <span style="color:#f84;">Backend → Archon:</span> REST (register, report step result)<br>
+            <span style="color:#f84;">Archon → Backend:</span> SSE (next nodes, resume signals)
+          </div>
+        </div>
+      </div>
+
+      <!-- Database -->
+      <div style="margin-top:12px; border:1px solid rgba(200,100,255,0.3); border-radius:8px; padding:12px; background:rgba(200,100,255,0.03);">
+        <div style="color:#c8f; font-weight:bold; margin-bottom:8px; font-size:13px;">SUPABASE (PostgreSQL + pgvector)</div>
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; font-size:11px;">
+          <div style="background:rgba(200,100,255,0.08); padding:6px; border-radius:4px; text-align:center;">workflow_definitions</div>
+          <div style="background:rgba(200,100,255,0.08); padding:6px; border-radius:4px; text-align:center;">workflow_runs</div>
+          <div style="background:rgba(200,100,255,0.08); padding:6px; border-radius:4px; text-align:center;">workflow_nodes</div>
+          <div style="background:rgba(200,100,255,0.08); padding:6px; border-radius:4px; text-align:center;">approval_requests</div>
+          <div style="background:rgba(200,100,255,0.08); padding:6px; border-radius:4px; text-align:center;">node_outputs</div>
+          <div style="background:rgba(200,100,255,0.08); padding:6px; border-radius:4px; text-align:center;">execution_backends</div>
+          <div style="background:rgba(200,100,255,0.08); padding:6px; border-radius:4px; text-align:center;">activity_events</div>
+          <div style="background:rgba(200,100,255,0.08); padding:6px; border-radius:4px; text-align:center;">discovered_patterns</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>DAG Engine — Node State Machine</h3>
+  <div class="mockup">
+    <div class="mockup-header">Node Lifecycle States</div>
+    <div class="mockup-body" style="padding:24px; font-family:monospace; font-size:12px;">
+      <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap; margin-bottom:20px;">
+        <div style="padding:8px 16px; background:rgba(150,150,150,0.15); border:1px solid rgba(150,150,150,0.3); border-radius:20px; color:#aaa;">pending</div>
+        <span style="color:#555;">→</span>
+        <div style="padding:8px 16px; background:rgba(0,200,255,0.15); border:1px solid rgba(0,200,255,0.3); border-radius:20px; color:#0cf;">queued</div>
+        <span style="color:#555;">→</span>
+        <div style="padding:8px 16px; background:rgba(255,200,0,0.15); border:1px solid rgba(255,200,0,0.3); border-radius:20px; color:#fa0;">running</div>
+        <span style="color:#555;">→</span>
+        <div style="padding:8px 16px; background:rgba(0,255,100,0.15); border:1px solid rgba(0,255,100,0.3); border-radius:20px; color:#6f8;">completed</div>
+      </div>
+      <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap; margin-bottom:20px;">
+        <span style="color:#555; font-size:11px;">Branch states:</span>
+        <div style="padding:8px 16px; background:rgba(255,200,0,0.15); border:1px solid rgba(255,200,0,0.3); border-radius:20px; color:#fa0;">running</div>
+        <span style="color:#555;">→</span>
+        <div style="padding:8px 16px; background:rgba(200,100,255,0.15); border:1px solid rgba(200,100,255,0.3); border-radius:20px; color:#c8f;">waiting_approval</div>
+        <span style="color:#555;">→</span>
+        <div style="padding:8px 16px; background:rgba(0,255,100,0.15); border:1px solid rgba(0,255,100,0.3); border-radius:20px; color:#6f8;">completed</div>
+      </div>
+      <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap;">
+        <span style="color:#555; font-size:11px;">Terminal states:</span>
+        <div style="padding:8px 16px; background:rgba(255,60,60,0.15); border:1px solid rgba(255,60,60,0.3); border-radius:20px; color:#f66;">failed</div>
+        <div style="padding:8px 16px; background:rgba(150,150,150,0.15); border:1px solid rgba(150,150,150,0.3); border-radius:20px; color:#888;">skipped</div>
+        <div style="padding:8px 16px; background:rgba(255,150,0,0.15); border:1px solid rgba(255,150,0,0.3); border-radius:20px; color:#f90;">cancelled</div>
+      </div>
+
+      <div style="margin-top:20px; border-top:1px solid rgba(255,255,255,0.1); padding-top:16px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; font-size:11px;">
+          <div>
+            <strong style="color:#c8f;">waiting_approval</strong> — NEW STATE<br>
+            <span style="color:#888;">Node execution paused. Approval request created in DB. HITL Router notifies UI (SSE) + Telegram (bot message with inline buttons). Workflow run status becomes "paused". Resumes when any channel approves.</span>
+          </div>
+          <div>
+            <strong style="color:#0cf;">queued</strong> — NEW STATE<br>
+            <span style="color:#888;">All dependencies satisfied, conditions evaluated true. Node is ready for execution. Backend picks it up via REST poll or SSE push. Prevents race conditions in parallel execution.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>DAG Evaluation Algorithm</h3>
+  <div class="mockup">
+    <div class="mockup-header">Core Loop — evaluate_dag()</div>
+    <div class="mockup-body" style="padding:24px; font-family:monospace; font-size:12px; line-height:1.8; color:#ccc;">
+      <pre style="margin:0; white-space:pre-wrap;">
+<span style="color:#6f8;">1.</span> Load workflow_run + all workflow_nodes from Supabase
+<span style="color:#6f8;">2.</span> Build adjacency map from node.depends_on edges
+<span style="color:#6f8;">3.</span> FOR EACH node in topological order:
+   <span style="color:#0cf;">a.</span> IF node.state != 'pending' → skip (already processed)
+   <span style="color:#0cf;">b.</span> Check upstream dependencies against trigger_rule:
+      • all_success: all deps completed successfully
+      • one_success: at least one dep completed
+      • all_done: all deps in terminal state (completed/failed/skipped)
+      • none_failed_min_one_success: no failures + at least one success
+   <span style="color:#0cf;">c.</span> IF deps not satisfied → skip (still pending)
+   <span style="color:#0cf;">d.</span> Evaluate when: condition against upstream node_outputs
+      • IF condition false → mark node 'skipped', continue
+   <span style="color:#0cf;">e.</span> Check if node has approval_required: true
+      • IF yes → mark node 'waiting_approval', create approval_request
+      • HITL Router dispatches to UI SSE + Telegram
+      • RETURN (pause evaluation until approval)
+   <span style="color:#0cf;">f.</span> Mark node 'queued'
+   <span style="color:#0cf;">g.</span> Fire SSE event: {type: 'node_ready', node_id, workflow_run_id}
+<span style="color:#6f8;">4.</span> IF all nodes in terminal states → mark workflow_run 'completed'
+<span style="color:#6f8;">5.</span> IF any node failed + no downstream nodes can proceed → mark 'failed'</pre>
+    </div>
+  </div>
+</div>

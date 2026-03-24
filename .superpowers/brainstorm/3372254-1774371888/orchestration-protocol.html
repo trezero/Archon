@@ -1,0 +1,277 @@
+<h2>Section 3: Orchestration Protocol & Execution Backend API</h2>
+<p class="subtitle">The REST + SSE contract between Archon and execution backends</p>
+
+<div class="section">
+  <h3>Backend Registration & Lifecycle</h3>
+  <div class="mockup">
+    <div class="mockup-header">How Execution Backends Connect to Archon</div>
+    <div class="mockup-body" style="padding:24px; font-family:monospace; font-size:12px; line-height:1.8; color:#ccc;">
+      <pre style="margin:0; white-space:pre-wrap;">
+<span style="color:#6f8; font-weight:bold;">REGISTRATION (one-time)</span>
+<span style="color:#0cf;">1.</span> Backend calls: POST /api/workflows/backends/register
+   Body: {
+     name: "remote-coding-agent",
+     base_url: "http://remote-agent:3000",
+     capabilities: ["claude-sdk", "codex", "worktree-isolation", "telegram"],
+     supported_node_types: ["command", "prompt", "bash"],
+     max_concurrent_nodes: 5,
+     heartbeat_interval_seconds: 30
+   }
+<span style="color:#0cf;">2.</span> Archon stores in execution_backends table, returns backend_id + auth_token
+<span style="color:#0cf;">3.</span> Backend stores token for subsequent API calls
+
+<span style="color:#6f8; font-weight:bold;">SSE CONNECTION (persistent)</span>
+<span style="color:#0cf;">4.</span> Backend connects: GET /api/workflows/backends/{id}/events
+   Headers: Authorization: Bearer {auth_token}
+<span style="color:#0cf;">5.</span> Archon streams events:
+   • node_ready     — "execute this node" (includes full node definition + context)
+   • workflow_cancel — "abort all nodes for this workflow run"
+   • approval_resolved — "HITL gate passed, resume downstream nodes"
+   • heartbeat      — keep-alive ping every 15s
+
+<span style="color:#6f8; font-weight:bold;">HEARTBEAT (ongoing)</span>
+<span style="color:#0cf;">6.</span> Backend sends: POST /api/workflows/backends/{id}/heartbeat
+   Every 30 seconds while connected
+<span style="color:#0cf;">7.</span> If heartbeat missed for 3 intervals (90s):
+   • Archon marks backend 'unhealthy'
+   • Running nodes on that backend marked 'failed' with reason 'backend_timeout'
+   • evaluate_dag() re-invoked to process downstream effects</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Node Execution Protocol</h3>
+  <div class="mockup">
+    <div class="mockup-header">Step-by-Step: Backend Executes a Node</div>
+    <div class="mockup-body" style="padding:24px; font-family:monospace; font-size:12px;">
+      <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:8px; align-items:start;">
+        <!-- Left: Backend -->
+        <div style="border:1px solid rgba(255,100,0,0.3); border-radius:8px; padding:12px;">
+          <div style="color:#f84; font-weight:bold; text-align:center; margin-bottom:12px;">Execution Backend</div>
+
+          <div style="background:rgba(255,100,0,0.05); padding:8px; border-radius:4px; margin-bottom:8px; font-size:11px;">
+            <span style="color:#f84;">①</span> Receives <code>node_ready</code> via SSE<br>
+            <span style="color:#888;">Contains: node definition, upstream outputs, workflow context, working_dir</span>
+          </div>
+
+          <div style="background:rgba(255,100,0,0.05); padding:8px; border-radius:4px; margin-bottom:8px; font-size:11px;">
+            <span style="color:#f84;">③</span> Calls REST to claim node:<br>
+            <code style="color:#0cf;">POST /api/workflows/nodes/{id}/claim</code><br>
+            <span style="color:#888;">Prevents double-execution if multiple backends</span>
+          </div>
+
+          <div style="background:rgba(255,200,0,0.05); padding:8px; border-radius:4px; margin-bottom:8px; font-size:11px;">
+            <span style="color:#fa0;">④</span> Executes node (Claude SDK / CLI / bash)<br>
+            <span style="color:#888;">Streams progress updates periodically</span>
+          </div>
+
+          <div style="background:rgba(255,100,0,0.05); padding:8px; border-radius:4px; font-size:11px;">
+            <span style="color:#f84;">⑤</span> Reports result:<br>
+            <code style="color:#0cf;">POST /api/workflows/nodes/{id}/result</code><br>
+            <span style="color:#888;">Body: {state, output, error?, session_id?, artifacts?}</span>
+          </div>
+        </div>
+
+        <!-- Middle: Arrows -->
+        <div style="display:flex; flex-direction:column; align-items:center; gap:24px; padding-top:60px; font-size:20px; color:#555;">
+          <div>→</div>
+          <div>←</div>
+          <div>→</div>
+          <div>→</div>
+        </div>
+
+        <!-- Right: Archon -->
+        <div style="border:2px solid rgba(0,255,100,0.3); border-radius:8px; padding:12px;">
+          <div style="color:#6f8; font-weight:bold; text-align:center; margin-bottom:12px;">Archon DAG Engine</div>
+
+          <div style="background:rgba(0,255,100,0.05); padding:8px; border-radius:4px; margin-bottom:8px; font-size:11px;">
+            <span style="color:#6f8;">①</span> evaluate_dag() marks node 'queued'<br>
+            <span style="color:#888;">Fires node_ready SSE to connected backends</span>
+          </div>
+
+          <div style="background:rgba(0,255,100,0.05); padding:8px; border-radius:4px; margin-bottom:8px; font-size:11px;">
+            <span style="color:#6f8;">③</span> Validates claim (atomic DB update)<br>
+            <span style="color:#888;">Returns 200 if claimed, 409 if already claimed</span>
+          </div>
+
+          <div style="background:rgba(0,255,100,0.05); padding:8px; border-radius:4px; margin-bottom:8px; font-size:11px;">
+            <span style="color:#6f8;">④</span> Updates node progress in DB<br>
+            <span style="color:#888;">Fires SSE to UI for real-time progress display</span>
+          </div>
+
+          <div style="background:rgba(0,255,100,0.05); padding:8px; border-radius:4px; font-size:11px;">
+            <span style="color:#6f8;">⑤</span> Stores result in node_outputs<br>
+            <span style="color:#888;">Calls evaluate_dag() → queues next nodes</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>REST API Surface</h3>
+  <div class="mockup">
+    <div class="mockup-header">Orchestration API Endpoints</div>
+    <div class="mockup-body" style="padding:20px; font-size:11px; line-height:1.6;">
+      <div style="margin-bottom:16px;">
+        <div style="color:#6f8; font-weight:bold; margin-bottom:8px; font-size:13px;">Workflow Management (UI + MCP clients)</div>
+        <table style="width:100%; border-collapse:collapse;">
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#0cf; width:60px;">POST</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows</td>
+            <td style="padding:6px; color:#888;">Create workflow run from definition</td>
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#0cf;">GET</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/{run_id}</td>
+            <td style="padding:6px; color:#888;">Get workflow run status + all node states</td>
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#0cf;">GET</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/{run_id}/events</td>
+            <td style="padding:6px; color:#888;">SSE stream for UI (node state changes, progress, approvals)</td>
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#f66;">POST</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/{run_id}/cancel</td>
+            <td style="padding:6px; color:#888;">Cancel workflow run (marks all pending nodes cancelled)</td>
+          </tr>
+          <tr>
+            <td style="padding:6px; color:#0cf;">GET</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/definitions</td>
+            <td style="padding:6px; color:#888;">List/search workflow definitions from Supabase</td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <div style="color:#c8f; font-weight:bold; margin-bottom:8px; font-size:13px;">Approval Management (UI + Telegram callback)</div>
+        <table style="width:100%; border-collapse:collapse;">
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#0cf; width:60px;">GET</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/approvals</td>
+            <td style="padding:6px; color:#888;">List pending approvals (filterable by project)</td>
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#0cf;">GET</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/approvals/{id}</td>
+            <td style="padding:6px; color:#888;">Get full approval payload (plan, diff, etc.)</td>
+          </tr>
+          <tr>
+            <td style="padding:6px; color:#fa0;">POST</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/approvals/{id}/resolve</td>
+            <td style="padding:6px; color:#888;">Approve or reject (from any channel)</td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <div style="color:#f84; font-weight:bold; margin-bottom:8px; font-size:13px;">Backend Protocol (execution backends only)</div>
+        <table style="width:100%; border-collapse:collapse;">
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#fa0; width:60px;">POST</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/backends/register</td>
+            <td style="padding:6px; color:#888;">Register new execution backend</td>
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#0cf;">GET</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/backends/{id}/events</td>
+            <td style="padding:6px; color:#888;">SSE stream for backend (node_ready, cancel, resume)</td>
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#fa0;">POST</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/backends/{id}/heartbeat</td>
+            <td style="padding:6px; color:#888;">Backend heartbeat (every 30s)</td>
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#fa0;">POST</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/nodes/{id}/claim</td>
+            <td style="padding:6px; color:#888;">Atomically claim a queued node for execution</td>
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#fa0;">POST</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/nodes/{id}/progress</td>
+            <td style="padding:6px; color:#888;">Stream progress update during execution</td>
+          </tr>
+          <tr>
+            <td style="padding:6px; color:#fa0;">POST</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/nodes/{id}/result</td>
+            <td style="padding:6px; color:#888;">Report node completion/failure + output</td>
+          </tr>
+        </table>
+      </div>
+
+      <div>
+        <div style="color:#fa0; font-weight:bold; margin-bottom:8px; font-size:13px;">Workflow Definitions (UI editor)</div>
+        <table style="width:100%; border-collapse:collapse;">
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#0cf; width:60px;">GET</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/definitions</td>
+            <td style="padding:6px; color:#888;">List all definitions (with search/filter)</td>
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#fa0;">POST</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/definitions</td>
+            <td style="padding:6px; color:#888;">Create new definition (YAML stored in Supabase)</td>
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#fa0;">PUT</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/definitions/{id}</td>
+            <td style="padding:6px; color:#888;">Update definition (versioned — old version preserved)</td>
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; color:#f66;">DELETE</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/definitions/{id}</td>
+            <td style="padding:6px; color:#888;">Soft-delete definition</td>
+          </tr>
+          <tr>
+            <td style="padding:6px; color:#fa0;">POST</td>
+            <td style="padding:6px; color:#ccc;">/api/workflows/definitions/{id}/export</td>
+            <td style="padding:6px; color:#888;">Export as YAML file (for .archon/workflows/)</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Node Ready Payload — What the Backend Receives</h3>
+  <div class="mockup">
+    <div class="mockup-header">SSE Event: node_ready</div>
+    <div class="mockup-body" style="padding:20px; font-family:monospace; font-size:11px; color:#ccc;">
+      <pre style="margin:0;">{
+  "type": "node_ready",
+  "workflow_run_id": "wr_abc123",
+  "node": {
+    "id": "execute-implementation",
+    "type": "command",                   <span style="color:#888;">// command | prompt | bash</span>
+    "command": "execute",                <span style="color:#888;">// command name (loads .md file)</span>
+    "model": "sonnet",
+    "provider": "claude",
+    "allowed_tools": ["Read", "Edit", "Write", "Bash"],
+    "retry": {"max_attempts": 2, "delay_ms": 3000},
+    "mcp": ".archon/mcp-servers.json",  <span style="color:#888;">// optional MCP config</span>
+    "approval_required": false
+  },
+  "context": {
+    "working_dir": "/home/user/projects/myapp/trees/wo-abc123",
+    "user_request": "Add rate limiting to the API endpoints",
+    "project_id": "proj_xyz",
+    "upstream_outputs": {               <span style="color:#888;">// $node.output references</span>
+      "create-branch": {
+        "state": "completed",
+        "output": "feat/rate-limiting"
+      },
+      "planning": {
+        "state": "completed",
+        "output": "PRPs/features/rate-limiting-plan.md"
+      }
+    }
+  }
+}</pre>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,267 @@
+<h2>Section 5: Pattern Discovery Engine</h2>
+<p class="subtitle">Proactive workflow suggestion based on cross-repo activity analysis</p>
+
+<div class="section">
+  <h3>Data Capture Pipeline</h3>
+  <div class="mockup">
+    <div class="mockup-header">Three Input Streams → Unified Activity Events</div>
+    <div class="mockup-body" style="padding:24px; font-family:monospace; font-size:12px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:20px;">
+        <!-- Stream 1: Git -->
+        <div style="border:1px solid rgba(0,200,255,0.3); border-radius:8px; padding:12px;">
+          <div style="color:#0cf; font-weight:bold; margin-bottom:8px;">Stream 1: Git Activity</div>
+          <div style="color:#aaa; font-size:11px; line-height:1.6;">
+            <strong>Source:</strong> Post-commit hooks + periodic git log polling<br><br>
+            <strong>Captured data:</strong><br>
+            • Commit message + diff stats<br>
+            • Files touched (paths + languages)<br>
+            • Branch name patterns<br>
+            • Time of day / frequency<br>
+            • Author (for multi-user setups)<br><br>
+            <strong>Frequency:</strong> Real-time via hook, or every 15min poll
+          </div>
+        </div>
+        <!-- Stream 2: Conversations -->
+        <div style="border:1px solid rgba(200,100,255,0.3); border-radius:8px; padding:12px;">
+          <div style="color:#c8f; font-weight:bold; margin-bottom:8px;">Stream 2: Agent Conversations</div>
+          <div style="color:#aaa; font-size:11px; line-height:1.6;">
+            <strong>Source:</strong> remote_agent_messages table + Archon chat sessions<br><br>
+            <strong>Captured data:</strong><br>
+            • User request text (intent)<br>
+            • Which repo / project scoped to<br>
+            • Tools the agent used<br>
+            • Workflow invocations triggered<br>
+            • Outcome (success / failure / abandoned)<br><br>
+            <strong>Frequency:</strong> Captured on conversation end
+          </div>
+        </div>
+        <!-- Stream 3: Workflows -->
+        <div style="border:1px solid rgba(0,255,100,0.3); border-radius:8px; padding:12px;">
+          <div style="color:#6f8; font-weight:bold; margin-bottom:8px;">Stream 3: Workflow Runs</div>
+          <div style="color:#aaa; font-size:11px; line-height:1.6;">
+            <strong>Source:</strong> workflow_runs + workflow_nodes tables<br><br>
+            <strong>Captured data:</strong><br>
+            • Which workflow was run<br>
+            • Node execution order + durations<br>
+            • Which nodes failed / were skipped<br>
+            • HITL approval patterns (always approved? always rejected?)<br>
+            • Which repo + project context<br><br>
+            <strong>Frequency:</strong> On workflow completion
+          </div>
+        </div>
+      </div>
+
+      <!-- Unified event -->
+      <div style="text-align:center; margin-bottom:16px; color:#555; font-size:18px;">↓ ↓ ↓</div>
+      <div style="border:2px solid rgba(255,200,0,0.3); border-radius:8px; padding:16px; background:rgba(255,200,0,0.03);">
+        <div style="color:#fa0; font-weight:bold; margin-bottom:8px;">Unified: activity_events table</div>
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; font-size:11px;">
+          <div style="background:rgba(255,200,0,0.08); padding:6px; border-radius:4px; text-align:center; color:#ccc;">
+            id<br><span style="color:#888; font-size:10px;">uuid</span>
+          </div>
+          <div style="background:rgba(255,200,0,0.08); padding:6px; border-radius:4px; text-align:center; color:#ccc;">
+            event_type<br><span style="color:#888; font-size:10px;">commit | conversation | workflow_run</span>
+          </div>
+          <div style="background:rgba(255,200,0,0.08); padding:6px; border-radius:4px; text-align:center; color:#ccc;">
+            project_id<br><span style="color:#888; font-size:10px;">FK → archon_projects</span>
+          </div>
+          <div style="background:rgba(255,200,0,0.08); padding:6px; border-radius:4px; text-align:center; color:#ccc;">
+            repo_url<br><span style="color:#888; font-size:10px;">cross-ref key</span>
+          </div>
+          <div style="background:rgba(255,200,0,0.08); padding:6px; border-radius:4px; text-align:center; color:#ccc;">
+            intent_summary<br><span style="color:#888; font-size:10px;">AI-extracted intent</span>
+          </div>
+          <div style="background:rgba(255,200,0,0.08); padding:6px; border-radius:4px; text-align:center; color:#ccc;">
+            intent_embedding<br><span style="color:#888; font-size:10px;">vector(1536)</span>
+          </div>
+          <div style="background:rgba(255,200,0,0.08); padding:6px; border-radius:4px; text-align:center; color:#ccc;">
+            metadata<br><span style="color:#888; font-size:10px;">jsonb (event-specific)</span>
+          </div>
+          <div style="background:rgba(255,200,0,0.08); padding:6px; border-radius:4px; text-align:center; color:#ccc;">
+            created_at<br><span style="color:#888; font-size:10px;">timestamptz</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Analysis Pipeline</h3>
+  <div class="mockup">
+    <div class="mockup-header">Nightly Batch + On-Demand Analysis</div>
+    <div class="mockup-body" style="padding:24px; font-family:monospace; font-size:12px; line-height:1.8; color:#ccc;">
+      <pre style="margin:0; white-space:pre-wrap;">
+<span style="color:#fa0; font-weight:bold;">STEP 1: INTENT EXTRACTION (per event)</span>
+For each new activity_event without an embedding:
+  • Send event metadata to Anthropic API (haiku — cheap, fast)
+  • Prompt: "Classify the developer intent in one sentence: {event_data}"
+  • Store intent_summary + generate embedding via OpenAI/voyage
+  • <span style="color:#888;">Example: commit "Add rate limiting middleware" → intent: "API security hardening"</span>
+  • <span style="color:#888;">Example: Telegram "run tests before merging" → intent: "Pre-merge validation"</span>
+
+<span style="color:#fa0; font-weight:bold;">STEP 2: CLUSTERING (nightly batch)</span>
+Query: activity_events from last 30 days, grouped by intent_embedding similarity
+  • Use pgvector cosine similarity: <span style="color:#0cf;">1 - (embedding <=> target)</span>
+  • Cluster threshold: similarity > 0.85
+  • Minimum cluster size: 3 events across 2+ repos
+  • <span style="color:#888;">Example cluster: "Pre-merge validation" appears in repos A, B, C</span>
+  •   <span style="color:#888;">- Repo A: user always runs "npm test && npm run lint" before PR</span>
+  •   <span style="color:#888;">- Repo B: user asks agent "run the test suite" before every merge</span>
+  •   <span style="color:#888;">- Repo C: workflow "pre-merge-check" exists, used 12 times</span>
+
+<span style="color:#fa0; font-weight:bold;">STEP 3: PATTERN SCORING</span>
+For each cluster, compute:
+  • <span style="color:#6f8;">frequency_score</span> = occurrences / days_in_window (how often?)
+  • <span style="color:#6f8;">cross_repo_score</span> = unique_repos / total_repos (how widespread?)
+  • <span style="color:#6f8;">automation_potential</span> = % of events that were manual (not workflow-triggered)
+  • <span style="color:#6f8;">final_score</span> = frequency × cross_repo × automation_potential
+  • Threshold: final_score > 0.4 → candidate for suggestion
+
+<span style="color:#fa0; font-weight:bold;">STEP 4: WORKFLOW GENERATION</span>
+For high-scoring patterns:
+  • Send cluster data to Anthropic API (sonnet):
+    "Given these repeated developer actions across repos, generate a
+     reusable Archon workflow YAML definition that automates this pattern."
+  • Validate generated YAML against schema
+  • Store in discovered_patterns table with status: 'pending_review'</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Suggestion Surfacing</h3>
+  <div class="mockup">
+    <div class="mockup-header">How Discovered Patterns Reach the User</div>
+    <div class="mockup-body" style="padding:20px; font-size:12px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div style="border:1px solid rgba(0,200,255,0.2); border-radius:8px; padding:16px;">
+          <div style="color:#0cf; font-weight:bold; margin-bottom:8px;">Archon UI — Suggestions Panel</div>
+          <div style="color:#aaa; font-size:11px; line-height:1.6;">
+            New section on the Workflows page:<br><br>
+            <div style="background:rgba(0,0,0,0.3); padding:12px; border-radius:6px; margin-bottom:8px;">
+              <div style="color:#fa0; font-size:10px; text-transform:uppercase; margin-bottom:4px;">💡 Suggested Workflow</div>
+              <div style="color:#ccc; font-size:12px; margin-bottom:4px;"><strong>Pre-merge validation</strong></div>
+              <div style="color:#888; font-size:11px; margin-bottom:8px;">
+                Detected across 3 repos: you run tests + lint before every PR.
+                This workflow automates that pattern.
+              </div>
+              <div style="color:#888; font-size:11px; margin-bottom:8px;">
+                Frequency: 4.2x/week · Repos: myapp, api-service, frontend
+              </div>
+              <div style="display:flex; gap:8px;">
+                <span style="padding:4px 12px; background:rgba(0,255,100,0.15); border:1px solid rgba(0,255,100,0.3); border-radius:4px; color:#6f8; font-size:11px;">Accept</span>
+                <span style="padding:4px 12px; background:rgba(0,200,255,0.1); border:1px solid rgba(0,200,255,0.2); border-radius:4px; color:#0cf; font-size:11px;">Customize</span>
+                <span style="padding:4px 12px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:#888; font-size:11px;">Dismiss</span>
+              </div>
+            </div>
+            <span style="color:#888;">Accept → saves to workflow_definitions with origin: pattern_discovery</span><br>
+            <span style="color:#888;">Customize → opens in workflow editor with pre-filled YAML</span><br>
+            <span style="color:#888;">Dismiss → marks pattern 'dismissed', won't suggest again</span>
+          </div>
+        </div>
+
+        <div style="border:1px solid rgba(200,100,255,0.2); border-radius:8px; padding:16px;">
+          <div style="color:#c8f; font-weight:bold; margin-bottom:8px;">Archon Chat / MCP Integration</div>
+          <div style="color:#aaa; font-size:11px; line-height:1.6;">
+            When user asks: "What should I automate?"<br>
+            or: "Any workflow suggestions?"<br><br>
+            Chat agent queries discovered_patterns table<br>
+            and presents findings conversationally:<br><br>
+            <div style="background:rgba(0,0,0,0.3); padding:12px; border-radius:6px; font-style:italic; color:#aaa;">
+              "I've noticed a pattern across your repos: you consistently
+              run security audits before creating PRs in myapp, api-service,
+              and frontend. This happened 14 times in the last month, always
+              manually. Want me to create a workflow that automates this?"
+            </div>
+            <br>
+            MCP tool: <code>archon:suggest_workflows</code><br>
+            Returns discovered patterns as structured data<br>
+            IDE agents can present suggestions inline
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Database Schema — Pattern Discovery</h3>
+  <div class="mockup">
+    <div class="mockup-header">discovered_patterns table</div>
+    <div class="mockup-body" style="padding:20px; font-size:11px;">
+      <table style="width:100%; border-collapse:collapse; font-family:monospace;">
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.1); color:#0cf;">
+          <td style="padding:8px;">Column</td>
+          <td style="padding:8px;">Type</td>
+          <td style="padding:8px;">Notes</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">id</td>
+          <td style="padding:6px; color:#888;">uuid</td>
+          <td style="padding:6px; color:#666;">PK</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">pattern_name</td>
+          <td style="padding:6px; color:#888;">text</td>
+          <td style="padding:6px; color:#666;">AI-generated descriptive name</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">description</td>
+          <td style="padding:6px; color:#888;">text</td>
+          <td style="padding:6px; color:#666;">Human-readable explanation of the pattern</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">cluster_embedding</td>
+          <td style="padding:6px; color:#888;">vector(1536)</td>
+          <td style="padding:6px; color:#666;">Centroid of the activity cluster</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">source_event_ids</td>
+          <td style="padding:6px; color:#888;">uuid[]</td>
+          <td style="padding:6px; color:#666;">FK → activity_events that formed this cluster</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">repos_involved</td>
+          <td style="padding:6px; color:#888;">text[]</td>
+          <td style="padding:6px; color:#666;">Repo URLs where pattern was observed</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">frequency_score</td>
+          <td style="padding:6px; color:#888;">float</td>
+          <td style="padding:6px; color:#666;">How often (occurrences/day)</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">cross_repo_score</td>
+          <td style="padding:6px; color:#888;">float</td>
+          <td style="padding:6px; color:#666;">How widespread (repos with pattern / total repos)</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">final_score</td>
+          <td style="padding:6px; color:#888;">float</td>
+          <td style="padding:6px; color:#666;">Composite ranking score</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">suggested_yaml</td>
+          <td style="padding:6px; color:#888;">text</td>
+          <td style="padding:6px; color:#666;">AI-generated workflow YAML</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">status</td>
+          <td style="padding:6px; color:#888;">text</td>
+          <td style="padding:6px; color:#666;">pending_review | accepted | dismissed | expired</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+          <td style="padding:6px; color:#ccc;">accepted_workflow_id</td>
+          <td style="padding:6px; color:#888;">uuid | null</td>
+          <td style="padding:6px; color:#666;">FK → workflow_definitions (if accepted)</td>
+        </tr>
+        <tr>
+          <td style="padding:6px; color:#ccc;">discovered_at</td>
+          <td style="padding:6px; color:#888;">timestamptz</td>
+          <td style="padding:6px; color:#666;"></td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</div>
