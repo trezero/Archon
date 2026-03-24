@@ -197,6 +197,24 @@ CREATE TABLE IF NOT EXISTS user_profile (
 
 -- Seed the singleton row
 INSERT INTO user_profile (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Full-text search function for chat messages
+CREATE OR REPLACE FUNCTION search_chat_messages(search_query TEXT)
+RETURNS TABLE (
+  id UUID, conversation_id UUID, role TEXT, content TEXT,
+  created_at TIMESTAMPTZ, conversation_title TEXT
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, c.title as conversation_title
+  FROM chat_messages m
+  JOIN chat_conversations c ON c.id = m.conversation_id
+  WHERE m.search_vector @@ plainto_tsquery('english', search_query)
+    AND c.deleted_at IS NULL
+  ORDER BY ts_rank(m.search_vector, plainto_tsquery('english', search_query)) DESC
+  LIMIT 50;
+END;
+$$ LANGUAGE plpgsql;
 ```
 
 - [ ] **Step 2: Run migration against Supabase**
@@ -232,18 +250,12 @@ git commit -m "feat: add chat tables (conversations, messages, user_profile)"
 - Create: `python/src/server/services/chat/chat_service.py`
 - Create: `python/tests/server/services/test_chat_service.py`
 
-- [ ] **Step 1: Create service package init**
+- [ ] **Step 1: Create empty service package**
 
 ```python
 # python/src/server/services/chat/__init__.py
-from .chat_service import ChatService
-from .chat_message_service import ChatMessageService
-from .user_profile_service import UserProfileService
-
-__all__ = ["ChatService", "ChatMessageService", "UserProfileService"]
+# Barrel exports added after all services are created (Task 5)
 ```
-
-Note: `ChatMessageService` and `UserProfileService` will be created in Tasks 4 and 5. This file will error on import until those are done — that's fine.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -396,6 +408,22 @@ class ChatService:
             return True, {"conversation": response.data[0]}
         except Exception as e:
             logger.error(f"Failed to update conversation {conversation_id}: {e}", exc_info=True)
+            return False, {"error": str(e)}
+
+    def list_categories(self) -> tuple[bool, dict[str, Any]]:
+        try:
+            response = (
+                self.supabase_client.table("archon_projects")
+                .select("project_category")
+                .not_.is_("project_category", "null")
+                .execute()
+            )
+            categories = sorted(set(
+                row["project_category"] for row in response.data if row.get("project_category")
+            ))
+            return True, {"categories": categories}
+        except Exception as e:
+            logger.error(f"Failed to list categories: {e}", exc_info=True)
             return False, {"error": str(e)}
 
     def delete_conversation(self, conversation_id: str) -> tuple[bool, dict[str, Any]]:
@@ -777,11 +805,23 @@ class UserProfileService:
 Run: `cd python && uv run pytest tests/server/services/test_user_profile_service.py -v`
 Expected: All 3 tests PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Update barrel exports in __init__.py**
+
+Now that all three services exist, update `python/src/server/services/chat/__init__.py`:
+
+```python
+from .chat_service import ChatService
+from .chat_message_service import ChatMessageService
+from .user_profile_service import UserProfileService
+
+__all__ = ["ChatService", "ChatMessageService", "UserProfileService"]
+```
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add python/src/server/services/chat/user_profile_service.py python/tests/server/services/test_user_profile_service.py
-git commit -m "feat: add UserProfileService with singleton pattern"
+git add python/src/server/services/chat/ python/tests/server/services/test_user_profile_service.py
+git commit -m "feat: add UserProfileService with singleton pattern, complete service barrel exports"
 ```
 
 ---
@@ -853,7 +893,7 @@ Expected: FAIL — routes don't exist yet.
 # python/src/server/api_routes/chat_api.py
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Any
 
@@ -906,7 +946,7 @@ async def list_conversations(
     service = ChatService()
     success, result = service.list_conversations(project_id=project_id, conversation_type=conversation_type)
     if not success:
-        return {"error": result.get("error", "Unknown error")}, 500
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
     return result
 
 
@@ -919,7 +959,7 @@ async def create_conversation(request: CreateConversationRequest):
         model_config=request.model_config_data,
     )
     if not success:
-        return {"error": result.get("error", "Unknown error")}, 500
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
     return result
 
 
@@ -928,17 +968,17 @@ async def get_conversation(conversation_id: str):
     service = ChatService()
     success, result = service.get_conversation(conversation_id)
     if not success:
-        return {"error": result.get("error", "Unknown error")}, 404
+        raise HTTPException(status_code=404, detail=result.get("error", "Unknown error"))
     return result
 
 
 @router.put("/conversations/{conversation_id}")
 async def update_conversation(conversation_id: str, request: UpdateConversationRequest):
     service = ChatService()
-    updates = {k: v for k, v in request.model_dump(exclude_none=True).items()}
+    updates = {k: v for k, v in request.model_dump(by_alias=True, exclude_none=True).items()}
     success, result = service.update_conversation(conversation_id, **updates)
     if not success:
-        return {"error": result.get("error", "Unknown error")}, 500
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
     return result
 
 
@@ -947,7 +987,7 @@ async def delete_conversation(conversation_id: str):
     service = ChatService()
     success, result = service.delete_conversation(conversation_id)
     if not success:
-        return {"error": result.get("error", "Unknown error")}, 500
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
     return result
 
 
@@ -962,7 +1002,7 @@ async def get_messages(
     service = ChatMessageService()
     success, result = service.get_messages(conversation_id, limit=limit, offset=offset)
     if not success:
-        return {"error": result.get("error", "Unknown error")}, 500
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
     return result
 
 
@@ -979,7 +1019,7 @@ async def save_message(conversation_id: str, request: SaveMessageRequest):
         token_count=request.token_count,
     )
     if not success:
-        return {"error": result.get("error", "Unknown error")}, 500
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
     return result
 
 
@@ -990,7 +1030,7 @@ async def search_messages(q: str = Query(..., min_length=1)):
     service = ChatMessageService()
     success, result = service.search_messages(q)
     if not success:
-        return {"error": result.get("error", "Unknown error")}, 500
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
     return result
 
 
@@ -1001,7 +1041,7 @@ async def get_profile():
     service = UserProfileService()
     success, result = service.get_profile()
     if not success:
-        return {"error": result.get("error", "Unknown error")}, 500
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
     return result
 
 
@@ -1011,7 +1051,7 @@ async def update_profile(request: UpdateProfileRequest):
     updates = {k: v for k, v in request.model_dump(exclude_none=True).items()}
     success, result = service.update_profile(**updates)
     if not success:
-        return {"error": result.get("error", "Unknown error")}, 500
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
     return result
 
 
@@ -1019,15 +1059,11 @@ async def update_profile(request: UpdateProfileRequest):
 
 @router.get("/categories")
 async def list_categories():
-    from ..services.projects.project_service import ProjectService
-    service = ProjectService()
-    try:
-        response = service.supabase_client.table("archon_projects").select("project_category").not_.is_("project_category", "null").execute()
-        categories = sorted(set(row["project_category"] for row in response.data if row["project_category"]))
-        return {"categories": categories}
-    except Exception as e:
-        logger.error(f"Failed to list categories: {e}", exc_info=True)
-        return {"error": str(e)}, 500
+    service = ChatService()
+    success, result = service.list_categories()
+    if not success:
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+    return result
 ```
 
 - [ ] **Step 4: Delete old agent_chat_api.py and register new router in main.py**
@@ -1083,46 +1119,70 @@ logger = logging.getLogger(__name__)
 
 async def tool_search_knowledge_base(query: str, source_id: str | None = None, match_count: int = 5) -> str:
     client = await get_mcp_client()
-    result = await client.perform_rag_query(query, source_filter=source_id, match_count=match_count)
+    result = await client.perform_rag_query(query, source=source_id, match_count=match_count)
     return json.dumps(result, default=str)
 
 
 async def tool_list_projects() -> str:
     client = await get_mcp_client()
-    result = await client.call_tool("find_projects", {})
+    result = await client.call_tool("find_projects")
     return result
 
 
 async def tool_get_project_detail(project_id: str) -> str:
     client = await get_mcp_client()
-    result = await client.call_tool("find_projects", {"project_id": project_id})
+    result = await client.call_tool("find_projects", project_id=project_id)
     return result
 
 
 async def tool_list_tasks(project_id: str | None = None, status: str | None = None) -> str:
     client = await get_mcp_client()
-    params: dict[str, Any] = {}
+    kwargs: dict[str, Any] = {}
     if project_id:
-        params["filter_by"] = "project"
-        params["filter_value"] = project_id
+        kwargs["filter_by"] = "project"
+        kwargs["filter_value"] = project_id
     elif status:
-        params["filter_by"] = "status"
-        params["filter_value"] = status
-    result = await client.call_tool("find_tasks", params)
+        kwargs["filter_by"] = "status"
+        kwargs["filter_value"] = status
+    result = await client.call_tool("find_tasks", **kwargs)
+    return result
+
+
+async def tool_get_task_detail(task_id: str) -> str:
+    client = await get_mcp_client()
+    result = await client.call_tool("find_tasks", task_id=task_id)
+    return result
+
+
+async def tool_list_documents(project_id: str) -> str:
+    client = await get_mcp_client()
+    result = await client.call_tool("find_documents", project_id=project_id)
     return result
 
 
 async def tool_get_session_history(query: str | None = None) -> str:
     client = await get_mcp_client()
-    params = {"query": query} if query else {}
-    result = await client.call_tool("archon_search_sessions", params)
+    if query:
+        result = await client.call_tool("archon_search_sessions", query=query)
+    else:
+        result = await client.call_tool("archon_search_sessions")
     return result
 
 
 async def tool_search_code_examples(query: str) -> str:
     client = await get_mcp_client()
-    result = await client.perform_code_search(query)
+    result = await client.search_code_examples(query)
     return json.dumps(result, default=str)
+
+
+async def tool_suggest_project_category(project_name: str, description: str, existing_categories: list[str]) -> str:
+    """Returns a suggested category for the AI to present to the user."""
+    return json.dumps({
+        "project_name": project_name,
+        "description": description,
+        "existing_categories": existing_categories,
+        "instruction": "Based on the project name, description, and existing categories, suggest the most appropriate category.",
+    })
 ```
 
 - [ ] **Step 2: Create the ChatAgent class**
@@ -1239,9 +1299,31 @@ def create_chat_agent(model: str = "openai:gpt-4o") -> Agent[ChatDependencies, s
         return await chat_tools.tool_get_session_history(query=query or None)
 
     @agent.tool
+    async def get_task_detail(ctx: RunContext[ChatDependencies], task_id: str) -> str:
+        """Get detailed information about a specific task."""
+        return await chat_tools.tool_get_task_detail(task_id)
+
+    @agent.tool
+    async def list_documents(ctx: RunContext[ChatDependencies], project_id: str) -> str:
+        """List documents for a specific project."""
+        return await chat_tools.tool_list_documents(project_id)
+
+    @agent.tool
     async def search_code_examples(ctx: RunContext[ChatDependencies], query: str) -> str:
         """Search for code examples in the knowledge base."""
         return await chat_tools.tool_search_code_examples(query)
+
+    @agent.tool
+    async def suggest_project_category(ctx: RunContext[ChatDependencies], project_name: str, description: str) -> str:
+        """Suggest a category for a project based on its name, description, and existing categories."""
+        from . import chat_tools as ct
+        # Fetch existing categories via MCP
+        client = await get_mcp_client()
+        projects_data = await client.call_tool("find_projects")
+        import json as j
+        projects = j.loads(projects_data) if isinstance(projects_data, str) else projects_data
+        existing = list(set(p.get("project_category", "") for p in projects if p.get("project_category")))
+        return await ct.tool_suggest_project_category(project_name, description, existing)
 
     return agent
 ```
@@ -1266,6 +1348,7 @@ Add the following to `python/src/agents/server.py`. Place it after the existing 
 
 ```python
 # Add these imports at the top
+import asyncio
 import httpx
 from .chat_agent import create_chat_agent, ChatDependencies
 
@@ -1315,10 +1398,16 @@ async def stream_chat(request: Request):
             yield f"data: {json.dumps({'type': 'message_start', 'conversation_id': conversation_id})}\n\n"
 
             full_content = ""
+            last_heartbeat = asyncio.get_event_loop().time()
             async with agent.run_stream(message, deps=deps, message_history=messages) as stream:
                 async for chunk in stream.stream_text(delta=True):
                     full_content += chunk
                     yield f"data: {json.dumps({'type': 'text_delta', 'delta': chunk})}\n\n"
+                    # Heartbeat every 15 seconds during long tool calls
+                    now = asyncio.get_event_loop().time()
+                    if now - last_heartbeat > 15:
+                        yield ": heartbeat\n\n"
+                        last_heartbeat = now
 
             # Persist assistant message via Main Server
             async with httpx.AsyncClient(timeout=30) as client:
@@ -1331,6 +1420,19 @@ async def stream_chat(request: Request):
                     },
                 )
                 saved_msg = save_response.json().get("message", {})
+
+            # Auto-generate conversation title from first assistant response
+            if len(conversation_history) == 0:  # First message in conversation
+                title_prompt = f"Generate a short title (max 6 words) for a conversation that starts with: {message[:200]}"
+                # Use a quick non-streaming call to generate the title
+                title_agent = create_chat_agent(model=model)
+                title_result = await title_agent.run(title_prompt, deps=deps)
+                title = title_result.data.strip('"').strip()[:100]
+                async with httpx.AsyncClient(timeout=10) as client:
+                    await client.put(
+                        f"{api_url}/api/chat/conversations/{conversation_id}",
+                        json={"title": title},
+                    )
 
             yield f"data: {json.dumps({'type': 'message_complete', 'message_id': saved_msg.get('id', ''), 'model_used': model, 'persisted': True})}\n\n"
 
