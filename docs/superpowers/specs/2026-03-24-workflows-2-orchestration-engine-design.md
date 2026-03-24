@@ -520,7 +520,7 @@ Three input streams converge into a unified `activity_events` table:
 | **Agent Conversations** | `remote_agent_messages` + Archon chat sessions | User request text, repo context, tools used, workflow invocations, outcomes | On conversation end |
 | **Workflow Runs** | `workflow_runs` + `workflow_nodes` tables | Which workflow, node execution patterns, HITL approval behavior, repo context | On workflow completion |
 
-Each event gets an AI-extracted `intent_summary` and a `vector(1536)` embedding.
+Each event gets an AI-extracted `intent_summary` and a vector embedding (dimension matches Archon's configured embedding model).
 
 ### Analysis Pipeline (Nightly Batch)
 
