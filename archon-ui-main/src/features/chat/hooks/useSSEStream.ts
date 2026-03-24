@@ -131,7 +131,7 @@ export function useSSEStream(): UseSSEStreamReturn {
               (old: ChatMessage[] | undefined) => (old ? [...old, finalMessage] : [finalMessage]),
             );
 
-            // Also invalidate conversation list to update last_message_at
+            // Also invalidate conversation list to update updated_at ordering
             queryClient.invalidateQueries({ queryKey: chatKeys.conversations() });
 
             setStreamingMessage(null);

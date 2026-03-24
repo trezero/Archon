@@ -8,15 +8,15 @@
 
 export interface ChatConversation {
   id: string;
-  title: string;
+  title: string | null;
   project_id: string | null;
-  user_profile_id: string | null;
-  category: string | null;
-  metadata: Record<string, unknown> | null;
+  conversation_type: string;
+  model_config: Record<string, unknown>;
+  action_mode: boolean;
   created_at: string;
   updated_at: string;
-  last_message_at: string | null;
-  message_count: number;
+  deleted_at: string | null;
+  metadata: Record<string, unknown>;
 }
 
 export interface ChatMessage {
@@ -138,16 +138,13 @@ export interface StreamingMessage {
 export interface CreateConversationRequest {
   title?: string;
   project_id?: string | null;
-  user_profile_id?: string | null;
-  category?: string | null;
-  metadata?: Record<string, unknown> | null;
+  model_config?: Record<string, unknown>;
 }
 
 export interface UpdateConversationRequest {
   title?: string;
-  project_id?: string | null;
-  category?: string | null;
-  metadata?: Record<string, unknown> | null;
+  model_config?: Record<string, unknown>;
+  action_mode?: boolean;
 }
 
 export interface SendMessageRequest {

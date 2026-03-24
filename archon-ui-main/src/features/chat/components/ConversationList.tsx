@@ -50,7 +50,7 @@ export function ConversationList({ conversations, activeId, onSelect, onCreate, 
     );
     if (!searchQuery.trim()) return sorted;
     const q = searchQuery.toLowerCase();
-    return sorted.filter((c) => c.title.toLowerCase().includes(q));
+    return sorted.filter((c) => (c.title ?? "").toLowerCase().includes(q));
   }, [conversations, searchQuery]);
 
   return (
@@ -124,7 +124,6 @@ export function ConversationList({ conversations, activeId, onSelect, onCreate, 
                 </div>
                 <div className="text-[10px] text-gray-600 mt-0.5">
                   {relativeTime(conv.updated_at)}
-                  {conv.message_count > 0 && ` \u00B7 ${conv.message_count} messages`}
                 </div>
               </div>
 

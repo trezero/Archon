@@ -5,9 +5,10 @@
  * and conversation metadata (created, message count, category).
  */
 
-import { ChevronRight, FolderOpen, Hash, Info, Clock } from "lucide-react";
+import { ChevronRight, FolderOpen, Info, Clock } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import type { ChatConversation } from "../types";
+import { useMessages } from "../hooks/useChatQueries";
 import { ModelSelector } from "./ModelSelector";
 
 interface ConversationContextProps {
@@ -43,6 +44,9 @@ export function ConversationContext({
   actionMode,
   onActionModeChange,
 }: ConversationContextProps) {
+  const { data: messages } = useMessages(conversation?.id);
+  const messageCount = messages?.length ?? 0;
+
   return (
     <div
       className={cn(
@@ -79,24 +83,18 @@ export function ConversationContext({
                 </div>
               )}
 
-              {/* Category */}
-              {conversation.category && (
-                <div className="flex items-center gap-2 text-xs text-gray-400">
-                  <Hash className="w-3.5 h-3.5" />
-                  <span>{conversation.category}</span>
+              {/* Created */}
+              {conversation.created_at && (
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{formatDate(conversation.created_at)}</span>
                 </div>
               )}
-
-              {/* Created */}
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Clock className="w-3.5 h-3.5" />
-                <span>{formatDate(conversation.created_at)}</span>
-              </div>
 
               {/* Message count */}
               <div className="flex items-center gap-2 text-xs text-gray-500">
                 <Info className="w-3.5 h-3.5" />
-                <span>{conversation.message_count} messages</span>
+                <span>{messageCount} messages</span>
               </div>
 
               {/* Divider */}
