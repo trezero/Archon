@@ -174,6 +174,8 @@ The core function is **re-entrant** — called after every node completion or ap
 - The advisory lock is released when evaluation completes
 - This is lightweight (no row-level locking) and scoped per-workflow (different workflows evaluate in parallel)
 
+**Commit ordering**: The node result must be fully committed to Postgres *before* the advisory lock is acquired for DAG evaluation. The pattern is: (1) backend reports result via `POST /nodes/{id}/result`, (2) Archon commits the node state update in its own transaction, (3) after commit completes, Archon attempts the advisory lock for `evaluate_dag()`. If the lock is held, the caller returns — the lock holder will see the committed state when it evaluates. If the lock holder's evaluation began before the commit, the next `evaluate_dag()` invocation (triggered by the lock holder releasing and the waiting caller acquiring) will pick up the missed state. This two-phase approach (commit-then-lock) prevents stale reads that could stall the DAG.
+
 ### File Location
 
 ```
@@ -536,6 +538,12 @@ Each event gets an AI-extracted `intent_summary` and a vector embedding (dimensi
 
 **Step 1 — Intent Extraction**: For new events without embeddings, send metadata to Anthropic API (Haiku) for one-sentence intent classification, then generate embedding.
 
+**Cost controls**: To prevent runaway API costs on repos with high commit frequency:
+- **Batch extraction**: Group up to 50 events into a single Haiku prompt that returns intents for all items at once, rather than one API call per event
+- **Daily cap**: Maximum 500 intent extractions per day (configurable via `PATTERN_DISCOVERY_DAILY_CAP`). Events beyond the cap are queued for the next batch cycle
+- **Deduplication**: Skip commits with near-identical messages (e.g., automated version bumps, merge commits from bots)
+- **Sampling**: For repos with 100+ daily commits, sample a representative subset rather than processing every commit
+
 **Step 2 — Clustering**: Query events from last 30 days. Use pgvector cosine similarity (`1 - (embedding <=> target)`). Cluster threshold: similarity > 0.85. Minimum cluster size: 3 events across 2+ repos.
 
 **Step 3 — Pattern Scoring**:
@@ -696,7 +704,7 @@ Archon uses 8 node states; the remote-agent uses 5. The bridge translates betwee
 | `completed` | `completed` | Direct mapping |
 | `failed` | `failed` | Direct mapping |
 | `skipped` | `skipped` | Direct mapping |
-| `cancelled` | _(no equivalent)_ | Archon-only. Bridge sends cancellation signal to remote-agent, which terminates the running process |
+| `cancelled` | _(no equivalent)_ | Archon-only. Bridge calls the remote-agent's cancellation endpoint with the session ID. The remote-agent sends SIGTERM to the Claude Code subprocess, waits 5 seconds for graceful shutdown, then SIGKILL if still running. The bridge confirms termination and reports the node as cancelled to Archon. If the bridge cannot reach the remote-agent (network failure), Archon marks the node `cancelled` after the backend heartbeat timeout (90s) expires. |
 
 ### Required Remote-Agent Development
 
