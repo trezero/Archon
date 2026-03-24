@@ -42,10 +42,12 @@ export function useSSEStream(): UseSSEStreamReturn {
   const [toolResults, setToolResults] = useState<Map<string, ToolResultEvent>>(new Map());
   const [isStreaming, setIsStreaming] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
+  const accumulatedContentRef = useRef("");
 
   const cancelStream = useCallback(() => {
     controllerRef.current?.abort();
     controllerRef.current = null;
+    accumulatedContentRef.current = "";
     setIsStreaming(false);
     setStreamingMessage(null);
     setToolResults(new Map());
@@ -59,6 +61,7 @@ export function useSSEStream(): UseSSEStreamReturn {
       setStreamingMessage(createEmptyStreamingMessage(conversationId));
       setToolResults(new Map());
       setIsStreaming(true);
+      accumulatedContentRef.current = "";
 
       // Optimistically add the user message to the cache
       const optimisticUserMessage: ChatMessage = {
@@ -81,6 +84,7 @@ export function useSSEStream(): UseSSEStreamReturn {
       const handleEvent = (event: AnySSEEvent) => {
         switch (event.type) {
           case "text_delta":
+            accumulatedContentRef.current += event.delta;
             setStreamingMessage((prev) =>
               prev ? { ...prev, content: prev.content + event.delta } : prev,
             );
@@ -108,12 +112,12 @@ export function useSSEStream(): UseSSEStreamReturn {
           }
 
           case "message_complete": {
-            // Build the finalized assistant message and append to cache
+            // Build the finalized assistant message using accumulated streaming content
             const finalMessage: ChatMessage = {
-              id: event.message_id,
-              conversation_id: event.conversation_id,
+              id: event.message_id || `assistant-${Date.now()}`,
+              conversation_id: conversationId,
               role: "assistant",
-              content: event.content,
+              content: accumulatedContentRef.current,
               tool_calls: null,
               tool_results: null,
               model: model ?? null,
