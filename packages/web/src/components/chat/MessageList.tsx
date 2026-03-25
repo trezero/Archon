@@ -68,7 +68,12 @@ function WorkflowDispatchInline({
 // Hoisted to module scope to prevent new references on every render
 const WORKFLOW_RESULT_MARKDOWN_COMPONENTS = {
   a: ({ children, ...props }: React.ComponentPropsWithoutRef<'a'>): React.ReactElement => (
-    <a target="_blank" rel="noopener noreferrer" {...props}>
+    <a
+      className="text-primary underline decoration-primary/40 hover:decoration-primary"
+      target="_blank"
+      rel="noopener noreferrer"
+      {...props}
+    >
       {children}
     </a>
   ),
