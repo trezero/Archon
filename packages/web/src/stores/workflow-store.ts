@@ -11,6 +11,7 @@ import type {
   ParallelAgentEvent,
   WorkflowArtifactEvent,
   DagNodeEvent,
+  WorkflowToolActivityEvent,
 } from '@/lib/types';
 
 interface WorkflowStoreState {
@@ -22,6 +23,7 @@ interface WorkflowStoreState {
   handleParallelAgent: (event: ParallelAgentEvent) => void;
   handleWorkflowArtifact: (event: WorkflowArtifactEvent) => void;
   handleDagNode: (event: DagNodeEvent) => void;
+  handleWorkflowToolActivity: (event: WorkflowToolActivityEvent) => void;
   hydrateWorkflow: (state: WorkflowState) => void;
 }
 
@@ -197,6 +199,7 @@ export const useWorkflowStore = create<WorkflowStoreState>()(
                 startedAt: event.timestamp,
                 completedAt: isTerminalStatus(event.status) ? event.timestamp : undefined,
                 error: event.error,
+                currentTool: null,
               });
             } else {
               // Don't allow a late/replayed SSE event to resurrect a terminal workflow
@@ -348,6 +351,21 @@ export const useWorkflowStore = create<WorkflowStoreState>()(
         );
       },
 
+      handleWorkflowToolActivity: (event: WorkflowToolActivityEvent): void => {
+        set(
+          state =>
+            updateWorkflow(state, event.runId, wf => ({
+              ...wf,
+              currentTool:
+                event.status === 'started'
+                  ? { name: event.toolName, status: 'running' }
+                  : { name: event.toolName, status: 'completed', durationMs: event.durationMs },
+            })),
+          undefined,
+          'workflow/toolActivity'
+        );
+      },
+
       hydrateWorkflow: (incoming: WorkflowState): void => {
         set(
           state => {
@@ -390,6 +408,7 @@ const {
   handleParallelAgent,
   handleWorkflowArtifact,
   handleDagNode,
+  handleWorkflowToolActivity,
 } = useWorkflowStore.getState();
 
 export const workflowSSEHandlers = {
@@ -398,6 +417,7 @@ export const workflowSSEHandlers = {
   onParallelAgent: handleParallelAgent,
   onWorkflowArtifact: handleWorkflowArtifact,
   onDagNode: handleDagNode,
+  onToolActivity: handleWorkflowToolActivity,
 } as const;
 
 /** Reset store data and clean up polling timers/subscriptions. Use in tests and HMR. */

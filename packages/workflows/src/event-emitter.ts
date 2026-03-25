@@ -165,6 +165,21 @@ interface NodeSkippedEvent {
   reason: 'when_condition' | 'when_condition_parse_error' | 'trigger_rule' | 'prior_success';
 }
 
+interface ToolStartedEvent {
+  type: 'tool_started';
+  runId: string;
+  toolName: string;
+  stepName: string;
+}
+
+interface ToolCompletedEvent {
+  type: 'tool_completed';
+  runId: string;
+  toolName: string;
+  stepName: string;
+  durationMs: number;
+}
+
 export type WorkflowEmitterEvent =
   | WorkflowStartedEvent
   | WorkflowCompletedEvent
@@ -182,7 +197,9 @@ export type WorkflowEmitterEvent =
   | NodeFailedEvent
   | NodeSkippedEvent
   | LoopIterationFailedEvent
-  | WorkflowArtifactEvent;
+  | WorkflowArtifactEvent
+  | ToolStartedEvent
+  | ToolCompletedEvent;
 
 // ---------------------------------------------------------------------------
 // Emitter class

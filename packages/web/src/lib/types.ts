@@ -122,6 +122,16 @@ export interface DagNodeEvent extends BaseSSEEvent {
   reason?: 'when_condition' | 'trigger_rule';
 }
 
+// Workflow tool activity (tool_started / tool_completed from executor)
+export interface WorkflowToolActivityEvent extends BaseSSEEvent {
+  type: 'workflow_tool_activity';
+  runId: string;
+  toolName: string;
+  stepName: string;
+  status: 'started' | 'completed';
+  durationMs?: number;
+}
+
 // Workflow artifact
 export interface WorkflowArtifactEvent extends BaseSSEEvent {
   type: 'workflow_artifact';
@@ -168,6 +178,7 @@ export type SSEEvent =
   | WorkflowStatusEvent
   | ParallelAgentEvent
   | DagNodeEvent
+  | WorkflowToolActivityEvent
   | WorkflowArtifactEvent
   | WorkflowDispatchEvent
   | WorkflowOutputPreviewEvent
@@ -262,4 +273,9 @@ export interface WorkflowState {
   completedAt?: number;
   error?: string;
   stale?: boolean;
+  currentTool?: {
+    name: string;
+    status: 'running' | 'completed';
+    durationMs?: number;
+  } | null;
 }

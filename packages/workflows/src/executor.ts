@@ -528,6 +528,13 @@ async function executeStepInternal(
         // Emit tool_completed for the previous tool (fire-and-forget)
         if (lastToolStartedAt) {
           const prevTool = lastToolStartedAt;
+          getWorkflowEventEmitter().emit({
+            type: 'tool_completed',
+            runId: workflowRun.id,
+            toolName: prevTool.toolName,
+            stepName: commandName,
+            durationMs: now - prevTool.startedAt,
+          });
           deps.store
             .createWorkflowEvent({
               workflow_run_id: workflowRun.id,
@@ -547,6 +554,14 @@ async function executeStepInternal(
             });
         }
         lastToolStartedAt = { toolName: msg.toolName, startedAt: now };
+
+        // Emit tool_started for the current tool (fire-and-forget)
+        getWorkflowEventEmitter().emit({
+          type: 'tool_started',
+          runId: workflowRun.id,
+          toolName: msg.toolName,
+          stepName: commandName,
+        });
 
         if (streamingMode === 'stream') {
           const toolMessage = formatToolCall(msg.toolName, msg.toolInput);
@@ -595,6 +610,13 @@ async function executeStepInternal(
         // Emit tool_completed for the last tool in the step
         if (lastToolStartedAt) {
           const prevTool = lastToolStartedAt;
+          getWorkflowEventEmitter().emit({
+            type: 'tool_completed',
+            runId: workflowRun.id,
+            toolName: prevTool.toolName,
+            stepName: commandName,
+            durationMs: Date.now() - prevTool.startedAt,
+          });
           deps.store
             .createWorkflowEvent({
               workflow_run_id: workflowRun.id,

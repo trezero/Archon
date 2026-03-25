@@ -206,6 +206,12 @@ export interface DashboardRunResponse extends Omit<
   platform_type: string | null;
   worker_platform_id: string | null;
   parent_platform_id: string | null;
+  current_step_name: string | null;
+  total_steps: number | null;
+  current_step_status: 'running' | 'completed' | 'failed' | null;
+  agents_completed: number | null;
+  agents_failed: number | null;
+  agents_total: number | null;
 }
 
 /** Status counts across all matching runs (ignoring status filter). */

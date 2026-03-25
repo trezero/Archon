@@ -158,6 +158,27 @@ export function mapWorkflowEvent(event: WorkflowEmitterEvent): string | null {
         timestamp: Date.now(),
       });
 
+    case 'tool_started':
+      return JSON.stringify({
+        type: 'workflow_tool_activity',
+        runId: event.runId,
+        toolName: event.toolName,
+        stepName: event.stepName,
+        status: 'started',
+        timestamp: Date.now(),
+      });
+
+    case 'tool_completed':
+      return JSON.stringify({
+        type: 'workflow_tool_activity',
+        runId: event.runId,
+        toolName: event.toolName,
+        stepName: event.stepName,
+        status: 'completed',
+        durationMs: event.durationMs,
+        timestamp: Date.now(),
+      });
+
     default: {
       const exhaustiveCheck: never = event;
       getLog().warn(
@@ -192,11 +213,14 @@ export class WorkflowEventBridge {
     const emitter = getWorkflowEventEmitter();
     this.unsubscribeWorkflowEvents = emitter.subscribe((event: WorkflowEmitterEvent) => {
       const conversationId = emitter.getConversationId(event.runId);
-      if (!conversationId) return;
-
       const sseEvent = mapWorkflowEvent(event);
       if (sseEvent) {
-        this.transport.emitWorkflowEvent(conversationId, sseEvent);
+        // Emit to per-conversation stream (existing behavior)
+        if (conversationId) {
+          this.transport.emitWorkflowEvent(conversationId, sseEvent);
+        }
+        // Fan-out to dashboard stream — no-op when no dashboard client connected
+        this.transport.emitWorkflowEvent('__dashboard__', sseEvent);
       }
     });
   }

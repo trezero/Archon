@@ -11,10 +11,13 @@ import {
   type DashboardRunResponse,
 } from '@/lib/api';
 import type { WorkflowRunStatus } from '@/lib/types';
+import { ensureUtc } from '@/lib/format';
 import { StatusSummaryBar } from '@/components/dashboard/StatusSummaryBar';
 import { WorkflowRunGroup } from '@/components/dashboard/WorkflowRunGroup';
 import { WorkflowRunCard } from '@/components/dashboard/WorkflowRunCard';
 import { WorkflowHistoryTable } from '@/components/dashboard/WorkflowHistoryTable';
+import { useDashboardSSE } from '@/hooks/useDashboardSSE';
+import { useWorkflowStore } from '@/stores/workflow-store';
 
 const DEFAULT_PAGE_SIZE = 10;
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
@@ -39,6 +42,11 @@ function getDateBounds(range: DateRange): { after?: string; before?: string } {
 export function DashboardPage(): React.ReactElement {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Connect to multiplexed dashboard SSE stream (all workflow events → Zustand store)
+  useDashboardSSE();
+
+  const hydrateWorkflow = useWorkflowStore(state => state.hydrateWorkflow);
 
   // Hydrate filter state from URL (supports bookmarkable views)
   const statusFilter = searchParams.get('status') ?? null;
@@ -172,6 +180,26 @@ export function DashboardPage(): React.ReactElement {
     cancelled: 0,
     pending: 0,
   };
+
+  // Hydrate Zustand store from REST-polled data for active runs.
+  // Only sets initial state if the run isn't already tracked by SSE.
+  useEffect(() => {
+    for (const run of runs) {
+      if (run.status === 'running' || run.status === 'pending') {
+        hydrateWorkflow({
+          runId: run.id,
+          workflowName: run.workflow_name,
+          status: run.status,
+          steps: [],
+          dagNodes: [],
+          artifacts: [],
+          isLoop: false,
+          startedAt: new Date(ensureUtc(run.started_at)).getTime(),
+          currentTool: null,
+        });
+      }
+    }
+  }, [runs, hydrateWorkflow]);
 
   const { data: codebases } = useQuery({
     queryKey: ['codebases'],

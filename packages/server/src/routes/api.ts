@@ -328,6 +328,43 @@ export function registerApiRoutes(
     return c.json(result);
   });
 
+  // GET /api/stream/__dashboard__ — multiplexed dashboard SSE (all workflow events)
+  // IMPORTANT: Must be registered before /api/stream/:conversationId to avoid param capture.
+  app.get('/api/stream/__dashboard__', async c => {
+    return streamSSE(c, async stream => {
+      await stream.writeSSE({
+        data: JSON.stringify({ type: 'heartbeat', timestamp: Date.now() }),
+      });
+
+      webAdapter.registerStream('__dashboard__', stream);
+      getLog().debug({ streamId: '__dashboard__' }, 'dashboard_sse_opened');
+
+      stream.onAbort(() => {
+        getLog().debug({ streamId: '__dashboard__' }, 'dashboard_sse_disconnected');
+        webAdapter.removeStream('__dashboard__', stream);
+      });
+
+      try {
+        while (true) {
+          await stream.sleep(30000);
+          if (!stream.closed) {
+            await stream.writeSSE({
+              data: JSON.stringify({ type: 'heartbeat', timestamp: Date.now() }),
+            });
+          }
+        }
+      } catch (e: unknown) {
+        const msg = (e as Error).message ?? '';
+        if (!msg.includes('aborted') && !msg.includes('closed') && !msg.includes('cancel')) {
+          getLog().warn({ err: e as Error }, 'dashboard_sse_heartbeat_error');
+        }
+      } finally {
+        webAdapter.removeStream('__dashboard__', stream);
+        getLog().debug({ streamId: '__dashboard__' }, 'dashboard_sse_closed');
+      }
+    });
+  });
+
   // GET /api/stream/:conversationId - SSE streaming
   app.get('/api/stream/:conversationId', async c => {
     const conversationId = c.req.param('conversationId');

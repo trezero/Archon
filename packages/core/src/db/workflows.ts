@@ -1,7 +1,7 @@
 /**
  * Database operations for workflow runs
  */
-import { pool, getDialect } from './connection';
+import { pool, getDialect, getDatabaseType } from './connection';
 import type { IDatabase } from './adapters/types';
 import type { WorkflowRun, WorkflowRunStatus } from '@archon/workflows';
 import { createLogger } from '@archon/paths';
@@ -375,6 +375,14 @@ export interface DashboardWorkflowRun extends WorkflowRun {
   platform_type: string | null;
   worker_platform_id: string | null;
   parent_platform_id: string | null;
+  // Step-level progress (from latest step_started/step_completed event)
+  current_step_name: string | null;
+  total_steps: number | null;
+  current_step_status: 'running' | 'completed' | 'failed' | null;
+  // Parallel agent progress (from parallel_agent_* events)
+  agents_completed: number | null;
+  agents_failed: number | null;
+  agents_total: number | null;
 }
 
 /** Options for listing dashboard runs with server-side search, filtering, and pagination. */
@@ -440,6 +448,16 @@ function buildDashboardWhereClauses(
 }
 
 /**
+ * Returns a SQL fragment to extract and cast an integer from a JSON data column.
+ * Handles SQLite (`json_extract`) and PostgreSQL (`->>`/`::INTEGER`) dialects.
+ */
+function jsonIntExtract(col: string, key: string): string {
+  return getDatabaseType() === 'postgresql'
+    ? `(${col}->>'${key}')::INTEGER`
+    : `CAST(json_extract(${col}, '$.${key}') AS INTEGER)`;
+}
+
+/**
  * List workflow runs with enriched JOINs for the dashboard Command Center.
  * Supports server-side search, status/date filtering, and offset-based pagination.
  * Returns runs, total matching count, and per-status counts for the filter bar.
@@ -477,7 +495,33 @@ export async function listDashboardRuns(
                 c.platform_type,
                 c.platform_conversation_id AS worker_platform_id,
                 pc.platform_conversation_id AS parent_platform_id,
-                cb.name AS codebase_name
+                cb.name AS codebase_name,
+                (SELECT e.step_name
+                 FROM remote_agent_workflow_events e
+                 WHERE e.workflow_run_id = r.id AND e.event_type = 'step_started'
+                 ORDER BY e.created_at DESC LIMIT 1) AS current_step_name,
+                (SELECT ${jsonIntExtract('e.data', 'total_steps')}
+                 FROM remote_agent_workflow_events e
+                 WHERE e.workflow_run_id = r.id AND e.event_type = 'step_started'
+                 ORDER BY e.created_at DESC LIMIT 1) AS total_steps,
+                CASE (SELECT e2.event_type
+                      FROM remote_agent_workflow_events e2
+                      WHERE e2.workflow_run_id = r.id
+                        AND e2.event_type IN ('step_completed','step_failed','step_started')
+                      ORDER BY e2.created_at DESC LIMIT 1)
+                  WHEN 'step_completed' THEN 'completed'
+                  WHEN 'step_failed' THEN 'failed'
+                  WHEN 'step_started' THEN 'running'
+                  ELSE NULL
+                END AS current_step_status,
+                (SELECT COUNT(*) FROM remote_agent_workflow_events e
+                 WHERE e.workflow_run_id = r.id AND e.event_type = 'parallel_agent_completed') AS agents_completed,
+                (SELECT COUNT(*) FROM remote_agent_workflow_events e
+                 WHERE e.workflow_run_id = r.id AND e.event_type = 'parallel_agent_failed') AS agents_failed,
+                (SELECT ${jsonIntExtract('e.data', 'totalAgents')}
+                 FROM remote_agent_workflow_events e
+                 WHERE e.workflow_run_id = r.id AND e.event_type = 'parallel_agent_started'
+                 ORDER BY e.created_at DESC LIMIT 1) AS agents_total
          FROM remote_agent_workflow_runs r
          LEFT JOIN remote_agent_conversations c ON r.conversation_id = c.id
          LEFT JOIN remote_agent_conversations pc ON r.parent_conversation_id = pc.id

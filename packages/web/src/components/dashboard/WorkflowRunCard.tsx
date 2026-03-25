@@ -14,6 +14,8 @@ import {
 import type { DashboardRunResponse } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { formatDuration } from '@/lib/format';
+import { useWorkflowStore } from '@/stores/workflow-store';
+import type { WorkflowState } from '@/lib/types';
 
 interface WorkflowRunCardProps {
   run: DashboardRunResponse;
@@ -28,9 +30,72 @@ const PLATFORM_ICONS: Record<string, React.ReactElement> = {
   github: <GitBranch className="h-3.5 w-3.5" />,
 };
 
+function StepProgress({
+  run,
+  liveState,
+}: {
+  run: DashboardRunResponse;
+  liveState: WorkflowState | undefined;
+}): React.ReactElement | null {
+  const runningStep = liveState?.steps
+    .slice()
+    .reverse()
+    .find(s => s.status === 'running');
+  const stepIndex = runningStep?.index ?? run.current_step_index;
+  const stepName = runningStep?.name ?? run.current_step_name;
+  const totalSteps = run.total_steps;
+  const liveAgents = runningStep?.agents;
+  const agentsCompleted =
+    liveAgents !== undefined
+      ? liveAgents.filter(a => a.status === 'completed').length
+      : run.agents_completed;
+  const agentsTotal = liveAgents !== undefined ? liveAgents.length || null : run.agents_total;
+  const currentTool = liveState?.currentTool ?? null;
+
+  if (stepIndex == null && !currentTool) return null;
+
+  return (
+    <div className="rounded-md bg-surface-elevated px-3 py-2 space-y-1">
+      {stepIndex != null && (
+        <div className="flex items-center gap-2 text-sm text-text-primary">
+          <span className="font-medium">
+            {`Step ${String(stepIndex)}${totalSteps ? `/${String(totalSteps)}` : ''}`}
+          </span>
+          {stepName && <span className="text-text-secondary">{stepName}</span>}
+          {agentsTotal ? (
+            <span className="text-text-tertiary text-xs">
+              {`${String(agentsCompleted ?? 0)}/${String(agentsTotal)} agents done`}
+            </span>
+          ) : null}
+        </div>
+      )}
+      {currentTool && (
+        <div className="flex items-center gap-2">
+          {currentTool.status === 'running' && (
+            <div className="h-3.5 w-3.5 shrink-0 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          )}
+          <span
+            className={cn(
+              'text-sm font-mono truncate',
+              currentTool.status === 'running' ? 'text-primary' : 'text-text-secondary'
+            )}
+          >
+            {currentTool.status === 'running'
+              ? currentTool.name
+              : `${currentTool.name} (${currentTool.durationMs ? `${(currentTool.durationMs / 1000).toFixed(1)}s` : 'done'})`}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function WorkflowRunCard({ run, onCancel }: WorkflowRunCardProps): React.ReactElement {
   const navigate = useNavigate();
   const [elapsed, setElapsed] = useState(() => formatDuration(run.started_at, run.completed_at));
+
+  // Live SSE state from Zustand store — overrides REST-polled data when present
+  const liveState = useWorkflowStore(state => state.workflows.get(run.id));
 
   useEffect(() => {
     if (run.status !== 'running') return;
@@ -77,6 +142,9 @@ export function WorkflowRunCard({ run, onCancel }: WorkflowRunCardProps): React.
         <span className="text-xs text-text-tertiary shrink-0">{elapsed}</span>
       </div>
 
+      {/* Live progress */}
+      <StepProgress run={run} liveState={liveState} />
+
       {/* Metadata row */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
         <span className="flex items-center gap-1">
@@ -84,7 +152,6 @@ export function WorkflowRunCard({ run, onCancel }: WorkflowRunCardProps): React.
           {run.platform_type ?? 'unknown'}
         </span>
         <span>{run.codebase_name ?? 'Unknown project'}</span>
-        {run.current_step_index > 0 && <span>Step {String(run.current_step_index)}</span>}
         {run.parent_platform_id && run.parent_platform_id !== run.worker_platform_id && (
           <button
             onClick={(): void => {
