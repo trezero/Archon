@@ -1,8 +1,10 @@
 import { callAPIWithETag } from "../../shared/api/apiClient";
 import type {
+  ApprovalRequest,
   CreateDefinitionRequest,
   CreateRunRequest,
   ExecutionBackend,
+  ResolveApprovalRequest,
   WorkflowDefinition,
   WorkflowRun,
   WorkflowRunDetail,
@@ -54,5 +56,21 @@ export const workflowService = {
 
   async listBackends(): Promise<ExecutionBackend[]> {
     return callAPIWithETag<ExecutionBackend[]>("/api/workflows/backends");
+  },
+
+  async listApprovals(status?: string): Promise<ApprovalRequest[]> {
+    const params = status ? `?status=${status}` : "";
+    return callAPIWithETag<ApprovalRequest[]>(`/api/workflows/approvals${params}`);
+  },
+
+  async getApproval(id: string): Promise<ApprovalRequest> {
+    return callAPIWithETag<ApprovalRequest>(`/api/workflows/approvals/${id}`);
+  },
+
+  async resolveApproval(id: string, data: ResolveApprovalRequest): Promise<{ resolved: boolean }> {
+    return callAPIWithETag<{ resolved: boolean }>(`/api/workflows/approvals/${id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   },
 };

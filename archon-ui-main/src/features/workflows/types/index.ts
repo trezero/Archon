@@ -75,3 +75,31 @@ export interface WorkflowSSEEvent {
   type: "node_state_changed" | "run_status_changed" | "approval_requested" | "approval_resolved" | "node_progress";
   data: Record<string, unknown>;
 }
+
+export interface ApprovalRequest {
+  id: string;
+  workflow_run_id: string;
+  workflow_node_id: string;
+  yaml_node_id: string;
+  approval_type: string;
+  payload: { components?: A2UIComponent[]; raw_output?: string };
+  status: "pending" | "approved" | "rejected" | "expired";
+  channels_notified: string[];
+  resolved_by: string | null;
+  resolved_via: string | null;
+  resolved_comment: string | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface A2UIComponent {
+  type: string;
+  id: string;
+  props: Record<string, unknown>;
+  zone?: string;
+}
+
+export interface ResolveApprovalRequest {
+  decision: "approved" | "rejected";
+  comment?: string;
+}

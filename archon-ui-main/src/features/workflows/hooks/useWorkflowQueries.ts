@@ -4,7 +4,7 @@ import { DISABLED_QUERY_KEY, STALE_TIMES } from "@/features/shared/config/queryP
 import { useSmartPolling } from "@/features/shared/hooks";
 
 import { workflowService } from "../services/workflowService";
-import type { CreateDefinitionRequest, CreateRunRequest } from "../types";
+import type { CreateDefinitionRequest, CreateRunRequest, ResolveApprovalRequest } from "../types";
 
 export const workflowKeys = {
   all: ["workflows"] as const,
@@ -13,6 +13,8 @@ export const workflowKeys = {
   runs: () => [...workflowKeys.all, "runs"] as const,
   runDetail: (id: string) => [...workflowKeys.all, "runs", id] as const,
   backends: () => [...workflowKeys.all, "backends"] as const,
+  approvals: () => [...workflowKeys.all, "approvals"] as const,
+  approvalDetail: (id: string) => [...workflowKeys.all, "approvals", id] as const,
 };
 
 export function useWorkflowDefinitions(projectId?: string) {
@@ -88,5 +90,36 @@ export function useExecutionBackends() {
     queryKey: workflowKeys.backends(),
     queryFn: () => workflowService.listBackends(),
     staleTime: STALE_TIMES.normal,
+  });
+}
+
+export function useApprovals(status?: string) {
+  const { refetchInterval } = useSmartPolling(5000);
+  return useQuery({
+    queryKey: workflowKeys.approvals(),
+    queryFn: () => workflowService.listApprovals(status),
+    refetchInterval,
+    staleTime: STALE_TIMES.frequent,
+  });
+}
+
+export function useApprovalDetail(id: string | undefined) {
+  return useQuery({
+    queryKey: id ? workflowKeys.approvalDetail(id) : DISABLED_QUERY_KEY,
+    queryFn: () => (id ? workflowService.getApproval(id) : Promise.reject("No ID")),
+    enabled: !!id,
+    staleTime: STALE_TIMES.frequent,
+  });
+}
+
+export function useResolveApproval() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: ResolveApprovalRequest }) =>
+      workflowService.resolveApproval(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.approvals() });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.runs() });
+    },
   });
 }
