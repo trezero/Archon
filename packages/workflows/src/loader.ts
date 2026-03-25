@@ -514,7 +514,7 @@ function parseDagNode(
     ...(triggerRule ? { trigger_rule: triggerRule } : {}),
     ...(model ? { model } : {}),
     ...(provider ? { provider } : {}),
-    ...(raw.context === 'fresh' ? { context: 'fresh' as const } : {}),
+    ...(raw.context === 'fresh' || raw.context === 'shared' ? { context: raw.context } : {}),
     ...(raw.output_format !== undefined &&
     typeof raw.output_format === 'object' &&
     !Array.isArray(raw.output_format) &&

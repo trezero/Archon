@@ -116,6 +116,13 @@ export interface WorkflowAssistantOptions {
    * to avoid disk pollution. Set to true only when session persistence is explicitly needed.
    */
   persistSession?: boolean;
+  /**
+   * When true, the SDK copies the prior session's history into a new session file
+   * before appending, leaving the original untouched. Use with `resume` to safely
+   * preserve conversation context without risk of corrupting the source session.
+   * Claude only — ignored for Codex.
+   */
+  forkSession?: boolean;
 }
 
 // ---------------------------------------------------------------------------

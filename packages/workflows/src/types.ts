@@ -42,7 +42,9 @@ export interface StepRetryConfig {
  */
 export interface SingleStep {
   command: string;
-  /** Controls session continuity between steps. When true, creates a fresh session.
+  /** Controls session continuity between steps.
+   *  - `true` — creates a fresh session for this step (no prior context)
+   *  - `false` or omitted — inherits session from the prior step (with forkSession safety)
    *  Only applies to sequential execution; parallel blocks always use fresh sessions. */
   clearContext?: boolean;
   /**
@@ -184,8 +186,13 @@ export interface DagNodeBase {
   model?: string;
   /** Per-node provider override. */
   provider?: 'claude' | 'codex';
-  /** Force fresh session for this node (ignores any prior session). */
-  context?: 'fresh';
+  /** Session context mode for this node.
+   *  - `'fresh'` — ignore any prior session, start a new one
+   *  - `'shared'` — inherit session from the prior sequential node (with forkSession safety).
+   *    Has no effect on nodes in a parallel layer — parallel nodes always start fresh.
+   *  - omitted — defaults to 'fresh' for parallel layers, inherited for sequential nodes
+   */
+  context?: 'fresh' | 'shared';
   /**
    * JSON Schema for structured output.
    * Claude: enforced via outputFormat SDK option.

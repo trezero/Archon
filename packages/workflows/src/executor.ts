@@ -368,11 +368,14 @@ async function executeStepInternal(
   // Determine if we need fresh context
   const needsFreshSession = stepDef.clearContext === true;
   const resumeSessionId = needsFreshSession ? undefined : currentSessionId;
+  // When resuming a prior session, fork it so the original stays clean if this step crashes.
+  // This lets retries safely resume from the same source session.
+  const shouldForkSession = !needsFreshSession && resumeSessionId !== undefined;
 
   if (needsFreshSession) {
     getLog().debug({ commandName }, 'step_fresh_session');
   } else if (resumeSessionId) {
-    getLog().debug({ resumeSessionId }, 'step_resuming_session');
+    getLog().debug({ resumeSessionId, forkSession: shouldForkSession }, 'step_resuming_session');
   }
 
   // Log provider/model selection
@@ -435,7 +438,11 @@ async function executeStepInternal(
       { once: true }
     );
   }
-  stepOptions = { ...stepOptions, abortSignal: stepAbortController.signal };
+  stepOptions = {
+    ...stepOptions,
+    abortSignal: stepAbortController.signal,
+    ...(shouldForkSession ? { forkSession: true } : {}),
+  };
 
   try {
     const assistantMessages: string[] = [];
@@ -942,8 +949,9 @@ async function executeStepWithRetry(
       logDir,
       totalSteps,
       baseBranch,
-      // Don't resume session on retry — start fresh to avoid partial state
-      attempt > 0 ? undefined : resumeSessionId,
+      // Always pass the prior successful session ID — with forkSession:true in executeStepInternal,
+      // the original session is never mutated, so retries can safely resume from it.
+      resumeSessionId,
       configuredCommandFolder,
       issueContext,
       abortSignal
@@ -1266,9 +1274,10 @@ export async function executeWorkflow(
           additionalDirectories:
             workflow.additionalDirectories ?? config.assistants.codex.additionalDirectories,
         }
-      : resolvedModel
-        ? { model: resolvedModel }
-        : undefined;
+      : {
+          ...(resolvedModel ? { model: resolvedModel } : {}),
+          persistSession: false,
+        };
   getLog().info(
     {
       workflowName: workflow.name,

@@ -745,9 +745,12 @@ async function executeNodeInternal(
 
   // Create per-node abort controller for idle timeout cleanup
   const nodeAbortController = new AbortController();
+  // Fork when resuming — leaves the source session untouched so retries are safe.
+  const shouldForkSession = resumeSessionId !== undefined;
   const nodeOptionsWithAbort: WorkflowAssistantOptions | undefined = {
     ...nodeOptions,
     abortSignal: nodeAbortController.signal,
+    ...(shouldForkSession ? { forkSession: true } : {}),
   };
   let nodeIdleTimedOut = false;
   const effectiveIdleTimeout = node.idle_timeout ?? STEP_IDLE_TIMEOUT_MS;
@@ -1906,6 +1909,8 @@ export async function executeDagWorkflow(
           );
 
           // 5. Determine session — parallel or context:fresh → always fresh
+          // Parallel layers always get fresh sessions; explicit 'fresh' context also forces it.
+          // 'shared' forces continuation. Default: fresh for parallel, inherited for sequential.
           const isFresh = isParallelLayer || node.context === 'fresh';
           const resumeSessionId = isFresh ? undefined : lastSequentialSessionId;
 
@@ -1927,8 +1932,9 @@ export async function executeDagWorkflow(
               logDir,
               baseBranch,
               nodeOutputs,
-              // Don't resume session on retry — start fresh
-              attempt > 0 ? undefined : resumeSessionId,
+              // Always pass the prior session ID — forkSession:true in executeNodeInternal
+              // ensures the source is never mutated, so retries can safely resume from it.
+              resumeSessionId,
               configuredCommandFolder,
               issueContext
             );

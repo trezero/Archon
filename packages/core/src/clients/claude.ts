@@ -291,6 +291,11 @@ export class ClaudeClient implements IAssistantClient {
         ...(requestOptions?.persistSession !== undefined
           ? { persistSession: requestOptions.persistSession }
           : {}),
+        // When forkSession is true, the SDK copies the prior session's history into a new
+        // session file, leaving the original untouched — safe to use on retries.
+        ...(requestOptions?.forkSession !== undefined
+          ? { forkSession: requestOptions.forkSession }
+          : {}),
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         systemPrompt: { type: 'preset', preset: 'claude_code' },
@@ -350,7 +355,10 @@ export class ClaudeClient implements IAssistantClient {
 
       if (resumeSessionId) {
         options.resume = resumeSessionId;
-        getLog().debug({ sessionId: resumeSessionId }, 'resuming_session');
+        getLog().debug(
+          { sessionId: resumeSessionId, forkSession: requestOptions?.forkSession },
+          'resuming_session'
+        );
       } else {
         getLog().debug({ cwd, attempt }, 'starting_new_session');
       }
