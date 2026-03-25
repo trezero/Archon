@@ -65,9 +65,21 @@ async def dismiss_suggestion(pattern_id: str, request: DismissRequest):
 
 
 @router.post("/backfill")
-async def trigger_backfill():
-    """Trigger historical data backfill (Task 12 will add BackfillService)."""
-    raise HTTPException(status_code=501, detail={"error": "Backfill not yet implemented"})
+async def trigger_backfill(lookback_days: int = 90):
+    """Trigger historical data backfill from all registered projects."""
+    try:
+        from ..services.pattern_discovery.backfill_service import BackfillService
+
+        service = BackfillService()
+        success, result = await service.backfill_all_projects(lookback_days)
+        if not success:
+            raise HTTPException(status_code=500, detail=result)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error running backfill: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
 @router.post("/run-pipeline")
