@@ -209,7 +209,7 @@ export interface IsolationHints {
   suggestedBranch?: string;
 }
 
-export type IsolationBlockReason = 'limit_reached' | 'creation_failed';
+export type IsolationBlockReason = 'creation_failed';
 
 // --- Database Types ---
 
@@ -240,14 +240,13 @@ export type RepoConfigLoader = (repoPath: string) => Promise<WorktreeCreateConfi
 
 /**
  * Detailed worktree status breakdown for a codebase.
- * Used for limit-reached messaging.
+ * Used for status display and cleanup messaging.
  */
 export interface WorktreeStatusBreakdown {
   total: number;
   merged: number;
   stale: number;
   active: number;
-  limit: number;
   mergedEnvs: { id: string; branchName: string }[];
   staleEnvs: { id: string; branchName: string; daysInactive: number }[];
   activeEnvs: { id: string; branchName: string }[];

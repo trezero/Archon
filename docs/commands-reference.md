@@ -10,7 +10,6 @@ All slash commands available in Archon. Type `/help` in any platform adapter (We
 |---------|-------------|
 | `/command-set <name> <path> [text]` | Register a command from file |
 | `/load-commands <folder>` | Bulk load commands (recursive) |
-| `/command-invoke <name> [args]` | Execute a codebase command |
 | `/commands` | List registered commands |
 
 > **Note:** Commands use relative paths (e.g., `.archon/commands/plan.md`)

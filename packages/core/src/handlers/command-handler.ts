@@ -245,6 +245,43 @@ function findRepository(repos: RepoEntry[], identifier: string): RepoEntry | und
   );
 }
 
+type ResolveRepoArgResult =
+  | { ok: true; repos: RepoEntry[]; targetRepo: RepoEntry }
+  | { ok: false; result: CommandResult };
+
+/**
+ * Resolve a repository by number or name from the workspace.
+ * Returns `{ ok: false, result }` on error (no repos, not found),
+ * or `{ ok: true, repos, targetRepo }` on success.
+ */
+async function resolveRepoArg(
+  workspacePath: string,
+  identifier: string,
+  emptyMessage: string
+): Promise<ResolveRepoArgResult> {
+  const repos = await listRepositories(workspacePath);
+
+  if (!repos.length) {
+    return { ok: false, result: { success: false, message: emptyMessage } };
+  }
+
+  const num = parseInt(identifier, 10);
+  const isValidIndex = !isNaN(num) && num >= 1 && num <= repos.length;
+  const targetRepo = isValidIndex ? repos[num - 1] : findRepository(repos, identifier);
+
+  if (!targetRepo) {
+    return {
+      ok: false,
+      result: {
+        success: false,
+        message: `Repository not found: ${identifier}\n\nUse /repos to see available repositories.`,
+      },
+    };
+  }
+
+  return { ok: true, repos, targetRepo };
+}
+
 export function parseCommand(text: string): { command: string; args: string[] } {
   // Match quoted strings or non-whitespace sequences
   const matches = text.match(/"[^"]+"|'[^']+'|\S+/g) ?? [];
@@ -289,6 +326,789 @@ async function safeDeactivateSession(
     } else {
       throw error;
     }
+  }
+}
+
+async function handleRepoCommand(
+  conversation: Conversation,
+  args: string[]
+): Promise<CommandResult> {
+  if (args.length === 0) {
+    return { success: false, message: 'Usage: /repo <number|name> [pull]' };
+  }
+
+  const workspacePath = getArchonWorkspacesPath();
+  const identifier = args[0];
+  const shouldPull = args[1]?.toLowerCase() === 'pull';
+
+  try {
+    const resolved = await resolveRepoArg(
+      workspacePath,
+      identifier,
+      'No repositories found. Use /clone <repo-url> first.'
+    );
+    if (!resolved.ok) return resolved.result;
+    const { targetRepo } = resolved;
+
+    const targetPath = targetRepo.fullPath;
+    const targetFolder = targetRepo.displayName;
+
+    // Git pull if requested
+    if (shouldPull) {
+      try {
+        await execFileAsync('git', ['-C', targetPath, 'pull']);
+        getLog().info({ repo: targetFolder }, 'cmd.repo_pulled');
+      } catch (pullError) {
+        const err = pullError as Error;
+        getLog().error({ err, repo: targetFolder }, 'cmd.repo_pull_failed');
+        return {
+          success: false,
+          message: `Failed to pull: ${err.message}`,
+        };
+      }
+    }
+
+    // Find or create codebase for this path
+    let codebase = await codebaseDb.findCodebaseByDefaultCwd(targetPath);
+
+    if (!codebase) {
+      // Create new codebase for this directory
+      // Auto-detect assistant type
+      let suggestedAssistant = 'claude';
+      try {
+        await access(join(targetPath, '.codex'));
+        suggestedAssistant = 'codex';
+      } catch {
+        // Default to claude
+      }
+
+      codebase = await codebaseDb.createCodebase({
+        name: targetFolder,
+        default_cwd: targetPath,
+        ai_assistant_type: suggestedAssistant,
+      });
+      getLog().info({ repo: targetFolder, codebaseId: codebase.id }, 'cmd.codebase_created');
+    }
+
+    // Link conversation to codebase
+    try {
+      await db.updateConversation(conversation.id, {
+        codebase_id: codebase.id,
+        cwd: targetPath,
+      });
+    } catch (updateError) {
+      if (updateError instanceof ConversationNotFoundError) {
+        return {
+          success: false,
+          message: 'Failed to switch repository: conversation state changed. Please try again.',
+        };
+      }
+      throw updateError;
+    }
+
+    // Reset session when switching
+    const session = await sessionDb.getActiveSession(conversation.id);
+    if (session) {
+      await safeDeactivateSession(session.id, 'repo');
+    }
+
+    // Auto-load commands if found
+    let commandsLoaded = 0;
+    for (const folder of getCommandFolderSearchPaths()) {
+      try {
+        const commandPath = join(targetPath, folder);
+        await access(commandPath);
+
+        const markdownFiles = await findMarkdownFilesRecursive(commandPath);
+        if (markdownFiles.length > 0) {
+          const commands = await codebaseDb.getCodebaseCommands(codebase.id);
+          markdownFiles.forEach(({ commandName, relativePath }) => {
+            commands[commandName] = {
+              path: join(folder, relativePath),
+              description: `From ${folder}`,
+            };
+          });
+          await codebaseDb.updateCodebaseCommands(codebase.id, commands);
+          commandsLoaded = markdownFiles.length;
+          break;
+        }
+      } catch {
+        // Folder doesn't exist, try next
+      }
+    }
+
+    let msg = `Switched to: ${targetFolder}`;
+    if (shouldPull) {
+      msg += '\n✓ Pulled latest changes';
+    }
+    if (commandsLoaded > 0) {
+      msg += `\n✓ Loaded ${String(commandsLoaded)} commands`;
+    }
+    msg += '\n\nReady to work!';
+
+    return { success: true, message: msg, modified: true };
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err, command: 'repo', identifier }, 'cmd.repo_switch_failed');
+    return {
+      success: false,
+      message: `Failed to switch to repository '${identifier}': ${err.message}`,
+    };
+  }
+}
+
+async function handleRepoRemoveCommand(
+  conversation: Conversation,
+  args: string[]
+): Promise<CommandResult> {
+  if (args.length === 0) {
+    return { success: false, message: 'Usage: /repo-remove <number|name>' };
+  }
+
+  const workspacePath = getArchonWorkspacesPath();
+  const identifier = args[0];
+
+  try {
+    const resolved = await resolveRepoArg(
+      workspacePath,
+      identifier,
+      'No repositories found. Nothing to remove.'
+    );
+    if (!resolved.ok) return resolved.result;
+    const { targetRepo } = resolved;
+
+    const targetPath = targetRepo.fullPath;
+    const targetFolder = targetRepo.displayName;
+
+    // Find codebase by path
+    const codebase = await codebaseDb.findCodebaseByDefaultCwd(targetPath);
+
+    // Capture before mutation — used for both unlinking and message building
+    const isCurrentCodebase = conversation.codebase_id === codebase?.id;
+
+    // If current conversation uses this codebase, unlink it
+    if (isCurrentCodebase) {
+      try {
+        await db.updateConversation(conversation.id, { codebase_id: null, cwd: null });
+      } catch (updateError) {
+        if (updateError instanceof ConversationNotFoundError) {
+          return {
+            success: false,
+            message: 'Failed to unlink repository: conversation state changed. Please try again.',
+          };
+        }
+        throw updateError;
+      }
+      // Also deactivate any active session
+      const session = await sessionDb.getActiveSession(conversation.id);
+      if (session) {
+        await safeDeactivateSession(session.id, 'repo-remove');
+      }
+    }
+
+    // Delete codebase record (this also unlinks sessions)
+    if (codebase) {
+      await codebaseDb.deleteCodebase(codebase.id);
+      getLog().info(
+        { codebaseId: codebase.id, codebaseName: codebase.name },
+        'cmd.codebase_deleted'
+      );
+    }
+
+    // Remove directory
+    await rm(targetPath, { recursive: true, force: true });
+    getLog().info({ path: targetPath, repo: targetFolder }, 'cmd.repo_directory_removed');
+
+    let msg = `Removed: ${targetFolder}`;
+    if (codebase) {
+      msg += '\n✓ Deleted codebase record';
+    }
+    if (isCurrentCodebase) {
+      msg += '\n✓ Unlinked from current conversation';
+    }
+
+    return { success: true, message: msg, modified: true };
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err, command: 'repo-remove', identifier }, 'cmd.repo_remove_failed');
+    return { success: false, message: `Failed to remove: ${err.message}` };
+  }
+}
+
+async function handleWorktreeCommand(
+  conversation: Conversation,
+  args: string[]
+): Promise<CommandResult> {
+  if (!conversation.codebase_id) {
+    return { success: false, message: 'No codebase configured. Use /clone first.' };
+  }
+
+  const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
+  if (!codebase) {
+    return { success: false, message: 'Codebase not found.' };
+  }
+
+  const mainPath = codebase.default_cwd;
+  const subcommand = args[0];
+
+  switch (subcommand) {
+    case 'create': {
+      const branchName = args[1];
+      if (!branchName) {
+        return { success: false, message: 'Usage: /worktree create <branch-name>' };
+      }
+
+      // Check if already using a worktree
+      if (conversation.isolation_env_id) {
+        const existingEnv = await isolationEnvDb.getById(conversation.isolation_env_id);
+        const worktreeLabel = existingEnv
+          ? shortenPath(existingEnv.working_path, mainPath)
+          : conversation.isolation_env_id;
+        return {
+          success: false,
+          message: `Already using worktree: ${worktreeLabel}\n\nRun /worktree remove first.`,
+        };
+      }
+
+      // Validate branch name (alphanumeric, dash, underscore only)
+      if (!/^[a-zA-Z0-9_-]+$/.test(branchName)) {
+        return {
+          success: false,
+          message: 'Branch name must contain only letters, numbers, dashes, and underscores.',
+        };
+      }
+
+      try {
+        // Use isolation provider for worktree creation
+        const provider = getIsolationProvider();
+        const env = await provider.create({
+          codebaseId: conversation.codebase_id,
+          canonicalRepoPath: toRepoPath(mainPath),
+          workflowType: 'task',
+          identifier: branchName,
+          description: `Manual worktree: ${branchName}`,
+        });
+
+        // Add to git safe.directory
+        await execFileAsync('git', [
+          'config',
+          '--global',
+          '--add',
+          'safe.directory',
+          env.workingPath,
+        ]);
+
+        // Create database record for isolation environment
+        const dbEnv = await isolationEnvDb.create({
+          codebase_id: conversation.codebase_id,
+          workflow_type: 'task',
+          workflow_id: `task-${branchName}`,
+          provider: 'worktree',
+          working_path: env.workingPath,
+          branch_name: env.branchName ?? branchName,
+          created_by_platform: conversation.platform_type,
+        });
+
+        // Update conversation with isolation info (use database UUID)
+        await db.updateConversation(conversation.id, {
+          isolation_env_id: dbEnv.id,
+          cwd: env.workingPath,
+        });
+
+        // NOTE: Do NOT deactivate session - preserve AI context per plan
+
+        const shortPath = shortenPath(env.workingPath, mainPath);
+        return {
+          success: true,
+          message: `Worktree created!\n\nBranch: ${env.branchName ?? branchName}\nPath: ${shortPath}\n\nThis conversation now works in isolation.\nRun dependency install if needed (e.g., bun install).`,
+          modified: true,
+        };
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, branch: branchName }, 'cmd.worktree_create_failed');
+
+        // Check for common errors
+        if (error instanceof ConversationNotFoundError) {
+          return {
+            success: false,
+            message: 'Failed to create worktree: conversation state changed. Please try again.',
+          };
+        }
+        if (err.message.includes('already exists')) {
+          return {
+            success: false,
+            message: `Branch '${branchName}' already exists. Use a different name.`,
+          };
+        }
+        return { success: false, message: `Failed to create worktree: ${err.message}` };
+      }
+    }
+
+    case 'list': {
+      try {
+        const { stdout } = await execFileAsync('git', ['-C', mainPath, 'worktree', 'list']);
+
+        // Resolve the current worktree's working path from the DB (isolation_env_id is a UUID)
+        let currentWorktreePath: string | null = null;
+        if (conversation.isolation_env_id) {
+          const currentEnv = await isolationEnvDb.getById(conversation.isolation_env_id);
+          currentWorktreePath = currentEnv?.working_path ?? null;
+        }
+
+        // Parse output and mark current
+        const lines = stdout.trim().split('\n');
+        let msg = 'Worktrees:\n\n';
+
+        for (const line of lines) {
+          // Extract the path (first part before whitespace)
+          const parts = line.split(/\s+/);
+          const fullPath = parts[0];
+          const shortPath = shortenPath(fullPath, mainPath);
+
+          // Reconstruct line with shortened path
+          const restOfLine = parts.slice(1).join(' ');
+          const shortenedLine = restOfLine ? `${shortPath} ${restOfLine}` : shortPath;
+
+          const isActive = currentWorktreePath && fullPath === currentWorktreePath;
+          const marker = isActive ? ' <- active' : '';
+          msg += `${shortenedLine}${marker}\n`;
+        }
+
+        return { success: true, message: msg };
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, mainPath }, 'cmd.worktree_list_failed');
+        return { success: false, message: `Failed to list worktrees: ${err.message}` };
+      }
+    }
+
+    case 'remove': {
+      const isolationEnvId = conversation.isolation_env_id;
+      if (!isolationEnvId) {
+        return { success: false, message: 'This conversation is not using a worktree.' };
+      }
+
+      // Look up the isolation environment to get the working path
+      const isolationEnv = await isolationEnvDb.getById(isolationEnvId);
+      if (!isolationEnv) {
+        return { success: false, message: 'Isolation environment not found in database.' };
+      }
+
+      const forceFlag = args[1] === '--force';
+
+      try {
+        // Use isolation provider for removal (pass the working path, not UUID)
+        const provider = getIsolationProvider();
+        await provider.destroy(isolationEnv.working_path, { force: forceFlag });
+
+        // Update database record status
+        await isolationEnvDb.updateStatus(isolationEnvId, 'destroyed');
+
+        // Clear isolation reference, set cwd to main repo
+        await db.updateConversation(conversation.id, {
+          isolation_env_id: null,
+          cwd: mainPath,
+        });
+
+        // Reset session
+        const session = await sessionDb.getActiveSession(conversation.id);
+        if (session) {
+          await safeDeactivateSession(session.id, 'worktree-remove');
+        }
+
+        const shortPath = shortenPath(isolationEnv.working_path, mainPath);
+        return {
+          success: true,
+          message: `Worktree removed: ${shortPath}\n\nSwitched back to main repo.`,
+          modified: true,
+        };
+      } catch (error) {
+        const err = error as Error;
+        getLog().error(
+          { err, isolationEnvId, workingPath: isolationEnv.working_path },
+          'cmd.worktree_remove_failed'
+        );
+
+        // Check for common errors
+        if (error instanceof ConversationNotFoundError) {
+          return {
+            success: false,
+            message: 'Failed to remove worktree: conversation state changed. Please try again.',
+          };
+        }
+        // Provide friendly error for uncommitted changes
+        if (err.message.includes('untracked files') || err.message.includes('modified')) {
+          return {
+            success: false,
+            message:
+              'Worktree has uncommitted changes.\n\nCommit your work first, or use `/worktree remove --force` to discard.',
+          };
+        }
+        return { success: false, message: `Failed to remove worktree: ${err.message}` };
+      }
+    }
+
+    case 'orphans': {
+      try {
+        // Show all worktrees from git perspective (source of truth)
+        // Useful for discovering skill-created worktrees or stale entries
+        const gitWorktrees = await listWorktrees(toRepoPath(mainPath));
+
+        if (gitWorktrees.length <= 1) {
+          return {
+            success: true,
+            message:
+              'No worktrees found (only main repo).\n\nUse `/worktree create <branch>` to create one.',
+          };
+        }
+
+        // Resolve working path from UUID for current marker
+        let currentWorktreePath: string | null = null;
+        if (conversation.isolation_env_id) {
+          const currentEnv = await isolationEnvDb.getById(conversation.isolation_env_id);
+          currentWorktreePath = currentEnv?.working_path ?? null;
+        }
+
+        let msg = 'All worktrees (from git):\n\n';
+        for (const wt of gitWorktrees) {
+          const isMainRepo = wt.path === mainPath;
+          if (isMainRepo) continue;
+
+          const shortPath = shortenPath(wt.path, mainPath);
+          const isCurrent = currentWorktreePath && wt.path === currentWorktreePath;
+          const marker = isCurrent ? ' ← current' : '';
+          msg += `  ${wt.branch} → ${shortPath}${marker}\n`;
+        }
+
+        msg += '\nNote: This shows ALL worktrees including those created by external tools.\n';
+        msg += 'Git (`git worktree list`) is the source of truth.';
+
+        return { success: true, message: msg };
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, mainPath }, 'cmd.worktree_orphans_failed');
+        return { success: false, message: `Failed to list worktrees: ${err.message}` };
+      }
+    }
+
+    case 'cleanup': {
+      const cleanupType = args[1];
+
+      if (!cleanupType || !['merged', 'stale'].includes(cleanupType)) {
+        return {
+          success: false,
+          message:
+            'Usage:\n  /worktree cleanup merged - Remove worktrees with merged branches\n  /worktree cleanup stale - Remove inactive worktrees (14+ days)',
+        };
+      }
+
+      try {
+        let result;
+        if (cleanupType === 'merged') {
+          result = await cleanupMergedWorktrees(conversation.codebase_id, mainPath);
+        } else {
+          result = await cleanupStaleWorktrees(conversation.codebase_id, mainPath);
+        }
+
+        let msg = '';
+
+        if (result.removed.length > 0) {
+          msg += `Cleaned up ${String(result.removed.length)} ${cleanupType} worktree(s):\n`;
+          for (const branch of result.removed) {
+            msg += `  • ${branch}\n`;
+          }
+        } else {
+          msg += `No ${cleanupType} worktrees to clean up.\n`;
+        }
+
+        if (result.skipped.length > 0) {
+          msg += `\nSkipped ${String(result.skipped.length)} (protected):\n`;
+          for (const { branchName, reason } of result.skipped) {
+            msg += `  • ${branchName} (${reason})\n`;
+          }
+        }
+
+        // Show updated count
+        const count = await isolationEnvDb.countActiveByCodebase(conversation.codebase_id);
+        msg += `\nActive worktrees: ${String(count)}`;
+
+        return { success: true, message: msg.trim() };
+      } catch (error) {
+        const err = error as Error;
+        getLog().error(
+          { err, cleanupType, codebaseId: conversation.codebase_id },
+          'cmd.worktree_cleanup_failed'
+        );
+        return { success: false, message: `Failed to cleanup: ${err.message}` };
+      }
+    }
+
+    default:
+      return {
+        success: false,
+        message:
+          'Usage:\n  /worktree create <branch>\n  /worktree list\n  /worktree remove [--force]\n  /worktree cleanup merged|stale\n  /worktree orphans',
+      };
+  }
+}
+
+async function handleWorkflowCommand(
+  conversation: Conversation,
+  args: string[]
+): Promise<CommandResult> {
+  const subcommand = args[0];
+
+  // Workflow commands work with or without a project context
+  const codebase = conversation.codebase_id
+    ? await codebaseDb.getCodebase(conversation.codebase_id)
+    : null;
+
+  const workflowCwd = codebase
+    ? (conversation.cwd ?? codebase.default_cwd)
+    : getArchonWorkspacesPath();
+
+  switch (subcommand) {
+    case 'list':
+    case 'ls': {
+      let workflows: readonly WorkflowDefinition[];
+      let errors: readonly WorkflowLoadError[];
+      try {
+        const result = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
+        workflows = result.workflows;
+        errors = result.errors;
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, cwd: workflowCwd }, 'cmd.workflow_list_failed');
+        return {
+          success: false,
+          message: `Failed to load workflows: ${err.message}\n\nCheck .archon/workflows/ for YAML syntax issues.`,
+        };
+      }
+
+      if (workflows.length === 0 && errors.length === 0) {
+        return {
+          success: true,
+          message: 'No workflows found.\n\nCreate workflows in `.archon/workflows/` as YAML files.',
+        };
+      }
+
+      let msg = '';
+
+      if (workflows.length > 0) {
+        msg += 'Available Workflows:\n\n';
+        for (const w of workflows) {
+          const stepsOrLoop = w.loop
+            ? `Loop: until \`${w.loop.until}\` (max ${String(w.loop.max_iterations)} iterations)`
+            : `Steps: ${w.steps?.map(s => (isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`)).join(' -> ') ?? 'none'}`;
+          msg += `**\`${w.name}\`**\n  ${w.description}\n  ${stepsOrLoop}\n\n`;
+        }
+      }
+
+      if (errors.length > 0) {
+        const displayErrors = errors.slice(0, 10);
+        msg += `\n---\n\n**${String(errors.length)} workflow(s) failed to load:**\n\n`;
+        for (const e of displayErrors) {
+          msg += `- \`${e.filename}\`: ${e.error}\n`;
+        }
+        if (errors.length > 10) {
+          msg += `\n...and ${String(errors.length - 10)} more\n`;
+        }
+      }
+
+      return { success: true, message: msg };
+    }
+
+    case 'reload': {
+      try {
+        const { workflows: reloadedWorkflows, errors: reloadErrors } =
+          await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
+        let msg = `Discovered ${String(reloadedWorkflows.length)} workflow(s).`;
+        if (reloadErrors.length > 0) {
+          msg += `\n\n**${String(reloadErrors.length)} failed to load:**\n`;
+          for (const e of reloadErrors) {
+            msg += `- \`${e.filename}\`: ${e.error}\n`;
+          }
+        }
+        return { success: true, message: msg };
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, cwd: workflowCwd }, 'cmd.workflow_reload_failed');
+        return {
+          success: false,
+          message: `Failed to reload workflows: ${err.message}\n\nCheck .archon/workflows/ for YAML syntax issues.`,
+        };
+      }
+    }
+
+    case 'cancel': {
+      try {
+        const activeWorkflow = await workflowDb.getActiveWorkflowRun(conversation.id);
+        if (!activeWorkflow) {
+          return {
+            success: true,
+            message: 'No active workflow to cancel.',
+          };
+        }
+
+        await workflowDb.cancelWorkflowRun(activeWorkflow.id);
+        return {
+          success: true,
+          message: `Cancelled workflow: \`${activeWorkflow.workflow_name}\``,
+        };
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, conversationId: conversation.id }, 'cmd.workflow_cancel_failed');
+        return { success: false, message: 'Failed to cancel workflow. Please try again.' };
+      }
+    }
+
+    case 'status': {
+      // Show detailed status of running workflow
+      try {
+        const activeWorkflow = await workflowDb.getActiveWorkflowRun(conversation.id);
+        if (!activeWorkflow) {
+          return {
+            success: true,
+            message: 'No workflow currently running.',
+          };
+        }
+
+        const timing = calculateWorkflowTiming(activeWorkflow);
+
+        if (!timing.isValid) {
+          // Graceful fallback for corrupted timing data
+          return {
+            success: true,
+            message: `Workflow: \`${activeWorkflow.workflow_name}\`\nID: ${activeWorkflow.id}\nStatus: ${activeWorkflow.status}\n\nTiming data unavailable.`,
+          };
+        }
+
+        let msg = `Workflow: \`${activeWorkflow.workflow_name}\`\n`;
+        msg += `ID: ${activeWorkflow.id}\n`;
+        msg += `Status: ${activeWorkflow.status}\n`;
+        msg += `Step: ${activeWorkflow.current_step_index + 1}\n`;
+        msg += `Started: ${timing.startedAt.toISOString()}\n`;
+        msg += `Duration: ${timing.durationMin}m ${timing.durationSec}s\n`;
+        msg += `Last activity: ${timing.lastActivityMin}m ${timing.lastActivitySec}s ago\n`;
+
+        // Staleness check
+        if (timing.lastActivityMs > WORKFLOW_STALE_THRESHOLD_MS) {
+          msg += `\nThis workflow appears stale (no activity for ${timing.lastActivityMin} minutes).\n`;
+          msg += 'Consider cancelling with `/workflow cancel`.';
+        } else if (timing.lastActivityMs > WORKFLOW_SLOW_THRESHOLD_MS) {
+          msg += '\nActivity is slow - may be waiting on AI response or stuck.';
+        }
+
+        return { success: true, message: msg };
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, conversationId: conversation.id }, 'cmd.workflow_status_failed');
+        return {
+          success: false,
+          message: 'Failed to retrieve workflow status. Please try again.',
+        };
+      }
+    }
+
+    case 'run': {
+      // Directly invoke a workflow by name (bypasses AI router)
+      const workflowName = args[1];
+      const workflowArgs = args.slice(2).join(' ');
+
+      if (!workflowName) {
+        return {
+          success: false,
+          message:
+            'Usage: /workflow run <name> [args]\n\nUse /workflow list to see available workflows.',
+        };
+      }
+
+      getLog().debug(
+        { workflowName, args: workflowArgs, cwd: workflowCwd },
+        'cmd.workflow_run_invoked'
+      );
+
+      // Discover workflows with error handling
+      let workflows: readonly WorkflowDefinition[];
+      let loadErrors: readonly WorkflowLoadError[];
+      try {
+        const result = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
+        workflows = result.workflows;
+        loadErrors = result.errors;
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, cwd: workflowCwd }, 'cmd.workflow_discovery_failed');
+        return {
+          success: false,
+          message: `Failed to load workflows: ${err.message}\n\nCheck .archon/workflows/ for YAML syntax issues.`,
+        };
+      }
+
+      getLog().debug(
+        {
+          count: workflows.length,
+          names: workflows.map(w => w.name),
+          searchingFor: workflowName,
+        },
+        'cmd.workflows_discovered'
+      );
+
+      // Exact match first, then case-insensitive
+      let workflow = workflows.find(w => w.name === workflowName);
+      if (!workflow) {
+        const caseMatch = workflows.find(w => w.name.toLowerCase() === workflowName.toLowerCase());
+        if (caseMatch) {
+          getLog().info(
+            { requested: workflowName, matched: caseMatch.name },
+            'cmd.workflow_run_case_insensitive_match'
+          );
+          workflow = caseMatch;
+        }
+      }
+
+      if (!workflow) {
+        // Check if the requested workflow had a load error
+        const loadError = loadErrors.find(
+          e =>
+            e.filename.replace(/\.ya?ml$/, '') === workflowName ||
+            e.filename === `${workflowName}.yaml` ||
+            e.filename === `${workflowName}.yml`
+        );
+        if (loadError) {
+          return {
+            success: false,
+            message: `Workflow \`${workflowName}\` failed to load: ${loadError.error}\n\nFix the YAML file and try again.`,
+          };
+        }
+        getLog().warn(
+          { requested: workflowName, available: workflows.map(w => w.name) },
+          'cmd.workflow_not_found'
+        );
+        return {
+          success: false,
+          message: `Workflow \`${workflowName}\` not found.\n\nUse /workflow list to see available workflows.`,
+        };
+      }
+
+      getLog().info({ workflow: workflow.name, args: workflowArgs }, 'cmd.workflow_starting');
+
+      // Return special result that triggers workflow execution in orchestrator
+      return {
+        success: true,
+        message: `Starting workflow: \`${workflow.name}\``,
+        workflow: {
+          definition: workflow,
+          args: workflowArgs,
+        },
+      };
+    }
+
+    default:
+      return {
+        success: false,
+        message:
+          'Usage:\n  /workflow list - Show available workflows\n  /workflow reload - Reload workflow definitions\n  /workflow status - Show running workflow details\n  /workflow cancel - Cancel running workflow\n  /workflow run <name> [args] - Run a workflow directly',
+      };
   }
 }
 
@@ -391,13 +1211,14 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
         }
       } catch (error) {
         // Don't fail status if workflow query fails
+        const err = error as Error;
         getLog().error(
-          { err: error, conversationId: conversation.id },
-          'workflow_status_query_failed'
+          { err, conversationId: conversation.id },
+          'cmd.workflow_status_query_failed'
         );
       }
 
-      // Add worktree breakdown if codebase is configured (Phase 3D)
+      // Add worktree breakdown if codebase is configured
       if (codebase) {
         try {
           const breakdown = await getWorktreeStatusBreakdown(codebase.id, codebase.default_cwd);
@@ -413,7 +1234,8 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
           }
         } catch (error) {
           // Don't fail status if breakdown fails
-          getLog().error({ err: error, codebaseId: codebase.id }, 'worktree_breakdown_failed');
+          const err = error as Error;
+          getLog().error({ err, codebaseId: codebase.id }, 'cmd.worktree_breakdown_failed');
         }
       }
 
@@ -556,7 +1378,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
       } catch (error) {
         const err = error as Error;
         const safeErr = sanitizeError(err);
-        getLog().error({ err: safeErr }, 'clone_failed');
+        getLog().error({ err: safeErr }, 'cmd.clone_failed');
         return {
           success: false,
           message: `Failed to clone repository: ${safeErr.message}`,
@@ -599,7 +1421,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
         };
       } catch (error) {
         const err = error as Error;
-        getLog().error({ err, command: 'command-set' }, 'command_set_failed');
+        getLog().error({ err, command: 'command-set' }, 'cmd.command_set_failed');
         return { success: false, message: `Failed: ${err.message}` };
       }
     }
@@ -651,7 +1473,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
         };
       } catch (error) {
         const err = error as Error;
-        getLog().error({ err, command: 'load-commands' }, 'load_commands_failed');
+        getLog().error({ err, command: 'load-commands' }, 'cmd.load_commands_failed');
         return { success: false, message: `Failed: ${err.message}` };
       }
     }
@@ -715,7 +1537,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
         return { success: true, message: msg };
       } catch (error) {
         const err = error as Error;
-        getLog().error({ err, command: 'repos' }, 'repos_list_failed');
+        getLog().error({ err, command: 'repos' }, 'cmd.repos_list_failed');
         return { success: false, message: `Failed to list repositories: ${err.message}` };
       }
     }
@@ -753,773 +1575,17 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
       };
     }
 
-    case 'repo': {
-      if (args.length === 0) {
-        return { success: false, message: 'Usage: /repo <number|name> [pull]' };
-      }
+    case 'repo':
+      return handleRepoCommand(conversation, args);
 
-      const workspacePath = getArchonWorkspacesPath();
-      const identifier = args[0];
-      const shouldPull = args[1]?.toLowerCase() === 'pull';
+    case 'repo-remove':
+      return handleRepoRemoveCommand(conversation, args);
 
-      try {
-        // Get sorted list of repos with nested structure
-        const repos = await listRepositories(workspacePath);
+    case 'worktree':
+      return handleWorktreeCommand(conversation, args);
 
-        if (!repos.length) {
-          return {
-            success: false,
-            message: 'No repositories found. Use /clone <repo-url> first.',
-          };
-        }
-
-        // Find the target repo by number or name
-        let targetRepo: RepoEntry | undefined;
-        const num = parseInt(identifier, 10);
-        if (!isNaN(num) && num >= 1 && num <= repos.length) {
-          targetRepo = repos[num - 1];
-        } else {
-          targetRepo = findRepository(repos, identifier);
-        }
-
-        if (!targetRepo) {
-          return {
-            success: false,
-            message: `Repository not found: ${identifier}\n\nUse /repos to see available repositories.`,
-          };
-        }
-
-        const targetPath = targetRepo.fullPath;
-        const targetFolder = targetRepo.displayName;
-
-        // Git pull if requested
-        if (shouldPull) {
-          try {
-            await execFileAsync('git', ['-C', targetPath, 'pull']);
-            getLog().info({ repo: targetFolder }, 'repo_pulled');
-          } catch (pullError) {
-            const err = pullError as Error;
-            getLog().error({ err, repo: targetFolder }, 'repo_pull_failed');
-            return {
-              success: false,
-              message: `Failed to pull: ${err.message}`,
-            };
-          }
-        }
-
-        // Find or create codebase for this path
-        let codebase = await codebaseDb.findCodebaseByDefaultCwd(targetPath);
-
-        if (!codebase) {
-          // Create new codebase for this directory
-          // Auto-detect assistant type
-          let suggestedAssistant = 'claude';
-          try {
-            await access(join(targetPath, '.codex'));
-            suggestedAssistant = 'codex';
-          } catch {
-            // Default to claude
-          }
-
-          codebase = await codebaseDb.createCodebase({
-            name: targetFolder,
-            default_cwd: targetPath,
-            ai_assistant_type: suggestedAssistant,
-          });
-          getLog().info({ repo: targetFolder, codebaseId: codebase.id }, 'codebase_created');
-        }
-
-        // Link conversation to codebase
-        try {
-          await db.updateConversation(conversation.id, {
-            codebase_id: codebase.id,
-            cwd: targetPath,
-          });
-        } catch (updateError) {
-          if (updateError instanceof ConversationNotFoundError) {
-            return {
-              success: false,
-              message: 'Failed to switch repository: conversation state changed. Please try again.',
-            };
-          }
-          throw updateError;
-        }
-
-        // Reset session when switching
-        const session = await sessionDb.getActiveSession(conversation.id);
-        if (session) {
-          await safeDeactivateSession(session.id, 'repo');
-        }
-
-        // Auto-load commands if found
-        let commandsLoaded = 0;
-        for (const folder of getCommandFolderSearchPaths()) {
-          try {
-            const commandPath = join(targetPath, folder);
-            await access(commandPath);
-
-            const markdownFiles = await findMarkdownFilesRecursive(commandPath);
-            if (markdownFiles.length > 0) {
-              const commands = await codebaseDb.getCodebaseCommands(codebase.id);
-              markdownFiles.forEach(({ commandName, relativePath }) => {
-                commands[commandName] = {
-                  path: join(folder, relativePath),
-                  description: `From ${folder}`,
-                };
-              });
-              await codebaseDb.updateCodebaseCommands(codebase.id, commands);
-              commandsLoaded = markdownFiles.length;
-              break;
-            }
-          } catch {
-            // Folder doesn't exist, try next
-          }
-        }
-
-        let msg = `Switched to: ${targetFolder}`;
-        if (shouldPull) {
-          msg += '\n✓ Pulled latest changes';
-        }
-        if (commandsLoaded > 0) {
-          msg += `\n✓ Loaded ${String(commandsLoaded)} commands`;
-        }
-        msg += '\n\nReady to work!';
-
-        return { success: true, message: msg, modified: true };
-      } catch (error) {
-        const err = error as Error;
-        getLog().error({ err, command: 'repo' }, 'repo_switch_failed');
-        return { success: false, message: `Failed: ${err.message}` };
-      }
-    }
-
-    case 'repo-remove': {
-      if (args.length === 0) {
-        return { success: false, message: 'Usage: /repo-remove <number|name>' };
-      }
-
-      const workspacePath = getArchonWorkspacesPath();
-      const identifier = args[0];
-
-      try {
-        // Get sorted list of repos with nested structure
-        const repos = await listRepositories(workspacePath);
-
-        if (!repos.length) {
-          return {
-            success: false,
-            message: 'No repositories found. Nothing to remove.',
-          };
-        }
-
-        // Find the target repo by number or name
-        let targetRepo: RepoEntry | undefined;
-        const num = parseInt(identifier, 10);
-        if (!isNaN(num) && num >= 1 && num <= repos.length) {
-          targetRepo = repos[num - 1];
-        } else {
-          targetRepo = findRepository(repos, identifier);
-        }
-
-        if (!targetRepo) {
-          return {
-            success: false,
-            message: `Repository not found: ${identifier}\n\nUse /repos to see available repositories.`,
-          };
-        }
-
-        const targetPath = targetRepo.fullPath;
-        const targetFolder = targetRepo.displayName;
-
-        // Find codebase by path
-        const codebase = await codebaseDb.findCodebaseByDefaultCwd(targetPath);
-
-        // If current conversation uses this codebase, unlink it
-        if (conversation.codebase_id === codebase?.id) {
-          try {
-            await db.updateConversation(conversation.id, { codebase_id: null, cwd: null });
-          } catch (updateError) {
-            if (updateError instanceof ConversationNotFoundError) {
-              return {
-                success: false,
-                message:
-                  'Failed to unlink repository: conversation state changed. Please try again.',
-              };
-            }
-            throw updateError;
-          }
-          // Also deactivate any active session
-          const session = await sessionDb.getActiveSession(conversation.id);
-          if (session) {
-            await safeDeactivateSession(session.id, 'repo-remove');
-          }
-        }
-
-        // Delete codebase record (this also unlinks sessions)
-        if (codebase) {
-          await codebaseDb.deleteCodebase(codebase.id);
-          getLog().info(
-            { codebaseId: codebase.id, codebaseName: codebase.name },
-            'codebase_deleted'
-          );
-        }
-
-        // Remove directory
-        await rm(targetPath, { recursive: true, force: true });
-        getLog().info({ path: targetPath, repo: targetFolder }, 'repo_directory_removed');
-
-        let msg = `Removed: ${targetFolder}`;
-        if (codebase) {
-          msg += '\n✓ Deleted codebase record';
-        }
-        if (conversation.codebase_id === codebase?.id) {
-          msg += '\n✓ Unlinked from current conversation';
-        }
-
-        return { success: true, message: msg, modified: true };
-      } catch (error) {
-        const err = error as Error;
-        getLog().error({ err, command: 'repo-remove' }, 'repo_remove_failed');
-        return { success: false, message: `Failed to remove: ${err.message}` };
-      }
-    }
-
-    case 'worktree': {
-      const subcommand = args[0];
-
-      if (!conversation.codebase_id) {
-        return { success: false, message: 'No codebase configured. Use /clone first.' };
-      }
-
-      const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
-      if (!codebase) {
-        return { success: false, message: 'Codebase not found.' };
-      }
-
-      const mainPath = codebase.default_cwd;
-
-      switch (subcommand) {
-        case 'create': {
-          const branchName = args[1];
-          if (!branchName) {
-            return { success: false, message: 'Usage: /worktree create <branch-name>' };
-          }
-
-          // Check if already using a worktree
-          const existingIsolation = conversation.isolation_env_id;
-          if (existingIsolation) {
-            const shortPath = shortenPath(existingIsolation, mainPath);
-            return {
-              success: false,
-              message: `Already using worktree: ${shortPath}\n\nRun /worktree remove first.`,
-            };
-          }
-
-          // Validate branch name (alphanumeric, dash, underscore only)
-          if (!/^[a-zA-Z0-9_-]+$/.test(branchName)) {
-            return {
-              success: false,
-              message: 'Branch name must contain only letters, numbers, dashes, and underscores.',
-            };
-          }
-
-          try {
-            // Use isolation provider for worktree creation
-            const provider = getIsolationProvider();
-            const env = await provider.create({
-              codebaseId: conversation.codebase_id,
-              canonicalRepoPath: toRepoPath(mainPath),
-              workflowType: 'task',
-              identifier: branchName,
-              description: `Manual worktree: ${branchName}`,
-            });
-
-            // Add to git safe.directory
-            await execFileAsync('git', [
-              'config',
-              '--global',
-              '--add',
-              'safe.directory',
-              env.workingPath,
-            ]);
-
-            // Create database record for isolation environment
-            const dbEnv = await isolationEnvDb.create({
-              codebase_id: conversation.codebase_id,
-              workflow_type: 'task',
-              workflow_id: `task-${branchName}`,
-              provider: 'worktree',
-              working_path: env.workingPath,
-              branch_name: env.branchName ?? branchName,
-              created_by_platform: conversation.platform_type,
-            });
-
-            // Update conversation with isolation info (use database UUID)
-            await db.updateConversation(conversation.id, {
-              isolation_env_id: dbEnv.id,
-              cwd: env.workingPath,
-            });
-
-            // NOTE: Do NOT deactivate session - preserve AI context per plan
-
-            const shortPath = shortenPath(env.workingPath, mainPath);
-            return {
-              success: true,
-              message: `Worktree created!\n\nBranch: ${env.branchName ?? branchName}\nPath: ${shortPath}\n\nThis conversation now works in isolation.\nRun dependency install if needed (e.g., bun install).`,
-              modified: true,
-            };
-          } catch (error) {
-            const err = error as Error;
-            getLog().error({ err, branch: branchName }, 'worktree_create_failed');
-
-            // Check for common errors
-            if (error instanceof ConversationNotFoundError) {
-              return {
-                success: false,
-                message: 'Failed to create worktree: conversation state changed. Please try again.',
-              };
-            }
-            if (err.message.includes('already exists')) {
-              return {
-                success: false,
-                message: `Branch '${branchName}' already exists. Use a different name.`,
-              };
-            }
-            return { success: false, message: `Failed to create worktree: ${err.message}` };
-          }
-        }
-
-        case 'list': {
-          try {
-            const { stdout } = await execFileAsync('git', ['-C', mainPath, 'worktree', 'list']);
-
-            // Parse output and mark current
-            const lines = stdout.trim().split('\n');
-            let msg = 'Worktrees:\n\n';
-
-            const currentWorktree = conversation.isolation_env_id;
-
-            for (const line of lines) {
-              // Extract the path (first part before whitespace)
-              const parts = line.split(/\s+/);
-              const fullPath = parts[0];
-              const shortPath = shortenPath(fullPath, mainPath);
-
-              // Reconstruct line with shortened path
-              const restOfLine = parts.slice(1).join(' ');
-              const shortenedLine = restOfLine ? `${shortPath} ${restOfLine}` : shortPath;
-
-              const isActive = currentWorktree && line.startsWith(currentWorktree);
-              const marker = isActive ? ' <- active' : '';
-              msg += `${shortenedLine}${marker}\n`;
-            }
-
-            return { success: true, message: msg };
-          } catch (error) {
-            const err = error as Error;
-            getLog().error({ err, mainPath }, 'cmd.worktree_list_failed');
-            return { success: false, message: `Failed to list worktrees: ${err.message}` };
-          }
-        }
-
-        case 'remove': {
-          const isolationEnvId = conversation.isolation_env_id;
-          if (!isolationEnvId) {
-            return { success: false, message: 'This conversation is not using a worktree.' };
-          }
-
-          // Look up the isolation environment to get the working path
-          const isolationEnv = await isolationEnvDb.getById(isolationEnvId);
-          if (!isolationEnv) {
-            return { success: false, message: 'Isolation environment not found in database.' };
-          }
-
-          const forceFlag = args[1] === '--force';
-
-          try {
-            // Use isolation provider for removal (pass the working path, not UUID)
-            const provider = getIsolationProvider();
-            await provider.destroy(isolationEnv.working_path, { force: forceFlag });
-
-            // Update database record status
-            await isolationEnvDb.updateStatus(isolationEnvId, 'destroyed');
-
-            // Clear isolation reference, set cwd to main repo
-            await db.updateConversation(conversation.id, {
-              isolation_env_id: null,
-              cwd: mainPath,
-            });
-
-            // Reset session
-            const session = await sessionDb.getActiveSession(conversation.id);
-            if (session) {
-              await safeDeactivateSession(session.id, 'worktree-remove');
-            }
-
-            const shortPath = shortenPath(isolationEnv.working_path, mainPath);
-            return {
-              success: true,
-              message: `Worktree removed: ${shortPath}\n\nSwitched back to main repo.`,
-              modified: true,
-            };
-          } catch (error) {
-            const err = error as Error;
-            getLog().error({ err }, 'worktree_remove_failed');
-
-            // Check for common errors
-            if (error instanceof ConversationNotFoundError) {
-              return {
-                success: false,
-                message: 'Failed to remove worktree: conversation state changed. Please try again.',
-              };
-            }
-            // Provide friendly error for uncommitted changes
-            if (err.message.includes('untracked files') || err.message.includes('modified')) {
-              return {
-                success: false,
-                message:
-                  'Worktree has uncommitted changes.\n\nCommit your work first, or use `/worktree remove --force` to discard.',
-              };
-            }
-            return { success: false, message: `Failed to remove worktree: ${err.message}` };
-          }
-        }
-
-        case 'orphans': {
-          // Show all worktrees from git perspective (source of truth)
-          // Useful for discovering skill-created worktrees or stale entries
-          const gitWorktrees = await listWorktrees(toRepoPath(mainPath));
-
-          if (gitWorktrees.length <= 1) {
-            return {
-              success: true,
-              message:
-                'No worktrees found (only main repo).\n\nUse `/worktree create <branch>` to create one.',
-            };
-          }
-
-          const currentWorktree = conversation.isolation_env_id;
-
-          let msg = 'All worktrees (from git):\n\n';
-          for (const wt of gitWorktrees) {
-            const isMainRepo = wt.path === mainPath;
-            if (isMainRepo) continue;
-
-            const shortPath = shortenPath(wt.path, mainPath);
-            const isCurrent = wt.path === currentWorktree;
-            const marker = isCurrent ? ' ← current' : '';
-            msg += `  ${wt.branch} → ${shortPath}${marker}\n`;
-          }
-
-          msg += '\nNote: This shows ALL worktrees including those created by external tools.\n';
-          msg += 'Git (`git worktree list`) is the source of truth.';
-
-          return { success: true, message: msg };
-        }
-
-        case 'cleanup': {
-          const cleanupType = args[1];
-
-          if (!cleanupType || !['merged', 'stale'].includes(cleanupType)) {
-            return {
-              success: false,
-              message:
-                'Usage:\n  /worktree cleanup merged - Remove worktrees with merged branches\n  /worktree cleanup stale - Remove inactive worktrees (14+ days)',
-            };
-          }
-
-          try {
-            let result;
-            if (cleanupType === 'merged') {
-              result = await cleanupMergedWorktrees(conversation.codebase_id, mainPath);
-            } else {
-              result = await cleanupStaleWorktrees(conversation.codebase_id, mainPath);
-            }
-
-            let msg = '';
-
-            if (result.removed.length > 0) {
-              msg += `Cleaned up ${String(result.removed.length)} ${cleanupType} worktree(s):\n`;
-              for (const branch of result.removed) {
-                msg += `  • ${branch}\n`;
-              }
-            } else {
-              msg += `No ${cleanupType} worktrees to clean up.\n`;
-            }
-
-            if (result.skipped.length > 0) {
-              msg += `\nSkipped ${String(result.skipped.length)} (protected):\n`;
-              for (const { branchName, reason } of result.skipped) {
-                msg += `  • ${branchName} (${reason})\n`;
-              }
-            }
-
-            // Show updated count
-            const count = await isolationEnvDb.countActiveByCodebase(conversation.codebase_id);
-            msg += `\nWorktrees: ${String(count)} active`;
-
-            return { success: true, message: msg.trim() };
-          } catch (error) {
-            const err = error as Error;
-            getLog().error(
-              { err, cleanupType, codebaseId: conversation.codebase_id },
-              'cmd.worktree_cleanup_failed'
-            );
-            return { success: false, message: `Failed to cleanup: ${err.message}` };
-          }
-        }
-
-        default:
-          return {
-            success: false,
-            message:
-              'Usage:\n  /worktree create <branch>\n  /worktree list\n  /worktree remove [--force]\n  /worktree cleanup merged|stale\n  /worktree orphans',
-          };
-      }
-    }
-
-    case 'workflow': {
-      const subcommand = args[0];
-
-      // Workflow commands work with or without a project context
-      const codebase = conversation.codebase_id
-        ? await codebaseDb.getCodebase(conversation.codebase_id)
-        : null;
-
-      switch (subcommand) {
-        case 'list':
-        case 'ls': {
-          // Discover workflows: use project CWD if available, otherwise global discovery
-          const workflowCwd = codebase
-            ? (conversation.cwd ?? codebase.default_cwd)
-            : getArchonWorkspacesPath();
-          const { workflows, errors } = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
-
-          if (workflows.length === 0 && errors.length === 0) {
-            return {
-              success: true,
-              message:
-                'No workflows found.\n\nCreate workflows in `.archon/workflows/` as YAML files.',
-            };
-          }
-
-          let msg = '';
-
-          if (workflows.length > 0) {
-            msg += 'Available Workflows:\n\n';
-            for (const w of workflows) {
-              const stepsOrLoop = w.loop
-                ? `Loop: until \`${w.loop.until}\` (max ${String(w.loop.max_iterations)} iterations)`
-                : `Steps: ${w.steps?.map(s => (isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`)).join(' -> ') ?? 'none'}`;
-              msg += `**\`${w.name}\`**\n  ${w.description}\n  ${stepsOrLoop}\n\n`;
-            }
-          }
-
-          if (errors.length > 0) {
-            const displayErrors = errors.slice(0, 10);
-            msg += `\n---\n\n**${String(errors.length)} workflow(s) failed to load:**\n\n`;
-            for (const e of displayErrors) {
-              msg += `- \`${e.filename}\`: ${e.error}\n`;
-            }
-            if (errors.length > 10) {
-              msg += `\n...and ${String(errors.length - 10)} more\n`;
-            }
-          }
-
-          return { success: true, message: msg };
-        }
-
-        case 'reload': {
-          // Force reload workflows (discovery is stateless, just confirms they load correctly)
-          const reloadCwd = codebase
-            ? (conversation.cwd ?? codebase.default_cwd)
-            : getArchonWorkspacesPath();
-          const { workflows: reloadedWorkflows, errors: reloadErrors } =
-            await discoverWorkflowsWithConfig(reloadCwd, loadConfig);
-          let msg = `Discovered ${String(reloadedWorkflows.length)} workflow(s).`;
-          if (reloadErrors.length > 0) {
-            msg += `\n\n**${String(reloadErrors.length)} failed to load:**\n`;
-            for (const e of reloadErrors) {
-              msg += `- \`${e.filename}\`: ${e.error}\n`;
-            }
-          }
-          return { success: true, message: msg };
-        }
-
-        case 'cancel': {
-          // Cancel (force-fail) any running workflow for this conversation
-          const activeWorkflow = await workflowDb.getActiveWorkflowRun(conversation.id);
-          if (!activeWorkflow) {
-            return {
-              success: true,
-              message: 'No active workflow to cancel.',
-            };
-          }
-
-          await workflowDb.cancelWorkflowRun(activeWorkflow.id);
-          return {
-            success: true,
-            message: `Cancelled workflow: \`${activeWorkflow.workflow_name}\``,
-          };
-        }
-
-        case 'status': {
-          // Show detailed status of running workflow
-          try {
-            const activeWorkflow = await workflowDb.getActiveWorkflowRun(conversation.id);
-            if (!activeWorkflow) {
-              return {
-                success: true,
-                message: 'No workflow currently running.',
-              };
-            }
-
-            const timing = calculateWorkflowTiming(activeWorkflow);
-
-            if (!timing.isValid) {
-              // Graceful fallback for corrupted timing data
-              return {
-                success: true,
-                message: `Workflow: \`${activeWorkflow.workflow_name}\`\nID: ${activeWorkflow.id}\nStatus: ${activeWorkflow.status}\n\nTiming data unavailable.`,
-              };
-            }
-
-            let msg = `Workflow: \`${activeWorkflow.workflow_name}\`\n`;
-            msg += `ID: ${activeWorkflow.id}\n`;
-            msg += `Status: ${activeWorkflow.status}\n`;
-            msg += `Step: ${activeWorkflow.current_step_index + 1}\n`;
-            msg += `Started: ${timing.startedAt.toISOString()}\n`;
-            msg += `Duration: ${timing.durationMin}m ${timing.durationSec}s\n`;
-            msg += `Last activity: ${timing.lastActivityMin}m ${timing.lastActivitySec}s ago\n`;
-
-            // Staleness check
-            if (timing.lastActivityMs > WORKFLOW_STALE_THRESHOLD_MS) {
-              msg += `\nThis workflow appears stale (no activity for ${timing.lastActivityMin} minutes).\n`;
-              msg += 'Consider cancelling with `/workflow cancel`.';
-            } else if (timing.lastActivityMs > WORKFLOW_SLOW_THRESHOLD_MS) {
-              msg += '\nActivity is slow - may be waiting on AI response or stuck.';
-            }
-
-            return { success: true, message: msg };
-          } catch (error) {
-            getLog().error(
-              { err: error, conversationId: conversation.id },
-              'workflow_status_failed'
-            );
-            return {
-              success: false,
-              message: 'Failed to retrieve workflow status. Please try again.',
-            };
-          }
-        }
-
-        case 'run': {
-          // Directly invoke a workflow by name (bypasses AI router)
-          const workflowName = args[1];
-          const workflowArgs = args.slice(2).join(' ');
-
-          if (!workflowName) {
-            return {
-              success: false,
-              message:
-                'Usage: /workflow run <name> [args]\n\nUse /workflow list to see available workflows.',
-            };
-          }
-
-          const workflowCwd = codebase
-            ? (conversation.cwd ?? codebase.default_cwd)
-            : getArchonWorkspacesPath();
-
-          getLog().debug(
-            { workflowName, args: workflowArgs, cwd: workflowCwd },
-            'workflow_run_invoked'
-          );
-
-          // Discover workflows with error handling
-          let workflows: readonly WorkflowDefinition[];
-          let loadErrors: readonly WorkflowLoadError[];
-          try {
-            const result = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
-            workflows = result.workflows;
-            loadErrors = result.errors;
-          } catch (error) {
-            const err = error as Error;
-            getLog().error({ err, cwd: workflowCwd }, 'workflow_discovery_failed');
-            return {
-              success: false,
-              message: `Failed to load workflows: ${err.message}\n\nCheck .archon/workflows/ for YAML syntax issues.`,
-            };
-          }
-
-          getLog().debug(
-            {
-              count: workflows.length,
-              names: workflows.map(w => w.name),
-              searchingFor: workflowName,
-            },
-            'workflows_discovered'
-          );
-
-          // Exact match first, then case-insensitive
-          let workflow = workflows.find(w => w.name === workflowName);
-          if (!workflow) {
-            const caseMatch = workflows.find(
-              w => w.name.toLowerCase() === workflowName.toLowerCase()
-            );
-            if (caseMatch) {
-              getLog().info(
-                { requested: workflowName, matched: caseMatch.name },
-                'workflow_run_case_insensitive_match'
-              );
-              workflow = caseMatch;
-            }
-          }
-
-          if (!workflow) {
-            // Check if the requested workflow had a load error
-            const loadError = loadErrors.find(
-              e =>
-                e.filename.replace(/\.ya?ml$/, '') === workflowName ||
-                e.filename === `${workflowName}.yaml` ||
-                e.filename === `${workflowName}.yml`
-            );
-            if (loadError) {
-              return {
-                success: false,
-                message: `Workflow \`${workflowName}\` failed to load: ${loadError.error}\n\nFix the YAML file and try again.`,
-              };
-            }
-            getLog().warn(
-              { requested: workflowName, available: workflows.map(w => w.name) },
-              'workflow_not_found'
-            );
-            return {
-              success: false,
-              message: `Workflow \`${workflowName}\` not found.\n\nUse /workflow list to see available workflows.`,
-            };
-          }
-
-          getLog().info({ workflow: workflow.name, args: workflowArgs }, 'workflow_starting');
-
-          // Return special result that triggers workflow execution in orchestrator
-          return {
-            success: true,
-            message: `Starting workflow: \`${workflow.name}\``,
-            workflow: {
-              definition: workflow,
-              args: workflowArgs,
-            },
-          };
-        }
-
-        default:
-          return {
-            success: false,
-            message:
-              'Usage:\n  /workflow list - Show available workflows\n  /workflow reload - Reload workflow definitions\n  /workflow status - Show running workflow details\n  /workflow cancel - Cancel running workflow\n  /workflow run <name> [args] - Run a workflow directly',
-          };
-      }
-    }
+    case 'workflow':
+      return handleWorkflowCommand(conversation, args);
 
     case 'init': {
       // Create .archon structure in current repo
@@ -1592,7 +1658,7 @@ Use /load-commands .archon/commands to register commands.`,
         };
       } catch (error) {
         const err = error as Error;
-        getLog().error({ err, command: 'init' }, 'init_failed');
+        getLog().error({ err, command: 'init' }, 'cmd.init_failed');
         return { success: false, message: `Failed to initialize: ${err.message}` };
       }
     }

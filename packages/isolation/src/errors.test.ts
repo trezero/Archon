@@ -1,11 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import {
-  classifyIsolationError,
-  formatWorktreeLimitMessage,
-  isKnownIsolationError,
-  IsolationBlockedError,
-} from './errors';
-import type { WorktreeStatusBreakdown } from './types';
+import { classifyIsolationError, isKnownIsolationError, IsolationBlockedError } from './errors';
 
 describe('classifyIsolationError', () => {
   test('matches "permission denied" in message', () => {
@@ -108,62 +102,9 @@ describe('isKnownIsolationError', () => {
   });
 });
 
-describe('formatWorktreeLimitMessage', () => {
-  const baseBreakdown: WorktreeStatusBreakdown = {
-    total: 25,
-    merged: 3,
-    stale: 5,
-    active: 17,
-    limit: 25,
-    mergedEnvs: [],
-    staleEnvs: [],
-    activeEnvs: [],
-  };
-
-  test('includes counts in message', () => {
-    const msg = formatWorktreeLimitMessage('my-repo', baseBreakdown, 14);
-    expect(msg).toContain('25/25');
-    expect(msg).toContain('3 merged');
-    expect(msg).toContain('5 stale');
-    expect(msg).toContain('17 active');
-  });
-
-  test('includes codebase name', () => {
-    const msg = formatWorktreeLimitMessage('my-repo', baseBreakdown, 14);
-    expect(msg).toContain('**my-repo**');
-  });
-
-  test('includes stale threshold days', () => {
-    const msg = formatWorktreeLimitMessage('my-repo', baseBreakdown, 14);
-    expect(msg).toContain('14+ days');
-  });
-
-  test('includes stale cleanup option when stale > 0', () => {
-    const msg = formatWorktreeLimitMessage('my-repo', baseBreakdown, 14);
-    expect(msg).toContain('/worktree cleanup stale');
-  });
-
-  test('omits stale cleanup option when stale = 0', () => {
-    const noStale = { ...baseBreakdown, stale: 0 };
-    const msg = formatWorktreeLimitMessage('my-repo', noStale, 14);
-    expect(msg).not.toContain('/worktree cleanup stale');
-  });
-
-  test('includes correct command text for worktree removal', () => {
-    const msg = formatWorktreeLimitMessage('my-repo', baseBreakdown, 14);
-    expect(msg).toContain('/worktree remove');
-    expect(msg).not.toContain('/worktree remove <name>');
-  });
-
-  test('always includes worktree list option', () => {
-    const msg = formatWorktreeLimitMessage('my-repo', baseBreakdown, 14);
-    expect(msg).toContain('/worktree list');
-  });
-});
-
 describe('IsolationBlockedError', () => {
   test('has correct name', () => {
-    const err = new IsolationBlockedError('blocked', 'limit_reached');
+    const err = new IsolationBlockedError('blocked', 'creation_failed');
     expect(err.name).toBe('IsolationBlockedError');
   });
 
@@ -173,12 +114,12 @@ describe('IsolationBlockedError', () => {
   });
 
   test('is instanceof Error', () => {
-    const err = new IsolationBlockedError('blocked', 'limit_reached');
+    const err = new IsolationBlockedError('blocked', 'creation_failed');
     expect(err).toBeInstanceOf(Error);
   });
 
   test('has correct message', () => {
-    const err = new IsolationBlockedError('test message', 'limit_reached');
+    const err = new IsolationBlockedError('test message', 'creation_failed');
     expect(err.message).toBe('test message');
   });
 });

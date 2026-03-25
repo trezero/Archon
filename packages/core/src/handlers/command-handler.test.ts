@@ -95,6 +95,7 @@ const mockIsolationEnvDbCreate = mock(() =>
 const mockIsolationEnvDbGet = mock(() => Promise.resolve(null));
 const mockIsolationEnvDbUpdate = mock(() => Promise.resolve());
 
+const mockCountActiveByCodebase = mock(() => Promise.resolve(0));
 mock.module('../db/isolation-environments', () => ({
   create: mockIsolationEnvDbCreate,
   getById: mockIsolationEnvDbGet,
@@ -103,6 +104,7 @@ mock.module('../db/isolation-environments', () => ({
   markDestroyed: mock(() => Promise.resolve()),
   getActiveByCodebase: mock(() => Promise.resolve([])),
   getActiveEnvironments: mock(() => Promise.resolve([])),
+  countActiveByCodebase: mockCountActiveByCodebase,
 }));
 
 // Mock isolation provider
@@ -140,6 +142,27 @@ mock.module('@archon/isolation', () => ({
     adopt: mock(() => Promise.resolve(null)),
     healthCheck: mock(() => Promise.resolve(true)),
   }),
+}));
+
+// Mock cleanup service
+const mockCleanupMergedWorktrees = mock(() =>
+  Promise.resolve({
+    removed: [] as string[],
+    skipped: [] as { branchName: string; reason: string }[],
+  })
+);
+const mockCleanupStaleWorktrees = mock(() =>
+  Promise.resolve({
+    removed: [] as string[],
+    skipped: [] as { branchName: string; reason: string }[],
+  })
+);
+mock.module('../services/cleanup-service', () => ({
+  cleanupMergedWorktrees: mockCleanupMergedWorktrees,
+  cleanupStaleWorktrees: mockCleanupStaleWorktrees,
+  getWorktreeStatusBreakdown: mock(() =>
+    Promise.resolve({ total: 0, active: 0, merged: 0, stale: 0 })
+  ),
 }));
 
 // Note: We removed mock.module('child_process') because:
@@ -190,6 +213,10 @@ function clearAllMocks(): void {
   mockIsolationEnvDbCreate.mockClear();
   mockIsolationEnvDbGet.mockClear();
   mockIsolationEnvDbUpdate.mockClear();
+  // Cleanup service mocks
+  mockCleanupMergedWorktrees.mockClear();
+  mockCleanupStaleWorktrees.mockClear();
+  mockCountActiveByCodebase.mockClear();
 }
 
 // Setup spies for internal modules
@@ -870,18 +897,43 @@ describe('CommandHandler', () => {
           expect(mockIsolationCreate).toHaveBeenCalled();
         });
 
-        test('should reject if already using a worktree', async () => {
+        test('should reject if already using a worktree (shows working path, not UUID)', async () => {
           const convWithWorktree: Conversation = {
             ...conversationWithCodebase,
-            isolation_env_id: '/workspace/my-repo/worktrees/existing-branch',
+            isolation_env_id: 'env-uuid-existing',
           };
+
+          // Mock DB lookup to return the working path for this UUID
+          mockIsolationEnvDbGet.mockResolvedValueOnce({
+            id: 'env-uuid-existing',
+            codebase_id: 'codebase-123',
+            working_path: '/workspace/my-repo/worktrees/existing-branch',
+            branch_name: 'existing-branch',
+          });
 
           const result = await handleCommand(convWithWorktree, '/worktree create new-branch');
 
           expect(result.success).toBe(false);
           expect(result.message).toContain('Already using worktree');
           expect(result.message).toMatch(/worktrees[\\\/]existing-branch/);
+          expect(result.message).not.toContain('env-uuid-existing');
           expect(result.message).toContain('/worktree remove first');
+        });
+
+        test('should fallback to UUID when isolation env not found in DB', async () => {
+          const convWithWorktree: Conversation = {
+            ...conversationWithCodebase,
+            isolation_env_id: 'env-uuid-orphaned',
+          };
+
+          // DB lookup returns null (orphaned reference)
+          mockIsolationEnvDbGet.mockResolvedValueOnce(null);
+
+          const result = await handleCommand(convWithWorktree, '/worktree create new-branch');
+
+          expect(result.success).toBe(false);
+          expect(result.message).toContain('Already using worktree');
+          expect(result.message).toContain('env-uuid-orphaned');
         });
       });
 
@@ -984,6 +1036,53 @@ describe('CommandHandler', () => {
           const result = await handleCommand(conversationWithCodebase, '/worktree foo');
           expect(result.success).toBe(false);
           expect(result.message).toContain('Usage');
+        });
+      });
+
+      describe('cleanup', () => {
+        test('should return usage for missing cleanup type', async () => {
+          const result = await handleCommand(conversationWithCodebase, '/worktree cleanup');
+          expect(result.success).toBe(false);
+          expect(result.message).toContain('Usage');
+          expect(result.message).toContain('merged');
+          expect(result.message).toContain('stale');
+        });
+
+        test('should return usage for invalid cleanup type', async () => {
+          const result = await handleCommand(conversationWithCodebase, '/worktree cleanup foo');
+          expect(result.success).toBe(false);
+          expect(result.message).toContain('Usage');
+        });
+
+        test('should report merged worktree cleanup results', async () => {
+          mockCleanupMergedWorktrees.mockResolvedValueOnce({
+            removed: ['feat-old', 'feat-done'],
+            skipped: [{ branchName: 'feat-protected', reason: 'has uncommitted changes' }],
+          });
+          mockCountActiveByCodebase.mockResolvedValueOnce(3);
+
+          const result = await handleCommand(conversationWithCodebase, '/worktree cleanup merged');
+
+          expect(result.success).toBe(true);
+          expect(result.message).toContain('Cleaned up 2 merged worktree(s)');
+          expect(result.message).toContain('feat-old');
+          expect(result.message).toContain('feat-done');
+          expect(result.message).toContain('Skipped 1 (protected)');
+          expect(result.message).toContain('feat-protected');
+          expect(result.message).toContain('Active worktrees: 3');
+        });
+
+        test('should report when no stale worktrees to clean up', async () => {
+          mockCleanupStaleWorktrees.mockResolvedValueOnce({
+            removed: [],
+            skipped: [],
+          });
+          mockCountActiveByCodebase.mockResolvedValueOnce(1);
+
+          const result = await handleCommand(conversationWithCodebase, '/worktree cleanup stale');
+
+          expect(result.success).toBe(true);
+          expect(result.message).toContain('No stale worktrees to clean up');
         });
       });
     });
@@ -1661,6 +1760,50 @@ describe('CommandHandler', () => {
         expect(result.success).toBe(true);
         expect(mockDeactivateSession).toHaveBeenCalledWith('session-repo', 'codebase-changed');
       });
+
+      test('/repo 0 should fail with not-found (out of range)', async () => {
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        const result = await handleCommand(baseConversation, '/repo 0');
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('Repository not found: 0');
+      });
+
+      test('/repo N where N > count should fail with not-found', async () => {
+        spyFsReaddir.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.endsWith('/workspaces') || pathStr.endsWith('\\workspaces')) {
+            return Promise.resolve([
+              { name: 'octocat', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          if (pathStr.includes('octocat')) {
+            return Promise.resolve([
+              { name: 'Hello-World', isDirectory: () => true, isFile: () => false },
+            ] as unknown as never[]);
+          }
+          return Promise.resolve([]);
+        });
+
+        const result = await handleCommand(baseConversation, '/repo 99');
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('Repository not found: 99');
+      });
     });
 
     describe('/repo-remove with nested structure (Issue #95)', () => {
@@ -1830,6 +1973,11 @@ describe('CommandHandler', () => {
 
         expect(result.success).toBe(true);
         expect(mockDeactivateSession).toHaveBeenCalledWith('session-remove', 'repo-removed');
+        // Verify conversation was unlinked from codebase
+        expect(mockUpdateConversation).toHaveBeenCalledWith(convWithCodebase.id, {
+          codebase_id: null,
+          cwd: null,
+        });
       });
     });
 

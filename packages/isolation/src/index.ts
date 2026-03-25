@@ -36,11 +36,7 @@ export { isPRIsolationRequest } from './types';
 export type { IIsolationStore } from './store';
 
 // --- Errors ---
-export {
-  IsolationBlockedError,
-  classifyIsolationError,
-  formatWorktreeLimitMessage,
-} from './errors';
+export { IsolationBlockedError, classifyIsolationError } from './errors';
 
 // --- Factory ---
 export { getIsolationProvider, configureIsolation, resetIsolationProvider } from './factory';

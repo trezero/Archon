@@ -98,7 +98,6 @@ import {
   cleanupStaleWorktrees,
   removeEnvironment,
   onConversationClosed,
-  MAX_WORKTREES_PER_CODEBASE,
   SESSION_RETENTION_DAYS,
 } from './cleanup-service';
 
@@ -773,7 +772,6 @@ describe('getWorktreeStatusBreakdown', () => {
     expect(breakdown.merged).toBe(1);
     expect(breakdown.stale).toBe(1); // env-2 is stale (30 days), env-4 is Telegram so not counted as stale
     expect(breakdown.active).toBe(2); // env-3 active, env-4 Telegram (counted as active, not stale)
-    expect(breakdown.limit).toBe(MAX_WORKTREES_PER_CODEBASE);
   });
 
   test('excludes telegram from stale count', async () => {
@@ -1186,17 +1184,5 @@ describe('cleanupStaleWorktrees', () => {
       branchName: 'dirty-stale-branch',
       reason: 'has uncommitted changes',
     });
-  });
-});
-
-describe('MAX_WORKTREES_PER_CODEBASE', () => {
-  test('exports configuration constant', () => {
-    expect(typeof MAX_WORKTREES_PER_CODEBASE).toBe('number');
-    expect(MAX_WORKTREES_PER_CODEBASE).toBeGreaterThan(0);
-  });
-
-  test('has default value of 25', () => {
-    // Unless env var is set, default should be 25
-    expect(MAX_WORKTREES_PER_CODEBASE).toBe(25);
   });
 });

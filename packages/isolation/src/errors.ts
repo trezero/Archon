@@ -1,4 +1,4 @@
-import type { IsolationBlockReason, WorktreeStatusBreakdown } from './types';
+import type { IsolationBlockReason } from './types';
 
 /**
  * Error thrown when isolation is required but cannot be provided.
@@ -102,29 +102,4 @@ export function isKnownIsolationError(err: Error): boolean {
   ];
 
   return knownPatterns.some(pattern => errorLower.includes(pattern));
-}
-
-/**
- * Format the worktree limit reached message with actionable options.
- */
-export function formatWorktreeLimitMessage(
-  codebaseName: string,
-  breakdown: WorktreeStatusBreakdown,
-  staleThresholdDays: number
-): string {
-  let msg = `Worktree limit reached (${String(breakdown.total)}/${String(breakdown.limit)}) for **${codebaseName}**.\n\n`;
-
-  msg += '**Status:**\n';
-  msg += `• ${String(breakdown.merged)} merged (can auto-remove)\n`;
-  msg += `• ${String(breakdown.stale)} stale (no activity in ${String(staleThresholdDays)}+ days)\n`;
-  msg += `• ${String(breakdown.active)} active\n\n`;
-
-  msg += '**Options:**\n';
-  if (breakdown.stale > 0) {
-    msg += '• `/worktree cleanup stale` - Remove stale worktrees\n';
-  }
-  msg += '• `/worktree list` - See all worktrees\n';
-  msg += '• `/worktree remove` - Remove current worktree';
-
-  return msg;
 }

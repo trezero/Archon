@@ -364,7 +364,7 @@ import * as core from '@archon/core';  // Don't do this
 
 **2. Command Handler** (`packages/core/src/handlers/`)
 - Process slash commands (deterministic, no AI)
-- Commands: `/command-set`, `/command-invoke`, `/load-commands`, `/clone`, `/getcwd`, `/setcwd`, `/codebase-switch`, `/status`, `/commands`, `/help`, `/reset`
+- Commands: `/command-set`, `/load-commands`, `/clone`, `/getcwd`, `/setcwd`, `/repos`, `/repo`, `/repo-remove`, `/worktree`, `/workflow`, `/status`, `/commands`, `/help`, `/reset`, `/reset-context`, `/init`
 - Update database, perform operations, return responses
 
 **3. Orchestrator** (`packages/core/src/orchestrator/`)
@@ -596,7 +596,7 @@ async function createSession(conversationId: string, codebaseId: string) {
 1. **Codebase Commands** (per-repo):
    - Stored in `.archon/commands/` (plain text/markdown)
    - Auto-detected via `/clone` or `/load-commands <folder>`
-   - Invoked via `/command-invoke <name> [args]`
+   - Loaded by `/clone` or `/load-commands`, invoked by AI via orchestrator routing
 
 2. **Workflows** (YAML-based):
    - Stored in `.archon/workflows/` (searched recursively)

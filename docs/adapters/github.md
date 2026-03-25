@@ -95,7 +95,7 @@ Interact by @mentioning `@Archon` in issues or PRs:
 
 ```
 @Archon can you analyze this bug?
-@Archon /command-invoke prime
+@Archon prime the codebase
 @Archon review this implementation
 ```
 

@@ -713,13 +713,13 @@ The command system allows users to define custom workflows in Git-versioned mark
 ### Architecture
 
 ```
-User: /command-invoke plan "Add dark mode"
+User: "Plan adding dark mode to project X"
            ↓
-Orchestrator: Parse command + args
+Orchestrator: Route to workflow via AI router
            ↓
-Read file: .claude/commands/plan.md
+Read command file: .archon/commands/plan.md
            ↓
-Variable substitution: $1 → "Add dark mode"
+Variable substitution: $ARGUMENTS → "Add dark mode"
            ↓
 Send to AI client: Injected prompt
            ↓
@@ -733,11 +733,11 @@ Stream responses back to platform
 ```json
 {
   "prime": {
-    "path": ".claude/commands/prime.md",
+    "path": ".archon/commands/prime.md",
     "description": "Research codebase"
   },
   "plan": {
-    "path": ".claude/commands/plan-feature.md",
+    "path": ".archon/commands/plan-feature.md",
     "description": "Create implementation plan"
   }
 }
@@ -750,13 +750,13 @@ Stream responses back to platform
 **Manual registration** (`/command-set`):
 
 ```bash
-/command-set analyze .claude/commands/analyze.md
+/command-set analyze .archon/commands/analyze.md
 ```
 
 **Bulk loading** (`/load-commands`):
 
 ```bash
-/load-commands .claude/commands
+/load-commands .archon/commands
 # Loads all .md files: prime.md → prime, plan.md → plan
 ```
 
@@ -823,9 +823,10 @@ Focus on: $ARGUMENTS
 Provide recommendations for improvement.
 ```
 
-```bash
-/command-invoke analyze "security" "authentication" "authorization"
-# Becomes:
+```
+User asks: "Analyze the security of authentication and authorization"
+# Orchestrator routes to the `analyze` command
+# Variable substitution produces:
 # Analyze the following aspect of the codebase: security
 # Focus on: security authentication authorization
 # Provide recommendations for improvement.
@@ -833,65 +834,36 @@ Provide recommendations for improvement.
 
 ### Slash Command Routing
 
-**Orchestrator logic** (`src/orchestrator/orchestrator.ts:28-42`):
+**Orchestrator logic** (`packages/core/src/orchestrator/`):
 
-```typescript
-if (message.startsWith('/')) {
-  if (!message.startsWith('/command-invoke')) {
-    // Handle deterministic commands (help, status, clone, etc.)
-    const result = await commandHandler.handleCommand(conversation, message);
-    await platform.sendMessage(conversationId, result.message);
-    return;
-  }
-  // /command-invoke falls through to AI handling
-}
-```
+All messages starting with `/` are routed to the Command Handler first. If the command is recognized (deterministic), it is handled directly. Non-slash messages go through the AI router, which discovers available workflows and commands, then routes the user's request to the appropriate one.
 
 **Command categories:**
 
 1. **Deterministic** (handled by Command Handler):
    - `/help`, `/status`, `/getcwd`, `/setcwd`
-   - `/clone`, `/repos`
+   - `/clone`, `/repos`, `/repo`, `/repo-remove`
    - `/command-set`, `/load-commands`, `/commands`
-   - `/reset`
+   - `/worktree`, `/workflow`
+   - `/reset`, `/reset-context`, `/init`
 
-2. **AI-invoked** (handled by Orchestrator):
-   - `/command-invoke <name> [args...]` - Loads command file and sends to AI
+2. **AI-routed** (handled by Orchestrator):
+   - Natural language messages are routed to workflows and commands via AI
 
 ### Command Handler Implementation
 
-**Reference:** `src/handlers/command-handler.ts`
+**Reference:** `packages/core/src/handlers/command-handler.ts`
 
-**Key patterns:**
+The handler is split into focused functions per command group:
 
-```typescript
-export async function handleCommand(
-  conversation: Conversation,
-  message: string
-): Promise<CommandResult> {
-  const { command, args } = parseCommand(message);
+- `handleCommand()` — Top-level dispatcher (switch on command name)
+- `handleRepoCommand()` — `/repo` (switch repos, pull, auto-load commands)
+- `handleRepoRemoveCommand()` — `/repo-remove` (delete repo + codebase record)
+- `handleWorktreeCommand()` — `/worktree` subcommands (create, list, remove, cleanup, orphans)
+- `handleWorkflowCommand()` — `/workflow` subcommands (list, reload, run, status, cancel)
+- `resolveRepoArg()` — Shared helper for repo lookup by number or name
 
-  switch (command) {
-    case 'clone':
-      // Clone repo, create codebase, update conversation
-      return { success: true, message: '...', modified: true };
-
-    case 'setcwd':
-      // Update working directory, reset session
-      await db.updateConversation(conversation.id, { cwd: args[0] });
-      await sessionDb.deactivateSession(session.id);
-      return { success: true, message: '...', modified: true };
-
-    case 'load-commands':
-      // Scan folder, register all .md files
-      const files = await readdir(folderPath).filter(f => f.endsWith('.md'));
-      await codebaseDb.updateCodebaseCommands(codebase.id, commands);
-      return { success: true, message: `Loaded ${files.length} commands` };
-  }
-}
-```
-
-**Important:** `modified: true` flag signals orchestrator to reload conversation state.
+**Important:** `modified: true` flag on `CommandResult` signals orchestrator to reload conversation state.
 
 ---
 
@@ -1148,11 +1120,11 @@ await updateConversation(id, { codebase_id: '...' });
 **Plan→Execute transition (immutable sessions):**
 
 ```
-1. /command-invoke plan-feature "Add dark mode"
+1. User: "Plan adding dark mode" → routed to plan-feature workflow
    → transitionSession() or resumeSession()
    → updateSessionMetadata({ lastCommand: 'plan-feature' })
 
-2. /command-invoke execute
+2. User: "Execute the plan" → routed to execute workflow
    → detectPlanToExecuteTransition() // Returns 'plan-to-execute' trigger
    → transitionSession(conversationId, 'plan-to-execute', {...})
    → New session created, parent_session_id points to planning session
@@ -1186,11 +1158,11 @@ Send response: "Repository cloned! Found: .claude/commands/"
 ```
 
 ```
-User types: /command-invoke prime
+User types: "Prime the codebase"
          ↓
-Orchestrator: Parse command
+Orchestrator: Route via AI router
          ↓
-Load command file: .claude/commands/prime.md
+Load command file: .archon/commands/prime.md
          ↓
 Variable substitution (no args in this case)
          ↓
@@ -1210,7 +1182,7 @@ Save session ID for next message
 ### GitHub Webhook Flow
 
 ```
-User comments: @Archon /command-invoke prime
+User comments: @Archon prime the codebase
          ↓
 GitHub sends webhook to POST /webhooks/github
          ↓
@@ -1226,7 +1198,7 @@ First mention on this issue?
          ↓
 Strip @Archon from comment
          ↓
-Orchestrator.handleMessage(adapter, "user/repo#42", "/command-invoke prime")
+Orchestrator.handleMessage(adapter, "user/repo#42", "prime the codebase")
          ↓
 Load command file, substitute variables
          ↓

@@ -34,11 +34,10 @@ function getLog(): ReturnType<typeof createLogger> {
 // Configuration constants (configurable via env vars)
 const STALE_THRESHOLD_DAYS = parseInt(process.env.STALE_THRESHOLD_DAYS ?? '14', 10);
 const CLEANUP_INTERVAL_HOURS = parseInt(process.env.CLEANUP_INTERVAL_HOURS ?? '6', 10);
-const MAX_WORKTREES_PER_CODEBASE = parseInt(process.env.MAX_WORKTREES_PER_CODEBASE ?? '25', 10);
 const SESSION_RETENTION_DAYS = parseInt(process.env.SESSION_RETENTION_DAYS ?? '30', 10);
 
 // Export configuration for use by other modules
-export { MAX_WORKTREES_PER_CODEBASE, STALE_THRESHOLD_DAYS, SESSION_RETENTION_DAYS };
+export { STALE_THRESHOLD_DAYS, SESSION_RETENTION_DAYS };
 
 // Module-level variable for scheduler
 let cleanupIntervalId: NodeJS.Timeout | null = null;
@@ -416,7 +415,6 @@ export async function getWorktreeStatusBreakdown(
     merged: 0,
     stale: 0,
     active: 0,
-    limit: MAX_WORKTREES_PER_CODEBASE,
     mergedEnvs: [],
     staleEnvs: [],
     activeEnvs: [],

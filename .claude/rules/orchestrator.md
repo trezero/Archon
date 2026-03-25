@@ -39,7 +39,7 @@ Only **5 commands** are handled deterministically (orchestrator-agent.ts:420):
 | `/workflow` | Subcommands: `list`, `run`, `status`, `cancel`, `reload` |
 | `/register-project` | Handled inline — creates codebase DB record |
 
-**All other slash commands fall through to the AI router.** Legacy commands (`/clone`, `/setcwd`, `/getcwd`, `/repos`, `/repo`, `/worktree`, `/init`, `/command-set`, `/command-invoke`, `/load-commands`, `/reset-context`) still have implementations in command-handler.ts but are only reachable via the old direct path. The `default` case returns a deprecation notice for a subset of these: `codebase-switch`, `command-invoke`, `template-*`.
+**All other slash commands fall through to the AI router.** Additional commands (`/clone`, `/setcwd`, `/getcwd`, `/repos`, `/repo`, `/repo-remove`, `/worktree`, `/init`, `/command-set`, `/load-commands`, `/commands`, `/reset-context`) are handled by command-handler.ts. Unrecognized commands return an "Unknown command" error.
 
 ## Routing AI — Prompt Building (prompt-builder.ts)
 
