@@ -1118,17 +1118,18 @@ export function registerApiRoutes(
 
     // Merge lock-based and DB-based active tracking.
     // Background workflows bypass the lock manager, so we combine both sources.
+    const lockActiveSet = new Set(stats.activeConversationIds);
     const backgroundConversationIds = runningWorkflowRows
       .map(r => r.conversation_id)
-      .filter(id => !stats.activeConversationIds.includes(id));
+      .filter(id => !lockActiveSet.has(id));
     const allActiveIds = [...stats.activeConversationIds, ...backgroundConversationIds];
 
     return c.json({
       status: 'ok',
       adapter: 'web',
       concurrency: {
-        ...stats,
         active: allActiveIds.length,
+        queued: stats.queuedTotal,
         activeConversationIds: allActiveIds,
       },
       runningWorkflows: runningWorkflowRows.length,
