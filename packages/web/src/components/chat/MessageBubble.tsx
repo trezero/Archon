@@ -116,6 +116,7 @@ function MessageBubbleRaw({ message }: MessageBubbleProps): React.ReactElement {
               onClick={copyMessage}
               className="shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-text-tertiary hover:text-text-primary"
               title="Copy message"
+              aria-label={copied ? 'Copied' : 'Copy message'}
             >
               {copied ? (
                 <Check className="h-3.5 w-3.5 text-success" />
