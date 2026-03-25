@@ -8,7 +8,7 @@ from typing import Any
 
 from ...config.logfire_config import get_logger
 from .a2ui_client import A2UIClient
-from .a2ui_models import A2UIComponent, A2UIGenerationRequest, A2UIGenerationResponse
+from .a2ui_models import A2UIGenerationRequest
 
 logger = get_logger(__name__)
 

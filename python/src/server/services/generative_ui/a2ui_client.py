@@ -1,7 +1,6 @@
 """HTTP client for the Second Brain's A2UI generation endpoint."""
 
 import os
-from typing import Any
 
 import httpx
 
