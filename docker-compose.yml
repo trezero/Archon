@@ -193,6 +193,31 @@ services:
       archon-server:
         condition: service_healthy
 
+  # Trinity A2UI Generation Service (Second Brain)
+  trinity-a2ui:
+    profiles:
+      - trinity
+    build:
+      context: ../second-brain-research-dashboard/agent
+      dockerfile: Dockerfile
+    container_name: trinity-a2ui
+    restart: unless-stopped
+    ports:
+      - "${A2UI_PORT:-8054}:8054"
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${A2UI_MODEL:-anthropic/claude-haiku-4-5-20251001}
+      - A2UI_MAX_COMPONENTS=${A2UI_MAX_COMPONENTS:-20}
+      - A2UI_TIMEOUT=${A2UI_TIMEOUT:-10}
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8054/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 networks:
   app-network:
     driver: bridge
