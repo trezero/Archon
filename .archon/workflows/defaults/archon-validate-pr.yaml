@@ -11,7 +11,6 @@ description: |
   to avoid conflicts. Produces artifacts in $ARTIFACTS_DIR/ and posts a validation report.
 
 provider: claude
-model: opus
 
 nodes:
   # ═══════════════════════════════════════════════════════════════
@@ -181,11 +180,8 @@ nodes:
       pkill -f "PORT=$BACKEND_PORT.*bun" 2>/dev/null || true
       pkill -f "vite.*port.*$FRONTEND_PORT" 2>/dev/null || true
 
-      # Close this workflow's browser session only (scoped by session ID)
-      BROWSER_SESSION=$(cat "$ARTIFACTS_DIR/.browser-session" 2>/dev/null | tr -d '\n')
-      if [ -n "$BROWSER_SESSION" ]; then
-        agent-browser --session "$BROWSER_SESSION" close 2>/dev/null || true
-      fi
+      # Close any leftover browser sessions
+      agent-browser close 2>/dev/null || true
 
       # Remove main E2E worktree if it still exists (safety net)
       CANONICAL_REPO=$(cat "$ARTIFACTS_DIR/.canonical-repo" 2>/dev/null | tr -d '\n')
