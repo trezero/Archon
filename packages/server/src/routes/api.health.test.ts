@@ -289,11 +289,11 @@ describe('GET /api/health', () => {
     expect(response.status).toBe(200);
 
     const body = (await response.json()) as {
-      concurrency: { active: number; queued: number; activeConversationIds: string[] };
+      concurrency: { active: number; queuedTotal: number; activeConversationIds: string[] };
       runningWorkflows: number;
     };
     expect(body.concurrency.active).toBe(2);
-    expect(body.concurrency.queued).toBe(3);
+    expect(body.concurrency.queuedTotal).toBe(3);
     expect(body.concurrency.activeConversationIds).toEqual(['conv-1', 'conv-2']);
     expect(body.runningWorkflows).toBe(1);
   });

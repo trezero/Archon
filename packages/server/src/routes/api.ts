@@ -1128,8 +1128,8 @@ export function registerApiRoutes(
       status: 'ok',
       adapter: 'web',
       concurrency: {
+        ...stats,
         active: allActiveIds.length,
-        queued: stats.queuedTotal,
         activeConversationIds: allActiveIds,
       },
       runningWorkflows: runningWorkflowRows.length,
