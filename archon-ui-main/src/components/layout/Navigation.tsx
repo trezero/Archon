@@ -1,4 +1,4 @@
-import { BookOpen, Bot, MessageSquare, Palette, Settings, Sparkles } from "lucide-react";
+import { BookOpen, Bot, Layers, MessageSquare, Palette, Settings, Sparkles } from "lucide-react";
 import type React from "react";
 import { Link, useLocation } from "react-router-dom";
 // TEMPORARY: Use old SettingsContext until settings are migrated
@@ -39,6 +39,12 @@ export function Navigation({ className }: NavigationProps) {
       icon: <Bot className="h-5 w-5" />,
       label: "Agent Work Orders",
       enabled: agentWorkOrdersEnabled,
+    },
+    {
+      path: "/workflows",
+      icon: <Layers className="h-5 w-5" />,
+      label: "Workflows",
+      enabled: true,
     },
     {
       path: "/auto-research",

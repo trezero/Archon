@@ -18,6 +18,7 @@ import { AgentWorkOrdersPage } from './pages/AgentWorkOrdersPage';
 import { AgentWorkOrderDetailPage } from './pages/AgentWorkOrderDetailPage';
 import AutoResearchPage from './pages/AutoResearchPage';
 import { ChatView } from './features/chat/views/ChatView';
+import WorkflowsPage from './features/workflows/components/WorkflowsPage';
 import { DisconnectScreenOverlay } from './components/DisconnectScreenOverlay';
 import { ErrorBoundaryWithBugReport } from './components/bug-report/ErrorBoundaryWithBugReport';
 import { MigrationBanner } from './components/ui/MigrationBanner';
@@ -57,6 +58,7 @@ const AppRoutes = () => {
       )}
       <Route path="/auto-research" element={<AutoResearchPage />} />
       <Route path="/chat" element={<ChatView />} />
+      <Route path="/workflows" element={<WorkflowsPage />} />
     </Routes>
   );
 };
