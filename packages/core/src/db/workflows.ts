@@ -140,6 +140,27 @@ export async function countRunningWorkflows(): Promise<number> {
   }
 }
 
+export async function getRunningWorkflows(): Promise<
+  { id: string; conversation_id: string; workflow_name: string; started_at: string }[]
+> {
+  try {
+    const result = await pool.query<{
+      id: string;
+      conversation_id: string;
+      workflow_name: string;
+      started_at: string;
+    }>(
+      "SELECT id, conversation_id, workflow_name, started_at FROM remote_agent_workflow_runs WHERE status = 'running' ORDER BY started_at ASC",
+      []
+    );
+    return [...result.rows];
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err }, 'db.workflow_runs_get_running_failed');
+    return []; // Non-critical: don't break health check
+  }
+}
+
 export async function findResumableRun(
   workflowName: string,
   workingPath: string,

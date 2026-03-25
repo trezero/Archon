@@ -1114,12 +1114,24 @@ export function registerApiRoutes(
   // GET /api/health - Health check with web adapter info
   app.get('/api/health', async c => {
     const stats = lockManager.getStats();
-    const runningWorkflows = await workflowDb.countRunningWorkflows();
+    const runningWorkflowRows = await workflowDb.getRunningWorkflows();
+
+    // Merge lock-based and DB-based active tracking.
+    // Background workflows bypass the lock manager, so we combine both sources.
+    const backgroundConversationIds = runningWorkflowRows
+      .map(r => r.conversation_id)
+      .filter(id => !stats.activeConversationIds.includes(id));
+    const allActiveIds = [...stats.activeConversationIds, ...backgroundConversationIds];
+
     return c.json({
       status: 'ok',
       adapter: 'web',
-      concurrency: stats,
-      runningWorkflows,
+      concurrency: {
+        ...stats,
+        active: allActiveIds.length,
+        activeConversationIds: allActiveIds,
+      },
+      runningWorkflows: runningWorkflowRows.length,
     });
   });
 }
