@@ -95,15 +95,20 @@ export function isSingleStep(step: WorkflowStep): step is SingleStep {
 }
 
 /**
- * Loop configuration for Ralph-style autonomous iteration
+ * Configuration for a loop node within a DAG workflow.
+ * Runs a prompt repeatedly until a completion signal or deterministic bash condition.
  */
-export interface LoopConfig {
-  /** Completion signal to detect in AI output (e.g., "COMPLETE") */
+export interface LoopNodeConfig {
+  /** Inline prompt text executed each iteration */
+  prompt: string;
+  /** Completion signal string detected in AI output (e.g., "COMPLETE") */
   until: string;
-  /** Maximum iterations allowed; exceeding this fails the workflow with an error */
+  /** Maximum iterations allowed; exceeding this fails the node */
   max_iterations: number;
   /** Whether to start fresh session each iteration (default: false) */
   fresh_context?: boolean;
+  /** Optional bash script run after each iteration; exit 0 = complete */
+  until_bash?: string;
 }
 
 /** Common fields shared by all workflow types */
@@ -122,14 +127,6 @@ interface StepWorkflow extends WorkflowBase {
   readonly steps: readonly WorkflowStep[];
   loop?: never;
   prompt?: never;
-  nodes?: never;
-}
-
-/** Loop-based workflow - autonomous iteration until completion */
-interface LoopWorkflow extends WorkflowBase {
-  steps?: never;
-  loop: LoopConfig;
-  prompt: string;
   nodes?: never;
 }
 
@@ -316,6 +313,7 @@ export interface CommandNode extends DagNodeBase {
   command: string;
   prompt?: never;
   bash?: never;
+  loop?: never;
 }
 
 /** DAG node with an inline prompt (no command file) */
@@ -323,6 +321,7 @@ export interface PromptNode extends DagNodeBase {
   prompt: string;
   command?: never;
   bash?: never;
+  loop?: never;
 }
 
 /** DAG node that runs a shell script without AI */
@@ -332,32 +331,45 @@ export interface BashNode extends DagNodeBase {
   timeout?: number;
   command?: never;
   prompt?: never;
+  loop?: never;
 }
 
-/** A single node in a DAG workflow. command, prompt, and bash are mutually exclusive. */
-export type DagNode = CommandNode | PromptNode | BashNode;
+/** DAG node that runs an AI prompt in a loop until a completion condition is met */
+export interface LoopNode extends DagNodeBase {
+  loop: LoopNodeConfig;
+  command?: never;
+  prompt?: never;
+  bash?: never;
+}
+
+/** A single node in a DAG workflow. command, prompt, bash, and loop are mutually exclusive. */
+export type DagNode = CommandNode | PromptNode | BashNode | LoopNode;
 
 /** Type guard: check if a DAG node is a bash (shell script) node */
 export function isBashNode(node: DagNode): node is BashNode {
   return 'bash' in node && typeof node.bash === 'string';
 }
 
+/** Type guard: check if a DAG node is a loop (iterative) node */
+export function isLoopNode(node: DagNode): node is LoopNode {
+  return 'loop' in node && typeof node.loop === 'object' && node.loop !== null;
+}
+
 /** DAG-based workflow — nodes with explicit dependency edges */
 interface DagWorkflow extends WorkflowBase {
   readonly nodes: readonly DagNode[];
   steps?: never;
-  loop?: never;
   prompt?: never;
 }
 
 /**
  * Workflow definition parsed from YAML - discriminated union
  *
- * Either step-based (with `steps`), loop-based (with `loop` + `prompt`),
- * or DAG-based (with `nodes`).
+ * Either step-based (with `steps`) or DAG-based (with `nodes`).
+ * Loop iteration is available as a DAG node type (LoopNode), not a standalone workflow type.
  * The `never` types ensure TypeScript enforces mutual exclusivity at compile time.
  */
-export type WorkflowDefinition = StepWorkflow | LoopWorkflow | DagWorkflow;
+export type WorkflowDefinition = StepWorkflow | DagWorkflow;
 
 /**
  * Type guard: check if workflow is a DAG workflow

@@ -316,3 +316,43 @@ export function buildPromptWithContext(
 
   return prompt;
 }
+
+// ─── Completion Signal Detection ────────────────────────────────────────────
+
+/**
+ * Escape special regex characters in string
+ */
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Detect whether the AI output contains a completion signal.
+ *
+ * Supports two formats:
+ * 1. <promise>SIGNAL</promise> - Recommended; prevents false positives in prose
+ * 2. Plain SIGNAL - Backwards compatibility; only at end of output or on own line
+ *
+ * The <promise> tag format uses case-insensitive matching for the tags.
+ * Plain signal detection is restrictive to prevent false positives.
+ */
+export function detectCompletionSignal(output: string, signal: string): boolean {
+  // Check for <promise>SIGNAL</promise> format (recommended - prevents false positives)
+  // Case-insensitive for tags
+  const promisePattern = new RegExp(`<promise>\\s*${escapeRegExp(signal)}\\s*</promise>`, 'i');
+  if (promisePattern.test(output)) {
+    return true;
+  }
+  // Plain signal detection - restrictive to prevent false positives like "not COMPLETE yet"
+  // Only matches if signal is:
+  // 1. At the very end of output (with optional trailing whitespace/punctuation)
+  // 2. On its own line
+  const endPattern = new RegExp(`${escapeRegExp(signal)}[\\s.,;:!?]*$`);
+  const ownLinePattern = new RegExp(`^\\s*${escapeRegExp(signal)}\\s*$`, 'm');
+  return endPattern.test(output) || ownLinePattern.test(output);
+}
+
+/** Strip internal completion signal tags before sending to user-facing output. */
+export function stripCompletionTags(content: string): string {
+  return content.replace(/<promise>[\s\S]*?<\/promise>/gi, '').trim();
+}

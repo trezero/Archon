@@ -5,7 +5,7 @@
  */
 import type { Codebase } from '../types';
 import type { WorkflowDefinition } from '@archon/workflows';
-import { isSingleStep } from '@archon/workflows';
+import { isDagWorkflow, isSingleStep } from '@archon/workflows';
 
 /**
  * Format a single project for the orchestrator prompt.
@@ -32,8 +32,8 @@ export function formatWorkflowSection(workflows: readonly WorkflowDefinition[]):
   for (const w of workflows) {
     section += `**${w.name}**\n`;
     section += `  ${w.description}\n`;
-    if (w.loop) {
-      section += `  Type: Loop (until \`${w.loop.until}\`, max ${String(w.loop.max_iterations)} iterations)\n`;
+    if (isDagWorkflow(w)) {
+      section += `  Type: DAG (${String(w.nodes.length)} nodes)\n`;
     } else if (w.steps) {
       const stepNames = w.steps.map(s =>
         isSingleStep(s) ? s.command : `[${String(s.parallel.length)} parallel]`

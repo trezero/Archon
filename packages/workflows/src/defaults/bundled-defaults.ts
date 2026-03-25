@@ -42,11 +42,8 @@ import archonAssistWf from '../../../../.archon/workflows/defaults/archon-assist
 import archonComprehensivePrReviewWf from '../../../../.archon/workflows/defaults/archon-comprehensive-pr-review.yaml' with { type: 'text' };
 import archonFeatureDevelopmentWf from '../../../../.archon/workflows/defaults/archon-feature-development.yaml' with { type: 'text' };
 import archonFixGithubIssueWf from '../../../../.archon/workflows/defaults/archon-fix-github-issue.yaml' with { type: 'text' };
-import archonRalphFreshWf from '../../../../.archon/workflows/defaults/archon-ralph-fresh.yaml' with { type: 'text' };
-import archonRalphStatefulWf from '../../../../.archon/workflows/defaults/archon-ralph-stateful.yaml' with { type: 'text' };
 import archonResolveConflictsWf from '../../../../.archon/workflows/defaults/archon-resolve-conflicts.yaml' with { type: 'text' };
 import archonSmartPrReviewWf from '../../../../.archon/workflows/defaults/archon-smart-pr-review.yaml' with { type: 'text' };
-import archonTestLoopWf from '../../../../.archon/workflows/defaults/archon-test-loop.yaml' with { type: 'text' };
 import archonValidatePrWf from '../../../../.archon/workflows/defaults/archon-validate-pr.yaml' with { type: 'text' };
 import archonRemotionGenerateWf from '../../../../.archon/workflows/defaults/archon-remotion-generate.yaml' with { type: 'text' };
 
@@ -89,11 +86,8 @@ export const BUNDLED_WORKFLOWS: Record<string, string> = {
   'archon-comprehensive-pr-review': archonComprehensivePrReviewWf,
   'archon-feature-development': archonFeatureDevelopmentWf,
   'archon-fix-github-issue': archonFixGithubIssueWf,
-  'archon-ralph-fresh': archonRalphFreshWf,
-  'archon-ralph-stateful': archonRalphStatefulWf,
   'archon-resolve-conflicts': archonResolveConflictsWf,
   'archon-smart-pr-review': archonSmartPrReviewWf,
-  'archon-test-loop': archonTestLoopWf,
   'archon-validate-pr': archonValidatePrWf,
   'archon-remotion-generate': archonRemotionGenerateWf,
 };

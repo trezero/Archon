@@ -226,12 +226,12 @@ packages/
 │       └── index.ts          # Package exports
 ├── workflows/                # @archon/workflows - Workflow engine (depends on @archon/git + @archon/paths)
 │   └── src/
-│       ├── types.ts          # Workflow type definitions (step, loop, DAG)
+│       ├── types.ts          # Workflow type definitions (step, DAG, loop node)
 │       ├── loader.ts         # YAML parsing + validation (parseWorkflow)
 │       ├── workflow-discovery.ts # Workflow filesystem discovery (discoverWorkflows, discoverWorkflowsWithConfig)
 │       ├── executor-shared.ts # Shared executor infrastructure (error classification, variable substitution)
 │       ├── router.ts         # Prompt building + invocation parsing
-│       ├── executor.ts       # Sequential, parallel, loop, DAG execution (executeWorkflow)
+│       ├── executor.ts       # Sequential, parallel, DAG execution (executeWorkflow)
 │       ├── dag-executor.ts   # DAG-specific execution logic
 │       ├── store.ts          # IWorkflowStore interface (database abstraction)
 │       ├── deps.ts           # WorkflowDeps injection types (IWorkflowPlatform, IWorkflowAssistantClient)
@@ -601,8 +601,8 @@ async function createSession(conversationId: string, codebaseId: string) {
 2. **Workflows** (YAML-based):
    - Stored in `.archon/workflows/` (searched recursively)
    - Multi-step AI execution chains, discovered at runtime
-   - Three execution modes (mutually exclusive): `steps:` (sequential), `loop:` (iterative), `nodes:` (DAG)
-   - **`nodes:` (DAG mode)**: Nodes with explicit `depends_on` edges; independent nodes in the same topological layer run concurrently. Node types: `command:` (named command file), `prompt:` (inline prompt), `bash:` (shell script, stdout captured as `$nodeId.output`, no AI). Supports `when:` conditions, `trigger_rule` join semantics, `$nodeId.output` substitution, `output_format` for structured JSON output (Claude and Codex), `allowed_tools`/`denied_tools` for per-node tool restrictions (Claude only), `hooks` for per-node SDK hook callbacks (Claude only) — see docs/hooks.md, `mcp` for per-node MCP server config files (Claude only, env vars expanded at execution time) — see docs/mcp-servers.md, and `skills` for per-node skill preloading via AgentDefinition wrapping (Claude only) — see docs/skills.md
+   - Two execution modes (mutually exclusive): `steps:` (sequential), `nodes:` (DAG)
+   - **`nodes:` (DAG mode)**: Nodes with explicit `depends_on` edges; independent nodes in the same topological layer run concurrently. Node types: `command:` (named command file), `prompt:` (inline prompt), `bash:` (shell script, stdout captured as `$nodeId.output`, no AI), `loop:` (iterative AI prompt until completion signal). Supports `when:` conditions, `trigger_rule` join semantics, `$nodeId.output` substitution, `output_format` for structured JSON output (Claude and Codex), `allowed_tools`/`denied_tools` for per-node tool restrictions (Claude only), `hooks` for per-node SDK hook callbacks (Claude only) — see docs/hooks.md, `mcp` for per-node MCP server config files (Claude only, env vars expanded at execution time) — see docs/mcp-servers.md, and `skills` for per-node skill preloading via AgentDefinition wrapping (Claude only) — see docs/skills.md
    - Provider inherited from `.archon/config.yaml` unless explicitly set; per-node `provider` and `model` overrides supported in DAG mode
    - Model and options can be set per workflow or inherited from config defaults
    - Model validation ensures provider/model compatibility at load time

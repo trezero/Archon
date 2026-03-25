@@ -35,13 +35,6 @@ const stepWorkflow: WorkflowDefinition = {
   steps: [singleStep],
 };
 
-const loopWorkflow: WorkflowDefinition = {
-  name: 'loop-workflow',
-  description: 'loop until done',
-  loop: { until: 'COMPLETE', max_iterations: 10 },
-  prompt: 'Do the thing.',
-};
-
 const commandNode: CommandNode = { id: 'n1', command: 'build' };
 const promptNode: PromptNode = { id: 'n2', prompt: 'Do this inline.' };
 const bashNode: BashNode = { id: 'n3', bash: 'echo hello' };
@@ -147,10 +140,6 @@ describe('isDagWorkflow', () => {
 
   test('returns false for a step-based workflow', () => {
     expect(isDagWorkflow(stepWorkflow)).toBe(false);
-  });
-
-  test('returns false for a loop-based workflow', () => {
-    expect(isDagWorkflow(loopWorkflow)).toBe(false);
   });
 
   test('step workflow without nodes is not a DAG', () => {

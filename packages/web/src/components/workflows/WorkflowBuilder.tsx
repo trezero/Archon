@@ -6,7 +6,6 @@ import type { Edge } from '@xyflow/react';
 import type {
   WorkflowDefinition,
   WorkflowStep,
-  LoopConfig,
   SingleStep,
   ParallelBlock,
 } from '@archon/workflows/types';
@@ -32,17 +31,10 @@ import { NodeLibrary } from './NodeLibrary';
 import { WorkflowCanvas, reactFlowToDagNodes } from './WorkflowCanvas';
 import { NodeInspector } from './NodeInspector';
 import { SequentialEditor } from './SequentialEditor';
-import { LoopEditor } from './LoopEditor';
 import { ValidationPanel } from './ValidationPanel';
 import { StatusBar } from './StatusBar';
 import { YamlCodeView } from './YamlCodeView';
 import type { DagNodeData, DagFlowNode } from './DagNodeComponent';
-
-const DEFAULT_LOOP_CONFIG: LoopConfig = {
-  until: 'COMPLETE',
-  max_iterations: 10,
-  fresh_context: false,
-};
 
 function WorkflowBuilderInner(): React.ReactElement {
   const [searchParams] = useSearchParams();
@@ -78,8 +70,6 @@ function WorkflowBuilderInner(): React.ReactElement {
   const [selectedStepIndex, setSelectedStepIndex] = useState<number | null>(null);
 
   // Loop state
-  const [loopPrompt, setLoopPrompt] = useState('');
-  const [loopConfig, setLoopConfig] = useState<LoopConfig>(DEFAULT_LOOP_CONFIG);
 
   // Commands for palette/inspector
   const {
@@ -124,8 +114,6 @@ function WorkflowBuilderInner(): React.ReactElement {
         const dagNodes = reactFlowToDagNodes(nodes, edges);
         return { name, description, provider, model, nodes: dagNodes };
       }
-      case 'loop':
-        return { name, description, provider, model, prompt: loopPrompt, loop: loopConfig };
       case 'sequential':
         return { name, description, provider, model, steps };
       default: {
@@ -133,18 +121,7 @@ function WorkflowBuilderInner(): React.ReactElement {
         throw new Error(`Unknown builder mode: ${String(exhaustiveCheck)}`);
       }
     }
-  }, [
-    mode,
-    workflowName,
-    workflowDescription,
-    provider,
-    model,
-    nodes,
-    edges,
-    steps,
-    loopPrompt,
-    loopConfig,
-  ]);
+  }, [mode, workflowName, workflowDescription, provider, model, nodes, edges, steps]);
 
   const loadWorkflow = useCallback(
     async (name: string): Promise<void> => {
@@ -161,10 +138,6 @@ function WorkflowBuilderInner(): React.ReactElement {
           const { nodes: rfNodes, edges: rfEdges } = dagNodesToReactFlow(workflow.nodes);
           setNodes(rfNodes);
           setEdges(rfEdges);
-        } else if ('loop' in workflow && workflow.loop) {
-          setMode('loop');
-          setLoopPrompt(workflow.prompt ?? '');
-          setLoopConfig(workflow.loop);
         } else if ('steps' in workflow && workflow.steps) {
           setMode('sequential');
           setSteps([...workflow.steps] as WorkflowStep[]);
@@ -532,16 +505,6 @@ function WorkflowBuilderInner(): React.ReactElement {
                     }}
                     onSelectStep={setSelectedStepIndex}
                     onUngroup={ungroupBlock}
-                    onDirty={markDirty}
-                  />
-                )}
-
-                {mode === 'loop' && (
-                  <LoopEditor
-                    prompt={loopPrompt}
-                    loop={loopConfig}
-                    onPromptChange={setLoopPrompt}
-                    onLoopChange={setLoopConfig}
                     onDirty={markDirty}
                   />
                 )}

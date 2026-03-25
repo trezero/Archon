@@ -29,7 +29,7 @@ mock.module('@archon/paths', () => ({
 }));
 
 import { discoverWorkflows } from './workflow-discovery';
-import { isParallelBlock, isDagWorkflow, isBashNode } from './types';
+import { isParallelBlock, isDagWorkflow, isBashNode, isLoopNode } from './types';
 import * as bundledDefaults from './defaults/bundled-defaults';
 
 describe('Workflow Loader', () => {
@@ -513,262 +513,6 @@ steps:
       const workflows = result.workflows;
 
       // Should fail validation due to null description
-      expect(workflows).toHaveLength(0);
-    });
-  });
-
-  describe('loop workflow parsing', () => {
-    it('should parse valid loop workflow', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const loopYaml = `name: loop-workflow
-description: A loop workflow
-loop:
-  until: COMPLETE
-  max_iterations: 10
-  fresh_context: false
-prompt: Do work. Output <promise>COMPLETE</promise> when done.
-`;
-      await writeFile(join(workflowDir, 'loop.yaml'), loopYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
-
-      expect(workflows).toHaveLength(1);
-      expect(workflows[0].name).toBe('loop-workflow');
-      expect(workflows[0].loop).toBeDefined();
-      expect(workflows[0].loop!.until).toBe('COMPLETE');
-      expect(workflows[0].loop!.max_iterations).toBe(10);
-      expect(workflows[0].loop!.fresh_context).toBe(false);
-      expect(workflows[0].prompt).toBe('Do work. Output <promise>COMPLETE</promise> when done.');
-      expect(workflows[0].steps).toBeUndefined();
-    });
-
-    it('should reject workflow with both steps and loop', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const bothYaml = `name: both-workflow
-description: Has both steps and loop
-steps:
-  - command: plan
-loop:
-  until: COMPLETE
-  max_iterations: 5
-prompt: This should fail.
-`;
-      await writeFile(join(workflowDir, 'both.yaml'), bothYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
-
-      expect(workflows).toHaveLength(0);
-    });
-
-    it('should reject loop workflow without prompt', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const noPromptYaml = `name: no-prompt-loop
-description: Loop without prompt
-loop:
-  until: COMPLETE
-  max_iterations: 5
-`;
-      await writeFile(join(workflowDir, 'noprompt.yaml'), noPromptYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
-
-      expect(workflows).toHaveLength(0);
-    });
-
-    it('should reject loop without until signal', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const noUntilYaml = `name: no-until-loop
-description: Loop without until
-loop:
-  max_iterations: 5
-prompt: Do work.
-`;
-      await writeFile(join(workflowDir, 'nountil.yaml'), noUntilYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
-
-      expect(workflows).toHaveLength(0);
-    });
-
-    it('should reject loop without max_iterations', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const noMaxYaml = `name: no-max-loop
-description: Loop without max_iterations
-loop:
-  until: COMPLETE
-prompt: Do work.
-`;
-      await writeFile(join(workflowDir, 'nomax.yaml'), noMaxYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
-
-      expect(workflows).toHaveLength(0);
-    });
-
-    it('should reject loop with zero max_iterations', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const zeroMaxYaml = `name: zero-max-loop
-description: Loop with zero max
-loop:
-  until: COMPLETE
-  max_iterations: 0
-prompt: Do work.
-`;
-      await writeFile(join(workflowDir, 'zeromax.yaml'), zeroMaxYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
-
-      expect(workflows).toHaveLength(0);
-    });
-
-    it('should reject loop with negative max_iterations', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const negativeMaxYaml = `name: negative-max-loop
-description: Loop with negative max
-loop:
-  until: COMPLETE
-  max_iterations: -5
-prompt: Do work.
-`;
-      await writeFile(join(workflowDir, 'negativemax.yaml'), negativeMaxYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
-
-      expect(workflows).toHaveLength(0);
-    });
-
-    it('should default fresh_context to false if not specified', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const defaultFreshYaml = `name: default-fresh-loop
-description: Loop without fresh_context
-loop:
-  until: COMPLETE
-  max_iterations: 5
-prompt: Do work.
-`;
-      await writeFile(join(workflowDir, 'defaultfresh.yaml'), defaultFreshYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
-
-      expect(workflows).toHaveLength(1);
-      expect(workflows[0].loop!.fresh_context).toBe(false);
-    });
-
-    it('should parse fresh_context: true correctly', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const freshTrueYaml = `name: fresh-true-loop
-description: Loop with fresh_context true
-loop:
-  until: COMPLETE
-  max_iterations: 5
-  fresh_context: true
-prompt: Do work.
-`;
-      await writeFile(join(workflowDir, 'freshtrue.yaml'), freshTrueYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
-
-      expect(workflows).toHaveLength(1);
-      expect(workflows[0].loop!.fresh_context).toBe(true);
-    });
-
-    it('should reject workflow with neither steps nor loop', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const neitherYaml = `name: neither-workflow
-description: Has neither steps nor loop
-provider: claude
-`;
-      await writeFile(join(workflowDir, 'neither.yaml'), neitherYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
-
-      expect(workflows).toHaveLength(0);
-    });
-
-    it('should reject loop with empty until signal', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const emptyUntilYaml = `name: empty-until-loop
-description: Loop with empty until
-loop:
-  until: ""
-  max_iterations: 5
-prompt: Do work.
-`;
-      await writeFile(join(workflowDir, 'emptyuntil.yaml'), emptyUntilYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
-
-      expect(workflows).toHaveLength(0);
-    });
-
-    it('should reject loop with whitespace-only until signal', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const whitespaceUntilYaml = `name: whitespace-until-loop
-description: Loop with whitespace until
-loop:
-  until: "   "
-  max_iterations: 5
-prompt: Do work.
-`;
-      await writeFile(join(workflowDir, 'whitespaceuntil.yaml'), whitespaceUntilYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
-
-      expect(workflows).toHaveLength(0);
-    });
-
-    it('should reject loop with empty prompt', async () => {
-      const workflowDir = join(testDir, '.archon', 'workflows');
-      await mkdir(workflowDir, { recursive: true });
-
-      const emptyPromptYaml = `name: empty-prompt-loop
-description: Loop with empty prompt
-loop:
-  until: COMPLETE
-  max_iterations: 5
-prompt: ""
-`;
-      await writeFile(join(workflowDir, 'emptyprompt.yaml'), emptyPromptYaml);
-
-      const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
-
       expect(workflows).toHaveLength(0);
     });
   });
@@ -2087,6 +1831,248 @@ steps:
           expect(step.retry?.delay_ms).toBeUndefined();
           expect(step.retry?.on_error).toBeUndefined();
         }
+      }
+    });
+  });
+
+  describe('loop node parsing', () => {
+    it('should parse a valid loop node with all fields', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'loop-test.yaml'),
+        `
+name: loop-test
+description: Test loop node
+nodes:
+  - id: my-loop
+    loop:
+      prompt: "Do one task. Output <promise>COMPLETE</promise> when done."
+      until: COMPLETE
+      max_iterations: 10
+      fresh_context: true
+      until_bash: "test -f done.txt"
+    idle_timeout: 300000
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      expect(result.workflows).toHaveLength(1);
+
+      const wf = result.workflows[0];
+      expect(isDagWorkflow(wf)).toBe(true);
+      if (!isDagWorkflow(wf)) return;
+
+      expect(wf.nodes).toHaveLength(1);
+      expect(isLoopNode(wf.nodes[0])).toBe(true);
+      if (isLoopNode(wf.nodes[0])) {
+        expect(wf.nodes[0].loop.prompt).toContain('Do one task');
+        expect(wf.nodes[0].loop.until).toBe('COMPLETE');
+        expect(wf.nodes[0].loop.max_iterations).toBe(10);
+        expect(wf.nodes[0].loop.fresh_context).toBe(true);
+        expect(wf.nodes[0].loop.until_bash).toBe('test -f done.txt');
+        expect(wf.nodes[0].idle_timeout).toBe(300000);
+      }
+    });
+
+    it('should parse minimal loop node (only required fields)', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'loop-min.yaml'),
+        `
+name: loop-minimal
+description: Minimal loop node
+nodes:
+  - id: simple-loop
+    loop:
+      prompt: "Iterate."
+      until: DONE
+      max_iterations: 3
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (!isDagWorkflow(wf)) return;
+      expect(isLoopNode(wf.nodes[0])).toBe(true);
+      if (isLoopNode(wf.nodes[0])) {
+        expect(wf.nodes[0].loop.fresh_context).toBe(false);
+        expect(wf.nodes[0].loop.until_bash).toBeUndefined();
+      }
+    });
+
+    it('should reject loop node missing loop.prompt', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'loop-no-prompt.yaml'),
+        `
+name: loop-no-prompt
+description: Missing prompt
+nodes:
+  - id: bad-loop
+    loop:
+      until: COMPLETE
+      max_iterations: 5
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0].error).toContain('loop.prompt');
+    });
+
+    it('should reject loop node missing loop.until', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'loop-no-until.yaml'),
+        `
+name: loop-no-until
+description: Missing until
+nodes:
+  - id: bad-loop
+    loop:
+      prompt: "Do stuff"
+      max_iterations: 5
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0].error).toContain('loop.until');
+    });
+
+    it('should reject loop node with invalid max_iterations', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'loop-bad-max.yaml'),
+        `
+name: loop-bad-max
+description: Invalid max_iterations
+nodes:
+  - id: bad-loop
+    loop:
+      prompt: "Do stuff"
+      until: DONE
+      max_iterations: 0
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0].error).toContain('max_iterations');
+    });
+
+    it('should reject node with both loop and command', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'loop-cmd.yaml'),
+        `
+name: loop-cmd-conflict
+description: Loop + command
+nodes:
+  - id: bad
+    command: my-cmd
+    loop:
+      prompt: "Do stuff"
+      until: DONE
+      max_iterations: 5
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0].error).toContain('mutually exclusive');
+    });
+
+    it('should reject node with both loop and bash', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'loop-bash.yaml'),
+        `
+name: loop-bash-conflict
+description: Loop + bash
+nodes:
+  - id: bad
+    bash: "echo hi"
+    loop:
+      prompt: "Do stuff"
+      until: DONE
+      max_iterations: 5
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0].error).toContain('mutually exclusive');
+    });
+
+    it('should validate $nodeId.output refs in loop.prompt', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'loop-bad-ref.yaml'),
+        `
+name: loop-bad-ref
+description: Bad ref in loop prompt
+nodes:
+  - id: my-loop
+    loop:
+      prompt: "Use $nonexistent.output to do stuff"
+      until: DONE
+      max_iterations: 5
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0].error).toContain('nonexistent');
+    });
+
+    it('should parse loop node with depends_on', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'loop-deps.yaml'),
+        `
+name: loop-deps
+description: Loop with dependencies
+nodes:
+  - id: setup
+    bash: "echo ready"
+  - id: my-loop
+    depends_on: [setup]
+    loop:
+      prompt: "Use $setup.output. Do task."
+      until: COMPLETE
+      max_iterations: 5
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0];
+      if (!isDagWorkflow(wf)) return;
+      expect(wf.nodes).toHaveLength(2);
+      expect(isLoopNode(wf.nodes[1])).toBe(true);
+      if (isLoopNode(wf.nodes[1])) {
+        expect(wf.nodes[1].depends_on).toEqual(['setup']);
       }
     });
   });

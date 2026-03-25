@@ -1,9 +1,4 @@
-import type {
-  WorkflowDefinition,
-  DagNode,
-  WorkflowStep,
-  LoopConfig,
-} from '@archon/workflows/types';
+import type { WorkflowDefinition, DagNode, WorkflowStep } from '@archon/workflows/types';
 import { isDagWorkflow, isParallelBlock } from '@archon/workflows/types';
 import { cn } from '@/lib/utils';
 
@@ -166,18 +161,6 @@ function serializeStep(step: WorkflowStep, baseIndent: number): string {
   return result;
 }
 
-/** Serialize a LoopConfig. */
-function serializeLoop(loop: LoopConfig, baseIndent: number): string {
-  const pad = ' '.repeat(baseIndent);
-  const lines: string[] = [];
-  lines.push(`${pad}until: ${JSON.stringify(loop.until)}`);
-  lines.push(`${pad}max_iterations: ${loop.max_iterations}`);
-  if (loop.fresh_context) {
-    lines.push(`${pad}fresh_context: true`);
-  }
-  return lines.join('\n');
-}
-
 /** Convert a WorkflowDefinition into a YAML-like string for preview. */
 export function serializeToYaml(def: WorkflowDefinition): string {
   const lines: string[] = [];
@@ -207,11 +190,6 @@ export function serializeToYaml(def: WorkflowDefinition): string {
     for (const node of def.nodes) {
       lines.push(serializeDagNode(node, 2));
     }
-  } else if ('loop' in def && def.loop) {
-    lines.push(`prompt: ${serializeValue(def.prompt, 0)}`);
-    lines.push('');
-    lines.push('loop:');
-    lines.push(serializeLoop(def.loop, 2));
   } else if ('steps' in def && def.steps) {
     lines.push('steps:');
     for (const step of def.steps) {

@@ -4,16 +4,16 @@
 import type {
   WorkflowDefinition,
   WorkflowLoadError,
-  LoopConfig,
   SingleStep,
   StepRetryConfig,
   WorkflowStep,
   DagNode,
+  LoopNode,
   WorkflowHookEvent,
   WorkflowHookMatcher,
   WorkflowNodeHooks,
 } from './types';
-import { TRIGGER_RULES, isTriggerRule, WORKFLOW_HOOK_EVENTS } from './types';
+import { TRIGGER_RULES, isTriggerRule, isLoopNode, WORKFLOW_HOOK_EVENTS } from './types';
 import type { ModelReasoningEffort, WebSearchMode } from './types';
 import { isValidCommandName } from './command-validation';
 import { createLogger } from '@archon/paths';
@@ -323,6 +323,23 @@ export function parseNodeHooks(
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
+/**
+ * Parse and validate idle_timeout from raw node data.
+ * Returns: number if valid, undefined if not present, null if invalid (errors pushed).
+ */
+function parseIdleTimeout(
+  raw: Record<string, unknown>,
+  id: string,
+  errors: string[]
+): number | undefined | null {
+  if (raw.idle_timeout === undefined) return undefined;
+  if (typeof raw.idle_timeout === 'number' && raw.idle_timeout > 0 && isFinite(raw.idle_timeout)) {
+    return raw.idle_timeout;
+  }
+  errors.push(`Node '${id}': 'idle_timeout' must be a finite positive number (ms)`);
+  return null;
+}
+
 /** Validate and parse a single DagNode from raw YAML data */
 function parseDagNode(
   raw: Record<string, unknown>,
@@ -338,15 +355,16 @@ function parseDagNode(
   const hasCommand = typeof raw.command === 'string' && raw.command.trim().length > 0;
   const hasPrompt = typeof raw.prompt === 'string' && raw.prompt.trim().length > 0;
   const hasBash = typeof raw.bash === 'string' && raw.bash.trim().length > 0;
+  const hasLoop = typeof raw.loop === 'object' && raw.loop !== null;
 
-  // Three-way mutual exclusivity: exactly one of command, prompt, bash
-  const modeCount = [hasCommand, hasPrompt, hasBash].filter(Boolean).length;
+  // Four-way mutual exclusivity: exactly one of command, prompt, bash, loop
+  const modeCount = [hasCommand, hasPrompt, hasBash, hasLoop].filter(Boolean).length;
   if (modeCount > 1) {
-    errors.push(`Node '${id}': 'command', 'prompt', and 'bash' are mutually exclusive`);
+    errors.push(`Node '${id}': 'command', 'prompt', 'bash', and 'loop' are mutually exclusive`);
     return null;
   }
   if (modeCount === 0) {
-    errors.push(`Node '${id}': must have either 'command', 'prompt', or 'bash'`);
+    errors.push(`Node '${id}': must have either 'command', 'prompt', 'bash', or 'loop'`);
     return null;
   }
 
@@ -390,20 +408,8 @@ function parseDagNode(
       }
     }
 
-    // Parse idle_timeout (finite positive number or undefined)
-    let idleTimeout: number | undefined;
-    if (raw.idle_timeout !== undefined) {
-      if (
-        typeof raw.idle_timeout === 'number' &&
-        raw.idle_timeout > 0 &&
-        isFinite(raw.idle_timeout)
-      ) {
-        idleTimeout = raw.idle_timeout;
-      } else {
-        errors.push(`Node '${id}': 'idle_timeout' must be a finite positive number (ms)`);
-        return null;
-      }
-    }
+    const idleTimeout = parseIdleTimeout(raw, id, errors);
+    if (idleTimeout === null) return null;
 
     // Parse retry for bash nodes
     const bashRetry = parseRetryConfig(raw.retry, `Node '${id}'`, errors);
@@ -421,6 +427,67 @@ function parseDagNode(
     };
   }
 
+  // Loop nodes: validate loop config, warn on AI-specific fields
+  if (hasLoop) {
+    const presentAiFields = BASH_NODE_AI_FIELDS.filter(f => raw[f] !== undefined);
+    if (presentAiFields.length > 0) {
+      getLog().warn({ id, fields: presentAiFields }, 'loop_node_ai_fields_ignored');
+    }
+
+    const loopRaw = raw.loop as Record<string, unknown>;
+
+    // Validate required fields
+    const loopPrompt = typeof loopRaw.prompt === 'string' ? loopRaw.prompt.trim() : '';
+    if (!loopPrompt) {
+      errors.push(`Node '${id}': loop node requires 'loop.prompt' (non-empty string)`);
+      return null;
+    }
+
+    const until = typeof loopRaw.until === 'string' ? loopRaw.until.trim() : '';
+    if (!until) {
+      errors.push(`Node '${id}': loop node requires 'loop.until' (completion signal string)`);
+      return null;
+    }
+
+    const maxIterations = typeof loopRaw.max_iterations === 'number' ? loopRaw.max_iterations : 0;
+    if (!Number.isInteger(maxIterations) || maxIterations < 1) {
+      errors.push(`Node '${id}': 'loop.max_iterations' must be a positive integer`);
+      return null;
+    }
+
+    const freshContext = loopRaw.fresh_context === true;
+
+    // Optional until_bash
+    const untilBash =
+      typeof loopRaw.until_bash === 'string' ? loopRaw.until_bash.trim() : undefined;
+
+    const loopIdleTimeout = parseIdleTimeout(raw, id, errors);
+    if (loopIdleTimeout === null) return null;
+
+    // Reject retry on loop nodes — the executor does not apply retry logic to loop dispatch
+    if (raw.retry !== undefined) {
+      errors.push(
+        `Node '${id}': 'retry' is not supported on loop nodes (loop manages its own iteration)`
+      );
+      return null;
+    }
+
+    return {
+      id,
+      loop: {
+        prompt: loopPrompt,
+        until,
+        max_iterations: maxIterations,
+        fresh_context: freshContext,
+        ...(untilBash ? { until_bash: untilBash } : {}),
+      },
+      ...(loopIdleTimeout !== undefined ? { idle_timeout: loopIdleTimeout } : {}),
+      ...(dependsOn.length > 0 ? { depends_on: dependsOn } : {}),
+      ...(whenStr !== undefined ? { when: whenStr } : {}),
+      ...(triggerRule ? { trigger_rule: triggerRule } : {}),
+    } as LoopNode;
+  }
+
   // AI nodes (command or prompt): full validation
   const provider: 'claude' | 'codex' | undefined =
     raw.provider === 'claude' || raw.provider === 'codex' ? raw.provider : undefined;
@@ -431,20 +498,8 @@ function parseDagNode(
     return null;
   }
 
-  // Parse idle_timeout for AI nodes (finite positive number or undefined)
-  let aiIdleTimeout: number | undefined;
-  if (raw.idle_timeout !== undefined) {
-    if (
-      typeof raw.idle_timeout === 'number' &&
-      raw.idle_timeout > 0 &&
-      isFinite(raw.idle_timeout)
-    ) {
-      aiIdleTimeout = raw.idle_timeout;
-    } else {
-      errors.push(`Node '${id}': 'idle_timeout' must be a finite positive number (ms)`);
-      return null;
-    }
-  }
+  const aiIdleTimeout = parseIdleTimeout(raw, id, errors);
+  if (aiIdleTimeout === null) return null;
 
   // Parse retry for AI nodes
   const aiRetry = parseRetryConfig(raw.retry, `Node '${id}'`, errors);
@@ -587,6 +642,9 @@ function validateDagStructure(nodes: DagNode[]): string | null {
     const sources: string[] = [];
     if (node.when) sources.push(node.when);
     if ('prompt' in node && typeof node.prompt === 'string') sources.push(node.prompt);
+    if (isLoopNode(node)) {
+      sources.push(node.loop.prompt);
+    }
     for (const source of sources) {
       let m: RegExpExecArray | null;
       outputRefPattern.lastIndex = 0; // reset stateful g-flag regex before each new source string
@@ -643,21 +701,20 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
       };
     }
 
-    // Validate mutual exclusivity: steps XOR (loop + prompt) XOR nodes
-    // This prevents ambiguous execution modes - a workflow is either
-    // step-based (sequential commands), loop-based (autonomous iteration), or DAG-based (nodes)
+    // Validate mutual exclusivity: steps XOR nodes
+    // Loop iteration is available as a DAG node type (LoopNode), not a standalone workflow type.
     const hasSteps = Array.isArray(raw.steps) && raw.steps.length > 0;
-    const hasLoop = raw.loop && typeof raw.loop === 'object';
-    const hasPrompt = typeof raw.prompt === 'string' && raw.prompt.trim().length > 0;
     const hasNodes = Array.isArray(raw.nodes) && (raw.nodes as unknown[]).length > 0;
 
-    if (hasSteps && hasLoop) {
-      getLog().warn({ filename }, 'workflow_steps_and_loop_conflict');
+    // Reject legacy top-level loop: field (removed — use loop nodes in DAG workflows)
+    if (raw.loop && typeof raw.loop === 'object') {
+      getLog().warn({ filename }, 'workflow_standalone_loop_removed');
       return {
         workflow: null,
         error: {
           filename,
-          error: "Cannot have both 'steps' and 'loop' (mutually exclusive)",
+          error:
+            "Standalone 'loop:' workflows are no longer supported. Use a DAG workflow with a loop node instead. See archon-ralph-dag.yaml for an example.",
           errorType: 'validation_error',
         },
       };
@@ -675,72 +732,15 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
       };
     }
 
-    if (hasNodes && hasLoop) {
-      getLog().warn({ filename }, 'workflow_nodes_and_loop_conflict');
+    if (!hasSteps && !hasNodes) {
+      getLog().warn({ filename }, 'workflow_missing_steps_or_nodes');
       return {
         workflow: null,
         error: {
           filename,
-          error: "Cannot have both 'nodes' and 'loop' (mutually exclusive)",
+          error: "Missing 'steps' or 'nodes' configuration",
           errorType: 'validation_error',
         },
-      };
-    }
-
-    if (hasLoop && !hasPrompt) {
-      getLog().warn({ filename }, 'workflow_loop_missing_prompt');
-      return {
-        workflow: null,
-        error: {
-          filename,
-          error: "Loop workflows require a 'prompt' field",
-          errorType: 'validation_error',
-        },
-      };
-    }
-
-    if (!hasSteps && !hasLoop && !hasNodes) {
-      getLog().warn({ filename }, 'workflow_missing_steps_or_loop');
-      return {
-        workflow: null,
-        error: {
-          filename,
-          error: "Missing 'steps', 'loop', or 'nodes' configuration",
-          errorType: 'validation_error',
-        },
-      };
-    }
-
-    // Parse loop config if present
-    let loopConfig: LoopConfig | undefined;
-    if (hasLoop) {
-      const loop = raw.loop as Record<string, unknown>;
-      if (typeof loop.until !== 'string' || !loop.until.trim()) {
-        getLog().warn({ filename }, 'workflow_loop_missing_until');
-        return {
-          workflow: null,
-          error: {
-            filename,
-            error: "Loop 'until' must be a non-empty string",
-            errorType: 'validation_error',
-          },
-        };
-      }
-      if (typeof loop.max_iterations !== 'number' || loop.max_iterations < 1) {
-        getLog().warn({ filename }, 'workflow_loop_invalid_max_iterations');
-        return {
-          workflow: null,
-          error: {
-            filename,
-            error: "'max_iterations' must be a positive number",
-            errorType: 'validation_error',
-          },
-        };
-      }
-      loopConfig = {
-        until: loop.until,
-        max_iterations: loop.max_iterations,
-        fresh_context: Boolean(loop.fresh_context),
       };
     }
 
@@ -858,26 +858,9 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
       };
     }
 
-    if (hasLoop && loopConfig) {
-      return {
-        workflow: {
-          name: raw.name,
-          description: raw.description,
-          provider,
-          model,
-          modelReasoningEffort,
-          webSearchMode,
-          additionalDirectories,
-          loop: loopConfig,
-          prompt: raw.prompt as string,
-        },
-        error: null,
-      };
-    }
-
     // Guard for TypeScript type narrowing - if we reach here without steps,
     // it means step validation failed (see workflow_step_validation_failed log above).
-    // DAG and loop workflows return early above, so only StepWorkflow reaches here.
+    // DAG workflows return early above, so only StepWorkflow reaches here.
     if (!steps) {
       getLog().error({ filename }, 'workflow_step_validation_unexpected_failure');
       return {

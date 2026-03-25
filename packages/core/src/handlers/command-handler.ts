@@ -22,6 +22,7 @@ import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '@archon/pa
 import { loadConfig } from '../config/config-loader';
 import {
   discoverWorkflowsWithConfig,
+  isDagWorkflow,
   isSingleStep,
   type WorkflowDefinition,
   type WorkflowLoadError,
@@ -897,10 +898,10 @@ async function handleWorkflowCommand(
       if (workflows.length > 0) {
         msg += 'Available Workflows:\n\n';
         for (const w of workflows) {
-          const stepsOrLoop = w.loop
-            ? `Loop: until \`${w.loop.until}\` (max ${String(w.loop.max_iterations)} iterations)`
+          const modeInfo = isDagWorkflow(w)
+            ? `DAG: ${String(w.nodes.length)} nodes`
             : `Steps: ${w.steps?.map(s => (isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`)).join(' -> ') ?? 'none'}`;
-          msg += `**\`${w.name}\`**\n  ${w.description}\n  ${stepsOrLoop}\n\n`;
+          msg += `**\`${w.name}\`**\n  ${w.description}\n  ${modeInfo}\n\n`;
         }
       }
 

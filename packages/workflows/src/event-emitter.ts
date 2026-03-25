@@ -30,7 +30,6 @@ interface WorkflowStartedEvent {
   workflowName: string;
   conversationId: string;
   totalSteps: number;
-  isLoop: boolean;
 }
 
 interface WorkflowCompletedEvent {
@@ -104,6 +103,7 @@ interface ParallelAgentFailedEvent {
 interface LoopIterationStartedEvent {
   type: 'loop_iteration_started';
   runId: string;
+  nodeId?: string; // present when loop runs as a DAG node
   iteration: number;
   maxIterations: number;
 }
@@ -111,6 +111,7 @@ interface LoopIterationStartedEvent {
 interface LoopIterationCompletedEvent {
   type: 'loop_iteration_completed';
   runId: string;
+  nodeId?: string; // present when loop runs as a DAG node
   iteration: number;
   duration: number;
   completionDetected: boolean;
@@ -119,6 +120,7 @@ interface LoopIterationCompletedEvent {
 interface LoopIterationFailedEvent {
   type: 'loop_iteration_failed';
   runId: string;
+  nodeId?: string; // present when loop runs as a DAG node
   iteration: number;
   error: string;
 }

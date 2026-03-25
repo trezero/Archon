@@ -140,11 +140,8 @@ describe('bundled-defaults', () => {
         'archon-comprehensive-pr-review',
         'archon-feature-development',
         'archon-fix-github-issue',
-        'archon-ralph-fresh',
-        'archon-ralph-stateful',
         'archon-resolve-conflicts',
         'archon-smart-pr-review',
-        'archon-test-loop',
         'archon-validate-pr',
         'archon-remotion-generate',
       ];
@@ -153,7 +150,7 @@ describe('bundled-defaults', () => {
         expect(BUNDLED_WORKFLOWS).toHaveProperty(wf);
       }
 
-      expect(Object.keys(BUNDLED_WORKFLOWS)).toHaveLength(11);
+      expect(Object.keys(BUNDLED_WORKFLOWS)).toHaveLength(8);
     });
 
     it('should have non-empty content for all workflows', () => {

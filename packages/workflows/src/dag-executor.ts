@@ -21,12 +21,13 @@ import type {
   BashNode,
   CommandNode,
   PromptNode,
+  LoopNode,
   NodeOutput,
   TriggerRule,
   WorkflowRun,
   WorkflowNodeHooks,
 } from './types';
-import { isBashNode } from './types';
+import { isBashNode, isLoopNode } from './types';
 import { formatToolCall } from './utils/tool-formatter';
 import { createLogger } from '@archon/paths';
 import { getWorkflowEventEmitter } from './event-emitter';
@@ -39,6 +40,7 @@ import {
   logNodeError,
   logAssistant,
   logTool,
+  logStepComplete,
   logWorkflowComplete,
   logWorkflowError,
 } from './logger';
@@ -48,6 +50,8 @@ import {
   loadCommandPrompt,
   substituteWorkflowVariables,
   buildPromptWithContext,
+  detectCompletionSignal,
+  stripCompletionTags,
 } from './executor-shared';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -1249,6 +1253,364 @@ async function executeBashNode(
 }
 
 /**
+ * Build WorkflowAssistantOptions from workflow-level config.
+ * Loop nodes use workflow-level provider/model only; per-node overrides are not supported.
+ */
+function buildLoopNodeOptions(
+  provider: 'claude' | 'codex',
+  model: string | undefined,
+  config: WorkflowConfig
+): WorkflowAssistantOptions | undefined {
+  const codexOptions =
+    provider === 'codex'
+      ? {
+          modelReasoningEffort: config.assistants.codex.modelReasoningEffort,
+          webSearchMode: config.assistants.codex.webSearchMode,
+          additionalDirectories: config.assistants.codex.additionalDirectories,
+        }
+      : undefined;
+
+  if (!model && !codexOptions) return undefined;
+  return { ...(model ? { model } : {}), ...codexOptions };
+}
+
+/**
+ * Execute a loop node — runs prompt repeatedly until completion signal or max iterations.
+ *
+ * Key behaviors:
+ * - Returns NodeOutput (not void) — DAG executor owns workflow lifecycle
+ * - Receives upstream node outputs for $nodeId.output substitution
+ * - Does not write current_step_index (DAG tracks per-node completion)
+ */
+async function executeLoopNode(
+  deps: WorkflowDeps,
+  platform: IWorkflowPlatform,
+  conversationId: string,
+  cwd: string,
+  workflowRun: WorkflowRun,
+  node: LoopNode,
+  workflowProvider: 'claude' | 'codex',
+  workflowModel: string | undefined,
+  artifactsDir: string,
+  logDir: string,
+  baseBranch: string,
+  nodeOutputs: Map<string, NodeOutput>,
+  config: WorkflowConfig,
+  issueContext?: string
+): Promise<NodeOutput> {
+  const loop = node.loop;
+  const msgContext = { workflowId: workflowRun.id, nodeName: node.id };
+
+  // Resolve AI client — fail fast with descriptive error
+  let aiClient: ReturnType<typeof deps.getAssistantClient>;
+  try {
+    aiClient = deps.getAssistantClient(workflowProvider);
+  } catch (error) {
+    const err = error as Error;
+    const errorMsg = `Invalid provider '${workflowProvider}' for loop node '${node.id}'. Check workflow YAML or .archon/config.yaml. Original: ${err.message}`;
+    getLog().error(
+      { err, nodeId: node.id, provider: workflowProvider },
+      'loop_node.provider_failed'
+    );
+    return { state: 'failed', output: '', error: errorMsg };
+  }
+
+  let currentSessionId: string | undefined;
+  let lastIterationOutput = '';
+  const resolvedOptions = buildLoopNodeOptions(workflowProvider, workflowModel, config);
+
+  // Helper to log event store errors consistently
+  const logEventStoreError = (err: Error, iteration: number): void => {
+    getLog().error({ err, nodeId: node.id, iteration }, 'loop_node.iteration_event_failed');
+  };
+
+  for (let i = 1; i <= loop.max_iterations; i++) {
+    const iterationStart = Date.now();
+
+    // Check for workflow cancellation between iterations
+    const runStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
+    if (runStatus === 'cancelled') {
+      getLog().info(
+        { workflowRunId: workflowRun.id, nodeId: node.id, iteration: i },
+        'loop_node.cancel_detected'
+      );
+      await safeSendMessage(
+        platform,
+        conversationId,
+        `Loop node '${node.id}' cancelled at iteration ${String(i)}`,
+        msgContext
+      );
+      return { state: 'failed', output: '', error: 'Workflow cancelled' };
+    }
+
+    // Emit iteration started
+    getWorkflowEventEmitter().emit({
+      type: 'loop_iteration_started',
+      runId: workflowRun.id,
+      nodeId: node.id,
+      iteration: i,
+      maxIterations: loop.max_iterations,
+    });
+    deps.store
+      .createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'loop_iteration_started',
+        step_name: node.id,
+        data: { iteration: i, maxIterations: loop.max_iterations, nodeId: node.id },
+      })
+      .catch((err: Error) => {
+        logEventStoreError(err, i);
+      });
+
+    // Session threading
+    const needsFreshSession = loop.fresh_context === true || i === 1;
+    const resumeSessionId = needsFreshSession ? undefined : currentSessionId;
+
+    // Stream AI response for this iteration
+    let fullOutput = ''; // raw, for signal detection
+    let cleanOutput = ''; // stripped, for platform display
+    let iterationIdleTimedOut = false;
+    const iterationAbortController = new AbortController();
+
+    try {
+      // Build prompt — substituteWorkflowVariables throws if $BASE_BRANCH referenced but empty
+      const { prompt: substitutedPrompt } = substituteWorkflowVariables(
+        loop.prompt,
+        workflowRun.id,
+        workflowRun.user_message,
+        artifactsDir,
+        baseBranch,
+        issueContext
+      );
+      const finalPrompt = substituteNodeOutputRefs(substitutedPrompt, nodeOutputs);
+
+      const iterationOptions: WorkflowAssistantOptions | undefined = {
+        ...resolvedOptions,
+        abortSignal: iterationAbortController.signal,
+      };
+
+      const generator = aiClient.sendQuery(finalPrompt, cwd, resumeSessionId, iterationOptions);
+      let lastToolStartedAt: { toolName: string; startedAt: number } | null = null;
+
+      for await (const msg of withIdleTimeout(
+        generator,
+        node.idle_timeout ?? STEP_IDLE_TIMEOUT_MS,
+        () => {
+          iterationIdleTimedOut = true;
+          getLog().warn(
+            { nodeId: node.id, iteration: i, timeoutMs: node.idle_timeout ?? STEP_IDLE_TIMEOUT_MS },
+            'loop_node.idle_timeout_reached'
+          );
+          iterationAbortController.abort();
+        },
+        m => m.type !== 'tool' // shouldResetTimer
+      )) {
+        if (msg.type === 'assistant') {
+          fullOutput += msg.content;
+          const cleaned = stripCompletionTags(msg.content);
+          cleanOutput += cleaned;
+          if (platform.getStreamingMode() === 'stream' && cleaned) {
+            await safeSendMessage(platform, conversationId, cleaned, msgContext);
+          }
+          await logAssistant(logDir, workflowRun.id, msg.content);
+        } else if (msg.type === 'result') {
+          // Emit tool_completed for the last tool in the iteration
+          if (lastToolStartedAt) {
+            const prevTool = lastToolStartedAt;
+            deps.store
+              .createWorkflowEvent({
+                workflow_run_id: workflowRun.id,
+                event_type: 'tool_completed',
+                step_name: node.id,
+                data: {
+                  tool_name: prevTool.toolName,
+                  duration_ms: Date.now() - prevTool.startedAt,
+                },
+              })
+              .catch((err: Error) => {
+                logEventStoreError(err, i);
+              });
+            lastToolStartedAt = null;
+          }
+          if (msg.sessionId) currentSessionId = msg.sessionId;
+        } else if (msg.type === 'tool' && msg.toolName) {
+          const now = Date.now();
+
+          // Emit tool_completed for the previous tool
+          if (lastToolStartedAt) {
+            const prevTool = lastToolStartedAt;
+            deps.store
+              .createWorkflowEvent({
+                workflow_run_id: workflowRun.id,
+                event_type: 'tool_completed',
+                step_name: node.id,
+                data: { tool_name: prevTool.toolName, duration_ms: now - prevTool.startedAt },
+              })
+              .catch((err: Error) => {
+                logEventStoreError(err, i);
+              });
+          }
+          lastToolStartedAt = { toolName: msg.toolName, startedAt: now };
+
+          if (platform.getStreamingMode() === 'stream') {
+            const toolMsg = formatToolCall(msg.toolName, msg.toolInput);
+            if (toolMsg) {
+              await safeSendMessage(platform, conversationId, toolMsg, msgContext);
+            }
+            if (platform.sendStructuredEvent) {
+              await platform.sendStructuredEvent(conversationId, msg);
+            }
+          }
+
+          const toolInput: Record<string, unknown> = msg.toolInput
+            ? Object.fromEntries(
+                Object.entries(msg.toolInput).map(([k, v]) =>
+                  typeof v === 'string' && v.length > 500 ? [k, v.slice(0, 500) + '...'] : [k, v]
+                )
+              )
+            : {};
+          await logTool(logDir, workflowRun.id, msg.toolName, toolInput);
+
+          // Persist tool_called event
+          deps.store
+            .createWorkflowEvent({
+              workflow_run_id: workflowRun.id,
+              event_type: 'tool_called',
+              step_name: node.id,
+              data: { tool_name: msg.toolName, tool_input: toolInput },
+            })
+            .catch((err: Error) => {
+              logEventStoreError(err, i);
+            });
+        } else if (msg.type === 'tool_result' && platform.sendStructuredEvent) {
+          await platform.sendStructuredEvent(conversationId, msg);
+        }
+      }
+    } catch (error) {
+      const err = error as Error;
+      const duration = Date.now() - iterationStart;
+      getLog().error({ err, nodeId: node.id, iteration: i }, 'loop_node.iteration_failed');
+      getWorkflowEventEmitter().emit({
+        type: 'loop_iteration_failed',
+        runId: workflowRun.id,
+        nodeId: node.id,
+        iteration: i,
+        error: err.message,
+      });
+      deps.store
+        .createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'loop_iteration_failed',
+          step_name: node.id,
+          data: { iteration: i, error: err.message, duration, nodeId: node.id },
+        })
+        .catch((evtErr: Error) => {
+          logEventStoreError(evtErr, i);
+        });
+      return { state: 'failed', output: '', error: `Loop iteration ${i} failed: ${err.message}` };
+    }
+
+    // Notify on idle timeout
+    if (iterationIdleTimedOut) {
+      await safeSendMessage(
+        platform,
+        conversationId,
+        `Loop node '${node.id}' iteration ${String(i)} completed via idle timeout (no output for ${String((node.idle_timeout ?? STEP_IDLE_TIMEOUT_MS) / 60000)} min)`,
+        msgContext
+      );
+    }
+
+    // Batch mode: send accumulated output
+    if (platform.getStreamingMode() === 'batch' && cleanOutput) {
+      await safeSendMessage(platform, conversationId, cleanOutput, msgContext);
+    }
+
+    lastIterationOutput = cleanOutput || fullOutput;
+
+    // Check LLM completion signal
+    const signalDetected = detectCompletionSignal(fullOutput, loop.until);
+
+    // Check deterministic bash condition (if configured)
+    let bashComplete = false;
+    if (loop.until_bash) {
+      try {
+        const { prompt: bashPrompt } = substituteWorkflowVariables(
+          loop.until_bash,
+          workflowRun.id,
+          workflowRun.user_message,
+          artifactsDir,
+          baseBranch,
+          issueContext
+        );
+        const substitutedBash = substituteNodeOutputRefs(
+          bashPrompt,
+          nodeOutputs,
+          true // escapedForBash
+        );
+        await execFileAsync('bash', ['-c', substitutedBash], { cwd });
+        bashComplete = true; // exit 0 = complete
+      } catch (e) {
+        const bashErr = e as NodeJS.ErrnoException;
+        // ENOENT or other system errors are unexpected — log them
+        if (bashErr.code === 'ENOENT') {
+          getLog().warn(
+            { err: bashErr, nodeId: node.id, iteration: i },
+            'loop_node.until_bash_exec_error'
+          );
+        }
+        bashComplete = false; // non-zero exit = not complete
+      }
+    }
+
+    const duration = Date.now() - iterationStart;
+    const completionDetected = signalDetected || bashComplete;
+
+    // Emit iteration completed
+    getWorkflowEventEmitter().emit({
+      type: 'loop_iteration_completed',
+      runId: workflowRun.id,
+      nodeId: node.id,
+      iteration: i,
+      duration,
+      completionDetected,
+    });
+    deps.store
+      .createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'loop_iteration_completed',
+        step_name: node.id,
+        data: { iteration: i, duration, completionDetected, nodeId: node.id },
+      })
+      .catch((err: Error) => {
+        logEventStoreError(err, i);
+      });
+
+    await logStepComplete(logDir, workflowRun.id, `${node.id}-iteration-${String(i)}`, i - 1, {
+      durationMs: duration,
+    });
+
+    if (completionDetected) {
+      await safeSendMessage(
+        platform,
+        conversationId,
+        `Loop node '${node.id}' completed after ${String(i)} iteration${i > 1 ? 's' : ''}`,
+        msgContext
+      );
+      return { state: 'completed', output: lastIterationOutput, sessionId: currentSessionId };
+    }
+  }
+
+  // Max iterations exceeded
+  const errorMsg = `Loop node '${node.id}' exceeded max iterations (${String(loop.max_iterations)}) without completion signal '${loop.until}'`;
+  getLog().warn(
+    { nodeId: node.id, maxIterations: loop.max_iterations, signal: loop.until },
+    'loop_node.max_iterations_reached'
+  );
+  await safeSendMessage(platform, conversationId, errorMsg, msgContext);
+  return { state: 'failed', output: lastIterationOutput, error: errorMsg };
+}
+
+/**
  * Execute a complete DAG workflow.
  * Called from executeWorkflow() in executor.ts after isDagWorkflow() check.
  */
@@ -1461,6 +1823,27 @@ export async function executeDagWorkflow(
               logDir,
               baseBranch,
               nodeOutputs,
+              issueContext
+            );
+            return { nodeId: node.id, output };
+          }
+
+          // 3b. Loop node dispatch — manages its own AI sessions and iteration
+          if (isLoopNode(node)) {
+            const output = await executeLoopNode(
+              deps,
+              platform,
+              conversationId,
+              cwd,
+              workflowRun,
+              node,
+              workflowProvider,
+              workflowModel,
+              artifactsDir,
+              logDir,
+              baseBranch,
+              nodeOutputs,
+              config,
               issueContext
             );
             return { nodeId: node.id, output };

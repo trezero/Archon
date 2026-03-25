@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils';
 import { listWorkflows } from '@/lib/api';
 import { useProject } from '@/contexts/ProjectContext';
 
-export type BuilderMode = 'dag' | 'sequential' | 'loop';
+export type BuilderMode = 'dag' | 'sequential';
 export type ViewMode = 'hidden' | 'split' | 'full';
 
 export interface BuilderToolbarProps {
@@ -43,13 +43,11 @@ export interface BuilderToolbarProps {
 const MODE_COLORS: Record<BuilderMode, string> = {
   dag: 'bg-node-command/20 text-node-command',
   sequential: 'bg-node-prompt/20 text-node-prompt',
-  loop: 'bg-node-bash/20 text-node-bash',
 };
 
 const MODE_LABELS: Record<BuilderMode, string> = {
   dag: 'DAG',
   sequential: 'STEPS',
-  loop: 'LOOP',
 };
 
 const VIEW_MODE_LABELS: readonly { value: ViewMode; label: string }[] = [
@@ -195,7 +193,7 @@ export function BuilderToolbar({
               MODE_COLORS[mode]
             )}
           >
-            {(['dag', 'sequential', 'loop'] as const).map(m => (
+            {(['dag', 'sequential'] as const).map(m => (
               <option key={m} value={m}>
                 {MODE_LABELS[m]}
               </option>
