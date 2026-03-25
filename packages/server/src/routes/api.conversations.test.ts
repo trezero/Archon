@@ -19,6 +19,7 @@ const mockFindConversationByPlatformId = mock(
 const mockSoftDeleteConversation = mock(async (_id: string) => {});
 const mockUpdateConversationTitle = mock(async (_id: string, _title: string) => {});
 
+const mockGenerateAndSetTitle = mock(async () => {});
 mock.module('@archon/core', () => ({
   handleMessage: mock(async () => {}),
   getDatabaseType: () => 'sqlite',
@@ -36,6 +37,7 @@ mock.module('@archon/core', () => ({
       this.name = 'ConversationNotFoundError';
     }
   },
+  generateAndSetTitle: mockGenerateAndSetTitle,
   getArchonWorkspacesPath: () => '/tmp/.archon/workspaces',
   createLogger: () => ({
     fatal: mock(() => undefined),
@@ -82,7 +84,12 @@ mock.module('@archon/core/db/conversations', () => ({
 mock.module('@archon/core/db/isolation-environments', () => ({}));
 mock.module('@archon/core/db/workflows', () => ({}));
 mock.module('@archon/core/db/workflow-events', () => ({}));
-mock.module('@archon/core/db/messages', () => ({}));
+const mockAddMessage = mock(async (_convId: string, _role: string, _content: string) => ({
+  id: 'msg-uuid-1',
+}));
+mock.module('@archon/core/db/messages', () => ({
+  addMessage: mockAddMessage,
+}));
 mock.module('@archon/core/db/codebases', () => ({
   listCodebases: mock(async () => [{ default_cwd: '/tmp/project' }]),
   getCodebase: mock(async () => null),
@@ -303,6 +310,107 @@ describe('POST /api/conversations', () => {
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: string };
     expect(body.error).toContain('Invalid JSON');
+  });
+});
+
+describe('POST /api/conversations with message (atomic create+send)', () => {
+  const mockLockManager = {
+    acquireLock: mock(async (_convId: string, fn: () => Promise<void>) => {
+      await fn();
+      return { status: 'started' as const };
+    }),
+  } as unknown as ConversationLockManager;
+
+  const mockWebAdapter = {
+    setConversationDbId: mock((_platformId: string, _dbId: string) => {}),
+    emitLockEvent: mock((_convId: string, _locked: boolean) => {}),
+    emitSSE: mock(async (_convId: string, _data: string) => {}),
+  } as unknown as WebAdapter;
+
+  test('creates conversation and dispatches message atomically', async () => {
+    const app = new Hono();
+    registerApiRoutes(app, mockWebAdapter, mockLockManager);
+
+    const response = await app.request('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'hello' }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      conversationId: string;
+      id: string;
+      dispatched: boolean;
+    };
+    expect(body.conversationId).toBe('web-test-abc');
+    expect(body.id).toBe('internal-uuid-123');
+    expect(body.dispatched).toBe(true);
+  });
+
+  test('persists user message during atomic creation', async () => {
+    const callsBefore = mockAddMessage.mock.calls.length;
+
+    const app = new Hono();
+    registerApiRoutes(app, mockWebAdapter, mockLockManager);
+
+    await app.request('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'test message' }),
+    });
+    expect(mockAddMessage.mock.calls.length).toBeGreaterThan(callsBefore);
+  });
+
+  test('generates title for non-command messages', async () => {
+    const callsBefore = mockGenerateAndSetTitle.mock.calls.length;
+
+    const app = new Hono();
+    registerApiRoutes(app, mockWebAdapter, mockLockManager);
+
+    await app.request('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'help me debug this function' }),
+    });
+    expect(mockGenerateAndSetTitle.mock.calls.length).toBeGreaterThan(callsBefore);
+  });
+
+  test('skips title generation for slash commands', async () => {
+    const callsBefore = mockGenerateAndSetTitle.mock.calls.length;
+
+    const app = new Hono();
+    registerApiRoutes(app, mockWebAdapter, mockLockManager);
+
+    await app.request('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: '/status' }),
+    });
+    expect(mockGenerateAndSetTitle.mock.calls.length).toBe(callsBefore);
+  });
+
+  test('still works without message (backward compatible)', async () => {
+    const simpleWebAdapter = {
+      setConversationDbId: mock((_platformId: string, _dbId: string) => {}),
+    } as unknown as WebAdapter;
+
+    const app = new Hono();
+    registerApiRoutes(app, simpleWebAdapter, {} as ConversationLockManager);
+
+    const response = await app.request('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      conversationId: string;
+      id: string;
+      dispatched?: boolean;
+    };
+    expect(body.conversationId).toBe('web-test-abc');
+    expect(body.id).toBe('internal-uuid-123');
+    expect(body.dispatched).toBeUndefined();
   });
 });
 

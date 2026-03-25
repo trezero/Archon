@@ -163,8 +163,9 @@ export function registerApiRoutes(
   });
 
   // POST /api/conversations - Create new conversation
+  // Accepts optional `message` field for atomic create+send (avoids ghost "Untitled" entries)
   app.post('/api/conversations', async c => {
-    let body: { codebaseId?: unknown; conversationId?: unknown };
+    let body: { codebaseId?: unknown; conversationId?: unknown; message?: unknown };
     try {
       body = await c.req.json();
     } catch {
@@ -173,6 +174,7 @@ export function registerApiRoutes(
 
     try {
       const codebaseId = typeof body.codebaseId === 'string' ? body.codebaseId : undefined;
+      const message = typeof body.message === 'string' && body.message ? body.message : undefined;
 
       if (body.conversationId !== undefined) {
         return apiError(
@@ -199,6 +201,35 @@ export function registerApiRoutes(
         codebaseId
       );
       webAdapter.setConversationDbId(conversation.platform_conversation_id, conversation.id);
+
+      // If message provided, dispatch it atomically (avoids ghost "Untitled" conversations)
+      if (message) {
+        try {
+          await messageDb.addMessage(conversation.id, 'user', message);
+        } catch (e: unknown) {
+          getLog().error({ err: e, conversationId: conversation.id }, 'message_persistence_failed');
+        }
+
+        // Generate title for non-command messages (fire-and-forget)
+        if (!message.startsWith('/')) {
+          void generateAndSetTitle(
+            conversation.id,
+            message,
+            conversation.ai_assistant_type,
+            getArchonWorkspacesPath()
+          );
+        }
+
+        const result = await dispatchToOrchestrator(conversation.platform_conversation_id, message);
+
+        return c.json({
+          conversationId: conversation.platform_conversation_id,
+          id: conversation.id,
+          dispatched: true,
+          ...result,
+        });
+      }
+
       return c.json({ conversationId: conversation.platform_conversation_id, id: conversation.id });
     } catch (error) {
       getLog().error({ err: error }, 'create_conversation_failed');
