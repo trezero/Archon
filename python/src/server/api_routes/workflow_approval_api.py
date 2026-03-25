@@ -1,9 +1,11 @@
 """Approval management endpoints.
 
-Stub for Phase 1 -- full HITL with A2UI rendering and Telegram
-integration ships in Phase 2.
+Handles listing, retrieving, and resolving approval requests.
+Resolution sends a resume signal to the remote-agent backend
+and notifies channels via the HITLRouter.
 """
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -52,8 +54,9 @@ async def get_approval(approval_id: str):
 
 @router.post("/approvals/{approval_id}/resolve")
 async def resolve_approval(approval_id: str, request: ResolveApprovalRequest):
-    """Resolve an approval. Phase 1: updates DB + transitions node state.
-    Phase 2 will add: resume signal to remote-agent, Telegram message edit, A2UI."""
+    """Resolve an approval: updates DB, transitions node state,
+    sends resume signal to the remote-agent backend, and notifies
+    channels via HITLRouter."""
     try:
         client = get_supabase_client()
         from datetime import UTC, datetime
@@ -72,7 +75,7 @@ async def resolve_approval(approval_id: str, request: ResolveApprovalRequest):
         approval = response.data[0]
 
         # Update the workflow node state based on decision
-        from .workflow_backend_api import get_state_service
+        from .workflow_backend_api import get_hitl_router, get_state_service
         state_service = get_state_service()
         node_state = "completed" if request.decision == "approved" else "failed"
         await state_service.process_node_state(
@@ -81,16 +84,32 @@ async def resolve_approval(approval_id: str, request: ResolveApprovalRequest):
             output=f"Approval {request.decision}" + (f": {request.comment}" if request.comment else ""),
         )
 
-        # Fire SSE event for approval resolution
-        await state_service.fire_sse_event(approval["workflow_run_id"], "approval_resolved", {
-            "approval_id": approval_id,
-            "decision": request.decision,
-            "resolved_by": request.resolved_by or "user",
-            "resolved_via": "ui",
-        })
+        # Send resume signal to the remote-agent backend
+        run_id = approval["workflow_run_id"]
+        run_response = client.table("workflow_runs").select("backend_id").eq("id", run_id).execute()
+        if run_response.data:
+            backend_id = run_response.data[0]["backend_id"]
+            backend_response = (
+                client.table("execution_backends").select("base_url").eq("id", backend_id).execute()
+            )
+            if backend_response.data:
+                base_url = backend_response.data[0]["base_url"]
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as http_client:
+                        await http_client.post(
+                            f"{base_url}/api/archon/workflows/{run_id}/resume",
+                            json={"approval_id": approval_id, "decision": request.decision},
+                        )
+                except httpx.HTTPError as http_err:
+                    logger.error(f"Failed to send resume signal to {base_url}: {http_err}", exc_info=True)
 
-        # TODO Phase 2: Send resume signal to remote-agent
-        # TODO Phase 2: Edit Telegram message with resolution status
+        # Notify channels of the resolution via HITLRouter
+        hitl_router = get_hitl_router()
+        await hitl_router.handle_resolution(
+            approval_id=approval_id,
+            decision=request.decision,
+            resolved_by=request.resolved_by or "user",
+        )
 
         return {"resolved": True, "decision": request.decision}
     except HTTPException:

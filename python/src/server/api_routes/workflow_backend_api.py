@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from ..config.logfire_config import get_logger
 from ..services.workflow.backend_service import BackendService
+from ..services.workflow.hitl_router import HITLRouter
 from ..services.workflow.state_service import StateService
 from ..services.workflow.workflow_models import (
     ApprovalRequestCallback,
@@ -27,12 +28,22 @@ router = APIRouter(prefix="/api/workflows", tags=["workflow-backends"])
 # Singleton state service for SSE fan-out (shared across requests)
 _state_service: StateService | None = None
 
+# Singleton HITL router for approval dispatch (shared across requests)
+_hitl_router: HITLRouter | None = None
+
 
 def get_state_service() -> StateService:
     global _state_service
     if _state_service is None:
         _state_service = StateService()
     return _state_service
+
+
+def get_hitl_router() -> HITLRouter:
+    global _hitl_router
+    if _hitl_router is None:
+        _hitl_router = HITLRouter(get_state_service())
+    return _hitl_router
 
 
 # -- Auth dependency for callback endpoints --
@@ -162,8 +173,8 @@ async def approval_request_callback(
     _backend_id: str = Depends(verify_backend_token),
 ):
     """Received when the remote-agent hits a node with approval.required: true.
-    Creates an approval_request record and fires SSE event.
-    Full HITL handling (A2UI, Telegram) is Phase 2 scope -- this is the stub."""
+    Updates node state to waiting_approval, then delegates to HITLRouter
+    for record creation, A2UI payload generation, and channel dispatch."""
     state_service = get_state_service()
 
     # Update node state to waiting_approval
@@ -175,28 +186,18 @@ async def approval_request_callback(
     if not success:
         raise HTTPException(status_code=400, detail=result)
 
-    # Create approval_request record (stub for Phase 2 -- stores raw output, no A2UI yet)
-    try:
-        from ..utils import get_supabase_client
-        client = get_supabase_client()
-        client.table("approval_requests").insert({
-            "workflow_run_id": callback.workflow_run_id,
-            "workflow_node_id": callback.workflow_node_id,
-            "yaml_node_id": callback.yaml_node_id,
-            "approval_type": callback.approval_type,
-            "payload": {"raw_output": callback.node_output},
-            "status": "pending",
-            "channels_notified": callback.channels,
-        }).execute()
-    except Exception as e:
-        logger.error(f"Error creating approval request: {e}", exc_info=True)
-
-    # Fire SSE event
-    await state_service.fire_sse_event(callback.workflow_run_id, "approval_requested", {
-        "node_id": callback.workflow_node_id,
-        "yaml_node_id": callback.yaml_node_id,
-        "approval_type": callback.approval_type,
-    })
+    # Delegate to HITLRouter for approval record creation and channel dispatch
+    hitl_router = get_hitl_router()
+    success, result = await hitl_router.handle_approval_request(
+        workflow_run_id=callback.workflow_run_id,
+        workflow_node_id=callback.workflow_node_id,
+        yaml_node_id=callback.yaml_node_id,
+        approval_type=callback.approval_type,
+        node_output=callback.node_output,
+        channels=callback.channels,
+    )
+    if not success:
+        logger.error(f"HITLRouter failed to handle approval request: {result}")
 
     return {"accepted": True}
 
