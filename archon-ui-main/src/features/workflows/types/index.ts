@@ -103,3 +103,12 @@ export interface ResolveApprovalRequest {
   decision: "approved" | "rejected";
   comment?: string;
 }
+
+export interface EditorNode {
+  id: string;
+  command: string;
+  prompt: string;
+  depends_on: string[];
+  approval_required: boolean;
+  when?: string;
+}
