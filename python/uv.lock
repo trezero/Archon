@@ -187,6 +187,7 @@ agents = [
     { name = "uvicorn" },
 ]
 all = [
+    { name = "anthropic" },
     { name = "asyncpg" },
     { name = "crawl4ai" },
     { name = "cryptography" },
@@ -198,6 +199,7 @@ all = [
     { name = "mcp" },
     { name = "openai" },
     { name = "pdfplumber" },
+    { name = "prefixspan" },
     { name = "pydantic" },
     { name = "pydantic-ai" },
     { name = "pypdf2" },
@@ -240,6 +242,7 @@ mcp = [
     { name = "supabase" },
 ]
 server = [
+    { name = "anthropic" },
     { name = "asyncpg" },
     { name = "crawl4ai" },
     { name = "cryptography" },
@@ -249,6 +252,7 @@ server = [
     { name = "markdown" },
     { name = "openai" },
     { name = "pdfplumber" },
+    { name = "prefixspan" },
     { name = "pydantic" },
     { name = "pydantic-ai" },
     { name = "pypdf2" },
@@ -298,6 +302,7 @@ agents = [
     { name = "uvicorn", specifier = ">=0.24.0" },
 ]
 all = [
+    { name = "anthropic", specifier = ">=0.40.0" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "crawl4ai", specifier = "==0.7.4" },
     { name = "cryptography", specifier = ">=41.0.0" },
@@ -309,6 +314,7 @@ all = [
     { name = "mcp", specifier = "==1.12.2" },
     { name = "openai", specifier = "==1.71.0" },
     { name = "pdfplumber", specifier = ">=0.11.6" },
+    { name = "prefixspan", specifier = ">=0.5.2" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-ai", specifier = ">=0.0.13" },
     { name = "pypdf2", specifier = ">=3.0.1" },
@@ -351,6 +357,7 @@ mcp = [
     { name = "supabase", specifier = "==2.15.1" },
 ]
 server = [
+    { name = "anthropic", specifier = ">=0.40.0" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "crawl4ai", specifier = "==0.7.4" },
     { name = "cryptography", specifier = ">=41.0.0" },
@@ -360,6 +367,7 @@ server = [
     { name = "markdown", specifier = ">=3.8" },
     { name = "openai", specifier = "==1.71.0" },
     { name = "pdfplumber", specifier = ">=0.11.6" },
+    { name = "prefixspan", specifier = ">=0.5.2" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-ai", specifier = ">=0.0.13" },
     { name = "pypdf2", specifier = ">=3.0.1" },
@@ -830,6 +838,12 @@ wheels = [
 ]
 
 [[package]]
+name = "docopt"
+version = "0.6.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/55/8f8cab2afd404cf578136ef2cc5dfb50baa1761b68c9da1fb1e4eed343c9/docopt-0.6.2.tar.gz", hash = "sha256:49b3a825280bd66b3aa83585ef59c4a8c82f2c8a522dbe754a8bc8d08c85c491", size = 25901, upload-time = "2014-06-16T11:18:57.406Z" }
+
+[[package]]
 name = "ecdsa"
 version = "0.19.1"
 source = { registry = "https://pypi.org/simple" }
@@ -858,6 +872,16 @@ sdist = { url = "https://files.pythonhosted.org/packages/91/50/a9d80c47ff289c611
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/8f/c4d9bafc34ad7ad5d8dc16dd1347ee0e507a52c3adb6bfa8887e1c6a26ba/executing-2.2.0-py2.py3-none-any.whl", hash = "sha256:11387150cad388d62750327a53d3339fad4888b39a6fe233c3afbb54ecffd3aa", size = 26702, upload-time = "2025-01-22T15:41:25.929Z" },
 ]
+
+[[package]]
+name = "extratools"
+version = "0.8.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "sortedcontainers" },
+    { name = "toolz" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/30/17/43350d1b147510b3ebbb09fdc05109aab6de2b6483b7f2110bb043f44ffb/extratools-0.8.2.1.tar.gz", hash = "sha256:d1410f4ffb59a508a3ec4b9f801eb378c6ce051f70360001536824542d6deb7a", size = 25589, upload-time = "2018-12-02T22:22:22.967Z" }
 
 [[package]]
 name = "factory-boy"
@@ -1991,6 +2015,16 @@ wheels = [
 ]
 
 [[package]]
+name = "prefixspan"
+version = "0.5.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "docopt" },
+    { name = "extratools" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c5/b0/e66e9f6e07a0b37aa0f5703c46f54bafbdf65dfba63994247676b19076c4/prefixspan-0.5.2.tar.gz", hash = "sha256:8fbd2f94b3a7f4399d04f9bd6aa214b830fb7828799c472cd43dda10b03f671c", size = 10404, upload-time = "2018-09-29T06:12:27.708Z" }
+
+[[package]]
 name = "prompt-toolkit"
 version = "3.0.51"
 source = { registry = "https://pypi.org/simple" }
@@ -3004,6 +3038,15 @@ wheels = [
 ]
 
 [[package]]
+name = "sortedcontainers"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/c4/ba2f8066cceb6f23394729afe52f3bf7adec04bf9ed2c820b39e19299111/sortedcontainers-2.4.0.tar.gz", hash = "sha256:25caa5a06cc30b6b83d11423433f65d1f9d76c4c6a0c90e3379eaa43b9bfdb88", size = 30594, upload-time = "2021-05-16T22:03:42.897Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl", hash = "sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0", size = 29575, upload-time = "2021-05-16T22:03:41.177Z" },
+]
+
+[[package]]
 name = "soupsieve"
 version = "2.7"
 source = { registry = "https://pypi.org/simple" }
@@ -3194,6 +3237,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/5f/aa/8ae85f69a9f6012c6f8011c6f4aa1c96154c816e9eea2e1b758601157833/tokenizers-0.21.1-cp39-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:e5a69c1a4496b81a5ee5d2c1f3f7fbdf95e90a0196101b0ee89ed9956b8a168f", size = 9384380, upload-time = "2025-03-13T10:51:16.526Z" },
     { url = "https://files.pythonhosted.org/packages/e8/5b/a5d98c89f747455e8b7a9504910c865d5e51da55e825a7ae641fb5ff0a58/tokenizers-0.21.1-cp39-abi3-win32.whl", hash = "sha256:1039a3a5734944e09de1d48761ade94e00d0fa760c0e0551151d4dd851ba63e3", size = 2239506, upload-time = "2025-03-13T10:51:20.643Z" },
     { url = "https://files.pythonhosted.org/packages/e6/b6/072a8e053ae600dcc2ac0da81a23548e3b523301a442a6ca900e92ac35be/tokenizers-0.21.1-cp39-abi3-win_amd64.whl", hash = "sha256:0f0dcbcc9f6e13e675a66d7a5f2f225a736745ce484c1a4e07476a89ccdad382", size = 2435481, upload-time = "2025-03-13T10:51:19.243Z" },
+]
+
+[[package]]
+name = "toolz"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/11/d6/114b492226588d6ff54579d95847662fc69196bdeec318eb45393b24c192/toolz-1.1.0.tar.gz", hash = "sha256:27a5c770d068c110d9ed9323f24f1543e83b2f300a687b7891c1a6d56b697b5b", size = 52613, upload-time = "2025-10-17T04:03:21.661Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fb/12/5911ae3eeec47800503a238d971e51722ccea5feb8569b735184d5fcdbc0/toolz-1.1.0-py3-none-any.whl", hash = "sha256:15ccc861ac51c53696de0a5d6d4607f99c210739caf987b5d2054f3efed429d8", size = 58093, upload-time = "2025-10-17T04:03:20.435Z" },
 ]
 
 [[package]]
