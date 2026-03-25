@@ -87,11 +87,16 @@ async def proxy_to_agent_work_orders(request: Request, path: str = "") -> Respon
             },
         )
 
-        # Return response with preserved headers and status
+        # Return response with preserved headers, status, and deprecation notice
+        response_headers = dict(response.headers)
+        response_headers["X-Deprecated"] = "true"
+        response_headers["X-Deprecation-Notice"] = (
+            "Agent Work Orders is deprecated. Use Workflows 2.0 at /api/workflows instead."
+        )
         return Response(
             content=response.content,
             status_code=response.status_code,
-            headers=dict(response.headers),
+            headers=response_headers,
             media_type=response.headers.get("content-type"),
         )
 
