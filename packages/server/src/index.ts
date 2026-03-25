@@ -509,8 +509,8 @@ async function main(): Promise<void> {
   });
 
   app.get('/health/concurrency', c => {
-    const stats = lockManager.getStats();
-    return c.json({ status: 'ok', ...stats });
+    const { active, queuedTotal, maxConcurrent } = lockManager.getStats();
+    return c.json({ status: 'ok', active, queuedTotal, maxConcurrent });
   });
 
   // Serve web UI static files in production
@@ -529,12 +529,14 @@ async function main(): Promise<void> {
     app.get('*', serveStatic({ root: webDistPath, path: 'index.html' }));
   }
 
+  const hostname = process.env.HOST || '0.0.0.0';
   const server = Bun.serve({
     fetch: app.fetch,
+    hostname,
     port,
     idleTimeout: 255, // Max value (seconds) - prevents SSE connections from being killed
   });
-  getLog().info({ port: server.port }, 'server_listening');
+  getLog().info({ port: server.port, hostname }, 'server_listening');
 
   // Initialize Telegram adapter (conditional)
   let telegram: TelegramAdapter | null = null;
