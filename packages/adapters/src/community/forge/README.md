@@ -73,6 +73,46 @@ app.post('/webhooks/my-forge', async (c) => {
 });
 ```
 
+## Testing
+
+### Mock isolation (required)
+
+Bun's `mock.module()` is process-global and irreversible — `mock.restore()` does NOT undo it. Your test file **must** run in its own `bun test` invocation to avoid polluting other tests.
+
+After adding your test file, update `packages/adapters/package.json` to add a separate batch:
+
+```json
+"test": "... existing batches ... && bun test src/community/forge/your-adapter/adapter.test.ts"
+```
+
+Never add your test to an existing batch that mocks the same modules differently (e.g., `@archon/paths`, `@archon/git`).
+
+### Lazy logger pattern
+
+Always use a module-level `cachedLog` + `getLog()` getter so test mocks can intercept `createLogger` before the logger is instantiated:
+
+```typescript
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('adapter.my-forge');
+  return cachedLog;
+}
+```
+
+### Log event naming
+
+Follow the `{domain}.{action}_{state}` convention. Standard states: `_started`, `_completed`, `_failed`. Always pair `_started` with `_completed` or `_failed`.
+
+```typescript
+// ✅ CORRECT
+getLog().info({ conversationId }, 'adapter.comment_post_completed');
+getLog().error({ err, conversationId }, 'adapter.comment_post_failed');
+
+// ❌ WRONG
+getLog().info({ conversationId }, 'comment_posted');
+getLog().error({ err }, 'error_posting');
+```
+
 ## Reference
 
 See the GitHub adapter (`packages/adapters/src/forge/github/`) for a complete working example.

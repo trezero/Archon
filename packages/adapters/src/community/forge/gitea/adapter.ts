@@ -765,7 +765,7 @@ Use 'tea pr view ${String(pr.number)}' for full details if needed.`;
     }
     // Secondary: Check comment author (works with dedicated bot account)
     const commentAuthor = event.comment?.user?.login;
-    if (commentAuthor && commentAuthor.toLowerCase() === this.botMention.toLowerCase()) {
+    if (commentAuthor?.toLowerCase() === this.botMention.toLowerCase()) {
       getLog().debug({ commentAuthor }, 'ignoring_own_comment');
       return;
     }
@@ -828,7 +828,7 @@ Use 'tea pr view ${String(pr.number)}' for full details if needed.`;
 
     // For PRs: get branch info from the event payload
     if (isPR && pullRequest?.head) {
-      isolationHints.prBranch = pullRequest.head.ref;
+      isolationHints.prBranch = toBranchName(pullRequest.head.ref);
       isolationHints.prSha = pullRequest.head.sha;
 
       // Detect if PR is from a fork

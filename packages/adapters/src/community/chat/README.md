@@ -76,6 +76,30 @@ if (process.env.MY_PLATFORM_TOKEN) {
 }
 ```
 
+## Testing
+
+### Mock isolation (required)
+
+Bun's `mock.module()` is process-global and irreversible — `mock.restore()` does NOT undo it. Your test file **must** run in its own `bun test` invocation if it mocks modules differently from existing test files in the same batch.
+
+Check `packages/adapters/package.json` to see which test files share a batch. If your test mocks the same modules (e.g., `@archon/paths`) with different exports, split it into a separate batch:
+
+```json
+"test": "... existing batches ... && bun test src/community/chat/your-adapter/adapter.test.ts"
+```
+
+### Lazy logger pattern
+
+Always use a module-level `cachedLog` + `getLog()` getter so test mocks can intercept `createLogger` before the logger is instantiated:
+
+```typescript
+let cachedLog: ReturnType<typeof createLogger> | undefined;
+function getLog(): ReturnType<typeof createLogger> {
+  if (!cachedLog) cachedLog = createLogger('adapter.my-chat');
+  return cachedLog;
+}
+```
+
 ## Reference
 
 See the Discord adapter (`discord/`) for a complete working example.
