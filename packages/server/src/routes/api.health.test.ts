@@ -12,7 +12,13 @@ const mockLoadConfig = mock(async () => ({
   worktree: { baseBranch: 'main' },
 }));
 const mockGetDatabaseType = mock(() => 'sqlite' as const);
-const mockGetStats = mock(() => ({ active: 1, queued: 2 }));
+const mockGetStats = mock(() => ({
+  active: 1,
+  queuedTotal: 2,
+  queuedByConversation: [] as { conversationId: string; queuedMessages: number }[],
+  maxConcurrent: 10,
+  activeConversationIds: [] as string[],
+}));
 
 mock.module('@archon/core', () => ({
   handleMessage: mock(async () => {}),
@@ -116,7 +122,6 @@ mock.module('@archon/core/db/isolation-environments', () => ({
   updateStatus: mock(async () => {}),
 }));
 
-const mockCountRunningWorkflows = mock(async () => 0);
 const mockGetRunningWorkflows = mock(
   async () =>
     [] as { id: string; conversation_id: string; workflow_name: string; started_at: string }[]
@@ -132,7 +137,6 @@ mock.module('@archon/core/db/workflows', () => ({
   getWorkflowRun: mock(async () => null),
   cancelWorkflowRun: mock(async () => {}),
   getWorkflowRunByWorkerPlatformId: mock(async () => null),
-  countRunningWorkflows: mockCountRunningWorkflows,
   getRunningWorkflows: mockGetRunningWorkflows,
 }));
 
@@ -187,14 +191,15 @@ function makeApp(): Hono {
 describe('GET /api/health', () => {
   beforeEach(() => {
     mockGetStats.mockReset();
-    mockCountRunningWorkflows.mockReset();
     mockGetRunningWorkflows.mockReset();
   });
 
   test('returns status ok with adapter and concurrency info', async () => {
     mockGetStats.mockImplementationOnce(() => ({
       active: 0,
-      queued: 2,
+      queuedTotal: 2,
+      queuedByConversation: [],
+      maxConcurrent: 10,
       activeConversationIds: [],
     }));
     mockGetRunningWorkflows.mockImplementationOnce(async () => [
@@ -220,7 +225,9 @@ describe('GET /api/health', () => {
   test('includes running background workflows in concurrency.active count', async () => {
     mockGetStats.mockImplementationOnce(() => ({
       active: 0,
-      queued: 0,
+      queuedTotal: 0,
+      queuedByConversation: [],
+      maxConcurrent: 10,
       activeConversationIds: [],
     }));
     mockGetRunningWorkflows.mockImplementationOnce(async () => [
@@ -244,7 +251,9 @@ describe('GET /api/health', () => {
   test('deduplicates conversation IDs tracked by both lock manager and DB', async () => {
     mockGetStats.mockImplementationOnce(() => ({
       active: 1,
-      queued: 0,
+      queuedTotal: 0,
+      queuedByConversation: [],
+      maxConcurrent: 10,
       activeConversationIds: ['conv-1'],
     }));
     mockGetRunningWorkflows.mockImplementationOnce(async () => [
@@ -266,7 +275,9 @@ describe('GET /api/health', () => {
   test('combines lock manager and background workflow counts', async () => {
     mockGetStats.mockImplementationOnce(() => ({
       active: 1,
-      queued: 3,
+      queuedTotal: 3,
+      queuedByConversation: [],
+      maxConcurrent: 10,
       activeConversationIds: ['conv-1'],
     }));
     mockGetRunningWorkflows.mockImplementationOnce(async () => [
@@ -290,7 +301,9 @@ describe('GET /api/health', () => {
   test('returns 200 without any auth requirements', async () => {
     mockGetStats.mockImplementationOnce(() => ({
       active: 0,
-      queued: 0,
+      queuedTotal: 0,
+      queuedByConversation: [],
+      maxConcurrent: 10,
       activeConversationIds: [],
     }));
     mockGetRunningWorkflows.mockImplementationOnce(async () => []);

@@ -126,20 +126,6 @@ export async function getActiveWorkflowRun(conversationId: string): Promise<Work
   }
 }
 
-export async function countRunningWorkflows(): Promise<number> {
-  try {
-    const result = await pool.query<{ cnt: string }>(
-      "SELECT COUNT(*) AS cnt FROM remote_agent_workflow_runs WHERE status = 'running'",
-      []
-    );
-    return Number(result.rows[0]?.cnt ?? 0);
-  } catch (error) {
-    const err = error as Error;
-    getLog().error({ err }, 'db.workflow_run_count_running_failed');
-    return 0; // Non-critical: don't break health check
-  }
-}
-
 export async function getRunningWorkflows(): Promise<
   { id: string; conversation_id: string; workflow_name: string; started_at: string }[]
 > {
