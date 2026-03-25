@@ -2,5 +2,6 @@
 
 from .capture_service import CaptureService
 from .normalization_service import NormalizationService
+from .sequence_mining_service import SequenceMiningService
 
-__all__ = ["CaptureService", "NormalizationService"]
+__all__ = ["CaptureService", "NormalizationService", "SequenceMiningService"]
