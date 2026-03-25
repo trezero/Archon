@@ -195,7 +195,9 @@ const messageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
     // Auto-expand textarea
     const textarea = e.target;
     textarea.style.height = 'auto';
-    textarea.style.height = `${String(Math.min(textarea.scrollHeight, 200))}px`;
+    const newHeight = Math.min(textarea.scrollHeight, 200);
+    textarea.style.height = `${String(newHeight)}px`;
+    textarea.style.overflowY = newHeight >= 200 ? 'auto' : 'hidden';
   };
 
   const handleFilePickerChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
@@ -310,8 +312,8 @@ const messageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
             disabled={disabled}
             placeholder={dragging ? 'Drop files here...' : (disabledReason ?? 'Message Archon...')}
             rows={1}
-            className="flex-1 resize-none rounded-lg border border-border bg-background px-4 py-3 text-sm text-text-primary placeholder:text-text-tertiary focus:border-primary focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-            style={{ maxHeight: '200px' }}
+            className="flex-1 resize-none overflow-hidden rounded-lg border border-border bg-background px-4 py-2 text-sm leading-6 text-text-primary placeholder:text-text-tertiary focus:border-primary focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ minHeight: '40px', maxHeight: '200px' }}
           />
           <Button
             onClick={handleSend}
