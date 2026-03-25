@@ -112,3 +112,18 @@ export interface EditorNode {
   approval_required: boolean;
   when?: string;
 }
+
+export interface WorkflowCommand {
+  id: string;
+  name: string;
+  prompt_template: string;
+  description: string | null;
+  is_builtin: boolean;
+  created_at: string;
+}
+
+export interface CreateCommandRequest {
+  name: string;
+  prompt_template: string;
+  description?: string;
+}

@@ -151,3 +151,95 @@ async def export_definition(definition_id: str):
     except Exception as e:
         logger.error(f"Error exporting definition: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+# -- Command Library --
+
+
+class CreateCommandRequest(BaseModel):
+    name: str = Field(..., description="Command name")
+    prompt_template: str = Field(..., description="Markdown prompt template")
+    description: str | None = Field(None)
+
+
+class UpdateCommandRequest(BaseModel):
+    name: str | None = Field(None)
+    prompt_template: str | None = Field(None)
+    description: str | None = Field(None)
+
+
+@router.get("/commands")
+async def list_commands():
+    try:
+        from ..services.workflow.command_service import CommandService
+
+        service = CommandService()
+        success, result = service.list_commands()
+        if not success:
+            raise HTTPException(status_code=500, detail=result)
+        return result["commands"]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing commands: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.post("/commands", status_code=http_status.HTTP_201_CREATED)
+async def create_command(request: CreateCommandRequest):
+    try:
+        from ..services.workflow.command_service import CommandService
+
+        service = CommandService()
+        success, result = service.create_command(
+            name=request.name,
+            prompt_template=request.prompt_template,
+            description=request.description,
+        )
+        if not success:
+            raise HTTPException(status_code=400, detail=result)
+        return result["command"]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating command: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.put("/commands/{command_id}")
+async def update_command(command_id: str, request: UpdateCommandRequest):
+    try:
+        from ..services.workflow.command_service import CommandService
+
+        service = CommandService()
+        success, result = service.update_command(
+            command_id,
+            name=request.name,
+            prompt_template=request.prompt_template,
+            description=request.description,
+        )
+        if not success:
+            raise HTTPException(status_code=400, detail=result)
+        return result["command"]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating command: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.delete("/commands/{command_id}")
+async def delete_command(command_id: str):
+    try:
+        from ..services.workflow.command_service import CommandService
+
+        service = CommandService()
+        success, result = service.delete_command(command_id)
+        if not success:
+            raise HTTPException(status_code=404, detail=result)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting command: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"error": str(e)})

@@ -1,10 +1,12 @@
 import { callAPIWithETag } from "../../shared/api/apiClient";
 import type {
   ApprovalRequest,
+  CreateCommandRequest,
   CreateDefinitionRequest,
   CreateRunRequest,
   ExecutionBackend,
   ResolveApprovalRequest,
+  WorkflowCommand,
   WorkflowDefinition,
   WorkflowRun,
   WorkflowRunDetail,
@@ -72,5 +74,27 @@ export const workflowService = {
       method: "POST",
       body: JSON.stringify(data),
     });
+  },
+
+  async listCommands(): Promise<WorkflowCommand[]> {
+    return callAPIWithETag<WorkflowCommand[]>("/api/workflows/commands");
+  },
+
+  async createCommand(data: CreateCommandRequest): Promise<WorkflowCommand> {
+    return callAPIWithETag<WorkflowCommand>("/api/workflows/commands", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateCommand(id: string, data: Partial<CreateCommandRequest>): Promise<WorkflowCommand> {
+    return callAPIWithETag<WorkflowCommand>(`/api/workflows/commands/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async deleteCommand(id: string): Promise<void> {
+    await callAPIWithETag(`/api/workflows/commands/${id}`, { method: "DELETE" });
   },
 };
