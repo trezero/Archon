@@ -22,18 +22,22 @@ const ACCEPTED_BINARY_MIME_TYPES = new Set([
 
 /** Extensions for the file-picker `accept` attribute. Covers images, PDFs, and text/code files. */
 const ACCEPTED_EXTENSIONS_LIST = [
+  // Images
   '.png',
   '.jpg',
   '.jpeg',
   '.gif',
   '.webp',
+  // Documents
   '.pdf',
+  // Text / markup
   '.md',
   '.txt',
   '.csv',
   '.xml',
   '.html',
   '.htm',
+  // Data / config
   '.json',
   '.yaml',
   '.yml',
@@ -43,6 +47,7 @@ const ACCEPTED_EXTENSIONS_LIST = [
   '.conf',
   '.env',
   '.log',
+  // Web
   '.css',
   '.js',
   '.jsx',
@@ -50,6 +55,7 @@ const ACCEPTED_EXTENSIONS_LIST = [
   '.tsx',
   '.mjs',
   '.cjs',
+  // Systems / scripting
   '.py',
   '.rb',
   '.go',
