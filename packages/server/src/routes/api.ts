@@ -207,6 +207,8 @@ export function registerApiRoutes(
         try {
           await messageDb.addMessage(conversation.id, 'user', message);
         } catch (e: unknown) {
+          // Log only (no SSE warning) — the SSE stream isn't connected yet for new conversations.
+          // The existing /message endpoint emits a warning because the stream is guaranteed to be active.
           getLog().error({ err: e, conversationId: conversation.id }, 'message_persistence_failed');
         }
 
