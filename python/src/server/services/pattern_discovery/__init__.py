@@ -6,6 +6,7 @@ from .generation_service import GenerationService
 from .normalization_service import NormalizationService
 from .scoring_service import ScoringService
 from .sequence_mining_service import SequenceMiningService
+from .suggestion_service import SuggestionService
 
 __all__ = [
     "CaptureService",
@@ -14,4 +15,5 @@ __all__ = [
     "NormalizationService",
     "ScoringService",
     "SequenceMiningService",
+    "SuggestionService",
 ]

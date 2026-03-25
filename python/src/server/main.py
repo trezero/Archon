@@ -43,6 +43,7 @@ from .api_routes.workflow_api import router as workflow_router
 from .api_routes.workflow_approval_api import router as workflow_approval_router
 from .api_routes.workflow_backend_api import router as workflow_backend_router
 from .api_routes.workflow_definition_api import router as workflow_definition_router
+from .api_routes.pattern_discovery_api import router as pattern_discovery_router
 
 # Import modular API routers
 from .api_routes.settings_api import router as settings_router
@@ -258,6 +259,7 @@ app.include_router(workflow_router)
 app.include_router(workflow_approval_router)
 app.include_router(workflow_backend_router)
 app.include_router(workflow_definition_router)
+app.include_router(pattern_discovery_router)
 
 
 # Root endpoint
