@@ -20,27 +20,20 @@ const ACCEPTED_BINARY_MIME_TYPES = new Set([
   'application/pdf',
 ]);
 
-/**
- * Extensions listed in the file-picker's `accept` attribute.
- * Covers all file types Claude Code supports: images, PDFs, and text/code files.
- */
+/** Extensions for the file-picker `accept` attribute. Covers images, PDFs, and text/code files. */
 const ACCEPTED_EXTENSIONS_LIST = [
-  // Images (also accepted via MIME type above)
   '.png',
   '.jpg',
   '.jpeg',
   '.gif',
   '.webp',
-  // Documents
   '.pdf',
-  // Text / markup
   '.md',
   '.txt',
   '.csv',
   '.xml',
   '.html',
   '.htm',
-  // Data / config
   '.json',
   '.yaml',
   '.yml',
@@ -50,7 +43,6 @@ const ACCEPTED_EXTENSIONS_LIST = [
   '.conf',
   '.env',
   '.log',
-  // Web
   '.css',
   '.js',
   '.jsx',
@@ -58,7 +50,6 @@ const ACCEPTED_EXTENSIONS_LIST = [
   '.tsx',
   '.mjs',
   '.cjs',
-  // Systems / scripting
   '.py',
   '.rb',
   '.go',
