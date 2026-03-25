@@ -1,9 +1,9 @@
-# Docker Compose profiles:
-# - Default (no profile): Starts archon-server, archon-mcp, and archon-frontend
-# - Agents are opt-in: archon-agents starts only with the "agents" profile
+# Docker Compose overview:
+# - Default (no profile): Starts archon-server, archon-mcp, archon-agents, and archon-frontend
+# - Optional profile: archon-agent-work-orders starts only with the "work-orders" profile
 # Usage:
-#   docker compose up                        # Starts server, mcp, frontend (agents disabled)
-#   docker compose --profile agents up -d    # Also starts archon-agents
+#   docker compose up                        # Starts server, mcp, agents, frontend
+#   docker compose --profile work-orders up  # Additionally starts agent work orders service
 
 services:
   # Server Service (FastAPI + Socket.IO + Crawling)
@@ -126,8 +126,6 @@ services:
 
   # AI Agents Service (ML/Reranking)
   archon-agents:
-    profiles:
-      - agents  # Only starts when explicitly using --profile agents
     build:
       context: ./python
       dockerfile: Dockerfile.agents
