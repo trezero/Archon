@@ -13,10 +13,12 @@ set -euo pipefail
 # Configuration
 # ──────────────────────────────────────────────────────────────────────
 BACKUP_BASE="$HOME/archon-backups"
-ARCHON_DIR="${ARCHON_DIR:-/home/winadmin/projects/Archon}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ARCHON_DIR="${ARCHON_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 GLOBAL_CLAUDE_DIR="/home/winadmin/.claude"
-# Source machine memory path — preserved regardless of local project path
-MEMORY_DIR="$GLOBAL_CLAUDE_DIR/projects/-home-winadmin-projects-archon/memory"
+# Claude Code project memory uses the absolute path with slashes replaced by dashes
+ARCHON_PATH_SLUG="$(echo "$ARCHON_DIR" | sed 's|^/||; s|/|-|g')"
+MEMORY_DIR="$GLOBAL_CLAUDE_DIR/projects/-${ARCHON_PATH_SLUG}/memory"
 DB_CONTAINER="supabase-db"
 
 # Determine which backup to restore

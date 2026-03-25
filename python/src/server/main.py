@@ -39,6 +39,11 @@ from .api_routes.leaveoff_api import router as leaveoff_router
 from .api_routes.postman_api import router as postman_router
 from .api_routes.scanner_script_api import router as scanner_script_router
 from .api_routes.version_api import router as version_router
+from .api_routes.workflow_api import router as workflow_router
+from .api_routes.workflow_approval_api import router as workflow_approval_router
+from .api_routes.workflow_backend_api import router as workflow_backend_router
+from .api_routes.workflow_definition_api import router as workflow_definition_router
+from .api_routes.pattern_discovery_api import router as pattern_discovery_router
 
 # Import modular API routers
 from .api_routes.settings_api import router as settings_router
@@ -250,6 +255,11 @@ app.include_router(leaveoff_router)
 app.include_router(postman_router)
 app.include_router(scanner_script_router)
 app.include_router(auto_research_router)
+app.include_router(workflow_approval_router)
+app.include_router(workflow_backend_router)
+app.include_router(workflow_definition_router)
+app.include_router(workflow_router)  # Must be last — has catch-all /{run_id} path
+app.include_router(pattern_discovery_router)
 
 
 # Root endpoint

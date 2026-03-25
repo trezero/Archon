@@ -32,9 +32,7 @@ class ServiceDiscovery:
         server_port = os.getenv("ARCHON_SERVER_PORT")
         mcp_port = os.getenv("ARCHON_MCP_PORT")
         agents_port = os.getenv("ARCHON_AGENTS_PORT")
-        agent_work_orders_port = os.getenv("AGENT_WORK_ORDERS_PORT")
 
-        # Required ports (core services)
         if not server_port:
             raise ValueError(
                 "ARCHON_SERVER_PORT environment variable is required. "
@@ -54,13 +52,10 @@ class ServiceDiscovery:
                 "Default value: 8052"
             )
 
-        # Optional ports (agent_work_orders is an optional feature)
-        # Store None if not configured to indicate feature is unavailable
         self.DEFAULT_PORTS = {
             "api": int(server_port),
             "mcp": int(mcp_port),
             "agents": int(agents_port),
-            "agent_work_orders": int(agent_work_orders_port) if agent_work_orders_port else None,
         }
 
         self.environment = self._detect_environment()
@@ -71,11 +66,9 @@ class ServiceDiscovery:
         "api": "archon-server",
         "mcp": "archon-mcp",
         "agents": "archon-agents",
-        "agent_work_orders": "archon-agent-work-orders",
         "archon-server": "archon-server",
         "archon-mcp": "archon-mcp",
         "archon-agents": "archon-agents",
-        "archon-agent-work-orders": "archon-agent-work-orders",
     }
 
     @staticmethod
@@ -254,12 +247,10 @@ def get_agents_url() -> str:
 
 def get_agent_work_orders_url() -> str | None:
     """
-    Get the Agent Work Orders service URL.
-
-    Returns:
-        Service URL or None if agent work orders feature is not configured.
+    Deprecated: Agent Work Orders service has been removed.
+    Returns None; the proxy will return 503 for all requests.
     """
-    return get_discovery().get_service_url("agent_work_orders")
+    return None
 
 
 def is_service_available(service: str) -> bool:

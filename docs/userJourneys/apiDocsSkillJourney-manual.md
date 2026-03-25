@@ -141,7 +141,7 @@ whether Claude Code naturally discovers and follows the skill when given a relev
 1. Navigate to a non-FastAPI project directory. If you don't have one handy, use the
    frontend directory:
    ```bash
-   cd /home/winadmin/projects/archon/archon-ui-main
+   cd /home/winadmin/projects/Trinity/archon/archon-ui-main
    claude
    ```
 

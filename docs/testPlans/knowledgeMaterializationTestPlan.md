@@ -333,7 +333,7 @@ Create or modify materializations to have each status, then check the UI:
 Run the automated test suite to confirm nothing is broken:
 
 ```bash
-cd /home/winadmin/projects/archon/python
+cd /home/winadmin/projects/Trinity/archon/python
 uv run pytest tests/server/services/test_materialization_service.py tests/server/services/test_materialization_pipeline.py tests/server/services/test_indexer_service.py tests/agents/test_synthesizer_agent.py tests/server/api_routes/test_materialization_api.py -v
 ```
 

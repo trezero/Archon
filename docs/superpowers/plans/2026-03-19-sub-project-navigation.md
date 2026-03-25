@@ -139,7 +139,7 @@ class TestGetProjectChildren:
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-cd /home/winadmin/projects/archon/python && uv run pytest tests/server/api_routes/test_project_children.py -v
+cd /home/winadmin/projects/Trinity/archon/python && uv run pytest tests/server/api_routes/test_project_children.py -v
 ```
 
 Expected: FAIL — `get_project_children` does not exist yet.
@@ -231,7 +231,7 @@ async def get_project_children(project_id: str):
 - [ ] **Step 6: Run tests to verify they pass**
 
 ```bash
-cd /home/winadmin/projects/archon/python && uv run pytest tests/server/api_routes/test_project_children.py -v
+cd /home/winadmin/projects/Trinity/archon/python && uv run pytest tests/server/api_routes/test_project_children.py -v
 ```
 
 Expected: All tests PASS.
@@ -290,7 +290,7 @@ Add to `CreateProjectSchema` (after the `pinned` field on line 19):
 - [ ] **Step 3: Verify TypeScript compiles**
 
 ```bash
-cd /home/winadmin/projects/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/projects"
+cd /home/winadmin/projects/Trinity/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/projects"
 ```
 
 Expected: No new errors.
@@ -402,7 +402,7 @@ export function useSetParentProject() {
 - [ ] **Step 3: Verify TypeScript compiles**
 
 ```bash
-cd /home/winadmin/projects/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/projects"
+cd /home/winadmin/projects/Trinity/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/projects"
 ```
 
 Expected: No new errors.
@@ -496,7 +496,7 @@ export function SubProjectCard({ project, onSelect }: SubProjectCardProps) {
 - [ ] **Step 2: Verify TypeScript compiles**
 
 ```bash
-cd /home/winadmin/projects/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "SubProjectCard"
+cd /home/winadmin/projects/Trinity/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "SubProjectCard"
 ```
 
 Expected: No errors.
@@ -600,7 +600,7 @@ export function SubProjectsStrip({
 - [ ] **Step 2: Verify TypeScript compiles**
 
 ```bash
-cd /home/winadmin/projects/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "SubProjectsStrip"
+cd /home/winadmin/projects/Trinity/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "SubProjectsStrip"
 ```
 
 Expected: No errors.
@@ -851,7 +851,7 @@ In `archon-ui-main/src/features/projects/views/ProjectsView.tsx`, pass `allProje
 - [ ] **Step 5: Verify TypeScript compiles and check in browser**
 
 ```bash
-cd /home/winadmin/projects/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/projects"
+cd /home/winadmin/projects/Trinity/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/projects"
 ```
 
 Expected: No errors.
@@ -926,7 +926,7 @@ Add breadcrumb above the PillNavigation (inside the detail area, before the `<di
 - [ ] **Step 2: Verify TypeScript compiles**
 
 ```bash
-cd /home/winadmin/projects/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/projects"
+cd /home/winadmin/projects/Trinity/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/projects"
 ```
 
 Expected: No errors.
@@ -1150,7 +1150,7 @@ Add the modal at the bottom of the component, alongside other modals:
 - [ ] **Step 3: Verify TypeScript compiles**
 
 ```bash
-cd /home/winadmin/projects/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/projects"
+cd /home/winadmin/projects/Trinity/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/projects"
 ```
 
 Expected: No errors.
@@ -1238,7 +1238,7 @@ setFormData({ title: "", description: "", parent_project_id: undefined });
 - [ ] **Step 2: Verify TypeScript compiles**
 
 ```bash
-cd /home/winadmin/projects/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/projects"
+cd /home/winadmin/projects/Trinity/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/projects"
 ```
 
 Expected: No errors.
@@ -1257,7 +1257,7 @@ git commit -m "feat: add Parent Project dropdown to NewProjectModal"
 - [ ] **Step 1: Run full TypeScript check**
 
 ```bash
-cd /home/winadmin/projects/archon/archon-ui-main && npx tsc --noEmit
+cd /home/winadmin/projects/Trinity/archon/archon-ui-main && npx tsc --noEmit
 ```
 
 Expected: No new errors in `src/features/projects`.
@@ -1265,7 +1265,7 @@ Expected: No new errors in `src/features/projects`.
 - [ ] **Step 2: Run Biome on features directory**
 
 ```bash
-cd /home/winadmin/projects/archon/archon-ui-main && npm run biome:fix
+cd /home/winadmin/projects/Trinity/archon/archon-ui-main && npm run biome:fix
 ```
 
 Fix any formatting issues.
@@ -1273,13 +1273,13 @@ Fix any formatting issues.
 - [ ] **Step 3: Run backend linter**
 
 ```bash
-cd /home/winadmin/projects/archon/python && uv run ruff check src/server/api_routes/projects_api.py src/server/services/projects/project_service.py --fix
+cd /home/winadmin/projects/Trinity/archon/python && uv run ruff check src/server/api_routes/projects_api.py src/server/services/projects/project_service.py --fix
 ```
 
 - [ ] **Step 4: Run backend tests**
 
 ```bash
-cd /home/winadmin/projects/archon/python && uv run pytest tests/server/api_routes/test_project_children.py -v
+cd /home/winadmin/projects/Trinity/archon/python && uv run pytest tests/server/api_routes/test_project_children.py -v
 ```
 
 Expected: All pass.

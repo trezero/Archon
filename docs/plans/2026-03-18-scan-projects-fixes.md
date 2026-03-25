@@ -199,7 +199,7 @@ The existing link in `source_management_service.py` (line 368-382) does an upser
 - [ ] **Step 3: Test**
 
 ```bash
-cd /home/winadmin/projects/archon/python
+cd /home/winadmin/projects/Trinity/archon/python
 uv run pytest tests/ -k "crawl" -v --no-header 2>&1 | tail -20
 ```
 

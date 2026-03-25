@@ -7,7 +7,8 @@
 set -euo pipefail
 
 BACKUP_BASE="$HOME/archon-backups"
-ARCHON_DIR="${ARCHON_DIR:-/home/winadmin/projects/Archon}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ARCHON_DIR="${ARCHON_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 DB_CONTAINER="supabase-db"
 
 PASS=0

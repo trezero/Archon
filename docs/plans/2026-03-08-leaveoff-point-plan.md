@@ -44,7 +44,7 @@ CREATE INDEX IF NOT EXISTS idx_leaveoff_project ON archon_leaveoff_points(projec
 
 Run:
 ```bash
-cd /home/winadmin/projects/archon
+cd /home/winadmin/projects/Trinity/archon
 # Apply via psql or Supabase dashboard — depends on local setup
 # If using docker compose with local Supabase:
 docker compose exec supabase-db psql -U postgres -d postgres -f /docker-entrypoint-initdb.d/migrations/019_add_leaveoff_points.sql
@@ -243,7 +243,7 @@ async def test_delete_returns_false_when_not_found(service, mock_supabase):
 
 **Step 3: Run tests to verify they fail**
 
-Run: `cd /home/winadmin/projects/archon/python && uv run pytest tests/server/services/leaveoff/ -v`
+Run: `cd /home/winadmin/projects/Trinity/archon/python && uv run pytest tests/server/services/leaveoff/ -v`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'src.server.services.leaveoff'`
 
@@ -377,7 +377,7 @@ class LeaveOffService:
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/winadmin/projects/archon/python && uv run pytest tests/server/services/leaveoff/ -v`
+Run: `cd /home/winadmin/projects/Trinity/archon/python && uv run pytest tests/server/services/leaveoff/ -v`
 
 Expected: All 6 tests PASS
 
@@ -507,7 +507,7 @@ def test_delete_leaveoff_not_found(mock_leaveoff_service):
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/winadmin/projects/archon/python && uv run pytest tests/server/api_routes/test_leaveoff_api.py -v`
+Run: `cd /home/winadmin/projects/Trinity/archon/python && uv run pytest tests/server/api_routes/test_leaveoff_api.py -v`
 
 Expected: FAIL (import errors — `leaveoff_api` module doesn't exist yet)
 
@@ -619,13 +619,13 @@ app.include_router(leaveoff_router)
 
 **Step 4: Run API tests to verify they pass**
 
-Run: `cd /home/winadmin/projects/archon/python && uv run pytest tests/server/api_routes/test_leaveoff_api.py -v`
+Run: `cd /home/winadmin/projects/Trinity/archon/python && uv run pytest tests/server/api_routes/test_leaveoff_api.py -v`
 
 Expected: All 5 tests PASS
 
 **Step 5: Run full backend test suite to verify no regressions**
 
-Run: `cd /home/winadmin/projects/archon/python && uv run pytest -v`
+Run: `cd /home/winadmin/projects/Trinity/archon/python && uv run pytest -v`
 
 Expected: All tests PASS
 
@@ -789,7 +789,7 @@ Modify `python/src/mcp_server/mcp_server.py`. After the materialization tools bl
 
 **Step 5: Verify MCP server starts cleanly**
 
-Run: `cd /home/winadmin/projects/archon/python && uv run python -c "from src.mcp_server.features.leaveoff import register_leaveoff_tools; print('Import OK')"`
+Run: `cd /home/winadmin/projects/Trinity/archon/python && uv run python -c "from src.mcp_server.features.leaveoff import register_leaveoff_tools; print('Import OK')"`
 
 Expected: `Import OK`
 
@@ -981,7 +981,7 @@ Add `project_path: str | None = None` to the tool function signature, add it to 
 
 **Step 3: Run all tests**
 
-Run: `cd /home/winadmin/projects/archon/python && uv run pytest tests/server/services/leaveoff/ tests/server/api_routes/test_leaveoff_api.py -v`
+Run: `cd /home/winadmin/projects/Trinity/archon/python && uv run pytest tests/server/services/leaveoff/ tests/server/api_routes/test_leaveoff_api.py -v`
 
 Expected: All tests PASS (existing tests don't use project_path, so they're unaffected)
 
@@ -1093,7 +1093,7 @@ Update the `main()` function to add `client.get_leaveoff_point()` to the paralle
 
 **Step 3: Test manually**
 
-Run: `cd /home/winadmin/projects/archon && python3 integrations/claude-code/plugins/archon-memory/scripts/session_start_hook.py`
+Run: `cd /home/winadmin/projects/Trinity/archon && python3 integrations/claude-code/plugins/archon-memory/scripts/session_start_hook.py`
 
 Expected: Should print `<archon-context>` block. If Archon is running and a LeaveOff point exists, it appears first in the output.
 
@@ -1158,7 +1158,7 @@ Call it at the end of `main()`, after the `tracker.append_observation()` try/exc
 Create a test buffer with 80 lines and run the hook:
 
 ```bash
-cd /home/winadmin/projects/archon
+cd /home/winadmin/projects/Trinity/archon
 # Create a fake buffer with 80 lines
 python3 -c "
 from pathlib import Path
@@ -1247,13 +1247,13 @@ git commit -m "feat: add LeaveOff Point Protocol to CLAUDE.md"
 
 **Step 1: Run the full backend test suite**
 
-Run: `cd /home/winadmin/projects/archon/python && uv run pytest -v`
+Run: `cd /home/winadmin/projects/Trinity/archon/python && uv run pytest -v`
 
 Expected: All tests PASS (including new LeaveOff tests)
 
 **Step 2: Run linters**
 
-Run: `cd /home/winadmin/projects/archon && make lint-be`
+Run: `cd /home/winadmin/projects/Trinity/archon && make lint-be`
 
 Expected: No errors from ruff or mypy
 

@@ -76,7 +76,7 @@ def mock_projects():
 **Step 2: Run to verify it fails**
 
 ```bash
-cd /home/winadmin/projects/archon/python && uv run pytest tests/server/api_routes/test_projects_search.py -v
+cd /home/winadmin/projects/Trinity/archon/python && uv run pytest tests/server/api_routes/test_projects_search.py -v
 ```
 
 Expected: FAIL (fixture and filtering not yet implemented)
@@ -186,7 +186,7 @@ def test_archon_setup_sh_content_type_is_plain_text(mcp_test_client):
 **Step 2: Run to verify it fails**
 
 ```bash
-cd /home/winadmin/projects/archon/python && uv run pytest tests/mcp_server/test_setup_endpoints.py -v
+cd /home/winadmin/projects/Trinity/archon/python && uv run pytest tests/mcp_server/test_setup_endpoints.py -v
 ```
 
 Expected: FAIL (endpoints don't exist yet)
@@ -294,7 +294,7 @@ git commit -m "feat: add /archon-setup.sh, .bat, .md endpoints to MCP server"
 **Step 1: Create the directory and file**
 
 ```bash
-mkdir -p /home/winadmin/projects/archon/integrations/claude-code/commands
+mkdir -p /home/winadmin/projects/Trinity/archon/integrations/claude-code/commands
 ```
 
 Write `integrations/claude-code/commands/archon-setup.md`:
@@ -434,7 +434,7 @@ git commit -m "feat: add /archon-setup Claude Code slash command"
 **Step 1: Create the directory and file**
 
 ```bash
-mkdir -p /home/winadmin/projects/archon/integrations/claude-code/setup
+mkdir -p /home/winadmin/projects/Trinity/archon/integrations/claude-code/setup
 ```
 
 Write `integrations/claude-code/setup/archonSetup.sh`:
@@ -808,7 +808,7 @@ Expected: line shown with placeholder
 **Step 3: Run the MCP endpoint tests now (all template files exist)**
 
 ```bash
-cd /home/winadmin/projects/archon/python && uv run pytest tests/mcp_server/test_setup_endpoints.py -v
+cd /home/winadmin/projects/Trinity/archon/python && uv run pytest tests/mcp_server/test_setup_endpoints.py -v
 ```
 
 Expected: 5 PASSED
@@ -895,7 +895,7 @@ export { ArchonSetupDownload } from "./ArchonSetupDownload";
 **Step 3: TypeScript check**
 
 ```bash
-cd /home/winadmin/projects/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/mcp"
+cd /home/winadmin/projects/Trinity/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/mcp"
 ```
 
 Expected: no output (no errors)
@@ -909,7 +909,7 @@ npm run biome:fix -- --write src/features/mcp/components/ArchonSetupDownload.tsx
 **Step 5: Commit**
 
 ```bash
-cd /home/winadmin/projects/archon && git add archon-ui-main/src/features/mcp/components/ArchonSetupDownload.tsx archon-ui-main/src/features/mcp/components/index.ts
+cd /home/winadmin/projects/Trinity/archon && git add archon-ui-main/src/features/mcp/components/ArchonSetupDownload.tsx archon-ui-main/src/features/mcp/components/index.ts
 git commit -m "feat: add ArchonSetupDownload component for MCP page"
 ```
 
@@ -942,7 +942,7 @@ Inside the return's `<motion.div>`, add before the existing Status Bar block:
 **Step 3: TypeScript check**
 
 ```bash
-cd /home/winadmin/projects/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/mcp"
+cd /home/winadmin/projects/Trinity/archon/archon-ui-main && npx tsc --noEmit 2>&1 | grep "src/features/mcp"
 ```
 
 Expected: no output
@@ -956,7 +956,7 @@ npm run biome:fix -- --write src/features/mcp/views/McpView.tsx
 **Step 5: Run full backend test suite to verify nothing broken**
 
 ```bash
-cd /home/winadmin/projects/archon/python && uv run pytest -q 2>&1 | tail -5
+cd /home/winadmin/projects/Trinity/archon/python && uv run pytest -q 2>&1 | tail -5
 ```
 
 Expected: all pass
@@ -964,7 +964,7 @@ Expected: all pass
 **Step 6: Commit**
 
 ```bash
-cd /home/winadmin/projects/archon && git add archon-ui-main/src/features/mcp/views/McpView.tsx
+cd /home/winadmin/projects/Trinity/archon && git add archon-ui-main/src/features/mcp/views/McpView.tsx
 git commit -m "feat: add Connect a New Machine section to MCP page"
 ```
 

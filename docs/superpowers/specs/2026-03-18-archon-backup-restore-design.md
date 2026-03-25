@@ -25,7 +25,7 @@ currently no backup mechanism.
 |------|------|----------|
 | PostgreSQL (all 12 schemas — see note below) | 1.1 GB logical, **353 MB** compressed dump | `supabase-db` Docker container |
 | PostgreSQL roles (via `pg_dumpall --globals-only`) | ~5 KB | `supabase-db` Docker container |
-| Archon `.env` | ~3 KB | `/home/winadmin/projects/archon/.env` |
+| Archon `.env` | ~3 KB | `/home/winadmin/projects/Trinity/archon/.env` |
 | localSupabase `.env` | ~4 KB | `/home/winadmin/projects/localSupabase/.env` |
 
 The database contains 23 `archon_*` tables (1 GB of which is `archon_crawled_pages` with
@@ -48,15 +48,15 @@ when restoring into a Supabase instance with different role configurations.
 
 | Data | Size | Location |
 |------|------|----------|
-| `archon-state.json` | <1 KB | `/home/winadmin/projects/archon/.claude/` |
-| `archon-config.json` | <1 KB | `/home/winadmin/projects/archon/.claude/` |
-| `archon-memory-buffer.jsonl` | ~240 KB | `/home/winadmin/projects/archon/.claude/` |
-| `settings.local.json` | <1 KB | `/home/winadmin/projects/archon/.claude/` |
-| `skills/` directory | ~212 KB | `/home/winadmin/projects/archon/.claude/skills/` |
-| `commands/` directory | ~132 KB | `/home/winadmin/projects/archon/.claude/commands/` |
-| `agents/` directory | ~16 KB | `/home/winadmin/projects/archon/.claude/agents/` |
-| `plugins/` directory (excl. `.venv`) | ~264 KB | `/home/winadmin/projects/archon/.claude/plugins/` |
-| `postmanSkill/.env` | <1 KB | `/home/winadmin/projects/archon/postmanSkill/.env` |
+| `archon-state.json` | <1 KB | `/home/winadmin/projects/Trinity/archon/.claude/` |
+| `archon-config.json` | <1 KB | `/home/winadmin/projects/Trinity/archon/.claude/` |
+| `archon-memory-buffer.jsonl` | ~240 KB | `/home/winadmin/projects/Trinity/archon/.claude/` |
+| `settings.local.json` | <1 KB | `/home/winadmin/projects/Trinity/archon/.claude/` |
+| `skills/` directory | ~212 KB | `/home/winadmin/projects/Trinity/archon/.claude/skills/` |
+| `commands/` directory | ~132 KB | `/home/winadmin/projects/Trinity/archon/.claude/commands/` |
+| `agents/` directory | ~16 KB | `/home/winadmin/projects/Trinity/archon/.claude/agents/` |
+| `plugins/` directory (excl. `.venv`) | ~264 KB | `/home/winadmin/projects/Trinity/archon/.claude/plugins/` |
+| `postmanSkill/.env` | <1 KB | `/home/winadmin/projects/Trinity/archon/postmanSkill/.env` |
 | Global `settings.json` | ~1 KB | `/home/winadmin/.claude/settings.json` |
 | Auto-memory `.md` files | ~50 KB | `/home/winadmin/.claude/projects/-home-winadmin-projects-archon/memory/` |
 
@@ -249,7 +249,7 @@ brand_settings, etc.). This is intentional — it's a full instance backup, not 
 
 ### Path casing: `archon` vs `Archon`
 
-The source machine uses lowercase `/home/winadmin/projects/archon/`. The backup server's
+The source machine uses lowercase `/home/winadmin/projects/Trinity/archon/`. The backup server's
 existing clone uses uppercase `/home/winadmin/projects/Archon/` (matching the GitHub repo
 name). The restore script uses `$ARCHON_DIR` to abstract this. Claude Code's auto-memory
 directory encodes the project path, so memory files backed up from the source machine will

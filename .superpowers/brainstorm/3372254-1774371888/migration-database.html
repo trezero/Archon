@@ -1,0 +1,229 @@
+<h2>Section 6: Database Schema & Migration from Current System</h2>
+<p class="subtitle">New tables, migration path from agent work orders, and deprecation plan</p>
+
+<div class="section">
+  <h3>Complete Database Schema — New Tables</h3>
+  <div class="mockup">
+    <div class="mockup-header">8 New Supabase Tables (migrations 027–034)</div>
+    <div class="mockup-body" style="padding:20px; font-size:11px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <!-- Left column -->
+        <div>
+          <div style="border:1px solid rgba(0,255,100,0.2); border-radius:8px; padding:12px; margin-bottom:12px;">
+            <div style="color:#6f8; font-weight:bold; margin-bottom:6px;">027: workflow_definitions</div>
+            <div style="color:#aaa; font-size:10px; line-height:1.5;">
+              YAML-native workflow storage with versioning.<br>
+              id, name, description, project_id (FK), yaml_content, parsed_definition (jsonb), version, is_latest, tags (text[]), origin, created_at, deleted_at<br>
+              <span style="color:#888;">UNIQUE(name, project_id, version)</span>
+            </div>
+          </div>
+
+          <div style="border:1px solid rgba(0,255,100,0.2); border-radius:8px; padding:12px; margin-bottom:12px;">
+            <div style="color:#6f8; font-weight:bold; margin-bottom:6px;">028: workflow_commands</div>
+            <div style="color:#aaa; font-size:10px; line-height:1.5;">
+              DB-backed command templates (replaces .md files).<br>
+              id, name, description, prompt_template (text), variables (jsonb), version, is_latest, project_id (FK nullable), created_at, deleted_at<br>
+              <span style="color:#888;">UNIQUE(name, project_id, version)</span>
+            </div>
+          </div>
+
+          <div style="border:1px solid rgba(0,200,255,0.2); border-radius:8px; padding:12px; margin-bottom:12px;">
+            <div style="color:#0cf; font-weight:bold; margin-bottom:6px;">029: workflow_runs</div>
+            <div style="color:#aaa; font-size:10px; line-height:1.5;">
+              Workflow execution instances.<br>
+              id, definition_id (FK), project_id (FK), status (pending|running|paused|completed|failed|cancelled), triggered_by (text), trigger_context (jsonb), backend_id (FK nullable), started_at, completed_at, created_at<br>
+              <span style="color:#888;">INDEX on (status), (project_id, status)</span>
+            </div>
+          </div>
+
+          <div style="border:1px solid rgba(0,200,255,0.2); border-radius:8px; padding:12px;">
+            <div style="color:#0cf; font-weight:bold; margin-bottom:6px;">030: workflow_nodes</div>
+            <div style="color:#aaa; font-size:10px; line-height:1.5;">
+              Per-node state within a workflow run.<br>
+              id, workflow_run_id (FK), node_id (text — matches YAML), state (pending|queued|running|waiting_approval|completed|failed|skipped|cancelled), claimed_by_backend_id (FK nullable), output (text), error (text nullable), session_id (text nullable), started_at, completed_at<br>
+              <span style="color:#888;">INDEX on (workflow_run_id, state)</span><br>
+              <span style="color:#888;">UNIQUE(workflow_run_id, node_id)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right column -->
+        <div>
+          <div style="border:1px solid rgba(200,100,255,0.2); border-radius:8px; padding:12px; margin-bottom:12px;">
+            <div style="color:#c8f; font-weight:bold; margin-bottom:6px;">031: approval_requests</div>
+            <div style="color:#aaa; font-size:10px; line-height:1.5;">
+              HITL approval state.<br>
+              id, workflow_run_id (FK), node_id (text), approval_type (text), payload (jsonb), status (pending|approved|rejected|expired), channels_notified (text[]), resolved_by (text nullable), resolved_via (text nullable), resolved_comment (text nullable), telegram_message_id (text nullable), expires_at, created_at, resolved_at<br>
+              <span style="color:#888;">INDEX on (status), (workflow_run_id)</span>
+            </div>
+          </div>
+
+          <div style="border:1px solid rgba(255,100,0,0.2); border-radius:8px; padding:12px; margin-bottom:12px;">
+            <div style="color:#f84; font-weight:bold; margin-bottom:6px;">032: execution_backends</div>
+            <div style="color:#aaa; font-size:10px; line-height:1.5;">
+              Registered execution backend instances.<br>
+              id, name, base_url, auth_token_hash (text), capabilities (text[]), supported_node_types (text[]), max_concurrent_nodes (int), status (healthy|unhealthy|disconnected), last_heartbeat_at, registered_at<br>
+              <span style="color:#888;">UNIQUE(name)</span>
+            </div>
+          </div>
+
+          <div style="border:1px solid rgba(255,200,0,0.2); border-radius:8px; padding:12px; margin-bottom:12px;">
+            <div style="color:#fa0; font-weight:bold; margin-bottom:6px;">033: activity_events</div>
+            <div style="color:#aaa; font-size:10px; line-height:1.5;">
+              Unified activity stream for pattern discovery.<br>
+              id, event_type (commit|conversation|workflow_run), project_id (FK nullable), repo_url (text), intent_summary (text nullable), intent_embedding (vector(1536) nullable), metadata (jsonb), created_at<br>
+              <span style="color:#888;">INDEX on (event_type, created_at)</span><br>
+              <span style="color:#888;">ivfflat INDEX on intent_embedding</span>
+            </div>
+          </div>
+
+          <div style="border:1px solid rgba(255,200,0,0.2); border-radius:8px; padding:12px;">
+            <div style="color:#fa0; font-weight:bold; margin-bottom:6px;">034: discovered_patterns</div>
+            <div style="color:#aaa; font-size:10px; line-height:1.5;">
+              AI-discovered workflow suggestions.<br>
+              id, pattern_name, description, cluster_embedding (vector(1536)), source_event_ids (uuid[]), repos_involved (text[]), frequency_score (float), cross_repo_score (float), final_score (float), suggested_yaml (text), status (pending_review|accepted|dismissed|expired), accepted_workflow_id (FK nullable), discovered_at<br>
+              <span style="color:#888;">INDEX on (status, final_score DESC)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Entity Relationship Map</h3>
+  <div class="mockup">
+    <div class="mockup-header">Foreign Key Relationships</div>
+    <div class="mockup-body" style="padding:24px; font-family:monospace; font-size:11px; color:#ccc; line-height:1.8;">
+      <pre style="margin:0; white-space:pre-wrap;">
+<span style="color:#6f8;">archon_projects</span>
+  ├─← <span style="color:#0cf;">workflow_definitions</span>.project_id
+  ├─← <span style="color:#0cf;">workflow_commands</span>.project_id
+  ├─← <span style="color:#0cf;">workflow_runs</span>.project_id
+  └─← <span style="color:#fa0;">activity_events</span>.project_id
+
+<span style="color:#0cf;">workflow_definitions</span>
+  └─← <span style="color:#0cf;">workflow_runs</span>.definition_id
+
+<span style="color:#0cf;">workflow_runs</span>
+  ├─← <span style="color:#0cf;">workflow_nodes</span>.workflow_run_id
+  ├─← <span style="color:#c8f;">approval_requests</span>.workflow_run_id
+  └─→ <span style="color:#f84;">execution_backends</span>.id  (via backend_id)
+
+<span style="color:#0cf;">workflow_nodes</span>
+  └─→ <span style="color:#f84;">execution_backends</span>.id  (via claimed_by_backend_id)
+
+<span style="color:#fa0;">activity_events</span>
+  └─← <span style="color:#fa0;">discovered_patterns</span>.source_event_ids  (array reference)
+
+<span style="color:#fa0;">discovered_patterns</span>
+  └─→ <span style="color:#0cf;">workflow_definitions</span>.id  (via accepted_workflow_id)
+      </pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Migration from Agent Work Orders</h3>
+  <div class="mockup">
+    <div class="mockup-header">Deprecation & Transition Plan</div>
+    <div class="mockup-body" style="padding:20px; font-size:12px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
+        <div style="border:1px solid rgba(255,200,0,0.2); border-radius:8px; padding:12px;">
+          <div style="color:#fa0; font-weight:bold; margin-bottom:8px;">Phase 1: Build Alongside</div>
+          <div style="color:#aaa; font-size:11px; line-height:1.6;">
+            • New orchestration engine built as separate service module<br>
+            • Agent work orders continues to run unchanged<br>
+            • New API endpoints under <code>/api/workflows/</code> prefix<br>
+            • Existing <code>/api/agent-work-orders/</code> untouched<br>
+            • Convert the 6 hardcoded steps into a YAML workflow definition<br>
+            • Both systems operational simultaneously
+          </div>
+        </div>
+
+        <div style="border:1px solid rgba(0,200,255,0.2); border-radius:8px; padding:12px;">
+          <div style="color:#0cf; font-weight:bold; margin-bottom:8px;">Phase 2: Bridge & Verify</div>
+          <div style="color:#aaa; font-size:11px; line-height:1.6;">
+            • Archon local executor wraps existing <code>AgentCLIExecutor</code><br>
+            • Register as execution backend to new DAG engine<br>
+            • Run same workflows through both systems, compare results<br>
+            • Add HITL gates to the converted workflow<br>
+            • UI updated with new Workflows page<br>
+            • Existing work order UI still accessible
+          </div>
+        </div>
+
+        <div style="border:1px solid rgba(0,255,100,0.2); border-radius:8px; padding:12px;">
+          <div style="color:#6f8; font-weight:bold; margin-bottom:8px;">Phase 3: Deprecate & Remove</div>
+          <div style="color:#aaa; font-size:11px; line-height:1.6;">
+            • All work order creation routed through new engine<br>
+            • <code>/api/agent-work-orders/</code> endpoints return deprecation warning<br>
+            • Agent work orders module removed<br>
+            • Worktree/sandbox code reused by local executor<br>
+            • Structured logging patterns preserved<br>
+            • In-memory state replaced by Supabase persistence
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px; padding:12px; background:rgba(0,255,100,0.05); border:1px solid rgba(0,255,100,0.15); border-radius:8px; font-size:11px;">
+        <strong style="color:#6f8;">What gets preserved from agent work orders:</strong>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; color:#aaa;">
+          <div>✓ Git worktree sandbox pattern</div>
+          <div>✓ Port allocation logic</div>
+          <div>✓ Claude CLI executor (wrapped by local backend)</div>
+          <div>✓ Structured logging patterns</div>
+          <div>✓ Command .md file loading (as fallback)</div>
+          <div>✓ GitHub integration (gh CLI operations)</div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px; padding:12px; background:rgba(255,60,60,0.05); border:1px solid rgba(255,60,60,0.15); border-radius:8px; font-size:11px;">
+        <strong style="color:#f66;">What gets replaced:</strong>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; color:#aaa;">
+          <div>✗ Linear WorkflowOrchestrator → DAG engine</div>
+          <div>✗ In-memory state → Supabase persistence</div>
+          <div>✗ Hardcoded command_map → YAML definitions</div>
+          <div>✗ Separate microservice → integrated into Archon server</div>
+          <div>✗ /api/agent-work-orders/ → /api/workflows/</div>
+          <div>✗ WorkflowStep enum → dynamic node definitions</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Remote-Agent Integration Bridge</h3>
+  <div class="mockup">
+    <div class="mockup-header">How the remote-coding-agent connects as an execution backend</div>
+    <div class="mockup-body" style="padding:20px; font-size:12px;">
+      <div style="color:#aaa; font-size:11px; line-height:1.8;">
+        <div style="display:grid; grid-template-columns:auto 1fr; gap:8px 16px;">
+          <span style="color:#f84; font-weight:bold;">New module:</span>
+          <span><code>packages/core/src/archon-bridge/</code> in remote-coding-agent repo</span>
+
+          <span style="color:#f84; font-weight:bold;">Responsibility:</span>
+          <span>Registers with Archon, connects SSE, claims + executes nodes, reports results</span>
+
+          <span style="color:#f84; font-weight:bold;">Node execution:</span>
+          <span>Routes to existing workflow engine — DAG nodes → remote-agent's <code>executeDagWorkflow()</code> for local sub-DAGs, or single AI steps via <code>sendQuery()</code></span>
+
+          <span style="color:#f84; font-weight:bold;">Telegram bridge:</span>
+          <span>When Archon sends approval request → bridge forwards to the project's Telegram adapter → user approves → bridge calls Archon's resolve endpoint</span>
+
+          <span style="color:#f84; font-weight:bold;">Session continuity:</span>
+          <span>Node results include <code>session_id</code> from Claude Agent SDK → stored in Archon's workflow_nodes → passed back as context to dependent nodes</span>
+
+          <span style="color:#f84; font-weight:bold;">Isolation:</span>
+          <span>Reuses existing <code>IsolationResolver</code> for worktree lifecycle — Archon doesn't need to know about isolation details</span>
+        </div>
+      </div>
+
+      <div style="margin-top:16px; padding:12px; background:rgba(255,200,0,0.05); border:1px solid rgba(255,200,0,0.15); border-radius:8px; font-size:11px;">
+        <strong style="color:#fa0;">Minimal changes to remote-agent:</strong> The bridge is an <em>additive</em> module. The remote-agent's existing orchestrator, adapters, and workflow engine remain untouched. The bridge sits alongside them as an alternative entry point for Archon-orchestrated work. Users can still use the remote-agent standalone without Archon.
+      </div>
+    </div>
+  </div>
+</div>
