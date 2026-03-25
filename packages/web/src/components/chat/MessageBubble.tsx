@@ -1,4 +1,5 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
+import { Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkBreaks from 'remark-breaks';
@@ -85,6 +86,16 @@ interface MessageBubbleProps {
 function MessageBubbleRaw({ message }: MessageBubbleProps): React.ReactElement {
   const isUser = message.role === 'user';
   const isThinking = message.isStreaming && !message.content;
+  const [copied, setCopied] = useState(false);
+
+  const copyMessage = (): void => {
+    void navigator.clipboard.writeText(message.content).then(() => {
+      setCopied(true);
+      setTimeout(() => {
+        setCopied(false);
+      }, 1500);
+    });
+  };
 
   return (
     <div className={cn('group flex w-full', isUser ? 'justify-end' : 'justify-start')}>
@@ -97,7 +108,22 @@ function MessageBubbleRaw({ message }: MessageBubbleProps): React.ReactElement {
         )}
       >
         {isUser ? (
-          <p className="text-sm text-text-primary whitespace-pre-wrap">{message.content}</p>
+          <div className="flex items-start gap-2">
+            <p className="text-sm text-text-primary whitespace-pre-wrap flex-1">
+              {message.content}
+            </p>
+            <button
+              onClick={copyMessage}
+              className="shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-text-tertiary hover:text-text-primary"
+              title="Copy message"
+            >
+              {copied ? (
+                <Check className="h-3.5 w-3.5 text-success" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </div>
         ) : (
           <div className="chat-markdown max-w-none text-sm text-text-primary">
             {isThinking && (
