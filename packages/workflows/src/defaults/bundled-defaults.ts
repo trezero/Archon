@@ -35,11 +35,12 @@ import archonValidatePrE2eMainCmd from '../../../../.archon/commands/defaults/ar
 import archonValidatePrReportCmd from '../../../../.archon/commands/defaults/archon-validate-pr-report.md' with { type: 'text' };
 
 // =============================================================================
-// Default Workflows (10 total)
+// Default Workflows (9 total)
 // =============================================================================
 
 import archonAssistWf from '../../../../.archon/workflows/defaults/archon-assist.yaml' with { type: 'text' };
 import archonComprehensivePrReviewWf from '../../../../.archon/workflows/defaults/archon-comprehensive-pr-review.yaml' with { type: 'text' };
+import archonCreateIssueWf from '../../../../.archon/workflows/defaults/archon-create-issue.yaml' with { type: 'text' };
 import archonFeatureDevelopmentWf from '../../../../.archon/workflows/defaults/archon-feature-development.yaml' with { type: 'text' };
 import archonFixGithubIssueWf from '../../../../.archon/workflows/defaults/archon-fix-github-issue.yaml' with { type: 'text' };
 import archonResolveConflictsWf from '../../../../.archon/workflows/defaults/archon-resolve-conflicts.yaml' with { type: 'text' };
@@ -84,6 +85,7 @@ export const BUNDLED_COMMANDS: Record<string, string> = {
 export const BUNDLED_WORKFLOWS: Record<string, string> = {
   'archon-assist': archonAssistWf,
   'archon-comprehensive-pr-review': archonComprehensivePrReviewWf,
+  'archon-create-issue': archonCreateIssueWf,
   'archon-feature-development': archonFeatureDevelopmentWf,
   'archon-fix-github-issue': archonFixGithubIssueWf,
   'archon-resolve-conflicts': archonResolveConflictsWf,

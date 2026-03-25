@@ -138,6 +138,7 @@ describe('bundled-defaults', () => {
       const expectedWorkflows = [
         'archon-assist',
         'archon-comprehensive-pr-review',
+        'archon-create-issue',
         'archon-feature-development',
         'archon-fix-github-issue',
         'archon-resolve-conflicts',
@@ -150,7 +151,7 @@ describe('bundled-defaults', () => {
         expect(BUNDLED_WORKFLOWS).toHaveProperty(wf);
       }
 
-      expect(Object.keys(BUNDLED_WORKFLOWS)).toHaveLength(8);
+      expect(Object.keys(BUNDLED_WORKFLOWS)).toHaveLength(9);
     });
 
     it('should have non-empty content for all workflows', () => {
