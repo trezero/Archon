@@ -255,10 +255,10 @@ app.include_router(leaveoff_router)
 app.include_router(postman_router)
 app.include_router(scanner_script_router)
 app.include_router(auto_research_router)
-app.include_router(workflow_router)
 app.include_router(workflow_approval_router)
 app.include_router(workflow_backend_router)
 app.include_router(workflow_definition_router)
+app.include_router(workflow_router)  # Must be last — has catch-all /{run_id} path
 app.include_router(pattern_discovery_router)
 
 
