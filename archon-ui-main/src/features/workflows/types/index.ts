@@ -127,3 +127,19 @@ export interface CreateCommandRequest {
   prompt_template: string;
   description?: string;
 }
+
+export interface DiscoveredPattern {
+  id: string;
+  pattern_name: string;
+  description: string | null;
+  pattern_type: string;
+  sequence_pattern: Record<string, unknown> | null;
+  repos_involved: string[];
+  frequency_score: number;
+  cross_repo_score: number;
+  automation_potential: number;
+  final_score: number;
+  suggested_yaml: string | null;
+  status: "pending_review" | "accepted" | "dismissed" | "expired";
+  discovered_at: string;
+}

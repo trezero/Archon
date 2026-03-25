@@ -16,6 +16,7 @@ export const workflowKeys = {
   approvals: () => [...workflowKeys.all, "approvals"] as const,
   approvalDetail: (id: string) => [...workflowKeys.all, "approvals", id] as const,
   commands: () => [...workflowKeys.all, "commands"] as const,
+  suggestions: () => [...workflowKeys.all, "suggestions"] as const,
 };
 
 export function useWorkflowDefinitions(projectId?: string) {
@@ -160,6 +161,37 @@ export function useDeleteCommand() {
     mutationFn: (id: string) => workflowService.deleteCommand(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.commands() });
+    },
+  });
+}
+
+export function useSuggestions(status?: string) {
+  return useQuery({
+    queryKey: workflowKeys.suggestions(),
+    queryFn: () => workflowService.listSuggestions(status),
+    staleTime: STALE_TIMES.normal,
+  });
+}
+
+export function useAcceptSuggestion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, yaml }: { id: string; yaml?: string }) =>
+      workflowService.acceptSuggestion(id, yaml),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: workflowKeys.suggestions() });
+      qc.invalidateQueries({ queryKey: workflowKeys.definitions() });
+    },
+  });
+}
+
+export function useDismissSuggestion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      workflowService.dismissSuggestion(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: workflowKeys.suggestions() });
     },
   });
 }

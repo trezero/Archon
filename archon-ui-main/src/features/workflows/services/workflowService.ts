@@ -4,6 +4,7 @@ import type {
   CreateCommandRequest,
   CreateDefinitionRequest,
   CreateRunRequest,
+  DiscoveredPattern,
   ExecutionBackend,
   ResolveApprovalRequest,
   WorkflowCommand,
@@ -96,5 +97,24 @@ export const workflowService = {
 
   async deleteCommand(id: string): Promise<void> {
     await callAPIWithETag(`/api/workflows/commands/${id}`, { method: "DELETE" });
+  },
+
+  async listSuggestions(status?: string): Promise<DiscoveredPattern[]> {
+    const params = status ? `?status=${status}` : "";
+    return callAPIWithETag<DiscoveredPattern[]>(`/api/patterns/suggestions${params}`);
+  },
+
+  async acceptSuggestion(id: string, customizedYaml?: string): Promise<{ accepted: boolean }> {
+    return callAPIWithETag<{ accepted: boolean }>(`/api/patterns/suggestions/${id}/accept`, {
+      method: "POST",
+      body: JSON.stringify({ customized_yaml: customizedYaml }),
+    });
+  },
+
+  async dismissSuggestion(id: string, reason?: string): Promise<{ dismissed: boolean }> {
+    return callAPIWithETag<{ dismissed: boolean }>(`/api/patterns/suggestions/${id}/dismiss`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
   },
 };
