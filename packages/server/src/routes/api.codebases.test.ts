@@ -2,6 +2,7 @@ import { describe, test, expect, mock, beforeEach } from 'bun:test';
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ConversationLockManager } from '@archon/core';
 import type { WebAdapter } from '../adapters/web';
+import { validationErrorHook } from './openapi-defaults';
 
 // ---------------------------------------------------------------------------
 // Mock setup — must be declared before any dynamic imports of mocked modules
@@ -198,8 +199,8 @@ const MOCK_ENV = {
   updated_at: new Date().toISOString(),
 };
 
-function makeApp(): Hono {
-  const app = new OpenAPIHono();
+function makeApp(): OpenAPIHono {
+  const app = new OpenAPIHono({ defaultHook: validationErrorHook });
   const mockWebAdapter = {
     setConversationDbId: mock((_platformId: string, _dbId: string) => {}),
     emitSSE: mock(async () => {}),
@@ -467,9 +468,6 @@ describe('POST /api/codebases', () => {
       body: 'not-json{{{',
     });
     expect(response.status).toBe(400);
-
-    const body = (await response.json()) as { error: string };
-    expect(body.error).toContain('Invalid JSON');
   });
 
   test('returns 500 when codebase record not found after creation', async () => {

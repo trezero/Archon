@@ -72,3 +72,131 @@ export const commandEntrySchema = z
 export const commandListResponseSchema = z
   .object({ commands: z.array(commandEntrySchema) })
   .openapi('CommandListResponse');
+
+// =========================================================================
+// Workflow run schemas
+// =========================================================================
+
+/** Workflow run status values. */
+export const workflowRunStatusSchema = z
+  .enum(['pending', 'running', 'completed', 'failed', 'cancelled'])
+  .openapi('WorkflowRunStatus');
+
+/** A workflow run record. */
+export const workflowRunSchema = z
+  .object({
+    id: z.string(),
+    workflow_name: z.string(),
+    conversation_id: z.string(),
+    parent_conversation_id: z.string().nullable(),
+    codebase_id: z.string().nullable(),
+    status: workflowRunStatusSchema,
+    user_message: z.string(),
+    metadata: z.record(z.unknown()),
+    started_at: z.string(),
+    completed_at: z.string().nullable(),
+    last_activity_at: z.string().nullable(),
+    working_path: z.string().nullable(),
+  })
+  .openapi('WorkflowRun');
+
+/** GET /api/workflows/runs response. */
+export const workflowRunListResponseSchema = z
+  .object({ runs: z.array(workflowRunSchema) })
+  .openapi('WorkflowRunListResponse');
+
+/** A workflow event record. */
+export const workflowEventSchema = z
+  .object({
+    id: z.string(),
+    workflow_run_id: z.string(),
+    event_type: z.string(),
+    step_index: z.number().nullable(),
+    step_name: z.string().nullable(),
+    data: z.record(z.unknown()),
+    created_at: z.string(),
+  })
+  .openapi('WorkflowEvent');
+
+/** GET /api/workflows/runs/:runId response. */
+export const workflowRunDetailSchema = z
+  .object({
+    run: workflowRunSchema.extend({
+      worker_platform_id: z.string().optional(),
+      parent_platform_id: z.string().optional(),
+      conversation_platform_id: z.string().nullable(),
+    }),
+    events: z.array(workflowEventSchema),
+  })
+  .openapi('WorkflowRunDetail');
+
+/** GET /api/workflows/runs/by-worker/:platformId response. */
+export const workflowRunByWorkerResponseSchema = z
+  .object({ run: workflowRunSchema })
+  .openapi('WorkflowRunByWorkerResponse');
+
+/** POST /api/workflows/runs/:runId/cancel response. */
+export const cancelWorkflowRunResponseSchema = z
+  .object({ success: z.boolean(), message: z.string() })
+  .openapi('CancelWorkflowRunResponse');
+
+/** Dashboard enriched workflow run (with joined codebase/conversation data). */
+export const dashboardWorkflowRunSchema = workflowRunSchema
+  .extend({
+    codebase_name: z.string().nullable(),
+    platform_type: z.string().nullable(),
+    worker_platform_id: z.string().nullable(),
+    parent_platform_id: z.string().nullable(),
+    current_step_name: z.string().nullable(),
+    total_steps: z.number().nullable(),
+    current_step_status: z.enum(['running', 'completed', 'failed']).nullable(),
+    agents_completed: z.number().nullable(),
+    agents_failed: z.number().nullable(),
+    agents_total: z.number().nullable(),
+  })
+  .openapi('DashboardWorkflowRun');
+
+/** GET /api/dashboard/runs response. */
+export const dashboardRunsResponseSchema = z
+  .object({
+    runs: z.array(dashboardWorkflowRunSchema),
+    total: z.number(),
+    counts: z.object({
+      all: z.number(),
+      running: z.number(),
+      completed: z.number(),
+      failed: z.number(),
+      cancelled: z.number(),
+      pending: z.number(),
+    }),
+  })
+  .openapi('DashboardRunsResponse');
+
+/** POST /api/workflows/:name/run request body. */
+export const runWorkflowBodySchema = z
+  .object({
+    conversationId: z.string(),
+    message: z.string(),
+  })
+  .openapi('RunWorkflowBody');
+
+/** GET /api/dashboard/runs query params. */
+export const dashboardRunsQuerySchema = z.object({
+  // z.string() — handler validates the enum value and ignores invalid values
+  status: z.string().optional(),
+  codebaseId: z.string().optional(),
+  search: z.string().optional(),
+  after: z.string().optional(),
+  before: z.string().optional(),
+  limit: z.string().optional(),
+  offset: z.string().optional(),
+});
+
+/** GET /api/workflows/runs query params. */
+export const workflowRunsQuerySchema = z.object({
+  conversationId: z.string().optional(),
+  // z.string() — handler validates the enum value and ignores invalid values
+  status: z.string().optional(),
+  codebaseId: z.string().optional(),
+  limit: z.string().optional(),
+});

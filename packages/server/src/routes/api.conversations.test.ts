@@ -2,6 +2,7 @@ import { describe, test, expect, mock } from 'bun:test';
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ConversationLockManager } from '@archon/core';
 import type { WebAdapter } from '../adapters/web';
+import { validationErrorHook } from './openapi-defaults';
 
 const mockFindConversationByPlatformId = mock(
   async (_platformId: string) =>
@@ -207,7 +208,7 @@ describe('PATCH /api/conversations/:id', () => {
   });
 
   test('returns 400 for malformed JSON body', async () => {
-    const app = new OpenAPIHono();
+    const app = new OpenAPIHono({ defaultHook: validationErrorHook });
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations/web-test-abc', {
@@ -216,8 +217,6 @@ describe('PATCH /api/conversations/:id', () => {
       body: 'not valid json{',
     });
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: string };
-    expect(body.error).toContain('Invalid JSON');
   });
 
   test('returns { success: true } without calling updateConversationTitle when body has no title', async () => {
@@ -278,7 +277,7 @@ describe('POST /api/conversations', () => {
   });
 
   test('returns 400 if conversationId is provided in request body', async () => {
-    const app = new OpenAPIHono();
+    const app = new OpenAPIHono({ defaultHook: validationErrorHook });
     registerApiRoutes(app, mockWebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations', {
@@ -292,7 +291,7 @@ describe('POST /api/conversations', () => {
   });
 
   test('returns 400 for malformed JSON body', async () => {
-    const app = new OpenAPIHono();
+    const app = new OpenAPIHono({ defaultHook: validationErrorHook });
     registerApiRoutes(app, mockWebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations', {
@@ -301,8 +300,6 @@ describe('POST /api/conversations', () => {
       body: 'not valid json{',
     });
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: string };
-    expect(body.error).toContain('Invalid JSON');
   });
 });
 

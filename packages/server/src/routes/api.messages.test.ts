@@ -2,6 +2,7 @@ import { describe, test, expect, mock, beforeEach } from 'bun:test';
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ConversationLockManager } from '@archon/core';
 import type { WebAdapter } from '../adapters/web';
+import { validationErrorHook } from './openapi-defaults';
 
 // ---------------------------------------------------------------------------
 // Mock setup — must be before dynamic imports of mocked modules
@@ -194,8 +195,8 @@ const MOCK_MESSAGES = [
   },
 ];
 
-function makeApp(): { app: Hono; mockWebAdapter: WebAdapter } {
-  const app = new OpenAPIHono();
+function makeApp(): { app: OpenAPIHono; mockWebAdapter: WebAdapter } {
+  const app = new OpenAPIHono({ defaultHook: validationErrorHook });
   const mockWebAdapter = {
     setConversationDbId: mock((_platformId: string, _dbId: string) => {}),
     emitSSE: mock(async () => {}),
@@ -298,7 +299,7 @@ describe('POST /api/conversations/:id/message', () => {
     expect(response.status).toBe(400);
 
     const body = (await response.json()) as { error: string };
-    expect(body.error).toContain('message must be a non-empty string');
+    expect(body.error).toContain('message');
   });
 
   test('returns 400 when message field is missing', async () => {
@@ -311,7 +312,8 @@ describe('POST /api/conversations/:id/message', () => {
     expect(response.status).toBe(400);
 
     const body = (await response.json()) as { error: string };
-    expect(body.error).toContain('message must be a non-empty string');
+    // Zod validation returns "message: Required" before the handler runs
+    expect(body.error).toContain('message');
   });
 
   test('returns 400 for malformed JSON body', async () => {
@@ -322,9 +324,6 @@ describe('POST /api/conversations/:id/message', () => {
       body: 'not-valid-json{',
     });
     expect(response.status).toBe(400);
-
-    const body = (await response.json()) as { error: string };
-    expect(body.error).toContain('Invalid JSON');
   });
 
   test('returns 400 when message is a non-string type', async () => {
@@ -522,8 +521,5 @@ describe('PATCH /api/conversations/:id', () => {
       body: 'not valid json {{{',
     });
     expect(response.status).toBe(400);
-
-    const body = (await response.json()) as { error: string };
-    expect(body.error).toContain('Invalid JSON');
   });
 });

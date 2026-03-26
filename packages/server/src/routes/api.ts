@@ -60,7 +60,36 @@ import {
   saveWorkflowBodySchema,
   deleteWorkflowResponseSchema,
   commandListResponseSchema,
+  workflowRunListResponseSchema,
+  workflowRunDetailSchema,
+  workflowRunByWorkerResponseSchema,
+  cancelWorkflowRunResponseSchema,
+  dashboardRunsResponseSchema,
+  runWorkflowBodySchema,
+  dashboardRunsQuerySchema,
+  workflowRunsQuerySchema,
 } from './schemas/workflow.schemas';
+import {
+  conversationListResponseSchema,
+  listConversationsQuerySchema,
+  conversationIdParamsSchema,
+  conversationSchema,
+  createConversationBodySchema,
+  createConversationResponseSchema,
+  updateConversationBodySchema,
+  successResponseSchema,
+  messageListResponseSchema,
+  listMessagesQuerySchema,
+  sendMessageBodySchema,
+  dispatchResponseSchema,
+} from './schemas/conversation.schemas';
+import {
+  codebaseListResponseSchema,
+  codebaseSchema,
+  codebaseIdParamsSchema,
+  addCodebaseBodySchema,
+  deleteCodebaseResponseSchema,
+} from './schemas/codebase.schemas';
 
 type WorkflowSource = 'project' | 'bundled';
 
@@ -191,6 +220,370 @@ const getCommandsRoute = createRoute({
   },
 });
 
+// =========================================================================
+// Conversation route configs
+// =========================================================================
+
+const getConversationsRoute = createRoute({
+  method: 'get',
+  path: '/api/conversations',
+  tags: ['Conversations'],
+  summary: 'List conversations',
+  request: { query: listConversationsQuerySchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: conversationListResponseSchema } },
+      description: 'OK',
+    },
+    500: jsonError('Server error'),
+  },
+});
+
+const getConversationRoute = createRoute({
+  method: 'get',
+  path: '/api/conversations/{id}',
+  tags: ['Conversations'],
+  summary: 'Get a conversation by platform conversation ID',
+  request: { params: conversationIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: conversationSchema } },
+      description: 'Conversation',
+    },
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const createConversationRoute = createRoute({
+  method: 'post',
+  path: '/api/conversations',
+  tags: ['Conversations'],
+  summary: 'Create a new conversation',
+  request: {
+    body: {
+      content: { 'application/json': { schema: createConversationBodySchema } },
+      required: false,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: createConversationResponseSchema } },
+      description: 'Created conversation',
+    },
+    400: jsonError('Bad request'),
+    500: jsonError('Server error'),
+  },
+});
+
+const updateConversationRoute = createRoute({
+  method: 'patch',
+  path: '/api/conversations/{id}',
+  tags: ['Conversations'],
+  summary: 'Update a conversation (title)',
+  request: {
+    params: conversationIdParamsSchema,
+    body: {
+      content: { 'application/json': { schema: updateConversationBodySchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: successResponseSchema } },
+      description: 'Updated',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const deleteConversationRoute = createRoute({
+  method: 'delete',
+  path: '/api/conversations/{id}',
+  tags: ['Conversations'],
+  summary: 'Soft-delete a conversation',
+  request: { params: conversationIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: successResponseSchema } },
+      description: 'Deleted',
+    },
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const listMessagesRoute = createRoute({
+  method: 'get',
+  path: '/api/conversations/{id}/messages',
+  tags: ['Conversations'],
+  summary: 'List message history for a conversation',
+  request: {
+    params: conversationIdParamsSchema,
+    query: listMessagesQuerySchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: messageListResponseSchema } },
+      description: 'Message list',
+    },
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const sendMessageRoute = createRoute({
+  method: 'post',
+  path: '/api/conversations/{id}/message',
+  tags: ['Conversations'],
+  summary: 'Send a message to a conversation',
+  request: {
+    params: conversationIdParamsSchema,
+    body: {
+      content: { 'application/json': { schema: sendMessageBodySchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: dispatchResponseSchema } },
+      description: 'Accepted',
+    },
+    400: jsonError('Bad request'),
+    500: jsonError('Server error'),
+  },
+});
+
+// =========================================================================
+// Codebase route configs
+// =========================================================================
+
+const listCodebasesRoute = createRoute({
+  method: 'get',
+  path: '/api/codebases',
+  tags: ['Codebases'],
+  summary: 'List registered codebases',
+  responses: {
+    200: {
+      content: { 'application/json': { schema: codebaseListResponseSchema } },
+      description: 'OK',
+    },
+    500: jsonError('Server error'),
+  },
+});
+
+const getCodebaseRoute = createRoute({
+  method: 'get',
+  path: '/api/codebases/{id}',
+  tags: ['Codebases'],
+  summary: 'Get a codebase by ID',
+  request: { params: codebaseIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: codebaseSchema } },
+      description: 'Codebase',
+    },
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const addCodebaseRoute = createRoute({
+  method: 'post',
+  path: '/api/codebases',
+  tags: ['Codebases'],
+  summary: 'Register a codebase (clone from URL or register local path)',
+  request: {
+    body: {
+      content: { 'application/json': { schema: addCodebaseBodySchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: codebaseSchema } },
+      description: 'Codebase already existed',
+    },
+    201: {
+      content: { 'application/json': { schema: codebaseSchema } },
+      description: 'Codebase created',
+    },
+    400: jsonError('Bad request'),
+    500: jsonError('Server error'),
+  },
+});
+
+const deleteCodebaseRoute = createRoute({
+  method: 'delete',
+  path: '/api/codebases/{id}',
+  tags: ['Codebases'],
+  summary: 'Delete a codebase and clean up associated resources',
+  request: { params: codebaseIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: deleteCodebaseResponseSchema } },
+      description: 'Deleted',
+    },
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+// =========================================================================
+// Workflow run route configs
+// =========================================================================
+
+const runWorkflowRoute = createRoute({
+  method: 'post',
+  path: '/api/workflows/{name}/run',
+  tags: ['Workflows'],
+  summary: 'Run a workflow via the orchestrator',
+  request: {
+    params: z.object({ name: z.string() }),
+    body: {
+      content: { 'application/json': { schema: runWorkflowBodySchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: dispatchResponseSchema } },
+      description: 'Accepted',
+    },
+    400: jsonError('Bad request'),
+    500: jsonError('Server error'),
+  },
+});
+
+const getDashboardRunsRoute = createRoute({
+  method: 'get',
+  path: '/api/dashboard/runs',
+  tags: ['Workflows'],
+  summary: 'List enriched workflow runs for the Command Center dashboard',
+  request: { query: dashboardRunsQuerySchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: dashboardRunsResponseSchema } },
+      description: 'OK',
+    },
+    500: jsonError('Server error'),
+  },
+});
+
+const getWorkflowRunByWorkerRoute = createRoute({
+  method: 'get',
+  path: '/api/workflows/runs/by-worker/{platformId}',
+  tags: ['Workflows'],
+  summary: 'Look up a workflow run by its worker conversation platform ID',
+  request: { params: z.object({ platformId: z.string() }) },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowRunByWorkerResponseSchema } },
+      description: 'Workflow run',
+    },
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const listWorkflowRunsRoute = createRoute({
+  method: 'get',
+  path: '/api/workflows/runs',
+  tags: ['Workflows'],
+  summary: 'List workflow runs',
+  request: { query: workflowRunsQuerySchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowRunListResponseSchema } },
+      description: 'OK',
+    },
+    500: jsonError('Server error'),
+  },
+});
+
+const cancelWorkflowRunRoute = createRoute({
+  method: 'post',
+  path: '/api/workflows/runs/{runId}/cancel',
+  tags: ['Workflows'],
+  summary: 'Cancel a workflow run',
+  request: { params: z.object({ runId: z.string() }) },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: cancelWorkflowRunResponseSchema } },
+      description: 'Cancelled',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const getWorkflowRunRoute = createRoute({
+  method: 'get',
+  path: '/api/workflows/runs/{runId}',
+  tags: ['Workflows'],
+  summary: 'Get workflow run details with events',
+  request: { params: z.object({ runId: z.string() }) },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowRunDetailSchema } },
+      description: 'Workflow run detail',
+    },
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+// =========================================================================
+// Config / health route configs
+// =========================================================================
+
+const getConfigRoute = createRoute({
+  method: 'get',
+  path: '/api/config',
+  tags: ['System'],
+  summary: 'Get read-only configuration (safe subset)',
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: z
+            .object({ config: z.record(z.unknown()), database: z.string() })
+            .openapi('ConfigResponse'),
+        },
+      },
+      description: 'Configuration',
+    },
+    500: jsonError('Server error'),
+  },
+});
+
+const getHealthRoute = createRoute({
+  method: 'get',
+  path: '/api/health',
+  tags: ['System'],
+  summary: 'Health check',
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: z
+            .object({
+              status: z.string(),
+              adapter: z.string(),
+              concurrency: z.record(z.unknown()),
+              runningWorkflows: z.number(),
+            })
+            .openapi('HealthResponse'),
+        },
+      },
+      description: 'Health status',
+    },
+  },
+});
+
 /**
  * Register all /api/* routes on the Hono app.
  */
@@ -272,7 +665,7 @@ export function registerApiRoutes(
   }
 
   // GET /api/conversations - List conversations
-  app.get('/api/conversations', async c => {
+  registerOpenApiRoute(getConversationsRoute, async c => {
     try {
       const platformType = c.req.query('platform') ?? undefined;
       const codebaseId = c.req.query('codebaseId') ?? undefined;
@@ -280,13 +673,13 @@ export function registerApiRoutes(
       return c.json(conversations);
     } catch (error) {
       getLog().error({ err: error }, 'list_conversations_failed');
-      return c.json({ error: 'Failed to list conversations' }, 500);
+      return apiError(c, 500, 'Failed to list conversations');
     }
   });
 
   // GET /api/conversations/:id - Get single conversation by platform conversation ID
-  app.get('/api/conversations/:id', async c => {
-    const platformId = c.req.param('id');
+  registerOpenApiRoute(getConversationRoute, async c => {
+    const platformId = c.req.param('id') ?? '';
     try {
       const conv = await conversationDb.findConversationByPlatformId(platformId);
       if (!conv) {
@@ -300,25 +693,9 @@ export function registerApiRoutes(
   });
 
   // POST /api/conversations - Create new conversation
-  app.post('/api/conversations', async c => {
-    let body: { codebaseId?: unknown; conversationId?: unknown };
+  registerOpenApiRoute(createConversationRoute, async c => {
     try {
-      body = await c.req.json();
-    } catch {
-      return apiError(c, 400, 'Invalid JSON in request body');
-    }
-
-    try {
-      const codebaseId = typeof body.codebaseId === 'string' ? body.codebaseId : undefined;
-
-      if (body.conversationId !== undefined) {
-        return apiError(
-          c,
-          400,
-          'conversationId is not accepted',
-          'Conversation IDs are auto-generated; do not provide conversationId in the request body'
-        );
-      }
+      const { codebaseId } = getValidatedBody(c, createConversationBodySchema);
 
       // Validate codebase exists if provided
       if (codebaseId) {
@@ -344,22 +721,16 @@ export function registerApiRoutes(
   });
 
   // PATCH /api/conversations/:id - Update conversation (title)
-  app.patch('/api/conversations/:id', async c => {
-    const platformId = c.req.param('id');
-    let body: { title?: unknown };
-    try {
-      body = await c.req.json();
-    } catch {
-      return apiError(c, 400, 'Invalid JSON in request body');
-    }
+  registerOpenApiRoute(updateConversationRoute, async c => {
+    const platformId = c.req.param('id') ?? '';
+    const { title } = getValidatedBody(c, updateConversationBodySchema);
     try {
       const conv = await conversationDb.findConversationByPlatformId(platformId);
       if (!conv) {
         return apiError(c, 404, 'Conversation not found');
       }
-      if (typeof body.title === 'string') {
-        const title = body.title.slice(0, 255);
-        await conversationDb.updateConversationTitle(conv.id, title);
+      if (title !== undefined) {
+        await conversationDb.updateConversationTitle(conv.id, title.slice(0, 255));
       }
       return c.json({ success: true });
     } catch (error) {
@@ -372,8 +743,8 @@ export function registerApiRoutes(
   });
 
   // DELETE /api/conversations/:id - Soft delete
-  app.delete('/api/conversations/:id', async c => {
-    const platformId = c.req.param('id');
+  registerOpenApiRoute(deleteConversationRoute, async c => {
+    const platformId = c.req.param('id') ?? '';
     try {
       const conv = await conversationDb.findConversationByPlatformId(platformId);
       if (!conv) {
@@ -391,13 +762,13 @@ export function registerApiRoutes(
   });
 
   // GET /api/conversations/:id/messages - Message history
-  app.get('/api/conversations/:id/messages', async c => {
-    const platformConversationId = c.req.param('id');
+  registerOpenApiRoute(listMessagesRoute, async c => {
+    const platformConversationId = c.req.param('id') ?? '';
     const limit = Math.min(Number(c.req.query('limit') ?? '200'), 500);
     try {
       const conv = await conversationDb.findConversationByPlatformId(platformConversationId);
       if (!conv) {
-        return c.json({ error: 'Conversation not found' }, 404);
+        return apiError(c, 404, 'Conversation not found');
       }
       const messages = await messageDb.listMessages(conv.id, limit);
       // Normalize metadata: PostgreSQL JSONB auto-deserializes to object,
@@ -410,26 +781,14 @@ export function registerApiRoutes(
       );
     } catch (error) {
       getLog().error({ err: error }, 'list_messages_failed');
-      return c.json({ error: 'Failed to list messages' }, 500);
+      return apiError(c, 500, 'Failed to list messages');
     }
   });
 
   // POST /api/conversations/:id/message - Send message
-  app.post('/api/conversations/:id/message', async c => {
-    const conversationId = c.req.param('id');
-
-    let body: { message?: unknown };
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: 'Invalid JSON in request body' }, 400);
-    }
-
-    if (typeof body.message !== 'string' || !body.message) {
-      return c.json({ error: 'message must be a non-empty string' }, 400);
-    }
-
-    const message = body.message;
+  registerOpenApiRoute(sendMessageRoute, async c => {
+    const conversationId = c.req.param('id') ?? '';
+    const { message } = getValidatedBody(c, sendMessageBodySchema);
 
     // Look up conversation for message persistence
     let conv: Awaited<ReturnType<typeof conversationDb.findConversationByPlatformId>> = null;
@@ -545,7 +904,7 @@ export function registerApiRoutes(
   });
 
   // GET /api/codebases - List codebases
-  app.get('/api/codebases', async c => {
+  registerOpenApiRoute(listCodebasesRoute, async c => {
     try {
       const codebases = await codebaseDb.listCodebases();
 
@@ -583,16 +942,16 @@ export function registerApiRoutes(
       );
     } catch (error) {
       getLog().error({ err: error }, 'list_codebases_failed');
-      return c.json({ error: 'Failed to list codebases' }, 500);
+      return apiError(c, 500, 'Failed to list codebases');
     }
   });
 
   // GET /api/codebases/:id - Codebase detail
-  app.get('/api/codebases/:id', async c => {
+  registerOpenApiRoute(getCodebaseRoute, async c => {
     try {
-      const codebase = await codebaseDb.getCodebase(c.req.param('id'));
+      const codebase = await codebaseDb.getCodebase(c.req.param('id') ?? '');
       if (!codebase) {
-        return c.json({ error: 'Codebase not found' }, 404);
+        return apiError(c, 404, 'Codebase not found');
       }
       let commands = codebase.commands;
       if (typeof commands === 'string') {
@@ -606,54 +965,44 @@ export function registerApiRoutes(
       return c.json({ ...codebase, commands });
     } catch (error) {
       getLog().error({ err: error }, 'get_codebase_failed');
-      return c.json({ error: 'Failed to get codebase' }, 500);
+      return apiError(c, 500, 'Failed to get codebase');
     }
   });
 
   // POST /api/codebases - Add a project (clone from URL or register local path)
-  app.post('/api/codebases', async c => {
-    let body: { url?: unknown; path?: unknown };
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: 'Invalid JSON in request body' }, 400);
-    }
-
-    const hasUrl = typeof body.url === 'string' && body.url.length > 0;
-    const hasPath = typeof body.path === 'string' && body.path.length > 0;
-
-    if ((!hasUrl && !hasPath) || (hasUrl && hasPath)) {
-      return c.json({ error: 'Provide either "url" or "path", not both' }, 400);
-    }
+  registerOpenApiRoute(addCodebaseRoute, async c => {
+    const body = getValidatedBody(c, addCodebaseBodySchema);
 
     try {
-      const result = hasUrl
-        ? await cloneRepository(body.url as string)
-        : await registerRepository(body.path as string);
+      // .refine() guarantees exactly one of url/path is present
+      const result = body.url
+        ? await cloneRepository(body.url)
+        : await registerRepository(body.path ?? '');
 
       // Fetch the full codebase record for a consistent response
       const codebase = await codebaseDb.getCodebase(result.codebaseId);
       if (!codebase) {
-        return c.json({ error: 'Codebase created but not found' }, 500);
+        return apiError(c, 500, 'Codebase created but not found');
       }
 
       return c.json(codebase, result.alreadyExisted ? 200 : 201);
     } catch (error) {
       getLog().error({ err: error }, 'add_codebase_failed');
-      return c.json(
-        { error: `Failed to add codebase: ${(error as Error).message ?? 'unknown error'}` },
-        500
+      return apiError(
+        c,
+        500,
+        `Failed to add codebase: ${(error as Error).message ?? 'unknown error'}`
       );
     }
   });
 
   // DELETE /api/codebases/:id - Delete a project and clean up
-  app.delete('/api/codebases/:id', async c => {
-    const id = c.req.param('id');
+  registerOpenApiRoute(deleteCodebaseRoute, async c => {
+    const id = c.req.param('id') ?? '';
     try {
       const codebase = await codebaseDb.getCodebase(id);
       if (!codebase) {
-        return c.json({ error: 'Codebase not found' }, 404);
+        return apiError(c, 404, 'Codebase not found');
       }
 
       // Clean up isolation environments (worktrees)
@@ -693,7 +1042,7 @@ export function registerApiRoutes(
       return c.json({ success: true });
     } catch (error) {
       getLog().error({ err: error }, 'delete_codebase_failed');
-      return c.json({ error: 'Failed to delete codebase' }, 500);
+      return apiError(c, 500, 'Failed to delete codebase');
     }
   });
 
@@ -708,6 +1057,11 @@ export function registerApiRoutes(
     handler: (c: Context) => Response | Promise<Response>
   ): void {
     app.openapi(route, handler as never);
+  }
+
+  /** Access Zod-validated body from a handler registered via registerOpenApiRoute. */
+  function getValidatedBody<T>(c: Context, _schema: z.ZodType<T>): T {
+    return (c.req as unknown as { valid(k: 'json'): T }).valid('json');
   }
 
   // Serve OpenAPI spec
@@ -754,26 +1108,13 @@ export function registerApiRoutes(
   });
 
   // POST /api/workflows/:name/run - Run a workflow via the orchestrator
-  app.post('/api/workflows/:name/run', async c => {
+  registerOpenApiRoute(runWorkflowRoute, async c => {
+    const workflowName = c.req.param('name') ?? '';
+    if (!isValidCommandName(workflowName)) {
+      return apiError(c, 400, 'Invalid workflow name');
+    }
     try {
-      let body: { conversationId?: unknown; message?: unknown };
-      try {
-        body = await c.req.json();
-      } catch {
-        return c.json({ error: 'Invalid JSON' }, 400);
-      }
-
-      const conversationId = typeof body.conversationId === 'string' ? body.conversationId : null;
-      const message = typeof body.message === 'string' ? body.message : null;
-
-      if (!conversationId || !message) {
-        return c.json({ error: 'conversationId and message are required' }, 400);
-      }
-
-      const workflowName = c.req.param('name');
-      if (!/^[\w-]+$/.test(workflowName)) {
-        return c.json({ error: 'Invalid workflow name' }, 400);
-      }
+      const { conversationId, message } = getValidatedBody(c, runWorkflowBodySchema);
       // Persist user message and register DB ID (same as message endpoint)
       let conv: Awaited<ReturnType<typeof conversationDb.findConversationByPlatformId>> = null;
       try {
@@ -805,13 +1146,13 @@ export function registerApiRoutes(
       return c.json(result);
     } catch (error) {
       getLog().error({ err: error }, 'run_workflow_failed');
-      return c.json({ error: 'Failed to run workflow' }, 500);
+      return apiError(c, 500, 'Failed to run workflow');
     }
   });
 
   // GET /api/dashboard/runs - Enriched workflow runs for Command Center
   // Supports server-side search, status/date filtering, and offset pagination.
-  app.get('/api/dashboard/runs', async c => {
+  registerOpenApiRoute(getDashboardRunsRoute, async c => {
     try {
       const rawStatus = c.req.query('status');
       const dashboardValidStatuses = [
@@ -847,31 +1188,31 @@ export function registerApiRoutes(
       return c.json(result);
     } catch (error) {
       getLog().error({ err: error }, 'list_dashboard_runs_failed');
-      return c.json({ error: 'Failed to list dashboard runs' }, 500);
+      return apiError(c, 500, 'Failed to list dashboard runs');
     }
   });
 
   // POST /api/workflows/runs/:runId/cancel - Cancel a workflow run
-  app.post('/api/workflows/runs/:runId/cancel', async c => {
+  registerOpenApiRoute(cancelWorkflowRunRoute, async c => {
     try {
-      const runId = c.req.param('runId');
+      const runId = c.req.param('runId') ?? '';
       const run = await workflowDb.getWorkflowRun(runId);
       if (!run) {
-        return c.json({ error: 'Workflow run not found' }, 404);
+        return apiError(c, 404, 'Workflow run not found');
       }
       if (run.status !== 'running' && run.status !== 'pending') {
-        return c.json({ error: `Cannot cancel workflow in '${run.status}' status` }, 400);
+        return apiError(c, 400, `Cannot cancel workflow in '${run.status}' status`);
       }
       await workflowDb.cancelWorkflowRun(runId);
       return c.json({ success: true, message: `Cancelled workflow: ${run.workflow_name}` });
     } catch (error) {
       getLog().error({ err: error }, 'cancel_workflow_run_api_failed');
-      return c.json({ error: 'Failed to cancel workflow run' }, 500);
+      return apiError(c, 500, 'Failed to cancel workflow run');
     }
   });
 
   // GET /api/workflows/runs - List workflow runs
-  app.get('/api/workflows/runs', async c => {
+  registerOpenApiRoute(listWorkflowRunsRoute, async c => {
     try {
       const conversationId = c.req.query('conversationId') ?? undefined;
       const rawStatus = c.req.query('status');
@@ -894,33 +1235,33 @@ export function registerApiRoutes(
       return c.json({ runs });
     } catch (error) {
       getLog().error({ err: error }, 'list_workflow_runs_failed');
-      return c.json({ error: 'Failed to list workflow runs' }, 500);
+      return apiError(c, 500, 'Failed to list workflow runs');
     }
   });
 
   // GET /api/workflows/runs/by-worker/:platformId - Look up run by worker conversation
   // Must be registered before :runId to avoid "by-worker" matching as a runId
-  app.get('/api/workflows/runs/by-worker/:platformId', async c => {
+  registerOpenApiRoute(getWorkflowRunByWorkerRoute, async c => {
     try {
-      const platformId = c.req.param('platformId');
+      const platformId = c.req.param('platformId') ?? '';
       const run = await workflowDb.getWorkflowRunByWorkerPlatformId(platformId);
       if (!run) {
-        return c.json({ error: 'No workflow run found for this worker' }, 404);
+        return apiError(c, 404, 'No workflow run found for this worker');
       }
       return c.json({ run });
     } catch (error) {
       getLog().error({ err: error }, 'workflow_run_by_worker_lookup_failed');
-      return c.json({ error: 'Failed to look up workflow run' }, 500);
+      return apiError(c, 500, 'Failed to look up workflow run');
     }
   });
 
   // GET /api/workflows/runs/:runId - Get run details with events
-  app.get('/api/workflows/runs/:runId', async c => {
+  registerOpenApiRoute(getWorkflowRunRoute, async c => {
     try {
-      const runId = c.req.param('runId');
+      const runId = c.req.param('runId') ?? '';
       const run = await workflowDb.getWorkflowRun(runId);
       if (!run) {
-        return c.json({ error: 'Workflow run not found' }, 404);
+        return apiError(c, 404, 'Workflow run not found');
       }
       const events = await workflowEventDb.listWorkflowEvents(runId);
 
@@ -958,27 +1299,18 @@ export function registerApiRoutes(
       });
     } catch (error) {
       getLog().error({ err: error }, 'get_workflow_run_failed');
-      return c.json({ error: 'Failed to get workflow run' }, 500);
+      return apiError(c, 500, 'Failed to get workflow run');
     }
   });
 
   // POST /api/workflows/validate - Validate a workflow definition without saving
   // MUST be registered before GET /api/workflows/:name so "validate" is not treated as :name
   registerOpenApiRoute(validateWorkflowRoute, async c => {
-    let body: { definition?: unknown };
-    try {
-      body = await c.req.json();
-    } catch {
-      return apiError(c, 400, 'Invalid JSON in request body');
-    }
-
-    if (!body.definition || typeof body.definition !== 'object') {
-      return apiError(c, 400, 'definition object is required');
-    }
+    const { definition } = getValidatedBody(c, validateWorkflowBodySchema);
 
     let yamlContent: string;
     try {
-      yamlContent = Bun.YAML.stringify(body.definition);
+      yamlContent = Bun.YAML.stringify(definition);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       getLog().error({ err }, 'workflow.serialize_failed');
@@ -1103,20 +1435,12 @@ export function registerApiRoutes(
       return apiError(c, 400, 'cwd is required');
     }
 
-    let body: { definition?: unknown };
-    try {
-      body = await c.req.json();
-    } catch {
-      return apiError(c, 400, 'Invalid JSON in request body');
-    }
-    if (!body.definition || typeof body.definition !== 'object') {
-      return apiError(c, 400, 'definition object is required');
-    }
+    const { definition } = getValidatedBody(c, saveWorkflowBodySchema);
 
     // Serialize and validate before writing
     let yamlContent: string;
     try {
-      yamlContent = Bun.YAML.stringify(body.definition);
+      yamlContent = Bun.YAML.stringify(definition);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       getLog().error({ err, name }, 'workflow.serialize_failed');
@@ -1125,7 +1449,7 @@ export function registerApiRoutes(
 
     const parsed = parseWorkflow(yamlContent, `${name}.yaml`);
     if (parsed.error) {
-      return c.json({ error: 'Workflow definition is invalid', detail: parsed.error.error }, 400);
+      return apiError(c, 400, 'Workflow definition is invalid', parsed.error.error);
     }
 
     try {
@@ -1142,7 +1466,7 @@ export function registerApiRoutes(
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       getLog().error({ err, name }, 'workflow.save_failed');
-      return c.json({ error: 'Failed to save workflow' }, 500);
+      return apiError(c, 500, 'Failed to save workflow');
     }
   });
 
@@ -1183,7 +1507,7 @@ export function registerApiRoutes(
         return apiError(c, 404, `Workflow not found: ${name}`);
       }
       getLog().error({ err, name }, 'workflow.delete_failed');
-      return c.json({ error: 'Failed to delete workflow' }, 500);
+      return apiError(c, 500, 'Failed to delete workflow');
     }
   });
 
@@ -1254,7 +1578,7 @@ export function registerApiRoutes(
   });
 
   // GET /api/config - Read-only configuration (safe subset only — no filesystem paths)
-  app.get('/api/config', async c => {
+  registerOpenApiRoute(getConfigRoute, async c => {
     try {
       const config = await loadConfig();
       return c.json({
@@ -1263,12 +1587,12 @@ export function registerApiRoutes(
       });
     } catch (error) {
       getLog().error({ err: error }, 'get_config_failed');
-      return c.json({ error: 'Failed to get config' }, 500);
+      return apiError(c, 500, 'Failed to get config');
     }
   });
 
   // GET /api/health - Health check with web adapter info
-  app.get('/api/health', async c => {
+  registerOpenApiRoute(getHealthRoute, async c => {
     const stats = lockManager.getStats();
     const runningWorkflows = await workflowDb.countRunningWorkflows();
     return c.json({

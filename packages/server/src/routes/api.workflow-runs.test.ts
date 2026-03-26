@@ -2,6 +2,7 @@ import { describe, test, expect, mock, beforeEach } from 'bun:test';
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ConversationLockManager } from '@archon/core';
 import type { WebAdapter } from '../adapters/web';
+import { validationErrorHook } from './openapi-defaults';
 
 // ---------------------------------------------------------------------------
 // Mock setup — must be before dynamic imports of mocked modules
@@ -282,8 +283,8 @@ const MOCK_CONV = {
   codebase_id: null,
 };
 
-function makeApp(): { app: Hono; mockWebAdapter: WebAdapter } {
-  const app = new OpenAPIHono();
+function makeApp(): { app: OpenAPIHono; mockWebAdapter: WebAdapter } {
+  const app = new OpenAPIHono({ defaultHook: validationErrorHook });
   const mockWebAdapter = {
     setConversationDbId: mock((_platformId: string, _dbId: string) => {}),
     emitSSE: mock(async () => {}),
@@ -969,5 +970,27 @@ describe('GET /api/dashboard/runs', () => {
 
     const body = (await response.json()) as { error: string };
     expect(body.error).toContain('Failed to list dashboard runs');
+  });
+});
+
+describe('GET /api/workflows/runs/by-worker/:platformId', () => {
+  beforeEach(() => {
+    mockGetWorkflowRunByWorkerPlatformId.mockReset();
+  });
+
+  test('returns run when found', async () => {
+    mockGetWorkflowRunByWorkerPlatformId.mockResolvedValueOnce(MOCK_RUNNING_RUN);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/by-worker/some-platform-id');
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { run: unknown };
+    expect(body.run).toBeDefined();
+  });
+
+  test('returns 404 when not found', async () => {
+    mockGetWorkflowRunByWorkerPlatformId.mockResolvedValueOnce(null);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/by-worker/unknown-id');
+    expect(response.status).toBe(404);
   });
 });
