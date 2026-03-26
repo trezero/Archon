@@ -8,7 +8,7 @@ import type { WorkflowDeps } from './deps';
 import * as archonPaths from '@archon/paths';
 import { createLogger } from '@archon/paths';
 import { getDefaultBranch, toRepoPath } from '@archon/git';
-import type { WorkflowDefinition, WorkflowRun, WorkflowExecutionResult } from './types';
+import type { WorkflowDefinition, WorkflowRun, WorkflowExecutionResult } from './schemas';
 import { executeDagWorkflow } from './dag-executor';
 import { logWorkflowStart, logWorkflowError } from './logger';
 import { getWorkflowEventEmitter } from './event-emitter';

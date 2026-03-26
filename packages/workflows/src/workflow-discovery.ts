@@ -9,7 +9,7 @@
  */
 import { readFile, readdir, access, stat } from 'fs/promises';
 import { join } from 'path';
-import type { WorkflowDefinition, WorkflowLoadError, WorkflowLoadResult } from './types';
+import type { WorkflowDefinition, WorkflowLoadError, WorkflowLoadResult } from './schemas';
 import * as archonPaths from '@archon/paths';
 import { BUNDLED_WORKFLOWS, isBinaryBuild } from './defaults/bundled-defaults';
 import { createLogger } from '@archon/paths';

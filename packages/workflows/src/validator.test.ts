@@ -9,7 +9,7 @@ import {
   validateCommand,
   discoverAvailableCommands,
 } from './validator';
-import type { WorkflowDefinition, DagNode } from './types';
+import type { WorkflowDefinition, DagNode } from './schemas';
 
 // =============================================================================
 // Test helpers

@@ -19,7 +19,7 @@ import {
 } from '@archon/paths';
 import { BUNDLED_COMMANDS, isBinaryBuild } from './defaults/bundled-defaults';
 import { isValidCommandName } from './command-validation';
-import type { WorkflowDefinition, DagNode } from './types';
+import type { WorkflowDefinition, DagNode } from './schemas';
 
 // =============================================================================
 // Types

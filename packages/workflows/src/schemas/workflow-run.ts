@@ -106,3 +106,17 @@ export const artifactTypeSchema = z.enum([
 ]);
 
 export type ArtifactType = z.infer<typeof artifactTypeSchema>;
+
+// ---------------------------------------------------------------------------
+// Compile-time assertion: NodeOutput must cover all NodeState values.
+// If NodeState gains a new value, this line becomes a type error as a reminder
+// to update NodeOutput.
+// ---------------------------------------------------------------------------
+
+type AssertNodeOutputCoversNodeState = NodeOutput['state'] extends NodeState
+  ? NodeState extends NodeOutput['state']
+    ? true
+    : never
+  : never;
+const nodeOutputStateCoverage: AssertNodeOutputCoversNodeState = true;
+void nodeOutputStateCoverage; // suppress unused-variable lint warning

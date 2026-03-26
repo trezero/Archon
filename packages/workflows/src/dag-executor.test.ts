@@ -33,7 +33,7 @@ import {
   executeDagWorkflow,
   loadMcpConfig,
 } from './dag-executor';
-import type { DagNode, BashNode, NodeOutput, WorkflowRun } from './types';
+import type { DagNode, BashNode, NodeOutput, WorkflowRun } from './schemas';
 import { discoverWorkflows } from './workflow-discovery';
 import { parseWorkflow } from './loader';
 import type { WorkflowDeps, IWorkflowPlatform, WorkflowConfig } from './deps';

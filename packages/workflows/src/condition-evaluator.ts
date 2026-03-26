@@ -9,7 +9,7 @@
  * Returns true = run this node, false = skip it.
  * Invalid/unparseable expressions default to false (fail-closed = skip the node).
  */
-import type { NodeOutput } from './types';
+import type { NodeOutput } from './schemas';
 import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */

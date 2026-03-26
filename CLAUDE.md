@@ -246,7 +246,6 @@ packages/
 │       └── index.ts          # Package exports
 ├── workflows/                # @archon/workflows - Workflow engine (depends on @archon/git + @archon/paths)
 │   └── src/
-│       ├── types.ts          # Re-exports all types from schemas/ (backward-compat thin wrapper)
 │       ├── schemas/          # Zod schemas for engine types
 │       ├── loader.ts         # YAML parsing + validation (parseWorkflow)
 │       ├── workflow-discovery.ts # Workflow filesystem discovery (discoverWorkflows, discoverWorkflowsWithConfig)
@@ -331,7 +330,7 @@ import { executeWorkflow, discoverWorkflows } from '@archon/workflows';
 import * as core from '@archon/core';  // Don't do this
 
 // ❌ WRONG: In @archon/web, never import from @archon/workflows
-import type { DagNode } from '@archon/workflows/types';  // Don't do this in web
+import type { DagNode } from '@archon/workflows/types';  // Don't do this — subpath no longer exists
 // ✅ CORRECT: Use frontend-local type mirrors in @archon/web
 import type { DagNode } from '@/lib/workflow-types';
 ```

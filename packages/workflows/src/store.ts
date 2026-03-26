@@ -5,7 +5,7 @@
  * Implementations live in @archon/core (backed by the real DB);
  * the workflow engine depends only on this narrow interface.
  */
-import type { WorkflowRun, WorkflowRunStatus } from './types';
+import type { WorkflowRun, WorkflowRunStatus } from './schemas';
 
 export type WorkflowEventType =
   | 'workflow_started'

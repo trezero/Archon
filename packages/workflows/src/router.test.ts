@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { buildRouterPrompt, parseWorkflowInvocation, findWorkflow } from './router';
-import type { WorkflowDefinition } from './types';
+import type { WorkflowDefinition } from './schemas';
 import type { RouterContext } from './router';
 
 describe('Workflow Router', () => {

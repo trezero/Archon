@@ -26,8 +26,8 @@ import type {
   TriggerRule,
   WorkflowRun,
   WorkflowNodeHooks,
-} from './types';
-import { isBashNode, isLoopNode } from './types';
+} from './schemas';
+import { isBashNode, isLoopNode } from './schemas';
 import { formatToolCall } from './utils/tool-formatter';
 import { createLogger } from '@archon/paths';
 import { getWorkflowEventEmitter } from './event-emitter';

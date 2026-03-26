@@ -58,7 +58,7 @@ mock.module('./event-emitter', () => ({
 import { executeWorkflow } from './executor';
 import type { WorkflowDeps, IWorkflowPlatform, WorkflowConfig } from './deps';
 import type { IWorkflowStore } from './store';
-import type { WorkflowDefinition, WorkflowRun } from './types';
+import type { WorkflowDefinition, WorkflowRun } from './schemas';
 
 // --- Helpers ---
 

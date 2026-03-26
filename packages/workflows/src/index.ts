@@ -18,7 +18,7 @@
 // =============================================================================
 // Types
 // =============================================================================
-export * from './types';
+export * from './schemas';
 
 export type { IWorkflowStore, WorkflowEventType } from './store';
 

@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { parseNodeHooks } from './loader';
 import { buildSDKHooksFromYAML } from './dag-executor';
-import type { WorkflowNodeHooks } from './types';
+import type { WorkflowNodeHooks } from './schemas';
 import { parseWorkflow } from './loader';
 
 describe('parseNodeHooks', () => {

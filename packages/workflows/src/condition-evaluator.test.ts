@@ -19,7 +19,7 @@ mock.module('@archon/paths', () => ({
 // --- Imports (after mocks) ---
 
 import { evaluateCondition } from './condition-evaluator';
-import type { NodeOutput } from './types';
+import type { NodeOutput } from './schemas';
 
 function makeOutput(
   output: string,

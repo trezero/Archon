@@ -1,5 +1,6 @@
 /**
- * Zod schemas for workflow definition types.
+ * Zod schemas for workflow definition types, plus result types for
+ * workflow loading and execution (non-schema hand-written discriminated unions).
  */
 import { z } from '@hono/zod-openapi';
 import type { DagNode } from './dag-node';
@@ -58,3 +59,52 @@ export type WorkflowDefinition = Omit<z.infer<typeof workflowDefinitionSchema>, 
   readonly nodes: readonly DagNode[];
   prompt?: never;
 };
+
+// ---------------------------------------------------------------------------
+// LoadCommandResult — discriminated union for command load outcomes
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of loading a command prompt - discriminated union for specific error handling
+ *
+ * On success, `content` is non-empty (enforced at load time in executor-shared.ts, not by the type).
+ */
+export type LoadCommandResult =
+  | { success: true; content: string }
+  | {
+      success: false;
+      reason: 'invalid_name' | 'empty_file' | 'not_found' | 'permission_denied' | 'read_error';
+      message: string;
+    };
+
+// ---------------------------------------------------------------------------
+// WorkflowExecutionResult — discriminated union for execution outcomes
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of workflow execution - allows callers to detect success/failure
+ */
+export type WorkflowExecutionResult =
+  | { success: true; workflowRunId: string; summary?: string }
+  | { success: false; workflowRunId?: string; error: string };
+
+// ---------------------------------------------------------------------------
+// WorkflowLoadError / WorkflowLoadResult — workflow discovery results
+// ---------------------------------------------------------------------------
+
+/**
+ * Error encountered while loading a workflow file
+ */
+export interface WorkflowLoadError {
+  readonly filename: string;
+  readonly error: string;
+  readonly errorType: 'read_error' | 'parse_error' | 'validation_error';
+}
+
+/**
+ * Result of workflow discovery - includes both successful loads and errors
+ */
+export interface WorkflowLoadResult {
+  readonly workflows: readonly WorkflowDefinition[];
+  readonly errors: readonly WorkflowLoadError[];
+}

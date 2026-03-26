@@ -1,7 +1,7 @@
 /**
  * Workflow Router - builds prompts and detects workflow invocation
  */
-import type { WorkflowDefinition } from './types';
+import type { WorkflowDefinition } from './schemas';
 import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */

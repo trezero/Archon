@@ -5,7 +5,7 @@
  * Callers in @archon/core satisfy these structurally — no adapter wrappers needed.
  */
 import type { IWorkflowStore } from './store';
-import type { ModelReasoningEffort, WebSearchMode } from './types';
+import type { ModelReasoningEffort, WebSearchMode } from './schemas';
 
 // ---------------------------------------------------------------------------
 // Workflow-local type copies — structurally identical to the originals in

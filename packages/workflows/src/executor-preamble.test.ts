@@ -6,7 +6,7 @@
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
 import type { WorkflowDeps, IWorkflowPlatform, WorkflowConfig } from './deps';
 import type { IWorkflowStore } from './store';
-import type { WorkflowDefinition, WorkflowRun } from './types';
+import type { WorkflowDefinition, WorkflowRun } from './schemas';
 
 // ---------------------------------------------------------------------------
 // Mock logger (must precede all module-under-test imports)

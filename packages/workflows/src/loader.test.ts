@@ -29,7 +29,7 @@ mock.module('@archon/paths', () => ({
 }));
 
 import { discoverWorkflows } from './workflow-discovery';
-import { isBashNode, isLoopNode } from './types';
+import { isBashNode, isLoopNode } from './schemas';
 import * as bundledDefaults from './defaults/bundled-defaults';
 
 describe('Workflow Loader', () => {

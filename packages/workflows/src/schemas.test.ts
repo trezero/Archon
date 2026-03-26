@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { isBashNode, isTriggerRule, TRIGGER_RULES } from './types';
+import { isBashNode, isTriggerRule, TRIGGER_RULES } from './schemas';
 import type {
   WorkflowDefinition,
   DagNode,
@@ -7,7 +7,7 @@ import type {
   PromptNode,
   BashNode,
   TriggerRule,
-} from './types';
+} from './schemas';
 
 // ---------------------------------------------------------------------------
 // Fixtures

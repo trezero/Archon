@@ -81,3 +81,14 @@ export type {
   WorkflowRun,
   ArtifactType,
 } from './workflow-run';
+
+// Result types (non-schema hand-written types)
+export type {
+  LoadCommandResult,
+  WorkflowExecutionResult,
+  WorkflowLoadError,
+  WorkflowLoadResult,
+} from './workflow';
+
+// DagWorkflow — alias kept for backward compatibility
+export type { WorkflowDefinition as DagWorkflow } from './workflow';

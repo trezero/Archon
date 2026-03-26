@@ -1,8 +1,8 @@
 /**
  * Workflow loader - discovers and parses workflow YAML files
  */
-import type { WorkflowDefinition, WorkflowLoadError, DagNode, WorkflowNodeHooks } from './types';
-import { isLoopNode } from './types';
+import type { WorkflowDefinition, WorkflowLoadError, DagNode, WorkflowNodeHooks } from './schemas';
+import { isLoopNode } from './schemas';
 import { createLogger } from '@archon/paths';
 import { isModelCompatible } from './model-validation';
 import { dagNodeSchema, BASH_NODE_AI_FIELDS } from './schemas/dag-node';
