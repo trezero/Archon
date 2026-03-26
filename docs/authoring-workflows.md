@@ -687,30 +687,30 @@ description: |
 nodes:
   - id: implement
     loop:
+      prompt: |
+        # PRD Implementation Loop
+
+        Workflow: $WORKFLOW_ID
+
+        ## Instructions
+
+        1. Read PRD from `.archon/prd.md`
+        2. Read progress from `.archon/progress.json`
+        3. Find the next incomplete story
+        4. Implement it with tests
+        5. Run validation: `bun run validate`
+        6. Update progress file
+        7. If ALL stories complete and validated:
+           Output: <promise>COMPLETE</promise>
+
+        ## Important
+
+        - Implement ONE story per iteration
+        - Always run validation after changes
+        - Update progress file before ending iteration
       until: COMPLETE
       max_iterations: 15
       fresh_context: true       # Progress tracked in files
-    prompt: |
-      # PRD Implementation Loop
-
-      Workflow: $WORKFLOW_ID
-
-      ## Instructions
-
-      1. Read PRD from `.archon/prd.md`
-      2. Read progress from `.archon/progress.json`
-      3. Find the next incomplete story
-      4. Implement it with tests
-      5. Run validation: `bun run validate`
-      6. Update progress file
-      7. If ALL stories complete and validated:
-         Output: <promise>COMPLETE</promise>
-
-      ## Important
-
-      - Implement ONE story per iteration
-      - Always run validation after changes
-      - Update progress file before ending iteration
 ```
 
 ### Classify and Route
@@ -766,26 +766,26 @@ description: |
 nodes:
   - id: fix-loop
     loop:
+      prompt: |
+        # Fix Until Green
+
+        ## Instructions
+
+        1. Run tests: `bun test`
+        2. If all pass: <promise>ALL_TESTS_PASS</promise>
+        3. If failures:
+           - Analyze the failure
+           - Fix the code (not the test, unless test is wrong)
+           - Run tests again
+
+        ## Rules
+
+        - Don't skip or delete failing tests
+        - Don't modify test expectations unless they're wrong
+        - Each iteration should fix at least one failure
       until: ALL_TESTS_PASS
       max_iterations: 5
       fresh_context: false      # Remember what we've tried
-    prompt: |
-      # Fix Until Green
-
-      ## Instructions
-
-      1. Run tests: `bun test`
-      2. If all pass: <promise>ALL_TESTS_PASS</promise>
-      3. If failures:
-         - Analyze the failure
-         - Fix the code (not the test, unless test is wrong)
-         - Run tests again
-
-      ## Rules
-
-      - Don't skip or delete failing tests
-      - Don't modify test expectations unless they're wrong
-      - Each iteration should fix at least one failure
 ```
 
 ---
@@ -949,7 +949,7 @@ Before deploying a workflow:
 3. **Artifacts are the glue** - Commands communicate via files, not memory
 4. **`context: fresh`** - Fresh session for a node, works from artifacts
 5. **Parallel execution** - Nodes in the same topological layer run concurrently
-6. **Loop nodes** - `loop:` on a node iterates until `<promise>COMPLETE</promise>` signal
+6. **Loop nodes** - `loop:` on a node iterates until `<promise>COMPLETE</promise>` signal — see [Loop Nodes](loop-nodes.md) for full reference
 7. **Conditional branching** - `when:` conditions and `trigger_rule` control which nodes run
 8. **`output_format`** - Enforce structured JSON output from AI nodes for reliable branching
 9. **`allowed_tools` / `denied_tools`** - Restrict which tools a node can use (Claude only, enforced at SDK level)
