@@ -2,7 +2,7 @@
  * REST API routes for the Archon Web UI.
  * Provides conversation, codebase, and SSE streaming endpoints.
  */
-import type { Hono } from 'hono';
+import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 import { streamSSE } from 'hono/streaming';
 import { cors } from 'hono/cors';
 import type { WebAdapter } from '../adapters/web';
@@ -51,14 +51,151 @@ import * as isolationEnvDb from '@archon/core/db/isolation-environments';
 import * as workflowDb from '@archon/core/db/workflows';
 import * as workflowEventDb from '@archon/core/db/workflow-events';
 import * as messageDb from '@archon/core/db/messages';
+import { errorSchema } from './schemas/common.schemas';
+import {
+  workflowListResponseSchema,
+  validateWorkflowBodySchema,
+  validateWorkflowResponseSchema,
+  getWorkflowResponseSchema,
+  saveWorkflowBodySchema,
+  deleteWorkflowResponseSchema,
+  commandListResponseSchema,
+} from './schemas/workflow.schemas';
 
 type WorkflowSource = 'project' | 'bundled';
+
+// =========================================================================
+// OpenAPI route configs (module-scope — pure config, no runtime dependencies)
+// =========================================================================
+
+/** Helper to build a JSON error response entry for createRoute configs. */
+function jsonError(description: string): {
+  content: { 'application/json': { schema: typeof errorSchema } };
+  description: string;
+} {
+  return { content: { 'application/json': { schema: errorSchema } }, description };
+}
+
+const cwdQuerySchema = z.object({ cwd: z.string().optional() });
+
+const getWorkflowsRoute = createRoute({
+  method: 'get',
+  path: '/api/workflows',
+  tags: ['Workflows'],
+  summary: 'List available workflows',
+  request: { query: cwdQuerySchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowListResponseSchema } },
+      description: 'OK',
+    },
+    400: jsonError('Bad request'),
+    500: jsonError('Server error'),
+  },
+});
+
+const validateWorkflowRoute = createRoute({
+  method: 'post',
+  path: '/api/workflows/validate',
+  tags: ['Workflows'],
+  summary: 'Validate a workflow definition without saving',
+  request: {
+    body: {
+      content: { 'application/json': { schema: validateWorkflowBodySchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: validateWorkflowResponseSchema } },
+      description: 'Validation result',
+    },
+    400: jsonError('Bad request'),
+    500: jsonError('Server error'),
+  },
+});
+
+const getWorkflowRoute = createRoute({
+  method: 'get',
+  path: '/api/workflows/{name}',
+  tags: ['Workflows'],
+  summary: 'Fetch a single workflow definition',
+  request: {
+    params: z.object({ name: z.string() }),
+    query: cwdQuerySchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: getWorkflowResponseSchema } },
+      description: 'Workflow definition',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const saveWorkflowRoute = createRoute({
+  method: 'put',
+  path: '/api/workflows/{name}',
+  tags: ['Workflows'],
+  summary: 'Save (create or update) a workflow',
+  request: {
+    params: z.object({ name: z.string() }),
+    query: cwdQuerySchema,
+    body: { content: { 'application/json': { schema: saveWorkflowBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: getWorkflowResponseSchema } },
+      description: 'Saved workflow',
+    },
+    400: jsonError('Bad request'),
+    500: jsonError('Server error'),
+  },
+});
+
+const deleteWorkflowRoute = createRoute({
+  method: 'delete',
+  path: '/api/workflows/{name}',
+  tags: ['Workflows'],
+  summary: 'Delete a user-defined workflow',
+  request: {
+    params: z.object({ name: z.string() }),
+    query: cwdQuerySchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: deleteWorkflowResponseSchema } },
+      description: 'Deleted',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const getCommandsRoute = createRoute({
+  method: 'get',
+  path: '/api/commands',
+  tags: ['Commands'],
+  summary: 'List available command names for the workflow node palette',
+  request: { query: cwdQuerySchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: commandListResponseSchema } },
+      description: 'OK',
+    },
+    400: jsonError('Bad request'),
+    500: jsonError('Server error'),
+  },
+});
 
 /**
  * Register all /api/* routes on the Hono app.
  */
 export function registerApiRoutes(
-  app: Hono,
+  app: OpenAPIHono,
   webAdapter: WebAdapter,
   lockManager: ConversationLockManager
 ): void {
@@ -560,12 +697,31 @@ export function registerApiRoutes(
     }
   });
 
+  /**
+   * Register a route with OpenAPI spec generation and input validation.
+   * Zod validates inputs (query, params, body) at runtime via defaultHook.
+   * Response schemas are used for OpenAPI spec generation only — output is not
+   * validated at runtime. The `as never` cast bypasses TypedResponse constraints.
+   */
+  function registerOpenApiRoute(
+    route: ReturnType<typeof createRoute>,
+    handler: (c: Context) => Response | Promise<Response>
+  ): void {
+    app.openapi(route, handler as never);
+  }
+
+  // Serve OpenAPI spec
+  app.doc('/api/openapi.json', {
+    openapi: '3.0.0',
+    info: { title: 'Archon API', version: '1.0.0' },
+  });
+
   // =========================================================================
   // Workflow endpoints
   // =========================================================================
 
   // GET /api/workflows - Discover available workflows
-  app.get('/api/workflows', async c => {
+  registerOpenApiRoute(getWorkflowsRoute, async c => {
     try {
       const cwd = c.req.query('cwd');
       let workingDir = cwd;
@@ -593,7 +749,7 @@ export function registerApiRoutes(
       // Workflow discovery can fail if cwd is stale or deleted — return empty with warning
       const err = error instanceof Error ? error : new Error(String(error));
       getLog().error({ err }, 'workflow_discovery_failed');
-      return c.json({ workflows: [], warning: `Workflow discovery failed: ${err.message}` }, 500);
+      return apiError(c, 500, `Workflow discovery failed: ${err.message}`);
     }
   });
 
@@ -808,7 +964,7 @@ export function registerApiRoutes(
 
   // POST /api/workflows/validate - Validate a workflow definition without saving
   // MUST be registered before GET /api/workflows/:name so "validate" is not treated as :name
-  app.post('/api/workflows/validate', async c => {
+  registerOpenApiRoute(validateWorkflowRoute, async c => {
     let body: { definition?: unknown };
     try {
       body = await c.req.json();
@@ -844,8 +1000,8 @@ export function registerApiRoutes(
   });
 
   // GET /api/workflows/:name - Fetch a single workflow definition
-  app.get('/api/workflows/:name', async c => {
-    const name = c.req.param('name');
+  registerOpenApiRoute(getWorkflowRoute, async c => {
+    const name = c.req.param('name') ?? '';
     if (!isValidCommandName(name)) {
       return apiError(c, 400, 'Invalid workflow name');
     }
@@ -927,8 +1083,8 @@ export function registerApiRoutes(
   });
 
   // PUT /api/workflows/:name - Save (create or update) a workflow
-  app.put('/api/workflows/:name', async c => {
-    const name = c.req.param('name');
+  registerOpenApiRoute(saveWorkflowRoute, async c => {
+    const name = c.req.param('name') ?? '';
     if (!isValidCommandName(name)) {
       return apiError(c, 400, 'Invalid workflow name');
     }
@@ -991,8 +1147,8 @@ export function registerApiRoutes(
   });
 
   // DELETE /api/workflows/:name - Delete a user-defined workflow
-  app.delete('/api/workflows/:name', async c => {
-    const name = c.req.param('name');
+  registerOpenApiRoute(deleteWorkflowRoute, async c => {
+    const name = c.req.param('name') ?? '';
     if (!isValidCommandName(name)) {
       return apiError(c, 400, 'Invalid workflow name');
     }
@@ -1032,7 +1188,7 @@ export function registerApiRoutes(
   });
 
   // GET /api/commands - List available command names for the workflow node palette
-  app.get('/api/commands', async c => {
+  registerOpenApiRoute(getCommandsRoute, async c => {
     try {
       const cwd = c.req.query('cwd');
       let workingDir = cwd;

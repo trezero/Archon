@@ -31,7 +31,8 @@ if (existsSync(globalEnvPath)) {
   }
 }
 
-import { Hono } from 'hono';
+import { OpenAPIHono } from '@hono/zod-openapi';
+import { validationErrorHook } from './routes/openapi-defaults';
 import { TelegramAdapter, GitHubAdapter, DiscordAdapter, SlackAdapter } from '@archon/adapters';
 import { GiteaAdapter } from '@archon/adapters/community/forge/gitea';
 import { WebAdapter } from './adapters/web';
@@ -346,7 +347,7 @@ async function main(): Promise<void> {
   }
 
   // Setup Hono server
-  const app = new Hono();
+  const app = new OpenAPIHono({ defaultHook: validationErrorHook });
   const port = await getPort();
 
   // Global error handler for unhandled exceptions

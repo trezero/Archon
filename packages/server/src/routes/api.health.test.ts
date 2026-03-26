@@ -1,5 +1,5 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
-import { Hono } from 'hono';
+import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ConversationLockManager } from '@archon/core';
 import type { WebAdapter } from '../adapters/web';
 
@@ -158,7 +158,7 @@ import { registerApiRoutes } from './api';
 // ---------------------------------------------------------------------------
 
 function makeApp(): Hono {
-  const app = new Hono();
+  const app = new OpenAPIHono();
   const mockWebAdapter = {
     setConversationDbId: mock((_platformId: string, _dbId: string) => {}),
     emitSSE: mock(async () => {}),

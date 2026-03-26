@@ -18,6 +18,13 @@
 - No `any` types without explicit justification
 - Interfaces for all major abstractions
 
+**Zod Schema Conventions**
+- Schema naming: camelCase, descriptive suffix (e.g., `workflowRunSchema`, `errorSchema`)
+- Type derivation: always use `z.infer<typeof schema>` — never write parallel hand-crafted interfaces
+- Import `z` from `@hono/zod-openapi` (not from `zod` directly)
+- All new/modified API routes must use `registerOpenApiRoute(createRoute({...}), handler)` — the local wrapper handles the TypedResponse bypass
+- Route schemas live in `packages/server/src/routes/schemas/` — one file per domain
+
 **Git Workflow and Releases**
 - `main` is the release branch. Never commit directly to `main`.
 - `dev` is the working branch. All feature work branches off `dev` and merges back into `dev`.
@@ -317,6 +324,11 @@ import { executeWorkflow, discoverWorkflows } from '@archon/workflows';
 
 // ❌ WRONG: Never use generic import for main package
 import * as core from '@archon/core';  // Don't do this
+
+// ❌ WRONG: In @archon/web, never import from @archon/workflows
+import type { DagNode } from '@archon/workflows/types';  // Don't do this in web
+// ✅ CORRECT: Use frontend-local type mirrors in @archon/web
+import type { DagNode } from '@/lib/workflow-types';
 ```
 
 ### Database Schema
@@ -351,8 +363,8 @@ import * as core from '@archon/core';  // Don't do this
 - **@archon/cli**: Command-line interface for running workflows
 - **@archon/core**: Business logic, database, orchestration, AI clients (provides `createWorkflowStore()` adapter bridging core DB → `IWorkflowStore`)
 - **@archon/adapters**: Platform adapters for Slack, Telegram, GitHub, Discord (depends on @archon/core)
-- **@archon/server**: Hono HTTP server, Web adapter (SSE), API routes, Web UI static serving (depends on @archon/adapters)
-- **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui + Zustand), SSE streaming to server
+- **@archon/server**: OpenAPIHono HTTP server (Zod + OpenAPI spec generation via `@hono/zod-openapi`), Web adapter (SSE), API routes, Web UI static serving (depends on @archon/adapters)
+- **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui + Zustand), SSE streaming to server. Workflow types are mirrored in `src/lib/workflow-types.ts` (not imported from `@archon/workflows`)
 
 **1. Platform Adapters**
 - Implement `IPlatformAdapter` interface
@@ -668,6 +680,7 @@ Pattern: Use `classifyIsolationError()` (from `@archon/isolation`) to map git er
 **Web UI REST API** (`packages/server/src/routes/api.ts`):
 
 **Workflow Management:**
+- `GET /api/workflows` - List available workflows; optional `?cwd=`; returns `{ workflows: [...], errors?: [...] }`
 - `POST /api/workflows/validate` - Validate a workflow definition in-memory (no save); body: `{ definition: object }`; returns `{ valid: boolean, errors?: string[] }`
 - `GET /api/workflows/:name` - Fetch a single workflow by name; optional `?cwd=` query param; returns `{ workflow, filename, source: 'project' | 'bundled' }`
 - `PUT /api/workflows/:name` - Save (create or update) a workflow YAML; body: `{ definition: object }`; validates before writing; requires `?cwd=` or registered codebase
@@ -675,6 +688,9 @@ Pattern: Use `classifyIsolationError()` (from `@archon/isolation`) to map git er
 
 **Command Listing:**
 - `GET /api/commands` - List available command names (bundled + project-defined); optional `?cwd=`; returns `{ commands: [{ name, source: 'bundled' | 'project' }] }`
+
+**OpenAPI Spec:**
+- `GET /api/openapi.json` - Generated OpenAPI 3.0 spec for all Zod-validated routes
 
 **Webhooks:**
 - `POST /webhooks/github` - GitHub webhook events

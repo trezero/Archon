@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps, Node } from '@xyflow/react';
-import type { DagNodeBase } from '@archon/workflows/types';
+import type { DagNodeBase } from '@/lib/workflow-types';
 import { cn } from '@/lib/utils';
 
 export interface DagNodeData extends DagNodeBase {

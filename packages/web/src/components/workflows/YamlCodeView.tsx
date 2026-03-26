@@ -1,4 +1,4 @@
-import type { WorkflowDefinition, DagNode } from '@archon/workflows/types';
+import type { WorkflowDefinition, DagNode } from '@/lib/workflow-types';
 import { cn } from '@/lib/utils';
 
 interface YamlCodeViewProps {

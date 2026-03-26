@@ -3,8 +3,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-import { TRIGGER_RULES } from '@archon/workflows/types';
-import type { TriggerRule } from '@archon/workflows/types';
+import { TRIGGER_RULES } from '@/lib/workflow-types';
+import type { TriggerRule } from '@/lib/workflow-types';
 import type { DagNodeData } from './DagNodeComponent';
 import type { CommandEntry } from '@/lib/api';
 

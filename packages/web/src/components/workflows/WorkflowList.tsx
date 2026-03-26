@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Pencil } from 'lucide-react';
 import { listWorkflows, createConversation, runWorkflow, deleteConversation } from '@/lib/api';
-import type { WorkflowDefinition } from '@archon/workflows/types';
+import type { WorkflowDefinition } from '@/lib/workflow-types';
 import { Button } from '@/components/ui/button';
 import { useProject } from '@/contexts/ProjectContext';
 

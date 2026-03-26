@@ -3,7 +3,7 @@
  * SSE event types match what the Web adapter emits.
  */
 
-import type { WorkflowRunStatus, WorkflowStepStatus, ArtifactType } from '@archon/workflows/types';
+import type { WorkflowRunStatus, WorkflowStepStatus, ArtifactType } from '@/lib/workflow-types';
 export type { WorkflowRunStatus, WorkflowStepStatus, ArtifactType };
 
 // Base SSE event
