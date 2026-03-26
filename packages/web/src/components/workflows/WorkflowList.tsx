@@ -56,13 +56,17 @@ export function WorkflowList(): React.ReactElement {
     }
   };
 
+  const selectedCwd = localProjectId
+    ? codebases?.find(cb => cb.id === localProjectId)?.default_cwd
+    : undefined;
+
   const {
     data: workflows,
     isLoading: loadingWorkflows,
     isError: workflowsError,
   } = useQuery({
-    queryKey: ['workflows'],
-    queryFn: () => listWorkflows(),
+    queryKey: ['workflows', selectedCwd ?? null],
+    queryFn: () => listWorkflows(selectedCwd),
   });
 
   if (loadingWorkflows) {
