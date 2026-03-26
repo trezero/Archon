@@ -1,0 +1,165 @@
+import { describe, it, expect, mock } from 'bun:test';
+
+// Mock logger before importing module under test
+const mockLogFn = mock(() => {});
+const mockLogger = {
+  info: mockLogFn,
+  warn: mockLogFn,
+  error: mockLogFn,
+  debug: mockLogFn,
+  trace: mockLogFn,
+  fatal: mockLogFn,
+  child: mock(() => mockLogger),
+  bindings: mock(() => ({ module: 'test' })),
+  isLevelEnabled: mock(() => true),
+  level: 'info',
+};
+mock.module('@archon/paths', () => ({
+  createLogger: mock(() => mockLogger),
+}));
+
+import { substituteWorkflowVariables, buildPromptWithContext } from './executor-shared';
+
+describe('substituteWorkflowVariables', () => {
+  it('replaces $WORKFLOW_ID with the run ID', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'Run ID: $WORKFLOW_ID',
+      'run-123',
+      'hello',
+      '/tmp/artifacts',
+      'main'
+    );
+    expect(prompt).toBe('Run ID: run-123');
+  });
+
+  it('replaces $ARTIFACTS_DIR with the resolved path', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'Save to $ARTIFACTS_DIR/output.txt',
+      'run-1',
+      'msg',
+      '/tmp/artifacts/runs/run-1',
+      'main'
+    );
+    expect(prompt).toBe('Save to /tmp/artifacts/runs/run-1/output.txt');
+  });
+
+  it('replaces $BASE_BRANCH with config value', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'Merge into $BASE_BRANCH',
+      'run-1',
+      'msg',
+      '/tmp',
+      'develop'
+    );
+    expect(prompt).toBe('Merge into develop');
+  });
+
+  it('throws when $BASE_BRANCH is referenced but empty', () => {
+    expect(() =>
+      substituteWorkflowVariables('Merge into $BASE_BRANCH', 'run-1', 'msg', '/tmp', '')
+    ).toThrow('No base branch could be resolved');
+  });
+
+  it('does not throw when $BASE_BRANCH is not referenced and baseBranch is empty', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'No branch reference here',
+      'run-1',
+      'msg',
+      '/tmp',
+      ''
+    );
+    expect(prompt).toBe('No branch reference here');
+  });
+
+  it('replaces $USER_MESSAGE and $ARGUMENTS with user message', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'Goal: $USER_MESSAGE. Args: $ARGUMENTS',
+      'run-1',
+      'add dark mode',
+      '/tmp',
+      'main'
+    );
+    expect(prompt).toBe('Goal: add dark mode. Args: add dark mode');
+  });
+
+  it('replaces $CONTEXT when issueContext is provided', () => {
+    const { prompt, contextSubstituted } = substituteWorkflowVariables(
+      'Fix this: $CONTEXT',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main',
+      '## Issue #42\nBug report'
+    );
+    expect(prompt).toBe('Fix this: ## Issue #42\nBug report');
+    expect(contextSubstituted).toBe(true);
+  });
+
+  it('replaces $ISSUE_CONTEXT and $EXTERNAL_CONTEXT with issueContext', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'Issue: $ISSUE_CONTEXT. External: $EXTERNAL_CONTEXT',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main',
+      'context-data'
+    );
+    expect(prompt).toBe('Issue: context-data. External: context-data');
+  });
+
+  it('clears context variables when issueContext is undefined', () => {
+    const { prompt, contextSubstituted } = substituteWorkflowVariables(
+      'Context: $CONTEXT here',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main'
+    );
+    expect(prompt).toBe('Context:  here');
+    expect(contextSubstituted).toBe(false);
+  });
+});
+
+describe('buildPromptWithContext', () => {
+  it('appends issueContext when no context variable in template', () => {
+    const result = buildPromptWithContext(
+      'Do the thing',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main',
+      '## Issue #42\nDetails here',
+      'test prompt'
+    );
+    expect(result).toContain('Do the thing');
+    expect(result).toContain('## Issue #42');
+  });
+
+  it('does not append issueContext when $CONTEXT was substituted', () => {
+    const result = buildPromptWithContext(
+      'Fix this: $CONTEXT',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main',
+      '## Issue #42\nDetails here',
+      'test prompt'
+    );
+    // Context was substituted inline, should not be appended again
+    const contextCount = (result.match(/## Issue #42/g) ?? []).length;
+    expect(contextCount).toBe(1);
+  });
+
+  it('returns prompt unchanged when no issueContext provided', () => {
+    const result = buildPromptWithContext(
+      'Do the thing',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main',
+      undefined,
+      'test prompt'
+    );
+    expect(result).toBe('Do the thing');
+  });
+});

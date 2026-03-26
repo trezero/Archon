@@ -1,13 +1,11 @@
 /**
  * Workflow Engine Type Definitions
  *
- * Core types for the workflow engine supporting three execution modes:
- * 1. Step-based: Sequential prompt chains with session continuity
- * 2. Loop-based: Autonomous iteration until completion signal (Ralph pattern)
- * 3. DAG-based: Nodes with explicit dependency edges, parallel layers, conditional branching
+ * Core types for the workflow engine supporting two execution modes:
+ * 1. Loop-based: Autonomous iteration until completion signal (Ralph pattern)
+ * 2. DAG-based: Nodes with explicit dependency edges, parallel layers, conditional branching
  *
- * The WorkflowDefinition type uses a discriminated union pattern with `never`
- * types to enforce mutual exclusivity between steps, loop, and nodes at compile time.
+ * Loop iteration is available as a DAG node type (LoopNode), not a standalone workflow type.
  */
 
 export type ModelReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
@@ -38,65 +36,6 @@ export interface StepRetryConfig {
 }
 
 /**
- * A single step with a command
- */
-export interface SingleStep {
-  command: string;
-  /** Controls session continuity between steps.
-   *  - `true` — creates a fresh session for this step (no prior context)
-   *  - `false` or omitted — inherits session from the prior step (with forkSession safety)
-   *  Only applies to sequential execution; parallel blocks always use fresh sessions. */
-  clearContext?: boolean;
-  /**
-   * Whitelist of built-in tools available to this step. Same semantics as DAG node allowed_tools.
-   * Claude only — Codex steps emit a warning and ignore this field.
-   */
-  allowed_tools?: string[];
-  /**
-   * Blacklist of built-in tools to remove from this step. Same semantics as DAG node denied_tools.
-   * Claude only — Codex steps emit a warning and ignore this field.
-   */
-  denied_tools?: string[];
-  /** Per-step idle timeout override in milliseconds. Overrides the default 5-minute idle timeout.
-   *  Useful for long-running steps (e.g., E2E tests with server startup + browser automation). */
-  idle_timeout?: number;
-  /** Retry configuration for transient failures. When present, the executor retries
-   *  the step instead of immediately failing the workflow. */
-  retry?: StepRetryConfig;
-}
-
-/**
- * @deprecated Use SingleStep directly. Alias kept for external consumers.
- */
-export type StepDefinition = SingleStep;
-
-/**
- * A block of steps that execute in parallel (separate agents, same worktree)
- */
-export interface ParallelBlock {
-  parallel: readonly SingleStep[];
-}
-
-/**
- * A workflow step is either a single step or a parallel block
- */
-export type WorkflowStep = SingleStep | ParallelBlock;
-
-/**
- * Type guard: check if step is a parallel block
- */
-export function isParallelBlock(step: WorkflowStep): step is ParallelBlock {
-  return 'parallel' in step && Array.isArray(step.parallel);
-}
-
-/**
- * Type guard: check if step is a single step
- */
-export function isSingleStep(step: WorkflowStep): step is SingleStep {
-  return 'command' in step && typeof step.command === 'string' && !('parallel' in step);
-}
-
-/**
  * Configuration for a loop node within a DAG workflow.
  * Runs a prompt repeatedly until a completion signal or deterministic bash condition.
  */
@@ -122,14 +61,6 @@ interface WorkflowBase {
   modelReasoningEffort?: ModelReasoningEffort;
   webSearchMode?: WebSearchMode;
   additionalDirectories?: string[];
-}
-
-/** Step-based workflow - sequential command execution */
-interface StepWorkflow extends WorkflowBase {
-  readonly steps: readonly WorkflowStep[];
-  loop?: never;
-  prompt?: never;
-  nodes?: never;
 }
 
 export type TriggerRule =
@@ -363,27 +294,18 @@ export function isLoopNode(node: DagNode): node is LoopNode {
 }
 
 /** DAG-based workflow — nodes with explicit dependency edges */
-interface DagWorkflow extends WorkflowBase {
+export interface DagWorkflow extends WorkflowBase {
   readonly nodes: readonly DagNode[];
-  steps?: never;
   prompt?: never;
 }
 
 /**
- * Workflow definition parsed from YAML - discriminated union
+ * Workflow definition parsed from YAML.
  *
- * Either step-based (with `steps`) or DAG-based (with `nodes`).
- * Loop iteration is available as a DAG node type (LoopNode), not a standalone workflow type.
- * The `never` types ensure TypeScript enforces mutual exclusivity at compile time.
+ * All workflows use DAG-based execution with `nodes`.
+ * Loop iteration is available as a DAG node type (LoopNode).
  */
-export type WorkflowDefinition = StepWorkflow | DagWorkflow;
-
-/**
- * Type guard: check if workflow is a DAG workflow
- */
-export function isDagWorkflow(workflow: WorkflowDefinition): workflow is DagWorkflow {
-  return Array.isArray(workflow.nodes);
-}
+export type WorkflowDefinition = DagWorkflow;
 
 /**
  * Runtime workflow run state stored in database
@@ -394,7 +316,6 @@ export interface WorkflowRun {
   conversation_id: string;
   parent_conversation_id: string | null;
   codebase_id: string | null;
-  current_step_index: number;
   status: WorkflowRunStatus;
   user_message: string; // Original user intent
   metadata: Record<string, unknown>;
@@ -403,19 +324,6 @@ export interface WorkflowRun {
   last_activity_at: Date | null; // For staleness detection
   working_path: string | null; // cwd at run creation time; used for resume detection
 }
-
-/**
- * Step execution result - discriminated union for type safety
- */
-export type StepResult =
-  | {
-      success: true;
-      commandName: string;
-      sessionId?: string;
-      artifacts?: string[];
-      output?: string;
-    }
-  | { success: false; commandName: string; error: string };
 
 /**
  * Result of loading a command prompt - discriminated union for specific error handling

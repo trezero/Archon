@@ -36,7 +36,6 @@ import {
 import type { DagNode, BashNode, NodeOutput, WorkflowRun } from './types';
 import { discoverWorkflows } from './workflow-discovery';
 import { parseWorkflow } from './loader';
-import { isDagWorkflow } from './types';
 import type { WorkflowDeps, IWorkflowPlatform, WorkflowConfig } from './deps';
 import type { IWorkflowStore } from './store';
 
@@ -504,36 +503,11 @@ nodes:
     expect(result.workflows).toHaveLength(1);
 
     const wf = result.workflows[0];
-    expect(isDagWorkflow(wf)).toBe(true);
-
-    if (!isDagWorkflow(wf)) return; // type narrowing for remaining assertions
     expect(wf.nodes).toHaveLength(4);
     expect(wf.nodes[0].id).toBe('classify');
     expect(wf.nodes[0].output_format).toBeDefined();
     expect(wf.nodes[1].when).toBe("$classify.output.type == 'BUG'");
     expect(wf.nodes[3].trigger_rule).toBe('none_failed_min_one_success');
-  });
-
-  it('rejects workflow with both nodes and steps', async () => {
-    const wfDir = join(testDir, '.archon', 'workflows');
-    await mkdir(wfDir, { recursive: true });
-
-    await writeFile(
-      join(wfDir, 'conflict.yaml'),
-      `
-name: conflict
-description: Both nodes and steps
-nodes:
-  - id: a
-    command: plan
-steps:
-  - command: implement
-`
-    );
-
-    const result = await discoverWorkflows(testDir, { loadDefaults: false });
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0].error).toMatch(/mutually exclusive/i);
   });
 
   it('accepts inline prompt nodes', async () => {
@@ -559,21 +533,20 @@ nodes:
     expect(result.workflows).toHaveLength(1);
 
     const wf = result.workflows[0];
-    expect(isDagWorkflow(wf)).toBe(true);
-    if (!isDagWorkflow(wf)) return;
+    expect(wf.nodes).toBeDefined();
     expect(wf.nodes[0].prompt).toBe('Output exactly: hello from A');
     expect(wf.nodes[1].depends_on).toEqual(['step-a']);
   });
 
-  it('rejects workflow with top-level loop (standalone loop removed)', async () => {
+  it('ignores unknown top-level fields when valid nodes: is present', async () => {
     const wfDir = join(testDir, '.archon', 'workflows');
     await mkdir(wfDir, { recursive: true });
 
     await writeFile(
-      join(wfDir, 'nodes-loop.yaml'),
+      join(wfDir, 'nodes-extra.yaml'),
       `
-name: conflict
-description: Both nodes and loop
+name: extra-fields
+description: Has extra top-level fields that are ignored
 nodes:
   - id: a
     command: plan
@@ -585,8 +558,9 @@ prompt: "do something"
     );
 
     const result = await discoverWorkflows(testDir, { loadDefaults: false });
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0].error).toMatch(/standalone.*loop.*no longer supported/i);
+    expect(result.errors).toHaveLength(0);
+    expect(result.workflows).toHaveLength(1);
+    expect(result.workflows[0].name).toBe('extra-fields');
   });
 
   it('rejects node with invalid trigger_rule', async () => {
@@ -639,7 +613,7 @@ nodes:
     expect(result.errors).toHaveLength(0);
     const wf = result.workflows.find(w => w.name === 'tool-restriction-test');
     expect(wf).toBeDefined();
-    if (!wf || !isDagWorkflow(wf)) return;
+    if (!wf) return;
 
     expect(wf.nodes[0].allowed_tools).toEqual(['Read', 'Grep', 'Glob']);
     expect(wf.nodes[0].denied_tools).toBeUndefined();
@@ -2359,7 +2333,7 @@ nodes:
     expect(result.error).toBeNull();
     expect(result.workflow).not.toBeNull();
     const wf = result.workflow!;
-    if (!isDagWorkflow(wf)) throw new Error('Expected DAG workflow');
+    expect(wf.nodes).toBeDefined();
     expect(wf.nodes[0].skills).toEqual(['codebase-search', 'test-runner']);
   });
 
@@ -2406,7 +2380,7 @@ nodes:
     expect(result.error).toBeNull();
     expect(result.workflow).not.toBeNull();
     const wf = result.workflow!;
-    if (!isDagWorkflow(wf)) throw new Error('Expected DAG workflow');
+    expect(wf.nodes).toBeDefined();
     // Bash nodes don't get the skills field
     expect(wf.nodes[0].skills).toBeUndefined();
   });
@@ -2422,7 +2396,7 @@ nodes:
     const result = parseWorkflow(yaml, 'no-skills.yaml');
     expect(result.error).toBeNull();
     const wf = result.workflow!;
-    if (!isDagWorkflow(wf)) throw new Error('Expected DAG workflow');
+    expect(wf.nodes).toBeDefined();
     expect(wf.nodes[0].skills).toBeUndefined();
   });
 });

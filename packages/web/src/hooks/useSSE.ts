@@ -2,9 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type {
   SSEEvent,
   ErrorDisplay,
-  WorkflowStepEvent,
   WorkflowStatusEvent,
-  ParallelAgentEvent,
   WorkflowArtifactEvent,
   WorkflowDispatchEvent,
   WorkflowOutputPreviewEvent,
@@ -36,9 +34,7 @@ interface SSEHandlers {
   onError: (error: ErrorDisplay) => void;
   onLockChange: (locked: boolean, queuePosition?: number) => void;
   onSessionInfo: (sessionId: string, cost?: number) => void;
-  onWorkflowStep?: (event: WorkflowStepEvent) => void;
   onWorkflowStatus?: (event: WorkflowStatusEvent) => void;
-  onParallelAgent?: (event: ParallelAgentEvent) => void;
   onWorkflowArtifact?: (event: WorkflowArtifactEvent) => void;
   onDagNode?: (event: DagNodeEvent) => void;
   onWorkflowDispatch?: (event: WorkflowDispatchEvent) => void;
@@ -174,9 +170,6 @@ export function useSSE(
           case 'session_info':
             h.onSessionInfo(data.sessionId, data.cost);
             break;
-          case 'workflow_step':
-            h.onWorkflowStep?.(data);
-            break;
           case 'workflow_status':
             h.onWorkflowStatus?.(data);
             if (
@@ -186,9 +179,6 @@ export function useSSE(
             ) {
               h.onLockChange(false);
             }
-            break;
-          case 'parallel_agent':
-            h.onParallelAgent?.(data);
             break;
           case 'workflow_artifact':
             h.onWorkflowArtifact?.(data);

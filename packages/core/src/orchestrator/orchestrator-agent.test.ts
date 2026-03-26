@@ -126,7 +126,7 @@ function makeWorkflow(name: string): WorkflowDefinition {
   return {
     name,
     description: `${name} workflow`,
-    steps: [{ prompt: 'do the thing' }],
+    nodes: [{ id: 'step-1', prompt: 'do the thing' }],
   } as unknown as WorkflowDefinition;
 }
 

@@ -270,7 +270,7 @@ export async function getWorkflowRunByWorkerPlatformId(
  */
 export async function updateWorkflowRun(
   id: string,
-  updates: Partial<Pick<WorkflowRun, 'current_step_index' | 'status' | 'metadata'>>
+  updates: Partial<Pick<WorkflowRun, 'status' | 'metadata'>>
 ): Promise<void> {
   const dialect = getDialect();
   const setClauses: string[] = [];
@@ -282,9 +282,6 @@ export async function updateWorkflowRun(
     setClauses.push(clause.replace('?', `$${values.length}`));
   }
 
-  if (updates.current_step_index !== undefined) {
-    addParam('current_step_index = ?', updates.current_step_index);
-  }
   if (updates.status !== undefined) {
     addParam('status = ?', updates.status);
     if (

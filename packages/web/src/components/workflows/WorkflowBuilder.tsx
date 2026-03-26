@@ -3,13 +3,8 @@ import { useSearchParams, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { ReactFlowProvider, useNodesState, useEdgesState, useViewport } from '@xyflow/react';
 import type { Edge } from '@xyflow/react';
-import type {
-  WorkflowDefinition,
-  WorkflowStep,
-  SingleStep,
-  ParallelBlock,
-} from '@archon/workflows/types';
-import { isDagWorkflow, isParallelBlock } from '@archon/workflows/types';
+import type { WorkflowDefinition } from '@archon/workflows/types';
+
 import { useProject } from '@/contexts/ProjectContext';
 import {
   getWorkflow,
@@ -26,11 +21,10 @@ import { useBuilderUndo } from '@/hooks/useBuilderUndo';
 import { useBuilderValidation } from '@/hooks/useBuilderValidation';
 import type { ValidationIssue } from '@/hooks/useBuilderValidation';
 import { BuilderToolbar } from './BuilderToolbar';
-import type { BuilderMode, ViewMode } from './BuilderToolbar';
+import type { ViewMode } from './BuilderToolbar';
 import { NodeLibrary } from './NodeLibrary';
 import { WorkflowCanvas, reactFlowToDagNodes } from './WorkflowCanvas';
 import { NodeInspector } from './NodeInspector';
-import { SequentialEditor } from './SequentialEditor';
 import { ValidationPanel } from './ValidationPanel';
 import { StatusBar } from './StatusBar';
 import { YamlCodeView } from './YamlCodeView';
@@ -47,7 +41,6 @@ function WorkflowBuilderInner(): React.ReactElement {
     : undefined;
 
   // Core state
-  const [mode, setMode] = useState<BuilderMode>('dag');
   const [workflowName, setWorkflowName] = useState('');
   const [workflowDescription, setWorkflowDescription] = useState('');
   const [provider, setProvider] = useState<'claude' | 'codex' | undefined>(undefined);
@@ -65,10 +58,6 @@ function WorkflowBuilderInner(): React.ReactElement {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
-  // Sequential state
-  const [steps, setSteps] = useState<WorkflowStep[]>([]);
-  const [selectedStepIndex, setSelectedStepIndex] = useState<number | null>(null);
-
   // Loop state
 
   // Commands for palette/inspector
@@ -85,13 +74,7 @@ function WorkflowBuilderInner(): React.ReactElement {
   const { pushSnapshot, undo, redo } = useBuilderUndo();
   const { zoom } = useViewport();
 
-  const validationIssues = useBuilderValidation(
-    mode,
-    workflowName,
-    workflowDescription,
-    nodes,
-    edges
-  );
+  const validationIssues = useBuilderValidation(workflowName, workflowDescription, nodes, edges);
   const errorCount = useMemo(
     () => validationIssues.filter(i => i.severity === 'error').length,
     [validationIssues]
@@ -108,20 +91,9 @@ function WorkflowBuilderInner(): React.ReactElement {
   const buildDefinition = useCallback((): WorkflowDefinition => {
     const name = workflowName.trim() || 'untitled';
     const description = workflowDescription;
-
-    switch (mode) {
-      case 'dag': {
-        const dagNodes = reactFlowToDagNodes(nodes, edges);
-        return { name, description, provider, model, nodes: dagNodes };
-      }
-      case 'sequential':
-        return { name, description, provider, model, steps };
-      default: {
-        const exhaustiveCheck: never = mode;
-        throw new Error(`Unknown builder mode: ${String(exhaustiveCheck)}`);
-      }
-    }
-  }, [mode, workflowName, workflowDescription, provider, model, nodes, edges, steps]);
+    const dagNodes = reactFlowToDagNodes(nodes, edges);
+    return { name, description, provider, model, nodes: dagNodes };
+  }, [workflowName, workflowDescription, provider, model, nodes, edges]);
 
   const loadWorkflow = useCallback(
     async (name: string): Promise<void> => {
@@ -133,20 +105,9 @@ function WorkflowBuilderInner(): React.ReactElement {
         setModel(workflow.model);
         setValidationErrors([]);
 
-        if (isDagWorkflow(workflow)) {
-          setMode('dag');
-          const { nodes: rfNodes, edges: rfEdges } = dagNodesToReactFlow(workflow.nodes);
-          setNodes(rfNodes);
-          setEdges(rfEdges);
-        } else if ('steps' in workflow && workflow.steps) {
-          setMode('sequential');
-          setSteps([...workflow.steps] as WorkflowStep[]);
-        } else {
-          setValidationErrors([
-            'Workflow has an unrecognized structure and cannot be loaded in the builder.',
-          ]);
-          return;
-        }
+        const { nodes: rfNodes, edges: rfEdges } = dagNodesToReactFlow(workflow.nodes);
+        setNodes(rfNodes);
+        setEdges(rfEdges);
 
         setHasUnsavedChanges(false);
       } catch (err) {
@@ -193,49 +154,6 @@ function WorkflowBuilderInner(): React.ReactElement {
     setSelectedNodeId(null);
     markDirty();
   }, [selectedNodeId, setNodes, setEdges, markDirty, pushSnapshot, nodes, edges]);
-
-  const handleStepUpdate = useCallback(
-    (updates: Partial<SingleStep>): void => {
-      if (selectedStepIndex === null) return;
-      setSteps(prev => prev.map((s, i) => (i === selectedStepIndex ? { ...s, ...updates } : s)));
-      markDirty();
-    },
-    [selectedStepIndex, markDirty]
-  );
-
-  const handleStepDelete = useCallback((): void => {
-    if (selectedStepIndex === null) return;
-    setSteps(prev => prev.filter((_, i) => i !== selectedStepIndex));
-    setSelectedStepIndex(null);
-    markDirty();
-  }, [selectedStepIndex, markDirty]);
-
-  const ungroupBlock = useCallback(
-    (index: number): void => {
-      const step = steps[index];
-      if (!isParallelBlock(step)) return;
-      const newSteps = [...steps];
-      newSteps.splice(index, 1, ...(step.parallel as SingleStep[]));
-      setSteps(newSteps);
-      if (selectedStepIndex === index) setSelectedStepIndex(null);
-      markDirty();
-    },
-    [steps, selectedStepIndex, markDirty]
-  );
-
-  const handleBlockUpdate = useCallback(
-    (block: ParallelBlock): void => {
-      if (selectedStepIndex === null) return;
-      setSteps(prev => prev.map((s, i) => (i === selectedStepIndex ? block : s)));
-      markDirty();
-    },
-    [selectedStepIndex, markDirty]
-  );
-
-  const handleUngroup = useCallback((): void => {
-    if (selectedStepIndex === null) return;
-    ungroupBlock(selectedStepIndex);
-  }, [selectedStepIndex, ungroupBlock]);
 
   // Toolbar action handlers
   const handleValidate = useCallback(async (): Promise<void> => {
@@ -346,7 +264,6 @@ function WorkflowBuilderInner(): React.ReactElement {
       },
       onToggleValidation: handleToggleValidationPanel,
       onAddPrompt: (): void => {
-        if (mode !== 'dag') return;
         const id = `node-${crypto.randomUUID()}`;
         const newNode: DagFlowNode = {
           id,
@@ -359,7 +276,6 @@ function WorkflowBuilderInner(): React.ReactElement {
         markDirty();
       },
       onAddBash: (): void => {
-        if (mode !== 'dag') return;
         const id = `node-${crypto.randomUUID()}`;
         const newNode: DagFlowNode = {
           id,
@@ -372,12 +288,12 @@ function WorkflowBuilderInner(): React.ReactElement {
         markDirty();
       },
       onDeleteSelected: (): void => {
-        if (selectedNodeId && mode === 'dag') {
+        if (selectedNodeId) {
           handleNodeDelete();
         }
       },
       onDuplicateSelected: (): void => {
-        if (!selectedNodeId || mode !== 'dag') return;
+        if (!selectedNodeId) return;
         const sourceNode = nodes.find(n => n.id === selectedNodeId);
         if (!sourceNode) return;
         const id = `node-${crypto.randomUUID()}`;
@@ -398,7 +314,6 @@ function WorkflowBuilderInner(): React.ReactElement {
       handleRedo,
       handleToggleValidationPanel,
       handleNodeDelete,
-      mode,
       nodes,
       edges,
       selectedNodeId,
@@ -411,14 +326,11 @@ function WorkflowBuilderInner(): React.ReactElement {
 
   const selectedNode = selectedNodeId ? nodes.find(n => n.id === selectedNodeId) : null;
 
-  const selectedStep = selectedStepIndex !== null ? steps[selectedStepIndex] : null;
-
   return (
     <div className="flex flex-col h-full">
       <BuilderToolbar
         workflowName={workflowName}
         workflowDescription={workflowDescription}
-        mode={mode}
         provider={provider}
         model={model}
         hasUnsavedChanges={hasUnsavedChanges}
@@ -432,7 +344,6 @@ function WorkflowBuilderInner(): React.ReactElement {
           setWorkflowDescription(d);
           markDirty();
         }}
-        onModeChange={setMode}
         onProviderChange={(p): void => {
           setProvider(p);
           markDirty();
@@ -463,8 +374,8 @@ function WorkflowBuilderInner(): React.ReactElement {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left panel: Node Library (DAG mode only) */}
-        {mode === 'dag' && showLibrary && (
+        {/* Left panel: Node Library */}
+        {showLibrary && (
           <div className="w-52 shrink-0 h-full overflow-hidden">
             <NodeLibrary commands={commandList} isLoading={commandsLoading} />
           </div>
@@ -477,37 +388,20 @@ function WorkflowBuilderInner(): React.ReactElement {
           ) : (
             <>
               <div className="flex-1 relative overflow-hidden">
-                {mode === 'dag' && (
-                  <WorkflowCanvas
-                    nodes={nodes}
-                    edges={edges}
-                    onNodesChange={onNodesChange}
-                    onEdgesChange={onEdgesChange}
-                    setNodes={setNodes}
-                    setEdges={setEdges}
-                    onNodeSelect={setSelectedNodeId}
-                    onDirty={markDirty}
-                    onPushSnapshot={(): void => {
-                      pushSnapshot({ nodes, edges });
-                    }}
-                    commands={commandList}
-                  />
-                )}
-
-                {mode === 'sequential' && (
-                  <SequentialEditor
-                    steps={steps}
-                    commands={commandList}
-                    selectedStepIndex={selectedStepIndex}
-                    onStepsChange={(s): void => {
-                      setSteps(s);
-                      markDirty();
-                    }}
-                    onSelectStep={setSelectedStepIndex}
-                    onUngroup={ungroupBlock}
-                    onDirty={markDirty}
-                  />
-                )}
+                <WorkflowCanvas
+                  nodes={nodes}
+                  edges={edges}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  setNodes={setNodes}
+                  setEdges={setEdges}
+                  onNodeSelect={setSelectedNodeId}
+                  onDirty={markDirty}
+                  onPushSnapshot={(): void => {
+                    pushSnapshot({ nodes, edges });
+                  }}
+                  commands={commandList}
+                />
               </div>
 
               {yamlViewMode === 'split' && (
@@ -519,8 +413,8 @@ function WorkflowBuilderInner(): React.ReactElement {
           )}
         </div>
 
-        {/* Right panel: Node Inspector (DAG mode only) */}
-        {selectedNodeId && selectedNode && mode === 'dag' && yamlViewMode !== 'full' && (
+        {/* Right panel: Node Inspector */}
+        {selectedNodeId && selectedNode && yamlViewMode !== 'full' && (
           <div className="w-72 shrink-0">
             <NodeInspector
               node={selectedNode.data}
@@ -535,31 +429,6 @@ function WorkflowBuilderInner(): React.ReactElement {
         )}
       </div>
 
-      {/* Inspector for sequential/parallel modes (bottom panel) */}
-      {mode === 'sequential' &&
-        selectedStep &&
-        selectedStepIndex !== null &&
-        ('command' in selectedStep ? (
-          <NodeInspector
-            mode="sequential"
-            step={selectedStep}
-            stepIndex={selectedStepIndex}
-            commands={commandList}
-            onUpdate={handleStepUpdate}
-            onDelete={handleStepDelete}
-          />
-        ) : isParallelBlock(selectedStep) ? (
-          <NodeInspector
-            mode="parallel"
-            block={selectedStep}
-            blockIndex={selectedStepIndex}
-            commands={commandList}
-            onUpdate={handleBlockUpdate}
-            onUngroup={handleUngroup}
-            onDelete={handleStepDelete}
-          />
-        ) : null)}
-
       {/* Validation Panel */}
       <ValidationPanel
         issues={allValidationIssues}
@@ -570,7 +439,6 @@ function WorkflowBuilderInner(): React.ReactElement {
 
       {/* Status Bar */}
       <StatusBar
-        mode={mode}
         nodeCount={nodes.length}
         edgeCount={edges.length}
         errorCount={errorCount}

@@ -195,10 +195,13 @@ A workflow is a YAML file that chains AI prompts together:
 │   │ name: fix-github-issue                                          │  │
 │   │ description: Investigate and fix a GitHub issue                 │  │
 │   │                                                                 │  │
-│   │ steps:                                                          │  │
-│   │   - command: investigate-issue    ◀── Step 1: Research         │  │
-│   │   - command: implement-issue      ◀── Step 2: Fix              │  │
-│   │     clearContext: true                                          │  │
+│   │ nodes:                                                          │  │
+│   │   - id: investigate                                             │  │
+│   │     command: investigate-issue    ◀── Node 1: Research         │  │
+│   │   - id: implement                                               │  │
+│   │     command: implement-issue      ◀── Node 2: Fix              │  │
+│   │     depends_on: [investigate]                                   │  │
+│   │     context: fresh                                              │  │
 │   └─────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
 │                              │                                          │
@@ -218,7 +221,7 @@ A workflow is a YAML file that chains AI prompts together:
 │   └──────────────────┘      └──────────────────┘      └────────────┘  │
 │                                                                         │
 │   Each "command" is a markdown file with AI instructions.              │
-│   The workflow executor runs them in sequence.                         │
+│   The workflow executor runs nodes in dependency order.                │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```

@@ -70,7 +70,7 @@ Step 1: investigate-issue    Step 2: implement-issue
 
 ### Why This Matters
 
-- **No shared context**: Each workflow step can run with `clearContext: true`
+- **No shared context**: Each workflow node can run with `context: fresh`
 - **Resumability**: If a step fails, the artifact preserves progress
 - **Auditability**: Artifacts create a paper trail of AI decisions
 - **Handoff quality**: The artifact determines if the next step succeeds

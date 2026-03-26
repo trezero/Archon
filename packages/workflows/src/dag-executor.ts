@@ -40,7 +40,6 @@ import {
   logNodeError,
   logAssistant,
   logTool,
-  logStepComplete,
   logWorkflowComplete,
   logWorkflowError,
 } from './logger';
@@ -1632,7 +1631,7 @@ async function executeLoopNode(
         logEventStoreError(err, i);
       });
 
-    await logStepComplete(logDir, workflowRun.id, `${node.id}-iteration-${String(i)}`, i - 1, {
+    await logNodeComplete(logDir, workflowRun.id, `${node.id}-iteration-${String(i)}`, node.id, {
       durationMs: duration,
     });
 
@@ -1659,7 +1658,7 @@ async function executeLoopNode(
 
 /**
  * Execute a complete DAG workflow.
- * Called from executeWorkflow() in executor.ts after isDagWorkflow() check.
+ * Called from executeWorkflow() in executor.ts.
  */
 export async function executeDagWorkflow(
   deps: WorkflowDeps,
@@ -1761,7 +1760,11 @@ export async function executeDagWorkflow(
           const triggerDecision = checkTriggerRule(node, nodeOutputs);
           if (triggerDecision === 'skip') {
             getLog().info({ nodeId: node.id, reason: 'trigger_rule' }, 'dag_node_skipped');
-            await logNodeSkip(logDir, workflowRun.id, node.id, 'trigger_rule');
+            await logNodeSkip(logDir, workflowRun.id, node.id, 'trigger_rule').catch(
+              (err: Error) => {
+                getLog().warn({ err, nodeId: node.id }, 'dag.node_skip_log_write_failed');
+              }
+            );
             deps.store
               .createWorkflowEvent({
                 workflow_run_id: workflowRun.id,
@@ -1802,7 +1805,14 @@ export async function executeDagWorkflow(
                 { nodeId: node.id, when: node.when },
                 'dag_node_skipped_condition_parse_error'
               );
-              await logNodeSkip(logDir, workflowRun.id, node.id, 'when_condition_parse_error');
+              await logNodeSkip(
+                logDir,
+                workflowRun.id,
+                node.id,
+                'when_condition_parse_error'
+              ).catch((err: Error) => {
+                getLog().warn({ err, nodeId: node.id }, 'dag.node_skip_log_write_failed');
+              });
               deps.store
                 .createWorkflowEvent({
                   workflow_run_id: workflowRun.id,
@@ -1828,7 +1838,11 @@ export async function executeDagWorkflow(
             }
             if (!conditionPasses) {
               getLog().info({ nodeId: node.id, when: node.when }, 'dag_node_skipped_condition');
-              await logNodeSkip(logDir, workflowRun.id, node.id, 'when_condition');
+              await logNodeSkip(logDir, workflowRun.id, node.id, 'when_condition').catch(
+                (err: Error) => {
+                  getLog().warn({ err, nodeId: node.id }, 'dag.node_skip_log_write_failed');
+                }
+              );
               deps.store
                 .createWorkflowEvent({
                   workflow_run_id: workflowRun.id,
@@ -2078,14 +2092,18 @@ export async function executeDagWorkflow(
     await deps.store.failWorkflowRun(workflowRun.id, failMsg).catch((dbErr: Error) => {
       getLog().error({ err: dbErr, workflowRunId: workflowRun.id }, 'dag_db_fail_failed');
     });
-    await logWorkflowError(logDir, workflowRun.id, failMsg);
+    await logWorkflowError(logDir, workflowRun.id, failMsg).catch((logErr: Error) => {
+      getLog().error(
+        { err: logErr, workflowRunId: workflowRun.id },
+        'dag.workflow_error_log_write_failed'
+      );
+    });
     const emitterForFail = getWorkflowEventEmitter();
     emitterForFail.emit({
       type: 'workflow_failed',
       runId: workflowRun.id,
       workflowName: workflow.name,
       error: failMsg,
-      stepIndex: 0,
     });
     emitterForFail.unregisterRun(workflowRun.id);
     await safeSendMessage(platform, conversationId, `\u274c ${failMsg}`, {

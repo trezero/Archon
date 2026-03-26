@@ -4,19 +4,23 @@ This guide explains how to create workflows that orchestrate multiple commands i
 
 ## What is a Workflow?
 
-A workflow is a **YAML file** that defines a sequence of commands to execute. Workflows enable:
+A workflow is a **YAML file** that defines a directed acyclic graph (DAG) of nodes to execute. Workflows enable:
 
-- **Multi-step automation**: Chain multiple AI agents together
-- **Artifact passing**: Output from step 1 becomes input for step 2
-- **Autonomous loops**: Iterate until a condition is met
+- **Multi-node automation**: Chain multiple AI agents together with dependency edges
+- **Parallel execution**: Independent nodes in the same topological layer run concurrently
+- **Conditional branching**: `when:` conditions and `trigger_rule` control which nodes run
+- **Autonomous loops**: Loop nodes iterate until a condition is met
 
 ```yaml
 name: fix-github-issue
 description: Investigate and fix a GitHub issue end-to-end
-steps:
-  - command: investigate-issue
-  - command: implement-issue
-    clearContext: true
+nodes:
+  - id: investigate
+    command: investigate-issue
+  - id: implement
+    command: implement-issue
+    depends_on: [investigate]
+    context: fresh
 ```
 
 ---
@@ -41,48 +45,11 @@ Archon discovers workflows recursively - subdirectories are fine. If a workflow 
 
 ---
 
-## Three Workflow Types
+## Workflow Schema
 
-### 1. Step-Based Workflows
+Workflows use a `nodes:` format where nodes declare explicit dependency edges. Independent nodes in the same topological layer run concurrently via `Promise.allSettled`. Skipped nodes (failed `when:` condition or `trigger_rule`) propagate their skipped state to dependants.
 
-Execute commands in sequence:
-
-```yaml
-name: feature-development
-description: Plan, implement, and create PR for a feature
-
-steps:
-  - command: create-plan
-  - command: implement-plan
-    clearContext: true
-  - command: create-pr
-    clearContext: true
-```
-
-### 2. Loop-Based Workflows
-
-Iterate until completion signal:
-
-```yaml
-name: autonomous-implementation
-description: Keep iterating until all tests pass
-
-loop:
-  until: COMPLETE
-  max_iterations: 10
-  fresh_context: false
-
-prompt: |
-  Read the plan and implement the next incomplete item.
-  Run tests after each change.
-
-  When ALL items pass validation, output:
-  <promise>COMPLETE</promise>
-```
-
-### 3. DAG-Based Workflows (nodes:)
-
-Execute nodes in dependency order with parallel layers and conditional branching:
+### Example: Conditional Branching
 
 ```yaml
 name: classify-and-fix
@@ -115,154 +82,9 @@ nodes:
     trigger_rule: none_failed_min_one_success
 ```
 
-Nodes without `depends_on` run immediately. Nodes in the same topological layer run concurrently via `Promise.allSettled`. Skipped nodes (failed `when:` condition or `trigger_rule`) propagate their skipped state to dependants.
-
 ---
 
-## Step-Based Workflow Schema
-
-```yaml
-# Required
-name: workflow-name              # Unique identifier (kebab-case)
-description: |                   # Multi-line description
-  What this workflow does.
-  When to use it.
-  What it produces.
-
-# Optional
-provider: claude                 # 'claude' or 'codex' (default: from config)
-model: sonnet                    # Model override (default: from config)
-modelReasoningEffort: medium     # Codex only: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
-webSearchMode: live              # Codex only: 'disabled' | 'cached' | 'live'
-additionalDirectories:           # Codex only: Additional directories to include
-  - /absolute/path/to/other/repo
-
-# Required for step-based
-steps:
-  - command: step-one            # References .archon/commands/step-one.md
-
-  - command: step-two
-    clearContext: true           # Start fresh AI session (default: false)
-
-  - parallel:                    # Run multiple commands concurrently
-      - command: review-code
-      - command: review-comments
-      - command: review-tests
-```
-
-### Step Options
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `command` | string | required | Command name (without `.md`) |
-| `clearContext` | boolean | `false` | Start fresh session for this step |
-| `allowed_tools` | string[] | — | Whitelist of built-in tools available to this step. `[]` disables all built-in tools. Claude only — Codex steps emit a warning and ignore this field |
-| `denied_tools` | string[] | — | Blacklist of built-in tools to remove from this step. Claude only — Codex steps emit a warning and ignore this field |
-| `retry` | object | — | Per-step retry configuration. See [Retry Configuration](#retry-configuration). Omit to use the automatic default (2 retries, 3 s base delay, transient errors only) |
-
-### When to Use `clearContext: true`
-
-Use fresh context when:
-- The previous step produced an artifact the next step should read
-- You want to avoid context pollution
-- The next step has a completely different focus
-
-```yaml
-steps:
-  - command: investigate-issue    # Explores codebase, writes artifact
-  - command: implement-issue      # Reads artifact, implements fix
-    clearContext: true            # Fresh start - works from artifact only
-```
-
----
-
-## Loop-Based Workflow Schema
-
-```yaml
-name: autonomous-loop
-description: |
-  Iterate until completion signal detected.
-  Good for: PRD implementation, test-fix cycles, iterative refinement.
-
-# Optional (same as step-based workflows)
-provider: claude                 # 'claude' or 'codex' (default: from config)
-model: sonnet                    # Model override (default: from config)
-modelReasoningEffort: medium     # Codex only
-webSearchMode: live              # Codex only
-additionalDirectories:           # Codex only
-  - /absolute/path/to/other/repo
-
-# Required for loop-based
-loop:
-  until: COMPLETE                # Signal to detect in AI output
-  max_iterations: 10             # Safety limit (fails if exceeded)
-  fresh_context: false           # true = fresh session each iteration
-
-# Required for loop-based
-prompt: |
-  Your instructions here.
-
-  Variables available:
-  - $WORKFLOW_ID - unique run identifier
-  - $USER_MESSAGE - original trigger
-  - $ARGUMENTS - same as $USER_MESSAGE
-  - $BASE_BRANCH - base branch (auto-detected from git; optional config: worktree.baseBranch)
-  - $CONTEXT - GitHub issue/PR context (if available)
-
-  When done, output: <promise>COMPLETE</promise>
-```
-
-### Loop Options
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `until` | string | required | Completion signal to detect |
-| `max_iterations` | number | required | Safety limit |
-| `fresh_context` | boolean | `false` | Fresh session each iteration |
-
-### Completion Signal Detection
-
-The AI signals completion by outputting:
-
-```
-<promise>COMPLETE</promise>
-```
-
-Or (simpler but less reliable):
-```
-COMPLETE
-```
-
-The `<promise>` tags are recommended - they're case-insensitive and harder to accidentally trigger.
-
-### When to Use `fresh_context`
-
-| Setting | Use When | Tradeoff |
-|---------|----------|----------|
-| `false` | Short loops (<5 iterations), need memory | Context grows each iteration |
-| `true` | Long loops, stateless work | Must track state in files |
-
-**Stateful example** (memory preserved):
-```yaml
-loop:
-  fresh_context: false  # AI remembers previous iterations
-```
-
-**Stateless example** (progress in files):
-```yaml
-loop:
-  fresh_context: true   # AI starts fresh, reads progress from disk
-
-prompt: |
-  Read progress from .archon/progress.json
-  Implement the next incomplete item.
-  Update progress file.
-  When all complete: <promise>COMPLETE</promise>
-```
-
----
-
-## DAG-Based Workflow Schema
+## Full Workflow Schema
 
 ```yaml
 # Required
@@ -270,13 +92,13 @@ name: workflow-name
 description: |
   What this workflow does.
 
-# Optional (same as step/loop workflows)
+# Optional
 provider: claude
 model: sonnet
 modelReasoningEffort: medium     # Codex only
 webSearchMode: live              # Codex only
 
-# Required for DAG-based
+# Required
 nodes:
   - id: classify                 # Unique node ID (used for dependency refs and $id.output)
     command: classify-issue      # Loads from .archon/commands/classify-issue.md
@@ -403,7 +225,7 @@ nodes:
 
 ### `allowed_tools` and `denied_tools` for Tool Restrictions
 
-Restrict which built-in tools a node or step can use without relying on prompt instructions. Restrictions are enforced at the Claude SDK level.
+Restrict which built-in tools a node can use without relying on prompt instructions. Restrictions are enforced at the Claude SDK level.
 
 ```yaml
 nodes:
@@ -420,52 +242,32 @@ nodes:
     allowed_tools: []                   # empty list = disable all built-in tools
 ```
 
-The same fields work on sequential steps:
-
-```yaml
-steps:
-  - command: read-only-analysis
-    allowed_tools: [Read, Grep, Glob]
-  - command: implement
-    denied_tools: [WebSearch]
-```
-
 - `allowed_tools: []` disables all built-in tools (useful for MCP-only nodes). Use the `mcp` field on a node to attach per-node MCP servers — see [Node Fields](#node-fields)
 - If both are set, `denied_tools` is applied after `allowed_tools`
 - `undefined` (field absent) and `[]` have different semantics — absent means use default tool set, `[]` means no tools
-- Claude only — Codex nodes/steps emit a warning and continue (Codex doesn't support per-call tool restrictions)
+- Claude only — Codex nodes emit a warning and continue (Codex doesn't support per-call tool restrictions)
 
 ---
 
 ## Retry Configuration
 
-Every step and DAG node automatically retries on **transient** errors (SDK subprocess crashes, rate limits, network timeouts) using a default configuration: **2 retries**, **3 s base delay** with exponential backoff. You will see a platform notification before each retry attempt.
+Every node automatically retries on **transient** errors (SDK subprocess crashes, rate limits, network timeouts) using a default configuration: **2 retries**, **3 s base delay** with exponential backoff. You will see a platform notification before each retry attempt.
 
 To opt out or customise, add a `retry:` block:
 
 ```yaml
-# Step-based workflow
-steps:
-  - command: flaky-step
+nodes:
+  - id: flaky-node
+    command: flaky-command
     retry:
       max_attempts: 3      # Total attempts including the first (1–5)
       delay_ms: 5000       # Base delay before first retry in ms (1000–60000, default: 3000)
       on_error: transient  # 'transient' (default) | 'all'
 
-  - command: no-retry-step
+  - id: no-retry-node
+    command: stable-command
     retry:
       max_attempts: 1      # Effectively disables retry
-```
-
-```yaml
-# DAG-based workflow
-nodes:
-  - id: flaky-node
-    command: flaky-command
-    retry:
-      max_attempts: 3
-      delay_ms: 5000
-      on_error: transient
 
   - id: aggressive-retry
     prompt: "Summarise the output"
@@ -497,7 +299,7 @@ Archon classifies errors into three buckets before deciding whether to retry:
 Before each retry the platform receives a message like:
 
 ```
-⚠️ Step `step-name` failed with transient error (attempt 1/3). Retrying in 3s...
+⚠️ Node `node-name` failed with transient error (attempt 1/3). Retrying in 3s...
 ```
 
 ### Two-Layer Retry Stack
@@ -507,77 +309,92 @@ Archon uses two independent retry layers:
 ```
 SDK subprocess retry (claude.ts)  — 3 total attempts, 2 s base backoff
     ↓ only if all SDK retries exhausted
-Step/node retry (executor / dag-executor)  — default 2 retries, 3 s base backoff
-    ↓ only if all step retries exhausted
-Workflow fails → steps: user can --resume | nodes: next invocation auto-resumes
+Node retry (dag-executor)  — default 2 retries, 3 s base backoff
+    ↓ only if all node retries exhausted
+Workflow fails → next invocation auto-resumes
 ```
 
-This means a single transient crash may trigger up to **3 SDK retries** before a single step retry attempt is consumed.
+This means a single transient crash may trigger up to **3 SDK retries** before a single node retry attempt is consumed.
 
-> **DAG resume**: For `nodes:` (DAG) workflows, resume is automatic — the next invocation detects the prior failed run and skips already-completed nodes. No `--resume` flag is needed. See [DAG Resume on Failure](#dag-resume-on-failure) below.
+> **Resume**: Resume is automatic — the next invocation detects the prior failed run and skips already-completed nodes. No `--resume` flag is needed. See [Resume on Failure](#resume-on-failure) below.
 
 ---
 
-## DAG Resume on Failure
+## Resume on Failure
 
-When a `nodes:` (DAG) workflow fails, the next invocation automatically resumes from where it left off — no `--resume` flag required.
+When a workflow fails, the next invocation automatically resumes from where it left off — no `--resume` flag required.
 
 **How it works:**
 
 1. On each invocation, Archon checks for a prior failed run of the same workflow in the same conversation.
 2. If found, it loads the `node_completed` events from that run to determine which nodes finished successfully.
 3. Completed nodes are skipped; only failed and not-yet-run nodes are executed.
-4. You receive a platform message like: `▶️ Resuming DAG workflow — skipping 3 already-completed node(s).`
+4. You receive a platform message like: `▶️ Resuming workflow — skipping 3 already-completed node(s).`
 
 **Known limitation**: AI session context from prior nodes is not restored. If a downstream node relies on in-context knowledge from a prior run's session (rather than artifacts), it may need to re-read those artifacts explicitly.
 
 **Fresh start**: If zero nodes completed in the prior run, Archon starts fresh (no nodes to skip).
 
-**Contrast with `steps:` workflows**: Sequential (`steps:`) workflows use the `--resume` flag to restart from a specific step. DAG workflows handle this automatically at the node level.
-
 ---
 
 ## Parallel Execution
 
-Run multiple commands concurrently within a step:
+Nodes without dependencies (or whose dependencies have all completed) run concurrently in the same topological layer:
 
 ```yaml
-steps:
-  - command: setup-scope          # Creates shared context
+nodes:
+  - id: setup
+    command: setup-scope            # Creates shared context
 
-  - parallel:                     # These run at the same time
-      - command: review-code
-      - command: review-comments
-      - command: review-security
+  - id: review-code
+    command: review-code
+    depends_on: [setup]             # These three run in parallel
 
-  - command: synthesize-reviews   # Combines all review artifacts
-    clearContext: true
+  - id: review-comments
+    command: review-comments
+    depends_on: [setup]
+
+  - id: review-security
+    command: review-security
+    depends_on: [setup]
+
+  - id: synthesize
+    command: synthesize-reviews     # Waits for all three reviews
+    depends_on: [review-code, review-comments, review-security]
+    context: fresh
 ```
 
 ### Parallel Execution Rules
 
-1. **Each parallel command gets a fresh session** - no context sharing
-2. **All commands must complete** before workflow continues
+1. **Each node gets its own session** - no context sharing (use `context: fresh` for explicit control)
+2. **All nodes in a layer must complete** before the next layer runs
 3. **All failures are reported** - not just the first one
-4. **Shared state via artifacts** - commands read/write to known paths
+4. **Shared state via artifacts** - nodes read/write to known paths
 
 ### Pattern: Coordinator + Parallel Agents
 
 ```yaml
 name: comprehensive-review
-steps:
-  # Step 1: Coordinator creates scope artifact
-  - command: create-review-scope
+nodes:
+  - id: scope
+    command: create-review-scope
 
-  # Step 2: Parallel agents read scope, write findings
-  - parallel:
-      - command: code-review-agent
-      - command: comment-quality-agent
-      - command: test-coverage-agent
+  - id: code-review
+    command: code-review-agent
+    depends_on: [scope]
 
-  # Step 3: Synthesizer reads all findings, posts summary
-  - command: synthesize-review
-    clearContext: true
+  - id: comment-quality
+    command: comment-quality-agent
+    depends_on: [scope]
+
+  - id: test-coverage
+    command: test-coverage-agent
+    depends_on: [scope]
+
+  - id: synthesize
+    command: synthesize-review
+    depends_on: [code-review, comment-quality, test-coverage]
+    context: fresh
 ```
 
 The coordinator writes to `.archon/artifacts/reviews/pr-{n}/scope.md`.
@@ -588,11 +405,10 @@ The synthesizer reads all findings and produces final output.
 
 ## The Artifact Chain
 
-Workflows work because **artifacts pass data between steps**:
+Workflows work because **artifacts pass data between nodes**:
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│ Step 1          │     │ Step 2          │     │ Step 3          │
 │ investigate     │     │ implement       │     │ create-pr       │
 │                 │     │                 │     │                 │
 │ Reads: input    │     │ Reads: artifact │     │ Reads: git diff │
@@ -608,10 +424,10 @@ Workflows work because **artifacts pass data between steps**:
 
 When creating a workflow, plan the artifact chain:
 
-| Step | Reads | Writes |
+| Node | Reads | Writes |
 |------|-------|--------|
 | `investigate-issue` | GitHub issue via `gh` | `.archon/artifacts/issues/issue-{n}.md` |
-| `implement-issue` | Artifact from step 1 | Code files, tests |
+| `implement-issue` | Artifact from investigate | Code files, tests |
 | `create-pr` | Git diff | GitHub PR |
 
 Each command must know:
@@ -711,9 +527,12 @@ name: complex-analysis
 description: Deep code analysis requiring powerful model
 provider: claude
 model: opus  # Override config default (haiku) for this workflow
-steps:
-  - command: analyze-architecture
-  - command: generate-report
+nodes:
+  - id: analyze
+    command: analyze-architecture
+  - id: report
+    command: generate-report
+    depends_on: [analyze]
 ```
 
 The workflow uses `opus` instead of the config default `haiku`, but other settings inherit from config.
@@ -752,7 +571,7 @@ Good descriptions include:
 
 ## Variable Substitution
 
-All workflow types (steps, loop, nodes) support these variables in prompts and commands:
+All workflows support these variables in prompts and commands:
 
 | Variable | Description |
 |----------|-------------|
@@ -783,7 +602,7 @@ prompt: |
 
 ## Example Workflows
 
-### Simple Two-Step
+### Simple Two-Node
 
 ```yaml
 name: quick-fix
@@ -792,10 +611,13 @@ description: |
   Use when: Simple, obvious bugs.
   NOT for: Complex issues needing root cause analysis.
 
-steps:
-  - command: analyze-and-fix
-  - command: create-pr
-    clearContext: true
+nodes:
+  - id: fix
+    command: analyze-and-fix
+  - id: pr
+    command: create-pr
+    depends_on: [fix]
+    context: fresh
 ```
 
 ### Investigation Pipeline
@@ -808,10 +630,13 @@ description: |
   Use when: User provides issue number/URL
   Produces: Investigation artifact, code fix, PR
 
-steps:
-  - command: investigate-issue    # Creates .archon/artifacts/issues/issue-{n}.md
-  - command: implement-issue      # Reads artifact, implements fix
-    clearContext: true
+nodes:
+  - id: investigate
+    command: investigate-issue    # Creates .archon/artifacts/issues/issue-{n}.md
+  - id: implement
+    command: implement-issue      # Reads artifact, implements fix
+    depends_on: [investigate]
+    context: fresh
 ```
 
 ### Parallel Review
@@ -824,20 +649,32 @@ description: |
   Use when: Reviewing PRs before merge
   Produces: Review findings, synthesized summary
 
-steps:
-  - command: create-review-scope
+nodes:
+  - id: scope
+    command: create-review-scope
 
-  - parallel:
-      - command: code-review-agent
-      - command: comment-quality-agent
-      - command: test-coverage-agent
-      - command: security-review-agent
+  - id: code-review
+    command: code-review-agent
+    depends_on: [scope]
+  - id: comment-review
+    command: comment-quality-agent
+    depends_on: [scope]
+  - id: test-review
+    command: test-coverage-agent
+    depends_on: [scope]
+  - id: security-review
+    command: security-review-agent
+    depends_on: [scope]
 
-  - command: synthesize-reviews
-    clearContext: true
+  - id: synthesize
+    command: synthesize-reviews
+    depends_on: [code-review, comment-review, test-review, security-review]
+    context: fresh
 ```
 
-### Autonomous Loop
+### Loop Node
+
+Loop nodes iterate until a completion signal is detected. Use them within a DAG for autonomous iteration:
 
 ```yaml
 name: implement-prd
@@ -847,46 +684,36 @@ description: |
   Use when: Full PRD implementation
   Requires: PRD file at .archon/prd.md
 
-loop:
-  until: COMPLETE
-  max_iterations: 15
-  fresh_context: true       # Progress tracked in files
+nodes:
+  - id: implement
+    loop:
+      until: COMPLETE
+      max_iterations: 15
+      fresh_context: true       # Progress tracked in files
+    prompt: |
+      # PRD Implementation Loop
 
-prompt: |
-  # PRD Implementation Loop
+      Workflow: $WORKFLOW_ID
 
-  Workflow: $WORKFLOW_ID
+      ## Instructions
 
-  ## Instructions
+      1. Read PRD from `.archon/prd.md`
+      2. Read progress from `.archon/progress.json`
+      3. Find the next incomplete story
+      4. Implement it with tests
+      5. Run validation: `bun run validate`
+      6. Update progress file
+      7. If ALL stories complete and validated:
+         Output: <promise>COMPLETE</promise>
 
-  1. Read PRD from `.archon/prd.md`
-  2. Read progress from `.archon/progress.json`
-  3. Find the next incomplete story
-  4. Implement it with tests
-  5. Run validation: `bun run validate`
-  6. Update progress file
-  7. If ALL stories complete and validated:
-     Output: <promise>COMPLETE</promise>
+      ## Important
 
-  ## Progress File Format
-
-  ```json
-  {
-    "stories": [
-      {"id": 1, "status": "complete", "validated": true},
-      {"id": 2, "status": "in_progress", "validated": false}
-    ]
-  }
-  ```
-
-  ## Important
-
-  - Implement ONE story per iteration
-  - Always run validation after changes
-  - Update progress file before ending iteration
+      - Implement ONE story per iteration
+      - Always run validation after changes
+      - Update progress file before ending iteration
 ```
 
-### DAG: Classify and Route
+### Classify and Route
 
 ```yaml
 name: classify-and-fix
@@ -936,28 +763,29 @@ description: |
   Keep fixing until all tests pass.
   Use when: Tests are failing and need automated fixing.
 
-loop:
-  until: ALL_TESTS_PASS
-  max_iterations: 5
-  fresh_context: false      # Remember what we've tried
+nodes:
+  - id: fix-loop
+    loop:
+      until: ALL_TESTS_PASS
+      max_iterations: 5
+      fresh_context: false      # Remember what we've tried
+    prompt: |
+      # Fix Until Green
 
-prompt: |
-  # Fix Until Green
+      ## Instructions
 
-  ## Instructions
+      1. Run tests: `bun test`
+      2. If all pass: <promise>ALL_TESTS_PASS</promise>
+      3. If failures:
+         - Analyze the failure
+         - Fix the code (not the test, unless test is wrong)
+         - Run tests again
 
-  1. Run tests: `bun test`
-  2. If all pass: <promise>ALL_TESTS_PASS</promise>
-  3. If failures:
-     - Analyze the failure
-     - Fix the code (not the test, unless test is wrong)
-     - Run tests again
+      ## Rules
 
-  ## Rules
-
-  - Don't skip or delete failing tests
-  - Don't modify test expectations unless they're wrong
-  - Each iteration should fix at least one failure
+      - Don't skip or delete failing tests
+      - Don't modify test expectations unless they're wrong
+      - Each iteration should fix at least one failure
 ```
 
 ---
@@ -966,39 +794,63 @@ prompt: |
 
 ### Pattern: Gated Execution
 
-Run different paths based on conditions:
+Run different paths based on conditions using `when:`:
 
 ```yaml
 name: smart-fix
 description: Route to appropriate fix strategy based on issue complexity
 
-steps:
-  - command: analyze-complexity   # Writes complexity assessment
-  - command: route-to-strategy    # Reads assessment, invokes appropriate workflow
-    clearContext: true
-```
+nodes:
+  - id: analyze
+    command: analyze-complexity
+    output_format:
+      type: object
+      properties:
+        complexity:
+          type: string
+          enum: [simple, complex]
+      required: [complexity]
 
-The `route-to-strategy` command reads the complexity artifact and can invoke sub-workflows.
+  - id: quick-fix
+    command: quick-fix-strategy
+    depends_on: [analyze]
+    when: "$analyze.output.complexity == 'simple'"
+
+  - id: deep-fix
+    command: deep-fix-strategy
+    depends_on: [analyze]
+    when: "$analyze.output.complexity == 'complex'"
+```
 
 ### Pattern: Checkpoint and Resume
 
-For long workflows, save checkpoints:
+For long workflows, save checkpoints. Resume is automatic on re-invocation — completed nodes are skipped:
 
 ```yaml
 name: large-migration
 description: Multi-file migration with checkpoint recovery
 
-steps:
-  - command: create-migration-plan    # Writes plan artifact
-  - command: migrate-batch-1          # Checkpoints after each batch
-    clearContext: true
-  - command: migrate-batch-2
-    clearContext: true
-  - command: validate-migration
-    clearContext: true
+nodes:
+  - id: plan
+    command: create-migration-plan
+
+  - id: batch-1
+    command: migrate-batch-1
+    depends_on: [plan]
+    context: fresh
+
+  - id: batch-2
+    command: migrate-batch-2
+    depends_on: [batch-1]
+    context: fresh
+
+  - id: validate
+    command: validate-migration
+    depends_on: [batch-2]
+    context: fresh
 ```
 
-Each batch command saves progress to an artifact, allowing recovery if the workflow fails mid-way.
+Each batch command saves progress to an artifact. If the workflow fails mid-way, re-invoking it skips already-completed nodes.
 
 ### Pattern: Human-in-the-Loop
 
@@ -1008,8 +860,9 @@ Pause for human approval:
 name: careful-refactor
 description: Refactor with human approval at each stage
 
-steps:
-  - command: propose-refactor         # Creates proposal artifact
+nodes:
+  - id: propose
+    command: propose-refactor         # Creates proposal artifact
   # Workflow pauses here - human reviews proposal
   # Human triggers next workflow to continue:
 ```
@@ -1017,10 +870,13 @@ steps:
 Then a separate workflow to continue:
 ```yaml
 name: execute-refactor
-steps:
-  - command: execute-approved-refactor
-  - command: create-pr
-    clearContext: true
+nodes:
+  - id: execute
+    command: execute-approved-refactor
+  - id: pr
+    command: create-pr
+    depends_on: [execute]
+    context: fresh
 ```
 
 ---
@@ -1039,7 +895,7 @@ bun run cli workflow list
 bun run cli workflow run {name} "test input"
 ```
 
-Watch the streaming output to see each step.
+Watch the streaming output to see each node.
 
 ### Check Artifacts
 
@@ -1057,7 +913,7 @@ Workflow execution logs to:
 .archon/logs/{workflow-id}.jsonl
 ```
 
-Each line is a JSON event (step start, AI response, tool call, etc.).
+Each line is a JSON event (node start, AI response, tool call, etc.).
 
 ---
 
@@ -1071,13 +927,13 @@ Before deploying a workflow:
    ```
 
 2. **Verify artifact flow**
-   - Does step 1 produce what step 2 expects?
+   - Does each node produce what downstream nodes expect?
    - Are paths correct?
    - Is the format complete?
 
 3. **Test edge cases**
    - What if the input is invalid?
-   - What if a step fails?
+   - What if a node fails?
    - What if an artifact is missing?
 
 4. **Check iteration limits** (for loops)
@@ -1088,16 +944,16 @@ Before deploying a workflow:
 
 ## Summary
 
-1. **Workflows orchestrate commands** - YAML files that define execution order
-2. **Three types**: Step-based (sequential), loop-based (iterative), and DAG-based (dependency graph)
+1. **Workflows orchestrate commands** - YAML files that define a DAG of nodes
+2. **Nodes with dependencies** - `depends_on` edges control execution order; independent nodes run in parallel
 3. **Artifacts are the glue** - Commands communicate via files, not memory
-4. **`clearContext: true`** - Fresh session for a step, works from artifacts
-5. **Parallel execution** - Step `parallel:` blocks and DAG nodes in the same layer both run concurrently
-6. **Loops need signals** - Use `<promise>COMPLETE</promise>` to exit
-7. **DAG branching** - `when:` conditions and `trigger_rule` control which nodes run
+4. **`context: fresh`** - Fresh session for a node, works from artifacts
+5. **Parallel execution** - Nodes in the same topological layer run concurrently
+6. **Loop nodes** - `loop:` on a node iterates until `<promise>COMPLETE</promise>` signal
+7. **Conditional branching** - `when:` conditions and `trigger_rule` control which nodes run
 8. **`output_format`** - Enforce structured JSON output from AI nodes for reliable branching
-9. **`allowed_tools` / `denied_tools`** - Restrict which tools a node or step can use (Claude only, enforced at SDK level)
-10. **`retry:`** - All steps/nodes auto-retry transient errors (default: 2 retries, 3 s backoff); configure per-step with `retry:` block
+9. **`allowed_tools` / `denied_tools`** - Restrict which tools a node can use (Claude only, enforced at SDK level)
+10. **`retry:`** - All nodes auto-retry transient errors (default: 2 retries, 3 s backoff); configure per-node with `retry:` block
 11. **`hooks`** — Attach static SDK hook callbacks to individual Claude nodes for tool control and context injection (see [docs/hooks.md](./hooks.md))
 12. **`mcp:`** — Attach per-node MCP servers via a JSON config file path (Claude only; env vars expanded at execution time); use with `allowed_tools: []` for MCP-only nodes
 13. **`skills:`** — Preload named skills into individual Claude nodes for domain expertise (Claude only; see [docs/skills.md](./skills.md))

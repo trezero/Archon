@@ -39,8 +39,6 @@ function makeWorkflowStartedEvent(runId = 'run-1'): WorkflowEmitterEvent {
     runId,
     workflowName: 'test-workflow',
     conversationId: 'conv-1',
-    totalSteps: 3,
-    isLoop: false,
   };
 }
 
@@ -59,28 +57,6 @@ function makeWorkflowFailedEvent(runId = 'run-1'): WorkflowEmitterEvent {
     runId,
     workflowName: 'test-workflow',
     error: 'Something went wrong',
-    stepIndex: 1,
-  };
-}
-
-function makeStepStartedEvent(runId = 'run-1'): WorkflowEmitterEvent {
-  return {
-    type: 'step_started',
-    runId,
-    stepIndex: 0,
-    stepName: 'plan',
-    totalSteps: 3,
-  };
-}
-
-function makeStepCompletedEvent(runId = 'run-1'): WorkflowEmitterEvent {
-  return {
-    type: 'step_completed',
-    runId,
-    stepIndex: 0,
-    stepName: 'plan',
-    totalSteps: 3,
-    duration: 500,
   };
 }
 
@@ -203,12 +179,12 @@ describe('WorkflowEventEmitter', () => {
       const unsubscribeA = emitter.subscribe(listenerA);
       emitter.subscribe(listenerB);
 
-      emitter.emit(makeStepStartedEvent());
+      emitter.emit(makeNodeStartedEvent());
       expect(listenerA).toHaveBeenCalledTimes(1);
       expect(listenerB).toHaveBeenCalledTimes(1);
 
       unsubscribeA();
-      emitter.emit(makeStepCompletedEvent());
+      emitter.emit(makeWorkflowCompletedEvent());
 
       // A was removed, B still receives events
       expect(listenerA).toHaveBeenCalledTimes(1);
@@ -259,14 +235,14 @@ describe('WorkflowEventEmitter', () => {
       emitter.subscribe(event => received.push(event.type));
 
       emitter.emit(makeWorkflowStartedEvent());
-      emitter.emit(makeStepStartedEvent());
-      emitter.emit(makeStepCompletedEvent());
+      emitter.emit(makeNodeStartedEvent());
+      emitter.emit(makeNodeSkippedEvent());
       emitter.emit(makeWorkflowCompletedEvent());
 
       expect(received).toEqual([
         'workflow_started',
-        'step_started',
-        'step_completed',
+        'node_started',
+        'node_skipped',
         'workflow_completed',
       ]);
     });
@@ -292,40 +268,6 @@ describe('WorkflowEventEmitter', () => {
         makeWorkflowStartedEvent(),
         makeWorkflowCompletedEvent(),
         makeWorkflowFailedEvent(),
-        makeStepStartedEvent(),
-        makeStepCompletedEvent(),
-        {
-          type: 'step_failed',
-          runId: 'run-1',
-          stepIndex: 0,
-          stepName: 'plan',
-          totalSteps: 3,
-          error: 'oops',
-        },
-        {
-          type: 'parallel_agent_started',
-          runId: 'run-1',
-          stepIndex: 0,
-          agentIndex: 0,
-          totalAgents: 2,
-          agentName: 'agent-a',
-        },
-        {
-          type: 'parallel_agent_completed',
-          runId: 'run-1',
-          stepIndex: 0,
-          agentIndex: 0,
-          agentName: 'agent-a',
-          duration: 300,
-        },
-        {
-          type: 'parallel_agent_failed',
-          runId: 'run-1',
-          stepIndex: 0,
-          agentIndex: 0,
-          agentName: 'agent-a',
-          error: 'timeout',
-        },
         { type: 'loop_iteration_started', runId: 'run-1', iteration: 1, maxIterations: 5 },
         {
           type: 'loop_iteration_completed',
@@ -414,7 +356,7 @@ describe('WorkflowEventEmitter', () => {
       });
 
       mockLogFn.mockClear();
-      expect(() => emitter.emit(makeStepStartedEvent())).not.toThrow();
+      expect(() => emitter.emit(makeNodeStartedEvent())).not.toThrow();
 
       expect(good).toHaveBeenCalledTimes(1);
       // Two throws → two error log calls
@@ -545,11 +487,11 @@ describe('WorkflowEventEmitter', () => {
       const listener = mock((_event: WorkflowEmitterEvent) => {});
       const unsubscribe = emitter.subscribeForConversation('conv-1', listener);
 
-      emitter.emit(makeStepStartedEvent('run-1'));
+      emitter.emit(makeNodeStartedEvent('run-1'));
       expect(listener).toHaveBeenCalledTimes(1);
 
       unsubscribe();
-      emitter.emit(makeStepCompletedEvent('run-1'));
+      emitter.emit(makeWorkflowCompletedEvent('run-1'));
       // Unsubscribed — no more calls
       expect(listener).toHaveBeenCalledTimes(1);
     });
@@ -578,14 +520,14 @@ describe('WorkflowEventEmitter', () => {
       emitter.subscribeForConversation('conv-1', e => received.push(e.type));
 
       emitter.emit(makeWorkflowStartedEvent('run-1'));
-      emitter.emit(makeStepStartedEvent('run-1'));
-      emitter.emit(makeStepCompletedEvent('run-1'));
+      emitter.emit(makeNodeStartedEvent('run-1'));
+      emitter.emit(makeNodeSkippedEvent('run-1'));
       emitter.emit(makeWorkflowCompletedEvent('run-1'));
 
       expect(received).toEqual([
         'workflow_started',
-        'step_started',
-        'step_completed',
+        'node_started',
+        'node_skipped',
         'workflow_completed',
       ]);
     });
@@ -609,31 +551,22 @@ describe('WorkflowEventEmitter', () => {
       emitter.subscribe(e => allEvents.push(e));
       emitter.subscribeForConversation(conversationId, e => convEvents.push(e));
 
-      // Emit a realistic sequence
+      // Emit a realistic DAG workflow sequence
       emitter.emit({
         type: 'workflow_started',
         runId,
         workflowName: 'plan-implement',
         conversationId,
-        totalSteps: 2,
-        isLoop: false,
       });
-      emitter.emit({ type: 'step_started', runId, stepIndex: 0, stepName: 'plan', totalSteps: 2 });
+      emitter.emit({ type: 'node_started', runId, nodeId: 'plan', nodeName: 'plan' });
       emitter.emit({
-        type: 'step_completed',
+        type: 'node_completed',
         runId,
-        stepIndex: 0,
-        stepName: 'plan',
-        totalSteps: 2,
+        nodeId: 'plan',
+        nodeName: 'plan',
         duration: 400,
       });
-      emitter.emit({
-        type: 'step_started',
-        runId,
-        stepIndex: 1,
-        stepName: 'implement',
-        totalSteps: 2,
-      });
+      emitter.emit({ type: 'node_started', runId, nodeId: 'implement', nodeName: 'implement' });
       emitter.emit({
         type: 'workflow_artifact',
         runId,
@@ -642,11 +575,10 @@ describe('WorkflowEventEmitter', () => {
         path: '/tmp/out.log',
       });
       emitter.emit({
-        type: 'step_completed',
+        type: 'node_completed',
         runId,
-        stepIndex: 1,
-        stepName: 'implement',
-        totalSteps: 2,
+        nodeId: 'implement',
+        nodeName: 'implement',
         duration: 900,
       });
       emitter.emit({
@@ -675,7 +607,7 @@ describe('WorkflowEventEmitter', () => {
       emitter.subscribeForConversation('conv-target', e => targetEvents.push(e));
 
       emitter.emit(makeWorkflowStartedEvent('run-other'));
-      emitter.emit(makeStepStartedEvent('run-other'));
+      emitter.emit(makeNodeStartedEvent('run-other'));
       emitter.emit(makeWorkflowStartedEvent('run-target'));
 
       // Only the run-target event should arrive

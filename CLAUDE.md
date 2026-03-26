@@ -226,12 +226,12 @@ packages/
 │       └── index.ts          # Package exports
 ├── workflows/                # @archon/workflows - Workflow engine (depends on @archon/git + @archon/paths)
 │   └── src/
-│       ├── types.ts          # Workflow type definitions (step, DAG, loop node)
+│       ├── types.ts          # Workflow type definitions (DAG node types, loop node)
 │       ├── loader.ts         # YAML parsing + validation (parseWorkflow)
 │       ├── workflow-discovery.ts # Workflow filesystem discovery (discoverWorkflows, discoverWorkflowsWithConfig)
 │       ├── executor-shared.ts # Shared executor infrastructure (error classification, variable substitution)
 │       ├── router.ts         # Prompt building + invocation parsing
-│       ├── executor.ts       # Sequential, parallel, DAG execution (executeWorkflow)
+│       ├── executor.ts       # Workflow execution orchestrator (executeWorkflow)
 │       ├── dag-executor.ts   # DAG-specific execution logic
 │       ├── store.ts          # IWorkflowStore interface (database abstraction)
 │       ├── deps.ts           # WorkflowDeps injection types (IWorkflowPlatform, IWorkflowAssistantClient)
@@ -370,7 +370,7 @@ import * as core from '@archon/core';  // Don't do this
 **3. Orchestrator** (`packages/core/src/orchestrator/`)
 - Manage AI conversations
 - Load conversation + codebase context from database
-- Variable substitution: `$1`, `$2`, `$3`, `$ARGUMENTS`, `$PLAN`
+- Variable substitution: `$1`, `$2`, `$3`, `$ARGUMENTS`
 - Session management: Create new or resume existing
 - Stream AI responses to platform
 
@@ -585,8 +585,6 @@ async function createSession(conversationId: string, codebaseId: string) {
 **Variable Substitution:**
 - `$1`, `$2`, `$3` - Positional arguments
 - `$ARGUMENTS` - All arguments as single string
-- `$PLAN` - Previous plan from session metadata
-- `$IMPLEMENTATION_SUMMARY` - Previous execution summary
 - `$ARTIFACTS_DIR` - External artifacts directory for the current workflow run (pre-created by executor)
 - `$WORKFLOW_ID` - The workflow run ID
 - `$BASE_BRANCH` - Base branch; auto-detected from git when `worktree.baseBranch` is not set; fails only if referenced in a prompt and auto-detection also fails
@@ -601,9 +599,8 @@ async function createSession(conversationId: string, codebaseId: string) {
 2. **Workflows** (YAML-based):
    - Stored in `.archon/workflows/` (searched recursively)
    - Multi-step AI execution chains, discovered at runtime
-   - Two execution modes (mutually exclusive): `steps:` (sequential), `nodes:` (DAG)
-   - **`nodes:` (DAG mode)**: Nodes with explicit `depends_on` edges; independent nodes in the same topological layer run concurrently. Node types: `command:` (named command file), `prompt:` (inline prompt), `bash:` (shell script, stdout captured as `$nodeId.output`, no AI), `loop:` (iterative AI prompt until completion signal). Supports `when:` conditions, `trigger_rule` join semantics, `$nodeId.output` substitution, `output_format` for structured JSON output (Claude and Codex), `allowed_tools`/`denied_tools` for per-node tool restrictions (Claude only), `hooks` for per-node SDK hook callbacks (Claude only) — see docs/hooks.md, `mcp` for per-node MCP server config files (Claude only, env vars expanded at execution time) — see docs/mcp-servers.md, and `skills` for per-node skill preloading via AgentDefinition wrapping (Claude only) — see docs/skills.md
-   - Provider inherited from `.archon/config.yaml` unless explicitly set; per-node `provider` and `model` overrides supported in DAG mode
+   - **`nodes:` (DAG format)**: Nodes with explicit `depends_on` edges; independent nodes in the same topological layer run concurrently. Node types: `command:` (named command file), `prompt:` (inline prompt), `bash:` (shell script, stdout captured as `$nodeId.output`, no AI), `loop:` (iterative AI prompt until completion signal). Supports `when:` conditions, `trigger_rule` join semantics, `$nodeId.output` substitution, `output_format` for structured JSON output (Claude and Codex), `allowed_tools`/`denied_tools` for per-node tool restrictions (Claude only), `hooks` for per-node SDK hook callbacks (Claude only) — see docs/hooks.md, `mcp` for per-node MCP server config files (Claude only, env vars expanded at execution time) — see docs/mcp-servers.md, and `skills` for per-node skill preloading via AgentDefinition wrapping (Claude only) — see docs/skills.md
+   - Provider inherited from `.archon/config.yaml` unless explicitly set; per-node `provider` and `model` overrides supported
    - Model and options can be set per workflow or inherited from config defaults
    - Model validation ensures provider/model compatibility at load time
    - Commands: `/workflow list`, `/workflow reload`, `/workflow status`, `/workflow cancel`

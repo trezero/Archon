@@ -29,7 +29,6 @@ interface WorkflowStartedEvent {
   runId: string;
   workflowName: string;
   conversationId: string;
-  totalSteps: number;
 }
 
 interface WorkflowCompletedEvent {
@@ -43,60 +42,6 @@ interface WorkflowFailedEvent {
   type: 'workflow_failed';
   runId: string;
   workflowName: string;
-  error: string;
-  stepIndex?: number;
-}
-
-interface StepStartedEvent {
-  type: 'step_started';
-  runId: string;
-  stepIndex: number;
-  stepName: string;
-  totalSteps: number;
-}
-
-interface StepCompletedEvent {
-  type: 'step_completed';
-  runId: string;
-  stepIndex: number;
-  stepName: string;
-  totalSteps: number;
-  duration: number;
-}
-
-interface StepFailedEvent {
-  type: 'step_failed';
-  runId: string;
-  stepIndex: number;
-  stepName: string;
-  totalSteps: number;
-  error: string;
-}
-
-interface ParallelAgentStartedEvent {
-  type: 'parallel_agent_started';
-  runId: string;
-  stepIndex: number;
-  agentIndex: number;
-  totalAgents: number;
-  agentName: string;
-}
-
-interface ParallelAgentCompletedEvent {
-  type: 'parallel_agent_completed';
-  runId: string;
-  stepIndex: number;
-  agentIndex: number;
-  agentName: string;
-  duration: number;
-}
-
-interface ParallelAgentFailedEvent {
-  type: 'parallel_agent_failed';
-  runId: string;
-  stepIndex: number;
-  agentIndex: number;
-  agentName: string;
   error: string;
 }
 
@@ -184,19 +129,13 @@ export type WorkflowEmitterEvent =
   | WorkflowStartedEvent
   | WorkflowCompletedEvent
   | WorkflowFailedEvent
-  | StepStartedEvent
-  | StepCompletedEvent
-  | StepFailedEvent
-  | ParallelAgentStartedEvent
-  | ParallelAgentCompletedEvent
-  | ParallelAgentFailedEvent
   | LoopIterationStartedEvent
   | LoopIterationCompletedEvent
+  | LoopIterationFailedEvent
   | NodeStartedEvent
   | NodeCompletedEvent
   | NodeFailedEvent
   | NodeSkippedEvent
-  | LoopIterationFailedEvent
   | WorkflowArtifactEvent
   | ToolStartedEvent
   | ToolCompletedEvent;

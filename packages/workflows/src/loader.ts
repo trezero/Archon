@@ -4,9 +4,7 @@
 import type {
   WorkflowDefinition,
   WorkflowLoadError,
-  SingleStep,
   StepRetryConfig,
-  WorkflowStep,
   DagNode,
   LoopNode,
   WorkflowHookEvent,
@@ -134,116 +132,6 @@ function parseRetryConfig(
   }
 
   return result;
-}
-
-/**
- * Parse a single step (helper for parseStep)
- * @param errors - Array to collect validation errors for aggregated reporting
- */
-function parseSingleStep(s: unknown, indexPath: string, errors: string[]): SingleStep | null {
-  const step = s as Record<string, unknown>;
-  const command = String(step.command ?? step.step);
-
-  if (!isValidCommandName(command)) {
-    errors.push(`Step ${indexPath}: invalid command name "${command}"`);
-    return null;
-  }
-
-  const result: SingleStep = {
-    command,
-    clearContext: Boolean(step.clearContext),
-  };
-
-  const errorsBefore = errors.length;
-  const allowedTools = parseToolList(step.allowed_tools, {
-    id: `Step ${indexPath}`,
-    fieldName: 'allowed_tools',
-    errors,
-  });
-  if (errors.length > errorsBefore) return null;
-  if (allowedTools !== undefined) result.allowed_tools = allowedTools;
-
-  const deniedBefore = errors.length;
-  const deniedTools = parseToolList(step.denied_tools, {
-    id: `Step ${indexPath}`,
-    fieldName: 'denied_tools',
-    errors,
-  });
-  if (errors.length > deniedBefore) return null;
-  if (deniedTools !== undefined) result.denied_tools = deniedTools;
-
-  if (result.allowed_tools?.length === 0 && result.denied_tools !== undefined) {
-    getLog().warn(
-      { id: `Step ${indexPath}` },
-      'tool_restrictions_denied_tools_on_empty_allowed_tools_ignored'
-    );
-  }
-
-  // Parse idle_timeout (finite positive number or undefined)
-  if (step.idle_timeout !== undefined) {
-    if (
-      typeof step.idle_timeout === 'number' &&
-      step.idle_timeout > 0 &&
-      isFinite(step.idle_timeout)
-    ) {
-      result.idle_timeout = step.idle_timeout;
-    } else {
-      errors.push(`Step ${indexPath}: 'idle_timeout' must be a finite positive number (ms)`);
-      return null;
-    }
-  }
-
-  // Parse retry config
-  const retryConfig = parseRetryConfig(step.retry, `Step ${indexPath}`, errors);
-  if (retryConfig === null && step.retry !== undefined) return null; // validation failed
-  if (retryConfig) result.retry = retryConfig;
-
-  return result;
-}
-
-/**
- * Parse a workflow step (either single step or parallel block)
- * @param errors - Array to collect validation errors for aggregated reporting
- */
-function parseStep(s: unknown, index: number, errors: string[]): WorkflowStep | null {
-  const step = s as Record<string, unknown>;
-
-  // Check for parallel block
-  if (Array.isArray(step.parallel)) {
-    const rawParallelSteps = step.parallel;
-
-    // Check for nested parallel BEFORE parsing (raw input still has parallel property)
-    if (
-      rawParallelSteps.some((ps: unknown) => {
-        const pstep = ps as Record<string, unknown>;
-        return Array.isArray(pstep.parallel);
-      })
-    ) {
-      errors.push(`Step ${String(index + 1)}: nested parallel blocks not allowed`);
-      return null;
-    }
-
-    const parallelSteps = rawParallelSteps
-      .map((ps: unknown, pi: number) =>
-        parseSingleStep(ps, `${String(index + 1)}.${String(pi + 1)}`, errors)
-      )
-      .filter((ps): ps is SingleStep => ps !== null);
-
-    if (parallelSteps.length === 0) {
-      errors.push(`Step ${String(index + 1)}: empty parallel block`);
-      return null;
-    }
-
-    // If any steps were invalid (filtered out), the errors were already collected
-    if (parallelSteps.length !== rawParallelSteps.length) {
-      return null;
-    }
-
-    return { parallel: parallelSteps };
-  }
-
-  // Regular single step
-  return parseSingleStep(step, String(index + 1), errors);
 }
 
 /** AI-specific fields that are meaningless on bash nodes — triggers a warning when set */
@@ -514,7 +402,11 @@ function parseDagNode(
     ...(triggerRule ? { trigger_rule: triggerRule } : {}),
     ...(model ? { model } : {}),
     ...(provider ? { provider } : {}),
-    ...(raw.context === 'fresh' || raw.context === 'shared' ? { context: raw.context } : {}),
+    ...(raw.context === 'fresh'
+      ? { context: 'fresh' as const }
+      : raw.context === 'shared'
+        ? { context: 'shared' as const }
+        : {}),
     ...(raw.output_format !== undefined &&
     typeof raw.output_format === 'object' &&
     !Array.isArray(raw.output_format) &&
@@ -701,103 +593,68 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
       };
     }
 
-    // Validate mutual exclusivity: steps XOR nodes
-    // Loop iteration is available as a DAG node type (LoopNode), not a standalone workflow type.
+    const errors: string[] = [];
+
+    // Reject legacy steps-based workflows
     const hasSteps = Array.isArray(raw.steps) && raw.steps.length > 0;
+    if (hasSteps) {
+      errors.push(
+        '`steps:` format has been removed. Workflows now use `nodes:` (DAG) format exclusively. Your bundled defaults are already updated — custom workflows need manual migration. See docs/sequential-dag-migration-guide.md for conversion patterns, or run: claude "Read docs/sequential-dag-migration-guide.md then convert .archon/workflows/<file> to nodes: format"'
+      );
+    }
+
     const hasNodes = Array.isArray(raw.nodes) && (raw.nodes as unknown[]).length > 0;
 
-    // Reject legacy top-level loop: field (removed — use loop nodes in DAG workflows)
-    if (raw.loop && typeof raw.loop === 'object') {
-      getLog().warn({ filename }, 'workflow_standalone_loop_removed');
+    if (errors.length > 0) {
       return {
         workflow: null,
         error: {
           filename,
-          error:
-            "Standalone 'loop:' workflows are no longer supported. Use a DAG workflow with a loop node instead. See archon-ralph-dag.yaml for an example.",
+          error: errors.join('; '),
           errorType: 'validation_error',
         },
       };
     }
 
-    if (hasNodes && hasSteps) {
-      getLog().warn({ filename }, 'workflow_nodes_and_steps_conflict');
+    if (!hasNodes) {
+      getLog().warn({ filename }, 'workflow_missing_nodes');
       return {
         workflow: null,
         error: {
           filename,
-          error: "Cannot have both 'nodes' and 'steps' (mutually exclusive)",
+          error: "Workflow must have 'nodes:' configuration",
           errorType: 'validation_error',
         },
       };
     }
 
-    if (!hasSteps && !hasNodes) {
-      getLog().warn({ filename }, 'workflow_missing_steps_or_nodes');
+    // Parse DAG nodes
+    const validationErrors: string[] = [];
+    const dagNodes = (raw.nodes as unknown[])
+      .map((n: unknown, i: number) =>
+        parseDagNode(n as Record<string, unknown>, i, validationErrors)
+      )
+      .filter((n): n is DagNode => n !== null);
+
+    if (dagNodes.length !== (raw.nodes as unknown[]).length) {
+      getLog().warn({ filename, validationErrors }, 'dag_node_validation_failed');
       return {
         workflow: null,
         error: {
           filename,
-          error: "Missing 'steps' or 'nodes' configuration",
+          error: `DAG node validation failed: ${validationErrors.join('; ')}`,
           errorType: 'validation_error',
         },
       };
     }
 
-    // Parse DAG nodes if present
-    let dagNodes: DagNode[] | undefined;
-    if (hasNodes) {
-      const validationErrors: string[] = [];
-      dagNodes = (raw.nodes as unknown[])
-        .map((n: unknown, i: number) =>
-          parseDagNode(n as Record<string, unknown>, i, validationErrors)
-        )
-        .filter((n): n is DagNode => n !== null);
-
-      if (dagNodes.length !== (raw.nodes as unknown[]).length) {
-        getLog().warn({ filename, validationErrors }, 'dag_node_validation_failed');
-        return {
-          workflow: null,
-          error: {
-            filename,
-            error: `DAG node validation failed: ${validationErrors.join('; ')}`,
-            errorType: 'validation_error',
-          },
-        };
-      }
-
-      const structureError = validateDagStructure(dagNodes);
-      if (structureError) {
-        getLog().warn({ filename, structureError }, 'dag_structure_invalid');
-        return {
-          workflow: null,
-          error: { filename, error: structureError, errorType: 'validation_error' },
-        };
-      }
-    }
-
-    // Parse steps if present (for step-based workflows)
-    let steps: WorkflowStep[] | undefined;
-    if (hasSteps) {
-      // Collect validation errors for aggregated reporting
-      const validationErrors: string[] = [];
-
-      steps = (raw.steps as unknown[])
-        .map((s: unknown, index: number) => parseStep(s, index, validationErrors))
-        .filter((step): step is WorkflowStep => step !== null);
-
-      // Reject workflow if any steps were invalid - report all errors at once
-      if (steps.length !== (raw.steps as unknown[]).length) {
-        getLog().warn({ filename, validationErrors }, 'workflow_step_validation_failed');
-        return {
-          workflow: null,
-          error: {
-            filename,
-            error: `Step validation failed: ${validationErrors.join('; ')}`,
-            errorType: 'validation_error',
-          },
-        };
-      }
+    const structureError = validateDagStructure(dagNodes);
+    if (structureError) {
+      getLog().warn({ filename, structureError }, 'dag_structure_invalid');
+      return {
+        workflow: null,
+        error: { filename, error: structureError, errorType: 'validation_error' },
+      };
     }
 
     // Validate provider (leave undefined if not specified - executor handles fallback to config)
@@ -841,38 +698,6 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
       };
     }
 
-    // Return appropriate workflow type based on discriminated union
-    if (hasNodes && dagNodes) {
-      return {
-        workflow: {
-          name: raw.name,
-          description: raw.description,
-          provider,
-          model,
-          modelReasoningEffort,
-          webSearchMode,
-          additionalDirectories,
-          nodes: dagNodes,
-        },
-        error: null,
-      };
-    }
-
-    // Guard for TypeScript type narrowing - if we reach here without steps,
-    // it means step validation failed (see workflow_step_validation_failed log above).
-    // DAG workflows return early above, so only StepWorkflow reaches here.
-    if (!steps) {
-      getLog().error({ filename }, 'workflow_step_validation_unexpected_failure');
-      return {
-        workflow: null,
-        error: {
-          filename,
-          error: 'Step validation failed unexpectedly',
-          errorType: 'validation_error',
-        },
-      };
-    }
-
     return {
       workflow: {
         name: raw.name,
@@ -882,7 +707,7 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
         modelReasoningEffort,
         webSearchMode,
         additionalDirectories,
-        steps,
+        nodes: dagNodes,
       },
       error: null,
     };

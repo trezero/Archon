@@ -171,11 +171,9 @@ describe('bundled-defaults', () => {
         expect(content).toContain('name:');
         // Should contain 'description:' as all workflows require description
         expect(content).toContain('description:');
-        // Should contain steps:, loop:, or nodes: (the three workflow execution modes)
-        const hasSteps = content.includes('steps:');
-        const hasLoop = content.includes('loop:');
+        // Should contain nodes: (with optional loop: inside nodes)
         const hasNodes = content.includes('nodes:');
-        expect(hasSteps || hasLoop || hasNodes).toBe(true);
+        expect(hasNodes).toBe(true);
       }
     });
   });

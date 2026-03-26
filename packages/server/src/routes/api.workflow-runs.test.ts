@@ -129,7 +129,7 @@ mock.module('@archon/paths', () => ({
 mock.module('@archon/workflows', () => ({
   discoverWorkflowsWithConfig: mock(async () => ({ workflows: [], errors: [] })),
   parseWorkflow: mock(() => ({
-    workflow: { name: 'test', description: 'Test', steps: [] },
+    workflow: { name: 'test', description: 'Test', nodes: [] },
     error: null,
   })),
   isValidCommandName: mock(

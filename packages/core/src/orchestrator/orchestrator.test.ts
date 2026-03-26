@@ -233,17 +233,23 @@ const testWorkflows: WorkflowDefinition[] = [
   {
     name: 'fix-bug',
     description: 'Fix a bug',
-    steps: [{ command: 'investigate' }, { command: 'implement' }],
+    nodes: [
+      { id: 'investigate', command: 'investigate' },
+      { id: 'implement', command: 'implement', depends_on: ['investigate'] },
+    ],
   },
   {
     name: 'add-feature',
     description: 'Add a feature',
-    steps: [{ command: 'plan' }, { command: 'implement' }],
+    nodes: [
+      { id: 'plan', command: 'plan' },
+      { id: 'implement', command: 'implement', depends_on: ['plan'] },
+    ],
   },
   {
     name: 'archon-assist',
     description: 'General assistance',
-    steps: [{ command: 'assist' }],
+    nodes: [{ id: 'assist', command: 'assist' }],
   },
 ];
 
@@ -516,7 +522,7 @@ describe('orchestrator-agent handleMessage', () => {
       const workflowDefinition: WorkflowDefinition = {
         name: 'test-workflow',
         description: 'A test workflow',
-        steps: [{ command: 'assist' }],
+        nodes: [{ id: 'assist', command: 'assist' }],
       };
       mockGetOrCreateConversation.mockResolvedValue(mockConversationWithProject);
       mockGetCodebase.mockResolvedValue(mockCodebase);
@@ -540,7 +546,7 @@ describe('orchestrator-agent handleMessage', () => {
       const workflowDefinition: WorkflowDefinition = {
         name: 'test-workflow',
         description: 'A test workflow',
-        steps: [{ command: 'assist' }],
+        nodes: [{ id: 'assist', command: 'assist' }],
       };
       mockListCodebases.mockResolvedValue([mockCodebase]);
       mockHandleCommand.mockResolvedValue({

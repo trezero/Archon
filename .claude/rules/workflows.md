@@ -7,25 +7,11 @@ paths:
 
 # Workflows Conventions
 
-## Three Execution Modes (mutually exclusive)
+## DAG Workflow Format
+
+All workflows use the DAG (Directed Acyclic Graph) format with `nodes:`. Loop nodes are supported as a node type within DAGs.
 
 ```yaml
-# 1. Sequential steps
-steps:
-  - command: plan-feature
-  - command: execute
-  - parallel:
-      - command: write-tests
-      - command: write-docs
-
-# 2. Loop (Ralph-style autonomous iteration)
-loop:
-  until: "COMPLETE"
-  max_iterations: 10
-  fresh_context: false
-prompt: "Iterate until the tests pass. Signal COMPLETE when done."
-
-# 3. DAG (nodes with explicit dependencies)
 nodes:
   - id: classify
     prompt: "Is this a bug or feature? Answer JSON: {type: 'BUG'|'FEATURE'}"
@@ -37,6 +23,12 @@ nodes:
   - id: run_lint
     bash: "bun run lint"
     depends_on: [implement]
+  - id: iterate
+    loop:
+      until: "COMPLETE"
+      max_iterations: 10
+    prompt: "Iterate until the tests pass. Signal COMPLETE when done."
+    depends_on: [run_lint]
 ```
 
 ## Variable Substitution
@@ -45,8 +37,6 @@ nodes:
 |----------|-------------|
 | `$1`, `$2`, `$3` | Positional arguments from user message |
 | `$ARGUMENTS` | All user arguments as single string |
-| `$PLAN` | Previous plan from session metadata |
-| `$IMPLEMENTATION_SUMMARY` | Previous execution summary |
 | `$ARTIFACTS_DIR` | Pre-created external artifacts directory |
 | `$WORKFLOW_ID` | Current workflow run ID |
 | `$BASE_BRANCH` | Base branch from config or auto-detected |

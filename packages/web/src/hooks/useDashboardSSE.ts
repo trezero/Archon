@@ -1,12 +1,6 @@
 import { useEffect } from 'react';
 import { workflowSSEHandlers } from '@/stores/workflow-store';
-import type {
-  WorkflowStatusEvent,
-  WorkflowStepEvent,
-  ParallelAgentEvent,
-  DagNodeEvent,
-  WorkflowToolActivityEvent,
-} from '@/lib/types';
+import type { WorkflowStatusEvent, DagNodeEvent, WorkflowToolActivityEvent } from '@/lib/types';
 
 /** Connects to the multiplexed dashboard SSE stream and routes events to the Zustand store. */
 export function useDashboardSSE(): void {
@@ -24,12 +18,6 @@ export function useDashboardSSE(): void {
       switch (event.type) {
         case 'workflow_status':
           workflowSSEHandlers.onWorkflowStatus(event as WorkflowStatusEvent);
-          break;
-        case 'workflow_step':
-          workflowSSEHandlers.onWorkflowStep(event as WorkflowStepEvent);
-          break;
-        case 'parallel_agent':
-          workflowSSEHandlers.onParallelAgent(event as ParallelAgentEvent);
           break;
         case 'dag_node':
           workflowSSEHandlers.onDagNode(event as DagNodeEvent);

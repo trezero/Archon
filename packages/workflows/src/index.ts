@@ -2,10 +2,10 @@
  * @archon/workflows - Workflow engine for Archon
  *
  * This package contains:
- * - Workflow type definitions (step, loop, DAG)
+ * - Workflow type definitions (DAG nodes, loop)
  * - Workflow loader (YAML parsing + validation)
  * - Workflow router (prompt building + invocation parsing)
- * - Workflow executor (sequential, parallel, loop, DAG)
+ * - Workflow executor (DAG with parallel layers, loop nodes)
  * - Event emitter (observability)
  * - JSONL file logger
  * - Bundled default commands and workflows
@@ -79,15 +79,11 @@ export {
   type WorkflowEvent,
   logWorkflowEvent,
   logWorkflowStart,
-  logStepStart,
-  logStepComplete,
   logAssistant,
   logTool,
   logValidation,
   logWorkflowError,
   logWorkflowComplete,
-  logParallelBlockStart,
-  logParallelBlockComplete,
 } from './logger';
 
 // =============================================================================

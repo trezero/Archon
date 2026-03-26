@@ -5,5 +5,6 @@ description: |
   Capability: Full Claude Code agent with all tools available.
   Note: Will inform user when assist mode is used for tracking.
 
-steps:
-  - command: archon-assist
+nodes:
+  - id: assist
+    command: archon-assist

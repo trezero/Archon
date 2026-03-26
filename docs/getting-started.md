@@ -143,7 +143,7 @@ argument-hint: <module>
 Run tests for: $ARGUMENTS
 ```
 
-Variables available: `$1`, `$2`, `$3` (positional), `$ARGUMENTS` (all args), `$PLAN` (previous plan output), `$CONTEXT` (GitHub issue/PR context).
+Variables available: `$1`, `$2`, `$3` (positional), `$ARGUMENTS` (all args), `$ARTIFACTS_DIR` (workflow artifacts directory), `$WORKFLOW_ID` (run ID), `$BASE_BRANCH` (base branch), `$nodeId.output` (DAG node output).
 
 ### Custom Workflows
 
@@ -154,15 +154,15 @@ name: my-workflow
 description: Plan then implement a feature
 model: sonnet
 
-steps:
-  - command: plan
-  - command: implement
-    args: |
-      --goal "$ARGUMENTS"
-      --plan "$PLAN"
+nodes:
+  - id: plan
+    command: plan
+  - id: implement
+    command: implement
+    depends_on: [plan]
 ```
 
-Workflows chain multiple commands together, support parallel steps, and carry context between steps via variable substitution.
+Workflows chain multiple commands as DAG nodes, support parallel execution via dependency graphs, and carry context between nodes via `$nodeId.output` variable substitution.
 
 > **Where are commands and workflows loaded from?**
 >

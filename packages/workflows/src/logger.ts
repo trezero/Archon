@@ -21,14 +21,9 @@ export interface WorkflowEvent {
     | 'workflow_start'
     | 'workflow_complete'
     | 'workflow_error'
-    | 'step_start'
-    | 'step_complete'
-    | 'step_error'
     | 'assistant'
     | 'tool'
     | 'validation'
-    | 'parallel_block_start'
-    | 'parallel_block_complete'
     | 'node_start'
     | 'node_complete'
     | 'node_skipped'
@@ -36,10 +31,6 @@ export interface WorkflowEvent {
   workflow_id: string;
   workflow_name?: string;
   step?: string;
-  step_index?: number;
-  block_index?: number;
-  steps?: string[];
-  results?: { command: string; success: boolean }[];
   content?: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
@@ -112,41 +103,6 @@ export async function logWorkflowStart(
 }
 
 /**
- * Log step start
- */
-export async function logStepStart(
-  logDir: string,
-  workflowRunId: string,
-  stepName: string,
-  stepIndex: number
-): Promise<void> {
-  await logWorkflowEvent(logDir, workflowRunId, {
-    type: 'step_start',
-    step: stepName,
-    step_index: stepIndex,
-  });
-}
-
-/**
- * Log step completion
- */
-export async function logStepComplete(
-  logDir: string,
-  workflowRunId: string,
-  stepName: string,
-  stepIndex: number,
-  meta?: { durationMs?: number; tokens?: WorkflowTokenUsage }
-): Promise<void> {
-  await logWorkflowEvent(logDir, workflowRunId, {
-    type: 'step_complete',
-    step: stepName,
-    step_index: stepIndex,
-    ...(meta?.durationMs !== undefined ? { duration_ms: meta.durationMs } : {}),
-    ...(meta?.tokens ? { tokens: meta.tokens } : {}),
-  });
-}
-
-/**
  * Log assistant message
  */
 export async function logAssistant(
@@ -187,7 +143,6 @@ export async function logValidation(
     result: 'pass' | 'fail' | 'warn' | 'unknown';
     error?: string;
     step?: string;
-    stepIndex?: number;
   }
 ): Promise<void> {
   await logWorkflowEvent(logDir, workflowRunId, {
@@ -196,7 +151,6 @@ export async function logValidation(
     result: payload.result,
     error: payload.error,
     step: payload.step,
-    step_index: payload.stepIndex,
   });
 }
 
@@ -220,38 +174,6 @@ export async function logWorkflowError(
 export async function logWorkflowComplete(logDir: string, workflowRunId: string): Promise<void> {
   await logWorkflowEvent(logDir, workflowRunId, {
     type: 'workflow_complete',
-  });
-}
-
-/**
- * Log parallel block start
- */
-export async function logParallelBlockStart(
-  logDir: string,
-  workflowRunId: string,
-  blockIndex: number,
-  stepCommands: string[]
-): Promise<void> {
-  await logWorkflowEvent(logDir, workflowRunId, {
-    type: 'parallel_block_start',
-    block_index: blockIndex,
-    steps: stepCommands,
-  });
-}
-
-/**
- * Log parallel block completion
- */
-export async function logParallelBlockComplete(
-  logDir: string,
-  workflowRunId: string,
-  blockIndex: number,
-  results: { command: string; success: boolean }[]
-): Promise<void> {
-  await logWorkflowEvent(logDir, workflowRunId, {
-    type: 'parallel_block_complete',
-    block_index: blockIndex,
-    results,
   });
 }
 

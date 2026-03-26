@@ -218,10 +218,9 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           runId: run.id,
           workflowName: run.workflow_name,
           status: run.status,
-          steps: [],
           dagNodes: [],
           artifacts: [],
-          isLoop: false,
+
           startedAt: new Date(ensureUtc(run.started_at)).getTime(),
           completedAt: run.completed_at
             ? new Date(ensureUtc(run.completed_at)).getTime()

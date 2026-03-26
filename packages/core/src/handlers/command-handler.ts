@@ -22,8 +22,6 @@ import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '@archon/pa
 import { loadConfig } from '../config/config-loader';
 import {
   discoverWorkflowsWithConfig,
-  isDagWorkflow,
-  isSingleStep,
   type WorkflowDefinition,
   type WorkflowLoadError,
 } from '@archon/workflows';
@@ -898,9 +896,7 @@ async function handleWorkflowCommand(
       if (workflows.length > 0) {
         msg += 'Available Workflows:\n\n';
         for (const w of workflows) {
-          const modeInfo = isDagWorkflow(w)
-            ? `DAG: ${String(w.nodes.length)} nodes`
-            : `Steps: ${w.steps?.map(s => (isSingleStep(s) ? `\`${s.command}\`` : `[${String(s.parallel.length)} parallel]`)).join(' -> ') ?? 'none'}`;
+          const modeInfo = `DAG: ${String(w.nodes.length)} nodes`;
           msg += `**\`${w.name}\`**\n  ${w.description}\n  ${modeInfo}\n\n`;
         }
       }
@@ -987,7 +983,6 @@ async function handleWorkflowCommand(
         let msg = `Workflow: \`${activeWorkflow.workflow_name}\`\n`;
         msg += `ID: ${activeWorkflow.id}\n`;
         msg += `Status: ${activeWorkflow.status}\n`;
-        msg += `Step: ${activeWorkflow.current_step_index + 1}\n`;
         msg += `Started: ${timing.startedAt.toISOString()}\n`;
         msg += `Duration: ${timing.durationMin}m ${timing.durationSec}s\n`;
         msg += `Last activity: ${timing.lastActivityMin}m ${timing.lastActivitySec}s ago\n`;
@@ -1197,7 +1192,6 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
           if (timing.isValid) {
             msg += `\n\nActive Workflow: \`${activeWorkflow.workflow_name}\``;
             msg += `\n  ID: ${activeWorkflow.id.slice(0, 8)}`;
-            msg += `\n  Step: ${activeWorkflow.current_step_index + 1}`;
             msg += `\n  Duration: ${timing.durationMin}m ${timing.durationSec}s`;
             msg += `\n  Last activity: ${timing.lastActivitySec}s ago`;
             if (timing.lastActivityMs > WORKFLOW_SLOW_THRESHOLD_MS) {

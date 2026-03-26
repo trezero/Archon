@@ -25,18 +25,32 @@ Archon fixes this. Encode your development process as a workflow. The workflow d
 name: archon-idea-to-pr
 description: Take a feature idea from plan to merged PR
 
-steps:
-  - command: create-plan
-  - command: implement-tasks
-    clearContext: true
-  - command: validate
-  - command: create-pr
-    clearContext: true
-  - parallel:
-      - command: review-security
-      - command: review-tests
-      - command: review-types
-  - command: self-fix
+nodes:
+  - id: plan
+    command: create-plan
+  - id: implement
+    command: implement-tasks
+    context: fresh
+    depends_on: [plan]
+  - id: validate
+    command: validate
+    depends_on: [implement]
+  - id: create-pr
+    command: create-pr
+    context: fresh
+    depends_on: [validate]
+  - id: review-security
+    command: review-security
+    depends_on: [create-pr]
+  - id: review-tests
+    command: review-tests
+    depends_on: [create-pr]
+  - id: review-types
+    command: review-types
+    depends_on: [create-pr]
+  - id: self-fix
+    command: self-fix
+    depends_on: [review-security, review-tests, review-types]
 ```
 
 ```bash
@@ -166,7 +180,7 @@ Register a project by clicking **+** next to "Project" in the chat sidebar — e
 **Key pages:**
 - **Chat** — Conversation interface with real-time streaming and tool call visualization
 - **Dashboard** — Mission Control for monitoring running workflows, with filterable history by project, status, and date
-- **Workflow Builder** — Visual drag-and-drop editor for creating DAG, sequential, and loop workflows
+- **Workflow Builder** — Visual drag-and-drop editor for creating DAG workflows with loop nodes
 - **Workflow Execution** — Step-by-step progress view for any running or completed workflow
 
 **Monitoring hub:** The sidebar shows conversations from **all platforms** — not just the web. Workflows kicked off from the CLI, messages from Slack or Telegram, GitHub issue interactions — everything appears in one place.

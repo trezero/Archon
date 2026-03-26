@@ -1,7 +1,6 @@
 import { cn } from '@/lib/utils';
 
 interface StatusBarProps {
-  mode: 'dag' | 'sequential' | 'loop';
   nodeCount: number;
   edgeCount: number;
   errorCount: number;
@@ -11,14 +10,7 @@ interface StatusBarProps {
   onValidationClick: () => void;
 }
 
-const MODE_LABELS: Record<StatusBarProps['mode'], string> = {
-  dag: 'DAG',
-  sequential: 'Steps',
-  loop: 'Loop',
-};
-
 export function StatusBar({
-  mode,
   nodeCount,
   edgeCount,
   errorCount,
@@ -69,14 +61,12 @@ export function StatusBar({
         </button>
 
         {/* Mode label */}
-        <span>{MODE_LABELS[mode]}</span>
+        <span>DAG</span>
 
-        {/* Node/edge count — DAG mode only */}
-        {mode === 'dag' && (
-          <span>
-            {nodeCount} nodes &middot; {edgeCount} edges
-          </span>
-        )}
+        {/* Node/edge count */}
+        <span>
+          {nodeCount} nodes &middot; {edgeCount} edges
+        </span>
       </div>
 
       {/* Right side */}

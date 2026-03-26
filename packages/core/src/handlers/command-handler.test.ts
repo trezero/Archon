@@ -2001,7 +2001,11 @@ describe('CommandHandler', () => {
       test('should show load errors alongside workflows', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
           workflows: [
-            { name: 'assist', description: 'General assistant', steps: [{ command: 'assist' }] },
+            {
+              name: 'assist',
+              description: 'General assistant',
+              nodes: [{ id: 'assist', command: 'assist' }],
+            },
           ],
           errors: [
             {
@@ -2064,7 +2068,9 @@ describe('CommandHandler', () => {
 
       test('should pass loadConfig as second argument to discoverWorkflowsWithConfig', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [{ name: 'test-wf', description: 'Test', steps: [{ command: 'test' }] }],
+          workflows: [
+            { name: 'test-wf', description: 'Test', nodes: [{ id: 'test', command: 'test' }] },
+          ],
           errors: [],
         });
 
@@ -2095,7 +2101,11 @@ describe('CommandHandler', () => {
       test('should show error count on reload', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
           workflows: [
-            { name: 'assist', description: 'General assistant', steps: [{ command: 'assist' }] },
+            {
+              name: 'assist',
+              description: 'General assistant',
+              nodes: [{ id: 'assist', command: 'assist' }],
+            },
           ],
           errors: [
             {
@@ -2105,7 +2115,7 @@ describe('CommandHandler', () => {
             },
             {
               filename: 'invalid.yml',
-              error: "Missing 'steps'",
+              error: "Missing 'nodes'",
               errorType: 'validation_error' as const,
             },
           ],
@@ -2123,7 +2133,11 @@ describe('CommandHandler', () => {
       test('should show clean reload when no errors', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
           workflows: [
-            { name: 'assist', description: 'General assistant', steps: [{ command: 'assist' }] },
+            {
+              name: 'assist',
+              description: 'General assistant',
+              nodes: [{ id: 'assist', command: 'assist' }],
+            },
           ],
           errors: [],
         });
@@ -2175,7 +2189,11 @@ describe('CommandHandler', () => {
       test('should match workflow name case-insensitively', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
           workflows: [
-            { name: 'assist', description: 'General assistant', steps: [{ command: 'assist' }] },
+            {
+              name: 'assist',
+              description: 'General assistant',
+              nodes: [{ id: 'assist', command: 'assist' }],
+            },
           ],
           errors: [],
         });
@@ -2284,7 +2302,6 @@ describe('CommandHandler', () => {
         expect(result.success).toBe(true);
         expect(result.message).toContain('Workflow: `test-workflow`');
         expect(result.message).toContain('Status: running');
-        expect(result.message).toContain('Step: 2'); // index + 1
         expect(result.message).toContain('Duration:');
         expect(result.message).toContain('Last activity:');
       });
@@ -2428,7 +2445,7 @@ describe('CommandHandler', () => {
             {
               name: 'existing-workflow',
               description: 'An existing workflow',
-              steps: [{ command: 'assist', args: 'test' }],
+              nodes: [{ id: 'assist', command: 'assist' }],
             },
           ],
           errors: [],
@@ -2447,7 +2464,7 @@ describe('CommandHandler', () => {
             {
               name: 'test-workflow',
               description: 'A test workflow',
-              steps: [{ command: 'assist', args: 'do something' }],
+              nodes: [{ id: 'assist', command: 'assist' }],
             },
           ],
           errors: [],
@@ -2468,7 +2485,7 @@ describe('CommandHandler', () => {
             {
               name: 'fix-issue',
               description: 'Fix a GitHub issue',
-              steps: [{ command: 'assist', args: 'fix $ARGUMENTS' }],
+              nodes: [{ id: 'assist', command: 'assist' }],
             },
           ],
           errors: [],
@@ -2552,7 +2569,6 @@ describe('CommandHandler', () => {
 
         expect(result.success).toBe(true);
         expect(result.message).toContain('Active Workflow: `investigate-issue`');
-        expect(result.message).toContain('Step: 3'); // index + 1
         expect(result.message).toContain('Cancel: `/workflow cancel`');
       });
 

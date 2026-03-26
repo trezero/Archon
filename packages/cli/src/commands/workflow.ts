@@ -276,7 +276,6 @@ export async function workflowRunCommand(
 
   // Handle --resume: find the most recent failed run and reuse its worktree
   let preCreatedRun: Awaited<ReturnType<typeof workflowDb.resumeWorkflowRun>> | undefined;
-  let startFromStep: number | undefined;
 
   if (options.resume) {
     if (!codebase) {
@@ -304,19 +303,10 @@ export async function workflowRunCommand(
       {
         workflowRunId: lastFailed.id,
         workflowName,
-        currentStepIndex: lastFailed.current_step_index,
         workingPath: lastFailed.working_path,
       },
       'workflow.resume_found_last_failed'
     );
-
-    // Guard: nothing to resume if the workflow failed before completing any steps
-    if (lastFailed.current_step_index === 0) {
-      throw new Error(
-        `Workflow '${workflowName}' failed before completing any steps — nothing to resume.\n` +
-          'Start a fresh run instead.'
-      );
-    }
 
     // Reuse the working path from the failed run (verify it still exists)
     if (lastFailed.working_path) {
@@ -343,11 +333,8 @@ export async function workflowRunCommand(
 
     // Reactivate the failed run so the executor treats it as pre-created (already running)
     preCreatedRun = await workflowDb.resumeWorkflowRun(lastFailed.id);
-    startFromStep = lastFailed.current_step_index;
 
-    console.log(
-      `Resuming from step ${String(startFromStep + 1)} — skipping ${String(startFromStep)} already-completed step(s).`
-    );
+    console.log(`Resuming failed workflow run: ${lastFailed.id}`);
     console.log(`Working path: ${workingCwd}`);
     console.log('');
   }
@@ -500,8 +487,7 @@ export async function workflowRunCommand(
     undefined, // issueContext
     undefined, // isolationContext
     undefined, // parentConversationId
-    preCreatedRun, // pre-activated run for --resume
-    startFromStep // step index to resume from
+    preCreatedRun // pre-activated run for --resume
   );
 
   // Check result and exit appropriately

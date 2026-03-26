@@ -22,7 +22,7 @@ const mockDiscoverWorkflows = mock(async (_cwd: string) => ({
 
 // Default: returns a valid workflow. Use mockReturnValueOnce in tests that need a parse failure.
 const mockParseWorkflow = mock((_content: string, _filename: string) => ({
-  workflow: { name: 'test', description: 'Test workflow', steps: [] },
+  workflow: { name: 'test', description: 'Test workflow', nodes: [] },
   error: null,
 }));
 
@@ -67,7 +67,7 @@ mock.module('@archon/workflows', () => ({
       !name.startsWith('.')
   ),
   BUNDLED_WORKFLOWS: {
-    'archon-assist': 'name: archon-assist\ndescription: Archon Assist\nsteps: []',
+    'archon-assist': 'name: archon-assist\ndescription: Archon Assist\nnodes: []',
   },
   BUNDLED_COMMANDS: {
     'archon-assist': '# archon-assist command',
@@ -123,7 +123,7 @@ describe('POST /api/workflows/validate', () => {
     const response = await app.request('/api/workflows/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ definition: { name: 'my-workflow', description: 'test', steps: [] } }),
+      body: JSON.stringify({ definition: { name: 'my-workflow', description: 'test', nodes: [] } }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { valid: boolean };
@@ -223,7 +223,7 @@ describe('GET /api/workflows/:name', () => {
     await mkdir(workflowDir, { recursive: true });
     await writeFile(
       join(workflowDir, 'custom.yaml'),
-      'name: custom\ndescription: My custom\nsteps:\n  - command: plan\n'
+      'name: custom\ndescription: My custom\nnodes:\n  - id: plan\n    command: plan\n'
     );
 
     try {
@@ -341,7 +341,11 @@ describe('PUT /api/workflows/:name', () => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          definition: { name: 'my-workflow', description: 'Test', steps: [{ command: 'plan' }] },
+          definition: {
+            name: 'my-workflow',
+            description: 'Test',
+            nodes: [{ id: 'plan', command: 'plan' }],
+          },
         }),
       });
 
@@ -403,7 +407,7 @@ describe('DELETE /api/workflows/:name', () => {
     await mkdir(workflowDir, { recursive: true });
     await writeFile(
       join(workflowDir, 'to-delete.yaml'),
-      'name: x\ndescription: y\nsteps:\n  - command: z\n'
+      'name: x\ndescription: y\nnodes:\n  - id: z\n    command: z\n'
     );
 
     try {
@@ -454,7 +458,7 @@ describe('PUT /api/workflows/:name - cwd validation', () => {
     const response = await app.request('/api/workflows/my-workflow?cwd=/etc/secrets', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ definition: { name: 'my-workflow', description: 'test', steps: [] } }),
+      body: JSON.stringify({ definition: { name: 'my-workflow', description: 'test', nodes: [] } }),
     });
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: string };

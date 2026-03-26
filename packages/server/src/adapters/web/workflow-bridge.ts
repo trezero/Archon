@@ -28,61 +28,6 @@ export function mapWorkflowEvent(event: WorkflowEmitterEvent): string | null {
         timestamp: Date.now(),
       });
 
-    case 'step_started':
-      return JSON.stringify({
-        type: 'workflow_step',
-        runId: event.runId,
-        step: event.stepIndex,
-        total: event.totalSteps,
-        name: event.stepName,
-        status: 'running',
-        timestamp: Date.now(),
-      });
-
-    case 'step_completed':
-      return JSON.stringify({
-        type: 'workflow_step',
-        runId: event.runId,
-        step: event.stepIndex,
-        total: event.totalSteps,
-        name: event.stepName,
-        status: 'completed',
-        duration: event.duration,
-        timestamp: Date.now(),
-      });
-
-    case 'step_failed':
-      return JSON.stringify({
-        type: 'workflow_step',
-        runId: event.runId,
-        step: event.stepIndex,
-        total: event.totalSteps,
-        name: event.stepName,
-        status: 'failed',
-        timestamp: Date.now(),
-      });
-
-    case 'parallel_agent_started':
-    case 'parallel_agent_completed':
-    case 'parallel_agent_failed':
-      return JSON.stringify({
-        type: 'parallel_agent',
-        runId: event.runId,
-        step: event.stepIndex,
-        agentIndex: event.agentIndex,
-        totalAgents: event.type === 'parallel_agent_started' ? event.totalAgents : 0,
-        name: event.agentName,
-        status:
-          event.type === 'parallel_agent_started'
-            ? 'running'
-            : event.type === 'parallel_agent_completed'
-              ? 'completed'
-              : 'failed',
-        duration: event.type === 'parallel_agent_completed' ? event.duration : undefined,
-        error: event.type === 'parallel_agent_failed' ? event.error : undefined,
-        timestamp: Date.now(),
-      });
-
     case 'loop_iteration_started':
       return JSON.stringify({
         type: 'workflow_step',
@@ -252,9 +197,7 @@ export class WorkflowEventBridge {
         // are available via REST immediately, not after the 30s periodic flush.
         if (
           this.onStepTransition &&
-          (event.type === 'step_completed' ||
-            event.type === 'step_failed' ||
-            event.type === 'loop_iteration_completed' ||
+          (event.type === 'loop_iteration_completed' ||
             event.type === 'loop_iteration_failed' ||
             event.type === 'node_completed' ||
             event.type === 'node_failed')
