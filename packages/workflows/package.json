@@ -14,7 +14,9 @@
   },
   "dependencies": {
     "@archon/git": "workspace:*",
-    "@archon/paths": "workspace:*"
+    "@archon/paths": "workspace:*",
+    "@hono/zod-openapi": "^0.19.6",
+    "zod": "^3.25.28"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

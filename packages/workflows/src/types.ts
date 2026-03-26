@@ -1,6 +1,10 @@
 /**
  * Workflow Engine Type Definitions
  *
+ * All types are now derived from Zod schemas in `./schemas/`.
+ * This file re-exports them for backward compatibility — existing imports
+ * from `@archon/workflows` or `./types` continue to work without changes.
+ *
  * Core types for the workflow engine supporting two execution modes:
  * 1. Loop-based: Autonomous iteration until completion signal (Ralph pattern)
  * 2. DAG-based: Nodes with explicit dependency edges, parallel layers, conditional branching
@@ -8,94 +12,50 @@
  * Loop iteration is available as a DAG node type (LoopNode), not a standalone workflow type.
  */
 
-export type ModelReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-export type WebSearchMode = 'disabled' | 'cached' | 'live';
+import type { WorkflowDefinition } from './schemas/workflow';
+import type { NodeOutput, NodeState } from './schemas/workflow-run';
 
-export type WorkflowRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
-export type ArtifactType = 'pr' | 'commit' | 'file_created' | 'file_modified' | 'branch';
+// ---------------------------------------------------------------------------
+// Re-export all types and values from schemas
+// ---------------------------------------------------------------------------
+export type { ModelReasoningEffort, WebSearchMode } from './schemas/workflow';
+export type {
+  WorkflowRunStatus,
+  WorkflowStepStatus,
+  ArtifactType,
+  NodeState,
+  NodeOutput,
+  WorkflowRun,
+} from './schemas/workflow-run';
+export type { StepRetryConfig } from './schemas/retry';
+export type { LoopNodeConfig } from './schemas/loop';
+export type { WorkflowBase, WorkflowDefinition } from './schemas/workflow';
+export type { TriggerRule } from './schemas/dag-node';
+export {
+  TRIGGER_RULES,
+  isTriggerRule,
+  isBashNode,
+  isLoopNode,
+  WORKFLOW_HOOK_EVENTS,
+} from './schemas';
+export type {
+  DagNodeBase,
+  CommandNode,
+  PromptNode,
+  BashNode,
+  LoopNode,
+  DagNode,
+  WorkflowHookEvent,
+  WorkflowHookMatcher,
+  WorkflowNodeHooks,
+} from './schemas';
 
-/**
- * Retry configuration for steps and DAG nodes.
- * When present, the executor retries the step/node on TRANSIENT errors
- * with exponential backoff before failing the workflow.
- */
-export interface StepRetryConfig {
-  /** Maximum number of retry attempts (not including the initial attempt).
-   *  Must be >= 1 and <= 5. Default: 2 when retry is enabled. */
-  max_attempts: number;
-  /** Initial delay between retries in milliseconds. Doubled on each attempt.
-   *  Must be >= 1000 and <= 60000. Default: 3000. */
-  delay_ms?: number;
-  /** Which error types trigger a retry. Default: 'transient'.
-   *  - 'transient': Only retry TRANSIENT errors (rate limits, crashes, network issues)
-   *  - 'all': Retry all errors including UNKNOWN (use with caution).
-   *  Note: FATAL errors (auth failure, permission denied, credit balance exhausted)
-   *  are NEVER retried regardless of this setting. */
-  on_error?: 'transient' | 'all';
-}
-
-/**
- * Configuration for a loop node within a DAG workflow.
- * Runs a prompt repeatedly until a completion signal or deterministic bash condition.
- */
-export interface LoopNodeConfig {
-  /** Inline prompt text executed each iteration */
-  prompt: string;
-  /** Completion signal string detected in AI output (e.g., "COMPLETE") */
-  until: string;
-  /** Maximum iterations allowed; exceeding this fails the node */
-  max_iterations: number;
-  /** Whether to start fresh session each iteration (default: false) */
-  fresh_context?: boolean;
-  /** Optional bash script run after each iteration; exit 0 = complete */
-  until_bash?: string;
-}
-
-/** Common fields shared by all workflow types */
-interface WorkflowBase {
-  name: string;
-  description: string;
-  provider?: 'claude' | 'codex'; // AI provider (default: claude)
-  model?: string; // Model override (future)
-  modelReasoningEffort?: ModelReasoningEffort;
-  webSearchMode?: WebSearchMode;
-  additionalDirectories?: string[];
-}
-
-export type TriggerRule =
-  | 'all_success'
-  | 'one_success'
-  | 'none_failed_min_one_success'
-  | 'all_done';
-
-/** Canonical list of trigger rules — derive from this, do not duplicate. */
-export const TRIGGER_RULES: readonly TriggerRule[] = [
-  'all_success',
-  'one_success',
-  'none_failed_min_one_success',
-  'all_done',
-];
-
-export function isTriggerRule(value: unknown): value is TriggerRule {
-  return typeof value === 'string' && (TRIGGER_RULES as readonly string[]).includes(value);
-}
-
-export type NodeState = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
-
-/**
- * Captured output from a completed DAG node.
- * `output` is the concatenated assistant text (or JSON-encoded string from the SDK
- * when output_format is set). Empty string for failed/skipped nodes.
- * `error` is required when state is 'failed', absent on all other states.
- */
-export type NodeOutput =
-  | { state: 'completed' | 'running'; output: string; sessionId?: string; error?: never }
-  | { state: 'failed'; output: string; sessionId?: string; error: string }
-  | { state: 'pending' | 'skipped'; output: string; sessionId?: never; error?: never };
-
+// ---------------------------------------------------------------------------
 // Compile-time assertion: NodeOutput must cover all NodeState values.
-// If NodeState gains a new value, this line becomes a type error as a reminder to update NodeOutput.
+// If NodeState gains a new value, this line becomes a type error as a reminder
+// to update NodeOutput.
+// ---------------------------------------------------------------------------
+
 type AssertNodeOutputCoversNodeState = NodeOutput['state'] extends NodeState
   ? NodeState extends NodeOutput['state']
     ? true
@@ -104,226 +64,14 @@ type AssertNodeOutputCoversNodeState = NodeOutput['state'] extends NodeState
 const nodeOutputStateCoverage: AssertNodeOutputCoversNodeState = true;
 void nodeOutputStateCoverage; // suppress unused-variable lint warning
 
-/** Shared fields for all DAG node types */
-export interface DagNodeBase {
-  id: string;
-  /** Node IDs that must complete before this node runs. */
-  depends_on?: string[];
-  /** Condition expression — node is skipped if false. e.g. "$classify.output.type == 'BUG'" */
-  when?: string;
-  /** Join semantics when multiple upstreams exist. Defaults to 'all_success'. */
-  trigger_rule?: TriggerRule;
-  /** Per-node model override. */
-  model?: string;
-  /** Per-node provider override. */
-  provider?: 'claude' | 'codex';
-  /** Session context mode for this node.
-   *  - `'fresh'` — ignore any prior session, start a new one
-   *  - `'shared'` — inherit session from the prior sequential node (with forkSession safety).
-   *    Has no effect on nodes in a parallel layer — parallel nodes always start fresh.
-   *  - omitted — defaults to 'fresh' for parallel layers, inherited for sequential nodes
-   */
-  context?: 'fresh' | 'shared';
-  /**
-   * JSON Schema for structured output.
-   * Claude: enforced via outputFormat SDK option.
-   * Codex: enforced via outputSchema TurnOptions (v0.116.0+).
-   */
-  output_format?: Record<string, unknown>;
-  /**
-   * Whitelist of built-in tools available to this node.
-   * - `[]` — disable all built-in tools (MCP-only mode)
-   * - `string[]` — restrict to named tools
-   * Omit to use the default tool set.
-   * Note: `undefined` and `[]` have different semantics — absent means default, [] means none.
-   * Claude only — Codex nodes emit a warning and ignore this field.
-   */
-  allowed_tools?: string[];
-  /**
-   * Blacklist of built-in tools to remove from this node's context.
-   * Applied after `allowed_tools` if both are set.
-   * Claude only — Codex nodes emit a warning and ignore this field.
-   */
-  denied_tools?: string[];
-  /** Per-node idle timeout override in milliseconds. Overrides the default 5-minute idle timeout.
-   *  Useful for long-running nodes (e.g., E2E tests with server startup + browser automation). */
-  idle_timeout?: number;
-  /** Retry configuration for transient failures. When present, the DAG executor retries
-   *  the node instead of marking it failed immediately. */
-  retry?: StepRetryConfig;
-  /**
-   * SDK hooks applied during this node's AI execution.
-   * Each hook matcher returns a static SyncHookJSONOutput response.
-   * Claude only — Codex nodes emit a warning and ignore this field.
-   */
-  hooks?: WorkflowNodeHooks;
-  /**
-   * Path to MCP server config JSON file (relative to cwd).
-   * The JSON must follow the SDK's Record<string, McpServerConfig> format.
-   * Environment variables ($VAR_NAME) in env/headers values are expanded from
-   * process.env at execution time (not load time) — secrets stay out of YAML.
-   * Claude only — Codex nodes emit a warning and ignore this field.
-   */
-  mcp?: string;
-  /**
-   * Skill names to preload into this node's agent context.
-   * Skills must be installed in .claude/skills/ (loaded via settingSources: ['project']).
-   * The node is wrapped in an AgentDefinition with these skills + 'Skill' auto-added to allowedTools.
-   * Claude only — Codex nodes emit a warning and ignore this field.
-   */
-  skills?: string[];
-}
+// ---------------------------------------------------------------------------
+// DagWorkflow — alias kept for backward compatibility
+// ---------------------------------------------------------------------------
+export type { WorkflowDefinition as DagWorkflow } from './schemas/workflow';
 
-/**
- * Supported hook events for per-node hooks.
- * Uses the same event names as the Claude Agent SDK's HookEvent type.
- */
-export type WorkflowHookEvent =
-  | 'PreToolUse'
-  | 'PostToolUse'
-  | 'PostToolUseFailure'
-  | 'Notification'
-  | 'UserPromptSubmit'
-  | 'SessionStart'
-  | 'SessionEnd'
-  | 'Stop'
-  | 'SubagentStart'
-  | 'SubagentStop'
-  | 'PreCompact'
-  | 'PermissionRequest'
-  | 'Setup'
-  | 'TeammateIdle'
-  | 'TaskCompleted'
-  | 'Elicitation'
-  | 'ElicitationResult'
-  | 'ConfigChange'
-  | 'WorktreeCreate'
-  | 'WorktreeRemove'
-  | 'InstructionsLoaded';
-
-/** Canonical list of hook events — derive from this, do not duplicate. */
-export const WORKFLOW_HOOK_EVENTS: readonly WorkflowHookEvent[] = [
-  'PreToolUse',
-  'PostToolUse',
-  'PostToolUseFailure',
-  'Notification',
-  'UserPromptSubmit',
-  'SessionStart',
-  'SessionEnd',
-  'Stop',
-  'SubagentStart',
-  'SubagentStop',
-  'PreCompact',
-  'PermissionRequest',
-  'Setup',
-  'TeammateIdle',
-  'TaskCompleted',
-  'Elicitation',
-  'ElicitationResult',
-  'ConfigChange',
-  'WorktreeCreate',
-  'WorktreeRemove',
-  'InstructionsLoaded',
-];
-
-/**
- * A single hook matcher in a YAML workflow definition.
- * Maps 1:1 to the SDK's HookCallbackMatcher, with `response` replacing `hooks` callbacks.
- * At runtime, `response` is wrapped in `async () => response` to create the SDK callback.
- */
-export interface WorkflowHookMatcher {
-  /** Regex pattern to match tool names (PreToolUse/PostToolUse) or event subtypes. */
-  matcher?: string;
-  /** The SDK SyncHookJSONOutput to return when this hook fires. */
-  response: Record<string, unknown>;
-  /** Timeout in seconds (default: SDK default of 60). Note: BashNode.timeout uses milliseconds — units differ. */
-  timeout?: number;
-}
-
-/**
- * Per-node hook configuration keyed by event name.
- * Each event maps to an array of matchers with static responses.
- */
-export type WorkflowNodeHooks = Partial<Record<WorkflowHookEvent, WorkflowHookMatcher[]>>;
-
-/** DAG node that runs a named command from .archon/commands/ */
-export interface CommandNode extends DagNodeBase {
-  command: string;
-  prompt?: never;
-  bash?: never;
-  loop?: never;
-}
-
-/** DAG node with an inline prompt (no command file) */
-export interface PromptNode extends DagNodeBase {
-  prompt: string;
-  command?: never;
-  bash?: never;
-  loop?: never;
-}
-
-/** DAG node that runs a shell script without AI */
-export interface BashNode extends DagNodeBase {
-  bash: string;
-  /** Execution timeout in milliseconds. Default: 120000 (2 minutes). */
-  timeout?: number;
-  command?: never;
-  prompt?: never;
-  loop?: never;
-}
-
-/** DAG node that runs an AI prompt in a loop until a completion condition is met */
-export interface LoopNode extends DagNodeBase {
-  loop: LoopNodeConfig;
-  command?: never;
-  prompt?: never;
-  bash?: never;
-}
-
-/** A single node in a DAG workflow. command, prompt, bash, and loop are mutually exclusive. */
-export type DagNode = CommandNode | PromptNode | BashNode | LoopNode;
-
-/** Type guard: check if a DAG node is a bash (shell script) node */
-export function isBashNode(node: DagNode): node is BashNode {
-  return 'bash' in node && typeof node.bash === 'string';
-}
-
-/** Type guard: check if a DAG node is a loop (iterative) node */
-export function isLoopNode(node: DagNode): node is LoopNode {
-  return 'loop' in node && typeof node.loop === 'object' && node.loop !== null;
-}
-
-/** DAG-based workflow — nodes with explicit dependency edges */
-export interface DagWorkflow extends WorkflowBase {
-  readonly nodes: readonly DagNode[];
-  prompt?: never;
-}
-
-/**
- * Workflow definition parsed from YAML.
- *
- * All workflows use DAG-based execution with `nodes`.
- * Loop iteration is available as a DAG node type (LoopNode).
- */
-export type WorkflowDefinition = DagWorkflow;
-
-/**
- * Runtime workflow run state stored in database
- */
-export interface WorkflowRun {
-  id: string;
-  workflow_name: string;
-  conversation_id: string;
-  parent_conversation_id: string | null;
-  codebase_id: string | null;
-  status: WorkflowRunStatus;
-  user_message: string; // Original user intent
-  metadata: Record<string, unknown>;
-  started_at: Date;
-  completed_at: Date | null;
-  last_activity_at: Date | null; // For staleness detection
-  working_path: string | null; // cwd at run creation time; used for resume detection
-}
+// ---------------------------------------------------------------------------
+// Non-schema types (complex discriminated unions kept as hand-written types)
+// ---------------------------------------------------------------------------
 
 /**
  * Result of loading a command prompt - discriminated union for specific error handling

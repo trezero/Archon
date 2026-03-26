@@ -24,6 +24,10 @@
 - Import `z` from `@hono/zod-openapi` (not from `zod` directly)
 - All new/modified API routes must use `registerOpenApiRoute(createRoute({...}), handler)` — the local wrapper handles the TypedResponse bypass
 - Route schemas live in `packages/server/src/routes/schemas/` — one file per domain
+- Engine schemas live in `packages/workflows/src/schemas/` — one file per concern (dag-node, workflow, workflow-run, retry, loop, hooks); `index.ts` re-exports all
+- Engine schema naming: camelCase (e.g., `dagNodeSchema`, `workflowBaseSchema`, `nodeOutputSchema`)
+- `TRIGGER_RULES` and `WORKFLOW_HOOK_EVENTS` are derived from schema `.options` — never duplicate as a plain array
+- `loader.ts` uses `dagNodeSchema.safeParse()` for node validation; graph-level checks (cycles, deps, `$nodeId.output` refs) remain as imperative code in `validateDagStructure()`
 
 **Git Workflow and Releases**
 - `main` is the release branch. Never commit directly to `main`.
@@ -242,7 +246,8 @@ packages/
 │       └── index.ts          # Package exports
 ├── workflows/                # @archon/workflows - Workflow engine (depends on @archon/git + @archon/paths)
 │   └── src/
-│       ├── types.ts          # Workflow type definitions (DAG node types, loop node)
+│       ├── types.ts          # Re-exports all types from schemas/ (backward-compat thin wrapper)
+│       ├── schemas/          # Zod schemas for engine types
 │       ├── loader.ts         # YAML parsing + validation (parseWorkflow)
 │       ├── workflow-discovery.ts # Workflow filesystem discovery (discoverWorkflows, discoverWorkflowsWithConfig)
 │       ├── executor-shared.ts # Shared executor infrastructure (error classification, variable substitution)
@@ -359,7 +364,7 @@ import type { DagNode } from '@/lib/workflow-types';
 - **@archon/paths**: Path resolution utilities and Pino logger factory (no @archon/* deps)
 - **@archon/git**: Git operations - worktrees, branches, repos, exec wrappers (depends only on @archon/paths)
 - **@archon/isolation**: Worktree isolation types, providers, resolver, error classifiers (depends only on @archon/git + @archon/paths)
-- **@archon/workflows**: Workflow engine - loader, router, executor, DAG, logger, bundled defaults (depends only on @archon/git + @archon/paths; DB/AI/config injected via `WorkflowDeps`)
+- **@archon/workflows**: Workflow engine - loader, router, executor, DAG, logger, bundled defaults (depends only on @archon/git + @archon/paths + @hono/zod-openapi + zod; DB/AI/config injected via `WorkflowDeps`)
 - **@archon/cli**: Command-line interface for running workflows
 - **@archon/core**: Business logic, database, orchestration, AI clients (provides `createWorkflowStore()` adapter bridging core DB → `IWorkflowStore`)
 - **@archon/adapters**: Platform adapters for Slack, Telegram, GitHub, Discord (depends on @archon/core)

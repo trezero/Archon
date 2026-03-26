@@ -1387,7 +1387,7 @@ async function executeLoopNode(
       });
 
     // Session threading
-    const needsFreshSession = loop.fresh_context === true || i === 1;
+    const needsFreshSession = loop.fresh_context || i === 1;
     const resumeSessionId = needsFreshSession ? undefined : currentSessionId;
 
     // Stream AI response for this iteration

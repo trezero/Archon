@@ -1073,7 +1073,7 @@ nodes:
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
       expect(result.errors).toHaveLength(1);
-      expect(result.errors[0].error).toMatch(/timeout.*positive/i);
+      expect(result.errors[0].error).toMatch(/timeout/i);
     });
 
     it('should parse idle_timeout on command node', async () => {
@@ -1186,7 +1186,7 @@ nodes:
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
       expect(result.errors).toHaveLength(1);
-      expect(result.errors[0].error).toMatch(/idle_timeout.*positive/i);
+      expect(result.errors[0].error).toMatch(/idle_timeout/i);
     });
 
     it('should reject invalid idle_timeout (Infinity)', async () => {
