@@ -1,0 +1,91 @@
+#cloud-config
+
+# =============================================================================
+# Archon — Cloud-Init Auto-Setup
+# =============================================================================
+#
+# Paste this into your VPS provider's "User Data" field when creating a server.
+# Tested on: Ubuntu 22.04+, Debian 12+
+#
+# What this does:
+#   1. Installs Docker + Docker Compose plugin
+#   2. Opens firewall ports (SSH, HTTP, HTTPS)
+#   3. Clones the repo to /opt/archon
+#   4. Prepares .env and Caddyfile from examples
+#   5. Builds the Docker image (~5 min)
+#
+# After the server boots (~5-8 min), SSH in and:
+#   1. Edit /opt/archon/.env — set your AI credentials, DOMAIN, DATABASE_URL
+#   2. cd /opt/archon && docker compose --profile with-db --profile cloud up -d
+#   3. Open https://your-domain.com
+#
+# IMPORTANT: Before starting, point your domain's DNS A record to this server's IP.
+#
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - git
+  - ufw
+
+runcmd:
+  # --- Docker ---
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable docker
+  - systemctl start docker
+
+  # --- Firewall ---
+  - ufw allow 22/tcp
+  - ufw allow 80/tcp
+  - ufw allow 443
+  - ufw --force enable
+
+  # --- Clone and configure ---
+  - git clone https://github.com/dynamous-community/remote-coding-agent.git /opt/archon
+  - cp /opt/archon/.env.example /opt/archon/.env
+  - cp /opt/archon/Caddyfile.example /opt/archon/Caddyfile
+
+  # --- Pre-pull external images ---
+  - docker pull postgres:17-alpine
+  - docker pull caddy:2-alpine
+
+  # --- Build the app image ---
+  - cd /opt/archon && docker compose build
+
+  # --- Signal completion ---
+  - |
+    cat > /opt/archon/SETUP_COMPLETE << 'DONE'
+    ============================================
+    Archon server setup complete!
+    ============================================
+
+    Next steps:
+
+      1. Edit credentials and domain:
+         nano /opt/archon/.env
+
+         Required:
+           CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...  (or CLAUDE_API_KEY)
+           DOMAIN=archon.example.com
+           DATABASE_URL=postgresql://postgres:postgres@postgres:5432/remote_coding_agent
+
+      2. (Optional) Set up basic auth to protect the Web UI:
+         docker run caddy caddy hash-password --plaintext 'YOUR_PASSWORD'
+         # Add to .env (use $$ to escape $ in hashes):
+           CADDY_BASIC_AUTH=basicauth @protected { admin $$2a$$14$$<hash> }
+         # Skip if using IP-based firewall rules instead.
+
+      3. Start all services:
+         cd /opt/archon
+         docker compose --profile with-db --profile cloud up -d
+
+      4. Open https://your-domain.com
+
+    Logs:     docker compose logs -f
+    Health:   curl https://your-domain.com/api/health
+    Docs:     https://github.com/dynamous-community/remote-coding-agent/blob/main/docs/docker.md
+    ============================================
+    DONE
+  - echo "[archon] Setup complete. Edit /opt/archon/.env and run docker compose up."

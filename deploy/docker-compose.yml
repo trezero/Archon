@@ -1,4 +1,6 @@
-# Remote Coding Agent - Docker Compose for End Users
+# =============================================================================
+# Archon - Docker Compose for End Users (pre-built image)
+# =============================================================================
 #
 # Usage:
 #   1. Copy this file and .env.example to your server
@@ -13,20 +15,22 @@ services:
     image: ghcr.io/dynamous-community/remote-coding-agent:latest
     restart: unless-stopped
     env_file: .env
+    environment:
+      ARCHON_DOCKER: "true"
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-3000}:${PORT:-3000}"
     volumes:
-      - archon_data:/.archon
+      - ${ARCHON_DATA:-archon_data}:/.archon
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-3000}/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
   # Uncomment to run PostgreSQL locally
   # postgres:
-  #   image: postgres:16-alpine
+  #   image: postgres:17-alpine
   #   restart: unless-stopped
   #   environment:
   #     POSTGRES_DB: remote_coding_agent

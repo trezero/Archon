@@ -1,33 +1,74 @@
-# Caddy configuration for Remote Coding Agent
-# Copy this file to 'Caddyfile' and update with your domain
+# Caddy reverse proxy for Archon.
+# Set DOMAIN=archon.example.com in .env — Caddy handles TLS via Let's Encrypt.
+# For local testing, replace {$DOMAIN} with :80 or localhost.
+#
+# Authentication: choose one method (or none):
+#   Option A — Form auth (HTML login page): requires --profile auth — uncomment block A below
+#   Option B — Basic auth (browser popup): set CADDY_BASIC_AUTH in .env
+#   None (default) — no authentication required
 
-# Replace 'remote-agent.yourdomain.com' with your actual domain or subdomain
-remote-agent.yourdomain.com {
-    # Reverse proxy to app container
-    reverse_proxy app:3000
+{$DOMAIN} {
+	# ── Public paths — always bypass auth ─────────────────────────────────────
+	handle /webhooks/* {
+		reverse_proxy app:{$PORT:3000}
+	}
+	handle /api/health {
+		reverse_proxy app:{$PORT:3000}
+	}
 
-    # Optional: Access logs
-    log {
-        output file /data/access.log
-    }
+	# ── Option A: Form-based auth (HTML login page) ────────────────────────────
+	# Requires: docker compose --profile cloud --profile auth up -d
+	# Setup:    Set AUTH_USERNAME, AUTH_PASSWORD_HASH, COOKIE_SECRET in .env
+	#           See docs/docker.md for hash generation instructions.
+	# To enable: uncomment this block AND comment out the "No auth" handle block below.
+	#
+	# handle /login {
+	# 	reverse_proxy auth-service:{$AUTH_SERVICE_PORT:9000}
+	# }
+	# handle /logout {
+	# 	reverse_proxy auth-service:{$AUTH_SERVICE_PORT:9000}
+	# }
+	# handle {
+	# 	forward_auth auth-service:{$AUTH_SERVICE_PORT:9000} {
+	# 		uri /verify
+	# 		copy_headers X-Auth-User
+	# 	}
+	# 	@sse path /api/stream/*
+	# 	reverse_proxy @sse app:{$PORT:3000} {
+	# 		flush_interval -1
+	# 	}
+	# 	reverse_proxy app:{$PORT:3000}
+	# }
 
-    # Optional: Enable compression
-    encode gzip
+	# ── Option B: Basic auth (browser popup, no extra container) ─────────────
+	# Generate hash: docker run caddy caddy hash-password --plaintext 'YOUR_PASSWORD'
+	# Then set in .env: CADDY_BASIC_AUTH=basicauth @protected { admin $$2a$$14$$<hash> }
+	@protected not path /webhooks/* /api/health
+	{$CADDY_BASIC_AUTH:}
 
-    # Automatic HTTPS via Let's Encrypt
-    # No additional configuration needed - Caddy handles it automatically
+	# ── No auth (default) ─────────────────────────────────────────────────────
+	# Comment out this handle block when using Option A above.
+	handle {
+		@sse path /api/stream/*
+		reverse_proxy @sse app:{$PORT:3000} {
+			flush_interval -1
+		}
+		reverse_proxy app:{$PORT:3000}
+	}
+
+	# ── Security Headers ───────────────────────────────────────────────────────
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	encode gzip zstd
+
+	log {
+		output stdout
+		format console
+	}
 }
-
-# IMPORTANT: Service name depends on your Docker Compose profile:
-# - external-db profile: use "app:3000"
-# - with-db profile: use "app-with-db:3000"
-
-# Alternative configuration with multiple domains:
-# remote-agent.yourdomain.com, alternative.domain.com {
-#     reverse_proxy app:3000  # Use app-with-db:3000 for with-db profile
-# }
-
-# Alternative: HTTP only (for testing, not recommended for production)
-# http://remote-agent.yourdomain.com {
-#     reverse_proxy app:3000  # Use app-with-db:3000 for with-db profile
-# }

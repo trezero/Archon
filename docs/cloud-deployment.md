@@ -1,5 +1,7 @@
 # Cloud Deployment Guide
 
+> **See also:** [Docker Guide](docker.md) for the complete Docker reference (profiles, building, configuration, troubleshooting).
+
 Deploy the Remote Coding Agent to a cloud VPS for 24/7 operation with automatic HTTPS and persistent uptime.
 
 **Navigation:** [Prerequisites](#prerequisites) • [Server Setup](#1-server-provisioning--initial-setup) • [DNS Configuration](#2-dns-configuration) • [Repository Setup](#3-clone-repository) • [Environment Config](#4-environment-configuration) • [Database Migration](#5-database-migration) • [Caddy Setup](#6-caddy-configuration) • [Start Services](#7-start-services) • [Verify](#8-verify-deployment)
@@ -494,26 +496,15 @@ Caddy provides automatic HTTPS with Let's Encrypt certificates.
 ### Create Caddyfile
 
 ```bash
-# Copy example file
+# Copy the example — no manual editing needed
 cp Caddyfile.example Caddyfile
-
-# Edit with your domain
-nano Caddyfile
 ```
 
-**Update with your domain:**
+The Caddyfile reads `{$DOMAIN}` and `{$PORT}` from your `.env` automatically. Make sure `DOMAIN` is set:
 
+```env
+DOMAIN=remote-agent.yourdomain.com
 ```
-remote-agent.yourdomain.com {
-    reverse_proxy app:3090
-}
-```
-
-Replace `remote-agent.yourdomain.com` with your actual domain.
-
-> **Note:** If using `with-db` profile (local PostgreSQL), change `app:3090` to `app-with-db:3090`
-
-**Save and exit:** `Ctrl+X`, then `Y`, then `Enter`
 
 ### How Caddy Works
 
@@ -540,10 +531,10 @@ If using managed database:
 
 ```bash
 # Start app with Caddy reverse proxy
-docker compose --profile external-db -f docker-compose.yml -f docker-compose.cloud.yml up -d --build
+docker compose --profile cloud up -d --build
 
 # View logs
-docker compose --profile external-db -f docker-compose.yml -f docker-compose.cloud.yml logs -f app
+docker compose --profile cloud logs -f app
 ```
 
 ### Option B: With Local PostgreSQL
@@ -552,18 +543,18 @@ If using `with-db` profile:
 
 ```bash
 # Start app, postgres, and Caddy
-docker compose --profile with-db -f docker-compose.yml -f docker-compose.cloud.yml up -d --build
+docker compose --profile with-db --profile cloud up -d --build
 
 # View logs
-docker compose --profile with-db -f docker-compose.yml -f docker-compose.cloud.yml logs -f app
-docker compose --profile with-db -f docker-compose.yml -f docker-compose.cloud.yml logs -f postgres
+docker compose --profile with-db --profile cloud logs -f app
+docker compose --profile with-db --profile cloud logs -f postgres
 ```
 
 ### Monitor Startup
 
 ```bash
 # Watch logs for successful startup (use --profile with-db for local PostgreSQL)
-docker compose --profile external-db -f docker-compose.yml -f docker-compose.cloud.yml logs -f app
+docker compose --profile cloud logs -f app
 
 # Look for:
 # [App] Starting Remote Coding Agent
@@ -583,21 +574,21 @@ docker compose --profile external-db -f docker-compose.yml -f docker-compose.clo
 
 ```bash
 # Basic health check
-curl https://remote-agent.yourdomain.com/health
+curl https://remote-agent.yourdomain.com/api/health
 # Expected: {"status":"ok"}
 
 # Database connectivity
-curl https://remote-agent.yourdomain.com/health/db
+curl https://remote-agent.yourdomain.com/api/health/db
 # Expected: {"status":"ok","database":"connected"}
 
 # Concurrency status
-curl https://remote-agent.yourdomain.com/health/concurrency
+curl https://remote-agent.yourdomain.com/api/health/concurrency
 # Expected: {"status":"ok","active":0,"queued":0,"maxConcurrent":10}
 ```
 
 ### Check SSL Certificate
 
-Visit `https://remote-agent.yourdomain.com/health` in your browser:
+Visit `https://remote-agent.yourdomain.com/api/health` in your browser:
 
 - Should show green padlock
 - Certificate issued by "Let's Encrypt"
@@ -666,14 +657,14 @@ Bot should respond with analysis.
 
 ```bash
 # All services
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml logs -f
+docker compose --profile cloud logs -f
 
 # Specific service
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml logs -f app
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml logs -f caddy
+docker compose --profile cloud logs -f app
+docker compose --profile cloud logs -f caddy
 
 # Last 100 lines
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml logs --tail=100 app
+docker compose --profile cloud logs --tail=100 app
 ```
 
 ### Update Application
@@ -684,31 +675,31 @@ cd /remote-coding-agent
 git pull
 
 # Rebuild and restart
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml up -d --build
+docker compose --profile cloud up -d --build
 
 # Check logs
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml logs -f app
+docker compose --profile cloud logs -f app
 ```
 
 ### Restart Services
 
 ```bash
 # Restart all services
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml restart
+docker compose --profile cloud restart
 
 # Restart specific service
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml restart app
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml restart caddy
+docker compose --profile cloud restart app
+docker compose --profile cloud restart caddy
 ```
 
 ### Stop Services
 
 ```bash
 # Stop all services
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml down
+docker compose --profile cloud down
 
 # Stop and remove volumes (caution: deletes data)
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml down -v
+docker compose --profile cloud down -v
 ```
 
 ---
@@ -734,7 +725,7 @@ sudo ufw status
 **Check Caddy logs:**
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml logs caddy
+docker compose --profile cloud logs caddy
 # Look for certificate issuance attempts
 ```
 
@@ -750,21 +741,21 @@ docker compose -f docker-compose.yml -f docker-compose.cloud.yml logs caddy
 **Check if running:**
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml ps
+docker compose --profile cloud ps
 # Should show 'app' and 'caddy' with state 'Up'
 ```
 
 **Check health endpoint:**
 
 ```bash
-curl http://localhost:3090/health
+curl http://localhost:3000/api/health
 # Tests app directly (bypasses Caddy)
 ```
 
 **Check logs:**
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml logs -f app
+docker compose --profile cloud logs -f app
 ```
 
 ### Database Connection Errors
