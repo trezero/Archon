@@ -1,6 +1,8 @@
-# Getting Started
+# Getting Started — CLI
 
-A practical guide to getting the Archon CLI installed and running against your own repository.
+Manual CLI setup guide. For the recommended AI-assisted setup, see the [README](../README.md#setup-2-min).
+
+A practical guide to getting the Archon CLI installed and running against your own repository without the setup wizard.
 
 ## Setup
 
@@ -88,17 +90,26 @@ archon complete <branch> --force   # skip uncommitted-changes check
 
 | Workflow | What It Does |
 |----------|-------------|
-| `archon-assist` | General questions, debugging, exploration |
-| `archon-fix-github-issue` | Investigate → plan → fix → PR for a GitHub issue |
-| `archon-idea-to-pr` | From idea to plan to implementation to PR |
-| `archon-plan-to-pr` | Execute an existing plan through to PR |
-| `archon-feature-development` | Implement a feature from a plan |
-| `archon-comprehensive-pr-review` | Multi-agent PR review |
-| `archon-resolve-conflicts` | Resolve merge conflicts |
-| `archon-ralph-fresh` | Iterate through PRD stories (stateless) |
-| `archon-ralph-stateful` | Iterate through PRD stories (with memory) |
-| `archon-refactor-safely` | Safely decompose large files with type-check hooks and behavior verification |
-| `archon-test-loop` | Run tests in a loop until passing |
+| `archon-assist` | General Q&A, debugging, exploration, CI failures — catch-all |
+| `archon-fix-github-issue` | Investigate → root cause analysis → implement fix → validate → PR |
+| `archon-idea-to-pr` | Feature idea → plan → implement → validate → PR → parallel reviews → self-fix |
+| `archon-plan-to-pr` | Execute existing plan → implement → validate → PR → review |
+| `archon-feature-development` | Implement feature from plan → validate → create PR |
+| `archon-comprehensive-pr-review` | Multi-agent PR review (5 parallel reviewers) with automatic fixes |
+| `archon-smart-pr-review` | Complexity-adaptive PR review — routes to relevant agents only |
+| `archon-create-issue` | Classify problem → gather context → investigate → create GitHub issue |
+| `archon-validate-pr` | Thorough PR validation testing both main and feature branches |
+| `archon-resolve-conflicts` | Detect, analyze, and resolve merge conflicts in PRs |
+| `archon-refactor-safely` | Safe refactoring with type-check hooks and behavior verification |
+| `archon-architect` | Architectural sweep, complexity reduction, codebase health |
+| `archon-ralph-dag` | PRD implementation loop (iterate through stories until done) |
+| `archon-issue-review-full` | Comprehensive fix + full multi-agent review for GitHub issues |
+| `archon-test-loop-dag` | Iterative test-fix cycle until all tests pass |
+| `archon-remotion-generate` | Generate or modify Remotion video compositions with AI |
+
+These bundled workflows work for most projects. To customize, copy one from `.archon/workflows/defaults/` into `.archon/workflows/` and modify it — same-named files override the defaults.
+
+> **Auto-selection:** You don't need to remember workflow names. Just describe what you want — the router reads all workflow descriptions and picks the best match. For example, "fix issue #42" routes to `archon-fix-github-issue`, while "review this PR" routes to `archon-smart-pr-review`. If nothing matches clearly, it falls back to `archon-assist`.
 
 ---
 
@@ -157,12 +168,14 @@ model: sonnet
 nodes:
   - id: plan
     command: plan
+
   - id: implement
     command: implement
     depends_on: [plan]
+    context: fresh
 ```
 
-Workflows chain multiple commands as DAG nodes, support parallel execution via dependency graphs, and carry context between nodes via `$nodeId.output` variable substitution.
+Workflows chain multiple commands as DAG nodes, support parallel execution, conditional branching, and carry context between nodes via `$nodeId.output` substitution.
 
 > **Where are commands and workflows loaded from?**
 >

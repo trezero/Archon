@@ -376,6 +376,6 @@ bun install
 
 - [README.md](README.md) — Full documentation (all platforms, Docker, advanced config)
 - [docs/new-developer-guide.md](docs/new-developer-guide.md) — How Archon works (concepts and architecture)
-- [docs/getting-started.md](docs/getting-started.md) — CLI-focused setup guide
+- [docs/getting-started-cli.md](docs/getting-started-cli.md) — CLI-focused setup guide
 - [docs/configuration.md](docs/configuration.md) — All configuration options
 - [docs/authoring-workflows.md](docs/authoring-workflows.md) — Creating custom workflows
