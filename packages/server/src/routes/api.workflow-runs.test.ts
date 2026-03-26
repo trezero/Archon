@@ -59,7 +59,6 @@ type MockWorkflowRun = {
   user_message: string;
   started_at: string;
   completed_at: string | null;
-  current_step_index: number | null;
   metadata: Record<string, unknown>;
   working_path: string | null;
   last_activity_at: string | null;
@@ -221,7 +220,6 @@ const MOCK_RUNNING_RUN: MockWorkflowRun = {
   user_message: 'Deploy to staging',
   started_at: NOW,
   completed_at: null,
-  current_step_index: 1,
   metadata: {},
   working_path: '/tmp/worktrees/feature',
   last_activity_at: NOW,
@@ -238,7 +236,6 @@ const MOCK_PENDING_RUN: MockWorkflowRun = {
   ...MOCK_RUNNING_RUN,
   id: 'run-uuid-3',
   status: 'pending',
-  current_step_index: null,
 };
 
 const MOCK_EVENTS: MockWorkflowEvent[] = [

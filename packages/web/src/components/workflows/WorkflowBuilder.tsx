@@ -30,6 +30,90 @@ import { StatusBar } from './StatusBar';
 import { YamlCodeView } from './YamlCodeView';
 import type { DagNodeData, DagFlowNode } from './DagNodeComponent';
 
+const NODE_LIBRARY_WIDTH_KEY = 'archon:nodeLibraryWidth';
+const NODE_LIBRARY_MIN_WIDTH = 160;
+const NODE_LIBRARY_MAX_WIDTH = 400;
+const NODE_LIBRARY_DEFAULT_WIDTH = 208; // w-52
+
+function NodeLibraryPanel({
+  commands,
+  isLoading,
+}: {
+  commands: CommandEntry[];
+  isLoading: boolean;
+}): React.ReactElement {
+  const [width, setWidth] = useState(() => {
+    try {
+      const stored = parseInt(localStorage.getItem(NODE_LIBRARY_WIDTH_KEY) ?? '', 10);
+      return Number.isFinite(stored)
+        ? Math.min(Math.max(stored, NODE_LIBRARY_MIN_WIDTH), NODE_LIBRARY_MAX_WIDTH)
+        : NODE_LIBRARY_DEFAULT_WIDTH;
+    } catch {
+      return NODE_LIBRARY_DEFAULT_WIDTH;
+    }
+  });
+  const dragging = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
+
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent): void => {
+      dragging.current = true;
+      startX.current = e.clientX;
+      startWidth.current = width;
+      e.preventDefault();
+    },
+    [width]
+  );
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent): void => {
+      if (!dragging.current) return;
+      const delta = e.clientX - startX.current;
+      const next = Math.min(
+        Math.max(startWidth.current + delta, NODE_LIBRARY_MIN_WIDTH),
+        NODE_LIBRARY_MAX_WIDTH
+      );
+      setWidth(next);
+    };
+    const onMouseUp = (): void => {
+      if (!dragging.current) return;
+      dragging.current = false;
+      setWidth(prev => {
+        try {
+          localStorage.setItem(NODE_LIBRARY_WIDTH_KEY, String(prev));
+        } catch {
+          // Storage unavailable or quota exceeded — width persists in memory only
+        }
+        return prev;
+      });
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return (): void => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
+
+  return (
+    <div className="relative shrink-0 h-full overflow-hidden flex" style={{ width }}>
+      <div className="flex-1 overflow-hidden">
+        <NodeLibrary commands={commands} isLoading={isLoading} />
+      </div>
+      {/* Drag handle */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize node library panel"
+        onMouseDown={onMouseDown}
+        className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-accent/40 transition-colors z-10"
+        title="Drag to resize"
+      />
+    </div>
+  );
+}
+
 function WorkflowBuilderInner(): React.ReactElement {
   const [searchParams] = useSearchParams();
   const editName = searchParams.get('edit');
@@ -375,11 +459,7 @@ function WorkflowBuilderInner(): React.ReactElement {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left panel: Node Library */}
-        {showLibrary && (
-          <div className="w-52 shrink-0 h-full overflow-hidden">
-            <NodeLibrary commands={commandList} isLoading={commandsLoading} />
-          </div>
-        )}
+        {showLibrary && <NodeLibraryPanel commands={commandList} isLoading={commandsLoading} />}
 
         {/* Center area */}
         <div className="flex-1 relative overflow-hidden flex">

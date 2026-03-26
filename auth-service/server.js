@@ -25,8 +25,8 @@ try {
 } catch {
   console.error(
     '[auth-service] AUTH_PASSWORD_HASH is not a valid bcrypt hash. ' +
-    'Generate one with: docker compose --profile auth run --rm auth-service ' +
-    "node -e \"require('bcryptjs').hash('YOUR_PASSWORD', 12).then(h => console.log(h))\""
+      'Generate one with: docker compose --profile auth run --rm auth-service ' +
+      "node -e \"require('bcryptjs').hash('YOUR_PASSWORD', 12).then(h => console.log(h))\""
   );
   process.exit(1);
 }
@@ -66,7 +66,11 @@ function isSafeRedirect(rd) {
 
 // ── HTML helpers ──────────────────────────────────────────────────────────────
 function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 // ── Login HTML page ───────────────────────────────────────────────────────────
@@ -205,7 +209,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.on('error', (err) => {
+server.on('error', err => {
   console.error('[auth-service] Server failed to start:', err);
   process.exit(1);
 });
