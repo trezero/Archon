@@ -64,6 +64,35 @@ archon isolation cleanup 14       # Custom: 14 days
 archon isolation cleanup --merged # Remove branches merged into main (+ remote branches)
 ```
 
+## Validate Commands
+
+### `archon validate workflows [name]`
+
+Validate workflow YAML definitions and their referenced resources.
+
+```bash
+archon validate workflows                 # Validate all workflows in the repo
+archon validate workflows my-workflow     # Validate a single workflow
+archon validate workflows my-workflow --json  # Machine-readable JSON output
+```
+
+Checks: YAML syntax, DAG structure (cycles, dependency refs), command file existence, MCP config files, skill directories, provider compatibility. Returns actionable error messages with "did you mean?" suggestions for typos.
+
+Exit code: 0 = all valid, 1 = errors found.
+
+### `archon validate commands [name]`
+
+Validate command files (.md) in `.archon/commands/`.
+
+```bash
+archon validate commands                  # Validate all commands
+archon validate commands my-command       # Validate a single command
+```
+
+Checks: file exists, non-empty, valid name.
+
+## Other Commands
+
 ### `archon complete <branch> [flags]`
 
 Complete a branch lifecycle — removes worktree + local/remote branches.

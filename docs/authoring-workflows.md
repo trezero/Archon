@@ -449,6 +449,16 @@ Example validation error:
 Model "sonnet" is not compatible with provider "codex"
 ```
 
+### Resource Validation (CLI)
+
+To validate that all referenced command files, MCP config files, and skill directories exist on disk, run:
+
+```bash
+archon validate workflows <name>
+```
+
+This checks resource resolution beyond what load-time validation covers. Use `--json` for machine-readable output. See the [CLI User Guide](cli-user-guide.md) for details.
+
 ### Example: Config Defaults + Workflow Override
 
 **`.archon/config.yaml`:**

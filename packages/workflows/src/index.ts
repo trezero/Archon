@@ -102,6 +102,24 @@ export { substituteVariables } from './utils/variable-substitution';
 export { formatToolCall, formatThinking } from './utils/tool-formatter';
 
 // =============================================================================
+// Validator
+// =============================================================================
+export {
+  validateWorkflowResources,
+  validateCommand,
+  discoverAvailableCommands,
+  findSimilar,
+  levenshtein,
+  makeWorkflowResult,
+} from './validator';
+export type {
+  ValidationIssue,
+  WorkflowValidationResult,
+  CommandValidationResult,
+  ValidationConfig,
+} from './validator';
+
+// =============================================================================
 // Bundled Defaults
 // =============================================================================
 export { BUNDLED_COMMANDS, BUNDLED_WORKFLOWS, isBinaryBuild } from './defaults/bundled-defaults';

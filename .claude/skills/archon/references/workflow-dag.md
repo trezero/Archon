@@ -279,6 +279,23 @@ First iteration is always fresh regardless.
 
 ---
 
+## Validate Before Finishing
+
+Before declaring a workflow complete, validate it:
+
+```bash
+archon validate workflows <name>
+```
+
+Fix any errors and re-validate until the command returns clean. This checks:
+- YAML syntax and required fields
+- DAG structure (cycles, missing dependencies, invalid `$nodeId.output` refs)
+- All `command:` files exist on disk
+- All `mcp:` config files exist and contain valid JSON
+- All `skills:` directories exist
+
+Use `--json` for machine-readable output. Use `archon validate commands <name>` to validate individual command files.
+
 ## Validation Rules (Load Time)
 
 - All node IDs unique

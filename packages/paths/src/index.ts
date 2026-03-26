@@ -24,6 +24,7 @@ export {
   resolveProjectRootFromCwd,
   ensureProjectStructure,
   createProjectSourceSymlink,
+  findMarkdownFilesRecursive,
 } from './archon-paths';
 
 // Logger

@@ -190,6 +190,15 @@ bun run cli isolation cleanup 14  # Custom days
 # Clean up environments with branches merged into main (also deletes remote branches)
 bun run cli isolation cleanup --merged
 
+# Validate workflow definitions and their referenced resources
+bun run cli validate workflows              # All workflows
+bun run cli validate workflows my-workflow  # Single workflow
+bun run cli validate workflows my-workflow --json  # Machine-readable output
+
+# Validate command files
+bun run cli validate commands               # All commands
+bun run cli validate commands my-command    # Single command
+
 # Complete branch lifecycle (remove worktree + local/remote branches)
 bun run cli complete <branch-name>
 bun run cli complete <branch-name> --force  # Skip uncommitted-changes check
@@ -237,6 +246,7 @@ packages/
 │       ├── deps.ts           # WorkflowDeps injection types (IWorkflowPlatform, IWorkflowAssistantClient)
 │       ├── event-emitter.ts  # Workflow observability events
 │       ├── logger.ts         # JSONL file logger
+│       ├── validator.ts      # Resource validation (command files, MCP configs, skill dirs)
 │       ├── defaults/         # Bundled default commands and workflows
 │       ├── utils/            # Variable substitution, tool formatting, execution utilities
 │       └── index.ts          # Package exports

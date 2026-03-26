@@ -55,6 +55,7 @@ import {
 } from './commands/isolation';
 import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
+import { validateWorkflowsCommand, validateCommandsCommand } from './commands/validate';
 import { closeDatabase } from '@archon/core';
 import { setLogLevel, createLogger } from '@archon/paths';
 import * as git from '@archon/git';
@@ -86,6 +87,8 @@ Commands:
   isolation cleanup [days]   Remove stale environments (default: 7 days)
   isolation cleanup --merged Remove environments with branches merged into main
   complete <branch> [...]    Complete branch lifecycle (remove worktree + branches)
+  validate workflows [name]  Validate workflow definitions and their references
+  validate commands [name]   Validate command files
   version                    Show version info
   help                       Show this help message
 
@@ -326,6 +329,28 @@ async function main(): Promise<number> {
             return 1;
         }
         break;
+
+      case 'validate':
+        switch (subcommand) {
+          case 'workflows': {
+            const validateName = positionals[2];
+            return await validateWorkflowsCommand(effectiveCwd, validateName, jsonFlag);
+          }
+
+          case 'commands': {
+            const validateName = positionals[2];
+            return await validateCommandsCommand(effectiveCwd, validateName, jsonFlag);
+          }
+
+          default:
+            if (subcommand === undefined) {
+              console.error('Missing validate target');
+            } else {
+              console.error(`Unknown validate target: ${subcommand}`);
+            }
+            console.error('Available: workflows, commands');
+            return 1;
+        }
 
       case 'complete': {
         const branches = positionals.slice(1);
