@@ -28,7 +28,8 @@ import {
 
 describe('workflows database', () => {
   beforeEach(() => {
-    mockQuery.mockClear();
+    mockQuery.mockReset();
+    mockQuery.mockImplementation(() => Promise.resolve(createQueryResult([])));
   });
 
   const mockWorkflowRun: WorkflowRun = {
@@ -37,7 +38,6 @@ describe('workflows database', () => {
     conversation_id: 'conv-456',
     parent_conversation_id: null,
     codebase_id: 'codebase-789',
-    current_step_index: 0,
     status: 'running',
     user_message: 'Add dark mode support',
     metadata: {},
@@ -198,17 +198,6 @@ describe('workflows database', () => {
   });
 
   describe('updateWorkflowRun', () => {
-    test('updates current_step_index', async () => {
-      mockQuery.mockResolvedValueOnce(createQueryResult([]));
-
-      await updateWorkflowRun('workflow-run-123', { current_step_index: 2 });
-
-      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('current_step_index = $1'), [
-        2,
-        'workflow-run-123',
-      ]);
-    });
-
     test('updates status to completed', async () => {
       mockQuery.mockResolvedValueOnce(createQueryResult([]));
 
@@ -244,14 +233,14 @@ describe('workflows database', () => {
       mockQuery.mockResolvedValueOnce(createQueryResult([]));
 
       await updateWorkflowRun('workflow-run-123', {
-        current_step_index: 1,
         status: 'running',
+        metadata: { step: 'plan' },
       });
 
       const [query, params] = mockQuery.mock.calls[0] as [string, unknown[]];
-      expect(query).toContain('current_step_index = $1');
-      expect(query).toContain('status = $2');
-      expect(params).toEqual([1, 'running', 'workflow-run-123']);
+      expect(query).toContain('status = $1');
+      expect(query).toContain('metadata = metadata ||');
+      expect(params).toEqual(['running', '{"step":"plan"}', 'workflow-run-123']);
     });
 
     test('does nothing when no updates provided', async () => {
