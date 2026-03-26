@@ -141,17 +141,35 @@ Wait for user confirmation.
 
 For each discovered file:
 
-1. Read the file content using the Read tool
-2. Compute MD5 hash of the content:
+1. Check the file's line count:
+   ```bash
+   wc -l <filepath> | awk '{print $1}'
+   ```
+
+2. Read the full file content:
+   - **For files ≤ 1500 lines:** Use the Read tool directly (no offset/limit needed).
+   - **For files > 1500 lines:** Read in 1500-line chunks using the Read tool's `offset` and `limit` parameters, then concatenate all chunks into the complete content string:
+     ```
+     Read(file_path=<filepath>, limit=1500)                  # lines 1–1500
+     Read(file_path=<filepath>, offset=1500, limit=1500)     # lines 1501–3000
+     Read(file_path=<filepath>, offset=3000, limit=1500)     # lines 3001–4500
+     # ... continue until offset ≥ total line count
+     ```
+     Strip the line-number prefix from each chunk (format: `   N→`) before concatenating.
+
+   **CRITICAL:** Never use the Read tool without `limit` on a file before confirming it is ≤ 1500 lines. The default 2000-line limit silently truncates larger files, resulting in partial indexing.
+
+3. Compute MD5 hash of the content:
    ```bash
    md5sum <filepath> 2>/dev/null | cut -d' ' -f1 || md5 -q <filepath> 2>/dev/null
    ```
-3. Add to documents array:
+
+4. Add to documents array:
    ```json
    {"title": "<filename>", "content": "<full content>", "path": "<relative path>"}
    ```
 
-Use sub-agents to read files in parallel batches for speed (groups of 5-10 files).
+Use sub-agents to read files in parallel batches for speed (groups of 5-10 files). Each sub-agent must follow the line-count check and chunked reading steps above.
 
 ### Phase 4: Ingest via Archon
 
@@ -252,7 +270,7 @@ grep -q "archon-state.json" .gitignore 2>/dev/null || echo ".claude/archon-state
 **Code examples extracted:** <from progress results>
 
 ### What's indexed
-- docs/ (<N> files)
+- docs/ (<N> files covering: <brief topic summary>)
 - CLAUDE.md: project instructions
 - README.md: project overview
 
@@ -262,6 +280,8 @@ grep -q "archon-state.json" .gitignore 2>/dev/null || echo ".claude/archon-state
 - `/archon-memory sync` — re-sync after doc changes
 - `/archon-memory status` — check freshness
 ```
+
+If any files required chunked reading (> 1500 lines), confirm in the report that all chunks were fully read and the complete content was indexed — do NOT note truncation.
 
 ---
 
