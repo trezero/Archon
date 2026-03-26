@@ -1,6 +1,6 @@
 # Advanced Features: Hooks, MCP, Skills, Retry
 
-These features are available on **command and prompt nodes** only. Bash and loop nodes do not support these features (silently ignored, except `retry` on loop nodes which is a hard error).
+These features are available on **command and prompt nodes** (hooks, MCP, skills, tool restrictions) and **command, prompt, and bash nodes** (retry, output_format). Loop nodes do not support these features (`retry` on loop nodes is a hard error; others are silently ignored).
 
 ## Provider Compatibility
 
@@ -307,15 +307,15 @@ Available on command, prompt, and bash nodes. **Not supported on loop nodes** (h
 
 | Category | Examples | Retried? |
 |----------|----------|----------|
-| **FATAL** | `unauthorized`, `forbidden`, `permission denied`, `401`, `403`, `credit balance` | Never |
-| **TRANSIENT** | `timeout`, `rate limit`, `429`, `503`, `network error`, `process crash` | By default |
+| **FATAL** | `unauthorized`, `forbidden`, `permission denied`, `invalid token`, `authentication failed`, `auth error`, `401`, `403`, `credit balance` | Never |
+| **TRANSIENT** | `timeout`, `etimedout`, `rate limit`, `too many requests`, `429`, `502`, `503`, `econnrefused`, `econnreset`, `network error`, `socket hang up`, `exited with code`, `claude code crash` | By default |
 | **UNKNOWN** | Everything else | Only with `on_error: all` |
 
 FATAL patterns take priority over TRANSIENT patterns in the same error message.
 
 ### Two-Layer Retry Stack
 
-1. **SDK-level** (automatic): 3 attempts with 2-second base delay for API errors
+1. **SDK-level** (automatic): Built-in retry for API errors (behavior managed by the Claude/Codex SDK)
 2. **Node-level** (configurable via `retry:`): Wraps the entire SDK call. Default when `retry:` is omitted: 2 retries, 3000ms base delay, transient errors only
 
 ### Idle Timeout

@@ -42,8 +42,8 @@ argument-hint: <expected-input-format>
 
 | Field | Required | Purpose |
 |-------|----------|---------|
-| `description` | Yes | Shown in `/commands` list and workflow routing |
-| `argument-hint` | Yes | Tells users what input to provide |
+| `description` | Recommended | Shown in `/commands` list and workflow routing |
+| `argument-hint` | Optional | Tells users what input to provide |
 
 ---
 

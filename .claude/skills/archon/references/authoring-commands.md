@@ -125,7 +125,7 @@ Artifacts are how steps communicate in multi-step workflows. Write outputs to `$
 
 - **Vague instructions** — "Fix the code" is too vague. Be specific about what to investigate, which tools to use, what output to produce.
 - **No artifact output** — If a command produces no artifacts, downstream steps have nothing to work from.
-- **Assuming prior context** — When `clearContext: true` is set, the AI starts fresh. It must read artifacts explicitly.
+- **Assuming prior context** — When `context: fresh` is set on the calling node, the AI starts fresh. It must read artifacts explicitly.
 - **Giant monolithic commands** — Split complex work into focused phases. Each command should have one clear responsibility.
 - **Hardcoded paths** — Use `$ARTIFACTS_DIR` instead of hardcoded paths for portability.
 

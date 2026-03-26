@@ -85,13 +85,13 @@ All node types share these fields:
 | `trigger_rule` | string | `all_success` | Join semantics for multiple dependencies |
 | `idle_timeout` | number (ms) | 300000 | Per-node idle timeout. On loop nodes, applies per-iteration |
 
-**Command/prompt nodes only** (silently ignored on bash and loop nodes):
+**Command, prompt, and bash nodes** (silently ignored on loop nodes, except `retry` which is a hard error):
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `model` | string | inherited | Per-node model override |
 | `provider` | `claude` / `codex` | inherited | Per-node provider override |
-| `context` | `fresh` | — | Force fresh AI session |
+| `context` | `fresh` / `shared` | — | `fresh` = new session; `shared` = inherit from prior node. Defaults to `fresh` for parallel layers, inherited for sequential |
 | `output_format` | object | — | JSON Schema for structured output |
 | `allowed_tools` | string[] | all | Tool whitelist. `[]` = disable all. Claude only |
 | `denied_tools` | string[] | none | Tool blacklist. Claude only |

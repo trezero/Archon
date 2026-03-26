@@ -17,21 +17,14 @@ Variables are placeholders in command files and workflow prompts that get replac
 | `$nodeId.output` | DAG only | Full text output of a completed upstream node |
 | `$nodeId.output.field` | DAG only | JSON field access on structured output from upstream node (string/number/boolean) |
 
-## Scope by Workflow Type
+## Variable Availability
 
-| Variable | Steps | Loops | DAG |
-|----------|-------|-------|-----|
-| `$ARGUMENTS` / `$USER_MESSAGE` | Yes | Yes | Yes |
-| `$WORKFLOW_ID` | Yes | Yes | Yes |
-| `$ARTIFACTS_DIR` | Yes | Yes | Yes |
-| `$BASE_BRANCH` | Yes | Yes | Yes |
-| `$CONTEXT` variants | Yes | Yes | Yes |
-| `$nodeId.output` | No | No | Yes |
+All variables are available in all workflows. The only exception is `$nodeId.output` / `$nodeId.output.field`, which is DAG-only (requires an upstream node to reference).
 
 ## Where Variables Are Substituted
 
 - **Command files** (`.archon/commands/*.md`) — all variables except `$nodeId.output`
-- **Inline `prompt:` fields** — in loop workflows and DAG prompt nodes
+- **Inline `prompt:` fields** — in DAG prompt nodes and loop node prompts
 - **`bash:` scripts in DAG nodes** — `$nodeId.output` references are automatically shell-quoted (single-quoted with `'` escaped)
 
 ## Substitution Order

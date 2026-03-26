@@ -91,7 +91,7 @@ nodes:
 
 Nodes without `depends_on` run immediately. Nodes in the same topological layer run concurrently via `Promise.allSettled`. Skipped nodes (failed `when:` condition or `trigger_rule`) propagate their skipped state to dependants.
 
-> **Deprecation notice:** The `steps:` (sequential) and standalone `loop:` workflow types still work but are deprecated and will be removed in a future release. All new workflows should use `nodes:` (DAG) syntax.
+> **Note:** The `steps:` (sequential) format has been removed. All workflows use `nodes:` (DAG) format exclusively. See [Sequential-to-DAG Migration](./sequential-dag-migration-guide.md).
 
 ---
 
@@ -158,7 +158,7 @@ nodes:
 | `when` | string | — | Condition expression. Node is skipped if false |
 | `trigger_rule` | string | `all_success` | Join semantics when multiple upstreams exist |
 | `output_format` | object | — | JSON Schema for structured output. Supported for Claude and Codex nodes |
-| `context` | `'fresh'` | — | Force a fresh AI session for this node |
+| `context` | `'fresh'` \| `'shared'` | — | `fresh` = new session; `shared` = inherit from prior node. Defaults to `fresh` for parallel layers, inherited for sequential |
 | `provider` | `'claude'` \| `'codex'` | inherited | Per-node provider override |
 | `model` | string | inherited | Per-node model override |
 | `allowed_tools` | string[] | — | Whitelist of built-in tools for this node. `[]` disables all built-in tools (MCP-only mode). Claude only — Codex nodes emit a warning and ignore this field |

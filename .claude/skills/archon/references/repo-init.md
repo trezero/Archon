@@ -24,7 +24,7 @@ Create `.archon/config.yaml` only if you need to override defaults:
 
 ```yaml
 # AI provider for this repo (default: inherited from global config)
-assistant: claude
+assistant: claude                 # Repo-level key. In ~/.archon/config.yaml, use 'defaultAssistant' instead
 
 # Worktree settings
 worktree:
