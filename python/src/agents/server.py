@@ -231,10 +231,11 @@ async def stream_chat(request: Request):
     model = body.get("model", "openai:gpt-4o")
     conversation_history = body.get("conversation_history", [])
 
-    # In Docker compose, use the service name; locally, use localhost.
-    # Detect Docker by checking if /.dockerenv exists (standard Docker indicator).
+    # In Docker compose, use the service name; locally, use ARCHON_HOST.
     is_docker = os.path.exists("/.dockerenv")
-    default_api_url = "http://archon-server:8181" if is_docker else "http://localhost:8181"
+    archon_host = os.environ.get("ARCHON_HOST", "localhost")
+    server_port = os.environ.get("ARCHON_SERVER_PORT", "8181")
+    default_api_url = f"http://archon-server:{server_port}" if is_docker else f"http://{archon_host}:{server_port}"
     api_url = os.environ.get("ARCHON_API_URL", default_api_url)
 
     # Persist the user message via Main Server REST API (skip if no conversation)

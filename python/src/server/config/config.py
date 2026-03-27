@@ -137,7 +137,7 @@ def validate_supabase_url(url: str) -> bool:
         hostname = parsed.hostname or ""
 
         # Check for exact localhost and Docker internal hosts (security: prevent subdomain bypass)
-        local_hosts = ["localhost", "127.0.0.1", "host.docker.internal"]
+        local_hosts = ["localhost", "127.0.0.1", "host.docker.internal", "kong"]
         if hostname in local_hosts or hostname.endswith(".localhost"):
             return True
 

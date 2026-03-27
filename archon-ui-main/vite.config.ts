@@ -15,14 +15,15 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
   
   // Get host and port from environment variables or use defaults
   // For internal Docker communication, use the service name
-  // For external access, use the HOST from environment
+  // For external access, use ARCHON_HOST (the externally-reachable address)
   const isDocker = process.env.DOCKER_ENV === 'true' || existsSync('/.dockerenv');
   const internalHost = 'archon-server';  // Docker service name for internal communication
-  const externalHost = process.env.HOST || 'localhost';  // Host for external access
+  const externalHost = process.env.ARCHON_HOST || env.ARCHON_HOST || 'localhost';
   // CRITICAL: For proxy target, always use internal host in Docker
   const proxyHost = isDocker ? internalHost : externalHost;
   const host = isDocker ? internalHost : externalHost;
   const port = process.env.ARCHON_SERVER_PORT || env.ARCHON_SERVER_PORT || '8181';
+  const agentsPort = process.env.ARCHON_AGENTS_PORT || env.ARCHON_AGENTS_PORT || '8052';
   
   return {
     plugins: [
@@ -305,12 +306,12 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
         // Agent Work Orders API proxy (must come before general /api if enabled)
         if (agentWorkOrdersEnabled) {
           proxyConfig['/api/agent-work-orders'] = {
-            target: isDocker ? `http://archon-agent-work-orders:${agentWorkOrdersPort}` : `http://localhost:${agentWorkOrdersPort}`,
+            target: isDocker ? `http://archon-agent-work-orders:${agentWorkOrdersPort}` : `http://${externalHost}:${agentWorkOrdersPort}`,
           changeOrigin: true,
           secure: false,
             timeout: 10000, // 10 second timeout
             configure: (proxy: any, options: any) => {
-              const targetUrl = isDocker ? `http://archon-agent-work-orders:${agentWorkOrdersPort}` : `http://localhost:${agentWorkOrdersPort}`;
+              const targetUrl = isDocker ? `http://archon-agent-work-orders:${agentWorkOrdersPort}` : `http://${externalHost}:${agentWorkOrdersPort}`;
               
               // Handle proxy errors (e.g., service is down)
               proxy.on('error', (err: Error, req: any, res: any) => {
@@ -364,15 +365,15 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
         // The agent service registers routes at /agents/chat/stream etc.
         // but /agents/health needs to map to /health on the service
         proxyConfig['/agents/health'] = {
-          target: isDocker ? 'http://archon-agents:8052' : 'http://localhost:8052',
+          target: isDocker ? `http://archon-agents:${agentsPort}` : `http://${externalHost}:${agentsPort}`,
           changeOrigin: true,
           rewrite: () => '/health',
         };
         proxyConfig['/agents'] = {
-          target: isDocker ? 'http://archon-agents:8052' : 'http://localhost:8052',
+          target: isDocker ? `http://archon-agents:${agentsPort}` : `http://${externalHost}:${agentsPort}`,
           changeOrigin: true,
           configure: (proxy: any, _options: any) => {
-            const targetUrl = isDocker ? 'http://archon-agents:8052' : 'http://localhost:8052';
+            const targetUrl = isDocker ? `http://archon-agents:${agentsPort}` : `http://${externalHost}:${agentsPort}`;
 
             proxy.on('error', (err: Error, req: any, res: any) => {
               console.log('[VITE PROXY ERROR - Agents]:', err.message);
@@ -398,7 +399,7 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
         // Archon setup script download proxy (served by MCP server)
         const mcpPort = env.ARCHON_MCP_PORT || '8051';
         proxyConfig['/archon-setup'] = {
-          target: isDocker ? `http://archon-mcp:${mcpPort}` : `http://localhost:${mcpPort}`,
+          target: isDocker ? `http://archon-mcp:${mcpPort}` : `http://${externalHost}:${mcpPort}`,
           changeOrigin: true,
           xfwd: true,
         };

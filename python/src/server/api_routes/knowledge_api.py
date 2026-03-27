@@ -214,6 +214,14 @@ class InlineSyncRequest(BaseModel):
     extract_code_examples: bool = True
 
 
+class InlineAppendRequest(BaseModel):
+    """Request to append documents to an existing inline source without removing existing content."""
+    source_id: str
+    documents: list[InlineDocument]
+    knowledge_type: str = "technical"
+    extract_code_examples: bool = True
+
+
 @router.get("/crawl-progress/{progress_id}")
 async def get_crawl_progress(progress_id: str):
     """Get crawl progress for polling.
@@ -990,6 +998,7 @@ async def _perform_inline_ingest(
     request: InlineIngestRequest,
     valid_docs: list[InlineDocument],
     tracker,
+    merge_hashes: bool = False,
 ):
     """Perform inline document ingestion with progress tracking."""
     async with crawl_semaphore:
@@ -1082,12 +1091,18 @@ async def _perform_inline_ingest(
                     if request.project_id:
                         metadata["project_id"] = request.project_id
                     # Store file hashes for incremental sync
-                    file_hashes = {}
+                    new_hashes = {}
                     for doc in valid_docs:
                         if doc.file_hash:
-                            file_hashes[doc.title] = doc.file_hash
-                    if file_hashes:
-                        metadata["file_hashes"] = file_hashes
+                            new_hashes[doc.title] = doc.file_hash
+                    if new_hashes:
+                        if merge_hashes:
+                            # Append mode: merge new hashes into existing
+                            existing_hashes = metadata.get("file_hashes", {})
+                            existing_hashes.update(new_hashes)
+                            metadata["file_hashes"] = existing_hashes
+                        else:
+                            metadata["file_hashes"] = new_hashes
                     metadata["last_synced"] = datetime.now(timezone.utc).isoformat()
                     supabase_client.table("archon_sources").update(
                         {"metadata": metadata}
@@ -1485,6 +1500,97 @@ async def sync_inline_documents(request: InlineSyncRequest):
         response["documentsSkipped"] = len(sync_diff["unchanged"])
 
     return response
+
+
+@router.post("/knowledge/append-inline")
+async def append_inline_documents(request: InlineAppendRequest):
+    """Append documents to an existing inline source without removing existing content.
+
+    Unlike sync (which compares hashes and removes deleted docs) or add (which replaces
+    the entire source), append only adds new documents to the source. Existing documents
+    are preserved untouched.
+    """
+    # Validate source exists
+    supabase_client = get_supabase_client()
+    existing = supabase_client.table("archon_sources").select(
+        "source_id, title, metadata"
+    ).eq("source_id", request.source_id).execute()
+    if not existing.data:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Source {request.source_id} not found. Use action='add' to create a new source first.",
+        )
+
+    source_data = existing.data[0]
+    source_title = source_data.get("title", request.source_id)
+
+    # Validate documents
+    if not request.documents:
+        raise HTTPException(status_code=422, detail="At least one document is required")
+
+    valid_docs = [doc for doc in request.documents if doc.content and doc.content.strip()]
+    if not valid_docs:
+        raise HTTPException(status_code=422, detail="All documents have empty content")
+
+    # Validate API key
+    await _validate_provider_api_key()
+
+    # Check for duplicate document titles already in the source
+    source_metadata = source_data.get("metadata", {}) or {}
+    stored_hashes = source_metadata.get("file_hashes", {})
+    duplicate_titles = [doc.title for doc in valid_docs if doc.title in stored_hashes]
+
+    # Warn but don't block — duplicates will overwrite their specific chunks via upsert
+    if duplicate_titles:
+        logger.info(
+            f"Append to {request.source_id}: {len(duplicate_titles)} document(s) already exist "
+            f"and will be updated: {duplicate_titles}"
+        )
+
+    # Build an InlineIngestRequest-compatible object for _perform_inline_ingest
+    ingest_request = InlineIngestRequest(
+        title=source_title,
+        documents=[InlineDocument(title=d.title, content=d.content, path=d.path, file_hash=d.file_hash) for d in valid_docs],
+        tags=source_metadata.get("tags", []),
+        project_id=source_metadata.get("project_id"),
+        knowledge_type=request.knowledge_type,
+        extract_code_examples=request.extract_code_examples,
+    )
+
+    progress_id = str(uuid.uuid4())
+    estimated_seconds = max(10, len(valid_docs) * 1)
+
+    from ..utils.progress.progress_tracker import ProgressTracker
+    tracker = ProgressTracker(progress_id, operation_type="inline_append")
+    await tracker.start({
+        "source_id": request.source_id,
+        "title": source_title,
+        "total_documents": len(valid_docs),
+        "status": "starting",
+        "operation": "append",
+    })
+
+    task = asyncio.create_task(
+        _perform_inline_ingest(
+            progress_id=progress_id,
+            source_id=request.source_id,
+            request=ingest_request,
+            valid_docs=valid_docs,
+            tracker=tracker,
+            merge_hashes=True,
+        )
+    )
+    active_crawl_tasks[progress_id] = task
+
+    return {
+        "success": True,
+        "progressId": progress_id,
+        "sourceId": request.source_id,
+        "estimatedSeconds": estimated_seconds,
+        "documentsToAppend": len(valid_docs),
+        "duplicatesDetected": len(duplicate_titles),
+        "duplicateTitles": duplicate_titles if duplicate_titles else None,
+    }
 
 
 async def _perform_upload_with_progress(

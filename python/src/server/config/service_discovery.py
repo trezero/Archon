@@ -124,8 +124,9 @@ class ServiceDiscovery:
             url = f"{protocol}://{host}:{port}"
 
         else:
-            # Local development - everything on localhost
-            url = f"{protocol}://localhost:{port}"
+            # Local development — use ARCHON_HOST for the externally-reachable address
+            host = os.getenv("ARCHON_HOST", "localhost")
+            url = f"{protocol}://{host}:{port}"
 
         self._cache[cache_key] = url
         return url

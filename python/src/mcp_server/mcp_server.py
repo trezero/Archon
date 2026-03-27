@@ -732,12 +732,13 @@ def _get_setup_urls(request: Request) -> tuple[str, str]:
     carries the external hostname (e.g. '192.168.1.10:3737').
     We extract just the hostname and combine with the known service ports
     so users outside Docker get reachable URLs.
+    Falls back to ARCHON_HOST env var (the externally-reachable address).
     """
     forwarded_host = request.headers.get("x-forwarded-host", "")
     if forwarded_host:
         hostname = forwarded_host.split(":")[0]
     else:
-        hostname = request.url.hostname or "localhost"
+        hostname = request.url.hostname or os.environ.get("ARCHON_HOST", "localhost")
 
     mcp_port = os.environ.get("ARCHON_MCP_PORT", "8051")
     api_port = os.environ.get("ARCHON_SERVER_PORT", "8181")

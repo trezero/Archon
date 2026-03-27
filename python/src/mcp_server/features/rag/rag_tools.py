@@ -395,13 +395,13 @@ def register_rag_tools(mcp: FastMCP):
         force: bool = False,
     ) -> str:
         """
-        Manage RAG knowledge base sources (consolidated: add/sync/delete).
+        Manage RAG knowledge base sources (consolidated: add/append/sync/delete).
 
         Args:
-            action: "add" | "sync" | "delete"
+            action: "add" | "append" | "sync" | "delete"
             title: Source title (required for add)
             source_type: "inline" | "url" (required for add)
-            documents: List of documents for inline mode (also accepts JSON string).
+            documents: List of documents for inline/append mode (also accepts JSON string).
                 Format: [{"title": "file.md", "content": "# Markdown...", "path": "docs/file.md"}]
                 Each document must have "title" and "content". "path" is optional.
             url: URL to crawl (required for add with source_type="url")
@@ -409,20 +409,22 @@ def register_rag_tools(mcp: FastMCP):
             project_id: Associate source with an Archon project for scoped searches
             knowledge_type: Classification (default: "technical")
             extract_code_examples: Extract and index code blocks (default: true)
-            source_id: Source ID for sync/delete (from rag_get_available_sources)
+            source_id: Source ID for append/sync/delete (from rag_get_available_sources)
             force: For sync: re-chunk everything (true) vs only changed (false)
 
         Workflow:
             1. Add source: manage_rag_source(action="add", title="My Docs", source_type="inline", documents='[...]')
             2. Poll progress: rag_check_progress(progress_id="...") until status="completed"
             3. Search: rag_search_knowledge_base(query="...", project_id="...")
-            4. Update later: manage_rag_source(action="sync", source_id="...", documents='[...]')
-            5. Remove: manage_rag_source(action="delete", source_id="...")
+            4. Append docs: manage_rag_source(action="append", source_id="...", documents='[...]')
+            5. Full sync: manage_rag_source(action="sync", source_id="...", documents='[...]')
+            6. Remove: manage_rag_source(action="delete", source_id="...")
 
         IMPORTANT: When project_id is provided with action="add", the source_id is deterministic
         (based on project_id + title). Calling "add" again with the same title and project_id
         will update the existing source instead of creating a duplicate.
 
+        For append: adds new documents to an existing source without removing anything.
         For sync: pass documents to re-ingest inline content, or omit documents to re-crawl a URL source.
 
         Returns:
@@ -525,6 +527,71 @@ def register_rag_tools(mcp: FastMCP):
                         else:
                             return MCPErrorFormatter.from_http_error(response, "url crawl")
 
+            elif action == "append":
+                if not source_id:
+                    return MCPErrorFormatter.format_error(
+                        "validation_error",
+                        "source_id is required for append action. Get it from rag_get_available_sources()."
+                    )
+                if not documents:
+                    return MCPErrorFormatter.format_error(
+                        "validation_error",
+                        "documents is required for append action. "
+                        'Format: [{"title": "file.md", "content": "# Content..."}]'
+                    )
+                # Handle both list and JSON string
+                if isinstance(documents, list):
+                    docs_list = documents
+                elif isinstance(documents, str):
+                    try:
+                        docs_list = json.loads(documents)
+                    except json.JSONDecodeError as e:
+                        return MCPErrorFormatter.format_error(
+                            "validation_error", f"Invalid JSON in documents parameter: {e}"
+                        )
+                else:
+                    return MCPErrorFormatter.format_error(
+                        "validation_error", "documents must be a list or JSON string"
+                    )
+                if not isinstance(docs_list, list) or not docs_list:
+                    return MCPErrorFormatter.format_error(
+                        "validation_error", "documents must be a non-empty array"
+                    )
+
+                async with httpx.AsyncClient(timeout=get_polling_timeout()) as client:
+                    response = await client.post(
+                        urljoin(api_url, "/api/knowledge/append-inline"),
+                        json={
+                            "source_id": source_id,
+                            "documents": docs_list,
+                            "knowledge_type": knowledge_type,
+                            "extract_code_examples": extract_code_examples,
+                        },
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        result = {
+                            "success": True,
+                            "progress_id": data.get("progressId"),
+                            "source_id": data.get("sourceId"),
+                            "estimated_seconds": data.get("estimatedSeconds"),
+                            "documents_to_append": data.get("documentsToAppend", 0),
+                            "duplicates_detected": data.get("duplicatesDetected", 0),
+                            "message": (
+                                f"Appending {data.get('documentsToAppend', 0)} document(s) to source '{source_id}'. "
+                                f"Poll rag_check_progress(progress_id='{data.get('progressId')}') for status."
+                            ),
+                        }
+                        if data.get("duplicateTitles"):
+                            result["duplicate_titles"] = data["duplicateTitles"]
+                            result["message"] += (
+                                f" Note: {data.get('duplicatesDetected', 0)} document(s) already exist "
+                                f"and will be updated in place."
+                            )
+                        return json.dumps(result, indent=2)
+                    else:
+                        return MCPErrorFormatter.from_http_error(response, "append documents")
+
             elif action == "sync":
                 if not source_id:
                     return MCPErrorFormatter.format_error(
@@ -626,7 +693,7 @@ def register_rag_tools(mcp: FastMCP):
             else:
                 return MCPErrorFormatter.format_error(
                     "validation_error",
-                    f'Invalid action "{action}". Must be "add", "sync", or "delete".'
+                    f'Invalid action "{action}". Must be "add", "append", "sync", or "delete".'
                 )
 
         except httpx.RequestError as e:

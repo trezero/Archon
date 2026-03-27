@@ -27,7 +27,7 @@ services:
       - ARCHON_MCP_PORT=${ARCHON_MCP_PORT:-8051}
       - ARCHON_AGENTS_PORT=${ARCHON_AGENTS_PORT:-8052}
       - AGENTS_ENABLED=${AGENTS_ENABLED:-false}
-      - ARCHON_HOST=${HOST:-localhost}
+      - ARCHON_HOST=${ARCHON_HOST:-localhost}
     networks:
       - app-network
       - default  # Connects to supabase_default network
@@ -96,6 +96,7 @@ services:
       - ARCHON_MCP_PORT=${ARCHON_MCP_PORT:-8051}
       - ARCHON_SERVER_PORT=${ARCHON_SERVER_PORT:-8181}
       - ARCHON_AGENTS_PORT=${ARCHON_AGENTS_PORT:-8052}
+      - ARCHON_HOST=${ARCHON_HOST:-localhost}
     networks:
       - app-network
       - default  # Connects to supabase_default network
@@ -173,6 +174,7 @@ services:
       - VITE_ARCHON_SERVER_PORT=${ARCHON_SERVER_PORT:-8181}
       - ARCHON_SERVER_PORT=${ARCHON_SERVER_PORT:-8181}
       - HOST=${HOST:-localhost}
+      - ARCHON_HOST=${ARCHON_HOST:-localhost}
       - PROD=${PROD:-false}
       - VITE_ALLOWED_HOSTS=${VITE_ALLOWED_HOSTS:-}
       - VITE_SHOW_DEVTOOLS=${VITE_SHOW_DEVTOOLS:-false}

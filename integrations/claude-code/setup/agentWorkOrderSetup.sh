@@ -8,8 +8,12 @@ ARCHON_API_URL="${ARCHON_API_URL:-{{ARCHON_API_URL}}}"
 ARCHON_MCP_URL="${ARCHON_MCP_URL:-{{ARCHON_MCP_URL}}}"
 
 # Fall back to defaults if placeholders were not substituted (script run directly from repo)
-[ "$ARCHON_API_URL" = "{{ARCHON_API_URL}}" ] && ARCHON_API_URL="http://localhost:8181"
-[ "$ARCHON_MCP_URL" = "{{ARCHON_MCP_URL}}" ] && ARCHON_MCP_URL="http://localhost:8051"
+# ARCHON_HOST, _SERVER_PORT, _MCP_PORT are resolved after ENV_FILE is located (below)
+if [ "$ARCHON_API_URL" = "{{ARCHON_API_URL}}" ]; then
+  _NEEDS_URL_FALLBACK=true
+else
+  _NEEDS_URL_FALLBACK=false
+fi
 
 # ── Resolve repo root by walking up to find docker-compose.yml ───────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -22,6 +26,23 @@ if [ ! -f "$REPO_ROOT/docker-compose.yml" ]; then
   exit 1
 fi
 ENV_FILE="$REPO_ROOT/.env"
+
+# ── Resolve ARCHON_HOST and service ports from .env ─────────────────────────
+_read_env() { grep "^${1}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | sed 's/^["'\'']\|["'\''"]$//g'; }
+ARCHON_HOST="${ARCHON_HOST:-$(_read_env ARCHON_HOST)}"
+ARCHON_HOST="${ARCHON_HOST:-localhost}"
+_SERVER_PORT="${ARCHON_SERVER_PORT:-$(_read_env ARCHON_SERVER_PORT)}"
+_SERVER_PORT="${_SERVER_PORT:-8181}"
+_MCP_PORT="${ARCHON_MCP_PORT:-$(_read_env ARCHON_MCP_PORT)}"
+_MCP_PORT="${_MCP_PORT:-8051}"
+_WO_PORT="${AGENT_WORK_ORDERS_PORT:-$(_read_env AGENT_WORK_ORDERS_PORT)}"
+_WO_PORT="${_WO_PORT:-8053}"
+
+# Apply URL fallback now that ARCHON_HOST and ports are resolved
+if [ "$_NEEDS_URL_FALLBACK" = "true" ]; then
+  ARCHON_API_URL="http://${ARCHON_HOST}:${_SERVER_PORT}"
+  ARCHON_MCP_URL="http://${ARCHON_HOST}:${_MCP_PORT}"
+fi
 
 # ── Color helpers (detect TTY, respect NO_COLOR) ────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
@@ -321,9 +342,9 @@ show_dashboard() {
 
   # --- Services ---
   ui_header "  Services"
-  check_service "Archon Server (:8181)" "http://localhost:8181/health" || true
-  check_service "Archon MCP (:8051)" "http://localhost:8051/health" || true
-  check_service "Work Orders (:8053)" "http://localhost:8053/health" || true
+  check_service "Archon Server (:${_SERVER_PORT})" "http://${ARCHON_HOST}:${_SERVER_PORT}/health" || true
+  check_service "Archon MCP (:${_MCP_PORT})" "http://${ARCHON_HOST}:${_MCP_PORT}/health" || true
+  check_service "Work Orders (:${_WO_PORT})" "http://${ARCHON_HOST}:${_WO_PORT}/health" || true
 
   # --- Database ---
   ui_header "  Database"
@@ -677,12 +698,12 @@ action_start_docker() {
   local max_attempts=15
   while [ "$attempts" -lt "$max_attempts" ]; do
     local code=""
-    code="$(curl -sf -m 3 -o /dev/null -w "%{http_code}" "http://localhost:8053/health" 2>/dev/null)" || code="000"
+    code="$(curl -sf -m 3 -o /dev/null -w "%{http_code}" "http://${ARCHON_HOST}:${_WO_PORT}/health" 2>/dev/null)" || code="000"
     if [ "$code" = "200" ]; then
       kill "$log_pid" 2>/dev/null || true
       trap - INT TERM
       echo
-      ui_success "Work Orders service is healthy at http://localhost:8053"
+      ui_success "Work Orders service is healthy at http://${ARCHON_HOST}:${_WO_PORT}"
       echo
       return
     fi
@@ -827,7 +848,7 @@ action_verify() {
   fi
 
   local svc_code=""
-  svc_code="$(curl -sf -m 3 -o /dev/null -w "%{http_code}" "http://localhost:8053/health" 2>/dev/null)" || svc_code="000"
+  svc_code="$(curl -sf -m 3 -o /dev/null -w "%{http_code}" "http://${ARCHON_HOST}:${_WO_PORT}/health" 2>/dev/null)" || svc_code="000"
   if [ "$svc_code" != "200" ]; then
     issues+=("4/5 - Work Orders service not running (run option [4] or [5])")
   fi
