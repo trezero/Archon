@@ -29,14 +29,10 @@ import {
   getDefaultWorkflowsPath,
   getArchonWorkspacesPath,
 } from '@archon/paths';
-import {
-  discoverWorkflowsWithConfig,
-  parseWorkflow,
-  isValidCommandName,
-  BUNDLED_WORKFLOWS,
-  BUNDLED_COMMANDS,
-  isBinaryBuild,
-} from '@archon/workflows';
+import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
+import { parseWorkflow } from '@archon/workflows/loader';
+import { isValidCommandName } from '@archon/workflows/command-validation';
+import { BUNDLED_WORKFLOWS, BUNDLED_COMMANDS, isBinaryBuild } from '@archon/workflows/defaults';
 import { findMarkdownFilesRecursive } from '@archon/core/utils/commands';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */

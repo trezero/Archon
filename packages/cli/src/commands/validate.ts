@@ -4,19 +4,19 @@
  * Thin layer over @archon/workflows validator: discovers, validates, formats output.
  */
 
+import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import {
-  discoverWorkflowsWithConfig,
   validateWorkflowResources,
   validateCommand,
   discoverAvailableCommands,
   findSimilar,
   makeWorkflowResult,
-} from '@archon/workflows';
+} from '@archon/workflows/validator';
 import type {
   ValidationIssue,
   WorkflowValidationResult,
   ValidationConfig,
-} from '@archon/workflows';
+} from '@archon/workflows/validator';
 import { loadConfig, loadRepoConfig } from '@archon/core';
 
 /**

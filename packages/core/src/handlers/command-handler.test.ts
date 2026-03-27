@@ -15,7 +15,7 @@ import { resolve, join } from 'path';
 import * as fsPromises from 'fs/promises';
 import * as gitUtils from '@archon/git';
 import * as pathValidation from '../utils/path-validation';
-import * as workflows from '@archon/workflows';
+import * as workflowDiscovery from '@archon/workflows/workflow-discovery';
 
 // Create mock functions for database modules (safe to mock - no standalone tests)
 const mockUpdateConversation = mock(() => Promise.resolve());
@@ -250,7 +250,7 @@ function setupSpies(): void {
   spyFsRm = spyOn(fsPromises, 'rm').mockImplementation(() => Promise.resolve());
 
   // Workflow spies
-  spyDiscoverWorkflows = spyOn(workflows, 'discoverWorkflowsWithConfig').mockResolvedValue({
+  spyDiscoverWorkflows = spyOn(workflowDiscovery, 'discoverWorkflowsWithConfig').mockResolvedValue({
     workflows: [],
     errors: [],
   });

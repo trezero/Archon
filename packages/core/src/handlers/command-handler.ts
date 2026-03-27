@@ -20,11 +20,8 @@ import {
 } from '../services/cleanup-service';
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '@archon/paths';
 import { loadConfig } from '../config/config-loader';
-import {
-  discoverWorkflowsWithConfig,
-  type WorkflowDefinition,
-  type WorkflowLoadError,
-} from '@archon/workflows';
+import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
+import type { WorkflowDefinition, WorkflowLoadError } from '@archon/workflows/schemas/workflow';
 import * as workflowDb from '../db/workflows';
 import { getTriggerForCommand, type DeactivatingCommand } from '../state/session-transitions';
 import { SessionNotFoundError } from '../db/sessions';

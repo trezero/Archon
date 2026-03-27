@@ -14,18 +14,16 @@ import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
 import * as commandHandler from '../handlers/command-handler';
-import { formatToolCall } from '@archon/workflows';
+import { formatToolCall } from '@archon/workflows/utils/tool-formatter';
 import { classifyAndFormatError } from '../utils/error-formatter';
 import { toError } from '../utils/error';
 import { getAssistantClient } from '../clients/factory';
 import { getArchonHome, getArchonWorkspacesPath } from '@archon/paths';
 import { syncArchonToWorktree } from '../utils/worktree-sync';
-import {
-  discoverWorkflowsWithConfig,
-  findWorkflow,
-  executeWorkflow,
-  type WorkflowDefinition,
-} from '@archon/workflows';
+import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
+import { findWorkflow } from '@archon/workflows/router';
+import { executeWorkflow } from '@archon/workflows/executor';
+import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 import { createWorkflowDeps } from '../workflows/store-adapter';
 import { loadConfig } from '../config/config-loader';
 import { generateAndSetTitle } from '../services/title-generator';

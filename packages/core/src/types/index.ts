@@ -2,7 +2,7 @@
  * Core type definitions for the Remote Coding Agent platform
  */
 import type { TransitionTrigger } from '../state/session-transitions';
-import type { WorkflowDefinition } from '@archon/workflows';
+import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 import type { McpServerConfig, AgentDefinition } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 
@@ -192,7 +192,7 @@ export type MessageChunk =
   | { type: 'tool_result'; toolName: string; toolOutput: string }
   | { type: 'workflow_dispatch'; workerConversationId: string; workflowName: string };
 
-import type { ModelReasoningEffort, WebSearchMode } from '@archon/workflows';
+import type { ModelReasoningEffort, WebSearchMode } from '@archon/workflows/schemas/workflow';
 export type { ModelReasoningEffort, WebSearchMode };
 
 export interface AssistantRequestOptions {

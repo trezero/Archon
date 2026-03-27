@@ -61,9 +61,13 @@ mock.module('@archon/core', () => ({
   }),
 }));
 
-mock.module('@archon/workflows', () => ({
+mock.module('@archon/workflows/workflow-discovery', () => ({
   discoverWorkflowsWithConfig: mockDiscoverWorkflows,
+}));
+mock.module('@archon/workflows/loader', () => ({
   parseWorkflow: mockParseWorkflow,
+}));
+mock.module('@archon/workflows/command-validation', () => ({
   isValidCommandName: mock(
     (name: string) =>
       !name.includes('/') &&
@@ -72,6 +76,8 @@ mock.module('@archon/workflows', () => ({
       !!name &&
       !name.startsWith('.')
   ),
+}));
+mock.module('@archon/workflows/defaults', () => ({
   BUNDLED_WORKFLOWS: {
     'archon-assist': 'name: archon-assist\ndescription: Archon Assist\nnodes: []',
   },

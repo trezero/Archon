@@ -259,8 +259,7 @@ packages/
 │       ├── logger.ts         # JSONL file logger
 │       ├── validator.ts      # Resource validation (command files, MCP configs, skill dirs)
 │       ├── defaults/         # Bundled default commands and workflows
-│       ├── utils/            # Variable substitution, tool formatting, execution utilities
-│       └── index.ts          # Package exports
+│       └── utils/            # Variable substitution, tool formatting, execution utilities
 ├── git/                      # @archon/git - Git operations (no @archon/core dep)
 │   └── src/
 │       ├── branch.ts         # Branch operations (checkout, merge detection, etc.)
@@ -322,15 +321,19 @@ import { handleMessage, ConversationLockManager, pool } from '@archon/core';
 import * as conversationDb from '@archon/core/db/conversations';
 import * as git from '@archon/git';
 
-// ✅ CORRECT: Import workflow engine types/functions directly from @archon/workflows
-import type { WorkflowDeps, IWorkflowStore } from '@archon/workflows';
-import { executeWorkflow, discoverWorkflows } from '@archon/workflows';
+// ✅ CORRECT: Import workflow engine types/functions from direct subpaths
+import type { WorkflowDeps } from '@archon/workflows/deps';
+import type { IWorkflowStore } from '@archon/workflows/store';
+import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
+import { executeWorkflow } from '@archon/workflows/executor';
+import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
+import { findWorkflow } from '@archon/workflows/router';
 
 // ❌ WRONG: Never use generic import for main package
 import * as core from '@archon/core';  // Don't do this
 
-// ❌ WRONG: In @archon/web, never import from @archon/workflows
-import type { DagNode } from '@archon/workflows/types';  // Don't do this — subpath no longer exists
+// ❌ WRONG: In @archon/web, never import from @archon/workflows (it's a server package)
+import type { DagNode } from '@archon/workflows/schemas/dag-node';  // Don't do this from @archon/web — use local mirror
 // ✅ CORRECT: Use frontend-local type mirrors in @archon/web
 import type { DagNode } from '@/lib/workflow-types';
 ```

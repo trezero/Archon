@@ -126,12 +126,16 @@ mock.module('@archon/paths', () => ({
   getArchonWorkspacesPath: () => '/tmp/.archon/workspaces',
 }));
 
-mock.module('@archon/workflows', () => ({
+mock.module('@archon/workflows/workflow-discovery', () => ({
   discoverWorkflowsWithConfig: mock(async () => ({ workflows: [], errors: [] })),
+}));
+mock.module('@archon/workflows/loader', () => ({
   parseWorkflow: mock(() => ({
     workflow: { name: 'test', description: 'Test', nodes: [] },
     error: null,
   })),
+}));
+mock.module('@archon/workflows/command-validation', () => ({
   isValidCommandName: mock(
     (name: string) =>
       !name.includes('/') &&
@@ -140,6 +144,8 @@ mock.module('@archon/workflows', () => ({
       !!name &&
       !name.startsWith('.')
   ),
+}));
+mock.module('@archon/workflows/defaults', () => ({
   BUNDLED_WORKFLOWS: {},
   BUNDLED_COMMANDS: {},
   isBinaryBuild: mock(() => false),

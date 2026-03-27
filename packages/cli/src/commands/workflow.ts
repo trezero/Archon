@@ -5,11 +5,9 @@ import { registerRepository, loadConfig, loadRepoConfig, generateAndSetTitle } f
 import { configureIsolation, getIsolationProvider } from '@archon/isolation';
 import { createLogger } from '@archon/paths';
 import { createWorkflowDeps } from '@archon/core/workflows/store-adapter';
-import {
-  discoverWorkflowsWithConfig,
-  executeWorkflow,
-  type WorkflowLoadResult,
-} from '@archon/workflows';
+import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
+import { executeWorkflow } from '@archon/workflows/executor';
+import type { WorkflowLoadResult } from '@archon/workflows/schemas/workflow';
 import * as conversationDb from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
 import * as isolationDb from '@archon/core/db/isolation-environments';

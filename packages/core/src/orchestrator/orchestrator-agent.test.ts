@@ -15,7 +15,7 @@
 import { mock, describe, test, expect, beforeEach } from 'bun:test';
 import { createMockLogger } from '../test/mocks/logger';
 import type { Codebase } from '../types';
-import type { WorkflowDefinition } from '@archon/workflows';
+import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 
 // ─── Mock setup (ALL mocks must come before the module under test import) ────
 
@@ -51,12 +51,18 @@ mock.module('../handlers/command-handler', () => ({
   handleCommand: mock(() => Promise.resolve({ success: true, message: 'ok', workflow: undefined })),
 }));
 
-mock.module('@archon/workflows', () => ({
+mock.module('@archon/workflows/utils/tool-formatter', () => ({
   formatToolCall: mock((toolName: string) => `🔧 ${toolName}`),
+}));
+mock.module('@archon/workflows/workflow-discovery', () => ({
   discoverWorkflowsWithConfig: mock(() => Promise.resolve({ workflows: [], errors: [] })),
+}));
+mock.module('@archon/workflows/router', () => ({
   findWorkflow: mock((name: string, workflows: WorkflowDefinition[]) =>
     workflows.find(w => w.name === name)
   ),
+}));
+mock.module('@archon/workflows/executor', () => ({
   executeWorkflow: mock(() => Promise.resolve()),
 }));
 

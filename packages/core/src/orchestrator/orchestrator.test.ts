@@ -3,7 +3,7 @@ import { MockPlatformAdapter } from '../test/mocks/platform';
 import { createMockLogger } from '../test/mocks/logger';
 import type { Conversation, Codebase, Session } from '../types';
 import { ConversationNotFoundError } from '../types';
-import type { WorkflowDefinition } from '@archon/workflows';
+import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 
 // ─── Mock setup (BEFORE importing module under test) ─────────────────────────
 
@@ -156,10 +156,16 @@ mock.module('../utils/error-formatter', () => ({
   classifyAndFormatError: mock((err: Error) => `⚠️ Error: ${err.message}`),
 }));
 
-mock.module('@archon/workflows', () => ({
+mock.module('@archon/workflows/workflow-discovery', () => ({
   discoverWorkflowsWithConfig: mockDiscoverWorkflows,
+}));
+mock.module('@archon/workflows/executor', () => ({
   executeWorkflow: mockExecuteWorkflow,
+}));
+mock.module('@archon/workflows/router', () => ({
   findWorkflow: mockFindWorkflow,
+}));
+mock.module('@archon/workflows/utils/tool-formatter', () => ({
   formatToolCall: mock((toolName: string, _toolInput: unknown) => `🔧 ${toolName.toUpperCase()}`),
 }));
 

@@ -3,7 +3,7 @@
  */
 import { pool, getDialect, getDatabaseType } from './connection';
 import type { IDatabase } from './adapters/types';
-import type { WorkflowRun, WorkflowRunStatus } from '@archon/workflows';
+import type { WorkflowRun, WorkflowRunStatus } from '@archon/workflows/schemas/workflow-run';
 import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
