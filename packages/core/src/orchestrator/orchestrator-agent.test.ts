@@ -20,6 +20,7 @@ import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 // ─── Mock setup (ALL mocks must come before the module under test import) ────
 
 const mockSyncWorkspace = mock(() => Promise.resolve({ branch: 'main', synced: true }));
+// Identity passthrough — strips branded type for test simplicity; empty-string guard not needed here
 const mockToRepoPath = mock((p: string) => p);
 const mockGetOrCreateConversation = mock(() => Promise.resolve(null as unknown));
 const mockGetCodebase = mock(() => Promise.resolve(null as unknown));
@@ -836,7 +837,7 @@ describe('discoverAllWorkflows — remote sync', () => {
     mockToRepoPath.mockClear();
     mockGetOrCreateConversation.mockReset();
     mockGetCodebase.mockReset();
-    // Restore defaults used by existing tests
+    // Reset mocks between tests in this suite and restore safe defaults
     mockGetOrCreateConversation.mockImplementation(() => Promise.resolve(null));
     mockGetCodebase.mockImplementation(() => Promise.resolve(null));
   });
@@ -876,5 +877,21 @@ describe('discoverAllWorkflows — remote sync', () => {
     await handleMessage(platform, 'conv-2', 'Hello');
 
     expect(mockSyncWorkspace).not.toHaveBeenCalled();
+  });
+
+  test('logs a warn when syncWorkspace rejects', async () => {
+    const conversation = makeConversation({ codebase_id: 'codebase-1' });
+    const codebase = makeCodebaseForSync();
+    mockGetOrCreateConversation.mockReturnValueOnce(Promise.resolve(conversation));
+    mockGetCodebase.mockReturnValueOnce(Promise.resolve(codebase));
+    mockSyncWorkspace.mockRejectedValueOnce(new Error('Network timeout'));
+
+    const platform = makePlatform();
+    await handleMessage(platform, 'conv-1', 'What is the latest commit?');
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ codebaseId: 'codebase-1' }),
+      'workspace.sync_failed'
+    );
   });
 });

@@ -354,8 +354,7 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Workflo
         allErrors.push(...repoResult.errors);
       }
     } catch (error) {
-      const err = error as Error;
-      getLog().warn({ err, errorType: err.constructor.name }, 'repo_workflow_discovery_failed');
+      getLog().warn({ err: error as Error }, 'repo_workflow_discovery_failed');
     }
   }
 
