@@ -100,6 +100,13 @@ bun run dev:server  # Backend only (port 3090)
 bun run dev:web     # Frontend only (port 5173)
 ```
 
+Regenerating frontend API types (requires server to be running at port 3090):
+
+```bash
+bun run dev:server  # must be running first
+bun --filter @archon/web generate:types
+```
+
 Optional: Use PostgreSQL instead of SQLite by setting `DATABASE_URL` in `.env`:
 
 ```bash
@@ -333,8 +340,8 @@ import { findWorkflow } from '@archon/workflows/router';
 import * as core from '@archon/core';  // Don't do this
 
 // ❌ WRONG: In @archon/web, never import from @archon/workflows (it's a server package)
-import type { DagNode } from '@archon/workflows/schemas/dag-node';  // Don't do this from @archon/web — use local mirror
-// ✅ CORRECT: Use frontend-local type mirrors in @archon/web
+import type { DagNode } from '@archon/workflows/schemas/dag-node';  // Don't do this from @archon/web
+// ✅ CORRECT: Use @archon/web-local types (DagNode hand-written; WorkflowRunStatus/WorkflowDefinition derived from generated spec)
 import type { DagNode } from '@/lib/workflow-types';
 ```
 
@@ -371,7 +378,7 @@ import type { DagNode } from '@/lib/workflow-types';
 - **@archon/core**: Business logic, database, orchestration, AI clients (provides `createWorkflowStore()` adapter bridging core DB → `IWorkflowStore`)
 - **@archon/adapters**: Platform adapters for Slack, Telegram, GitHub, Discord (depends on @archon/core)
 - **@archon/server**: OpenAPIHono HTTP server (Zod + OpenAPI spec generation via `@hono/zod-openapi`), Web adapter (SSE), API routes, Web UI static serving (depends on @archon/adapters)
-- **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui + Zustand), SSE streaming to server. Workflow types are mirrored in `src/lib/workflow-types.ts` (not imported from `@archon/workflows`)
+- **@archon/web**: React frontend (Vite + Tailwind v4 + shadcn/ui + Zustand), SSE streaming to server. `WorkflowRunStatus` and `WorkflowDefinition` base fields are derived from `src/lib/api.generated.d.ts` (generated from the OpenAPI spec via `bun generate:types`); `DagNode` and variants are hand-written in `src/lib/workflow-types.ts` (not imported from `@archon/workflows`)
 
 **1. Platform Adapters**
 - Implement `IPlatformAdapter` interface

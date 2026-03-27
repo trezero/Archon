@@ -257,6 +257,24 @@ describe('GET /api/workflows/:name', () => {
       await rm(testDir, { recursive: true, force: true });
     }
   });
+
+  test('returns WorkflowDefinition shape with expected top-level fields', async () => {
+    const app = createTestApp();
+    registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
+
+    mockListCodebases.mockImplementationOnce(async () => []);
+
+    const response = await app.request('/api/workflows/archon-assist');
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      workflow: Record<string, unknown>;
+    };
+    const wf = body.workflow;
+    // Guard against silent spec drift if engine's workflowBaseSchema drops or renames fields
+    expect(typeof wf['name']).toBe('string');
+    expect(typeof wf['description']).toBe('string');
+    expect(Array.isArray(wf['nodes'])).toBe(true);
+  });
 });
 
 describe('GET /api/workflows/:name - cwd validation', () => {

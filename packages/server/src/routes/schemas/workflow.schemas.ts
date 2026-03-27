@@ -2,12 +2,14 @@
  * Zod schemas for workflow API endpoints.
  */
 import { z } from '@hono/zod-openapi';
+import { workflowDefinitionSchema as engineWorkflowDefinitionSchema } from '@archon/workflows/schemas/workflow';
 
 /**
- * Workflow definition schema.
- * Intentionally z.any() for step 1 — full engine Zod schemas deferred to step 2 (#825).
+ * Workflow definition schema — derived from engine schema via direct subpath import.
+ * nodes: z.array(z.any()) is intentional; per-node validation happens in loader.ts.
  */
-export const workflowDefinitionSchema = z.any().openapi('WorkflowDefinition');
+export const workflowDefinitionSchema =
+  engineWorkflowDefinitionSchema.openapi('WorkflowDefinition');
 
 /** A workflow load error entry returned in GET /api/workflows `errors` field. */
 export const workflowLoadErrorSchema = z

@@ -1,10 +1,27 @@
 /**
- * Frontend-local type mirrors for workflow engine types.
- * Mirrors types from @archon/workflows/types — kept in sync manually.
- * This decouples the web package from the workflows engine package.
+ * Workflow types for the frontend.
+ *
+ * WorkflowRunStatus and the WorkflowDefinition base fields are derived from
+ * the generated OpenAPI spec (api.generated.d.ts) — run `bun generate:types`
+ * to regenerate when the server schema changes.
+ *
+ * DagNode and its variants are kept hand-written: the engine schema uses
+ * z.array(z.any()) for nodes (per-node validation happens in loader.ts), so
+ * node types do not appear in the OpenAPI spec.
  */
+import type { components } from './api.generated';
 
-export type WorkflowRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+// ---------------------------------------------------------------------------
+// Types derived from the generated OpenAPI spec
+// ---------------------------------------------------------------------------
+
+/** Workflow run status — derived from the OpenAPI spec. */
+export type WorkflowRunStatus = components['schemas']['WorkflowRunStatus'];
+
+// ---------------------------------------------------------------------------
+// UI-only types (not in the OpenAPI spec)
+// ---------------------------------------------------------------------------
+
 export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 export type ArtifactType = 'pr' | 'commit' | 'file_created' | 'file_modified' | 'branch';
 
@@ -14,7 +31,11 @@ export type TriggerRule =
   | 'none_failed_min_one_success'
   | 'all_done';
 
-/** Canonical list of trigger rules — mirrors TRIGGER_RULES from @archon/workflows. */
+/**
+ * Trigger rule values — manually kept in sync with TriggerRule and with
+ * TRIGGER_RULES in @archon/workflows/schemas/dag-node.
+ * Update this array whenever triggerRuleSchema.options changes.
+ */
 export const TRIGGER_RULES: readonly TriggerRule[] = [
   'all_success',
   'one_success',
@@ -137,23 +158,20 @@ export interface LoopNode extends DagNodeBase {
 /** A single node in a DAG workflow. */
 export type DagNode = CommandNode | PromptNode | BashNode | LoopNode;
 
-export type ModelReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-export type WebSearchMode = 'disabled' | 'cached' | 'live';
-
-/** DAG-based workflow — nodes with explicit dependency edges. */
-export interface DagWorkflow {
-  name: string;
-  description: string;
-  provider?: 'claude' | 'codex';
-  model?: string;
-  modelReasoningEffort?: ModelReasoningEffort;
-  webSearchMode?: WebSearchMode;
-  additionalDirectories?: string[];
-  readonly nodes: readonly DagNode[];
-  prompt?: never;
-}
+// ---------------------------------------------------------------------------
+// WorkflowDefinition — base fields from generated spec, nodes narrowed to DagNode[]
+// ---------------------------------------------------------------------------
 
 /**
- * Workflow definition parsed from YAML.
+ * Workflow definition for the frontend.
+ *
+ * The base fields (name, description, provider, model, etc.) are derived from
+ * the generated OpenAPI spec. nodes is narrowed from unknown[] (spec) to
+ * readonly DagNode[] because per-node validation happens in the engine's
+ * loader.ts, not at the top-level schema.
  */
-export type WorkflowDefinition = DagWorkflow;
+export type WorkflowDefinition = Omit<components['schemas']['WorkflowDefinition'], 'nodes'> & {
+  readonly nodes: readonly DagNode[];
+  // prompt?: never is intentionally omitted — the spec does not carry `never` fields.
+  // If discriminated union narrowing on `prompt` is ever needed, add it here.
+};
