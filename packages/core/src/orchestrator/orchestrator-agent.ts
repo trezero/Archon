@@ -20,6 +20,7 @@ import { toError } from '../utils/error';
 import { getAssistantClient } from '../clients/factory';
 import { getArchonHome, getArchonWorkspacesPath } from '@archon/paths';
 import { syncArchonToWorktree } from '../utils/worktree-sync';
+import { syncWorkspace, toRepoPath } from '@archon/git';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import { findWorkflow } from '@archon/workflows/router';
 import { executeWorkflow } from '@archon/workflows/executor';
@@ -328,6 +329,20 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Workflo
     try {
       const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
       if (codebase) {
+        // Sync canonical source with remote before the AI reads codebase state.
+        // Non-fatal: if fetch fails (network, no remote), proceed with local state.
+        try {
+          await syncWorkspace(toRepoPath(codebase.default_cwd));
+          getLog().debug(
+            { codebaseId: codebase.id, repoPath: codebase.default_cwd },
+            'workspace.sync_completed'
+          );
+        } catch (syncError) {
+          getLog().warn(
+            { err: syncError as Error, codebaseId: codebase.id },
+            'workspace.sync_failed'
+          );
+        }
         const workflowCwd = conversation.cwd ?? codebase.default_cwd;
         await syncArchonToWorktree(workflowCwd);
         const repoResult = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
