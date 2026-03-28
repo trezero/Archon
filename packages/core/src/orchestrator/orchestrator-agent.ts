@@ -21,6 +21,7 @@ import { getAssistantClient } from '../clients/factory';
 import { getArchonHome, getArchonWorkspacesPath } from '@archon/paths';
 import { syncArchonToWorktree } from '../utils/worktree-sync';
 import { syncWorkspace, toRepoPath } from '@archon/git';
+import type { WorkspaceSyncResult } from '@archon/git';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import { findWorkflow } from '@archon/workflows/router';
 import { executeWorkflow } from '@archon/workflows/executor';
@@ -309,10 +310,17 @@ async function inheritThreadContext(
   }
 }
 
+interface DiscoverResult extends WorkflowLoadResult {
+  syncResult?: WorkspaceSyncResult;
+  syncError?: string;
+}
+
 /** Discover global + repo-specific workflows, merge by name (repo overrides global) */
-async function discoverAllWorkflows(conversation: Conversation): Promise<WorkflowLoadResult> {
+async function discoverAllWorkflows(conversation: Conversation): Promise<DiscoverResult> {
   let workflows: WorkflowDefinition[] = [];
   const allErrors: WorkflowLoadError[] = [];
+  let syncResult: WorkspaceSyncResult | undefined;
+  let syncError: string | undefined;
 
   try {
     const result = await discoverWorkflowsWithConfig(getArchonWorkspacesPath(), loadConfig, {
@@ -332,16 +340,15 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Workflo
         // Sync canonical source with remote before the AI reads codebase state.
         // Non-fatal: if fetch fails (network, no remote), proceed with local state.
         try {
-          await syncWorkspace(toRepoPath(codebase.default_cwd));
+          syncResult = await syncWorkspace(toRepoPath(codebase.default_cwd));
           getLog().debug(
-            { codebaseId: codebase.id, repoPath: codebase.default_cwd },
+            { codebaseId: codebase.id, repoPath: codebase.default_cwd, ...syncResult },
             'workspace.sync_completed'
           );
-        } catch (syncError) {
-          getLog().warn(
-            { err: syncError as Error, codebaseId: codebase.id },
-            'workspace.sync_failed'
-          );
+        } catch (err) {
+          const error = err as Error;
+          syncError = error.message;
+          getLog().warn({ err: error, codebaseId: codebase.id }, 'workspace.sync_failed');
         }
         const workflowCwd = conversation.cwd ?? codebase.default_cwd;
         await syncArchonToWorktree(workflowCwd);
@@ -358,7 +365,7 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Workflo
     }
   }
 
-  return { workflows, errors: allErrors };
+  return { workflows, errors: allErrors, syncResult, syncError };
 }
 
 /** Build the full prompt with system prompt, user message, and optional contexts */
@@ -468,13 +475,29 @@ export async function handleMessage(
 
     // 3. Load codebases, discover workflows, build prompt
     const codebases = await codebaseDb.listCodebases();
-    const { workflows, errors: workflowErrors } = await discoverAllWorkflows(conversation);
+    const { workflows, errors: workflowErrors, syncResult, syncError } = await discoverAllWorkflows(conversation);
     if (workflowErrors.length > 0) {
       getLog().warn(
         { errorCount: workflowErrors.length, errors: workflowErrors },
         'workflow.discovery_errors_present'
       );
     }
+
+    // Emit workspace sync status to the user
+    if (syncResult || syncError) {
+      const syncMessage = syncError
+        ? 'Sync failed \u2014 using local state'
+        : syncResult?.updated
+          ? `Synced with origin/${syncResult.branch} \u2014 updated ${syncResult.previousHead} \u2192 ${syncResult.newHead}`
+          : `origin/${syncResult?.branch ?? 'unknown'} \u2014 up to date`;
+      if (platform.sendStructuredEvent) {
+        await platform.sendStructuredEvent(conversationId, {
+          type: 'system',
+          content: syncMessage,
+        });
+      }
+    }
+
     const fullPrompt = buildFullPrompt(
       conversation,
       codebases,

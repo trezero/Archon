@@ -19,7 +19,15 @@ import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 
 // ─── Mock setup (ALL mocks must come before the module under test import) ────
 
-const mockSyncWorkspace = mock(() => Promise.resolve({ branch: 'main', synced: true }));
+const mockSyncWorkspace = mock(() =>
+  Promise.resolve({
+    branch: 'main',
+    synced: true,
+    previousHead: 'abc12345',
+    newHead: 'abc12345',
+    updated: false,
+  })
+);
 // Identity passthrough — strips branded type for test simplicity; empty-string guard not needed here
 const mockToRepoPath = mock((p: string) => p);
 const mockGetOrCreateConversation = mock(() => Promise.resolve(null as unknown));

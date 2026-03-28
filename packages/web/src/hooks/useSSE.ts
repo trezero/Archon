@@ -41,6 +41,7 @@ interface SSEHandlers {
   onWorkflowOutputPreview?: (event: WorkflowOutputPreviewEvent) => void;
   onWarning?: (message: string) => void;
   onRetract?: () => void;
+  onSystemStatus?: (content: string) => void;
 }
 
 export function useSSE(
@@ -204,6 +205,9 @@ export function useSSE(
             break;
           case 'warning':
             h.onWarning?.(data.message);
+            break;
+          case 'system_status':
+            h.onSystemStatus?.(data.content);
             break;
           case 'retract':
             // Discard any buffered text (don't flush to UI)

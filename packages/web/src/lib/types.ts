@@ -139,6 +139,12 @@ export interface RetractEvent extends BaseSSEEvent {
   type: 'retract';
 }
 
+// System status (e.g., workspace sync result)
+export interface SystemStatusEvent extends BaseSSEEvent {
+  type: 'system_status';
+  content: string;
+}
+
 /**
  * Discriminated union of all SSE event types emitted by the Web adapter.
  * Parsed from JSON with no runtime validation — the server is trusted.
@@ -158,7 +164,8 @@ export type SSEEvent =
   | WorkflowArtifactEvent
   | WorkflowDispatchEvent
   | WorkflowOutputPreviewEvent
-  | RetractEvent;
+  | RetractEvent
+  | SystemStatusEvent;
 
 // UI State types
 
@@ -169,7 +176,7 @@ export type SSEEvent =
  */
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   toolCalls?: ToolCallDisplay[];
   error?: ErrorDisplay;

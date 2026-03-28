@@ -62,7 +62,13 @@ describe('WorktreeProvider', () => {
 
     // Default mocks for workspace sync
     getDefaultBranchSpy.mockResolvedValue('main');
-    syncWorkspaceSpy.mockResolvedValue({ branch: 'main', synced: true });
+    syncWorkspaceSpy.mockResolvedValue({
+      branch: 'main',
+      synced: true,
+      previousHead: '',
+      newHead: '',
+      updated: false,
+    });
   });
 
   afterEach(() => {

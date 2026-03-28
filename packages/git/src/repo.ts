@@ -68,8 +68,10 @@ export async function getRemoteUrl(repoPath: RepoPath): Promise<string | null> {
 
 /**
  * Sync workspace with remote origin.
- * Fetches the base branch from origin to ensure `origin/<baseBranch>` is up-to-date.
- * Does not modify the canonical repo's working tree or HEAD.
+ * Fetches the base branch from origin, then hard-resets the working tree to match
+ * `origin/<baseBranch>`. This ensures the canonical source clone always reflects
+ * the latest remote state — workflows use worktrees for isolation, so the source
+ * clone should never have local modifications.
  *
  * Branch resolution:
  * - If baseBranch is provided: Uses that branch (from config). Fails with actionable
@@ -110,7 +112,49 @@ export async function syncWorkspace(
     throw new Error(`Sync fetch from origin/${branchToSync} failed: ${err.message}`);
   }
 
-  return { branch: branchToSync, synced: true };
+  // Capture HEAD before reset so we can report whether anything changed
+  let previousHead = '';
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', workspacePath, 'rev-parse', '--short=8', 'HEAD'],
+      { timeout: 10000 }
+    );
+    previousHead = stdout.trim();
+  } catch {
+    // Non-fatal — fresh clone or detached HEAD edge case
+  }
+
+  // Hard-reset local working tree to match origin — source clone should never
+  // have local modifications (workflows use worktrees for isolation).
+  try {
+    await execFileAsync('git', ['-C', workspacePath, 'reset', '--hard', `origin/${branchToSync}`], {
+      timeout: 30000,
+    });
+  } catch (error) {
+    const err = error as Error;
+    throw new Error(`Reset to origin/${branchToSync} failed: ${err.message}`);
+  }
+
+  let newHead = '';
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', workspacePath, 'rev-parse', '--short=8', 'HEAD'],
+      { timeout: 10000 }
+    );
+    newHead = stdout.trim();
+  } catch {
+    // Non-fatal
+  }
+
+  return {
+    branch: branchToSync,
+    synced: true,
+    previousHead,
+    newHead,
+    updated: previousHead !== newHead && previousHead !== '',
+  };
 }
 
 /**

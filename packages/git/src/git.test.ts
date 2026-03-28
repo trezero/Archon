@@ -1369,7 +1369,13 @@ branch refs/heads/feature/auth
 
       const result = await git.syncWorkspace('/workspace/repo', 'main');
 
-      expect(result).toEqual({ branch: 'main', synced: true });
+      expect(result).toEqual({
+        branch: 'main',
+        synced: true,
+        previousHead: '',
+        newHead: '',
+        updated: false,
+      });
 
       expect(execSpy).toHaveBeenCalledWith(
         'git',
@@ -1378,22 +1384,31 @@ branch refs/heads/feature/auth
       );
     });
 
-    test('does not checkout or reset the canonical repo', async () => {
+    test('hard-resets working tree to origin after fetch', async () => {
       execSpy.mockResolvedValue({ stdout: '', stderr: '' });
 
       await git.syncWorkspace('/workspace/repo', 'main');
 
-      const checkoutCalls = execSpy.mock.calls.filter((call: unknown[]) => {
-        const args = call[1] as string[];
-        return args.includes('checkout');
-      });
       const resetCalls = execSpy.mock.calls.filter((call: unknown[]) => {
         const args = call[1] as string[];
         return args.includes('reset');
       });
 
-      expect(checkoutCalls).toHaveLength(0);
-      expect(resetCalls).toHaveLength(0);
+      expect(resetCalls).toHaveLength(1);
+      expect(resetCalls[0][1]).toEqual(['-C', '/workspace/repo', 'reset', '--hard', 'origin/main']);
+    });
+
+    test('throws if reset fails after successful fetch', async () => {
+      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+        if (args.includes('reset')) {
+          throw new Error('fatal: Could not reset index file');
+        }
+        return { stdout: '', stderr: '' };
+      });
+
+      await expect(git.syncWorkspace('/workspace/repo', 'main')).rejects.toThrow(
+        'Reset to origin/main failed'
+      );
     });
 
     test('throws error if fetch fails', async () => {
@@ -1440,7 +1455,13 @@ branch refs/heads/feature/auth
 
       const result = await git.syncWorkspace('/workspace/repo');
 
-      expect(result).toEqual({ branch: 'develop', synced: true });
+      expect(result).toEqual({
+        branch: 'develop',
+        synced: true,
+        previousHead: '',
+        newHead: '',
+        updated: false,
+      });
       expect(getDefaultBranchSpy).toHaveBeenCalledWith('/workspace/repo');
     });
 

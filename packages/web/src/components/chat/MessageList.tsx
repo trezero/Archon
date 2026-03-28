@@ -201,31 +201,42 @@ function MessageListRaw({
     <div className="relative flex-1 overflow-hidden">
       <div ref={containerRef} className="h-full overflow-y-auto px-4 py-4">
         <div className="mx-auto flex max-w-3xl flex-col gap-3 pb-6">
-          {messages.map(msg => (
-            <div key={msg.id} className="flex flex-col gap-1.5">
-              {msg.workflowResult ? (
-                <WorkflowResultCard
-                  workflowName={msg.workflowResult.workflowName}
-                  runId={msg.workflowResult.runId}
-                  content={msg.content}
-                />
-              ) : (
-                <>
-                  <MessageBubble message={msg} />
-                  {msg.toolCalls?.map(tool => (
-                    <ToolCallCard key={tool.id} tool={tool} />
-                  ))}
-                  {msg.error && <ErrorCard error={msg.error} />}
-                  {msg.workflowDispatch && (
-                    <WorkflowDispatchInline
-                      workflowName={msg.workflowDispatch.workflowName}
-                      workerConversationId={msg.workflowDispatch.workerConversationId}
-                    />
-                  )}
-                </>
-              )}
-            </div>
-          ))}
+          {messages.map(msg =>
+            msg.role === 'system' ? (
+              <div
+                key={msg.id}
+                className="flex items-center justify-center gap-2 py-1 text-xs text-muted-foreground"
+              >
+                <span className="h-px flex-1 bg-border" />
+                <span>{msg.content}</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            ) : (
+              <div key={msg.id} className="flex flex-col gap-1.5">
+                {msg.workflowResult ? (
+                  <WorkflowResultCard
+                    workflowName={msg.workflowResult.workflowName}
+                    runId={msg.workflowResult.runId}
+                    content={msg.content}
+                  />
+                ) : (
+                  <>
+                    <MessageBubble message={msg} />
+                    {msg.toolCalls?.map(tool => (
+                      <ToolCallCard key={tool.id} tool={tool} />
+                    ))}
+                    {msg.error && <ErrorCard error={msg.error} />}
+                    {msg.workflowDispatch && (
+                      <WorkflowDispatchInline
+                        workflowName={msg.workflowDispatch.workflowName}
+                        workerConversationId={msg.workflowDispatch.workerConversationId}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+            )
+          )}
         </div>
       </div>
 
