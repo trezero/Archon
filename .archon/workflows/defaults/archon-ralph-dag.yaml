@@ -153,8 +153,10 @@ nodes:
       echo "=== PROGRESS_END ==="
 
       # ── 5. Summary ────────────────────────────────────────────
-      TOTAL=$(grep -c '"passes"' "$PRD_DIR/prd.json" 2>/dev/null || echo "0")
-      DONE=$(grep -c '"passes": true' "$PRD_DIR/prd.json" 2>/dev/null || echo "0")
+      TOTAL=$(grep -c '"passes"' "$PRD_DIR/prd.json" || true)
+      DONE=$(grep -c '"passes": true' "$PRD_DIR/prd.json" || true)
+      TOTAL=${TOTAL:-0}
+      DONE=${DONE:-0}
       echo "STORIES_TOTAL=$TOTAL"
       echo "STORIES_DONE=$DONE"
       echo "STORIES_REMAINING=$(( TOTAL - DONE ))"
