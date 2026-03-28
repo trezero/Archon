@@ -127,9 +127,26 @@ async def get_extension(extension_id: str):
 
 @router.post("/extensions")
 async def create_extension(request: CreateExtensionRequest):
-    """Create a new extension. Validates content before saving."""
+    """Create a new extension. Validates content before saving.
+
+    Returns 409 Conflict if an extension with the same name already exists,
+    allowing callers to fall back to a PUT update.
+    """
     try:
         logfire.info(f"Creating extension | name={request.name}")
+
+        service = ExtensionService()
+
+        # Check for duplicate name before inserting
+        existing = service.find_by_name(request.name)
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": f"Extension '{request.name}' already exists",
+                    "existing_id": existing["id"],
+                },
+            )
 
         # Validate content first
         validator = ExtensionValidationService()
@@ -144,7 +161,6 @@ async def create_extension(request: CreateExtensionRequest):
                 },
             )
 
-        service = ExtensionService()
         extension = service.create_extension(
             name=request.name,
             description=request.description,

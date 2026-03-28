@@ -326,22 +326,27 @@ async def _handle_upload(
         })
 
     elif response.status_code == 409:
-        # Extension already exists - find it by name and update
-        list_response = await client.get(urljoin(api_url, "/api/extensions"))
-        if list_response.status_code != 200:
-            return MCPErrorFormatter.from_http_error(list_response, "find existing extension for update")
+        # Extension already exists — use the ID from the 409 response if available,
+        # otherwise fall back to a list lookup.
+        conflict_detail = response.json().get("detail", {})
+        existing_id = conflict_detail.get("existing_id") if isinstance(conflict_detail, dict) else None
 
-        extensions = list_response.json().get("extensions", [])
-        existing = next((e for e in extensions if e.get("name") == name), None)
+        if not existing_id:
+            list_response = await client.get(urljoin(api_url, "/api/extensions"))
+            if list_response.status_code != 200:
+                return MCPErrorFormatter.from_http_error(list_response, "find existing extension for update")
 
-        if not existing:
-            return MCPErrorFormatter.format_error(
-                "conflict",
-                f"Extension '{name}' reported as existing (409) but could not be found by name",
-                suggestion="Try deleting the conflicting extension first, then re-upload",
-            )
+            extensions = list_response.json().get("extensions", [])
+            existing = next((e for e in extensions if e.get("name") == name), None)
 
-        existing_id = existing["id"]
+            if not existing:
+                return MCPErrorFormatter.format_error(
+                    "conflict",
+                    f"Extension '{name}' reported as existing (409) but could not be found by name",
+                    suggestion="Try deleting the conflicting extension first, then re-upload",
+                )
+
+            existing_id = existing["id"]
         update_payload = {
             "content": extension_content,
             "updated_by": "mcp-upload",
