@@ -6,6 +6,7 @@ import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { validationErrorHook } from './openapi-defaults';
+import { makeTestWorkflow } from '@archon/workflows/test-utils';
 
 /** Test app factory: includes defaultHook to format validation errors as { error: string }. */
 function createTestApp(): OpenAPIHono {
@@ -28,7 +29,7 @@ const mockDiscoverWorkflows = mock(async (_cwd: string) => ({
 
 // Default: returns a valid workflow. Use mockReturnValueOnce in tests that need a parse failure.
 const mockParseWorkflow = mock((_content: string, _filename: string) => ({
-  workflow: { name: 'test', description: 'Test workflow', nodes: [] },
+  workflow: makeTestWorkflow({ name: 'test', description: 'Test workflow' }),
   error: null,
 }));
 

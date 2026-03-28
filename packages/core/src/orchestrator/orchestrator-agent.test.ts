@@ -14,6 +14,7 @@
 
 import { mock, describe, test, expect, beforeEach } from 'bun:test';
 import { createMockLogger } from '../test/mocks/logger';
+import { makeTestWorkflow } from '@archon/workflows/test-utils';
 import type { Codebase } from '../types';
 import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 
@@ -128,14 +129,6 @@ import { parseOrchestratorCommands } from './orchestrator-agent';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeWorkflow(name: string): WorkflowDefinition {
-  return {
-    name,
-    description: `${name} workflow`,
-    nodes: [{ id: 'step-1', prompt: 'do the thing' }],
-  } as unknown as WorkflowDefinition;
-}
-
 function makeCodebase(name: string, id = `id-${name}`): Codebase {
   return {
     id,
@@ -152,9 +145,9 @@ function makeCodebase(name: string, id = `id-${name}`): Codebase {
 // ─── parseOrchestratorCommands ────────────────────────────────────────────────
 
 describe('parseOrchestratorCommands', () => {
-  const assistWorkflow = makeWorkflow('assist');
-  const implementWorkflow = makeWorkflow('implement');
-  const planWorkflow = makeWorkflow('plan');
+  const assistWorkflow = makeTestWorkflow({ name: 'assist' });
+  const implementWorkflow = makeTestWorkflow({ name: 'implement' });
+  const planWorkflow = makeTestWorkflow({ name: 'plan' });
 
   const myProject = makeCodebase('my-project');
   const orgProject = makeCodebase('dynamous-community/remote-coding-agent');
@@ -748,7 +741,7 @@ describe('module constants (MAX_BATCH_ASSISTANT_CHUNKS, MAX_BATCH_TOTAL_CHUNKS)'
 describe('WorkflowInvocation and ProjectRegistration type shapes', () => {
   test('parseOrchestratorCommands result has the expected shape for workflowInvocation', () => {
     const codebases = [makeCodebase('my-project')];
-    const workflows = [makeWorkflow('assist')];
+    const workflows = [makeTestWorkflow({ name: 'assist' })];
     const response = '/invoke-workflow assist --project my-project --prompt "Do the thing"';
     const result = parseOrchestratorCommands(response, codebases, workflows);
 
@@ -772,7 +765,7 @@ describe('WorkflowInvocation and ProjectRegistration type shapes', () => {
 
   test('workflowInvocation.synthesizedPrompt is absent (not undefined-keyed) when no --prompt', () => {
     const codebases = [makeCodebase('my-project')];
-    const workflows = [makeWorkflow('assist')];
+    const workflows = [makeTestWorkflow({ name: 'assist' })];
     const response = '/invoke-workflow assist --project my-project';
     const result = parseOrchestratorCommands(response, codebases, workflows);
 

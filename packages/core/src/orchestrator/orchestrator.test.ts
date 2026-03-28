@@ -1,6 +1,7 @@
 import { mock, describe, test, expect, beforeEach } from 'bun:test';
 import { MockPlatformAdapter } from '../test/mocks/platform';
 import { createMockLogger } from '../test/mocks/logger';
+import { makeTestWorkflow, makeTestWorkflowList } from '@archon/workflows/test-utils';
 import type { Conversation, Codebase, Session } from '../types';
 import { ConversationNotFoundError } from '../types';
 import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
@@ -235,29 +236,7 @@ const mockSession: Session = {
   ended_reason: null,
 };
 
-const testWorkflows: WorkflowDefinition[] = [
-  {
-    name: 'fix-bug',
-    description: 'Fix a bug',
-    nodes: [
-      { id: 'investigate', command: 'investigate' },
-      { id: 'implement', command: 'implement', depends_on: ['investigate'] },
-    ],
-  },
-  {
-    name: 'add-feature',
-    description: 'Add a feature',
-    nodes: [
-      { id: 'plan', command: 'plan' },
-      { id: 'implement', command: 'implement', depends_on: ['plan'] },
-    ],
-  },
-  {
-    name: 'archon-assist',
-    description: 'General assistance',
-    nodes: [{ id: 'assist', command: 'assist' }],
-  },
-];
+const testWorkflows = makeTestWorkflowList(['fix-bug', 'add-feature', 'archon-assist']);
 
 const mockClient = {
   sendQuery: mock(async function* () {
@@ -525,11 +504,10 @@ describe('orchestrator-agent handleMessage', () => {
     });
 
     test('uses CommandResult workflow definition without rediscovery for /workflow run', async () => {
-      const workflowDefinition: WorkflowDefinition = {
+      const workflowDefinition = makeTestWorkflow({
         name: 'test-workflow',
         description: 'A test workflow',
-        nodes: [{ id: 'assist', command: 'assist' }],
-      };
+      });
       mockGetOrCreateConversation.mockResolvedValue(mockConversationWithProject);
       mockGetCodebase.mockResolvedValue(mockCodebase);
       mockHandleCommand.mockResolvedValue({
@@ -549,11 +527,10 @@ describe('orchestrator-agent handleMessage', () => {
     });
 
     test('validates workflow exists in auto-selected project before dispatch', async () => {
-      const workflowDefinition: WorkflowDefinition = {
+      const workflowDefinition = makeTestWorkflow({
         name: 'test-workflow',
         description: 'A test workflow',
-        nodes: [{ id: 'assist', command: 'assist' }],
-      };
+      });
       mockListCodebases.mockResolvedValue([mockCodebase]);
       mockHandleCommand.mockResolvedValue({
         success: true,

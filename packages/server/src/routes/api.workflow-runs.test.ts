@@ -3,6 +3,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ConversationLockManager } from '@archon/core';
 import type { WebAdapter } from '../adapters/web';
 import { validationErrorHook } from './openapi-defaults';
+import { mockAllWorkflowModules } from '../test/workflow-mock-factories';
 
 // ---------------------------------------------------------------------------
 // Mock setup — must be before dynamic imports of mocked modules
@@ -126,30 +127,7 @@ mock.module('@archon/paths', () => ({
   getArchonWorkspacesPath: () => '/tmp/.archon/workspaces',
 }));
 
-mock.module('@archon/workflows/workflow-discovery', () => ({
-  discoverWorkflowsWithConfig: mock(async () => ({ workflows: [], errors: [] })),
-}));
-mock.module('@archon/workflows/loader', () => ({
-  parseWorkflow: mock(() => ({
-    workflow: { name: 'test', description: 'Test', nodes: [] },
-    error: null,
-  })),
-}));
-mock.module('@archon/workflows/command-validation', () => ({
-  isValidCommandName: mock(
-    (name: string) =>
-      !name.includes('/') &&
-      !name.includes('\\') &&
-      !name.includes('..') &&
-      !!name &&
-      !name.startsWith('.')
-  ),
-}));
-mock.module('@archon/workflows/defaults', () => ({
-  BUNDLED_WORKFLOWS: {},
-  BUNDLED_COMMANDS: {},
-  isBinaryBuild: mock(() => false),
-}));
+mockAllWorkflowModules();
 
 mock.module('@archon/git', () => ({
   removeWorktree: mock(async () => {}),
@@ -456,6 +434,22 @@ describe('POST /api/workflows/:name/run', () => {
     });
     // Hono routes won't match ../secret as /:name due to path normalization — either 400 or 404
     expect([400, 404]).toContain(response.status);
+  });
+
+  test('returns 400 when isValidCommandName rejects the name', async () => {
+    const { isValidCommandName } = await import('@archon/workflows/command-validation');
+    (isValidCommandName as ReturnType<typeof mock>).mockReturnValueOnce(false);
+
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/.hidden/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: 'web-test-abc', message: 'Test' }),
+    });
+    expect(response.status).toBe(400);
+
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('Invalid workflow name');
   });
 
   test('returns 400 for malformed JSON body', async () => {

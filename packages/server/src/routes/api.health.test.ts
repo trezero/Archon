@@ -2,6 +2,11 @@ import { describe, test, expect, mock, beforeEach } from 'bun:test';
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ConversationLockManager } from '@archon/core';
 import type { WebAdapter } from '../adapters/web';
+import {
+  makeDiscoverWorkflowsMock,
+  makeLoaderMock,
+  makeCommandValidationMock,
+} from '../test/workflow-mock-factories';
 
 // ---------------------------------------------------------------------------
 // Mock setup — must be before dynamic imports
@@ -67,15 +72,9 @@ mock.module('@archon/paths', () => ({
   getArchonWorkspacesPath: () => '/tmp/.archon/workspaces',
 }));
 
-mock.module('@archon/workflows/workflow-discovery', () => ({
-  discoverWorkflowsWithConfig: mock(async () => ({ workflows: [], errors: [] })),
-}));
-mock.module('@archon/workflows/loader', () => ({
-  parseWorkflow: mock(() => ({ workflow: null, error: null })),
-}));
-mock.module('@archon/workflows/command-validation', () => ({
-  isValidCommandName: mock(() => true),
-}));
+mock.module('@archon/workflows/workflow-discovery', makeDiscoverWorkflowsMock);
+mock.module('@archon/workflows/loader', makeLoaderMock);
+mock.module('@archon/workflows/command-validation', makeCommandValidationMock);
 mock.module('@archon/workflows/defaults', () => ({
   BUNDLED_WORKFLOWS: {},
   BUNDLED_COMMANDS: {
