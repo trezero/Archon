@@ -4,22 +4,84 @@ description: |
   Triggers: "ralph", "run ralph", "ralph dag", "run ralph dag".
 
   DAG workflow that:
-  1. Validates PRD files exist, reads project context, installs dependencies
-  2. Runs Ralph loop (fresh context per iteration) implementing one story per iteration
-  3. Creates PR and reports completion
+  1. Detects input: existing prd.json, existing prd.md (needs stories), or raw idea
+  2. Generates prd.md + prd.json if needed (explores codebase, breaks into stories)
+  3. Validates PRD files, reads project context, installs dependencies
+  4. Runs Ralph loop (fresh context per iteration) implementing one story per iteration
+  5. Creates PR and reports completion
 
-  REQUIRES: .archon/ralph/{feature}/prd.md and prd.json
+  Accepts: An idea description, a path to an existing prd.md, or a directory with prd.md + prd.json
 
 provider: claude
 
 nodes:
   # ═══════════════════════════════════════════════════════════════
-  # NODE 1: VALIDATE & SETUP
+  # NODE 1: DETECT INPUT
+  # Determines what the user provided: full PRD, partial PRD, or idea
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: detect-input
+    bash: |
+      set -e
+      USER_MSG="$ARGUMENTS"
+      PRD_DIR=""
+
+      # Check if user specified a ralph path
+      if echo "$USER_MSG" | grep -qE '\.archon/ralph/'; then
+        PRD_DIR=$(echo "$USER_MSG" | grep -oE '\.archon/ralph/[^ ]+' | head -1)
+        PRD_DIR=$(dirname "$PRD_DIR" 2>/dev/null || echo "$PRD_DIR")
+      fi
+
+      # Auto-discover existing PRD directories
+      if [ -z "$PRD_DIR" ]; then
+        FOUND=$(find .archon/ralph -name "prd.json" -type f 2>/dev/null | head -1)
+        if [ -n "$FOUND" ]; then
+          PRD_DIR=$(dirname "$FOUND")
+        fi
+      fi
+
+      # Check if user pointed to a .md file directly
+      if [ -z "$PRD_DIR" ]; then
+        MD_PATH=$(echo "$USER_MSG" | grep -oE '[^ ]+\.prd\.md\|[^ ]+prd\.md\|[^ ]+\.md' | head -1)
+        if [ -n "$MD_PATH" ] && [ -f "$MD_PATH" ]; then
+          echo "INPUT_TYPE=external_prd"
+          echo "PRD_SOURCE=$MD_PATH"
+          echo "PRD_DIR="
+          exit 0
+        fi
+      fi
+
+      # Determine input type
+      if [ -n "$PRD_DIR" ] && [ -f "$PRD_DIR/prd.json" ] && [ -f "$PRD_DIR/prd.md" ]; then
+        echo "ready"
+      elif [ -n "$PRD_DIR" ] && [ -f "$PRD_DIR/prd.md" ] && [ ! -f "$PRD_DIR/prd.json" ]; then
+        echo "needs_generation"
+      else
+        echo "needs_generation"
+      fi
+
+  # ═══════════════════════════════════════════════════════════════
+  # NODE 2: GENERATE PRD
+  # Scenario 1: User has an idea → generate prd.md + prd.json
+  # Scenario 2: User has prd.md → generate prd.json with stories
+  # Skipped if prd.json already exists
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: generate-prd
+    depends_on: [detect-input]
+    when: "$detect-input.output == 'needs_generation'"
+    command: archon-ralph-generate
+    context: fresh
+
+  # ═══════════════════════════════════════════════════════════════
+  # NODE 3: VALIDATE & SETUP
   # Finds PRD directory, reads all state files, installs deps,
   # verifies the environment is ready for implementation.
   # ═══════════════════════════════════════════════════════════════
 
   - id: validate-prd
+    depends_on: [detect-input, generate-prd]
+    trigger_rule: one_success
     bash: |
       set -e
 
@@ -42,7 +104,8 @@ nodes:
       fi
 
       if [ -z "$PRD_DIR" ] || [ ! -f "$PRD_DIR/prd.json" ]; then
-        echo "ERROR: No prd.json found. Create one with: /command-invoke archon-ralph-prd"
+        echo "ERROR: No prd.json found after generation step."
+        echo "Check the generate-prd node output for errors."
         exit 1
       fi
 
@@ -90,14 +153,14 @@ nodes:
       echo "=== PROGRESS_END ==="
 
       # ── 5. Summary ────────────────────────────────────────────
-      TOTAL=$(cat "$PRD_DIR/prd.json" | grep -c '"passes"' || echo 0)
-      DONE=$(cat "$PRD_DIR/prd.json" | grep -c '"passes": true' || echo 0)
+      TOTAL=$(grep -c '"passes"' "$PRD_DIR/prd.json" 2>/dev/null || echo "0")
+      DONE=$(grep -c '"passes": true' "$PRD_DIR/prd.json" 2>/dev/null || echo "0")
       echo "STORIES_TOTAL=$TOTAL"
       echo "STORIES_DONE=$DONE"
-      echo "STORIES_REMAINING=$((TOTAL - DONE))"
+      echo "STORIES_REMAINING=$(( TOTAL - DONE ))"
 
   # ═══════════════════════════════════════════════════════════════
-  # NODE 2: RALPH IMPLEMENTATION LOOP
+  # NODE 4: RALPH IMPLEMENTATION LOOP
   # Fresh context each iteration. Reads PRD state from disk.
   # One story per iteration. Validates before committing.
   # ═══════════════════════════════════════════════════════════════
@@ -574,7 +637,7 @@ nodes:
       fresh_context: true
 
   # ═══════════════════════════════════════════════════════════════
-  # NODE 3: COMPLETION REPORT
+  # NODE 5: COMPLETION REPORT
   # Reads final state and produces a summary.
   # ═══════════════════════════════════════════════════════════════
 
