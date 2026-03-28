@@ -1,4 +1,4 @@
-import type { WorkflowDefinition, DagNode } from '@/lib/workflow-types';
+import type { WorkflowDefinition, DagNode } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 interface YamlCodeViewProps {

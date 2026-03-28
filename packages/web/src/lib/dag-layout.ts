@@ -1,6 +1,6 @@
 import type { Edge } from '@xyflow/react';
 import dagre from '@dagrejs/dagre';
-import type { DagNode } from '@/lib/workflow-types';
+import type { DagNode } from '@/lib/api';
 import type { DagFlowNode } from '@/components/workflows/DagNodeComponent';
 
 export const NODE_WIDTH = 180;

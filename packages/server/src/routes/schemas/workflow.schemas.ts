@@ -4,10 +4,7 @@
 import { z } from '@hono/zod-openapi';
 import { workflowDefinitionSchema as engineWorkflowDefinitionSchema } from '@archon/workflows/schemas/workflow';
 
-/**
- * Workflow definition schema — derived from engine schema via direct subpath import.
- * nodes: z.array(z.any()) is intentional; per-node validation happens in loader.ts.
- */
+/** Workflow definition schema — derived from engine schema via direct subpath import. */
 export const workflowDefinitionSchema =
   engineWorkflowDefinitionSchema.openapi('WorkflowDefinition');
 

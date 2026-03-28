@@ -4,7 +4,10 @@
  * SSE streams bypass the proxy in dev mode (Vite proxy buffers SSE responses).
  */
 import type { WorkflowRunStatus } from '@/lib/types';
-import type { WorkflowDefinition } from '@/lib/workflow-types';
+import type { components } from '@/lib/api.generated';
+
+export type WorkflowDefinition = components['schemas']['WorkflowDefinition'];
+export type DagNode = components['schemas']['DagNode'];
 
 /**
  * Base URL for SSE streams. In dev, bypasses Vite proxy by connecting directly
@@ -146,9 +149,6 @@ export async function addCodebase(
 export async function deleteCodebase(id: string): Promise<{ success: boolean }> {
   return fetchJSON<{ success: boolean }>(`/api/codebases/${id}`, { method: 'DELETE' });
 }
-
-// Workflows
-export type { WorkflowDefinition } from '@/lib/workflow-types';
 
 export interface WorkflowRunResponse {
   id: string;

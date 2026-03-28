@@ -16,8 +16,7 @@ import type {
   OnEdgesChange,
   NodeTypes,
 } from '@xyflow/react';
-import type { DagNode } from '@/lib/workflow-types';
-import type { CommandEntry } from '@/lib/api';
+import type { CommandEntry, DagNode } from '@/lib/api';
 import { dagNodeComponent, type DagFlowNode } from './DagNodeComponent';
 import { QuickAddPicker } from './QuickAddPicker';
 

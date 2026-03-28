@@ -3,8 +3,11 @@
  * SSE event types match what the Web adapter emits.
  */
 
-import type { WorkflowRunStatus, WorkflowStepStatus, ArtifactType } from '@/lib/workflow-types';
-export type { WorkflowRunStatus, WorkflowStepStatus, ArtifactType };
+import type { components } from '@/lib/api.generated';
+
+export type WorkflowRunStatus = components['schemas']['WorkflowRunStatus'];
+export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+export type ArtifactType = 'pr' | 'commit' | 'file_created' | 'file_modified' | 'branch';
 
 // Base SSE event
 interface BaseSSEEvent {

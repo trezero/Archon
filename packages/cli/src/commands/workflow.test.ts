@@ -18,6 +18,7 @@ const mockLogger = {
 // Mock @archon/paths (createLogger moved here from @archon/core)
 mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
+  getArchonHome: mock(() => '/home/test/.archon'),
 }));
 
 // Mock @archon/isolation (getIsolationProvider moved here from @archon/core)
@@ -262,6 +263,22 @@ describe('workflowListCommand', () => {
 
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Discovering workflows'));
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Found 1 workflow(s)'));
+  });
+
+  it('passes globalSearchPath to discoverWorkflowsWithConfig', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [],
+      errors: [],
+    });
+
+    await workflowListCommand('/test/path');
+
+    expect(discoverWorkflowsWithConfig).toHaveBeenCalledWith(
+      '/test/path',
+      expect.any(Function),
+      expect.objectContaining({ globalSearchPath: '/home/test/.archon' })
+    );
   });
 
   it('should throw error when discoverWorkflows fails', async () => {

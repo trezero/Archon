@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { ReactFlowProvider, useNodesState, useEdgesState, useViewport } from '@xyflow/react';
 import type { Edge } from '@xyflow/react';
-import type { WorkflowDefinition } from '@/lib/workflow-types';
+import type { WorkflowDefinition } from '@/lib/api';
 
 import { useProject } from '@/contexts/ProjectContext';
 import {

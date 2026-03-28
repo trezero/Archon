@@ -3,7 +3,7 @@
  * workflow loading and execution (non-schema hand-written discriminated unions).
  */
 import { z } from '@hono/zod-openapi';
-import type { DagNode } from './dag-node';
+import { dagNodeSchema } from './dag-node';
 
 // ---------------------------------------------------------------------------
 // Shared enum schemas
@@ -40,25 +40,13 @@ export type WorkflowBase = z.infer<typeof workflowBaseSchema>;
 /**
  * Workflow definition parsed from YAML.
  * All workflows use DAG-based execution with `nodes`.
- *
- * Note: nodes are typed as `readonly DagNode[]` but the schema uses `z.any()`
- * for the array elements because dagNodeSchema (with superRefine + transform)
- * is applied per-node in loader.ts — not as part of the top-level schema.
- * This is intentional — top-level schema parsing would lose the per-node error
- * accumulation that produces multiple errors for multiple invalid nodes.
  */
 export const workflowDefinitionSchema = workflowBaseSchema.extend({
-  nodes: z.array(z.any()),
+  nodes: z.array(dagNodeSchema),
 });
 
-/**
- * Derived from workflowDefinitionSchema with `nodes` narrowed to `DagNode[]`
- * (schema uses `z.any()` because per-node parsing happens in loader.ts).
- */
-export type WorkflowDefinition = Omit<z.infer<typeof workflowDefinitionSchema>, 'nodes'> & {
-  readonly nodes: readonly DagNode[];
-  prompt?: never;
-};
+/** Workflow definition with fully typed nodes (DagNode[]) derived from the schema. */
+export type WorkflowDefinition = z.infer<typeof workflowDefinitionSchema> & { prompt?: never };
 
 // ---------------------------------------------------------------------------
 // LoadCommandResult — discriminated union for command load outcomes

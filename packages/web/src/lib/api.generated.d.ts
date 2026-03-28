@@ -1385,6 +1385,193 @@ export interface components {
     DeleteCodebaseResponse: {
       success: boolean;
     };
+    DagNode: {
+      id: string;
+      depends_on?: string[];
+      when?: string;
+      /** @enum {string} */
+      trigger_rule?: 'all_success' | 'one_success' | 'none_failed_min_one_success' | 'all_done';
+      model?: string;
+      /** @enum {string} */
+      provider?: 'claude' | 'codex';
+      /** @enum {string} */
+      context?: 'fresh' | 'shared';
+      output_format?: {
+        [key: string]: unknown;
+      };
+      allowed_tools?: string[];
+      denied_tools?: string[];
+      idle_timeout?: number;
+      retry?: {
+        max_attempts: number;
+        delay_ms?: number;
+        /** @enum {string} */
+        on_error?: 'transient' | 'all';
+      };
+      hooks?: {
+        PreToolUse?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        PostToolUse?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        PostToolUseFailure?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        Notification?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        UserPromptSubmit?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        SessionStart?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        SessionEnd?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        Stop?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        SubagentStart?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        SubagentStop?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        PreCompact?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        PermissionRequest?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        Setup?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        TeammateIdle?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        TaskCompleted?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        Elicitation?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        ElicitationResult?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        ConfigChange?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        WorktreeCreate?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        WorktreeRemove?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+        InstructionsLoaded?: {
+          matcher?: string;
+          response: {
+            [key: string]: unknown;
+          };
+          timeout?: number;
+        }[];
+      };
+      mcp?: string;
+      skills?: string[];
+      command?: string;
+      prompt?: string;
+      bash?: string;
+      loop?: {
+        prompt: string;
+        until: string;
+        max_iterations: number;
+        /** @default false */
+        fresh_context: boolean;
+        until_bash?: string;
+      };
+      timeout?: number;
+    };
     WorkflowDefinition: {
       name: string;
       description: string;
@@ -1396,7 +1583,7 @@ export interface components {
       /** @enum {string} */
       webSearchMode?: 'disabled' | 'cached' | 'live';
       additionalDirectories?: string[];
-      nodes: unknown[];
+      nodes: components['schemas']['DagNode'][];
     };
     WorkflowLoadError: {
       filename: string;

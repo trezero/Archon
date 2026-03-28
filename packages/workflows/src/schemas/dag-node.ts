@@ -299,7 +299,8 @@ export const dagNodeSchema = dagNodeBaseSchema
     // loop — guaranteed by superRefine to be defined at this point
     if (!data.loop) throw new Error('unreachable: loop must be defined after superRefine');
     return { ...base, loop: data.loop } as LoopNode;
-  });
+  })
+  .openapi('DagNode');
 
 // ---------------------------------------------------------------------------
 // Type guards (preserved from original types.ts)

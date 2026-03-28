@@ -3,7 +3,7 @@
  */
 import { registerRepository, loadConfig, loadRepoConfig, generateAndSetTitle } from '@archon/core';
 import { configureIsolation, getIsolationProvider } from '@archon/isolation';
-import { createLogger } from '@archon/paths';
+import { createLogger, getArchonHome } from '@archon/paths';
 import { createWorkflowDeps } from '@archon/core/workflows/store-adapter';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import { executeWorkflow } from '@archon/workflows/executor';
@@ -57,7 +57,9 @@ function generateConversationId(): string {
  */
 async function loadWorkflows(cwd: string): Promise<WorkflowLoadResult> {
   try {
-    return await discoverWorkflowsWithConfig(cwd, loadConfig);
+    return await discoverWorkflowsWithConfig(cwd, loadConfig, {
+      globalSearchPath: getArchonHome(),
+    });
   } catch (error) {
     const err = error as Error;
     throw new Error(

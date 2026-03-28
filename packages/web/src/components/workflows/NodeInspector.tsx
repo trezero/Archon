@@ -3,10 +3,18 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-import { TRIGGER_RULES } from '@/lib/workflow-types';
-import type { TriggerRule } from '@/lib/workflow-types';
 import type { DagNodeData } from './DagNodeComponent';
-import type { CommandEntry } from '@/lib/api';
+import type { CommandEntry, DagNode } from '@/lib/api';
+
+// Keep in sync with triggerRuleSchema.options in @archon/workflows/schemas/dag-node.ts
+// (api.generated.d.ts is type-only and cannot export runtime values)
+type TriggerRule = NonNullable<DagNode['trigger_rule']>;
+const TRIGGER_RULES: readonly TriggerRule[] = [
+  'all_success',
+  'one_success',
+  'none_failed_min_one_success',
+  'all_done',
+];
 
 /** New DAG-mode inspector props (tabbed right panel). */
 export interface NodeInspectorProps {

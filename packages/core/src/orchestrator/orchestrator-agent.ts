@@ -23,7 +23,11 @@ import { syncArchonToWorktree } from '../utils/worktree-sync';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import { findWorkflow } from '@archon/workflows/router';
 import { executeWorkflow } from '@archon/workflows/executor';
-import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
+import type {
+  WorkflowDefinition,
+  WorkflowLoadResult,
+  WorkflowLoadError,
+} from '@archon/workflows/schemas/workflow';
 import { createWorkflowDeps } from '../workflows/store-adapter';
 import { loadConfig } from '../config/config-loader';
 import { generateAndSetTitle } from '../services/title-generator';
@@ -305,15 +309,19 @@ async function inheritThreadContext(
 }
 
 /** Discover global + repo-specific workflows, merge by name (repo overrides global) */
-async function discoverAllWorkflows(conversation: Conversation): Promise<WorkflowDefinition[]> {
+async function discoverAllWorkflows(conversation: Conversation): Promise<WorkflowLoadResult> {
   let workflows: WorkflowDefinition[] = [];
+  const allErrors: WorkflowLoadError[] = [];
+
   try {
     const result = await discoverWorkflowsWithConfig(getArchonWorkspacesPath(), loadConfig, {
       globalSearchPath: getArchonHome(),
     });
     workflows = [...result.workflows];
+    allErrors.push(...result.errors);
   } catch (error) {
-    getLog().warn({ err: error as Error }, 'global_workflow_discovery_failed');
+    const err = error as Error;
+    getLog().warn({ err, errorType: err.constructor.name }, 'global_workflow_discovery_failed');
   }
 
   if (conversation.codebase_id) {
@@ -328,13 +336,15 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Workflo
           workflowMap.set(rw.name, rw);
         }
         workflows = Array.from(workflowMap.values());
+        allErrors.push(...repoResult.errors);
       }
     } catch (error) {
-      getLog().debug({ err: error as Error }, 'repo_workflow_discovery_failed');
+      const err = error as Error;
+      getLog().warn({ err, errorType: err.constructor.name }, 'repo_workflow_discovery_failed');
     }
   }
 
-  return workflows;
+  return { workflows, errors: allErrors };
 }
 
 /** Build the full prompt with system prompt, user message, and optional contexts */
@@ -444,7 +454,13 @@ export async function handleMessage(
 
     // 3. Load codebases, discover workflows, build prompt
     const codebases = await codebaseDb.listCodebases();
-    const workflows = await discoverAllWorkflows(conversation);
+    const { workflows, errors: workflowErrors } = await discoverAllWorkflows(conversation);
+    if (workflowErrors.length > 0) {
+      getLog().warn(
+        { errorCount: workflowErrors.length, errors: workflowErrors },
+        'workflow.discovery_errors_present'
+      );
+    }
     const fullPrompt = buildFullPrompt(
       conversation,
       codebases,
