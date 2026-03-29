@@ -21,40 +21,70 @@ nodes:
   # ═══════════════════════════════════════════════════════════════
 
   - id: detect-input
-    bash: |
-      set -e
-      USER_MSG="$ARGUMENTS"
-      PRD_DIR=""
+    model: haiku
+    prompt: |
+      # Detect Ralph Input
 
-      # Check if user specified a ralph path
-      if echo "$USER_MSG" | grep -qE '\.archon/ralph/'; then
-        PRD_DIR=$(echo "$USER_MSG" | grep -oE '\.archon/ralph/[^ ]+' | head -1)
-        PRD_DIR=$(dirname "$PRD_DIR" 2>/dev/null || echo "$PRD_DIR")
-      fi
+      **User input**: $ARGUMENTS
 
-      # Auto-discover existing PRD directories
-      if [ -z "$PRD_DIR" ]; then
-        FOUND=$(find .archon/ralph -name "prd.json" -type f 2>/dev/null | head -1)
-        if [ -n "$FOUND" ]; then
-          PRD_DIR=$(dirname "$FOUND")
-        fi
-      fi
+      Determine what the user provided and prepare the PRD directory. Follow these steps exactly:
 
-      # Check if user pointed to a .md file directly
-      if [ -z "$PRD_DIR" ]; then
-        MD_PATH=$(echo "$USER_MSG" | grep -oE '[^ ]+\.prd\.md\|[^ ]+prd\.md\|[^ ]+\.md' | head -1)
-        if [ -n "$MD_PATH" ] && [ -f "$MD_PATH" ]; then
-          printf '{"input_type":"external_prd","prd_source":"%s","prd_dir":""}\n' "$MD_PATH"
-          exit 0
-        fi
-      fi
+      ## Step 1: Detect worktree
 
-      # Determine input type and emit JSON with discovered PRD_DIR
-      if [ -n "$PRD_DIR" ] && [ -f "$PRD_DIR/prd.json" ] && [ -f "$PRD_DIR/prd.md" ]; then
-        printf '{"input_type":"ready","prd_dir":"%s"}\n' "$PRD_DIR"
-      else
-        printf '{"input_type":"needs_generation","prd_dir":"%s"}\n' "$PRD_DIR"
-      fi
+      Run `git worktree list --porcelain` to check if you're in a worktree.
+      If you see multiple entries, you ARE in a worktree. The first entry (the one without "branch" pointing to your current branch) is the **main repo root**. Save it — you'll need it to find files.
+
+      ## Step 2: Classify the input
+
+      Look at the user input above. It's one of three things:
+
+      **Case A — Ralph directory path** (contains `.archon/ralph/`):
+      Extract the directory. Check if both `prd.json` and `prd.md` exist there (try locally first, then in the main repo root if in a worktree).
+
+      **Case B — File path** (ends in `.md`):
+      This is an external PRD file. Find it:
+      1. Try the path as-is (relative to cwd)
+      2. Try it as an absolute path
+      3. If in a worktree, try it relative to the **main repo root** from Step 1
+      Once found, read the file to confirm it's a PRD.
+
+      **Case C — Free text**:
+      Not a file path — it's a feature idea.
+
+      ## Step 3: Auto-discover existing ralph PRDs
+
+      If the input didn't point to a specific path, check if `.archon/ralph/` contains any `prd.json` files:
+      ```bash
+      find .archon/ralph -name "prd.json" -type f 2>/dev/null
+      ```
+
+      ## Step 4: Take action based on classification
+
+      **If Case A and both files exist** → output `ready` (no further action needed)
+
+      **If Case B (external PRD found)**:
+      1. Derive a kebab-case slug from the PRD filename or title (e.g., `workflow-lifecycle-overhaul`)
+      2. Create the ralph directory: `mkdir -p .archon/ralph/{slug}`
+      3. Copy the PRD content to `.archon/ralph/{slug}/prd.md`
+      4. Output `external_prd` with the new prd_dir
+
+      **If Case C or auto-discovered ralph dir has prd.md but no prd.json** → output `needs_generation`
+
+      ## Output
+
+      Your final output MUST be exactly one JSON object:
+      ```json
+      {"input_type": "ready|external_prd|needs_generation", "prd_dir": ".archon/ralph/{slug}"}
+      ```
+    output_format:
+      type: object
+      properties:
+        input_type:
+          type: string
+          enum: [ready, external_prd, needs_generation]
+        prd_dir:
+          type: string
+      required: [input_type, prd_dir]
 
   # ═══════════════════════════════════════════════════════════════
   # NODE 2: GENERATE PRD
@@ -65,7 +95,7 @@ nodes:
 
   - id: generate-prd
     depends_on: [detect-input]
-    when: "$detect-input.output.input_type == 'needs_generation'"
+    when: "$detect-input.output.input_type != 'ready'"
     command: archon-ralph-generate
     context: fresh
 
