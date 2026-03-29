@@ -98,6 +98,12 @@ When a user asks to add a new project:
 Example:
    /register-project my-new-app /home/user/.archon/workspaces/user/my-new-app/source
 
+To update a project's path:
+   /update-project {project-name} {new-path}
+
+To remove a registered project:
+   /remove-project {project-name}
+
 IMPORTANT: Always clone into ~/.archon/workspaces/{owner}/{repo}/source unless the user specifies a different location.`;
 }
 

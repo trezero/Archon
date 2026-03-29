@@ -1132,6 +1132,11 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
 - \`/workflow status\` — Show running workflow progress
 - \`/workflow cancel\` — Cancel the active workflow
 
+**Projects**
+- \`/register-project <name> <path>\` — Register a local project
+- \`/update-project <name> <new-path>\` — Update a project's path
+- \`/remove-project <name>\` — Remove a registered project
+
 **Session**
 - \`/status\` — Show current session and project info
 - \`/reset\` — Clear conversation and start fresh
