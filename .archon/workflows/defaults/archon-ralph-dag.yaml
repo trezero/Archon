@@ -520,36 +520,16 @@ nodes:
            git push -u origin HEAD
            ```
 
-        2. **Create a draft PR:**
-           ```bash
-           gh pr create --draft --base $BASE_BRANCH --title "feat: {PRD feature name}" --body "$(cat <<'PREOF'
-           ## Summary
+        2. **Read the PR template:**
+           Look for a PR template in the repo — check `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, and `docs/pull_request_template.md`. Read whichever one exists.
 
-           Implements all user stories from PRD: {feature name}
+           If a template was found, fill in **every section** using the context from this implementation. Don't skip sections or leave placeholders — fill them honestly based on the actual changes (summary, architecture, validation evidence, security, compatibility, rollback, etc.).
 
-           ## Stories Completed
+           If no template was found, write a summary with: problem, what changed, stories table, and validation evidence.
 
-           | ID | Title | Status |
-           |----|-------|--------|
-           | {id} | {title} | ✅ |
-           | ... | ... | ... |
+        3. **Create a draft PR** using `gh pr create --draft --base $BASE_BRANCH --title "feat: {PRD feature name}"` with the filled-in template as the body. Use a HEREDOC for the body.
 
-           ## Validation
-
-           - [x] Type check passes
-           - [x] Lint passes (0 warnings)
-           - [x] All tests pass
-           - [x] Format check passes
-
-           ## PRD
-
-           Source: `{prd-dir}/prd.json`
-           Progress: `{prd-dir}/progress.txt`
-           PREOF
-           )"
-           ```
-
-        3. **Output completion signal:**
+        4. **Output completion signal:**
            ```
            <promise>COMPLETE</promise>
            ```

@@ -351,60 +351,19 @@ If branch was rebased:
 git push -u origin HEAD --force-with-lease
 ```
 
-### 8.2 Create PR
+### 8.2 Prepare PR Body
+
+Look for the project's PR template at `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, or `docs/PULL_REQUEST_TEMPLATE.md`. Read whichever one exists.
+
+**If template found**: Use it as the structure, fill in **every section** with details from the artifact (root cause, changes, validation results, etc.). Don't skip sections or leave placeholders. Make sure to include `Fixes #{number}`.
+
+**If no template**, write a body covering: summary, root cause, changes table, validation evidence, and `Fixes #{number}`.
+
+### 8.3 Create PR
+
+Write the prepared body to `$ARTIFACTS_DIR/pr-body.md`, then:
 
 ```bash
-# Write PR body to file to avoid shell escaping
-cat > $ARTIFACTS_DIR/pr-body.md <<'EOF'
-## Summary
-
-{Problem statement from artifact}
-
-## Root Cause
-
-{Root cause summary from artifact}
-
-## Changes
-
-| File | Change |
-|------|--------|
-| `src/x.ts` | {description} |
-| `src/x.test.ts` | Added test for {case} |
-
-## Testing
-
-- [x] Type check passes
-- [x] Unit tests pass
-- [x] Lint passes
-- [x] {Manual verification from artifact}
-
-## Validation
-
-```bash
-bun run type-check && bun test {pattern} && bun run lint
-```
-
-## Issue
-
-Fixes #{number}
-
----
-
-<details>
-<summary>📋 Implementation Details</summary>
-
-### Implementation followed artifact:
-`$ARTIFACTS_DIR/../issues/issue-{number}.md`
-
-### Deviations from plan:
-{None | List any deviations}
-
-</details>
-
----
-*Automated implementation from investigation artifact*
-EOF
-
 gh pr create --title "Fix: {title} (#{number})" \
   --body-file $ARTIFACTS_DIR/pr-body.md
 ```

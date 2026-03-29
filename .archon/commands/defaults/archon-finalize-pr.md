@@ -39,20 +39,9 @@ Extract:
 
 ### 1.2 Check for PR Template
 
-**IMPORTANT**: Always check for project's PR template first.
+**IMPORTANT**: Always check for the project's PR template first. Look for it at `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, or `docs/PULL_REQUEST_TEMPLATE.md`. Read whichever one exists.
 
-```bash
-# Check common template locations
-for template in .github/PULL_REQUEST_TEMPLATE.md .github/pull_request_template.md docs/PULL_REQUEST_TEMPLATE.md; do
-  if [ -f "$template" ]; then
-    echo "Found template: $template"
-    cat "$template"
-    break
-  fi
-done
-```
-
-**If template found**: Use it as the structure, fill in sections with implementation details.
+**If template found**: Use it as the structure, fill in **every section** with implementation details.
 **If no template**: Use the default format defined in Phase 3.
 
 ### 1.3 Check for Existing PR

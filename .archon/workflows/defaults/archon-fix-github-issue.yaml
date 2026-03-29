@@ -90,19 +90,6 @@ nodes:
     depends_on: [classify]
     context: fresh
 
-  - id: fetch-pr-template
-    bash: |
-      for f in .github/PULL_REQUEST_TEMPLATE.md .github/pull_request_template.md .github/PULL_REQUEST_TEMPLATE/pull_request_template.md docs/pull_request_template.md; do
-        if [ -f "$f" ]; then
-          cp "$f" "$ARTIFACTS_DIR/pr-template.md"
-          echo "Found PR template: $f"
-          cat "$f"
-          exit 0
-        fi
-      done
-      echo "No PR template found — will use standard format"
-    depends_on: [fetch-issue]
-
   # ═══════════════════════════════════════════════════════════════
   # PHASE 3: INVESTIGATE (bugs) / PLAN (features)
   # ═══════════════════════════════════════════════════════════════
@@ -168,15 +155,6 @@ nodes:
       - **Classification**: $classify.output
       - **Issue title**: $classify.output.title
 
-      ## PR Template
-
-      If a PR template was found below, use it as the structure for the PR body.
-      Fill in each section with context from the workflow artifacts.
-
-      ```
-      $fetch-pr-template.output
-      ```
-
       ## Instructions
 
       1. Check git status — ensure all changes are committed. If uncommitted changes exist, stage and commit them.
@@ -187,38 +165,19 @@ nodes:
          - `$ARTIFACTS_DIR/validation.md`
       4. Check if a PR already exists for this branch: `gh pr list --head $(git branch --show-current)`
          - If PR exists, skip creation and capture its number
-      5. Create a DRAFT PR: `gh pr create --draft --base $BASE_BRANCH`
+      5. Look for the project's PR template at `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, or `docs/PULL_REQUEST_TEMPLATE.md`. Read whichever one exists.
+      6. Create a DRAFT PR: `gh pr create --draft --base $BASE_BRANCH`
          - Title: concise, imperative mood, under 70 chars
-         - Body: follow the PR template if one was found, otherwise use the standard format below
+         - Body: if a PR template was found, fill in **every section** with details from the artifacts. Don't skip sections or leave placeholders. If no template, write a body with summary, changes, validation evidence, and `Fixes #...`.
          - Link to issue: include `Fixes #...` or `Closes #...`
-      6. Capture PR identifiers:
+      7. Capture PR identifiers:
          ```bash
          PR_NUMBER=$(gh pr view --json number -q '.number')
          echo "$PR_NUMBER" > "$ARTIFACTS_DIR/.pr-number"
          PR_URL=$(gh pr view --json url -q '.url')
          echo "$PR_URL" > "$ARTIFACTS_DIR/.pr-url"
          ```
-
-      ## Standard Format (if no PR template found)
-
-      ```markdown
-      ## Summary
-
-      [From investigation/plan artifact — brief description of what this PR does]
-
-      ## Changes
-
-      [List files changed with descriptions]
-
-      ## Validation
-
-      - [x] Type check passes
-      - [x] Tests pass
-      - [x] Lint passes
-
-      Fixes #[issue-number]
-      ```
-    depends_on: [validate, fetch-pr-template]
+    depends_on: [validate]
     context: fresh
 
   # ═══════════════════════════════════════════════════════════════
