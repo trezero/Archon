@@ -10,17 +10,8 @@
  */
 import { describe, test, expect, mock, beforeEach, afterAll, spyOn, type Mock } from 'bun:test';
 import { createMockLogger } from '../test/mocks/logger';
-import { makeTestWorkflow } from '@archon/workflows/test-utils';
-import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
+import { makeTestWorkflowWithSource } from '@archon/workflows/test-utils';
 import { Conversation } from '../types';
-
-/** Wrap a WorkflowDefinition as a WorkflowWithSource entry for test mocks. */
-function ws(
-  workflow: WorkflowDefinition,
-  source: 'bundled' | 'project' = 'bundled'
-): { workflow: WorkflowDefinition; source: 'bundled' | 'project' } {
-  return { workflow, source };
-}
 import { resolve, join } from 'path';
 import * as fsPromises from 'fs/promises';
 import * as gitUtils from '@archon/git';
@@ -2010,7 +2001,7 @@ describe('CommandHandler', () => {
 
       test('should show load errors alongside workflows', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [ws(makeTestWorkflow({ name: 'assist' }))],
+          workflows: [makeTestWorkflowWithSource({ name: 'assist' })],
           errors: [
             {
               filename: 'broken.yaml',
@@ -2072,7 +2063,7 @@ describe('CommandHandler', () => {
 
       test('should pass loadConfig as second argument to discoverWorkflowsWithConfig', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [ws(makeTestWorkflow({ name: 'test-wf', description: 'Test' }))],
+          workflows: [makeTestWorkflowWithSource({ name: 'test-wf', description: 'Test' })],
           errors: [],
         });
 
@@ -2102,7 +2093,9 @@ describe('CommandHandler', () => {
 
       test('should show error count on reload', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'General assistant' }))],
+          workflows: [
+            makeTestWorkflowWithSource({ name: 'assist', description: 'General assistant' }),
+          ],
           errors: [
             {
               filename: 'broken.yaml',
@@ -2128,7 +2121,9 @@ describe('CommandHandler', () => {
 
       test('should show clean reload when no errors', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'General assistant' }))],
+          workflows: [
+            makeTestWorkflowWithSource({ name: 'assist', description: 'General assistant' }),
+          ],
           errors: [],
         });
 
@@ -2178,7 +2173,9 @@ describe('CommandHandler', () => {
 
       test('should match workflow name case-insensitively', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'General assistant' }))],
+          workflows: [
+            makeTestWorkflowWithSource({ name: 'assist', description: 'General assistant' }),
+          ],
           errors: [],
         });
 
@@ -2420,9 +2417,10 @@ describe('CommandHandler', () => {
       test('should return error when workflow is not found', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
           workflows: [
-            ws(
-              makeTestWorkflow({ name: 'existing-workflow', description: 'An existing workflow' })
-            ),
+            makeTestWorkflowWithSource({
+              name: 'existing-workflow',
+              description: 'An existing workflow',
+            }),
           ],
           errors: [],
         });
@@ -2437,7 +2435,7 @@ describe('CommandHandler', () => {
       test('should return success with workflow info when workflow is found', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
           workflows: [
-            ws(makeTestWorkflow({ name: 'test-workflow', description: 'A test workflow' })),
+            makeTestWorkflowWithSource({ name: 'test-workflow', description: 'A test workflow' }),
           ],
           errors: [],
         });
@@ -2454,7 +2452,7 @@ describe('CommandHandler', () => {
       test('should pass arguments to workflow', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
           workflows: [
-            ws(makeTestWorkflow({ name: 'fix-issue', description: 'Fix a GitHub issue' })),
+            makeTestWorkflowWithSource({ name: 'fix-issue', description: 'Fix a GitHub issue' }),
           ],
           errors: [],
         });

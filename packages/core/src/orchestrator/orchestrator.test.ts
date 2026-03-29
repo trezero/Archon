@@ -237,7 +237,10 @@ const mockSession: Session = {
 };
 
 const testWorkflowDefs = makeTestWorkflowList(['fix-bug', 'add-feature', 'archon-assist']);
-const testWorkflows = testWorkflowDefs.map(w => ({ workflow: w, source: 'bundled' as const }));
+const testWorkflows = testWorkflowDefs.map(w => ({
+  workflow: w,
+  source: 'bundled' as const,
+}));
 
 const mockClient = {
   sendQuery: mock(async function* () {

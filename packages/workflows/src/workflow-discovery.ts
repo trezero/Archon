@@ -194,7 +194,7 @@ export async function discoverWorkflows(
         if (workflowsByFile.has(filename)) {
           getLog().debug({ filename }, 'global_workflow_overrides_default');
         }
-        workflowsByFile.set(filename, { workflow, source: 'bundled' });
+        workflowsByFile.set(filename, { workflow, source: 'project' });
       }
       allErrors.push(...globalResult.errors);
       getLog().info({ count: globalResult.workflows.size }, 'global_workflows_loaded');
