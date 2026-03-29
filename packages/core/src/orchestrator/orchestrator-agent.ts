@@ -475,7 +475,12 @@ export async function handleMessage(
 
     // 3. Load codebases, discover workflows, build prompt
     const codebases = await codebaseDb.listCodebases();
-    const { workflows, errors: workflowErrors, syncResult, syncError } = await discoverAllWorkflows(conversation);
+    const {
+      workflows,
+      errors: workflowErrors,
+      syncResult,
+      syncError,
+    } = await discoverAllWorkflows(conversation);
     if (workflowErrors.length > 0) {
       getLog().warn(
         { errorCount: workflowErrors.length, errors: workflowErrors },
