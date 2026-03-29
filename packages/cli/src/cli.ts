@@ -46,7 +46,10 @@ import {
   workflowListCommand,
   workflowRunCommand,
   workflowStatusCommand,
+  workflowEventEmitCommand,
+  isValidEventType,
 } from './commands/workflow';
+import { WORKFLOW_EVENT_TYPES } from '@archon/workflows/store';
 import {
   isolationListCommand,
   isolationCleanupCommand,
@@ -55,6 +58,7 @@ import {
 } from './commands/isolation';
 import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
+import { validateWorkflowsCommand, validateCommandsCommand } from './commands/validate';
 import { closeDatabase } from '@archon/core';
 import { setLogLevel, createLogger } from '@archon/paths';
 import * as git from '@archon/git';
@@ -86,6 +90,8 @@ Commands:
   isolation cleanup [days]   Remove stale environments (default: 7 days)
   isolation cleanup --merged Remove environments with branches merged into main
   complete <branch> [...]    Complete branch lifecycle (remove worktree + branches)
+  validate workflows [name]  Validate workflow definitions and their references
+  validate commands [name]   Validate command files
   version                    Show version info
   help                       Show this help message
 
@@ -154,6 +160,9 @@ async function main(): Promise<number> {
         quiet: { type: 'boolean', short: 'q' },
         verbose: { type: 'boolean', short: 'v' },
         json: { type: 'boolean' },
+        'run-id': { type: 'string' },
+        type: { type: 'string' },
+        data: { type: 'string' },
       },
       allowPositionals: true,
       strict: false, // Allow unknown flags to pass through
@@ -287,13 +296,60 @@ async function main(): Promise<number> {
             await workflowStatusCommand();
             break;
 
+          case 'event': {
+            const action = positionals[2];
+            if (action !== 'emit') {
+              if (action === undefined) {
+                console.error('Missing workflow event subcommand');
+              } else {
+                console.error(`Unknown workflow event subcommand: ${action}`);
+              }
+              console.error('Available: emit');
+              return 1;
+            }
+            const runId = values['run-id'] as string | undefined;
+            const eventType = values.type as string | undefined;
+            if (!runId) {
+              console.error(
+                'Usage: archon workflow event emit --run-id <uuid> --type <event-type>'
+              );
+              console.error('Error: --run-id is required');
+              return 1;
+            }
+            if (!eventType) {
+              console.error(
+                'Usage: archon workflow event emit --run-id <uuid> --type <event-type>'
+              );
+              console.error('Error: --type is required');
+              return 1;
+            }
+            if (!isValidEventType(eventType)) {
+              console.error(`Error: unknown event type: ${eventType}`);
+              console.error(`Valid types: ${WORKFLOW_EVENT_TYPES.join(', ')}`);
+              return 1;
+            }
+            let eventData: Record<string, unknown> | undefined;
+            const rawData = values.data as string | undefined;
+            if (rawData) {
+              try {
+                eventData = JSON.parse(rawData) as Record<string, unknown>;
+              } catch {
+                console.warn(
+                  `Warning: --data is not valid JSON — event will be emitted without data payload: ${rawData}`
+                );
+              }
+            }
+            await workflowEventEmitCommand(runId, eventType, eventData);
+            break;
+          }
+
           default:
             if (subcommand === undefined) {
               console.error('Missing workflow subcommand');
             } else {
               console.error(`Unknown workflow subcommand: ${subcommand}`);
             }
-            console.error('Available: list, run, status');
+            console.error('Available: list, run, status, event');
             return 1;
         }
         break;
@@ -326,6 +382,28 @@ async function main(): Promise<number> {
             return 1;
         }
         break;
+
+      case 'validate':
+        switch (subcommand) {
+          case 'workflows': {
+            const validateName = positionals[2];
+            return await validateWorkflowsCommand(effectiveCwd, validateName, jsonFlag);
+          }
+
+          case 'commands': {
+            const validateName = positionals[2];
+            return await validateCommandsCommand(effectiveCwd, validateName, jsonFlag);
+          }
+
+          default:
+            if (subcommand === undefined) {
+              console.error('Missing validate target');
+            } else {
+              console.error(`Unknown validate target: ${subcommand}`);
+            }
+            console.error('Available: workflows, commands');
+            return 1;
+        }
 
       case 'complete': {
         const branches = positionals.slice(1);

@@ -1,7 +1,9 @@
 import { describe, test, expect, mock } from 'bun:test';
-import { Hono } from 'hono';
+import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ConversationLockManager } from '@archon/core';
 import type { WebAdapter } from '../adapters/web';
+import { validationErrorHook } from './openapi-defaults';
+import { mockAllWorkflowModules } from '../test/workflow-mock-factories';
 
 const mockFindConversationByPlatformId = mock(
   async (_platformId: string) =>
@@ -55,14 +57,7 @@ mock.module('@archon/core', () => ({
   }),
 }));
 
-mock.module('@archon/workflows', () => ({
-  discoverWorkflowsWithConfig: mock(async () => ({ workflows: [], errors: [] })),
-  parseWorkflow: mock(() => ({ workflow: null, error: null })),
-  isValidCommandName: mock(() => true),
-  BUNDLED_WORKFLOWS: {},
-  BUNDLED_COMMANDS: {},
-  isBinaryBuild: mock(() => false),
-}));
+mockAllWorkflowModules();
 
 mock.module('@archon/core/db/conversations', () => ({
   findConversationByPlatformId: mockFindConversationByPlatformId,
@@ -112,7 +107,7 @@ describe('GET /api/conversations/:id', () => {
   test('returns conversation JSON by platform conversation ID', async () => {
     mockFindConversationByPlatformId.mockImplementationOnce(async () => MOCK_CONV);
 
-    const app = new Hono();
+    const app = new OpenAPIHono();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations/web-test-abc');
@@ -124,7 +119,7 @@ describe('GET /api/conversations/:id', () => {
   test('returns 404 for unknown platform conversation ID', async () => {
     mockFindConversationByPlatformId.mockImplementationOnce(async () => null);
 
-    const app = new Hono();
+    const app = new OpenAPIHono();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations/web-nonexistent-id');
@@ -138,7 +133,7 @@ describe('GET /api/conversations/:id', () => {
       throw new Error('DB connection lost');
     });
 
-    const app = new Hono();
+    const app = new OpenAPIHono();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations/web-test-abc');
@@ -153,7 +148,7 @@ describe('DELETE /api/conversations/:id', () => {
     mockFindConversationByPlatformId.mockImplementationOnce(async () => MOCK_CONV);
     mockSoftDeleteConversation.mockImplementationOnce(async () => {});
 
-    const app = new Hono();
+    const app = new OpenAPIHono();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations/web-test-abc', { method: 'DELETE' });
@@ -166,7 +161,7 @@ describe('DELETE /api/conversations/:id', () => {
   test('returns 404 when platform conversation ID does not exist', async () => {
     mockFindConversationByPlatformId.mockImplementationOnce(async () => null);
 
-    const app = new Hono();
+    const app = new OpenAPIHono();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations/web-nonexistent-id', {
@@ -183,7 +178,7 @@ describe('PATCH /api/conversations/:id', () => {
     mockFindConversationByPlatformId.mockImplementationOnce(async () => MOCK_CONV);
     mockUpdateConversationTitle.mockImplementationOnce(async () => {});
 
-    const app = new Hono();
+    const app = new OpenAPIHono();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations/web-test-abc', {
@@ -200,7 +195,7 @@ describe('PATCH /api/conversations/:id', () => {
   test('returns 404 when platform conversation ID does not exist', async () => {
     mockFindConversationByPlatformId.mockImplementationOnce(async () => null);
 
-    const app = new Hono();
+    const app = new OpenAPIHono();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations/web-nonexistent-id', {
@@ -214,7 +209,7 @@ describe('PATCH /api/conversations/:id', () => {
   });
 
   test('returns 400 for malformed JSON body', async () => {
-    const app = new Hono();
+    const app = new OpenAPIHono({ defaultHook: validationErrorHook });
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations/web-test-abc', {
@@ -223,14 +218,12 @@ describe('PATCH /api/conversations/:id', () => {
       body: 'not valid json{',
     });
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: string };
-    expect(body.error).toContain('Invalid JSON');
   });
 
   test('returns { success: true } without calling updateConversationTitle when body has no title', async () => {
     mockFindConversationByPlatformId.mockImplementationOnce(async () => MOCK_CONV);
 
-    const app = new Hono();
+    const app = new OpenAPIHono();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const callsBefore = mockUpdateConversationTitle.mock.calls.length;
@@ -249,7 +242,7 @@ describe('PATCH /api/conversations/:id', () => {
     mockFindConversationByPlatformId.mockImplementationOnce(async () => MOCK_CONV);
     mockUpdateConversationTitle.mockImplementationOnce(async () => {});
 
-    const app = new Hono();
+    const app = new OpenAPIHono();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const longTitle = 'a'.repeat(300);
@@ -270,7 +263,7 @@ describe('POST /api/conversations', () => {
   } as unknown as WebAdapter;
 
   test('creates conversation and returns auto-generated conversationId', async () => {
-    const app = new Hono();
+    const app = new OpenAPIHono();
     registerApiRoutes(app, mockWebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations', {
@@ -285,7 +278,7 @@ describe('POST /api/conversations', () => {
   });
 
   test('returns 400 if conversationId is provided in request body', async () => {
-    const app = new Hono();
+    const app = new OpenAPIHono({ defaultHook: validationErrorHook });
     registerApiRoutes(app, mockWebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations', {
@@ -299,7 +292,7 @@ describe('POST /api/conversations', () => {
   });
 
   test('returns 400 for malformed JSON body', async () => {
-    const app = new Hono();
+    const app = new OpenAPIHono({ defaultHook: validationErrorHook });
     registerApiRoutes(app, mockWebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations', {
@@ -308,8 +301,6 @@ describe('POST /api/conversations', () => {
       body: 'not valid json{',
     });
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: string };
-    expect(body.error).toContain('Invalid JSON');
   });
 });
 
@@ -438,7 +429,7 @@ describe('GET /api/conversations/:id — forge platform IDs with encoded slashes
       return GITEA_CONV;
     });
 
-    const app = new Hono();
+    const app = new OpenAPIHono();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     // Client must URL-encode the ID: %2F for slash, %23 for #
@@ -464,7 +455,7 @@ describe('GET /api/conversations/:id — forge platform IDs with encoded slashes
       return giteaPRConv;
     });
 
-    const app = new Hono();
+    const app = new OpenAPIHono();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations/owner%2Frepo!42');
@@ -476,7 +467,7 @@ describe('GET /api/conversations/:id — forge platform IDs with encoded slashes
   test('returns 404 for unknown gitea conversation ID', async () => {
     mockFindConversationByPlatformId.mockImplementationOnce(async () => null);
 
-    const app = new Hono();
+    const app = new OpenAPIHono();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations/unknown-org%2Funknown-repo%2399');

@@ -95,9 +95,9 @@ export const BUNDLED_WORKFLOWS: Record<string, string> = {
 };
 
 /**
- * Check if the current process is running as a compiled binary (not via Bun)
- * When running as a binary, process.execPath won't contain 'bun'
+ * Check if the current process is running as a compiled binary (not via Bun CLI).
+ * `process.versions.bun` is set by the Bun runtime; absent in standalone binaries.
  */
 export function isBinaryBuild(): boolean {
-  return !process.execPath.toLowerCase().includes('bun');
+  return (process.versions as Record<string, string | undefined>).bun === undefined;
 }

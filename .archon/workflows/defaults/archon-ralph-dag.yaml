@@ -4,36 +4,117 @@ description: |
   Triggers: "ralph", "run ralph", "ralph dag", "run ralph dag".
 
   DAG workflow that:
-  1. Validates PRD files exist, reads project context, installs dependencies
-  2. Runs Ralph loop (fresh context per iteration) implementing one story per iteration
-  3. Creates PR and reports completion
+  1. Detects input: existing prd.json, existing prd.md (needs stories), or raw idea
+  2. Generates prd.md + prd.json if needed (explores codebase, breaks into stories)
+  3. Validates PRD files, reads project context, installs dependencies
+  4. Runs Ralph loop (fresh context per iteration) implementing one story per iteration
+  5. Creates PR and reports completion
 
-  REQUIRES: .archon/ralph/{feature}/prd.md and prd.json
+  Accepts: An idea description, a path to an existing prd.md, or a directory with prd.md + prd.json
 
 provider: claude
 
 nodes:
   # ═══════════════════════════════════════════════════════════════
-  # NODE 1: VALIDATE & SETUP
+  # NODE 1: DETECT INPUT
+  # Determines what the user provided: full PRD, partial PRD, or idea
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: detect-input
+    model: haiku
+    prompt: |
+      # Detect Ralph Input
+
+      **User input**: $ARGUMENTS
+
+      Determine what the user provided and prepare the PRD directory. Follow these steps exactly:
+
+      ## Step 1: Detect worktree
+
+      Run `git worktree list --porcelain` to check if you're in a worktree.
+      If you see multiple entries, you ARE in a worktree. The first entry (the one without "branch" pointing to your current branch) is the **main repo root**. Save it — you'll need it to find files.
+
+      ## Step 2: Classify the input
+
+      Look at the user input above. It's one of three things:
+
+      **Case A — Ralph directory path** (contains `.archon/ralph/`):
+      Extract the directory. Check if both `prd.json` and `prd.md` exist there (try locally first, then in the main repo root if in a worktree).
+
+      **Case B — File path** (ends in `.md`):
+      This is an external PRD file. Find it:
+      1. Try the path as-is (relative to cwd)
+      2. Try it as an absolute path
+      3. If in a worktree, try it relative to the **main repo root** from Step 1
+      Once found, read the file to confirm it's a PRD.
+
+      **Case C — Free text**:
+      Not a file path — it's a feature idea.
+
+      ## Step 3: Auto-discover existing ralph PRDs
+
+      If the input didn't point to a specific path, check if `.archon/ralph/` contains any `prd.json` files:
+      ```bash
+      find .archon/ralph -name "prd.json" -type f 2>/dev/null
+      ```
+
+      ## Step 4: Take action based on classification
+
+      **If Case A and both files exist** → output `ready` (no further action needed)
+
+      **If Case B (external PRD found)**:
+      1. Derive a kebab-case slug from the PRD filename or title (e.g., `workflow-lifecycle-overhaul`)
+      2. Create the ralph directory: `mkdir -p .archon/ralph/{slug}`
+      3. Copy the PRD content to `.archon/ralph/{slug}/prd.md`
+      4. Output `external_prd` with the new prd_dir
+
+      **If Case C or auto-discovered ralph dir has prd.md but no prd.json** → output `needs_generation`
+
+      ## Output
+
+      Your final output MUST be exactly one JSON object:
+      ```json
+      {"input_type": "ready|external_prd|needs_generation", "prd_dir": ".archon/ralph/{slug}"}
+      ```
+    output_format:
+      type: object
+      properties:
+        input_type:
+          type: string
+          enum: [ready, external_prd, needs_generation]
+        prd_dir:
+          type: string
+      required: [input_type, prd_dir]
+
+  # ═══════════════════════════════════════════════════════════════
+  # NODE 2: GENERATE PRD
+  # Scenario 1: User has an idea → generate prd.md + prd.json
+  # Scenario 2: User has prd.md → generate prd.json with stories
+  # Skipped if prd.json already exists
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: generate-prd
+    depends_on: [detect-input]
+    when: "$detect-input.output.input_type != 'ready'"
+    command: archon-ralph-generate
+    context: fresh
+
+  # ═══════════════════════════════════════════════════════════════
+  # NODE 3: VALIDATE & SETUP
   # Finds PRD directory, reads all state files, installs deps,
   # verifies the environment is ready for implementation.
   # ═══════════════════════════════════════════════════════════════
 
   - id: validate-prd
+    depends_on: [detect-input, generate-prd]
+    trigger_rule: one_success
     bash: |
       set -e
 
-      # ── 1. Find PRD directory ──────────────────────────────────
-      USER_MSG="$ARGUMENTS"
-      PRD_DIR=""
+      # ── 1. Find PRD directory (passed from detect-input) ──────
+      PRD_DIR=$detect-input.output.prd_dir
 
-      # Check if user specified a path
-      if echo "$USER_MSG" | grep -qE '\.archon/ralph/'; then
-        PRD_DIR=$(echo "$USER_MSG" | grep -oE '\.archon/ralph/[^ ]+' | head -1)
-        PRD_DIR=$(dirname "$PRD_DIR" 2>/dev/null || echo "$PRD_DIR")
-      fi
-
-      # Auto-discover if not specified
+      # If detect-input didn't know the PRD dir (generated from scratch), discover it
       if [ -z "$PRD_DIR" ] || [ ! -f "$PRD_DIR/prd.json" ]; then
         FOUND=$(find .archon/ralph -name "prd.json" -type f 2>/dev/null | head -1)
         if [ -n "$FOUND" ]; then
@@ -42,7 +123,8 @@ nodes:
       fi
 
       if [ -z "$PRD_DIR" ] || [ ! -f "$PRD_DIR/prd.json" ]; then
-        echo "ERROR: No prd.json found. Create one with: /command-invoke archon-ralph-prd"
+        echo "ERROR: No prd.json found after generation step."
+        echo "Check the generate-prd node output for errors."
         exit 1
       fi
 
@@ -90,14 +172,16 @@ nodes:
       echo "=== PROGRESS_END ==="
 
       # ── 5. Summary ────────────────────────────────────────────
-      TOTAL=$(cat "$PRD_DIR/prd.json" | grep -c '"passes"' || echo 0)
-      DONE=$(cat "$PRD_DIR/prd.json" | grep -c '"passes": true' || echo 0)
+      TOTAL=$(grep -c '"passes"' "$PRD_DIR/prd.json" || true)
+      DONE=$(grep -c '"passes": true' "$PRD_DIR/prd.json" || true)
+      TOTAL=${TOTAL:-0}
+      DONE=${DONE:-0}
       echo "STORIES_TOTAL=$TOTAL"
       echo "STORIES_DONE=$DONE"
-      echo "STORIES_REMAINING=$((TOTAL - DONE))"
+      echo "STORIES_REMAINING=$(( TOTAL - DONE ))"
 
   # ═══════════════════════════════════════════════════════════════
-  # NODE 2: RALPH IMPLEMENTATION LOOP
+  # NODE 4: RALPH IMPLEMENTATION LOOP
   # Fresh context each iteration. Reads PRD state from disk.
   # One story per iteration. Validates before committing.
   # ═══════════════════════════════════════════════════════════════
@@ -190,6 +274,11 @@ nodes:
         - {criterion 2}
         - ...
         ────────────────────────────────────────────────────
+        ```
+
+        After announcing the selected story, emit the story started event:
+        ```bash
+        bun run cli workflow event emit --run-id $WORKFLOW_ID --type ralph_story_started --data '{"story_id":"{story-id}","title":"{story-title}"}' || true
         ```
 
         **PHASE_1_CHECKPOINT:**
@@ -362,6 +451,11 @@ nodes:
         }
         ```
 
+        After updating prd.json, emit the story completed event:
+        ```bash
+        bun run cli workflow event emit --run-id $WORKFLOW_ID --type ralph_story_completed --data '{"story_id":"{story-id}","title":"{story-title}"}' || true
+        ```
+
         ### 5.2 Update progress.txt
 
         **Append** to `{prd-dir}/progress.txt`:
@@ -426,36 +520,16 @@ nodes:
            git push -u origin HEAD
            ```
 
-        2. **Create a draft PR:**
-           ```bash
-           gh pr create --draft --base $BASE_BRANCH --title "feat: {PRD feature name}" --body "$(cat <<'PREOF'
-           ## Summary
+        2. **Read the PR template:**
+           Look for a PR template in the repo — check `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, and `docs/pull_request_template.md`. Read whichever one exists.
 
-           Implements all user stories from PRD: {feature name}
+           If a template was found, fill in **every section** using the context from this implementation. Don't skip sections or leave placeholders — fill them honestly based on the actual changes (summary, architecture, validation evidence, security, compatibility, rollback, etc.).
 
-           ## Stories Completed
+           If no template was found, write a summary with: problem, what changed, stories table, and validation evidence.
 
-           | ID | Title | Status |
-           |----|-------|--------|
-           | {id} | {title} | ✅ |
-           | ... | ... | ... |
+        3. **Create a draft PR** using `gh pr create --draft --base $BASE_BRANCH --title "feat: {PRD feature name}"` with the filled-in template as the body. Use a HEREDOC for the body.
 
-           ## Validation
-
-           - [x] Type check passes
-           - [x] Lint passes (0 warnings)
-           - [x] All tests pass
-           - [x] Format check passes
-
-           ## PRD
-
-           Source: `{prd-dir}/prd.json`
-           Progress: `{prd-dir}/progress.txt`
-           PREOF
-           )"
-           ```
-
-        3. **Output completion signal:**
+        4. **Output completion signal:**
            ```
            <promise>COMPLETE</promise>
            ```
@@ -574,7 +648,7 @@ nodes:
       fresh_context: true
 
   # ═══════════════════════════════════════════════════════════════
-  # NODE 3: COMPLETION REPORT
+  # NODE 5: COMPLETION REPORT
   # Reads final state and produces a summary.
   # ═══════════════════════════════════════════════════════════════
 

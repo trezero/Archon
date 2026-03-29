@@ -68,8 +68,17 @@ export async function getRemoteUrl(repoPath: RepoPath): Promise<string | null> {
 
 /**
  * Sync workspace with remote origin.
- * Fetches the base branch from origin to ensure `origin/<baseBranch>` is up-to-date.
- * Does not modify the canonical repo's working tree or HEAD.
+ * Fetches the base branch from origin, then optionally hard-resets the working tree
+ * to match `origin/<baseBranch>`.
+ *
+ * When `resetAfterFetch` is true (default), the working tree is hard-reset to match
+ * the remote. This is safe for Archon-managed clones in `~/.archon/workspaces/` but
+ * **destructive for user's local working directories** — callers must check the path
+ * before enabling reset.
+ *
+ * When `resetAfterFetch` is false, only `git fetch` runs — the local working tree is
+ * untouched. This is safe for locally-registered repos where the user may have
+ * uncommitted changes.
  *
  * Branch resolution:
  * - If baseBranch is provided: Uses that branch (from config). Fails with actionable
@@ -78,13 +87,16 @@ export async function getRemoteUrl(repoPath: RepoPath): Promise<string | null> {
  *
  * @param workspacePath - Path to the workspace (canonical repo, not worktree)
  * @param baseBranch - Optional base branch name (e.g., 'main', 'develop'). If omitted, auto-detects default branch
+ * @param options - Optional settings. `resetAfterFetch` (default true) controls whether `git reset --hard` runs after fetch.
  * @returns Branch used plus whether sync was performed
  * @throws Error with actionable message if configured branch doesn't exist
  */
 export async function syncWorkspace(
   workspacePath: RepoPath,
-  baseBranch?: BranchName
+  baseBranch?: BranchName,
+  options?: { resetAfterFetch?: boolean }
 ): Promise<WorkspaceSyncResult> {
+  const shouldReset = options?.resetAfterFetch ?? true;
   const branchToSync = baseBranch ?? (await getDefaultBranch(workspacePath));
 
   // Fetch from origin to ensure origin/<branchToSync> is up-to-date
@@ -110,7 +122,54 @@ export async function syncWorkspace(
     throw new Error(`Sync fetch from origin/${branchToSync} failed: ${err.message}`);
   }
 
-  return { branch: branchToSync, synced: true };
+  if (!shouldReset) {
+    // Fetch-only mode: safe for locally-registered repos with uncommitted changes
+    return { branch: branchToSync, synced: true, previousHead: '', newHead: '', updated: false };
+  }
+
+  // Capture HEAD before reset so we can report whether anything changed
+  let previousHead = '';
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', workspacePath, 'rev-parse', '--short=8', 'HEAD'],
+      { timeout: 10000 }
+    );
+    previousHead = stdout.trim();
+  } catch {
+    // Non-fatal — fresh clone or detached HEAD edge case
+  }
+
+  // Hard-reset local working tree to match origin — only safe for Archon-managed
+  // clones, never for a user's local working directory.
+  try {
+    await execFileAsync('git', ['-C', workspacePath, 'reset', '--hard', `origin/${branchToSync}`], {
+      timeout: 30000,
+    });
+  } catch (error) {
+    const err = error as Error;
+    throw new Error(`Reset to origin/${branchToSync} failed: ${err.message}`);
+  }
+
+  let newHead = '';
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', workspacePath, 'rev-parse', '--short=8', 'HEAD'],
+      { timeout: 10000 }
+    );
+    newHead = stdout.trim();
+  } catch {
+    // Non-fatal
+  }
+
+  return {
+    branch: branchToSync,
+    synced: true,
+    previousHead,
+    newHead,
+    updated: previousHead !== newHead && previousHead !== '',
+  };
 }
 
 /**

@@ -20,6 +20,7 @@ export default tseslint.config(
       '*.mjs',
       '**/*.test.ts',
       '*.d.ts', // Root-level declaration files (not in tsconfig project scope)
+      '**/*.generated.d.ts', // Auto-generated declaration files (e.g. openapi-typescript output)
       'packages/web/vite.config.ts', // Vite config doesn't need type-checked linting
       'packages/web/components.json',
       'packages/web/src/components/ui/**', // shadcn/ui auto-generated components

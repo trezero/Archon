@@ -4,11 +4,10 @@ import { useAutoScroll } from '@/hooks/useAutoScroll';
 
 interface StepLogsProps {
   runId: string;
-  stepIndex: number;
   lines?: string[];
 }
 
-export function StepLogs({ runId, stepIndex, lines = [] }: StepLogsProps): React.ReactElement {
+export function StepLogs({ runId, lines = [] }: StepLogsProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { isAtBottom, scrollToBottom } = useAutoScroll(containerRef, [lines.length]);
 
@@ -23,7 +22,7 @@ export function StepLogs({ runId, stepIndex, lines = [] }: StepLogsProps): React
     return (
       <div className="flex-1 overflow-auto p-4 font-mono text-sm bg-surface-inset">
         <div className="text-text-secondary text-xs mb-2">
-          Step {String(stepIndex + 1)} logs &middot; Run {runId.slice(0, 8)}
+          Node logs &middot; Run {runId.slice(0, 8)}
         </div>
         <div className="text-text-secondary italic">
           Live log output will appear here during workflow execution.
@@ -35,8 +34,7 @@ export function StepLogs({ runId, stepIndex, lines = [] }: StepLogsProps): React
   return (
     <div className="flex-1 flex flex-col bg-surface-inset relative">
       <div className="text-text-secondary text-xs px-4 pt-3 pb-1">
-        Step {String(stepIndex + 1)} logs &middot; Run {runId.slice(0, 8)} &middot;{' '}
-        {String(lines.length)} lines
+        Node logs &middot; Run {runId.slice(0, 8)} &middot; {String(lines.length)} lines
       </div>
       <div ref={containerRef} className="flex-1 overflow-auto px-4 pb-4 font-mono text-sm">
         <div

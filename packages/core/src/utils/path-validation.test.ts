@@ -27,11 +27,13 @@ function getDefaultWorkspacesPath(): string {
 describe('path-validation', () => {
   const originalWorkspacePath = process.env.WORKSPACE_PATH;
   const originalArchonHome = process.env.ARCHON_HOME;
+  const originalArchonDocker = process.env.ARCHON_DOCKER;
 
   beforeEach(() => {
-    // Reset to default for consistent test behavior
+    // Reset to default for consistent test behavior (clear Docker detection too)
     delete process.env.WORKSPACE_PATH;
     delete process.env.ARCHON_HOME;
+    delete process.env.ARCHON_DOCKER;
   });
 
   afterAll(() => {
@@ -45,6 +47,11 @@ describe('path-validation', () => {
       process.env.ARCHON_HOME = originalArchonHome;
     } else {
       delete process.env.ARCHON_HOME;
+    }
+    if (originalArchonDocker !== undefined) {
+      process.env.ARCHON_DOCKER = originalArchonDocker;
+    } else {
+      delete process.env.ARCHON_DOCKER;
     }
   });
 

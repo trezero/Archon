@@ -4,7 +4,7 @@ Connect Archon to Discord so you can interact with your AI coding assistant from
 
 ## Prerequisites
 
-- Archon server running (see [Getting Started](../getting-started.md))
+- Archon server running (see [Getting Started](../getting-started-cli.md))
 - A Discord account
 - "Manage Server" permission on the Discord server you want to add the bot to
 

@@ -10,12 +10,13 @@
  */
 import { describe, test, expect, mock, beforeEach, afterAll, spyOn, type Mock } from 'bun:test';
 import { createMockLogger } from '../test/mocks/logger';
+import { makeTestWorkflow } from '@archon/workflows/test-utils';
 import { Conversation } from '../types';
 import { resolve, join } from 'path';
 import * as fsPromises from 'fs/promises';
 import * as gitUtils from '@archon/git';
 import * as pathValidation from '../utils/path-validation';
-import * as workflows from '@archon/workflows';
+import * as workflowDiscovery from '@archon/workflows/workflow-discovery';
 
 // Create mock functions for database modules (safe to mock - no standalone tests)
 const mockUpdateConversation = mock(() => Promise.resolve());
@@ -250,7 +251,7 @@ function setupSpies(): void {
   spyFsRm = spyOn(fsPromises, 'rm').mockImplementation(() => Promise.resolve());
 
   // Workflow spies
-  spyDiscoverWorkflows = spyOn(workflows, 'discoverWorkflowsWithConfig').mockResolvedValue({
+  spyDiscoverWorkflows = spyOn(workflowDiscovery, 'discoverWorkflowsWithConfig').mockResolvedValue({
     workflows: [],
     errors: [],
   });
@@ -2000,9 +2001,7 @@ describe('CommandHandler', () => {
 
       test('should show load errors alongside workflows', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [
-            { name: 'assist', description: 'General assistant', steps: [{ command: 'assist' }] },
-          ],
+          workflows: [makeTestWorkflow({ name: 'assist' })],
           errors: [
             {
               filename: 'broken.yaml',
@@ -2064,7 +2063,7 @@ describe('CommandHandler', () => {
 
       test('should pass loadConfig as second argument to discoverWorkflowsWithConfig', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [{ name: 'test-wf', description: 'Test', steps: [{ command: 'test' }] }],
+          workflows: [makeTestWorkflow({ name: 'test-wf', description: 'Test' })],
           errors: [],
         });
 
@@ -2094,9 +2093,7 @@ describe('CommandHandler', () => {
 
       test('should show error count on reload', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [
-            { name: 'assist', description: 'General assistant', steps: [{ command: 'assist' }] },
-          ],
+          workflows: [makeTestWorkflow({ name: 'assist', description: 'General assistant' })],
           errors: [
             {
               filename: 'broken.yaml',
@@ -2105,7 +2102,7 @@ describe('CommandHandler', () => {
             },
             {
               filename: 'invalid.yml',
-              error: "Missing 'steps'",
+              error: "Missing 'nodes'",
               errorType: 'validation_error' as const,
             },
           ],
@@ -2122,9 +2119,7 @@ describe('CommandHandler', () => {
 
       test('should show clean reload when no errors', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [
-            { name: 'assist', description: 'General assistant', steps: [{ command: 'assist' }] },
-          ],
+          workflows: [makeTestWorkflow({ name: 'assist', description: 'General assistant' })],
           errors: [],
         });
 
@@ -2174,9 +2169,7 @@ describe('CommandHandler', () => {
 
       test('should match workflow name case-insensitively', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [
-            { name: 'assist', description: 'General assistant', steps: [{ command: 'assist' }] },
-          ],
+          workflows: [makeTestWorkflow({ name: 'assist', description: 'General assistant' })],
           errors: [],
         });
 
@@ -2213,7 +2206,6 @@ describe('CommandHandler', () => {
           status: 'running',
           started_at: new Date(),
           completed_at: null,
-          current_step_index: 0,
           user_message: 'test',
           metadata: {},
           last_activity_at: new Date(),
@@ -2273,7 +2265,6 @@ describe('CommandHandler', () => {
           status: 'running',
           started_at: startedAt,
           completed_at: null,
-          current_step_index: 1,
           user_message: 'test',
           metadata: {},
           last_activity_at: lastActivity,
@@ -2284,7 +2275,6 @@ describe('CommandHandler', () => {
         expect(result.success).toBe(true);
         expect(result.message).toContain('Workflow: `test-workflow`');
         expect(result.message).toContain('Status: running');
-        expect(result.message).toContain('Step: 2'); // index + 1
         expect(result.message).toContain('Duration:');
         expect(result.message).toContain('Last activity:');
       });
@@ -2308,7 +2298,6 @@ describe('CommandHandler', () => {
           status: 'running',
           started_at: startedAt,
           completed_at: null,
-          current_step_index: 0,
           user_message: 'test',
           metadata: {},
           last_activity_at: lastActivity,
@@ -2331,7 +2320,6 @@ describe('CommandHandler', () => {
           status: 'running',
           started_at: startedAt,
           completed_at: null,
-          current_step_index: 0,
           user_message: 'test',
           metadata: {},
           last_activity_at: lastActivity,
@@ -2352,7 +2340,6 @@ describe('CommandHandler', () => {
           status: 'running',
           started_at: startedAt,
           completed_at: null,
-          current_step_index: 0,
           user_message: 'test',
           metadata: {},
           last_activity_at: null,
@@ -2383,7 +2370,6 @@ describe('CommandHandler', () => {
           status: 'running',
           started_at: 'invalid-date', // Invalid date string
           completed_at: null,
-          current_step_index: 0,
           user_message: 'test',
           metadata: {},
           last_activity_at: null,
@@ -2425,11 +2411,7 @@ describe('CommandHandler', () => {
       test('should return error when workflow is not found', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
           workflows: [
-            {
-              name: 'existing-workflow',
-              description: 'An existing workflow',
-              steps: [{ command: 'assist', args: 'test' }],
-            },
+            makeTestWorkflow({ name: 'existing-workflow', description: 'An existing workflow' }),
           ],
           errors: [],
         });
@@ -2443,13 +2425,7 @@ describe('CommandHandler', () => {
 
       test('should return success with workflow info when workflow is found', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [
-            {
-              name: 'test-workflow',
-              description: 'A test workflow',
-              steps: [{ command: 'assist', args: 'do something' }],
-            },
-          ],
+          workflows: [makeTestWorkflow({ name: 'test-workflow', description: 'A test workflow' })],
           errors: [],
         });
 
@@ -2464,13 +2440,7 @@ describe('CommandHandler', () => {
 
       test('should pass arguments to workflow', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [
-            {
-              name: 'fix-issue',
-              description: 'Fix a GitHub issue',
-              steps: [{ command: 'assist', args: 'fix $ARGUMENTS' }],
-            },
-          ],
+          workflows: [makeTestWorkflow({ name: 'fix-issue', description: 'Fix a GitHub issue' })],
           errors: [],
         });
 
@@ -2542,7 +2512,6 @@ describe('CommandHandler', () => {
           status: 'running',
           started_at: startedAt,
           completed_at: null,
-          current_step_index: 2,
           user_message: 'test',
           metadata: {},
           last_activity_at: lastActivity,
@@ -2552,7 +2521,6 @@ describe('CommandHandler', () => {
 
         expect(result.success).toBe(true);
         expect(result.message).toContain('Active Workflow: `investigate-issue`');
-        expect(result.message).toContain('Step: 3'); // index + 1
         expect(result.message).toContain('Cancel: `/workflow cancel`');
       });
 
@@ -2587,7 +2555,6 @@ describe('CommandHandler', () => {
           status: 'running',
           started_at: startedAt,
           completed_at: null,
-          current_step_index: 0,
           user_message: 'test',
           metadata: {},
           last_activity_at: lastActivity,
@@ -2631,7 +2598,6 @@ describe('CommandHandler', () => {
           status: 'running',
           started_at: 'not-a-valid-date', // Invalid date
           completed_at: null,
-          current_step_index: 0,
           user_message: 'test',
           metadata: {},
           last_activity_at: null,

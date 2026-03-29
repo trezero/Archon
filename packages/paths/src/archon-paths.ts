@@ -14,7 +14,7 @@
  * For Docker: /.archon/
  */
 
-import { join, dirname, normalize } from 'path';
+import { join, dirname, normalize, basename } from 'path';
 import { homedir } from 'os';
 import { access, mkdir, symlink, lstat, readdir, readlink, rm } from 'fs/promises';
 import { createLogger } from './logger';
@@ -128,6 +128,45 @@ export function getCommandFolderSearchPaths(configuredFolder?: string): string[]
  */
 export function getWorkflowFolderSearchPaths(): string[] {
   return ['.archon/workflows'];
+}
+
+/**
+ * Recursively find all .md files in a directory and its subdirectories.
+ * Skips hidden directories and node_modules.
+ */
+export async function findMarkdownFilesRecursive(
+  rootPath: string,
+  relativePath = ''
+): Promise<{ commandName: string; relativePath: string }[]> {
+  const results: { commandName: string; relativePath: string }[] = [];
+  const fullPath = join(rootPath, relativePath);
+
+  let entries;
+  try {
+    entries = await readdir(fullPath, { withFileTypes: true });
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    if (err.code === 'ENOENT') return results;
+    throw err;
+  }
+
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') || entry.name === 'node_modules') {
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      const subResults = await findMarkdownFilesRecursive(rootPath, join(relativePath, entry.name));
+      results.push(...subResults);
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      results.push({
+        commandName: basename(entry.name, '.md'),
+        relativePath: join(relativePath, entry.name),
+      });
+    }
+  }
+
+  return results;
 }
 
 /**

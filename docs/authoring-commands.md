@@ -42,8 +42,8 @@ argument-hint: <expected-input-format>
 
 | Field | Required | Purpose |
 |-------|----------|---------|
-| `description` | Yes | Shown in `/commands` list and workflow routing |
-| `argument-hint` | Yes | Tells users what input to provide |
+| `description` | Recommended | Shown in `/commands` list and workflow routing |
+| `argument-hint` | Optional | Tells users what input to provide |
 
 ---
 
@@ -70,7 +70,7 @@ Step 1: investigate-issue    Step 2: implement-issue
 
 ### Why This Matters
 
-- **No shared context**: Each workflow step can run with `clearContext: true`
+- **No shared context**: Each workflow node can run with `context: fresh`
 - **Resumability**: If a step fails, the artifact preserves progress
 - **Auditability**: Artifacts create a paper trail of AI decisions
 - **Handoff quality**: The artifact determines if the next step succeeds

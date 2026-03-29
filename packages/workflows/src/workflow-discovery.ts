@@ -9,7 +9,7 @@
  */
 import { readFile, readdir, access, stat } from 'fs/promises';
 import { join } from 'path';
-import type { WorkflowDefinition, WorkflowLoadError, WorkflowLoadResult } from './types';
+import type { WorkflowDefinition, WorkflowLoadError, WorkflowLoadResult } from './schemas';
 import * as archonPaths from '@archon/paths';
 import { BUNDLED_WORKFLOWS, isBinaryBuild } from './defaults/bundled-defaults';
 import { createLogger } from '@archon/paths';
@@ -96,8 +96,9 @@ async function loadWorkflowsFromDir(dirPath: string): Promise<DirLoadResult> {
  * Note: Bundled workflows are embedded at compile time and should ALWAYS be valid.
  * Parse failures indicate a build-time corruption and are logged as errors.
  */
-function loadBundledWorkflows(): Map<string, WorkflowDefinition> {
+function loadBundledWorkflows(): DirLoadResult {
   const workflows = new Map<string, WorkflowDefinition>();
+  const errors: WorkflowLoadError[] = [];
 
   for (const [name, content] of Object.entries(BUNDLED_WORKFLOWS)) {
     const filename = `${name}.yaml`;
@@ -111,10 +112,11 @@ function loadBundledWorkflows(): Map<string, WorkflowDefinition> {
         { filename, contentPreview: content.slice(0, 200) + '...' },
         'bundled_workflow_parse_failed'
       );
+      errors.push(result.error);
     }
   }
 
-  return workflows;
+  return { workflows, errors };
 }
 
 /**
@@ -140,11 +142,12 @@ export async function discoverWorkflows(
     if (isBinaryBuild()) {
       // Binary: load from embedded bundled content
       getLog().debug('loading_bundled_default_workflows');
-      const bundledWorkflows = loadBundledWorkflows();
-      for (const [filename, workflow] of bundledWorkflows) {
+      const bundledResult = loadBundledWorkflows();
+      for (const [filename, workflow] of bundledResult.workflows) {
         workflowsByFile.set(filename, workflow);
       }
-      getLog().info({ count: bundledWorkflows.size }, 'bundled_default_workflows_loaded');
+      allErrors.push(...bundledResult.errors);
+      getLog().info({ count: bundledResult.workflows.size }, 'bundled_default_workflows_loaded');
     } else {
       // Bun: load from filesystem (development mode)
       const appDefaultsPath = archonPaths.getDefaultWorkflowsPath();
@@ -155,12 +158,12 @@ export async function discoverWorkflows(
         for (const [filename, workflow] of appResult.workflows) {
           workflowsByFile.set(filename, workflow);
         }
-        // Don't surface bundled/app default errors to users - they're internal
         if (appResult.errors.length > 0) {
           getLog().warn(
             { errorCount: appResult.errors.length, errors: appResult.errors },
             'app_default_workflow_errors'
           );
+          allErrors.push(...appResult.errors);
         }
         getLog().info({ count: appResult.workflows.size }, 'app_default_workflows_loaded');
       } catch (error) {

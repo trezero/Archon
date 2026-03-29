@@ -18,7 +18,6 @@ const SEVERITY_ORDER: Record<ValidationIssue['severity'], number> = {
 };
 
 function getInstantIssues(
-  mode: 'dag' | 'sequential' | 'loop',
   workflowName: string,
   workflowDescription: string,
   nodes: DagFlowNode[]
@@ -41,7 +40,7 @@ function getInstantIssues(
     });
   }
 
-  if (mode === 'dag' && nodes.length === 0) {
+  if (nodes.length === 0) {
     issues.push({
       severity: 'error',
       message: 'At least one node is required',
@@ -51,13 +50,7 @@ function getInstantIssues(
   return issues;
 }
 
-function getDebouncedIssues(
-  mode: 'dag' | 'sequential' | 'loop',
-  nodes: DagFlowNode[],
-  edges: Edge[]
-): ValidationIssue[] {
-  if (mode !== 'dag') return [];
-
+function getDebouncedIssues(nodes: DagFlowNode[], edges: Edge[]): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const nodeIds = new Set(nodes.map(n => n.data.id));
 
@@ -148,7 +141,6 @@ function getDebouncedIssues(
 }
 
 export function useBuilderValidation(
-  mode: 'dag' | 'sequential' | 'loop',
   workflowName: string,
   workflowDescription: string,
   nodes: DagFlowNode[],
@@ -164,7 +156,7 @@ export function useBuilderValidation(
     }
 
     timerRef.current = setTimeout(() => {
-      const issues = getDebouncedIssues(mode, nodes, edges);
+      const issues = getDebouncedIssues(nodes, edges);
       setDebouncedIssues(issues);
       timerRef.current = null;
     }, 300);
@@ -174,10 +166,10 @@ export function useBuilderValidation(
         clearTimeout(timerRef.current);
       }
     };
-  }, [mode, nodes, edges]);
+  }, [nodes, edges]);
 
   // Instant checks (every render)
-  const instantIssues = getInstantIssues(mode, workflowName, workflowDescription, nodes);
+  const instantIssues = getInstantIssues(workflowName, workflowDescription, nodes);
 
   // Combine and sort by severity (errors first)
   const allIssues = [...instantIssues, ...debouncedIssues];

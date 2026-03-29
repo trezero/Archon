@@ -1,39 +1,17 @@
 import { describe, test, expect } from 'bun:test';
-import {
-  isParallelBlock,
-  isSingleStep,
-  isDagWorkflow,
-  isBashNode,
-  isTriggerRule,
-  TRIGGER_RULES,
-} from './types';
+import { isBashNode, isTriggerRule, TRIGGER_RULES } from './schemas';
 import type {
-  WorkflowStep,
-  SingleStep,
-  ParallelBlock,
   WorkflowDefinition,
   DagNode,
   CommandNode,
   PromptNode,
   BashNode,
   TriggerRule,
-} from './types';
+} from './schemas';
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
-
-const singleStep: SingleStep = { command: 'some-command' };
-
-const parallelBlock: ParallelBlock = {
-  parallel: [{ command: 'step-a' }, { command: 'step-b' }],
-};
-
-const stepWorkflow: WorkflowDefinition = {
-  name: 'my-workflow',
-  description: 'sequential steps',
-  steps: [singleStep],
-};
 
 const commandNode: CommandNode = { id: 'n1', command: 'build' };
 const promptNode: PromptNode = { id: 'n2', prompt: 'Do this inline.' };
@@ -44,113 +22,6 @@ const dagWorkflow: WorkflowDefinition = {
   description: 'DAG execution',
   nodes: [commandNode, promptNode, bashNode],
 };
-
-// ---------------------------------------------------------------------------
-// isParallelBlock
-// ---------------------------------------------------------------------------
-
-describe('isParallelBlock', () => {
-  test('returns true for a valid ParallelBlock', () => {
-    expect(isParallelBlock(parallelBlock)).toBe(true);
-  });
-
-  test('returns true for an empty parallel array', () => {
-    const emptyParallel: ParallelBlock = { parallel: [] };
-    expect(isParallelBlock(emptyParallel)).toBe(true);
-  });
-
-  test('returns false for a SingleStep', () => {
-    expect(isParallelBlock(singleStep)).toBe(false);
-  });
-
-  test('returns false for a SingleStep with clearContext', () => {
-    const step: SingleStep = { command: 'build', clearContext: true };
-    expect(isParallelBlock(step)).toBe(false);
-  });
-
-  test('returns false when parallel field is missing', () => {
-    // Cast to WorkflowStep to satisfy type checker in test context
-    const noParallel = { command: 'x' } as WorkflowStep;
-    expect(isParallelBlock(noParallel)).toBe(false);
-  });
-
-  test('parallel block with allowed_tools on inner steps is still recognized', () => {
-    const block: ParallelBlock = {
-      parallel: [{ command: 'step-a', allowed_tools: ['Read'] }],
-    };
-    expect(isParallelBlock(block)).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// isSingleStep
-// ---------------------------------------------------------------------------
-
-describe('isSingleStep', () => {
-  test('returns true for a minimal SingleStep', () => {
-    expect(isSingleStep(singleStep)).toBe(true);
-  });
-
-  test('returns true for a SingleStep with optional fields', () => {
-    const step: SingleStep = {
-      command: 'lint',
-      clearContext: false,
-      allowed_tools: ['Read'],
-      denied_tools: ['Bash'],
-      idle_timeout: 30000,
-      retry: { max_attempts: 2 },
-    };
-    expect(isSingleStep(step)).toBe(true);
-  });
-
-  test('returns false for a ParallelBlock', () => {
-    expect(isSingleStep(parallelBlock)).toBe(false);
-  });
-
-  test('returns false when command field is missing', () => {
-    // Force a bad object to verify the guard rejects it
-    const noCommand = { parallel: [] } as unknown as WorkflowStep;
-    expect(isSingleStep(noCommand)).toBe(false);
-  });
-
-  test('returns false when parallel field co-exists (malformed object)', () => {
-    // Even if command is present, 'parallel' in step → false
-    const hybrid = { command: 'x', parallel: [] } as unknown as WorkflowStep;
-    expect(isSingleStep(hybrid)).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// isDagWorkflow
-// ---------------------------------------------------------------------------
-
-describe('isDagWorkflow', () => {
-  test('returns true for a DAG workflow', () => {
-    expect(isDagWorkflow(dagWorkflow)).toBe(true);
-  });
-
-  test('returns true for a DAG workflow with empty nodes array', () => {
-    const emptyDag: WorkflowDefinition = {
-      name: 'empty-dag',
-      description: 'no nodes',
-      nodes: [],
-    };
-    expect(isDagWorkflow(emptyDag)).toBe(true);
-  });
-
-  test('returns false for a step-based workflow', () => {
-    expect(isDagWorkflow(stepWorkflow)).toBe(false);
-  });
-
-  test('step workflow without nodes is not a DAG', () => {
-    const w: WorkflowDefinition = {
-      name: 'w',
-      description: 'd',
-      steps: [{ command: 'x' }],
-    };
-    expect(isDagWorkflow(w)).toBe(false);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // isBashNode

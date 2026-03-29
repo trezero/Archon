@@ -4,8 +4,7 @@
  * registered projects and available workflows.
  */
 import type { Codebase } from '../types';
-import type { WorkflowDefinition } from '@archon/workflows';
-import { isDagWorkflow, isSingleStep } from '@archon/workflows';
+import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 
 /**
  * Format a single project for the orchestrator prompt.
@@ -32,14 +31,7 @@ export function formatWorkflowSection(workflows: readonly WorkflowDefinition[]):
   for (const w of workflows) {
     section += `**${w.name}**\n`;
     section += `  ${w.description}\n`;
-    if (isDagWorkflow(w)) {
-      section += `  Type: DAG (${String(w.nodes.length)} nodes)\n`;
-    } else if (w.steps) {
-      const stepNames = w.steps.map(s =>
-        isSingleStep(s) ? s.command : `[${String(s.parallel.length)} parallel]`
-      );
-      section += `  Steps: ${stepNames.join(' → ')}\n`;
-    }
+    section += `  Type: DAG (${String(w.nodes.length)} nodes)\n`;
     section += '\n';
   }
   return section;
@@ -105,6 +97,12 @@ When a user asks to add a new project:
 
 Example:
    /register-project my-new-app /home/user/.archon/workspaces/user/my-new-app/source
+
+To update a project's path:
+   /update-project {project-name} {new-path}
+
+To remove a registered project:
+   /remove-project {project-name}
 
 IMPORTANT: Always clone into ~/.archon/workspaces/{owner}/{repo}/source unless the user specifies a different location.`;
 }

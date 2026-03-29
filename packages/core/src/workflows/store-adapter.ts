@@ -2,12 +2,9 @@
  * WorkflowStore adapter — bridges @archon/core DB modules to the
  * IWorkflowStore trait defined in @archon/workflows.
  */
-import type {
-  IWorkflowStore,
-  WorkflowConfig,
-  WorkflowDeps,
-  WorkflowRunStatus,
-} from '@archon/workflows';
+import type { IWorkflowStore } from '@archon/workflows/store';
+import type { WorkflowConfig, WorkflowDeps } from '@archon/workflows/deps';
+import type { WorkflowRunStatus } from '@archon/workflows/schemas/workflow-run';
 import type { MergedConfig } from '../config/config-types';
 import * as workflowDb from '../db/workflows';
 import * as workflowEventDb from '../db/workflow-events';

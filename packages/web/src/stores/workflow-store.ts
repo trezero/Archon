@@ -4,11 +4,8 @@ import { queryClient } from '@/lib/query-client';
 import { getWorkflowRun } from '@/lib/api';
 import type {
   WorkflowState,
-  WorkflowStepState,
   DagNodeState,
-  WorkflowStepEvent,
   WorkflowStatusEvent,
-  ParallelAgentEvent,
   WorkflowArtifactEvent,
   DagNodeEvent,
   WorkflowToolActivityEvent,
@@ -19,8 +16,6 @@ interface WorkflowStoreState {
   activeWorkflowId: string | null;
   // Actions
   handleWorkflowStatus: (event: WorkflowStatusEvent) => void;
-  handleWorkflowStep: (event: WorkflowStepEvent) => void;
-  handleParallelAgent: (event: ParallelAgentEvent) => void;
   handleWorkflowArtifact: (event: WorkflowArtifactEvent) => void;
   handleDagNode: (event: DagNodeEvent) => void;
   handleWorkflowToolActivity: (event: WorkflowToolActivityEvent) => void;
@@ -192,10 +187,8 @@ export const useWorkflowStore = create<WorkflowStoreState>()(
                 runId: event.runId,
                 workflowName: event.workflowName,
                 status: event.status,
-                steps: [],
                 dagNodes: [],
                 artifacts: [],
-                isLoop: false,
                 startedAt: event.timestamp,
                 completedAt: isTerminalStatus(event.status) ? event.timestamp : undefined,
                 error: event.error,
@@ -222,84 +215,6 @@ export const useWorkflowStore = create<WorkflowStoreState>()(
         if (event.status === 'running' || isTerminalStatus(event.status)) {
           invalidateWorkflowQueries();
         }
-      },
-
-      handleWorkflowStep: (event: WorkflowStepEvent): void => {
-        set(
-          state => {
-            const wf = state.workflows.get(event.runId);
-            if (!wf) return state;
-
-            const steps = [...wf.steps];
-            const existingIdx = steps.findIndex(s => s.index === event.step);
-
-            const stepState: WorkflowStepState = {
-              index: event.step,
-              name: event.name,
-              status: event.status,
-              duration: event.duration,
-              agents: existingIdx >= 0 ? steps[existingIdx].agents : undefined,
-            };
-
-            if (existingIdx >= 0) {
-              steps[existingIdx] = { ...steps[existingIdx], ...stepState };
-            } else {
-              steps.push(stepState);
-            }
-
-            const isLoop = event.iteration !== undefined;
-            const next = new Map(state.workflows);
-            next.set(event.runId, {
-              ...wf,
-              steps,
-              isLoop,
-              currentIteration: event.iteration,
-              maxIterations: isLoop && event.total > 0 ? event.total : wf.maxIterations,
-            });
-            return { workflows: next };
-          },
-          undefined,
-          'workflow/step'
-        );
-      },
-
-      handleParallelAgent: (event: ParallelAgentEvent): void => {
-        set(
-          state => {
-            const wf = state.workflows.get(event.runId);
-            if (!wf) return state;
-
-            const steps = [...wf.steps];
-            const stepIdx = steps.findIndex(s => s.index === event.step);
-            if (stepIdx < 0) return state;
-
-            const step = { ...steps[stepIdx] };
-            const agents = [...(step.agents ?? [])];
-            const agentIdx = agents.findIndex(a => a.index === event.agentIndex);
-
-            const agentState = {
-              index: event.agentIndex,
-              name: event.name,
-              status: event.status,
-              duration: event.duration,
-              error: event.error,
-            };
-
-            if (agentIdx >= 0) {
-              agents[agentIdx] = agentState;
-            } else {
-              agents.push(agentState);
-            }
-
-            step.agents = agents;
-            steps[stepIdx] = step;
-            const next = new Map(state.workflows);
-            next.set(event.runId, { ...wf, steps });
-            return { workflows: next };
-          },
-          undefined,
-          'workflow/parallelAgent'
-        );
       },
 
       handleWorkflowArtifact: (event: WorkflowArtifactEvent): void => {
@@ -402,19 +317,11 @@ export function selectActiveWorkflow(state: WorkflowStoreState): WorkflowState |
 
 // Stable SSE handler object — actions are defined once in create(), so references never change.
 // Shared by ChatInterface and WorkflowLogs instead of per-component useShallow selectors.
-const {
-  handleWorkflowStep,
-  handleWorkflowStatus,
-  handleParallelAgent,
-  handleWorkflowArtifact,
-  handleDagNode,
-  handleWorkflowToolActivity,
-} = useWorkflowStore.getState();
+const { handleWorkflowStatus, handleWorkflowArtifact, handleDagNode, handleWorkflowToolActivity } =
+  useWorkflowStore.getState();
 
 export const workflowSSEHandlers = {
-  onWorkflowStep: handleWorkflowStep,
   onWorkflowStatus: handleWorkflowStatus,
-  onParallelAgent: handleParallelAgent,
   onWorkflowArtifact: handleWorkflowArtifact,
   onDagNode: handleDagNode,
   onToolActivity: handleWorkflowToolActivity,

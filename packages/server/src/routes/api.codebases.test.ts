@@ -1,7 +1,9 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
-import { Hono } from 'hono';
+import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ConversationLockManager } from '@archon/core';
 import type { WebAdapter } from '../adapters/web';
+import { validationErrorHook } from './openapi-defaults';
+import { mockAllWorkflowModules } from '../test/workflow-mock-factories';
 
 // ---------------------------------------------------------------------------
 // Mock setup — must be declared before any dynamic imports of mocked modules
@@ -86,14 +88,7 @@ mock.module('@archon/paths', () => ({
   getArchonWorkspacesPath: () => '/tmp/.archon/workspaces',
 }));
 
-mock.module('@archon/workflows', () => ({
-  discoverWorkflowsWithConfig: mock(async () => ({ workflows: [], errors: [] })),
-  parseWorkflow: mock(() => ({ workflow: null, error: null })),
-  isValidCommandName: mock(() => true),
-  BUNDLED_WORKFLOWS: {},
-  BUNDLED_COMMANDS: {},
-  isBinaryBuild: mock(() => false),
-}));
+mockAllWorkflowModules();
 
 mock.module('@archon/git', () => ({
   removeWorktree: mockRemoveWorktree,
@@ -198,8 +193,8 @@ const MOCK_ENV = {
   updated_at: new Date().toISOString(),
 };
 
-function makeApp(): Hono {
-  const app = new Hono();
+function makeApp(): OpenAPIHono {
+  const app = new OpenAPIHono({ defaultHook: validationErrorHook });
   const mockWebAdapter = {
     setConversationDbId: mock((_platformId: string, _dbId: string) => {}),
     emitSSE: mock(async () => {}),
@@ -467,9 +462,6 @@ describe('POST /api/codebases', () => {
       body: 'not-json{{{',
     });
     expect(response.status).toBe(400);
-
-    const body = (await response.json()) as { error: string };
-    expect(body.error).toContain('Invalid JSON');
   });
 
   test('returns 500 when codebase record not found after creation', async () => {

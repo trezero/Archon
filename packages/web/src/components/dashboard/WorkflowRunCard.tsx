@@ -37,36 +37,27 @@ function StepProgress({
   run: DashboardRunResponse;
   liveState: WorkflowState | undefined;
 }): React.ReactElement | null {
-  const runningStep = liveState?.steps
+  const dagNodes = liveState?.dagNodes ?? [];
+  const runningNode = dagNodes
     .slice()
     .reverse()
-    .find(s => s.status === 'running');
-  const stepIndex = runningStep?.index ?? run.current_step_index;
-  const stepName = runningStep?.name ?? run.current_step_name;
-  const totalSteps = run.total_steps;
-  const liveAgents = runningStep?.agents;
-  const agentsCompleted =
-    liveAgents !== undefined
-      ? liveAgents.filter(a => a.status === 'completed').length
-      : run.agents_completed;
-  const agentsTotal = liveAgents !== undefined ? liveAgents.length || null : run.agents_total;
+    .find(n => n.status === 'running');
+  const completedCount = dagNodes.filter(n => n.status === 'completed').length;
+  const totalNodes = dagNodes.length || run.total_steps || 0;
+  const stepName = runningNode?.name ?? run.current_step_name;
   const currentTool = liveState?.currentTool ?? null;
 
-  if (stepIndex == null && !currentTool) return null;
+  const hasProgress = runningNode != null || totalNodes > 0;
+  if (!hasProgress && !currentTool) return null;
 
   return (
     <div className="rounded-md bg-surface-elevated px-3 py-2 space-y-1">
-      {stepIndex != null && (
+      {hasProgress && (
         <div className="flex items-center gap-2 text-sm text-text-primary">
           <span className="font-medium">
-            {`Step ${String(stepIndex)}${totalSteps ? `/${String(totalSteps)}` : ''}`}
+            {`${String(completedCount)}${totalNodes ? `/${String(totalNodes)}` : ''} nodes`}
           </span>
           {stepName && <span className="text-text-secondary">{stepName}</span>}
-          {agentsTotal ? (
-            <span className="text-text-tertiary text-xs">
-              {`${String(agentsCompleted ?? 0)}/${String(agentsTotal)} agents done`}
-            </span>
-          ) : null}
         </div>
       )}
       {currentTool && (

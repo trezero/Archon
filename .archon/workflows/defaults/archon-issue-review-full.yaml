@@ -6,62 +6,88 @@ description: |
            questions about issues, CI failures, PR reviews, general exploration.
 
   Full workflow:
-  1. Investigate issue → root cause analysis, implementation plan
-  2. Implement fix → code changes, tests, PR creation
-  3. Comprehensive review → 5 parallel agents with scope awareness
-  4. Fix review issues → address CRITICAL/HIGH findings
-  5. Final summary → decision matrix, follow-up recommendations
+  1. Investigate issue -> root cause analysis, implementation plan
+  2. Implement fix -> code changes, tests, PR creation
+  3. Comprehensive review -> 5 parallel agents with scope awareness
+  4. Fix review issues -> address CRITICAL/HIGH findings
+  5. Final summary -> decision matrix, follow-up recommendations
 
-steps:
+nodes:
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 1: INVESTIGATE
   # ═══════════════════════════════════════════════════════════════════
 
-  - command: archon-investigate-issue
-    # Analyzes issue, creates investigation.md artifact
-    # Posts analysis to GitHub issue
+  - id: investigate
+    command: archon-investigate-issue
 
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 2: IMPLEMENT
   # ═══════════════════════════════════════════════════════════════════
 
-  - command: archon-implement-issue
-    clearContext: true
-    # Implements fix from investigation, creates PR
-    # Artifact: implementation.md
+  - id: implement
+    command: archon-implement-issue
+    depends_on: [investigate]
+    context: fresh
 
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 3: CODE REVIEW
   # ═══════════════════════════════════════════════════════════════════
 
-  - command: archon-pr-review-scope
-    clearContext: true
-    # Scopes the review, extracts OUT OF SCOPE from investigation
+  - id: review-scope
+    command: archon-pr-review-scope
+    depends_on: [implement]
+    context: fresh
 
-  - command: archon-sync-pr-with-main
-    clearContext: true
+  - id: sync
+    command: archon-sync-pr-with-main
+    depends_on: [review-scope]
+    context: fresh
 
-  - parallel:
-      - command: archon-code-review-agent
-      - command: archon-error-handling-agent
-      - command: archon-test-coverage-agent
-      - command: archon-comment-quality-agent
-      - command: archon-docs-impact-agent
+  - id: code-review
+    command: archon-code-review-agent
+    depends_on: [sync]
+    context: fresh
 
-  - command: archon-synthesize-review
-    clearContext: true
+  - id: error-handling
+    command: archon-error-handling-agent
+    depends_on: [sync]
+    context: fresh
+
+  - id: test-coverage
+    command: archon-test-coverage-agent
+    depends_on: [sync]
+    context: fresh
+
+  - id: comment-quality
+    command: archon-comment-quality-agent
+    depends_on: [sync]
+    context: fresh
+
+  - id: docs-impact
+    command: archon-docs-impact-agent
+    depends_on: [sync]
+    context: fresh
+
+  - id: synthesize
+    command: archon-synthesize-review
+    depends_on: [code-review, error-handling, test-coverage, comment-quality, docs-impact]
+    trigger_rule: one_success
+    context: fresh
 
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 4: FIX REVIEW ISSUES
   # ═══════════════════════════════════════════════════════════════════
 
-  - command: archon-implement-review-fixes
-    clearContext: true
+  - id: implement-fixes
+    command: archon-implement-review-fixes
+    depends_on: [synthesize]
+    context: fresh
 
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 5: FINAL SUMMARY
   # ═══════════════════════════════════════════════════════════════════
 
-  - command: archon-workflow-summary
-    clearContext: true
-    # Reads ALL artifacts, posts decision matrix to GitHub
+  - id: summary
+    command: archon-workflow-summary
+    depends_on: [implement-fixes]
+    context: fresh

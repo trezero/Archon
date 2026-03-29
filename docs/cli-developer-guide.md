@@ -79,7 +79,8 @@ packages/cli/
                                │
                                ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ @archon/workflows discoverWorkflows(cwd)                         │
+│ @archon/workflows/workflow-discovery                              │
+│ discoverWorkflowsWithConfig(cwd, config)                          │
 │ - Loads bundled defaults                                         │
 │ - Searches .archon/workflows/ recursively                        │
 │ - Merges (repo overrides defaults by name)                       │
@@ -162,6 +163,34 @@ packages/cli/
 **Code:** `packages/cli/src/commands/workflow.ts:72-251`
 
 **Worktree Provider:** `packages/core/src/isolation/providers/worktree-provider.ts`
+
+---
+
+## `workflow event emit` Flow
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ archon workflow event emit --run-id <uuid> --type <type> [...]   │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ cli.ts  Validate --run-id, --type (required)                     │
+│         Validate --type against WORKFLOW_EVENT_TYPES              │
+│         Parse --data as JSON (warn + skip if invalid)            │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ workflow.ts  workflowEventEmitCommand(runId, eventType, data?)   │
+│              createWorkflowStore().createWorkflowEvent(...)       │
+│              Non-throwing (fire-and-forget)                       │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Code:** `packages/cli/src/cli.ts` (case 'event'), `packages/cli/src/commands/workflow.ts:workflowEventEmitCommand`
+
+**Contract:** Event persistence is best-effort. `createWorkflowEvent` catches all errors internally — the CLI prints a confirmation but cannot guarantee the event was stored.
 
 ---
 
@@ -252,8 +281,8 @@ Implements `IPlatformAdapter` for terminal output.
 
 | Function | Package | Location | Purpose |
 |----------|---------|----------|---------|
-| `discoverWorkflows(cwd)` | `@archon/workflows` | `workflows/src/workflow-discovery.ts` | Find and parse workflow YAML |
-| `executeWorkflow(...)` | `@archon/workflows` | `workflows/src/executor.ts` | Run workflow steps |
+| `discoverWorkflowsWithConfig(cwd, config)` | `@archon/workflows/workflow-discovery` | `workflows/src/workflow-discovery.ts` | Find and parse workflow YAML |
+| `executeWorkflow(...)` | `@archon/workflows/executor` | `workflows/src/executor.ts` | Run workflow steps |
 | `getIsolationProvider()` | `@archon/isolation` | `isolation/src/factory.ts` | Get WorktreeProvider singleton |
 | `conversationDb.*` | `@archon/core` | `core/src/db/conversations.ts` | Conversation CRUD |
 | `codebaseDb.*` | `@archon/core` | `core/src/db/codebases.ts` | Codebase CRUD |

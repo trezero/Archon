@@ -41,6 +41,18 @@ export function getDatabase(): IDatabase {
     getLog().info({ dbPath }, 'db.connection_sqlite_selected');
     database = new SqliteAdapter(dbPath);
     dialect = sqliteDialect;
+
+    // Warn if running in Docker without DATABASE_URL — the postgres container
+    // from --profile with-db is running but the app is silently using SQLite
+    if (process.env.ARCHON_DOCKER === 'true') {
+      getLog().warn(
+        {
+          hint: 'Add DATABASE_URL=postgresql://postgres:postgres@postgres:5432/remote_coding_agent to .env to use PostgreSQL',
+          current: dbPath,
+        },
+        'db.docker_using_sqlite'
+      );
+    }
   }
 
   return database;

@@ -14,18 +14,22 @@ import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
 import * as commandHandler from '../handlers/command-handler';
-import { formatToolCall } from '@archon/workflows';
+import { formatToolCall } from '@archon/workflows/utils/tool-formatter';
 import { classifyAndFormatError } from '../utils/error-formatter';
 import { toError } from '../utils/error';
 import { getAssistantClient } from '../clients/factory';
 import { getArchonHome, getArchonWorkspacesPath } from '@archon/paths';
 import { syncArchonToWorktree } from '../utils/worktree-sync';
-import {
-  discoverWorkflowsWithConfig,
-  findWorkflow,
-  executeWorkflow,
-  type WorkflowDefinition,
-} from '@archon/workflows';
+import { syncWorkspace, toRepoPath } from '@archon/git';
+import type { WorkspaceSyncResult } from '@archon/git';
+import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
+import { findWorkflow } from '@archon/workflows/router';
+import { executeWorkflow } from '@archon/workflows/executor';
+import type {
+  WorkflowDefinition,
+  WorkflowLoadResult,
+  WorkflowLoadError,
+} from '@archon/workflows/schemas/workflow';
 import { createWorkflowDeps } from '../workflows/store-adapter';
 import { loadConfig } from '../config/config-loader';
 import { generateAndSetTitle } from '../services/title-generator';
@@ -306,22 +310,58 @@ async function inheritThreadContext(
   }
 }
 
+interface DiscoverResult extends WorkflowLoadResult {
+  syncResult?: WorkspaceSyncResult;
+  syncError?: string;
+}
+
 /** Discover global + repo-specific workflows, merge by name (repo overrides global) */
-async function discoverAllWorkflows(conversation: Conversation): Promise<WorkflowDefinition[]> {
+async function discoverAllWorkflows(conversation: Conversation): Promise<DiscoverResult> {
   let workflows: WorkflowDefinition[] = [];
+  const allErrors: WorkflowLoadError[] = [];
+  let syncResult: WorkspaceSyncResult | undefined;
+  let syncError: string | undefined;
+
   try {
     const result = await discoverWorkflowsWithConfig(getArchonWorkspacesPath(), loadConfig, {
       globalSearchPath: getArchonHome(),
     });
     workflows = [...result.workflows];
+    allErrors.push(...result.errors);
   } catch (error) {
-    getLog().warn({ err: error as Error }, 'global_workflow_discovery_failed');
+    const err = error as Error;
+    getLog().warn({ err, errorType: err.constructor.name }, 'global_workflow_discovery_failed');
   }
 
   if (conversation.codebase_id) {
     try {
       const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
       if (codebase) {
+        // Sync canonical source with remote before the AI reads codebase state.
+        // Only hard-reset for Archon-managed clones (under ~/.archon/workspaces/).
+        // Locally-registered repos get fetch-only to avoid destroying uncommitted work.
+        // Non-fatal: if fetch fails (network, no remote), proceed with local state.
+        try {
+          const isManagedClone = codebase.default_cwd
+            .replace(/\\/g, '/')
+            .startsWith(getArchonWorkspacesPath().replace(/\\/g, '/'));
+          syncResult = await syncWorkspace(toRepoPath(codebase.default_cwd), undefined, {
+            resetAfterFetch: isManagedClone,
+          });
+          getLog().debug(
+            {
+              codebaseId: codebase.id,
+              repoPath: codebase.default_cwd,
+              isManagedClone,
+              ...syncResult,
+            },
+            'workspace.sync_completed'
+          );
+        } catch (err) {
+          const error = err as Error;
+          syncError = error.message;
+          getLog().warn({ err: error, codebaseId: codebase.id }, 'workspace.sync_failed');
+        }
         const workflowCwd = conversation.cwd ?? codebase.default_cwd;
         await syncArchonToWorktree(workflowCwd);
         const repoResult = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
@@ -330,13 +370,14 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Workflo
           workflowMap.set(rw.name, rw);
         }
         workflows = Array.from(workflowMap.values());
+        allErrors.push(...repoResult.errors);
       }
     } catch (error) {
-      getLog().debug({ err: error as Error }, 'repo_workflow_discovery_failed');
+      getLog().warn({ err: error as Error }, 'repo_workflow_discovery_failed');
     }
   }
 
-  return workflows;
+  return { workflows, errors: allErrors, syncResult, syncError };
 }
 
 /** Build the full prompt with system prompt, user message, and optional contexts */
@@ -417,11 +458,34 @@ export async function handleMessage(
     // 2. Check for deterministic commands
     if (message.startsWith('/')) {
       const { command } = commandHandler.parseCommand(message);
-      const deterministicCommands = ['help', 'status', 'reset', 'workflow', 'register-project'];
+      const deterministicCommands = [
+        'help',
+        'status',
+        'reset',
+        'workflow',
+        'register-project',
+        'update-project',
+        'remove-project',
+      ];
 
       if (deterministicCommands.includes(command)) {
         if (command === 'register-project') {
+          getLog().debug({ command, conversationId }, 'deterministic_command');
           const result = await handleRegisterProject(message, platform, conversationId);
+          await platform.sendMessage(conversationId, result);
+          return;
+        }
+
+        if (command === 'update-project') {
+          getLog().debug({ command, conversationId }, 'deterministic_command');
+          const result = await handleUpdateProject(message);
+          await platform.sendMessage(conversationId, result);
+          return;
+        }
+
+        if (command === 'remove-project') {
+          getLog().debug({ command, conversationId }, 'deterministic_command');
+          const result = await handleRemoveProject(message);
           await platform.sendMessage(conversationId, result);
           return;
         }
@@ -446,7 +510,33 @@ export async function handleMessage(
 
     // 3. Load codebases, discover workflows, build prompt
     const codebases = await codebaseDb.listCodebases();
-    const workflows = await discoverAllWorkflows(conversation);
+    const {
+      workflows,
+      errors: workflowErrors,
+      syncResult,
+      syncError,
+    } = await discoverAllWorkflows(conversation);
+    if (workflowErrors.length > 0) {
+      getLog().warn(
+        { errorCount: workflowErrors.length, errors: workflowErrors },
+        'workflow.discovery_errors_present'
+      );
+    }
+
+    // Emit workspace sync status only when something noteworthy happened
+    // (HEAD moved or sync failed). Skip the "up to date" case to avoid noise.
+    if (syncError && platform.sendStructuredEvent) {
+      await platform.sendStructuredEvent(conversationId, {
+        type: 'system',
+        content: 'Sync failed \u2014 using local state',
+      });
+    } else if (syncResult?.updated && platform.sendStructuredEvent) {
+      await platform.sendStructuredEvent(conversationId, {
+        type: 'system',
+        content: `Synced with origin/${syncResult.branch} \u2014 updated ${syncResult.previousHead} \u2192 ${syncResult.newHead}`,
+      });
+    }
+
     const fullPrompt = buildFullPrompt(
       conversation,
       codebases,
@@ -896,8 +986,74 @@ async function handleRegisterProject(
     ai_assistant_type: 'claude',
   });
 
-  getLog().info({ name: projectName, path: projectPath, id: codebase.id }, 'project_registered');
+  getLog().info(
+    { name: projectName, path: projectPath, id: codebase.id },
+    'project.register_completed'
+  );
   return `Project "${projectName}" registered successfully!\nPath: ${projectPath}\nID: ${codebase.id}`;
+}
+
+/**
+ * Handle /update-project command.
+ * Updates the path for an existing registered project.
+ */
+async function handleUpdateProject(message: string): Promise<string> {
+  const { args } = commandHandler.parseCommand(message);
+  if (args.length < 2) {
+    return 'Usage: /update-project <name> <new-path>';
+  }
+
+  const [projectName, ...pathParts] = args;
+  const newPath = pathParts.join(' ');
+
+  // Validate path exists
+  if (!existsSync(newPath)) {
+    return `Path does not exist: ${newPath}`;
+  }
+
+  // Find existing codebase by name
+  const existing = await codebaseDb.listCodebases();
+  const codebase = existing.find(c => c.name.toLowerCase() === projectName.toLowerCase());
+
+  if (!codebase) {
+    return `Project "${projectName}" not found. Use /register-project to create it.`;
+  }
+
+  try {
+    await codebaseDb.updateCodebase(codebase.id, { default_cwd: newPath });
+  } catch {
+    return `Project "${projectName}" could not be updated — it may have been removed.`;
+  }
+  getLog().info(
+    { name: projectName, oldPath: codebase.default_cwd, newPath, id: codebase.id },
+    'project.update_completed'
+  );
+  return `Project "${projectName}" updated.\nOld path: ${codebase.default_cwd}\nNew path: ${newPath}`;
+}
+
+/**
+ * Handle /remove-project command.
+ * Deletes a registered project from the database.
+ */
+async function handleRemoveProject(message: string): Promise<string> {
+  const { args } = commandHandler.parseCommand(message);
+  if (args.length < 1) {
+    return 'Usage: /remove-project <name>';
+  }
+
+  const projectName = args[0];
+
+  // Find existing codebase by name
+  const existing = await codebaseDb.listCodebases();
+  const codebase = existing.find(c => c.name.toLowerCase() === projectName.toLowerCase());
+
+  if (!codebase) {
+    return `Project "${projectName}" not found.`;
+  }
+
+  await codebaseDb.deleteCodebase(codebase.id);
+  getLog().info({ name: projectName, id: codebase.id }, 'project.remove_completed');
+  return `Project "${projectName}" removed.\nPath was: ${codebase.default_cwd}`;
 }
 
 /**

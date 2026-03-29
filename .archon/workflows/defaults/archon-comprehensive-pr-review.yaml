@@ -10,18 +10,39 @@ description: |
   This workflow produces artifacts in $ARTIFACTS_DIR/../reviews/pr-{number}/ and posts
   a comprehensive review comment to the GitHub PR.
 
-steps:
-  - command: archon-pr-review-scope
+nodes:
+  - id: scope
+    command: archon-pr-review-scope
 
-  - command: archon-sync-pr-with-main
+  - id: sync
+    command: archon-sync-pr-with-main
+    depends_on: [scope]
 
-  - parallel:
-      - command: archon-code-review-agent
-      - command: archon-error-handling-agent
-      - command: archon-test-coverage-agent
-      - command: archon-comment-quality-agent
-      - command: archon-docs-impact-agent
+  - id: code-review
+    command: archon-code-review-agent
+    depends_on: [sync]
 
-  - command: archon-synthesize-review
+  - id: error-handling
+    command: archon-error-handling-agent
+    depends_on: [sync]
 
-  - command: archon-implement-review-fixes
+  - id: test-coverage
+    command: archon-test-coverage-agent
+    depends_on: [sync]
+
+  - id: comment-quality
+    command: archon-comment-quality-agent
+    depends_on: [sync]
+
+  - id: docs-impact
+    command: archon-docs-impact-agent
+    depends_on: [sync]
+
+  - id: synthesize
+    command: archon-synthesize-review
+    depends_on: [code-review, error-handling, test-coverage, comment-quality, docs-impact]
+    trigger_rule: one_success
+
+  - id: implement-fixes
+    command: archon-implement-review-fixes
+    depends_on: [synthesize]

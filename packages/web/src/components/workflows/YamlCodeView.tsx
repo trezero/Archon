@@ -1,5 +1,4 @@
-import type { WorkflowDefinition, DagNode, WorkflowStep } from '@archon/workflows/types';
-import { isDagWorkflow, isParallelBlock } from '@archon/workflows/types';
+import type { WorkflowDefinition, DagNode } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 interface YamlCodeViewProps {
@@ -145,22 +144,6 @@ function serializeDagNode(node: DagNode, baseIndent: number): string {
   return lines.join('\n');
 }
 
-/** Serialize a sequential workflow step. */
-function serializeStep(step: WorkflowStep, baseIndent: number): string {
-  const pad = ' '.repeat(baseIndent);
-
-  if (isParallelBlock(step)) {
-    const innerSteps = step.parallel.map(s => `${pad}    - command: ${s.command}`).join('\n');
-    return `${pad}- parallel:\n${innerSteps}`;
-  }
-
-  let result = `${pad}- command: ${step.command}`;
-  if (step.clearContext) {
-    result += `\n${pad}  clearContext: true`;
-  }
-  return result;
-}
-
 /** Convert a WorkflowDefinition into a YAML-like string for preview. */
 export function serializeToYaml(def: WorkflowDefinition): string {
   const lines: string[] = [];
@@ -185,16 +168,9 @@ export function serializeToYaml(def: WorkflowDefinition): string {
 
   lines.push('');
 
-  if (isDagWorkflow(def)) {
-    lines.push('nodes:');
-    for (const node of def.nodes) {
-      lines.push(serializeDagNode(node, 2));
-    }
-  } else if ('steps' in def && def.steps) {
-    lines.push('steps:');
-    for (const step of def.steps) {
-      lines.push(serializeStep(step, 2));
-    }
+  lines.push('nodes:');
+  for (const node of def.nodes) {
+    lines.push(serializeDagNode(node, 2));
   }
 
   return lines.join('\n') + '\n';

@@ -3,7 +3,7 @@
  */
 import { pool, getDialect, getDatabaseType } from './connection';
 import type { IDatabase } from './adapters/types';
-import type { WorkflowRun, WorkflowRunStatus } from '@archon/workflows';
+import type { WorkflowRun, WorkflowRunStatus } from '@archon/workflows/schemas/workflow-run';
 import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -126,17 +126,24 @@ export async function getActiveWorkflowRun(conversationId: string): Promise<Work
   }
 }
 
-export async function countRunningWorkflows(): Promise<number> {
+export async function getRunningWorkflows(): Promise<
+  { id: string; conversation_id: string; workflow_name: string; started_at: string }[]
+> {
   try {
-    const result = await pool.query<{ cnt: string }>(
-      "SELECT COUNT(*) AS cnt FROM remote_agent_workflow_runs WHERE status = 'running'",
+    const result = await pool.query<{
+      id: string;
+      conversation_id: string;
+      workflow_name: string;
+      started_at: string;
+    }>(
+      "SELECT id, conversation_id, workflow_name, started_at FROM remote_agent_workflow_runs WHERE status = 'running' ORDER BY started_at ASC LIMIT 100",
       []
     );
-    return Number(result.rows[0]?.cnt ?? 0);
+    return [...result.rows];
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'db.workflow_run_count_running_failed');
-    return 0; // Non-critical: don't break health check
+    getLog().error({ err }, 'db.workflow_runs_get_running_failed');
+    return []; // Non-critical: don't break health check
   }
 }
 
@@ -270,7 +277,7 @@ export async function getWorkflowRunByWorkerPlatformId(
  */
 export async function updateWorkflowRun(
   id: string,
-  updates: Partial<Pick<WorkflowRun, 'current_step_index' | 'status' | 'metadata'>>
+  updates: Partial<Pick<WorkflowRun, 'status' | 'metadata'>>
 ): Promise<void> {
   const dialect = getDialect();
   const setClauses: string[] = [];
@@ -282,9 +289,6 @@ export async function updateWorkflowRun(
     setClauses.push(clause.replace('?', `$${values.length}`));
   }
 
-  if (updates.current_step_index !== undefined) {
-    addParam('current_step_index = ?', updates.current_step_index);
-  }
   if (updates.status !== undefined) {
     addParam('status = ?', updates.status);
     if (
@@ -321,11 +325,12 @@ export async function updateWorkflowRun(
 
 export async function completeWorkflowRun(id: string): Promise<void> {
   const dialect = getDialect();
+  let result: Awaited<ReturnType<IDatabase['query']>>;
   try {
-    await pool.query(
+    result = await pool.query(
       `UPDATE remote_agent_workflow_runs
        SET status = 'completed', completed_at = ${dialect.now()}
-       WHERE id = $1`,
+       WHERE id = $1 AND status = 'running'`,
       [id]
     );
   } catch (error) {
@@ -333,21 +338,30 @@ export async function completeWorkflowRun(id: string): Promise<void> {
     getLog().error({ err }, 'db.workflow_run_complete_failed');
     throw new Error(`Failed to complete workflow run: ${err.message}`);
   }
+  if (result.rowCount === 0) {
+    getLog().warn({ workflowRunId: id }, 'db.workflow_run_complete_no_match');
+    throw new Error(`Workflow run not found or not in running state (id: ${id})`);
+  }
 }
 
 export async function failWorkflowRun(id: string, error: string): Promise<void> {
   const dialect = getDialect();
+  let result: Awaited<ReturnType<IDatabase['query']>>;
   try {
-    await pool.query(
+    result = await pool.query(
       `UPDATE remote_agent_workflow_runs
        SET status = 'failed', completed_at = ${dialect.now()}, metadata = ${dialect.jsonMerge('metadata', 2)}
-       WHERE id = $1`,
+       WHERE id = $1 AND status = 'running'`,
       [id, JSON.stringify({ error })]
     );
   } catch (dbError) {
     const err = dbError as Error;
     getLog().error({ err }, 'db.workflow_run_mark_failed_error');
     throw new Error(`Failed to fail workflow run: ${err.message}`);
+  }
+  if (result.rowCount === 0) {
+    getLog().warn({ workflowRunId: id }, 'db.workflow_run_fail_no_match');
+    throw new Error(`Workflow run not found or not in running state (id: ${id})`);
   }
 }
 

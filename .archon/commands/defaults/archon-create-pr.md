@@ -97,13 +97,13 @@ git push -u origin HEAD
 
 ## Phase 3: Create PR
 
-### 3.1 Determine PR Content
+### 3.1 Check for PR Template
 
-**Title**: Concise, imperative mood
-- From implementation report summary, OR
-- From commit messages
+Look for the project's PR template at `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, or `docs/PULL_REQUEST_TEMPLATE.md`. Read whichever one exists.
 
-**Body**: Use this format:
+**If template found**: Use it as the structure, fill in **every section** with details from the implementation report and commits. Don't skip sections or leave placeholders.
+
+**If no template**, use this format:
 
 ```markdown
 ## Summary
@@ -133,7 +133,13 @@ git push -u origin HEAD
 [If from a GitHub issue, add: Closes #XXX]
 ```
 
-### 3.2 Create the PR
+### 3.2 Determine PR Title
+
+**Title**: Concise, imperative mood
+- From implementation report summary, OR
+- From commit messages
+
+### 3.3 Create the PR
 
 ```bash
 # Write body to file to avoid shell escaping

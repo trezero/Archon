@@ -12,92 +12,114 @@ description: |
   5. Create PR with template, mark ready
   6. Comprehensive code review (5 parallel agents with scope limit awareness)
   7. Synthesize and fix review findings
-  8. Final summary with decision matrix → GitHub comment + follow-up recommendations
+  8. Final summary with decision matrix -> GitHub comment + follow-up recommendations
 
   NOT for: Creating plans from scratch (use archon-idea-to-pr), quick fixes, standalone reviews.
 
-steps:
+nodes:
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 1: SETUP
   # ═══════════════════════════════════════════════════════════════════
 
-  - command: archon-plan-setup
-    clearContext: true
-    # Reads plan, extracts scope limits (NOT Building), ensures branch ready
-    # Artifact: plan-context.md (includes scope limits for review agents)
+  - id: plan-setup
+    command: archon-plan-setup
+    context: fresh
 
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 2: CONFIRM PLAN
   # ═══════════════════════════════════════════════════════════════════
 
-  - command: archon-confirm-plan
-    clearContext: true
-    # Verifies patterns still exist, code hasn't drifted
-    # Artifact: plan-confirmation.md
+  - id: confirm-plan
+    command: archon-confirm-plan
+    depends_on: [plan-setup]
+    context: fresh
 
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 3: IMPLEMENT
   # ═══════════════════════════════════════════════════════════════════
 
-  - command: archon-implement-tasks
-    clearContext: true
-    # Executes each task with type-check after every change
-    # Artifact: implementation.md
+  - id: implement-tasks
+    command: archon-implement-tasks
+    depends_on: [confirm-plan]
+    context: fresh
 
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 4: VALIDATE
   # ═══════════════════════════════════════════════════════════════════
 
-  - command: archon-validate
-    clearContext: true
-    # Runs full validation: type-check, lint, tests, build
-    # Artifact: validation.md
+  - id: validate
+    command: archon-validate
+    depends_on: [implement-tasks]
+    context: fresh
 
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 5: FINALIZE PR
   # ═══════════════════════════════════════════════════════════════════
 
-  - command: archon-finalize-pr
-    clearContext: true
-    # Commits, pushes, creates PR with template (if exists), marks ready
-    # Artifact: pr-ready.md
+  - id: finalize-pr
+    command: archon-finalize-pr
+    depends_on: [validate]
+    context: fresh
 
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 6: CODE REVIEW
   # ═══════════════════════════════════════════════════════════════════
 
-  # Scope the review
-  - command: archon-pr-review-scope
-    clearContext: true
+  - id: review-scope
+    command: archon-pr-review-scope
+    depends_on: [finalize-pr]
+    context: fresh
 
-  # Sync with main before review
-  - command: archon-sync-pr-with-main
-    clearContext: true
+  - id: sync
+    command: archon-sync-pr-with-main
+    depends_on: [review-scope]
+    context: fresh
 
-  # Run all review agents in parallel
-  - parallel:
-      - command: archon-code-review-agent
-      - command: archon-error-handling-agent
-      - command: archon-test-coverage-agent
-      - command: archon-comment-quality-agent
-      - command: archon-docs-impact-agent
+  - id: code-review
+    command: archon-code-review-agent
+    depends_on: [sync]
+    context: fresh
 
-  # Synthesize findings from all agents
-  - command: archon-synthesize-review
-    clearContext: true
+  - id: error-handling
+    command: archon-error-handling-agent
+    depends_on: [sync]
+    context: fresh
+
+  - id: test-coverage
+    command: archon-test-coverage-agent
+    depends_on: [sync]
+    context: fresh
+
+  - id: comment-quality
+    command: archon-comment-quality-agent
+    depends_on: [sync]
+    context: fresh
+
+  - id: docs-impact
+    command: archon-docs-impact-agent
+    depends_on: [sync]
+    context: fresh
+
+  - id: synthesize
+    command: archon-synthesize-review
+    depends_on: [code-review, error-handling, test-coverage, comment-quality, docs-impact]
+    trigger_rule: one_success
+    context: fresh
 
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 7: FIX REVIEW ISSUES
   # ═══════════════════════════════════════════════════════════════════
 
-  - command: archon-implement-review-fixes
-    clearContext: true
+  - id: implement-fixes
+    command: archon-implement-review-fixes
+    depends_on: [synthesize]
+    context: fresh
 
   # ═══════════════════════════════════════════════════════════════════
   # PHASE 8: FINAL SUMMARY & FOLLOW-UP
   # ═══════════════════════════════════════════════════════════════════
 
-  - command: archon-workflow-summary
-    clearContext: true
-    # Reads ALL artifacts, creates decision matrix, posts to GitHub
-    # Artifact: workflow-summary.md + GitHub PR comment
+  - id: workflow-summary
+    command: archon-workflow-summary
+    depends_on: [implement-fixes]
+    context: fresh

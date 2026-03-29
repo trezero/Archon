@@ -14,10 +14,25 @@
 
 import { mock, describe, test, expect, beforeEach } from 'bun:test';
 import { createMockLogger } from '../test/mocks/logger';
-import type { Codebase } from '../types';
-import type { WorkflowDefinition } from '@archon/workflows';
+import { makeTestWorkflow } from '@archon/workflows/test-utils';
+import type { Codebase, Conversation, IPlatformAdapter } from '../types';
+import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 
 // ─── Mock setup (ALL mocks must come before the module under test import) ────
+
+const mockSyncWorkspace = mock(() =>
+  Promise.resolve({
+    branch: 'main',
+    synced: true,
+    previousHead: 'abc12345',
+    newHead: 'abc12345',
+    updated: false,
+  })
+);
+// Identity passthrough — strips branded type for test simplicity; empty-string guard not needed here
+const mockToRepoPath = mock((p: string) => p);
+const mockGetOrCreateConversation = mock(() => Promise.resolve(null as unknown));
+const mockGetCodebase = mock(() => Promise.resolve(null as unknown));
 
 const mockLogger = createMockLogger();
 
@@ -28,14 +43,14 @@ mock.module('@archon/paths', () => ({
 }));
 
 mock.module('../db/conversations', () => ({
-  getOrCreateConversation: mock(() => Promise.resolve(null)),
+  getOrCreateConversation: mockGetOrCreateConversation,
   getConversationByPlatformId: mock(() => Promise.resolve(null)),
   updateConversation: mock(() => Promise.resolve()),
   touchConversation: mock(() => Promise.resolve()),
 }));
 
 mock.module('../db/codebases', () => ({
-  getCodebase: mock(() => Promise.resolve(null)),
+  getCodebase: mockGetCodebase,
   listCodebases: mock(() => Promise.resolve([])),
   createCodebase: mock(() => Promise.resolve({ id: 'new-codebase-id' })),
 }));
@@ -51,12 +66,18 @@ mock.module('../handlers/command-handler', () => ({
   handleCommand: mock(() => Promise.resolve({ success: true, message: 'ok', workflow: undefined })),
 }));
 
-mock.module('@archon/workflows', () => ({
+mock.module('@archon/workflows/utils/tool-formatter', () => ({
   formatToolCall: mock((toolName: string) => `🔧 ${toolName}`),
+}));
+mock.module('@archon/workflows/workflow-discovery', () => ({
   discoverWorkflowsWithConfig: mock(() => Promise.resolve({ workflows: [], errors: [] })),
+}));
+mock.module('@archon/workflows/router', () => ({
   findWorkflow: mock((name: string, workflows: WorkflowDefinition[]) =>
     workflows.find(w => w.name === name)
   ),
+}));
+mock.module('@archon/workflows/executor', () => ({
   executeWorkflow: mock(() => Promise.resolve()),
 }));
 
@@ -112,23 +133,20 @@ mock.module('../utils/worktree-sync', () => ({
   syncArchonToWorktree: mock(() => Promise.resolve()),
 }));
 
+mock.module('@archon/git', () => ({
+  syncWorkspace: mockSyncWorkspace,
+  toRepoPath: mockToRepoPath,
+}));
+
 mock.module('fs', () => ({
   existsSync: mock(() => true),
 }));
 
 // ─── Import module under test (AFTER all mocks) ───────────────────────────────
 
-import { parseOrchestratorCommands } from './orchestrator-agent';
+import { parseOrchestratorCommands, handleMessage } from './orchestrator-agent';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function makeWorkflow(name: string): WorkflowDefinition {
-  return {
-    name,
-    description: `${name} workflow`,
-    steps: [{ prompt: 'do the thing' }],
-  } as unknown as WorkflowDefinition;
-}
 
 function makeCodebase(name: string, id = `id-${name}`): Codebase {
   return {
@@ -146,9 +164,9 @@ function makeCodebase(name: string, id = `id-${name}`): Codebase {
 // ─── parseOrchestratorCommands ────────────────────────────────────────────────
 
 describe('parseOrchestratorCommands', () => {
-  const assistWorkflow = makeWorkflow('assist');
-  const implementWorkflow = makeWorkflow('implement');
-  const planWorkflow = makeWorkflow('plan');
+  const assistWorkflow = makeTestWorkflow({ name: 'assist' });
+  const implementWorkflow = makeTestWorkflow({ name: 'implement' });
+  const planWorkflow = makeTestWorkflow({ name: 'plan' });
 
   const myProject = makeCodebase('my-project');
   const orgProject = makeCodebase('dynamous-community/remote-coding-agent');
@@ -721,6 +739,51 @@ describe('filterToolIndicators logic (replicated regex tests)', () => {
   });
 });
 
+// ─── Helpers for handleMessage tests ─────────────────────────────────────────
+
+function makePlatform(): IPlatformAdapter {
+  return {
+    sendMessage: mock(() => Promise.resolve()),
+    ensureThread: mock((id: string) => Promise.resolve(id)),
+    getStreamingMode: mock(() => 'batch' as const),
+    getPlatformType: mock(() => 'web'),
+    start: mock(() => Promise.resolve()),
+    stop: mock(() => {}),
+  };
+}
+
+function makeConversation(overrides: Partial<Conversation> = {}): Conversation {
+  return {
+    id: 'conv-1',
+    platform_type: 'web',
+    platform_conversation_id: 'conv-1',
+    codebase_id: null,
+    cwd: null,
+    isolation_env_id: null,
+    ai_assistant_type: 'claude',
+    title: 'Test Conversation',
+    hidden: false,
+    deleted_at: null,
+    last_activity_at: null,
+    created_at: new Date(),
+    updated_at: new Date(),
+    ...overrides,
+  };
+}
+
+function makeCodebaseForSync() {
+  return {
+    id: 'codebase-1',
+    name: 'test-repo',
+    repository_url: 'https://github.com/test/repo',
+    default_cwd: '/repos/test-repo',
+    ai_assistant_type: 'claude',
+    commands: {},
+    created_at: new Date(),
+    updated_at: new Date(),
+  };
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 describe('module constants (MAX_BATCH_ASSISTANT_CHUNKS, MAX_BATCH_TOTAL_CHUNKS)', () => {
@@ -742,7 +805,7 @@ describe('module constants (MAX_BATCH_ASSISTANT_CHUNKS, MAX_BATCH_TOTAL_CHUNKS)'
 describe('WorkflowInvocation and ProjectRegistration type shapes', () => {
   test('parseOrchestratorCommands result has the expected shape for workflowInvocation', () => {
     const codebases = [makeCodebase('my-project')];
-    const workflows = [makeWorkflow('assist')];
+    const workflows = [makeTestWorkflow({ name: 'assist' })];
     const response = '/invoke-workflow assist --project my-project --prompt "Do the thing"';
     const result = parseOrchestratorCommands(response, codebases, workflows);
 
@@ -766,11 +829,102 @@ describe('WorkflowInvocation and ProjectRegistration type shapes', () => {
 
   test('workflowInvocation.synthesizedPrompt is absent (not undefined-keyed) when no --prompt', () => {
     const codebases = [makeCodebase('my-project')];
-    const workflows = [makeWorkflow('assist')];
+    const workflows = [makeTestWorkflow({ name: 'assist' })];
     const response = '/invoke-workflow assist --project my-project';
     const result = parseOrchestratorCommands(response, codebases, workflows);
 
     // synthesizedPrompt is explicitly set to undefined when no prompt
     expect(result.workflowInvocation?.synthesizedPrompt).toBeUndefined();
+  });
+});
+
+// ─── discoverAllWorkflows — remote sync ───────────────────────────────────────
+
+describe('discoverAllWorkflows — remote sync', () => {
+  beforeEach(() => {
+    mockSyncWorkspace.mockClear();
+    mockToRepoPath.mockClear();
+    mockGetOrCreateConversation.mockReset();
+    mockGetCodebase.mockReset();
+    // Reset mocks between tests in this suite and restore safe defaults
+    mockGetOrCreateConversation.mockImplementation(() => Promise.resolve(null));
+    mockGetCodebase.mockImplementation(() => Promise.resolve(null));
+  });
+
+  test('calls syncWorkspace with codebase.default_cwd when conversation has codebase_id', async () => {
+    const conversation = makeConversation({ codebase_id: 'codebase-1' });
+    const codebase = makeCodebaseForSync();
+    mockGetOrCreateConversation.mockReturnValueOnce(Promise.resolve(conversation));
+    mockGetCodebase.mockReturnValueOnce(Promise.resolve(codebase));
+
+    const platform = makePlatform();
+    await handleMessage(platform, 'conv-1', 'What is the latest commit?');
+
+    // /repos/test-repo is NOT under ~/.archon/workspaces/ so resetAfterFetch=false
+    expect(mockSyncWorkspace).toHaveBeenCalledWith('/repos/test-repo', undefined, {
+      resetAfterFetch: false,
+    });
+  });
+
+  test('passes resetAfterFetch=true for managed clones', async () => {
+    const conversation = makeConversation({ codebase_id: 'codebase-1' });
+    const codebase = {
+      ...makeCodebaseForSync(),
+      default_cwd: '/home/test/.archon/workspaces/owner/repo/source',
+    };
+    mockGetOrCreateConversation.mockReturnValueOnce(Promise.resolve(conversation));
+    mockGetCodebase.mockReturnValueOnce(Promise.resolve(codebase));
+
+    const platform = makePlatform();
+    await handleMessage(platform, 'conv-1', 'What is the latest commit?');
+
+    expect(mockSyncWorkspace).toHaveBeenCalledWith(
+      '/home/test/.archon/workspaces/owner/repo/source',
+      undefined,
+      { resetAfterFetch: true }
+    );
+  });
+
+  test('proceeds without throwing when syncWorkspace rejects', async () => {
+    const conversation = makeConversation({ codebase_id: 'codebase-1' });
+    const codebase = makeCodebaseForSync();
+    mockGetOrCreateConversation.mockReturnValueOnce(Promise.resolve(conversation));
+    mockGetCodebase.mockReturnValueOnce(Promise.resolve(codebase));
+    mockSyncWorkspace.mockRejectedValueOnce(new Error('Network timeout'));
+
+    const platform = makePlatform();
+    // Non-fatal: no exception propagated
+    await expect(
+      handleMessage(platform, 'conv-1', 'What is the latest commit?')
+    ).resolves.toBeUndefined();
+    expect(mockSyncWorkspace).toHaveBeenCalledWith('/repos/test-repo', undefined, {
+      resetAfterFetch: false,
+    });
+  });
+
+  test('does not call syncWorkspace when conversation has no codebase_id', async () => {
+    const conversation = makeConversation({ codebase_id: null });
+    mockGetOrCreateConversation.mockReturnValueOnce(Promise.resolve(conversation));
+
+    const platform = makePlatform();
+    await handleMessage(platform, 'conv-2', 'Hello');
+
+    expect(mockSyncWorkspace).not.toHaveBeenCalled();
+  });
+
+  test('logs a warn when syncWorkspace rejects', async () => {
+    const conversation = makeConversation({ codebase_id: 'codebase-1' });
+    const codebase = makeCodebaseForSync();
+    mockGetOrCreateConversation.mockReturnValueOnce(Promise.resolve(conversation));
+    mockGetCodebase.mockReturnValueOnce(Promise.resolve(codebase));
+    mockSyncWorkspace.mockRejectedValueOnce(new Error('Network timeout'));
+
+    const platform = makePlatform();
+    await handleMessage(platform, 'conv-1', 'What is the latest commit?');
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ codebaseId: 'codebase-1' }),
+      'workspace.sync_failed'
+    );
   });
 });

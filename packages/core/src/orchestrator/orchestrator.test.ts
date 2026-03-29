@@ -1,9 +1,10 @@
 import { mock, describe, test, expect, beforeEach } from 'bun:test';
 import { MockPlatformAdapter } from '../test/mocks/platform';
 import { createMockLogger } from '../test/mocks/logger';
+import { makeTestWorkflow, makeTestWorkflowList } from '@archon/workflows/test-utils';
 import type { Conversation, Codebase, Session } from '../types';
 import { ConversationNotFoundError } from '../types';
-import type { WorkflowDefinition } from '@archon/workflows';
+import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 
 // ─── Mock setup (BEFORE importing module under test) ─────────────────────────
 
@@ -156,10 +157,16 @@ mock.module('../utils/error-formatter', () => ({
   classifyAndFormatError: mock((err: Error) => `⚠️ Error: ${err.message}`),
 }));
 
-mock.module('@archon/workflows', () => ({
+mock.module('@archon/workflows/workflow-discovery', () => ({
   discoverWorkflowsWithConfig: mockDiscoverWorkflows,
+}));
+mock.module('@archon/workflows/executor', () => ({
   executeWorkflow: mockExecuteWorkflow,
+}));
+mock.module('@archon/workflows/router', () => ({
   findWorkflow: mockFindWorkflow,
+}));
+mock.module('@archon/workflows/utils/tool-formatter', () => ({
   formatToolCall: mock((toolName: string, _toolInput: unknown) => `🔧 ${toolName.toUpperCase()}`),
 }));
 
@@ -229,23 +236,7 @@ const mockSession: Session = {
   ended_reason: null,
 };
 
-const testWorkflows: WorkflowDefinition[] = [
-  {
-    name: 'fix-bug',
-    description: 'Fix a bug',
-    steps: [{ command: 'investigate' }, { command: 'implement' }],
-  },
-  {
-    name: 'add-feature',
-    description: 'Add a feature',
-    steps: [{ command: 'plan' }, { command: 'implement' }],
-  },
-  {
-    name: 'archon-assist',
-    description: 'General assistance',
-    steps: [{ command: 'assist' }],
-  },
-];
+const testWorkflows = makeTestWorkflowList(['fix-bug', 'add-feature', 'archon-assist']);
 
 const mockClient = {
   sendQuery: mock(async function* () {
@@ -513,11 +504,10 @@ describe('orchestrator-agent handleMessage', () => {
     });
 
     test('uses CommandResult workflow definition without rediscovery for /workflow run', async () => {
-      const workflowDefinition: WorkflowDefinition = {
+      const workflowDefinition = makeTestWorkflow({
         name: 'test-workflow',
         description: 'A test workflow',
-        steps: [{ command: 'assist' }],
-      };
+      });
       mockGetOrCreateConversation.mockResolvedValue(mockConversationWithProject);
       mockGetCodebase.mockResolvedValue(mockCodebase);
       mockHandleCommand.mockResolvedValue({
@@ -537,11 +527,10 @@ describe('orchestrator-agent handleMessage', () => {
     });
 
     test('validates workflow exists in auto-selected project before dispatch', async () => {
-      const workflowDefinition: WorkflowDefinition = {
+      const workflowDefinition = makeTestWorkflow({
         name: 'test-workflow',
         description: 'A test workflow',
-        steps: [{ command: 'assist' }],
-      };
+      });
       mockListCodebases.mockResolvedValue([mockCodebase]);
       mockHandleCommand.mockResolvedValue({
         success: true,

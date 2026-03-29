@@ -3,67 +3,33 @@ import { isBinaryBuild, BUNDLED_COMMANDS, BUNDLED_WORKFLOWS } from './bundled-de
 
 describe('bundled-defaults', () => {
   describe('isBinaryBuild', () => {
-    let originalExecPath: string;
+    let originalVersions: NodeJS.ProcessVersions;
 
     beforeEach(() => {
-      originalExecPath = process.execPath;
+      originalVersions = process.versions;
     });
 
     afterEach(() => {
-      // Restore original execPath (note: this is read-only in practice, but tests may mock it)
-      Object.defineProperty(process, 'execPath', { value: originalExecPath, writable: true });
+      Object.defineProperty(process, 'versions', { value: originalVersions, writable: true });
     });
 
     it('should return false when running with Bun', () => {
-      // In test environment, we're running with Bun
-      expect(process.execPath.toLowerCase()).toContain('bun');
+      // In test environment, process.versions.bun is set by the Bun runtime
+      expect((process.versions as Record<string, string | undefined>).bun).toBeDefined();
       expect(isBinaryBuild()).toBe(false);
     });
 
-    it('should detect bun in path case-insensitively', () => {
-      // The function uses toLowerCase() so it should handle mixed case
-      const result = isBinaryBuild();
-      // Since we're running in Bun, should be false
-      expect(result).toBe(false);
-    });
-
-    it('should return true for non-bun executable paths', () => {
-      // Mock a binary executable path
-      Object.defineProperty(process, 'execPath', {
-        value: '/usr/local/bin/archon',
+    it('should return true when process.versions.bun is absent (compiled binary)', () => {
+      Object.defineProperty(process, 'versions', {
+        value: { node: '18.0.0' },
         writable: true,
       });
-
       expect(isBinaryBuild()).toBe(true);
     });
 
-    it('should return true for Windows-style binary paths', () => {
-      Object.defineProperty(process, 'execPath', {
-        value: 'C:\\Program Files\\archon\\archon.exe',
-        writable: true,
-      });
-
-      expect(isBinaryBuild()).toBe(true);
-    });
-
-    it('should return false for Bun paths on different platforms', () => {
-      // macOS Homebrew
-      Object.defineProperty(process, 'execPath', {
-        value: '/opt/homebrew/bin/bun',
-        writable: true,
-      });
-      expect(isBinaryBuild()).toBe(false);
-
-      // Linux
-      Object.defineProperty(process, 'execPath', {
-        value: '/home/user/.bun/bin/bun',
-        writable: true,
-      });
-      expect(isBinaryBuild()).toBe(false);
-
-      // Windows
-      Object.defineProperty(process, 'execPath', {
-        value: 'C:\\Users\\user\\.bun\\bin\\bun.exe',
+    it('should return false when process.versions.bun is present', () => {
+      Object.defineProperty(process, 'versions', {
+        value: { ...process.versions, bun: '1.1.0' },
         writable: true,
       });
       expect(isBinaryBuild()).toBe(false);
@@ -171,11 +137,9 @@ describe('bundled-defaults', () => {
         expect(content).toContain('name:');
         // Should contain 'description:' as all workflows require description
         expect(content).toContain('description:');
-        // Should contain steps:, loop:, or nodes: (the three workflow execution modes)
-        const hasSteps = content.includes('steps:');
-        const hasLoop = content.includes('loop:');
+        // Should contain nodes: (with optional loop: inside nodes)
         const hasNodes = content.includes('nodes:');
-        expect(hasSteps || hasLoop || hasNodes).toBe(true);
+        expect(hasNodes).toBe(true);
       }
     });
   });

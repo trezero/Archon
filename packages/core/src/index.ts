@@ -148,6 +148,3 @@ export { getPort } from './utils/port-allocation';
 
 // Worktree sync
 export { syncArchonToWorktree } from './utils/worktree-sync';
-
-// Defaults copy
-export { copyDefaultsToRepo } from './utils/defaults-copy';

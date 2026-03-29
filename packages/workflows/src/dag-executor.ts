@@ -26,8 +26,8 @@ import type {
   TriggerRule,
   WorkflowRun,
   WorkflowNodeHooks,
-} from './types';
-import { isBashNode, isLoopNode } from './types';
+} from './schemas';
+import { isBashNode, isLoopNode } from './schemas';
 import { formatToolCall } from './utils/tool-formatter';
 import { createLogger } from '@archon/paths';
 import { getWorkflowEventEmitter } from './event-emitter';
@@ -40,7 +40,6 @@ import {
   logNodeError,
   logAssistant,
   logTool,
-  logStepComplete,
   logWorkflowComplete,
   logWorkflowError,
 } from './logger';
@@ -745,9 +744,12 @@ async function executeNodeInternal(
 
   // Create per-node abort controller for idle timeout cleanup
   const nodeAbortController = new AbortController();
+  // Fork when resuming — leaves the source session untouched so retries are safe.
+  const shouldForkSession = resumeSessionId !== undefined;
   const nodeOptionsWithAbort: WorkflowAssistantOptions | undefined = {
     ...nodeOptions,
     abortSignal: nodeAbortController.signal,
+    ...(shouldForkSession ? { forkSession: true } : {}),
   };
   let nodeIdleTimedOut = false;
   const effectiveIdleTimeout = node.idle_timeout ?? STEP_IDLE_TIMEOUT_MS;
@@ -1385,7 +1387,7 @@ async function executeLoopNode(
       });
 
     // Session threading
-    const needsFreshSession = loop.fresh_context === true || i === 1;
+    const needsFreshSession = loop.fresh_context || i === 1;
     const resumeSessionId = needsFreshSession ? undefined : currentSessionId;
 
     // Stream AI response for this iteration
@@ -1629,7 +1631,7 @@ async function executeLoopNode(
         logEventStoreError(err, i);
       });
 
-    await logStepComplete(logDir, workflowRun.id, `${node.id}-iteration-${String(i)}`, i - 1, {
+    await logNodeComplete(logDir, workflowRun.id, `${node.id}-iteration-${String(i)}`, node.id, {
       durationMs: duration,
     });
 
@@ -1656,7 +1658,7 @@ async function executeLoopNode(
 
 /**
  * Execute a complete DAG workflow.
- * Called from executeWorkflow() in executor.ts after isDagWorkflow() check.
+ * Called from executeWorkflow() in executor.ts.
  */
 export async function executeDagWorkflow(
   deps: WorkflowDeps,
@@ -1758,7 +1760,11 @@ export async function executeDagWorkflow(
           const triggerDecision = checkTriggerRule(node, nodeOutputs);
           if (triggerDecision === 'skip') {
             getLog().info({ nodeId: node.id, reason: 'trigger_rule' }, 'dag_node_skipped');
-            await logNodeSkip(logDir, workflowRun.id, node.id, 'trigger_rule');
+            await logNodeSkip(logDir, workflowRun.id, node.id, 'trigger_rule').catch(
+              (err: Error) => {
+                getLog().warn({ err, nodeId: node.id }, 'dag.node_skip_log_write_failed');
+              }
+            );
             deps.store
               .createWorkflowEvent({
                 workflow_run_id: workflowRun.id,
@@ -1799,7 +1805,14 @@ export async function executeDagWorkflow(
                 { nodeId: node.id, when: node.when },
                 'dag_node_skipped_condition_parse_error'
               );
-              await logNodeSkip(logDir, workflowRun.id, node.id, 'when_condition_parse_error');
+              await logNodeSkip(
+                logDir,
+                workflowRun.id,
+                node.id,
+                'when_condition_parse_error'
+              ).catch((err: Error) => {
+                getLog().warn({ err, nodeId: node.id }, 'dag.node_skip_log_write_failed');
+              });
               deps.store
                 .createWorkflowEvent({
                   workflow_run_id: workflowRun.id,
@@ -1825,7 +1838,11 @@ export async function executeDagWorkflow(
             }
             if (!conditionPasses) {
               getLog().info({ nodeId: node.id, when: node.when }, 'dag_node_skipped_condition');
-              await logNodeSkip(logDir, workflowRun.id, node.id, 'when_condition');
+              await logNodeSkip(logDir, workflowRun.id, node.id, 'when_condition').catch(
+                (err: Error) => {
+                  getLog().warn({ err, nodeId: node.id }, 'dag.node_skip_log_write_failed');
+                }
+              );
               deps.store
                 .createWorkflowEvent({
                   workflow_run_id: workflowRun.id,
@@ -1906,6 +1923,8 @@ export async function executeDagWorkflow(
           );
 
           // 5. Determine session — parallel or context:fresh → always fresh
+          // Parallel layers always get fresh sessions; explicit 'fresh' context also forces it.
+          // 'shared' forces continuation. Default: fresh for parallel, inherited for sequential.
           const isFresh = isParallelLayer || node.context === 'fresh';
           const resumeSessionId = isFresh ? undefined : lastSequentialSessionId;
 
@@ -1927,8 +1946,9 @@ export async function executeDagWorkflow(
               logDir,
               baseBranch,
               nodeOutputs,
-              // Don't resume session on retry — start fresh
-              attempt > 0 ? undefined : resumeSessionId,
+              // Always pass the prior session ID — forkSession:true in executeNodeInternal
+              // ensures the source is never mutated, so retries can safely resume from it.
+              resumeSessionId,
               configuredCommandFolder,
               issueContext
             );
@@ -2072,14 +2092,18 @@ export async function executeDagWorkflow(
     await deps.store.failWorkflowRun(workflowRun.id, failMsg).catch((dbErr: Error) => {
       getLog().error({ err: dbErr, workflowRunId: workflowRun.id }, 'dag_db_fail_failed');
     });
-    await logWorkflowError(logDir, workflowRun.id, failMsg);
+    await logWorkflowError(logDir, workflowRun.id, failMsg).catch((logErr: Error) => {
+      getLog().error(
+        { err: logErr, workflowRunId: workflowRun.id },
+        'dag.workflow_error_log_write_failed'
+      );
+    });
     const emitterForFail = getWorkflowEventEmitter();
     emitterForFail.emit({
       type: 'workflow_failed',
       runId: workflowRun.id,
       workflowName: workflow.name,
       error: failMsg,
-      stepIndex: 0,
     });
     emitterForFail.unregisterRun(workflowRun.id);
     await safeSendMessage(platform, conversationId, `\u274c ${failMsg}`, {

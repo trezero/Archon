@@ -8,8 +8,8 @@ import {
   MiniMap,
 } from '@xyflow/react';
 import type { Edge, NodeTypes } from '@xyflow/react';
-import type { DagNode } from '@archon/workflows/types';
 import type { DagNodeState, WorkflowStepStatus } from '@/lib/types';
+import type { DagNode } from '@/lib/api';
 import { dagNodesToReactFlow, resolveNodeDisplay } from '@/lib/dag-layout';
 import { formatDurationMs } from '@/lib/format';
 import {

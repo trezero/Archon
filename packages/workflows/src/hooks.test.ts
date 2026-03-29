@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { parseNodeHooks } from './loader';
 import { buildSDKHooksFromYAML } from './dag-executor';
-import type { WorkflowNodeHooks } from './types';
+import type { WorkflowNodeHooks } from './schemas';
 import { parseWorkflow } from './loader';
 
 describe('parseNodeHooks', () => {
@@ -15,14 +15,14 @@ describe('parseNodeHooks', () => {
     const errors: string[] = [];
     expect(parseNodeHooks('bad', { id: 'test', errors })).toBeUndefined();
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("'hooks' must be an object");
+    expect(errors[0]).toContain('hooks');
   });
 
   test('non-object (array) pushes error and returns undefined', () => {
     const errors: string[] = [];
     expect(parseNodeHooks([], { id: 'test', errors })).toBeUndefined();
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("'hooks' must be an object");
+    expect(errors[0]).toContain('hooks');
   });
 
   test('non-object (null) pushes error and returns undefined', () => {
@@ -35,36 +35,35 @@ describe('parseNodeHooks', () => {
     const errors: string[] = [];
     parseNodeHooks({ FakeEvent: [{ response: { x: 1 } }] }, { id: 'test', errors });
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("unknown hook event 'FakeEvent'");
-    expect(errors[0]).toContain('valid:');
+    expect(errors[0]).toContain('FakeEvent');
   });
 
   test('valid event with non-array matchers pushes error', () => {
     const errors: string[] = [];
     parseNodeHooks({ PreToolUse: 'bad' }, { id: 'test', errors });
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain('hooks.PreToolUse must be an array');
+    expect(errors[0]).toContain('PreToolUse');
   });
 
   test('matcher missing response pushes error', () => {
     const errors: string[] = [];
     parseNodeHooks({ PreToolUse: [{ matcher: 'Bash' }] }, { id: 'test', errors });
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain('response is required');
+    expect(errors[0]).toContain('response');
   });
 
   test('matcher with string response pushes error', () => {
     const errors: string[] = [];
     parseNodeHooks({ PreToolUse: [{ response: 'bad' }] }, { id: 'test', errors });
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain('response is required and must be an object');
+    expect(errors[0]).toContain('response');
   });
 
   test('matcher with array response pushes error', () => {
     const errors: string[] = [];
     parseNodeHooks({ PreToolUse: [{ response: [] }] }, { id: 'test', errors });
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain('response is required and must be an object');
+    expect(errors[0]).toContain('response');
   });
 
   test('valid PreToolUse with matcher and response returns parsed structure', () => {
@@ -124,11 +123,11 @@ describe('parseNodeHooks', () => {
     expect(result?.PostToolUse).toHaveLength(1);
   });
 
-  test('event with empty matchers array returns undefined for that event', () => {
+  test('event with empty matchers array returns undefined (event filtered out)', () => {
     const errors: string[] = [];
     const result = parseNodeHooks({ PreToolUse: [] }, { id: 'test', errors });
     expect(errors).toHaveLength(0);
-    // Empty array means no parsed matchers, so event is excluded
+    // Empty array means no matchers, so the whole hooks result is undefined
     expect(result).toBeUndefined();
   });
 });

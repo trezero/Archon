@@ -2,27 +2,15 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { listWorkflows } from '@/lib/api';
 import { useProject } from '@/contexts/ProjectContext';
 
-export type BuilderMode = 'dag' | 'sequential';
 export type ViewMode = 'hidden' | 'split' | 'full';
 
 export interface BuilderToolbarProps {
   workflowName: string;
   workflowDescription: string;
-  mode: BuilderMode;
   provider: 'claude' | 'codex' | undefined;
   model: string | undefined;
   hasUnsavedChanges: boolean;
@@ -30,7 +18,6 @@ export interface BuilderToolbarProps {
   viewMode: ViewMode;
   onNameChange: (name: string) => void;
   onDescriptionChange: (desc: string) => void;
-  onModeChange: (mode: BuilderMode) => void;
   onProviderChange: (p: 'claude' | 'codex' | undefined) => void;
   onModelChange: (m: string | undefined) => void;
   onViewModeChange: (mode: ViewMode) => void;
@@ -39,16 +26,6 @@ export interface BuilderToolbarProps {
   onRun: () => void;
   onLoadWorkflow: (name: string) => void;
 }
-
-const MODE_COLORS: Record<BuilderMode, string> = {
-  dag: 'bg-node-command/20 text-node-command',
-  sequential: 'bg-node-prompt/20 text-node-prompt',
-};
-
-const MODE_LABELS: Record<BuilderMode, string> = {
-  dag: 'DAG',
-  sequential: 'STEPS',
-};
 
 const VIEW_MODE_LABELS: readonly { value: ViewMode; label: string }[] = [
   { value: 'hidden', label: 'Visual' },
@@ -59,7 +36,6 @@ const VIEW_MODE_LABELS: readonly { value: ViewMode; label: string }[] = [
 export function BuilderToolbar({
   workflowName,
   workflowDescription,
-  mode,
   provider,
   model,
   hasUnsavedChanges,
@@ -67,7 +43,6 @@ export function BuilderToolbar({
   viewMode,
   onNameChange,
   onDescriptionChange,
-  onModeChange,
   onProviderChange,
   onModelChange,
   onViewModeChange,
@@ -82,22 +57,12 @@ export function BuilderToolbar({
     ? codebases?.find(cb => cb.id === selectedProjectId)?.default_cwd
     : undefined;
 
-  const [pendingMode, setPendingMode] = useState<BuilderMode | null>(null);
   const [showDescription, setShowDescription] = useState(false);
 
   const { data: workflows, isError: workflowsError } = useQuery({
     queryKey: ['workflows', cwd],
     queryFn: () => listWorkflows(cwd),
   });
-
-  const handleModeSwitch = (newMode: BuilderMode): void => {
-    if (newMode === mode) return;
-    if (hasUnsavedChanges) {
-      setPendingMode(newMode);
-    } else {
-      onModeChange(newMode);
-    }
-  };
 
   return (
     <>
@@ -183,22 +148,9 @@ export function BuilderToolbar({
           )}
 
           {/* Mode badge */}
-          <select
-            value={mode}
-            onChange={(e): void => {
-              handleModeSwitch(e.target.value as BuilderMode);
-            }}
-            className={cn(
-              'rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider border-none focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer shrink-0',
-              MODE_COLORS[mode]
-            )}
-          >
-            {(['dag', 'sequential'] as const).map(m => (
-              <option key={m} value={m}>
-                {MODE_LABELS[m]}
-              </option>
-            ))}
-          </select>
+          <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider shrink-0 bg-node-command/20 text-node-command">
+            DAG
+          </span>
         </div>
 
         {/* Center group: Provider + Model */}
@@ -281,36 +233,6 @@ export function BuilderToolbar({
           Failed to load workflow list. The load dropdown may be empty.
         </div>
       )}
-
-      {/* Mode switch confirmation */}
-      <AlertDialog
-        open={pendingMode !== null}
-        onOpenChange={(open): void => {
-          if (!open) setPendingMode(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
-            <AlertDialogDescription>
-              You have unsaved changes. Switching modes will discard them. Continue?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(): void => {
-                if (pendingMode) {
-                  onModeChange(pendingMode);
-                  setPendingMode(null);
-                }
-              }}
-            >
-              Discard &amp; Switch
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 }

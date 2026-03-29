@@ -48,7 +48,8 @@ import * as db from '../db/conversations';
 import { createIsolationStore } from '../db/isolation-environments';
 import { toError } from '../utils/error';
 import { getCodebase } from '../db/codebases';
-import { executeWorkflow, type WorkflowDefinition } from '@archon/workflows';
+import { executeWorkflow } from '@archon/workflows/executor';
+import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 import { createWorkflowDeps } from '../workflows/store-adapter';
 import {
   cleanupToMakeRoom,

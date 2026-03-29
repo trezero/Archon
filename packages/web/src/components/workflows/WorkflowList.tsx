@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Pencil } from 'lucide-react';
 import { listWorkflows, createConversation, runWorkflow, deleteConversation } from '@/lib/api';
-import type { WorkflowDefinition } from '@archon/workflows/types';
+import type { WorkflowDefinition } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { useProject } from '@/contexts/ProjectContext';
 
@@ -56,13 +56,17 @@ export function WorkflowList(): React.ReactElement {
     }
   };
 
+  const selectedCwd = localProjectId
+    ? codebases?.find(cb => cb.id === localProjectId)?.default_cwd
+    : undefined;
+
   const {
     data: workflows,
     isLoading: loadingWorkflows,
     isError: workflowsError,
   } = useQuery({
-    queryKey: ['workflows'],
-    queryFn: () => listWorkflows(),
+    queryKey: ['workflows', selectedCwd ?? null],
+    queryFn: () => listWorkflows(selectedCwd),
   });
 
   if (loadingWorkflows) {

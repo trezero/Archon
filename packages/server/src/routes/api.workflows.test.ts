@@ -1,10 +1,17 @@
 import { describe, test, expect, mock } from 'bun:test';
-import { Hono } from 'hono';
+import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ConversationLockManager } from '@archon/core';
 import type { WebAdapter } from '../adapters/web';
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { validationErrorHook } from './openapi-defaults';
+import { makeTestWorkflow } from '@archon/workflows/test-utils';
+
+/** Test app factory: includes defaultHook to format validation errors as { error: string }. */
+function createTestApp(): OpenAPIHono {
+  return new OpenAPIHono({ defaultHook: validationErrorHook });
+}
 
 const mockDiscoverWorkflows = mock(async (_cwd: string) => ({
   workflows: [
@@ -22,7 +29,7 @@ const mockDiscoverWorkflows = mock(async (_cwd: string) => ({
 
 // Default: returns a valid workflow. Use mockReturnValueOnce in tests that need a parse failure.
 const mockParseWorkflow = mock((_content: string, _filename: string) => ({
-  workflow: { name: 'test', description: 'Test workflow', steps: [] },
+  workflow: makeTestWorkflow({ name: 'test', description: 'Test workflow' }),
   error: null,
 }));
 
@@ -55,9 +62,13 @@ mock.module('@archon/core', () => ({
   }),
 }));
 
-mock.module('@archon/workflows', () => ({
+mock.module('@archon/workflows/workflow-discovery', () => ({
   discoverWorkflowsWithConfig: mockDiscoverWorkflows,
+}));
+mock.module('@archon/workflows/loader', () => ({
   parseWorkflow: mockParseWorkflow,
+}));
+mock.module('@archon/workflows/command-validation', () => ({
   isValidCommandName: mock(
     (name: string) =>
       !name.includes('/') &&
@@ -66,8 +77,10 @@ mock.module('@archon/workflows', () => ({
       !!name &&
       !name.startsWith('.')
   ),
+}));
+mock.module('@archon/workflows/defaults', () => ({
   BUNDLED_WORKFLOWS: {
-    'archon-assist': 'name: archon-assist\ndescription: Archon Assist\nsteps: []',
+    'archon-assist': 'name: archon-assist\ndescription: Archon Assist\nnodes: []',
   },
   BUNDLED_COMMANDS: {
     'archon-assist': '# archon-assist command',
@@ -95,7 +108,7 @@ import { registerApiRoutes } from './api';
 
 describe('GET /api/workflows', () => {
   test('returns a flat workflows array from discoverWorkflows result', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/workflows');
@@ -117,13 +130,13 @@ describe('GET /api/workflows', () => {
 
 describe('POST /api/workflows/validate', () => {
   test('returns valid:true for valid definition', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/workflows/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ definition: { name: 'my-workflow', description: 'test', steps: [] } }),
+      body: JSON.stringify({ definition: { name: 'my-workflow', description: 'test', nodes: [] } }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { valid: boolean };
@@ -131,7 +144,7 @@ describe('POST /api/workflows/validate', () => {
   });
 
   test('returns valid:false with errors for invalid definition', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     mockParseWorkflow.mockReturnValueOnce({
@@ -152,7 +165,7 @@ describe('POST /api/workflows/validate', () => {
   });
 
   test('returns 400 for missing definition', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/workflows/validate', {
@@ -166,7 +179,7 @@ describe('POST /api/workflows/validate', () => {
   });
 
   test('returns 400 for malformed JSON body', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/workflows/validate', {
@@ -180,7 +193,7 @@ describe('POST /api/workflows/validate', () => {
 
 describe('GET /api/workflows/:name', () => {
   test('returns 400 for invalid name (path traversal)', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/workflows/..secret');
@@ -190,7 +203,7 @@ describe('GET /api/workflows/:name', () => {
   });
 
   test('returns 404 when workflow not found', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     // No cwd → no readFile attempt → checks BUNDLED_WORKFLOWS → not there → 404
@@ -203,7 +216,7 @@ describe('GET /api/workflows/:name', () => {
   });
 
   test('returns bundled workflow with source:bundled', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     // No cwd → no readFile attempt → checks BUNDLED_WORKFLOWS → archon-assist found
@@ -223,11 +236,11 @@ describe('GET /api/workflows/:name', () => {
     await mkdir(workflowDir, { recursive: true });
     await writeFile(
       join(workflowDir, 'custom.yaml'),
-      'name: custom\ndescription: My custom\nsteps:\n  - command: plan\n'
+      'name: custom\ndescription: My custom\nnodes:\n  - id: plan\n    command: plan\n'
     );
 
     try {
-      const app = new Hono();
+      const app = createTestApp();
       registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
       mockListCodebases.mockImplementationOnce(async () => [{ default_cwd: testDir }]);
@@ -245,11 +258,29 @@ describe('GET /api/workflows/:name', () => {
       await rm(testDir, { recursive: true, force: true });
     }
   });
+
+  test('returns WorkflowDefinition shape with expected top-level fields', async () => {
+    const app = createTestApp();
+    registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
+
+    mockListCodebases.mockImplementationOnce(async () => []);
+
+    const response = await app.request('/api/workflows/archon-assist');
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      workflow: Record<string, unknown>;
+    };
+    const wf = body.workflow;
+    // Guard against silent spec drift if engine's workflowBaseSchema drops or renames fields
+    expect(typeof wf['name']).toBe('string');
+    expect(typeof wf['description']).toBe('string');
+    expect(Array.isArray(wf['nodes'])).toBe(true);
+  });
 });
 
 describe('GET /api/workflows/:name - cwd validation', () => {
   test('returns 400 when cwd is not a registered codebase path', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     // default mock returns /tmp/project; /etc/secrets is not registered
@@ -262,7 +293,7 @@ describe('GET /api/workflows/:name - cwd validation', () => {
 
 describe('PUT /api/workflows/:name', () => {
   test('returns 400 for invalid name', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/workflows/..secret', {
@@ -276,7 +307,7 @@ describe('PUT /api/workflows/:name', () => {
   });
 
   test('returns 400 for missing definition', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/workflows/my-workflow', {
@@ -290,7 +321,7 @@ describe('PUT /api/workflows/:name', () => {
   });
 
   test('returns 400 when cwd not available', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     mockListCodebases.mockImplementationOnce(async () => []);
@@ -306,7 +337,7 @@ describe('PUT /api/workflows/:name', () => {
   });
 
   test('returns 400 when definition fails validation', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     mockParseWorkflow.mockReturnValueOnce({
@@ -333,7 +364,7 @@ describe('PUT /api/workflows/:name', () => {
     const testDir = join(tmpdir(), `wf-put-test-${Date.now()}`);
 
     try {
-      const app = new Hono();
+      const app = createTestApp();
       registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
       mockListCodebases.mockImplementationOnce(async () => [{ default_cwd: testDir }]);
@@ -341,7 +372,11 @@ describe('PUT /api/workflows/:name', () => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          definition: { name: 'my-workflow', description: 'Test', steps: [{ command: 'plan' }] },
+          definition: {
+            name: 'my-workflow',
+            description: 'Test',
+            nodes: [{ id: 'plan', command: 'plan' }],
+          },
         }),
       });
 
@@ -362,7 +397,7 @@ describe('PUT /api/workflows/:name', () => {
 
 describe('DELETE /api/workflows/:name', () => {
   test('returns 400 for bundled default name', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     // archon-assist is in the real BUNDLED_WORKFLOWS
@@ -373,7 +408,7 @@ describe('DELETE /api/workflows/:name', () => {
   });
 
   test('returns 404 when workflow file not found', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     // Uses real unlink on a path that definitely does not exist → natural ENOENT → 404
@@ -386,7 +421,7 @@ describe('DELETE /api/workflows/:name', () => {
   });
 
   test('returns 400 when cwd not available', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     mockListCodebases.mockImplementationOnce(async () => []);
@@ -403,11 +438,11 @@ describe('DELETE /api/workflows/:name', () => {
     await mkdir(workflowDir, { recursive: true });
     await writeFile(
       join(workflowDir, 'to-delete.yaml'),
-      'name: x\ndescription: y\nsteps:\n  - command: z\n'
+      'name: x\ndescription: y\nnodes:\n  - id: z\n    command: z\n'
     );
 
     try {
-      const app = new Hono();
+      const app = createTestApp();
       registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
       mockListCodebases.mockImplementationOnce(async () => [{ default_cwd: testDir }]);
@@ -426,7 +461,7 @@ describe('DELETE /api/workflows/:name', () => {
 
 describe('GET /api/workflows - cwd validation', () => {
   test('returns 400 when cwd is not a registered codebase path', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     // default mock returns /tmp/project; /etc is not registered
@@ -437,7 +472,7 @@ describe('GET /api/workflows - cwd validation', () => {
   });
 
   test('accepts cwd matching a registered codebase path', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     // default mock returns /tmp/project
@@ -448,13 +483,13 @@ describe('GET /api/workflows - cwd validation', () => {
 
 describe('PUT /api/workflows/:name - cwd validation', () => {
   test('returns 400 when cwd is not a registered codebase path', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/workflows/my-workflow?cwd=/etc/secrets', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ definition: { name: 'my-workflow', description: 'test', steps: [] } }),
+      body: JSON.stringify({ definition: { name: 'my-workflow', description: 'test', nodes: [] } }),
     });
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: string };
@@ -464,7 +499,7 @@ describe('PUT /api/workflows/:name - cwd validation', () => {
 
 describe('DELETE /api/workflows/:name - cwd validation', () => {
   test('returns 400 when cwd is not a registered codebase path', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/workflows/some-workflow?cwd=/etc/secrets', {
@@ -478,7 +513,7 @@ describe('DELETE /api/workflows/:name - cwd validation', () => {
 
 describe('GET /api/commands - cwd validation', () => {
   test('returns 400 when cwd is not a registered codebase path', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/commands?cwd=/etc/secrets');
@@ -490,7 +525,7 @@ describe('GET /api/commands - cwd validation', () => {
 
 describe('GET /api/commands', () => {
   test('returns commands array', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/commands');
@@ -500,7 +535,7 @@ describe('GET /api/commands', () => {
   });
 
   test('includes bundled commands with source:bundled', async () => {
-    const app = new Hono();
+    const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/commands');

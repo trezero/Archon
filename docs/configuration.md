@@ -104,7 +104,7 @@ worktree:
 defaults:
   loadDefaultCommands: true   # Load app's bundled default commands at runtime
   loadDefaultWorkflows: true  # Load app's bundled default workflows at runtime
-  copyDefaults: false         # Deprecated: use loadDefaultCommands/loadDefaultWorkflows instead
+  # copyDefaults was removed in v0.x — use loadDefaultCommands/loadDefaultWorkflows instead
 ```
 
 **Default behavior:** The `.archon/` directory is always copied to worktrees automatically (contains artifacts, plans, workflows). Use `copyFiles` only for additional files like `.env` or `.vscode`.

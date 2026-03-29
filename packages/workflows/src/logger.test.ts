@@ -25,8 +25,6 @@ mock.module('@archon/paths', () => ({
 import {
   logWorkflowEvent,
   logWorkflowStart,
-  logStepStart,
-  logStepComplete,
   logAssistant,
   logTool,
   logValidation,
@@ -81,21 +79,18 @@ describe('Workflow Logger', () => {
         workflow_name: 'multi-event',
       });
       await logWorkflowEvent(testDir, 'test-run-2', {
-        type: 'step_start',
-        step: 'step-1',
-        step_index: 0,
+        type: 'assistant',
+        content: 'Working on it...',
       });
       await logWorkflowEvent(testDir, 'test-run-2', {
-        type: 'step_complete',
-        step: 'step-1',
-        step_index: 0,
+        type: 'workflow_complete',
       });
 
       const events = await readLogFile('test-run-2');
       expect(events).toHaveLength(3);
       expect(events[0].type).toBe('workflow_start');
-      expect(events[1].type).toBe('step_start');
-      expect(events[2].type).toBe('step_complete');
+      expect(events[1].type).toBe('assistant');
+      expect(events[2].type).toBe('workflow_complete');
     });
 
     it('should include timestamp in ISO format', async () => {
@@ -130,41 +125,6 @@ describe('Workflow Logger', () => {
       expect(events[0].type).toBe('workflow_start');
       expect(events[0].workflow_name).toBe('my-workflow');
       expect(events[0].content).toBe('User wants to build feature X');
-    });
-  });
-
-  describe('logStepStart', () => {
-    it('should log step start with name and index', async () => {
-      await logStepStart(testDir, 'step-start-test', 'plan', 0);
-
-      const events = await readLogFile('step-start-test');
-      expect(events).toHaveLength(1);
-      expect(events[0].type).toBe('step_start');
-      expect(events[0].step).toBe('plan');
-      expect(events[0].step_index).toBe(0);
-    });
-  });
-
-  describe('logStepComplete', () => {
-    it('should log step completion with name and index', async () => {
-      await logStepComplete(testDir, 'step-complete-test', 'implement', 1);
-
-      const events = await readLogFile('step-complete-test');
-      expect(events).toHaveLength(1);
-      expect(events[0].type).toBe('step_complete');
-      expect(events[0].step).toBe('implement');
-      expect(events[0].step_index).toBe(1);
-    });
-
-    it('should include duration_ms and tokens when provided', async () => {
-      await logStepComplete(testDir, 'step-complete-meta-test', 'plan', 0, {
-        durationMs: 1234,
-        tokens: { input: 10, output: 5 },
-      });
-
-      const events = await readLogFile('step-complete-meta-test');
-      expect(events[0].duration_ms).toBe(1234);
-      expect(events[0].tokens).toEqual({ input: 10, output: 5 });
     });
   });
 
@@ -253,32 +213,24 @@ Line 3`;
     it('should log complete workflow execution', async () => {
       const runId = 'full-workflow-test';
 
-      // Simulate a complete workflow
+      // Simulate a complete DAG workflow
       await logWorkflowStart(testDir, runId, 'feature-dev', 'Add dark mode');
-      await logStepStart(testDir, runId, 'plan', 0);
       await logAssistant(testDir, runId, 'I will create a plan for dark mode...');
       await logTool(testDir, runId, 'Write', { file_path: '/plan.md' });
-      await logStepComplete(testDir, runId, 'plan', 0);
-      await logStepStart(testDir, runId, 'implement', 1);
       await logAssistant(testDir, runId, 'Implementing dark mode...');
       await logTool(testDir, runId, 'Edit', { file_path: '/src/theme.ts' });
-      await logStepComplete(testDir, runId, 'implement', 1);
       await logWorkflowComplete(testDir, runId);
 
       const events = await readLogFile(runId);
-      expect(events).toHaveLength(10);
+      expect(events).toHaveLength(6);
 
       // Verify event types in order
       expect(events.map(e => e.type)).toEqual([
         'workflow_start',
-        'step_start',
         'assistant',
         'tool',
-        'step_complete',
-        'step_start',
         'assistant',
         'tool',
-        'step_complete',
         'workflow_complete',
       ]);
 
@@ -290,13 +242,12 @@ Line 3`;
       const runId = 'error-workflow-test';
 
       await logWorkflowStart(testDir, runId, 'buggy-workflow', 'Do something');
-      await logStepStart(testDir, runId, 'failing-step', 0);
-      await logWorkflowError(testDir, runId, 'Step failed: timeout exceeded');
+      await logWorkflowError(testDir, runId, 'Node failed: timeout exceeded');
 
       const events = await readLogFile(runId);
-      expect(events).toHaveLength(3);
-      expect(events[2].type).toBe('workflow_error');
-      expect(events[2].error).toBe('Step failed: timeout exceeded');
+      expect(events).toHaveLength(2);
+      expect(events[1].type).toBe('workflow_error');
+      expect(events[1].error).toBe('Node failed: timeout exceeded');
     });
   });
 

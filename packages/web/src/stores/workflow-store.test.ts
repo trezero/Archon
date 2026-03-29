@@ -2,8 +2,6 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { useWorkflowStore, selectActiveWorkflow, cleanupWorkflowStore } from './workflow-store';
 import type {
   WorkflowStatusEvent,
-  WorkflowStepEvent,
-  ParallelAgentEvent,
   WorkflowArtifactEvent,
   DagNodeEvent,
   WorkflowState,
@@ -25,39 +23,12 @@ function statusEvent(
   };
 }
 
-function stepEvent(overrides: Partial<WorkflowStepEvent> & { runId: string }): WorkflowStepEvent {
-  return {
-    type: 'workflow_step',
-    step: 0,
-    total: 1,
-    name: 'Step 1',
-    status: 'running',
-    timestamp: 1000,
-    ...overrides,
-  };
-}
-
 function dagNodeEvent(
   overrides: Partial<DagNodeEvent> & { runId: string; nodeId: string }
 ): DagNodeEvent {
   return {
     type: 'dag_node',
     name: 'Node',
-    status: 'running',
-    timestamp: 1000,
-    ...overrides,
-  };
-}
-
-function parallelAgentEvent(
-  overrides: Partial<ParallelAgentEvent> & { runId: string }
-): ParallelAgentEvent {
-  return {
-    type: 'parallel_agent',
-    step: 0,
-    agentIndex: 0,
-    totalAgents: 2,
-    name: 'Agent 1',
     status: 'running',
     timestamp: 1000,
     ...overrides,
@@ -85,7 +56,6 @@ describe('handleWorkflowStatus', () => {
     expect(wf).toBeDefined();
     expect(wf!.status).toBe('running');
     expect(wf!.workflowName).toBe('test-wf');
-    expect(wf!.steps).toEqual([]);
     expect(wf!.dagNodes).toEqual([]);
     expect(wf!.artifacts).toEqual([]);
   });
@@ -115,41 +85,6 @@ describe('handleWorkflowStatus', () => {
     useWorkflowStore.getState().handleWorkflowStatus(statusEvent({ runId: 'run-ref' }));
     const after = useWorkflowStore.getState().workflows;
     expect(before).not.toBe(after);
-  });
-});
-
-describe('handleWorkflowStep', () => {
-  test('adds step to existing workflow', () => {
-    useWorkflowStore.getState().handleWorkflowStatus(statusEvent({ runId: 'run-s1' }));
-    useWorkflowStore
-      .getState()
-      .handleWorkflowStep(stepEvent({ runId: 'run-s1', name: 'Step 1', total: 3 }));
-    const wf = useWorkflowStore.getState().workflows.get('run-s1');
-    expect(wf!.steps).toHaveLength(1);
-    expect(wf!.steps[0].name).toBe('Step 1');
-  });
-
-  test('updates existing step by index', () => {
-    useWorkflowStore.getState().handleWorkflowStatus(statusEvent({ runId: 'run-s2' }));
-    useWorkflowStore
-      .getState()
-      .handleWorkflowStep(stepEvent({ runId: 'run-s2', step: 0, total: 2 }));
-    useWorkflowStore
-      .getState()
-      .handleWorkflowStep(
-        stepEvent({ runId: 'run-s2', step: 0, status: 'completed', duration: 500, total: 2 })
-      );
-    const wf = useWorkflowStore.getState().workflows.get('run-s2');
-    expect(wf!.steps).toHaveLength(1);
-    expect(wf!.steps[0].status).toBe('completed');
-    expect(wf!.steps[0].duration).toBe(500);
-  });
-
-  test('returns previous state if runId not found', () => {
-    const before = useWorkflowStore.getState().workflows;
-    useWorkflowStore.getState().handleWorkflowStep(stepEvent({ runId: 'nonexistent' }));
-    const after = useWorkflowStore.getState().workflows;
-    expect(before).toBe(after);
   });
 });
 
@@ -188,59 +123,6 @@ describe('handleDagNode', () => {
   });
 });
 
-describe('handleParallelAgent', () => {
-  test('adds agent to existing step', () => {
-    useWorkflowStore.getState().handleWorkflowStatus(statusEvent({ runId: 'run-pa1' }));
-    useWorkflowStore.getState().handleWorkflowStep(stepEvent({ runId: 'run-pa1', step: 0 }));
-    useWorkflowStore
-      .getState()
-      .handleParallelAgent(
-        parallelAgentEvent({ runId: 'run-pa1', step: 0, agentIndex: 0, name: 'Agent A' })
-      );
-    const wf = useWorkflowStore.getState().workflows.get('run-pa1');
-    expect(wf!.steps[0].agents).toHaveLength(1);
-    expect(wf!.steps[0].agents![0].name).toBe('Agent A');
-  });
-
-  test('updates existing agent by index', () => {
-    useWorkflowStore.getState().handleWorkflowStatus(statusEvent({ runId: 'run-pa2' }));
-    useWorkflowStore.getState().handleWorkflowStep(stepEvent({ runId: 'run-pa2', step: 0 }));
-    useWorkflowStore
-      .getState()
-      .handleParallelAgent(parallelAgentEvent({ runId: 'run-pa2', step: 0, agentIndex: 0 }));
-    useWorkflowStore.getState().handleParallelAgent(
-      parallelAgentEvent({
-        runId: 'run-pa2',
-        step: 0,
-        agentIndex: 0,
-        status: 'completed',
-        duration: 300,
-      })
-    );
-    const wf = useWorkflowStore.getState().workflows.get('run-pa2');
-    expect(wf!.steps[0].agents).toHaveLength(1);
-    expect(wf!.steps[0].agents![0].status).toBe('completed');
-    expect(wf!.steps[0].agents![0].duration).toBe(300);
-  });
-
-  test('no-ops when step index not found', () => {
-    useWorkflowStore.getState().handleWorkflowStatus(statusEvent({ runId: 'run-pa3' }));
-    const before = useWorkflowStore.getState().workflows;
-    useWorkflowStore
-      .getState()
-      .handleParallelAgent(parallelAgentEvent({ runId: 'run-pa3', step: 99 }));
-    const after = useWorkflowStore.getState().workflows;
-    expect(before).toBe(after);
-  });
-
-  test('no-ops when runId not found', () => {
-    const before = useWorkflowStore.getState().workflows;
-    useWorkflowStore.getState().handleParallelAgent(parallelAgentEvent({ runId: 'nonexistent' }));
-    const after = useWorkflowStore.getState().workflows;
-    expect(before).toBe(after);
-  });
-});
-
 describe('handleWorkflowArtifact', () => {
   test('appends artifact to existing workflow', () => {
     useWorkflowStore.getState().handleWorkflowStatus(statusEvent({ runId: 'run-a1' }));
@@ -275,51 +157,6 @@ describe('handleWorkflowArtifact', () => {
   });
 });
 
-describe('handleWorkflowStep — loop workflows', () => {
-  test('marks workflow as loop when iteration is present', () => {
-    useWorkflowStore.getState().handleWorkflowStatus(statusEvent({ runId: 'run-loop1' }));
-    useWorkflowStore
-      .getState()
-      .handleWorkflowStep(stepEvent({ runId: 'run-loop1', step: 0, iteration: 2, total: 5 }));
-    const wf = useWorkflowStore.getState().workflows.get('run-loop1');
-    expect(wf!.isLoop).toBe(true);
-    expect(wf!.currentIteration).toBe(2);
-    expect(wf!.maxIterations).toBe(5);
-  });
-
-  test('preserves maxIterations when total is 0', () => {
-    useWorkflowStore.getState().handleWorkflowStatus(statusEvent({ runId: 'run-loop2' }));
-    useWorkflowStore
-      .getState()
-      .handleWorkflowStep(stepEvent({ runId: 'run-loop2', step: 0, iteration: 1, total: 5 }));
-    useWorkflowStore
-      .getState()
-      .handleWorkflowStep(stepEvent({ runId: 'run-loop2', step: 0, iteration: 2, total: 0 }));
-    const wf = useWorkflowStore.getState().workflows.get('run-loop2');
-    expect(wf!.maxIterations).toBe(5);
-  });
-
-  test('preserves agent data when updating an existing step', () => {
-    useWorkflowStore.getState().handleWorkflowStatus(statusEvent({ runId: 'run-preserve' }));
-    useWorkflowStore.getState().handleWorkflowStep(stepEvent({ runId: 'run-preserve', step: 0 }));
-    useWorkflowStore
-      .getState()
-      .handleParallelAgent(
-        parallelAgentEvent({ runId: 'run-preserve', step: 0, agentIndex: 0, name: 'Keep Me' })
-      );
-    // Update the step — agents should be preserved
-    useWorkflowStore
-      .getState()
-      .handleWorkflowStep(
-        stepEvent({ runId: 'run-preserve', step: 0, status: 'completed', duration: 100 })
-      );
-    const wf = useWorkflowStore.getState().workflows.get('run-preserve');
-    expect(wf!.steps[0].status).toBe('completed');
-    expect(wf!.steps[0].agents).toHaveLength(1);
-    expect(wf!.steps[0].agents![0].name).toBe('Keep Me');
-  });
-});
-
 describe('handleWorkflowStatus — terminal guard', () => {
   test('does not allow running SSE event to resurrect a completed workflow', () => {
     useWorkflowStore
@@ -346,10 +183,9 @@ describe('hydrateWorkflow', () => {
     runId: 'run-h1',
     workflowName: 'test',
     status: 'running',
-    steps: [],
     dagNodes: [],
     artifacts: [],
-    isLoop: false,
+
     startedAt: 1000,
     ...overrides,
   });

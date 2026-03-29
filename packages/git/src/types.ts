@@ -40,6 +40,12 @@ export type GitError =
 export interface WorkspaceSyncResult {
   branch: BranchName;
   synced: boolean;
+  /** HEAD SHA before the reset (short, 8 chars) */
+  previousHead: string;
+  /** HEAD SHA after the reset (short, 8 chars) */
+  newHead: string;
+  /** True if the working tree was updated (HEAD changed) */
+  updated: boolean;
 }
 
 /** Info about a single worktree entry */

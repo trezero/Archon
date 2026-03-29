@@ -5,29 +5,27 @@
  * Implementations live in @archon/core (backed by the real DB);
  * the workflow engine depends only on this narrow interface.
  */
-import type { WorkflowRun, WorkflowRunStatus } from './types';
+import type { WorkflowRun, WorkflowRunStatus } from './schemas';
 
-export type WorkflowEventType =
-  | 'workflow_started'
-  | 'workflow_completed'
-  | 'workflow_failed'
-  | 'step_started'
-  | 'step_completed'
-  | 'step_failed'
-  | 'step_skipped_prior_success'
-  | 'node_started'
-  | 'node_completed'
-  | 'node_failed'
-  | 'node_skipped'
-  | 'node_skipped_prior_success'
-  | 'parallel_agent_started'
-  | 'parallel_agent_completed'
-  | 'parallel_agent_failed'
-  | 'loop_iteration_started'
-  | 'loop_iteration_completed'
-  | 'loop_iteration_failed'
-  | 'tool_called'
-  | 'tool_completed';
+export const WORKFLOW_EVENT_TYPES = [
+  'workflow_started',
+  'workflow_completed',
+  'workflow_failed',
+  'node_started',
+  'node_completed',
+  'node_failed',
+  'node_skipped',
+  'node_skipped_prior_success',
+  'loop_iteration_started',
+  'loop_iteration_completed',
+  'loop_iteration_failed',
+  'tool_called',
+  'tool_completed',
+  'ralph_story_started',
+  'ralph_story_completed',
+] as const;
+
+export type WorkflowEventType = (typeof WORKFLOW_EVENT_TYPES)[number];
 
 export interface IWorkflowStore {
   // Run lifecycle
@@ -50,7 +48,7 @@ export interface IWorkflowStore {
   resumeWorkflowRun(id: string): Promise<WorkflowRun>;
   updateWorkflowRun(
     id: string,
-    updates: Partial<Pick<WorkflowRun, 'current_step_index' | 'status' | 'metadata'>>
+    updates: Partial<Pick<WorkflowRun, 'status' | 'metadata'>>
   ): Promise<void>;
   updateWorkflowActivity(id: string): Promise<void>;
   getWorkflowRunStatus(id: string): Promise<WorkflowRunStatus | null>;

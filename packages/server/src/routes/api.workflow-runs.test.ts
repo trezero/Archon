@@ -1,7 +1,9 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
-import { Hono } from 'hono';
+import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ConversationLockManager } from '@archon/core';
 import type { WebAdapter } from '../adapters/web';
+import { validationErrorHook } from './openapi-defaults';
+import { mockAllWorkflowModules } from '../test/workflow-mock-factories';
 
 // ---------------------------------------------------------------------------
 // Mock setup — must be before dynamic imports of mocked modules
@@ -58,7 +60,6 @@ type MockWorkflowRun = {
   user_message: string;
   started_at: string;
   completed_at: string | null;
-  current_step_index: number | null;
   metadata: Record<string, unknown>;
   working_path: string | null;
   last_activity_at: string | null;
@@ -126,24 +127,7 @@ mock.module('@archon/paths', () => ({
   getArchonWorkspacesPath: () => '/tmp/.archon/workspaces',
 }));
 
-mock.module('@archon/workflows', () => ({
-  discoverWorkflowsWithConfig: mock(async () => ({ workflows: [], errors: [] })),
-  parseWorkflow: mock(() => ({
-    workflow: { name: 'test', description: 'Test', steps: [] },
-    error: null,
-  })),
-  isValidCommandName: mock(
-    (name: string) =>
-      !name.includes('/') &&
-      !name.includes('\\') &&
-      !name.includes('..') &&
-      !!name &&
-      !name.startsWith('.')
-  ),
-  BUNDLED_WORKFLOWS: {},
-  BUNDLED_COMMANDS: {},
-  isBinaryBuild: mock(() => false),
-}));
+mockAllWorkflowModules();
 
 mock.module('@archon/git', () => ({
   removeWorktree: mock(async () => {}),
@@ -220,7 +204,6 @@ const MOCK_RUNNING_RUN: MockWorkflowRun = {
   user_message: 'Deploy to staging',
   started_at: NOW,
   completed_at: null,
-  current_step_index: 1,
   metadata: {},
   working_path: '/tmp/worktrees/feature',
   last_activity_at: NOW,
@@ -237,7 +220,6 @@ const MOCK_PENDING_RUN: MockWorkflowRun = {
   ...MOCK_RUNNING_RUN,
   id: 'run-uuid-3',
   status: 'pending',
-  current_step_index: null,
 };
 
 const MOCK_EVENTS: MockWorkflowEvent[] = [
@@ -282,8 +264,8 @@ const MOCK_CONV = {
   codebase_id: null,
 };
 
-function makeApp(): { app: Hono; mockWebAdapter: WebAdapter } {
-  const app = new Hono();
+function makeApp(): { app: OpenAPIHono; mockWebAdapter: WebAdapter } {
+  const app = new OpenAPIHono({ defaultHook: validationErrorHook });
   const mockWebAdapter = {
     setConversationDbId: mock((_platformId: string, _dbId: string) => {}),
     emitSSE: mock(async () => {}),
@@ -452,6 +434,22 @@ describe('POST /api/workflows/:name/run', () => {
     });
     // Hono routes won't match ../secret as /:name due to path normalization — either 400 or 404
     expect([400, 404]).toContain(response.status);
+  });
+
+  test('returns 400 when isValidCommandName rejects the name', async () => {
+    const { isValidCommandName } = await import('@archon/workflows/command-validation');
+    (isValidCommandName as ReturnType<typeof mock>).mockReturnValueOnce(false);
+
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/.hidden/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: 'web-test-abc', message: 'Test' }),
+    });
+    expect(response.status).toBe(400);
+
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('Invalid workflow name');
   });
 
   test('returns 400 for malformed JSON body', async () => {
@@ -969,5 +967,27 @@ describe('GET /api/dashboard/runs', () => {
 
     const body = (await response.json()) as { error: string };
     expect(body.error).toContain('Failed to list dashboard runs');
+  });
+});
+
+describe('GET /api/workflows/runs/by-worker/:platformId', () => {
+  beforeEach(() => {
+    mockGetWorkflowRunByWorkerPlatformId.mockReset();
+  });
+
+  test('returns run when found', async () => {
+    mockGetWorkflowRunByWorkerPlatformId.mockResolvedValueOnce(MOCK_RUNNING_RUN);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/by-worker/some-platform-id');
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { run: unknown };
+    expect(body.run).toBeDefined();
+  });
+
+  test('returns 404 when not found', async () => {
+    mockGetWorkflowRunByWorkerPlatformId.mockResolvedValueOnce(null);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/by-worker/unknown-id');
+    expect(response.status).toBe(404);
   });
 });

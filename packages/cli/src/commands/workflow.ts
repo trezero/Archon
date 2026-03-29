@@ -1,15 +1,20 @@
 /**
  * Workflow command - list and run workflows
  */
-import { registerRepository, loadConfig, loadRepoConfig, generateAndSetTitle } from '@archon/core';
-import { configureIsolation, getIsolationProvider } from '@archon/isolation';
-import { createLogger } from '@archon/paths';
-import { createWorkflowDeps } from '@archon/core/workflows/store-adapter';
 import {
-  discoverWorkflowsWithConfig,
-  executeWorkflow,
-  type WorkflowLoadResult,
-} from '@archon/workflows';
+  registerRepository,
+  loadConfig,
+  loadRepoConfig,
+  generateAndSetTitle,
+  createWorkflowStore,
+} from '@archon/core';
+import { WORKFLOW_EVENT_TYPES, type WorkflowEventType } from '@archon/workflows/store';
+import { configureIsolation, getIsolationProvider } from '@archon/isolation';
+import { createLogger, getArchonHome } from '@archon/paths';
+import { createWorkflowDeps } from '@archon/core/workflows/store-adapter';
+import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
+import { executeWorkflow } from '@archon/workflows/executor';
+import type { WorkflowLoadResult } from '@archon/workflows/schemas/workflow';
 import * as conversationDb from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
 import * as isolationDb from '@archon/core/db/isolation-environments';
@@ -59,7 +64,9 @@ function generateConversationId(): string {
  */
 async function loadWorkflows(cwd: string): Promise<WorkflowLoadResult> {
   try {
-    return await discoverWorkflowsWithConfig(cwd, loadConfig);
+    return await discoverWorkflowsWithConfig(cwd, loadConfig, {
+      globalSearchPath: getArchonHome(),
+    });
   } catch (error) {
     const err = error as Error;
     throw new Error(
@@ -276,7 +283,6 @@ export async function workflowRunCommand(
 
   // Handle --resume: find the most recent failed run and reuse its worktree
   let preCreatedRun: Awaited<ReturnType<typeof workflowDb.resumeWorkflowRun>> | undefined;
-  let startFromStep: number | undefined;
 
   if (options.resume) {
     if (!codebase) {
@@ -304,19 +310,10 @@ export async function workflowRunCommand(
       {
         workflowRunId: lastFailed.id,
         workflowName,
-        currentStepIndex: lastFailed.current_step_index,
         workingPath: lastFailed.working_path,
       },
       'workflow.resume_found_last_failed'
     );
-
-    // Guard: nothing to resume if the workflow failed before completing any steps
-    if (lastFailed.current_step_index === 0) {
-      throw new Error(
-        `Workflow '${workflowName}' failed before completing any steps — nothing to resume.\n` +
-          'Start a fresh run instead.'
-      );
-    }
 
     // Reuse the working path from the failed run (verify it still exists)
     if (lastFailed.working_path) {
@@ -343,11 +340,8 @@ export async function workflowRunCommand(
 
     // Reactivate the failed run so the executor treats it as pre-created (already running)
     preCreatedRun = await workflowDb.resumeWorkflowRun(lastFailed.id);
-    startFromStep = lastFailed.current_step_index;
 
-    console.log(
-      `Resuming from step ${String(startFromStep + 1)} — skipping ${String(startFromStep)} already-completed step(s).`
-    );
+    console.log(`Resuming failed workflow run: ${lastFailed.id}`);
     console.log(`Working path: ${workingCwd}`);
     console.log('');
   }
@@ -500,8 +494,7 @@ export async function workflowRunCommand(
     undefined, // issueContext
     undefined, // isolationContext
     undefined, // parentConversationId
-    preCreatedRun, // pre-activated run for --resume
-    startFromStep // step index to resume from
+    preCreatedRun // pre-activated run for --resume
   );
 
   // Check result and exit appropriately
@@ -519,4 +512,28 @@ export async function workflowStatusCommand(): Promise<void> {
   throw new Error(
     'Workflow status not yet implemented.\nThis will show running workflows and their progress.'
   );
+}
+
+/**
+ * Emit a workflow event directly to the database.
+ * Non-throwing: mirrors the fire-and-forget contract of createWorkflowEvent.
+ */
+export function isValidEventType(value: string): value is WorkflowEventType {
+  return (WORKFLOW_EVENT_TYPES as readonly string[]).includes(value);
+}
+
+export async function workflowEventEmitCommand(
+  runId: string,
+  eventType: WorkflowEventType,
+  data?: Record<string, unknown>
+): Promise<void> {
+  const store = createWorkflowStore();
+  await store.createWorkflowEvent({
+    workflow_run_id: runId,
+    event_type: eventType,
+    data,
+  });
+  // createWorkflowEvent is non-throwing (fire-and-forget) — the event may not
+  // have been persisted if the DB was unavailable. Check server logs if missing.
+  console.log(`Event submitted (best-effort): ${eventType} for run ${runId}`);
 }

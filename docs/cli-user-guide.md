@@ -58,7 +58,7 @@ archon workflow list --cwd /path/to/repo
 archon workflow list --cwd /path/to/repo --json
 ```
 
-Discovers workflows from `.archon/workflows/` (recursive) plus bundled defaults.
+Discovers workflows from `.archon/workflows/` (recursive), `~/.archon/.archon/workflows/` (global), and bundled defaults. See [Global Workflows](./global-workflows.md).
 
 **Flags:**
 
@@ -103,6 +103,24 @@ archon workflow run plan --cwd /path/to/repo --branch feature-x "Add caching"
 - Runs in target directory directly (no isolation)
 - Mutually exclusive with `--branch` and `--from`
 
+### `workflow event emit`
+
+Emit a workflow event directly to the database. Primarily used inside workflow loop prompts (e.g., Ralph) to record story-level lifecycle events.
+
+```bash
+archon workflow event emit --run-id <uuid> --type <event-type> [--data <json>]
+```
+
+**Flags:**
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--run-id` | Yes | UUID of the workflow run |
+| `--type` | Yes | Event type (e.g., `ralph_story_started`, `node_completed`) |
+| `--data` | No | JSON string attached to the event. Invalid JSON prints a warning and is ignored. |
+
+Exit code: 0 on success, 1 when `--run-id`, `--type` is missing, or `--type` is not a valid event type. Event persistence is best-effort (non-throwing) — check server logs if events appear missing.
+
 ### `isolation list`
 
 Show all active worktree environments.
@@ -127,6 +145,33 @@ archon isolation cleanup 14
 # Remove environments with branches merged into main (also deletes remote branches)
 archon isolation cleanup --merged
 ```
+
+### `validate workflows [name]`
+
+Validate workflow YAML definitions and their referenced resources (command files, MCP configs, skill directories).
+
+```bash
+archon validate workflows                 # Validate all workflows
+archon validate workflows my-workflow     # Validate a single workflow
+archon validate workflows my-workflow --json  # Machine-readable JSON output
+```
+
+Checks: YAML syntax, DAG structure (cycles, dependency refs), command file existence, MCP config files, skill directories, provider compatibility. Returns actionable error messages with "did you mean?" suggestions for typos.
+
+Exit code: 0 = all valid, 1 = errors found.
+
+### `validate commands [name]`
+
+Validate command files (.md) in `.archon/commands/`.
+
+```bash
+archon validate commands                  # Validate all commands
+archon validate commands my-command       # Validate a single command
+```
+
+Checks: file exists, non-empty, valid name.
+
+Exit code: 0 = all valid, 1 = errors found.
 
 ### `complete <branch> [branch2 ...]`
 
