@@ -7,20 +7,25 @@
  */
 import type { WorkflowRun, WorkflowRunStatus } from './schemas';
 
-export type WorkflowEventType =
-  | 'workflow_started'
-  | 'workflow_completed'
-  | 'workflow_failed'
-  | 'node_started'
-  | 'node_completed'
-  | 'node_failed'
-  | 'node_skipped'
-  | 'node_skipped_prior_success'
-  | 'loop_iteration_started'
-  | 'loop_iteration_completed'
-  | 'loop_iteration_failed'
-  | 'tool_called'
-  | 'tool_completed';
+export const WORKFLOW_EVENT_TYPES = [
+  'workflow_started',
+  'workflow_completed',
+  'workflow_failed',
+  'node_started',
+  'node_completed',
+  'node_failed',
+  'node_skipped',
+  'node_skipped_prior_success',
+  'loop_iteration_started',
+  'loop_iteration_completed',
+  'loop_iteration_failed',
+  'tool_called',
+  'tool_completed',
+  'ralph_story_started',
+  'ralph_story_completed',
+] as const;
+
+export type WorkflowEventType = (typeof WORKFLOW_EVENT_TYPES)[number];
 
 export interface IWorkflowStore {
   // Run lifecycle

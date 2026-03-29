@@ -44,20 +44,16 @@ nodes:
       if [ -z "$PRD_DIR" ]; then
         MD_PATH=$(echo "$USER_MSG" | grep -oE '[^ ]+\.prd\.md\|[^ ]+prd\.md\|[^ ]+\.md' | head -1)
         if [ -n "$MD_PATH" ] && [ -f "$MD_PATH" ]; then
-          echo "INPUT_TYPE=external_prd"
-          echo "PRD_SOURCE=$MD_PATH"
-          echo "PRD_DIR="
+          printf '{"input_type":"external_prd","prd_source":"%s","prd_dir":""}\n' "$MD_PATH"
           exit 0
         fi
       fi
 
-      # Determine input type
+      # Determine input type and emit JSON with discovered PRD_DIR
       if [ -n "$PRD_DIR" ] && [ -f "$PRD_DIR/prd.json" ] && [ -f "$PRD_DIR/prd.md" ]; then
-        echo "ready"
-      elif [ -n "$PRD_DIR" ] && [ -f "$PRD_DIR/prd.md" ] && [ ! -f "$PRD_DIR/prd.json" ]; then
-        echo "needs_generation"
+        printf '{"input_type":"ready","prd_dir":"%s"}\n' "$PRD_DIR"
       else
-        echo "needs_generation"
+        printf '{"input_type":"needs_generation","prd_dir":"%s"}\n' "$PRD_DIR"
       fi
 
   # ═══════════════════════════════════════════════════════════════
@@ -69,7 +65,7 @@ nodes:
 
   - id: generate-prd
     depends_on: [detect-input]
-    when: "$detect-input.output == 'needs_generation'"
+    when: "$detect-input.output.input_type == 'needs_generation'"
     command: archon-ralph-generate
     context: fresh
 
@@ -85,17 +81,10 @@ nodes:
     bash: |
       set -e
 
-      # ── 1. Find PRD directory ──────────────────────────────────
-      USER_MSG="$ARGUMENTS"
-      PRD_DIR=""
+      # ── 1. Find PRD directory (passed from detect-input) ──────
+      PRD_DIR=$detect-input.output.prd_dir
 
-      # Check if user specified a path
-      if echo "$USER_MSG" | grep -qE '\.archon/ralph/'; then
-        PRD_DIR=$(echo "$USER_MSG" | grep -oE '\.archon/ralph/[^ ]+' | head -1)
-        PRD_DIR=$(dirname "$PRD_DIR" 2>/dev/null || echo "$PRD_DIR")
-      fi
-
-      # Auto-discover if not specified
+      # If detect-input didn't know the PRD dir (generated from scratch), discover it
       if [ -z "$PRD_DIR" ] || [ ! -f "$PRD_DIR/prd.json" ]; then
         FOUND=$(find .archon/ralph -name "prd.json" -type f 2>/dev/null | head -1)
         if [ -n "$FOUND" ]; then
@@ -255,6 +244,11 @@ nodes:
         - {criterion 2}
         - ...
         ────────────────────────────────────────────────────
+        ```
+
+        After announcing the selected story, emit the story started event:
+        ```bash
+        bun run cli workflow event emit --run-id $WORKFLOW_ID --type ralph_story_started --data '{"story_id":"{story-id}","title":"{story-title}"}' || true
         ```
 
         **PHASE_1_CHECKPOINT:**
@@ -425,6 +419,11 @@ nodes:
           "passes": true,
           "notes": "Implemented in iteration {N}. Files: {list}."
         }
+        ```
+
+        After updating prd.json, emit the story completed event:
+        ```bash
+        bun run cli workflow event emit --run-id $WORKFLOW_ID --type ralph_story_completed --data '{"story_id":"{story-id}","title":"{story-title}"}' || true
         ```
 
         ### 5.2 Update progress.txt

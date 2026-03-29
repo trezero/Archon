@@ -166,6 +166,34 @@ packages/cli/
 
 ---
 
+## `workflow event emit` Flow
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ archon workflow event emit --run-id <uuid> --type <type> [...]   │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ cli.ts  Validate --run-id, --type (required)                     │
+│         Validate --type against WORKFLOW_EVENT_TYPES              │
+│         Parse --data as JSON (warn + skip if invalid)            │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ workflow.ts  workflowEventEmitCommand(runId, eventType, data?)   │
+│              createWorkflowStore().createWorkflowEvent(...)       │
+│              Non-throwing (fire-and-forget)                       │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Code:** `packages/cli/src/cli.ts` (case 'event'), `packages/cli/src/commands/workflow.ts:workflowEventEmitCommand`
+
+**Contract:** Event persistence is best-effort. `createWorkflowEvent` catches all errors internally — the CLI prints a confirmation but cannot guarantee the event was stored.
+
+---
+
 ## `isolation list` Flow
 
 ```

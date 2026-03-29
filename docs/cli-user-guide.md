@@ -103,6 +103,24 @@ archon workflow run plan --cwd /path/to/repo --branch feature-x "Add caching"
 - Runs in target directory directly (no isolation)
 - Mutually exclusive with `--branch` and `--from`
 
+### `workflow event emit`
+
+Emit a workflow event directly to the database. Primarily used inside workflow loop prompts (e.g., Ralph) to record story-level lifecycle events.
+
+```bash
+archon workflow event emit --run-id <uuid> --type <event-type> [--data <json>]
+```
+
+**Flags:**
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--run-id` | Yes | UUID of the workflow run |
+| `--type` | Yes | Event type (e.g., `ralph_story_started`, `node_completed`) |
+| `--data` | No | JSON string attached to the event. Invalid JSON prints a warning and is ignored. |
+
+Exit code: 0 on success, 1 when `--run-id`, `--type` is missing, or `--type` is not a valid event type. Event persistence is best-effort (non-throwing) — check server logs if events appear missing.
+
 ### `isolation list`
 
 Show all active worktree environments.

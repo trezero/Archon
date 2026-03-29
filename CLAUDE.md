@@ -198,6 +198,9 @@ bun run cli workflow run implement --branch feature-auth "Add auth"
 # Opt out of isolation (run in live checkout)
 bun run cli workflow run quick-fix --no-worktree "Fix typo"
 
+# Emit a workflow event (used inside workflow loop prompts)
+bun run cli workflow event emit --run-id <uuid> --type <event-type> [--data <json>]
+
 # List active worktrees/environments
 bun run cli isolation list
 
