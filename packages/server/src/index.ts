@@ -533,6 +533,28 @@ async function main(): Promise<void> {
   if (gitea) activePlatforms.push('Gitea');
 
   getLog().info({ activePlatforms, port }, 'server_ready');
+
+  // Non-blocking: warn at startup if gh CLI auth is unavailable
+  checkGhAuth().catch((err: unknown) => {
+    getLog().debug({ err }, 'gh_auth.check_unexpected_error');
+  });
+}
+
+/**
+ * Run `gh auth status` and warn if it fails.
+ * Helps diagnose expired tokens or missing auth before workflows fail.
+ */
+async function checkGhAuth(): Promise<void> {
+  const { execFileAsync } = await import('@archon/git');
+  try {
+    await execFileAsync('gh', ['auth', 'status'], { timeout: 10_000 });
+    getLog().info('gh_auth.status_ok');
+  } catch {
+    getLog().warn(
+      'gh_auth.status_failed — gh CLI is not authenticated. Workflows using gh commands may fail. ' +
+        'Run `gh auth login` or set GH_TOKEN in .env to fix this.'
+    );
+  }
 }
 
 // Run the application
