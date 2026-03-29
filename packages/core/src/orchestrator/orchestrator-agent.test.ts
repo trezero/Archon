@@ -860,7 +860,29 @@ describe('discoverAllWorkflows — remote sync', () => {
     const platform = makePlatform();
     await handleMessage(platform, 'conv-1', 'What is the latest commit?');
 
-    expect(mockSyncWorkspace).toHaveBeenCalledWith('/repos/test-repo');
+    // /repos/test-repo is NOT under ~/.archon/workspaces/ so resetAfterFetch=false
+    expect(mockSyncWorkspace).toHaveBeenCalledWith('/repos/test-repo', undefined, {
+      resetAfterFetch: false,
+    });
+  });
+
+  test('passes resetAfterFetch=true for managed clones', async () => {
+    const conversation = makeConversation({ codebase_id: 'codebase-1' });
+    const codebase = {
+      ...makeCodebaseForSync(),
+      default_cwd: '/home/test/.archon/workspaces/owner/repo/source',
+    };
+    mockGetOrCreateConversation.mockReturnValueOnce(Promise.resolve(conversation));
+    mockGetCodebase.mockReturnValueOnce(Promise.resolve(codebase));
+
+    const platform = makePlatform();
+    await handleMessage(platform, 'conv-1', 'What is the latest commit?');
+
+    expect(mockSyncWorkspace).toHaveBeenCalledWith(
+      '/home/test/.archon/workspaces/owner/repo/source',
+      undefined,
+      { resetAfterFetch: true }
+    );
   });
 
   test('proceeds without throwing when syncWorkspace rejects', async () => {
@@ -875,7 +897,9 @@ describe('discoverAllWorkflows — remote sync', () => {
     await expect(
       handleMessage(platform, 'conv-1', 'What is the latest commit?')
     ).resolves.toBeUndefined();
-    expect(mockSyncWorkspace).toHaveBeenCalledWith('/repos/test-repo');
+    expect(mockSyncWorkspace).toHaveBeenCalledWith('/repos/test-repo', undefined, {
+      resetAfterFetch: false,
+    });
   });
 
   test('does not call syncWorkspace when conversation has no codebase_id', async () => {

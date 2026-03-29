@@ -1495,6 +1495,36 @@ branch refs/heads/feature/auth
       );
       await expect(git.syncWorkspace('/workspace/repo')).rejects.not.toThrow('worktree.baseBranch');
     });
+
+    test('skips reset when resetAfterFetch is false (fetch-only mode)', async () => {
+      execSpy.mockResolvedValue({ stdout: '', stderr: '' });
+
+      const result = await git.syncWorkspace('/workspace/repo', 'main', {
+        resetAfterFetch: false,
+      });
+
+      expect(result).toEqual({
+        branch: 'main',
+        synced: true,
+        previousHead: '',
+        newHead: '',
+        updated: false,
+      });
+
+      // Fetch should still have been called
+      const fetchCalls = execSpy.mock.calls.filter((call: unknown[]) => {
+        const args = call[1] as string[];
+        return args.includes('fetch');
+      });
+      expect(fetchCalls).toHaveLength(1);
+
+      // Reset should NOT have been called
+      const resetCalls = execSpy.mock.calls.filter((call: unknown[]) => {
+        const args = call[1] as string[];
+        return args.includes('reset');
+      });
+      expect(resetCalls).toHaveLength(0);
+    });
   });
 
   describe('cloneRepository', () => {

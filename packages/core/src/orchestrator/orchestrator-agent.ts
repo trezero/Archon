@@ -338,11 +338,23 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Discove
       const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
       if (codebase) {
         // Sync canonical source with remote before the AI reads codebase state.
+        // Only hard-reset for Archon-managed clones (under ~/.archon/workspaces/).
+        // Locally-registered repos get fetch-only to avoid destroying uncommitted work.
         // Non-fatal: if fetch fails (network, no remote), proceed with local state.
         try {
-          syncResult = await syncWorkspace(toRepoPath(codebase.default_cwd));
+          const isManagedClone = codebase.default_cwd
+            .replace(/\\/g, '/')
+            .startsWith(getArchonWorkspacesPath().replace(/\\/g, '/'));
+          syncResult = await syncWorkspace(toRepoPath(codebase.default_cwd), undefined, {
+            resetAfterFetch: isManagedClone,
+          });
           getLog().debug(
-            { codebaseId: codebase.id, repoPath: codebase.default_cwd, ...syncResult },
+            {
+              codebaseId: codebase.id,
+              repoPath: codebase.default_cwd,
+              isManagedClone,
+              ...syncResult,
+            },
             'workspace.sync_completed'
           );
         } catch (err) {
@@ -488,19 +500,18 @@ export async function handleMessage(
       );
     }
 
-    // Emit workspace sync status to the user
-    if (syncResult || syncError) {
-      const syncMessage = syncError
-        ? 'Sync failed \u2014 using local state'
-        : syncResult?.updated
-          ? `Synced with origin/${syncResult.branch} \u2014 updated ${syncResult.previousHead} \u2192 ${syncResult.newHead}`
-          : `origin/${syncResult?.branch ?? 'unknown'} \u2014 up to date`;
-      if (platform.sendStructuredEvent) {
-        await platform.sendStructuredEvent(conversationId, {
-          type: 'system',
-          content: syncMessage,
-        });
-      }
+    // Emit workspace sync status only when something noteworthy happened
+    // (HEAD moved or sync failed). Skip the "up to date" case to avoid noise.
+    if (syncError && platform.sendStructuredEvent) {
+      await platform.sendStructuredEvent(conversationId, {
+        type: 'system',
+        content: 'Sync failed \u2014 using local state',
+      });
+    } else if (syncResult?.updated && platform.sendStructuredEvent) {
+      await platform.sendStructuredEvent(conversationId, {
+        type: 'system',
+        content: `Synced with origin/${syncResult.branch} \u2014 updated ${syncResult.previousHead} \u2192 ${syncResult.newHead}`,
+      });
     }
 
     const fullPrompt = buildFullPrompt(
