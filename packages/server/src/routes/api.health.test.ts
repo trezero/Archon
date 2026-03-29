@@ -17,7 +17,13 @@ const mockLoadConfig = mock(async () => ({
   worktree: { baseBranch: 'main' },
 }));
 const mockGetDatabaseType = mock(() => 'sqlite' as const);
-const mockGetStats = mock(() => ({ active: 1, queued: 2 }));
+const mockGetStats = mock(() => ({
+  active: 1,
+  queuedTotal: 2,
+  queuedByConversation: [] as { conversationId: string; queuedMessages: number }[],
+  maxConcurrent: 10,
+  activeConversationIds: [] as string[],
+}));
 
 mock.module('@archon/core', () => ({
   handleMessage: mock(async () => {}),
@@ -121,7 +127,10 @@ mock.module('@archon/core/db/isolation-environments', () => ({
   updateStatus: mock(async () => {}),
 }));
 
-const mockCountRunningWorkflows = mock(async () => 0);
+const mockGetRunningWorkflows = mock(
+  async () =>
+    [] as { id: string; conversation_id: string; workflow_name: string; started_at: string }[]
+);
 
 mock.module('@archon/core/db/workflows', () => ({
   listWorkflowRuns: mock(async () => []),
@@ -133,7 +142,7 @@ mock.module('@archon/core/db/workflows', () => ({
   getWorkflowRun: mock(async () => null),
   cancelWorkflowRun: mock(async () => {}),
   getWorkflowRunByWorkerPlatformId: mock(async () => null),
-  countRunningWorkflows: mockCountRunningWorkflows,
+  getRunningWorkflows: mockGetRunningWorkflows,
 }));
 
 mock.module('@archon/core/db/workflow-events', () => ({
@@ -187,12 +196,20 @@ function makeApp(): Hono {
 describe('GET /api/health', () => {
   beforeEach(() => {
     mockGetStats.mockReset();
-    mockCountRunningWorkflows.mockReset();
+    mockGetRunningWorkflows.mockReset();
   });
 
   test('returns status ok with adapter and concurrency info', async () => {
-    mockGetStats.mockImplementationOnce(() => ({ active: 1, queued: 2 }));
-    mockCountRunningWorkflows.mockImplementationOnce(async () => 1);
+    mockGetStats.mockImplementationOnce(() => ({
+      active: 0,
+      queuedTotal: 2,
+      queuedByConversation: [],
+      maxConcurrent: 10,
+      activeConversationIds: [],
+    }));
+    mockGetRunningWorkflows.mockImplementationOnce(async () => [
+      { id: 'run-1', conversation_id: 'conv-1', workflow_name: 'assist', started_at: '2026-01-01' },
+    ]);
 
     const app = makeApp();
     const response = await app.request('/api/health');
@@ -201,36 +218,104 @@ describe('GET /api/health', () => {
     const body = (await response.json()) as {
       status: string;
       adapter: string;
-      concurrency: unknown;
+      concurrency: { active: number; activeConversationIds: string[] };
       runningWorkflows: number;
     };
     expect(body.status).toBe('ok');
     expect(body.adapter).toBe('web');
     expect(body.concurrency).toBeDefined();
+    expect(body.concurrency.active).toBe(1);
+    expect(body.concurrency.activeConversationIds).toEqual(['conv-1']);
     expect(body.runningWorkflows).toBe(1);
   });
 
-  test('reflects live concurrency stats from lockManager', async () => {
-    mockGetStats.mockImplementationOnce(() => ({ active: 3, queued: 7 }));
-    mockCountRunningWorkflows.mockImplementationOnce(async () => 2);
+  test('includes running background workflows in concurrency.active count', async () => {
+    mockGetStats.mockImplementationOnce(() => ({
+      active: 0,
+      queuedTotal: 0,
+      queuedByConversation: [],
+      maxConcurrent: 10,
+      activeConversationIds: [],
+    }));
+    mockGetRunningWorkflows.mockImplementationOnce(async () => [
+      { id: 'run-1', conversation_id: 'conv-1', workflow_name: 'assist', started_at: '2026-01-01' },
+      { id: 'run-2', conversation_id: 'conv-2', workflow_name: 'plan', started_at: '2026-01-01' },
+    ]);
 
     const app = makeApp();
     const response = await app.request('/api/health');
     expect(response.status).toBe(200);
 
     const body = (await response.json()) as {
-      concurrency: { active: number; queued: number };
+      concurrency: { active: number; activeConversationIds: string[] };
       runningWorkflows: number;
     };
-    expect(body.concurrency).toEqual({ active: 3, queued: 7 });
+    expect(body.concurrency.active).toBe(2);
+    expect(body.concurrency.activeConversationIds).toEqual(['conv-1', 'conv-2']);
     expect(body.runningWorkflows).toBe(2);
   });
 
-  test('returns 200 without any auth requirements', async () => {
-    mockGetStats.mockImplementationOnce(() => ({ active: 0, queued: 0 }));
+  test('deduplicates conversation IDs tracked by both lock manager and DB', async () => {
+    mockGetStats.mockImplementationOnce(() => ({
+      active: 1,
+      queuedTotal: 0,
+      queuedByConversation: [],
+      maxConcurrent: 10,
+      activeConversationIds: ['conv-1'],
+    }));
+    mockGetRunningWorkflows.mockImplementationOnce(async () => [
+      { id: 'run-1', conversation_id: 'conv-1', workflow_name: 'assist', started_at: '2026-01-01' },
+    ]);
 
     const app = makeApp();
-    // No auth headers provided — should still succeed
+    const response = await app.request('/api/health');
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as {
+      concurrency: { active: number; activeConversationIds: string[] };
+    };
+    // Should NOT double-count conv-1
+    expect(body.concurrency.active).toBe(1);
+    expect(body.concurrency.activeConversationIds).toEqual(['conv-1']);
+  });
+
+  test('combines lock manager and background workflow counts', async () => {
+    mockGetStats.mockImplementationOnce(() => ({
+      active: 1,
+      queuedTotal: 3,
+      queuedByConversation: [],
+      maxConcurrent: 10,
+      activeConversationIds: ['conv-1'],
+    }));
+    mockGetRunningWorkflows.mockImplementationOnce(async () => [
+      { id: 'run-2', conversation_id: 'conv-2', workflow_name: 'plan', started_at: '2026-01-01' },
+    ]);
+
+    const app = makeApp();
+    const response = await app.request('/api/health');
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as {
+      concurrency: { active: number; queuedTotal: number; activeConversationIds: string[] };
+      runningWorkflows: number;
+    };
+    expect(body.concurrency.active).toBe(2);
+    expect(body.concurrency.queuedTotal).toBe(3);
+    expect(body.concurrency.activeConversationIds).toEqual(['conv-1', 'conv-2']);
+    expect(body.runningWorkflows).toBe(1);
+  });
+
+  test('returns 200 without any auth requirements', async () => {
+    mockGetStats.mockImplementationOnce(() => ({
+      active: 0,
+      queuedTotal: 0,
+      queuedByConversation: [],
+      maxConcurrent: 10,
+      activeConversationIds: [],
+    }));
+    mockGetRunningWorkflows.mockImplementationOnce(async () => []);
+
+    const app = makeApp();
     const response = await app.request('/api/health');
     expect(response.status).toBe(200);
   });
