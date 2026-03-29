@@ -139,7 +139,12 @@ export function registerApiRoutes(
     try {
       const platformType = c.req.query('platform') ?? undefined;
       const codebaseId = c.req.query('codebaseId') ?? undefined;
-      const conversations = await conversationDb.listConversations(50, platformType, codebaseId);
+      const conversations = await conversationDb.listConversations(
+        50,
+        platformType,
+        codebaseId,
+        true
+      );
       return c.json(conversations);
     } catch (error) {
       getLog().error({ err: error }, 'list_conversations_failed');
@@ -212,7 +217,12 @@ export function registerApiRoutes(
           getLog().error({ err: e, conversationId: conversation.id }, 'message_persistence_failed');
         }
 
-        // Generate title for non-command messages (fire-and-forget)
+        // Set placeholder title immediately so the sidebar never shows "Untitled conversation"
+        const placeholderTitle =
+          message.length > 60 ? message.slice(0, 60) + '...' : message;
+        await conversationDb.updateConversationTitle(conversation.id, placeholderTitle);
+
+        // Generate proper AI title for non-command messages (fire-and-forget, overwrites placeholder)
         if (!message.startsWith('/')) {
           void generateAndSetTitle(
             conversation.id,

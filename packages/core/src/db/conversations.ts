@@ -189,11 +189,17 @@ export async function getConversationsByIsolationEnvId(
 export async function listConversations(
   limit = 50,
   platformType?: string,
-  codebaseId?: string
+  codebaseId?: string,
+  excludeEmpty = false
 ): Promise<readonly Conversation[]> {
   const params: unknown[] = [];
   let sql =
     'SELECT * FROM remote_agent_conversations WHERE deleted_at IS NULL AND (hidden IS NULL OR hidden = false)';
+
+  if (excludeEmpty) {
+    sql +=
+      ' AND (title IS NOT NULL OR EXISTS (SELECT 1 FROM remote_agent_messages WHERE conversation_id = remote_agent_conversations.id LIMIT 1))';
+  }
 
   if (platformType) {
     params.push(platformType);

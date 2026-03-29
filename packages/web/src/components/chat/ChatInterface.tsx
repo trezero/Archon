@@ -619,7 +619,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           // (navigate changes the key prop, causing unmount/remount — state is lost otherwise)
           setCachedMessages(newId, [userMsg, thinkingMsg]);
           navigate(`/chat/${newId}`, { replace: true });
-          // Message already dispatched atomically — trigger title + workflow refreshes
+          // Trigger title + workflow refreshes after AI generates a proper title
           if (!hasTriggeredTitleRefresh.current && !message.startsWith('/')) {
             hasTriggeredTitleRefresh.current = true;
             setTimeout(() => {
