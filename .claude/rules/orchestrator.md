@@ -14,7 +14,7 @@ Platform message
   → ConversationLockManager.acquireLock()
   → handleMessage() (orchestrator-agent.ts:383)
       → inheritThreadContext() — copy parent's codebase/cwd if child thread
-      → Deterministic gate: 5 commands only (help, status, reset, workflow, register-project)
+      → Deterministic gate: 7 commands (help, status, reset, workflow, register-project, update-project, remove-project)
       → Everything else → AI routing call:
           → listCodebases() + discoverAllWorkflows()
           → buildFullPrompt() → buildOrchestratorPrompt() or buildProjectScopedPrompt()
@@ -29,7 +29,7 @@ Lock manager returns `{ status: 'started' | 'queued-conversation' | 'queued-capa
 
 ## Deterministic Commands (command-handler.ts)
 
-Only **5 commands** are handled deterministically (orchestrator-agent.ts:420):
+Only **7 commands** are handled deterministically (orchestrator-agent.ts:420):
 
 | Command | Behavior |
 |---------|----------|
@@ -38,6 +38,8 @@ Only **5 commands** are handled deterministically (orchestrator-agent.ts:420):
 | `/reset` | Deactivate current session |
 | `/workflow` | Subcommands: `list`, `run`, `status`, `cancel`, `reload` |
 | `/register-project` | Handled inline — creates codebase DB record |
+| `/update-project` | Handled inline — updates codebase path |
+| `/remove-project` | Handled inline — deletes codebase DB record |
 
 **All other slash commands fall through to the AI router.** Additional commands (`/clone`, `/setcwd`, `/getcwd`, `/repos`, `/repo`, `/repo-remove`, `/worktree`, `/init`, `/command-set`, `/load-commands`, `/commands`, `/reset-context`) are handled by command-handler.ts. Unrecognized commands return an "Unknown command" error.
 
@@ -113,4 +115,4 @@ function getLog(): ReturnType<typeof createLogger> {
 - Never skip `IsolationBlockedError` — it must propagate to stop all further message handling
 - Never add platform-specific logic to the orchestrator; it uses `IPlatformAdapter` interface only
 - Never transition sessions by mutating them; always deactivate and create a new linked session
-- Never assume a slash command is deterministic — only the 5 listed above bypass the AI router
+- Never assume a slash command is deterministic — only the 7 listed above bypass the AI router

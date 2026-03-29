@@ -112,10 +112,13 @@ export async function updateCodebase(id: string, data: { default_cwd?: string })
   updates.push(`updated_at = ${dialect.now()}`);
   values.push(id);
 
-  await pool.query(
+  const result = await pool.query(
     `UPDATE remote_agent_codebases SET ${updates.join(', ')} WHERE id = $${paramIndex}`,
     values
   );
+  if ((result.rowCount ?? 0) === 0) {
+    throw new Error(`Codebase ${id} not found`);
+  }
 }
 
 export async function listCodebases(): Promise<readonly Codebase[]> {

@@ -429,18 +429,21 @@ export async function handleMessage(
 
       if (deterministicCommands.includes(command)) {
         if (command === 'register-project') {
+          getLog().debug({ command, conversationId }, 'deterministic_command');
           const result = await handleRegisterProject(message, platform, conversationId);
           await platform.sendMessage(conversationId, result);
           return;
         }
 
         if (command === 'update-project') {
+          getLog().debug({ command, conversationId }, 'deterministic_command');
           const result = await handleUpdateProject(message);
           await platform.sendMessage(conversationId, result);
           return;
         }
 
         if (command === 'remove-project') {
+          getLog().debug({ command, conversationId }, 'deterministic_command');
           const result = await handleRemoveProject(message);
           await platform.sendMessage(conversationId, result);
           return;
@@ -916,7 +919,10 @@ async function handleRegisterProject(
     ai_assistant_type: 'claude',
   });
 
-  getLog().info({ name: projectName, path: projectPath, id: codebase.id }, 'project_registered');
+  getLog().info(
+    { name: projectName, path: projectPath, id: codebase.id },
+    'project.register_completed'
+  );
   return `Project "${projectName}" registered successfully!\nPath: ${projectPath}\nID: ${codebase.id}`;
 }
 
@@ -946,10 +952,14 @@ async function handleUpdateProject(message: string): Promise<string> {
     return `Project "${projectName}" not found. Use /register-project to create it.`;
   }
 
-  await codebaseDb.updateCodebase(codebase.id, { default_cwd: newPath });
+  try {
+    await codebaseDb.updateCodebase(codebase.id, { default_cwd: newPath });
+  } catch {
+    return `Project "${projectName}" could not be updated — it may have been removed.`;
+  }
   getLog().info(
     { name: projectName, oldPath: codebase.default_cwd, newPath, id: codebase.id },
-    'project_updated'
+    'project.update_completed'
   );
   return `Project "${projectName}" updated.\nOld path: ${codebase.default_cwd}\nNew path: ${newPath}`;
 }
@@ -975,7 +985,7 @@ async function handleRemoveProject(message: string): Promise<string> {
   }
 
   await codebaseDb.deleteCodebase(codebase.id);
-  getLog().info({ name: projectName, id: codebase.id }, 'project_removed');
+  getLog().info({ name: projectName, id: codebase.id }, 'project.remove_completed');
   return `Project "${projectName}" removed.\nPath was: ${codebase.default_cwd}`;
 }
 
