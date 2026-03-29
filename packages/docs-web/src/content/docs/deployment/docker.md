@@ -81,8 +81,8 @@ Run Archon locally with Docker Desktop — no domain, no VPS required. Uses SQLi
 ### Quick start
 
 ```bash
-git clone https://github.com/dynamous-community/remote-coding-agent.git
-cd remote-coding-agent
+git clone https://github.com/coleam00/Archon.git
+cd Archon
 cp .env.example .env
 # Edit .env: set CLAUDE_CODE_OAUTH_TOKEN or CLAUDE_API_KEY
 docker compose up -d

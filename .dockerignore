@@ -3,7 +3,10 @@
 .gitignore
 
 # Dependencies (installed in container)
+# Must match root AND per-package node_modules — workspace symlinks from the
+# host are broken inside Linux containers and would shadow the production install.
 node_modules
+**/node_modules
 
 # Legacy workspace directory (not part of the app)
 workspace
