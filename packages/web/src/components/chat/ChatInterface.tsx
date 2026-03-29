@@ -150,6 +150,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           // never match DB-assigned IDs. Keep SSE IDs synthetic to preserve this invariant.
           const activeSSE = prev.filter(
             m =>
+              m.role === 'system' ||
               (m.isStreaming && (m.content || sendActive)) ||
               (m.toolCalls && m.toolCalls.length > 0)
           );
@@ -487,7 +488,19 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
           .then((rows: MessageResponse[]) => {
             if (rows.length === 0) return;
             const hydrated = rows.map(mapMessageRow);
-            setMessages(hydrated);
+            // Preserve client-only system messages (e.g., sync status) when rehydrating
+            setMessages(prev => {
+              const systemMessages = prev.filter(m => m.role === 'system');
+              if (systemMessages.length === 0) return hydrated;
+              // Interleave system messages at their original positions by timestamp
+              const merged = [...hydrated];
+              for (const sys of systemMessages) {
+                const insertIdx = merged.findIndex(m => m.timestamp > sys.timestamp);
+                if (insertIdx === -1) merged.push(sys);
+                else merged.splice(insertIdx, 0, sys);
+              }
+              return merged;
+            });
           })
           .catch(() => {
             // Re-fetch failed — clear stuck placeholder so user can retry
@@ -569,6 +582,18 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     [onError]
   );
 
+  const onSystemStatus = useCallback((content: string): void => {
+    setMessages(prev => [
+      ...prev,
+      {
+        id: nextId(),
+        role: 'system' as const,
+        content,
+        timestamp: Date.now(),
+      },
+    ]);
+  }, []);
+
   const { connected } = useSSE(isNewChat ? null : conversationId, {
     onText,
     onToolCall,
@@ -579,6 +604,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     onWorkflowDispatch,
     onWarning,
     onRetract,
+    onSystemStatus,
     ...workflowSSEHandlers,
   });
 

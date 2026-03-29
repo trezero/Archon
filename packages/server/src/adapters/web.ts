@@ -176,6 +176,12 @@ export class WebAdapter implements IWebPlatformAdapter {
         workflowName: chunk.workflowName,
         timestamp: Date.now(),
       });
+    } else if (chunk.type === 'system') {
+      event = JSON.stringify({
+        type: 'system_status',
+        content: chunk.content,
+        timestamp: Date.now(),
+      });
     } else {
       return;
     }
