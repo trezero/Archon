@@ -157,8 +157,10 @@ RUN gosu appuser git config --global --add safe.directory '/.archon/workspaces' 
     gosu appuser git config --global --add safe.directory '/.archon/worktrees/*'
 
 # Copy entrypoint script (fixes volume permissions, drops to appuser)
+# sed strips Windows CRLF in case .gitattributes eol=lf was bypassed
 COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
+    && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Default port (matches .env.example PORT=3000)
 EXPOSE 3000
