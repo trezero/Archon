@@ -29,6 +29,7 @@ import type {
   WorkflowDefinition,
   WorkflowLoadResult,
   WorkflowLoadError,
+  WorkflowWithSource,
 } from '@archon/workflows/schemas/workflow';
 import { createWorkflowDeps } from '../workflows/store-adapter';
 import { loadConfig } from '../config/config-loader';
@@ -317,7 +318,7 @@ interface DiscoverResult extends WorkflowLoadResult {
 
 /** Discover global + repo-specific workflows, merge by name (repo overrides global) */
 async function discoverAllWorkflows(conversation: Conversation): Promise<DiscoverResult> {
-  let workflows: WorkflowDefinition[] = [];
+  let workflowEntries: WorkflowWithSource[] = [];
   const allErrors: WorkflowLoadError[] = [];
   let syncResult: WorkspaceSyncResult | undefined;
   let syncError: string | undefined;
@@ -326,7 +327,7 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Discove
     const result = await discoverWorkflowsWithConfig(getArchonWorkspacesPath(), loadConfig, {
       globalSearchPath: getArchonHome(),
     });
-    workflows = [...result.workflows];
+    workflowEntries = [...result.workflows];
     allErrors.push(...result.errors);
   } catch (error) {
     const err = error as Error;
@@ -365,11 +366,11 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Discove
         const workflowCwd = conversation.cwd ?? codebase.default_cwd;
         await syncArchonToWorktree(workflowCwd);
         const repoResult = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
-        const workflowMap = new Map(workflows.map(w => [w.name, w]));
+        const entryMap = new Map(workflowEntries.map(ws => [ws.workflow.name, ws]));
         for (const rw of repoResult.workflows) {
-          workflowMap.set(rw.name, rw);
+          entryMap.set(rw.workflow.name, rw);
         }
-        workflows = Array.from(workflowMap.values());
+        workflowEntries = Array.from(entryMap.values());
         allErrors.push(...repoResult.errors);
       }
     } catch (error) {
@@ -377,7 +378,7 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Discove
     }
   }
 
-  return { workflows, errors: allErrors, syncResult, syncError };
+  return { workflows: workflowEntries, errors: allErrors, syncResult, syncError };
 }
 
 /** Build the full prompt with system prompt, user message, and optional contexts */
@@ -511,11 +512,12 @@ export async function handleMessage(
     // 3. Load codebases, discover workflows, build prompt
     const codebases = await codebaseDb.listCodebases();
     const {
-      workflows,
+      workflows: workflowEntries,
       errors: workflowErrors,
       syncResult,
       syncError,
     } = await discoverAllWorkflows(conversation);
+    const workflows = workflowEntries.map(ws => ws.workflow);
     if (workflowErrors.length > 0) {
       getLog().warn(
         { errorCount: workflowErrors.length, errors: workflowErrors },
@@ -1128,9 +1130,12 @@ async function handleWorkflowRunCommand(
       return;
     }
 
-    const resolvedWorkflow =
-      discovery.workflows.find(w => w.name === workflow.name) ??
-      discovery.workflows.find(w => w.name.toLowerCase() === workflow.name.toLowerCase());
+    const resolvedEntry =
+      discovery.workflows.find(ws => ws.workflow.name === workflow.name) ??
+      discovery.workflows.find(
+        ws => ws.workflow.name.toLowerCase() === workflow.name.toLowerCase()
+      );
+    const resolvedWorkflow = resolvedEntry?.workflow;
 
     if (!resolvedWorkflow) {
       const loadError = discovery.errors.find(

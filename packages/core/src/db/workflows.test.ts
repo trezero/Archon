@@ -262,10 +262,9 @@ describe('workflows database', () => {
       expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('completed_at = NOW()'), [
         'workflow-run-123',
       ]);
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining("AND status = 'running'"),
-        ['workflow-run-123']
-      );
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining("AND status = 'running'"), [
+        'workflow-run-123',
+      ]);
     });
 
     test('throws when rowCount is 0', async () => {

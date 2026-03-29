@@ -182,9 +182,14 @@ export interface WorkflowEventResponse {
   created_at: string;
 }
 
-export async function listWorkflows(cwd?: string): Promise<WorkflowDefinition[]> {
+export interface WorkflowListEntry {
+  workflow: WorkflowDefinition;
+  source: WorkflowSource;
+}
+
+export async function listWorkflows(cwd?: string): Promise<WorkflowListEntry[]> {
   const params = cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
-  const result = await fetchJSON<{ workflows: WorkflowDefinition[] }>(`/api/workflows${params}`);
+  const result = await fetchJSON<{ workflows: WorkflowListEntry[] }>(`/api/workflows${params}`);
   return result.workflows;
 }
 

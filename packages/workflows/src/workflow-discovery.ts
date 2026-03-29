@@ -9,7 +9,12 @@
  */
 import { readFile, readdir, access, stat } from 'fs/promises';
 import { join } from 'path';
-import type { WorkflowDefinition, WorkflowLoadError, WorkflowLoadResult } from './schemas';
+import type {
+  WorkflowDefinition,
+  WorkflowLoadError,
+  WorkflowLoadResult,
+  WorkflowWithSource,
+} from './schemas';
 import * as archonPaths from '@archon/paths';
 import { BUNDLED_WORKFLOWS, isBinaryBuild } from './defaults/bundled-defaults';
 import { createLogger } from '@archon/paths';
@@ -132,8 +137,8 @@ export async function discoverWorkflows(
   cwd: string,
   options?: { globalSearchPath?: string; loadDefaults?: boolean }
 ): Promise<WorkflowLoadResult> {
-  // Map of filename -> workflow for deduplication
-  const workflowsByFile = new Map<string, WorkflowDefinition>();
+  // Map of filename -> workflow+source for deduplication
+  const workflowsByFile = new Map<string, WorkflowWithSource>();
   const allErrors: WorkflowLoadError[] = [];
 
   // 1. Load from app's bundled defaults (unless opted out)
@@ -144,7 +149,7 @@ export async function discoverWorkflows(
       getLog().debug('loading_bundled_default_workflows');
       const bundledResult = loadBundledWorkflows();
       for (const [filename, workflow] of bundledResult.workflows) {
-        workflowsByFile.set(filename, workflow);
+        workflowsByFile.set(filename, { workflow, source: 'bundled' });
       }
       allErrors.push(...bundledResult.errors);
       getLog().info({ count: bundledResult.workflows.size }, 'bundled_default_workflows_loaded');
@@ -156,7 +161,7 @@ export async function discoverWorkflows(
         await access(appDefaultsPath);
         const appResult = await loadWorkflowsFromDir(appDefaultsPath);
         for (const [filename, workflow] of appResult.workflows) {
-          workflowsByFile.set(filename, workflow);
+          workflowsByFile.set(filename, { workflow, source: 'bundled' });
         }
         if (appResult.errors.length > 0) {
           getLog().warn(
@@ -189,7 +194,7 @@ export async function discoverWorkflows(
         if (workflowsByFile.has(filename)) {
           getLog().debug({ filename }, 'global_workflow_overrides_default');
         }
-        workflowsByFile.set(filename, workflow);
+        workflowsByFile.set(filename, { workflow, source: 'bundled' });
       }
       allErrors.push(...globalResult.errors);
       getLog().info({ count: globalResult.workflows.size }, 'global_workflows_loaded');
@@ -218,7 +223,7 @@ export async function discoverWorkflows(
       if (workflowsByFile.has(filename)) {
         getLog().debug({ filename }, 'repo_workflow_overrides_default');
       }
-      workflowsByFile.set(filename, workflow);
+      workflowsByFile.set(filename, { workflow, source: 'project' });
     }
 
     // Surface repo workflow errors to users (these are actionable)

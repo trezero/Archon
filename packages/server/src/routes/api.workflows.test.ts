@@ -16,10 +16,12 @@ function createTestApp(): OpenAPIHono {
 const mockDiscoverWorkflows = mock(async (_cwd: string) => ({
   workflows: [
     {
-      name: 'deploy',
-      description: 'Deploy app',
-      path: '/tmp/.archon/workflows/deploy.md',
-      source: 'local',
+      workflow: {
+        name: 'deploy',
+        description: 'Deploy app',
+        nodes: [],
+      },
+      source: 'bundled' as const,
     },
   ],
   errors: [
@@ -115,12 +117,13 @@ describe('GET /api/workflows', () => {
     expect(response.status).toBe(200);
 
     const body = (await response.json()) as {
-      workflows: Array<{ name: string }> & { workflows?: unknown };
+      workflows: Array<{ workflow: { name: string }; source: string }> & { workflows?: unknown };
       errors: unknown[];
     };
 
     expect(Array.isArray(body.workflows)).toBe(true);
-    expect(body.workflows[0]?.name).toBe('deploy');
+    expect(body.workflows[0]?.workflow.name).toBe('deploy');
+    expect(body.workflows[0]?.source).toBe('bundled');
     expect(body.workflows.workflows).toBeUndefined();
     expect(mockDiscoverWorkflows).toHaveBeenCalledWith('/tmp/project', expect.any(Function));
     expect(body.errors).toBeDefined();

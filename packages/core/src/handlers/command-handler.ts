@@ -21,7 +21,7 @@ import {
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '@archon/paths';
 import { loadConfig } from '../config/config-loader';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
-import type { WorkflowDefinition, WorkflowLoadError } from '@archon/workflows/schemas/workflow';
+import type { WorkflowLoadError, WorkflowWithSource } from '@archon/workflows/schemas/workflow';
 import * as workflowDb from '../db/workflows';
 import { getTriggerForCommand, type DeactivatingCommand } from '../state/session-transitions';
 import { SessionNotFoundError } from '../db/sessions';
@@ -866,11 +866,11 @@ async function handleWorkflowCommand(
   switch (subcommand) {
     case 'list':
     case 'ls': {
-      let workflows: readonly WorkflowDefinition[];
+      let workflowEntries: readonly WorkflowWithSource[];
       let errors: readonly WorkflowLoadError[];
       try {
         const result = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
-        workflows = result.workflows;
+        workflowEntries = result.workflows;
         errors = result.errors;
       } catch (error) {
         const err = error as Error;
@@ -881,7 +881,7 @@ async function handleWorkflowCommand(
         };
       }
 
-      if (workflows.length === 0 && errors.length === 0) {
+      if (workflowEntries.length === 0 && errors.length === 0) {
         return {
           success: true,
           message: 'No workflows found.\n\nCreate workflows in `.archon/workflows/` as YAML files.',
@@ -890,9 +890,9 @@ async function handleWorkflowCommand(
 
       let msg = '';
 
-      if (workflows.length > 0) {
+      if (workflowEntries.length > 0) {
         msg += 'Available Workflows:\n\n';
-        for (const w of workflows) {
+        for (const { workflow: w } of workflowEntries) {
           const modeInfo = `DAG: ${String(w.nodes.length)} nodes`;
           msg += `**\`${w.name}\`**\n  ${w.description}\n  ${modeInfo}\n\n`;
         }
@@ -1022,11 +1022,11 @@ async function handleWorkflowCommand(
       );
 
       // Discover workflows with error handling
-      let workflows: readonly WorkflowDefinition[];
+      let workflowEntries: readonly WorkflowWithSource[];
       let loadErrors: readonly WorkflowLoadError[];
       try {
         const result = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
-        workflows = result.workflows;
+        workflowEntries = result.workflows;
         loadErrors = result.errors;
       } catch (error) {
         const err = error as Error;
@@ -1036,6 +1036,8 @@ async function handleWorkflowCommand(
           message: `Failed to load workflows: ${err.message}\n\nCheck .archon/workflows/ for YAML syntax issues.`,
         };
       }
+
+      const workflows = workflowEntries.map(ws => ws.workflow);
 
       getLog().debug(
         {

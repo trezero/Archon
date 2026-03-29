@@ -3,7 +3,16 @@
  */
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
 import { makeTestWorkflow } from '@archon/workflows/test-utils';
+import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 import { workflowListCommand, workflowRunCommand, workflowStatusCommand } from './workflow';
+
+/** Wrap a WorkflowDefinition as a WorkflowWithSource entry for test mocks. */
+function ws(
+  workflow: WorkflowDefinition,
+  source: 'bundled' | 'project' = 'bundled'
+): { workflow: WorkflowDefinition; source: 'bundled' | 'project' } {
+  return { workflow, source };
+}
 
 const mockLogger = {
   fatal: mock(() => undefined),
@@ -127,12 +136,14 @@ describe('workflowListCommand', () => {
     const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
       workflows: [
-        makeTestWorkflow({ name: 'assist', description: 'General assistance workflow' }),
-        makeTestWorkflow({
-          name: 'plan',
-          description: 'Create implementation plan',
-          provider: 'claude',
-        }),
+        ws(makeTestWorkflow({ name: 'assist', description: 'General assistance workflow' })),
+        ws(
+          makeTestWorkflow({
+            name: 'plan',
+            description: 'Create implementation plan',
+            provider: 'claude',
+          })
+        ),
       ],
       errors: [],
     });
@@ -151,12 +162,14 @@ describe('workflowListCommand', () => {
     const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
       workflows: [
-        makeTestWorkflow({ name: 'assist', description: 'General assistance workflow' }),
-        makeTestWorkflow({
-          name: 'plan',
-          description: 'Create implementation plan',
-          provider: 'claude',
-        }),
+        ws(makeTestWorkflow({ name: 'assist', description: 'General assistance workflow' })),
+        ws(
+          makeTestWorkflow({
+            name: 'plan',
+            description: 'Create implementation plan',
+            provider: 'claude',
+          })
+        ),
       ],
       errors: [],
     });
@@ -223,14 +236,16 @@ describe('workflowListCommand', () => {
     const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
       workflows: [
-        makeTestWorkflow({
-          name: 'plan',
-          description: 'Planning workflow',
-          provider: 'codex',
-          model: 'gpt-5.3-codex',
-          modelReasoningEffort: 'high',
-          webSearchMode: 'live',
-        }),
+        ws(
+          makeTestWorkflow({
+            name: 'plan',
+            description: 'Planning workflow',
+            provider: 'codex',
+            model: 'gpt-5.3-codex',
+            modelReasoningEffort: 'high',
+            webSearchMode: 'live',
+          })
+        ),
       ],
       errors: [],
     });
@@ -255,7 +270,7 @@ describe('workflowListCommand', () => {
   it('should produce text output when json flag is false', async () => {
     const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflow({ name: 'assist', description: 'General assistance' })],
+      workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'General assistance' }))],
       errors: [],
     });
 
@@ -322,8 +337,8 @@ describe('workflowRunCommand', () => {
     const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
       workflows: [
-        makeTestWorkflow({ name: 'assist', description: 'Help' }),
-        makeTestWorkflow({ name: 'plan', description: 'Plan' }),
+        ws(makeTestWorkflow({ name: 'assist', description: 'Help' })),
+        ws(makeTestWorkflow({ name: 'plan', description: 'Plan' })),
       ],
       errors: [],
     });
@@ -337,8 +352,8 @@ describe('workflowRunCommand', () => {
     const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
       workflows: [
-        makeTestWorkflow({ name: 'assist', description: 'Help' }),
-        makeTestWorkflow({ name: 'plan', description: 'Plan' }),
+        ws(makeTestWorkflow({ name: 'assist', description: 'Help' })),
+        ws(makeTestWorkflow({ name: 'plan', description: 'Plan' })),
       ],
       errors: [],
     });
@@ -358,7 +373,7 @@ describe('workflowRunCommand', () => {
     const conversationDb = await import('@archon/core/db/conversations');
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflow({ name: 'assist', description: 'Help' })],
+      workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'Help' }))],
       errors: [],
     });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockRejectedValueOnce(
@@ -376,7 +391,7 @@ describe('workflowRunCommand', () => {
     const codebaseDb = await import('@archon/core/db/codebases');
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflow({ name: 'assist', description: 'Help' })],
+      workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'Help' }))],
       errors: [],
     });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
@@ -398,7 +413,7 @@ describe('workflowRunCommand', () => {
     const codebaseDb = await import('@archon/core/db/codebases');
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflow({ name: 'assist', description: 'Help' })],
+      workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'Help' }))],
       errors: [],
     });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
@@ -429,7 +444,7 @@ describe('workflowRunCommand', () => {
     const codebaseDb = await import('@archon/core/db/codebases');
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflow({ name: 'assist', description: 'Help' })],
+      workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'Help' }))],
       errors: [],
     });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
@@ -456,7 +471,7 @@ describe('workflowRunCommand', () => {
     const core = await import('@archon/core');
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflow({ name: 'assist', description: 'Help' })],
+      workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'Help' }))],
       errors: [],
     });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
@@ -494,7 +509,7 @@ describe('workflowRunCommand', () => {
     const isolation = await import('@archon/isolation');
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflow({ name: 'assist', description: 'Help' })],
+      workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'Help' }))],
       errors: [],
     });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
@@ -533,7 +548,7 @@ describe('workflowRunCommand', () => {
     const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflow({ name: 'assist', description: 'Help' })],
+      workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'Help' }))],
       errors: [],
     });
 
@@ -550,7 +565,7 @@ describe('workflowRunCommand', () => {
     const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflow({ name: 'assist', description: 'Help' })],
+      workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'Help' }))],
       errors: [],
     });
 
@@ -576,7 +591,7 @@ describe('workflowRunCommand', () => {
       .calls.length;
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflow({ name: 'assist', description: 'Help' })],
+      workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'Help' }))],
       errors: [],
     });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
@@ -630,7 +645,7 @@ describe('workflowRunCommand', () => {
     const createCallsBefore = providerBefore?.create.mock.calls.length ?? 0;
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflow({ name: 'assist', description: 'Help' })],
+      workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'Help' }))],
       errors: [],
     });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
@@ -663,7 +678,7 @@ describe('workflowRunCommand', () => {
     const gitModule = await import('@archon/git');
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflow({ name: 'assist', description: 'Help' })],
+      workflows: [ws(makeTestWorkflow({ name: 'assist', description: 'Help' }))],
       errors: [],
     });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({

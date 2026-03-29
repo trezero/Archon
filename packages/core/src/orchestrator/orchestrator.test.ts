@@ -236,7 +236,8 @@ const mockSession: Session = {
   ended_reason: null,
 };
 
-const testWorkflows = makeTestWorkflowList(['fix-bug', 'add-feature', 'archon-assist']);
+const testWorkflowDefs = makeTestWorkflowList(['fix-bug', 'add-feature', 'archon-assist']);
+const testWorkflows = testWorkflowDefs.map(w => ({ workflow: w, source: 'bundled' as const }));
 
 const mockClient = {
   sendQuery: mock(async function* () {
@@ -289,7 +290,7 @@ function clearAllMocks(): void {
 
 describe('parseOrchestratorCommands', () => {
   const codebases: Codebase[] = [mockCodebase];
-  const workflows: WorkflowDefinition[] = testWorkflows;
+  const workflows: WorkflowDefinition[] = testWorkflowDefs;
 
   test('parses /invoke-workflow with --project', () => {
     const response = 'I will fix this.\n/invoke-workflow fix-bug --project test-project';
@@ -538,7 +539,12 @@ describe('orchestrator-agent handleMessage', () => {
         workflow: { definition: workflowDefinition, args: 'payload' },
       });
       mockDiscoverWorkflows.mockResolvedValue({
-        workflows: [{ ...workflowDefinition, name: 'other-workflow' }],
+        workflows: [
+          {
+            workflow: { ...workflowDefinition, name: 'other-workflow' },
+            source: 'bundled' as const,
+          },
+        ],
         errors: [],
       });
 
