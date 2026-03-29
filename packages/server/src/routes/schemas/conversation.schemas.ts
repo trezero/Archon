@@ -40,6 +40,7 @@ export const conversationIdParamsSchema = z.object({ id: z.string() });
 export const createConversationBodySchema = z
   .object({
     codebaseId: z.string().optional(),
+    message: z.string().optional(),
   })
   .strict()
   .openapi('CreateConversationBody');
@@ -49,6 +50,7 @@ export const createConversationResponseSchema = z
   .object({
     conversationId: z.string(),
     id: z.string(),
+    dispatched: z.boolean().optional(),
   })
   .openapi('CreateConversationResponse');
 

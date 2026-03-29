@@ -665,7 +665,12 @@ export function registerApiRoutes(
     try {
       const platformType = c.req.query('platform') ?? undefined;
       const codebaseId = c.req.query('codebaseId') ?? undefined;
-      const conversations = await conversationDb.listConversations(50, platformType, codebaseId);
+      const conversations = await conversationDb.listConversations(
+        50,
+        platformType,
+        codebaseId,
+        true
+      );
       return c.json(conversations);
     } catch (error) {
       getLog().error({ err: error }, 'list_conversations_failed');
@@ -689,9 +694,10 @@ export function registerApiRoutes(
   });
 
   // POST /api/conversations - Create new conversation
+  // Accepts optional `message` field for atomic create+send (avoids ghost "Untitled" entries)
   registerOpenApiRoute(createConversationRoute, async c => {
     try {
-      const { codebaseId } = getValidatedBody(c, createConversationBodySchema);
+      const { codebaseId, message } = getValidatedBody(c, createConversationBodySchema);
 
       // Validate codebase exists if provided
       if (codebaseId) {
@@ -709,6 +715,42 @@ export function registerApiRoutes(
         codebaseId
       );
       webAdapter.setConversationDbId(conversation.platform_conversation_id, conversation.id);
+
+      // If message provided, dispatch it atomically (avoids ghost "Untitled" conversations)
+      if (message) {
+        try {
+          await messageDb.addMessage(conversation.id, 'user', message);
+        } catch (e: unknown) {
+          // Log only (no SSE warning) — the SSE stream isn't connected yet for new conversations.
+          // The existing /message endpoint emits a warning because the stream is guaranteed to be active.
+          getLog().error({ err: e, conversationId: conversation.id }, 'message_persistence_failed');
+        }
+
+        // Set placeholder title immediately so the sidebar never shows "Untitled conversation"
+        const placeholderTitle =
+          message.length > 60 ? message.slice(0, 60) + '...' : message;
+        await conversationDb.updateConversationTitle(conversation.id, placeholderTitle);
+
+        // Generate proper AI title for non-command messages (fire-and-forget, overwrites placeholder)
+        if (!message.startsWith('/')) {
+          void generateAndSetTitle(
+            conversation.id,
+            message,
+            conversation.ai_assistant_type,
+            getArchonWorkspacesPath()
+          );
+        }
+
+        const result = await dispatchToOrchestrator(conversation.platform_conversation_id, message);
+
+        return c.json({
+          conversationId: conversation.platform_conversation_id,
+          id: conversation.id,
+          dispatched: true,
+          ...result,
+        });
+      }
+
       return c.json({ conversationId: conversation.platform_conversation_id, id: conversation.id });
     } catch (error) {
       getLog().error({ err: error }, 'create_conversation_failed');

@@ -632,16 +632,29 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       let targetConversationId = conversationId;
 
       // Create conversation on first message if this is a new chat
+      // Uses atomic create+message to avoid ghost "Untitled conversation" entries
       if (isNewChat) {
         try {
           const { conversationId: newId } = await createConversation(
-            selectedProjectId ?? undefined
+            selectedProjectId ?? undefined,
+            message
           );
           targetConversationId = newId;
           // Cache messages under the new ID so the remounted ChatInterface picks them up
           // (navigate changes the key prop, causing unmount/remount — state is lost otherwise)
           setCachedMessages(newId, [userMsg, thinkingMsg]);
           navigate(`/chat/${newId}`, { replace: true });
+          // Trigger title + workflow refreshes after AI generates a proper title
+          if (!hasTriggeredTitleRefresh.current && !message.startsWith('/')) {
+            hasTriggeredTitleRefresh.current = true;
+            setTimeout(() => {
+              void queryClient.invalidateQueries({ queryKey: ['conversations'] });
+            }, 2000);
+          }
+          void queryClient.invalidateQueries({ queryKey: ['workflow-runs-status'] });
+          void queryClient.invalidateQueries({ queryKey: ['workflowRuns'] });
+          setSending(false);
+          return;
         } catch (error) {
           console.error('[Chat] Failed to create conversation', { error });
           onError({

@@ -76,12 +76,17 @@ export async function listConversations(codebaseId?: string): Promise<Conversati
 }
 
 export async function createConversation(
-  codebaseId?: string
-): Promise<{ conversationId: string; id: string }> {
+  codebaseId?: string,
+  message?: string
+): Promise<{ conversationId: string; id: string; dispatched?: boolean }> {
+  const body: Record<string, string> = {};
+  if (codebaseId) body.codebaseId = codebaseId;
+  if (message) body.message = message;
+
   return fetchJSON('/api/conversations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ codebaseId }),
+    body: JSON.stringify(body),
   });
 }
 
