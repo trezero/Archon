@@ -219,6 +219,8 @@ describe('GET /api/health', () => {
     expect(body.status).toBe('ok');
     expect(body.adapter).toBe('web');
     expect(body.concurrency).toBeDefined();
+    expect(body.concurrency.active).toBe(1);
+    expect(body.concurrency.activeConversationIds).toEqual(['conv-1']);
     expect(body.runningWorkflows).toBe(1);
   });
 

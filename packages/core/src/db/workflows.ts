@@ -136,7 +136,7 @@ export async function getRunningWorkflows(): Promise<
       workflow_name: string;
       started_at: string;
     }>(
-      "SELECT id, conversation_id, workflow_name, started_at FROM remote_agent_workflow_runs WHERE status = 'running' ORDER BY started_at ASC",
+      "SELECT id, conversation_id, workflow_name, started_at FROM remote_agent_workflow_runs WHERE status = 'running' ORDER BY started_at ASC LIMIT 100",
       []
     );
     return [...result.rows];
