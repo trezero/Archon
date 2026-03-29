@@ -65,6 +65,20 @@ function WorkflowDispatchInline({
   );
 }
 
+// Hoisted to module scope to prevent new references on every render
+const WORKFLOW_RESULT_MARKDOWN_COMPONENTS = {
+  a: ({ children, ...props }: React.ComponentPropsWithoutRef<'a'>): React.ReactElement => (
+    <a
+      className="text-primary underline decoration-primary/40 hover:decoration-primary"
+      target="_blank"
+      rel="noopener noreferrer"
+      {...props}
+    >
+      {children}
+    </a>
+  ),
+};
+
 function WorkflowResultCard({
   workflowName,
   runId,
@@ -104,7 +118,12 @@ function WorkflowResultCard({
       </div>
       <div className="px-3 py-2">
         <div className="chat-markdown text-xs text-text-secondary">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={WORKFLOW_RESULT_MARKDOWN_COMPONENTS}
+          >
+            {displayContent}
+          </ReactMarkdown>
         </div>
         {isTruncatable && (
           <button
