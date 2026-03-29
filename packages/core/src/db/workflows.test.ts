@@ -252,7 +252,7 @@ describe('workflows database', () => {
 
   describe('completeWorkflowRun', () => {
     test('marks workflow run as completed', async () => {
-      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
 
       await completeWorkflowRun('workflow-run-123');
 
@@ -262,12 +262,24 @@ describe('workflows database', () => {
       expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('completed_at = NOW()'), [
         'workflow-run-123',
       ]);
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining("AND status = 'running'"),
+        ['workflow-run-123']
+      );
+    });
+
+    test('throws when rowCount is 0', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 0));
+
+      await expect(completeWorkflowRun('workflow-run-123')).rejects.toThrow(
+        'not found or not in running state'
+      );
     });
   });
 
   describe('failWorkflowRun', () => {
     test('marks workflow run as failed with error', async () => {
-      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
 
       await failWorkflowRun('workflow-run-123', 'Step not found: missing.md');
 
@@ -279,15 +291,27 @@ describe('workflows database', () => {
         expect.stringContaining('completed_at = NOW()'),
         expect.any(Array)
       );
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining("AND status = 'running'"),
+        expect.any(Array)
+      );
     });
 
     test('stores error in metadata', async () => {
-      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
 
       await failWorkflowRun('workflow-run-123', 'Timeout exceeded');
 
       const [, params] = mockQuery.mock.calls[0] as [string, unknown[]];
       expect(params).toContain(JSON.stringify({ error: 'Timeout exceeded' }));
+    });
+
+    test('throws when rowCount is 0', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 0));
+
+      await expect(failWorkflowRun('workflow-run-123', 'some error')).rejects.toThrow(
+        'not found or not in running state'
+      );
     });
   });
 

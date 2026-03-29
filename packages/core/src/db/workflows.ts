@@ -325,11 +325,12 @@ export async function updateWorkflowRun(
 
 export async function completeWorkflowRun(id: string): Promise<void> {
   const dialect = getDialect();
+  let result: Awaited<ReturnType<IDatabase['query']>>;
   try {
-    await pool.query(
+    result = await pool.query(
       `UPDATE remote_agent_workflow_runs
        SET status = 'completed', completed_at = ${dialect.now()}
-       WHERE id = $1`,
+       WHERE id = $1 AND status = 'running'`,
       [id]
     );
   } catch (error) {
@@ -337,21 +338,30 @@ export async function completeWorkflowRun(id: string): Promise<void> {
     getLog().error({ err }, 'db.workflow_run_complete_failed');
     throw new Error(`Failed to complete workflow run: ${err.message}`);
   }
+  if (result.rowCount === 0) {
+    getLog().warn({ workflowRunId: id }, 'db.workflow_run_complete_no_match');
+    throw new Error(`Workflow run not found or not in running state (id: ${id})`);
+  }
 }
 
 export async function failWorkflowRun(id: string, error: string): Promise<void> {
   const dialect = getDialect();
+  let result: Awaited<ReturnType<IDatabase['query']>>;
   try {
-    await pool.query(
+    result = await pool.query(
       `UPDATE remote_agent_workflow_runs
        SET status = 'failed', completed_at = ${dialect.now()}, metadata = ${dialect.jsonMerge('metadata', 2)}
-       WHERE id = $1`,
+       WHERE id = $1 AND status = 'running'`,
       [id, JSON.stringify({ error })]
     );
   } catch (dbError) {
     const err = dbError as Error;
     getLog().error({ err }, 'db.workflow_run_mark_failed_error');
     throw new Error(`Failed to fail workflow run: ${err.message}`);
+  }
+  if (result.rowCount === 0) {
+    getLog().warn({ workflowRunId: id }, 'db.workflow_run_fail_no_match');
+    throw new Error(`Workflow run not found or not in running state (id: ${id})`);
   }
 }
 
