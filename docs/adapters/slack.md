@@ -4,7 +4,7 @@ Connect Archon to Slack so you can interact with your AI coding assistant from a
 
 ## Prerequisites
 
-- Archon server running (see [Getting Started](../getting-started-cli.md))
+- Archon server running (see [Getting Started](../getting-started.md))
 - A Slack workspace where you have permission to install apps
 
 ## Quick Setup

@@ -4,9 +4,9 @@ Connect Archon to GitHub so you can interact with your AI coding assistant from 
 
 ## Prerequisites
 
-- Archon server running (see [Getting Started](../getting-started-cli.md))
+- Archon server running (see [Getting Started](../getting-started.md))
 - GitHub repository with issues enabled
-- `GITHUB_TOKEN` set in your environment (see [Getting Started](../getting-started-cli.md))
+- `GITHUB_TOKEN` set in your environment (see [Getting Started](../getting-started.md))
 - Public endpoint for webhooks (see ngrok setup below for local development)
 
 ## Step 1: Generate Webhook Secret

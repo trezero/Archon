@@ -155,8 +155,7 @@ The coding agent handles workflow selection, branch naming, and worktree isolati
 
 ### Alternative setup paths
 
-- **[CLI Getting Started](docs/getting-started-cli.md)** — Manual CLI setup without the wizard
-- **[Web UI Quickstart](QUICKSTART.md)** — Full server setup with Web UI, Telegram, Slack, GitHub, and Discord
+- **[Getting Started](docs/getting-started.md)** — Full setup guide (Web UI or CLI)
 
 ## Web UI
 
@@ -251,7 +250,7 @@ The Web UI and CLI work out of the box. Optionally connect a chat platform for r
 
 | Topic | Description |
 |-------|-------------|
-| [Getting Started](docs/getting-started-cli.md) | CLI-focused setup guide |
+| [Getting Started](docs/getting-started.md) | Setup guide (Web UI or CLI) |
 | [CLI User Guide](docs/cli-user-guide.md) | Full CLI reference |
 | [Authoring Workflows](docs/authoring-workflows.md) | Create custom YAML workflows |
 | [Authoring Commands](docs/authoring-commands.md) | Create reusable AI commands |
