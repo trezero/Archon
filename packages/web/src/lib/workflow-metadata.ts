@@ -47,15 +47,18 @@ export function parseWorkflowDescription(description: string): ParsedDescription
     }
   }
 
-  // Extract "Triggers:" section — parse quoted strings
+  // Extract "Triggers:" section — parse quoted strings, fall back to comma-split
   const triggersRe = /Triggers:\s*(.+?)(?=\n\s*(?:Does:|NOT for:|Constraints:|\n\n)|$)/s;
   const triggersMatch = triggersRe.exec(text);
   if (triggersMatch) {
     const triggerText = triggersMatch[1];
-    const quotedRe = /"([^"]+)"/g;
-    const quoted = triggerText.match(quotedRe);
-    if (quoted) {
-      result.triggers = quoted.map(q => q.replace(/"/g, ''));
+    result.triggers = [...triggerText.matchAll(/"([^"]+)"/g)].map(m => m[1]);
+    // Fallback: comma-split for unquoted trigger lists
+    if (result.triggers.length === 0) {
+      result.triggers = triggerText
+        .split(',')
+        .map(t => t.trim())
+        .filter(t => t.length > 0 && !t.includes('\n'));
     }
   }
 
@@ -85,43 +88,49 @@ export function parseWorkflowDescription(description: string): ParsedDescription
   return result;
 }
 
+/** Known acronyms to preserve in display names. */
+const ACRONYMS = new Set(['pr', 'ci', 'dag', 'prd', 'api', 'ai']);
+
 /**
  * Convert a workflow name to a display-friendly title.
- * Strips `archon-` prefix, converts kebab-case to Title Case.
+ * Strips `archon-` prefix, converts kebab-case to Title Case,
+ * preserves known acronyms (PR, CI, DAG, etc.).
  */
 export function getWorkflowDisplayName(name: string): string {
   const stripped = name.replace(/^archon-/, '');
   return stripped
     .split('-')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .map(word =>
+      ACRONYMS.has(word) ? word.toUpperCase() : word.charAt(0).toUpperCase() + word.slice(1)
+    )
     .join(' ');
 }
 
 /** Workflow category for filtering. */
 export type WorkflowCategory = 'All' | 'CI/CD' | 'Code Review' | 'Automation' | 'Development';
 
-const CATEGORIES: WorkflowCategory[] = ['All', 'CI/CD', 'Code Review', 'Automation', 'Development'];
-
-export { CATEGORIES };
+export const CATEGORIES: WorkflowCategory[] = [
+  'All',
+  'CI/CD',
+  'Code Review',
+  'Automation',
+  'Development',
+];
 
 /**
  * Derive a category from the workflow name and description.
+ * Uses word-boundary checks for short tokens to avoid false positives.
  */
 export function getWorkflowCategory(name: string, description: string): WorkflowCategory {
   const lower = `${name} ${description}`.toLowerCase();
 
   // Code Review
-  if (lower.includes('review') || lower.includes('pr-review') || lower.includes('pr review')) {
+  if (lower.includes('review')) {
     return 'Code Review';
   }
 
-  // CI/CD — validation, testing, PR creation
-  if (
-    lower.includes('validate') ||
-    lower.includes('test-loop') ||
-    lower.includes('ci') ||
-    lower.includes('validate-pr')
-  ) {
+  // CI/CD — validation, testing (word-boundary for short tokens)
+  if (lower.includes('validate') || lower.includes('test-loop') || /\bci\b/.test(lower)) {
     return 'CI/CD';
   }
 
@@ -177,14 +186,12 @@ export function getWorkflowTags(name: string, parsed: ParsedDescription): string
 /** Map of icon name strings to use with dynamic icon lookup. */
 export type WorkflowIconName =
   | 'Bug'
-  | 'Search'
   | 'GitMerge'
   | 'Rocket'
   | 'RefreshCw'
   | 'TestTube'
   | 'Workflow'
   | 'Eye'
-  | 'FileText'
   | 'Lightbulb'
   | 'Wrench'
   | 'Zap'
@@ -197,7 +204,7 @@ export function getWorkflowIconName(name: string, category: WorkflowCategory): W
   const lower = name.toLowerCase();
 
   if (lower.includes('issue') || lower.includes('bug') || lower.includes('fix')) return 'Bug';
-  if (lower.includes('review') || lower.includes('pr-review')) return 'Eye';
+  if (lower.includes('review')) return 'Eye';
   if (lower.includes('conflict') || lower.includes('merge')) return 'GitMerge';
   if (lower.includes('feature') || lower.includes('idea') || lower.includes('remotion'))
     return 'Rocket';

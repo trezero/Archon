@@ -85,6 +85,21 @@ Note: Will inform user when assist mode is used for tracking.`;
     expect(result.triggers).toEqual([]);
   });
 
+  test('handles CRLF line endings in description', () => {
+    const crlf = 'Use when: Implementing a feature.\r\nDoes: Runs implementation loop.';
+    const result = parseWorkflowDescription(crlf);
+    expect(result.whenToUse).toBe('Implementing a feature.');
+    expect(result.does).toBe('Runs implementation loop.');
+  });
+
+  test('parses unquoted comma-separated triggers', () => {
+    const description = `Use when: Something happens.
+Triggers: push, pull_request, workflow_dispatch
+Does: Runs things.`;
+    const result = parseWorkflowDescription(description);
+    expect(result.triggers).toEqual(['push', 'pull_request', 'workflow_dispatch']);
+  });
+
   test('parses "Input:" followed by "Does:" correctly', () => {
     const description = `Use when: Implementing a feature from an existing plan.
 Input: Path to a plan file ($ARTIFACTS_DIR/plan.md) or GitHub issue containing a plan.
@@ -102,10 +117,15 @@ NOT for: Creating plans (plans should be created separately), bug fixes, code re
 describe('getWorkflowDisplayName', () => {
   test('strips archon- prefix and converts to title case', () => {
     expect(getWorkflowDisplayName('archon-create-issue')).toBe('Create Issue');
+    expect(getWorkflowDisplayName('archon-feature-development')).toBe('Feature Development');
+  });
+
+  test('preserves known acronyms (PR, CI, DAG)', () => {
     expect(getWorkflowDisplayName('archon-comprehensive-pr-review')).toBe(
-      'Comprehensive Pr Review'
+      'Comprehensive PR Review'
     );
-    expect(getWorkflowDisplayName('archon-ralph-dag')).toBe('Ralph Dag');
+    expect(getWorkflowDisplayName('archon-ralph-dag')).toBe('Ralph DAG');
+    expect(getWorkflowDisplayName('archon-interactive-prd')).toBe('Interactive PRD');
   });
 
   test('handles names without archon- prefix', () => {
@@ -136,6 +156,15 @@ describe('getWorkflowCategory', () => {
   test('categorizes CI/CD workflows', () => {
     expect(getWorkflowCategory('archon-validate-pr', 'Validate PR checks')).toBe('CI/CD');
     expect(getWorkflowCategory('archon-test-loop-dag', 'Run test loop')).toBe('CI/CD');
+  });
+
+  test('does not miscategorize workflows with "ci" as substring', () => {
+    expect(getWorkflowCategory('archon-decision-tree', 'Routes decisions')).toBe('Development');
+    expect(getWorkflowCategory('special-analyzer', 'Classifies problem area')).toBe('Development');
+  });
+
+  test('returns Development as default for unknown workflows', () => {
+    expect(getWorkflowCategory('my-custom-workflow', '')).toBe('Development');
   });
 
   test('categorizes development workflows', () => {

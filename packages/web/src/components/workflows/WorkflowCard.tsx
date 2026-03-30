@@ -1,14 +1,12 @@
 import { Link } from 'react-router';
 import {
   Bug,
-  Search,
   GitMerge,
   Rocket,
   RefreshCw,
   TestTube,
   Workflow,
   Eye,
-  FileText,
   Lightbulb,
   Wrench,
   Zap,
@@ -29,14 +27,12 @@ import {
 
 const ICON_MAP: Record<WorkflowIconName, LucideIcon> = {
   Bug,
-  Search,
   GitMerge,
   Rocket,
   RefreshCw,
   TestTube,
   Workflow,
   Eye,
-  FileText,
   Lightbulb,
   Wrench,
   Zap,
@@ -68,6 +64,8 @@ export function WorkflowCard({
     <div
       role="button"
       tabIndex={0}
+      aria-label={`Select workflow: ${displayName}`}
+      aria-pressed={isSelected}
       onClick={(): void => {
         onSelect(workflow.name);
       }}
@@ -195,7 +193,7 @@ export function WorkflowCard({
               onSelect(workflow.name);
             }}
             className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary hover:bg-primary/20 transition-colors"
-            title="Run workflow"
+            title="Configure and run workflow"
           >
             <Play className="size-3" />
             Run

@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
 import { listWorkflows, createConversation, runWorkflow, deleteConversation } from '@/lib/api';
-import type { WorkflowDefinition } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { useProject } from '@/contexts/ProjectContext';
 import { WorkflowCard } from '@/components/workflows/WorkflowCard';
@@ -23,6 +22,13 @@ export function WorkflowList(): React.ReactElement {
   useEffect(() => {
     setLocalProjectId(selectedProjectId);
   }, [selectedProjectId]);
+
+  // Reset selection when filters change so stale run panel state doesn't persist
+  useEffect(() => {
+    setSelectedWorkflow(null);
+    setRunMessage('');
+    setRunError(null);
+  }, [searchQuery, activeCategory]);
 
   const handleRun = async (workflowName: string): Promise<void> => {
     if (!runMessage.trim() || running) return;
@@ -73,7 +79,7 @@ export function WorkflowList(): React.ReactElement {
   // Filter workflows by search query and category
   const filteredWorkflows = useMemo(() => {
     if (!workflows) return [];
-    return workflows.filter((wf: WorkflowDefinition) => {
+    return workflows.filter(wf => {
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
@@ -104,46 +110,50 @@ export function WorkflowList(): React.ReactElement {
     );
   }
 
+  const hasWorkflows = workflows != null && workflows.length > 0;
+
   return (
     <div className="space-y-4">
-      {/* Search + Category Filters */}
-      <div className="space-y-3">
-        {/* Search bar */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-text-tertiary" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e): void => {
-              setSearchQuery(e.target.value);
-            }}
-            placeholder="Search workflows..."
-            className="w-full pl-9 pr-3 py-2 rounded-lg border border-border bg-surface text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
-          />
-        </div>
-
-        {/* Category filter tabs */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {CATEGORIES.map(cat => (
-            <button
-              key={cat}
-              onClick={(): void => {
-                setActiveCategory(cat);
+      {/* Search + Category Filters — only show when workflows exist */}
+      {hasWorkflows && (
+        <div className="space-y-3">
+          {/* Search bar */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-text-tertiary" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e): void => {
+                setSearchQuery(e.target.value);
               }}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                activeCategory === cat
-                  ? 'bg-primary text-white'
-                  : 'bg-surface-elevated text-text-secondary hover:text-text-primary'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
+              placeholder="Search workflows..."
+              className="w-full pl-9 pr-3 py-2 rounded-lg border border-border bg-surface text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+          </div>
+
+          {/* Category filter tabs */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {CATEGORIES.map(cat => (
+              <button
+                key={cat}
+                onClick={(): void => {
+                  setActiveCategory(cat);
+                }}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                  activeCategory === cat
+                    ? 'bg-primary text-white'
+                    : 'bg-surface-elevated text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Workflow grid */}
-      {!workflows || workflows.length === 0 ? (
+      {!hasWorkflows ? (
         <div className="text-sm text-text-secondary">
           No workflows found. Add workflow definitions to{' '}
           <code className="text-xs bg-surface-inset px-1 py-0.5 rounded">.archon/workflows/</code>
@@ -154,7 +164,7 @@ export function WorkflowList(): React.ReactElement {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {filteredWorkflows.map((wf: WorkflowDefinition) => (
+          {filteredWorkflows.map(wf => (
             <div key={wf.name}>
               <WorkflowCard
                 workflow={wf}
