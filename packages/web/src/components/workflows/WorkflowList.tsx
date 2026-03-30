@@ -202,9 +202,9 @@ export function WorkflowList(): React.ReactElement {
         )}
       </div>
 
-      {/* Sticky run bar — anchored at bottom of viewport, slides up when workflow selected */}
+      {/* Sticky run bar — anchored at bottom, slides up with glow when workflow selected */}
       {selectedWorkflow && (
-        <div className="shrink-0 border-t border-border bg-surface-elevated px-4 py-3">
+        <div className="shrink-0 border-t border-accent/40 bg-surface-elevated px-4 py-3 animate-slide-up shadow-[0_-4px_20px_rgba(59,130,246,0.15)]">
           <div className="flex items-center gap-3">
             {/* Workflow name + dismiss */}
             <div className="flex items-center gap-2 shrink-0">
