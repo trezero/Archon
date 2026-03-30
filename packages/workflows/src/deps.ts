@@ -47,6 +47,12 @@ export interface WorkflowAssistantOptions {
   modelReasoningEffort?: ModelReasoningEffort;
   webSearchMode?: WebSearchMode;
   additionalDirectories?: string[];
+  /**
+   * Controls which CLAUDE.md files the SDK loads.
+   * Mirrors Claude Agent SDK Options.settingSources.
+   * Claude only — ignored for Codex.
+   */
+  settingSources?: ('project' | 'user')[];
   tools?: string[];
   disallowedTools?: string[];
   outputFormat?: { type: 'json_schema'; schema: Record<string, unknown> };
@@ -179,7 +185,11 @@ export interface WorkflowConfig {
     loadDefaultCommands?: boolean;
   };
   assistants: {
-    claude: { model?: string };
+    claude: {
+      model?: string;
+      /** Controls which CLAUDE.md files are loaded by the SDK. Claude only. */
+      settingSources?: ('project' | 'user')[];
+    };
     codex: {
       model?: string;
       modelReasoningEffort?: ModelReasoningEffort;

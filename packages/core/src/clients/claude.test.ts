@@ -490,6 +490,38 @@ describe('ClaudeClient', () => {
       expect(err.message).toContain('startup diagnostic');
     }, 30_000);
 
+    test('passes settingSources from request options', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', session_id: 'test-session' };
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of client.sendQuery('test', '/tmp', undefined, {
+        settingSources: ['project', 'user'],
+      })) {
+        // consume
+      }
+
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
+      expect(callArgs.options.settingSources).toEqual(['project', 'user']);
+    });
+
+    test('defaults settingSources to project when not provided', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', session_id: 'test-session' };
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of client.sendQuery('test', '/tmp')) {
+        // consume
+      }
+
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
+      expect(callArgs.options.settingSources).toEqual(['project']);
+    });
+
     test('ignores empty text blocks', async () => {
       mockQuery.mockImplementation(async function* () {
         yield {

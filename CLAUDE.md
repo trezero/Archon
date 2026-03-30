@@ -447,6 +447,9 @@ The system supports configuring default models and options per assistant in `.ar
 assistants:
   claude:
     model: sonnet  # or 'opus', 'haiku', 'claude-*', 'inherit'
+    settingSources:  # Controls which CLAUDE.md files Claude SDK loads
+      - project      # Default: only project-level CLAUDE.md
+      - user         # Optional: also load ~/.claude/CLAUDE.md
   codex:
     model: gpt-5.3-codex
     modelReasoningEffort: medium  # 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'

@@ -273,6 +273,9 @@ function mergeGlobalConfig(defaults: MergedConfig, global: GlobalConfig): Merged
   if (global.assistants?.claude?.model) {
     result.assistants.claude.model = global.assistants.claude.model;
   }
+  if (global.assistants?.claude?.settingSources) {
+    result.assistants.claude.settingSources = global.assistants.claude.settingSources;
+  }
   if (global.assistants?.codex) {
     result.assistants.codex = {
       ...result.assistants.codex,
@@ -321,6 +324,9 @@ function mergeRepoConfig(merged: MergedConfig, repo: RepoConfig): MergedConfig {
 
   if (repo.assistants?.claude?.model) {
     result.assistants.claude.model = repo.assistants.claude.model;
+  }
+  if (repo.assistants?.claude?.settingSources) {
+    result.assistants.claude.settingSources = repo.assistants.claude.settingSources;
   }
   if (repo.assistants?.codex) {
     result.assistants.codex = {
@@ -412,7 +418,9 @@ export function toSafeConfig(config: MergedConfig): SafeConfig {
     botName: config.botName,
     assistant: config.assistant,
     assistants: {
-      claude: { model: config.assistants.claude.model },
+      claude: {
+        model: config.assistants.claude.model,
+      },
       codex: {
         model: config.assistants.codex.model,
         modelReasoningEffort: config.assistants.codex.modelReasoningEffort,

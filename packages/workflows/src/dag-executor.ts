@@ -438,6 +438,10 @@ async function resolveNodeProviderAndModel(
   } else {
     const claudeOptions: WorkflowAssistantOptions = {};
     if (model) claudeOptions.model = model;
+    // Propagate settingSources from config (controls which CLAUDE.md files the SDK loads)
+    if (config.assistants.claude.settingSources) {
+      claudeOptions.settingSources = config.assistants.claude.settingSources;
+    }
     if (provider === 'claude' && node.output_format) {
       claudeOptions.outputFormat = {
         type: 'json_schema',
@@ -1297,8 +1301,13 @@ function buildLoopNodeOptions(
         }
       : undefined;
 
-  if (!model && !codexOptions) return undefined;
-  return { ...(model ? { model } : {}), ...codexOptions };
+  const claudeOptions =
+    provider === 'claude' && config.assistants.claude.settingSources
+      ? { settingSources: config.assistants.claude.settingSources }
+      : undefined;
+
+  if (!model && !codexOptions && !claudeOptions) return undefined;
+  return { ...(model ? { model } : {}), ...codexOptions, ...claudeOptions };
 }
 
 /**

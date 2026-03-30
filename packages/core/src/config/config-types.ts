@@ -19,6 +19,14 @@ export interface AssistantDefaults {
   additionalDirectories?: string[];
 }
 
+export interface ClaudeAssistantDefaults {
+  model?: string;
+  /** Claude Code settingSources — controls which CLAUDE.md files are loaded.
+   *  @default ['project']
+   *  @see https://github.com/anthropics/claude-agent-sdk */
+  settingSources?: ('project' | 'user')[];
+}
+
 export interface GlobalConfig {
   /**
    * Bot display name (shown in messages)
@@ -36,7 +44,7 @@ export interface GlobalConfig {
    * Assistant-specific defaults (model, reasoning effort, etc.)
    */
   assistants?: {
-    claude?: Pick<AssistantDefaults, 'model'>;
+    claude?: ClaudeAssistantDefaults;
     codex?: AssistantDefaults;
   };
 
@@ -94,7 +102,7 @@ export interface RepoConfig {
    * Assistant-specific defaults for this repository
    */
   assistants?: {
-    claude?: Pick<AssistantDefaults, 'model'>;
+    claude?: ClaudeAssistantDefaults;
     codex?: AssistantDefaults;
   };
 
@@ -169,7 +177,7 @@ export interface MergedConfig {
   botName: string;
   assistant: 'claude' | 'codex';
   assistants: {
-    claude: Pick<AssistantDefaults, 'model'>;
+    claude: ClaudeAssistantDefaults;
     codex: AssistantDefaults;
   };
   streaming: {
@@ -214,7 +222,7 @@ export interface SafeConfig {
   botName: string;
   assistant: 'claude' | 'codex';
   assistants: {
-    claude: Pick<AssistantDefaults, 'model'>;
+    claude: Pick<ClaudeAssistantDefaults, 'model'>;
     codex: Pick<AssistantDefaults, 'model' | 'modelReasoningEffort' | 'webSearchMode'>;
   };
   streaming: {

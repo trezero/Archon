@@ -670,7 +670,8 @@ describe('orchestrator-agent handleMessage', () => {
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(String),
-        'claude-session-xyz'
+        'claude-session-xyz',
+        expect.any(Object)
       );
     });
 
@@ -683,6 +684,75 @@ describe('orchestrator-agent handleMessage', () => {
       await handleMessage(platform, 'chat-456', 'hello');
 
       expect(mockUpdateSession).toHaveBeenCalledWith('session-abc', 'new-ai-session-456');
+    });
+  });
+
+  // ─── settingSources forwarding ────────────────────────────────────────
+
+  describe('settingSources forwarding', () => {
+    test('passes settingSources from config to AI client for claude', async () => {
+      mockLoadConfig.mockResolvedValueOnce({
+        botName: 'Archon',
+        assistant: 'claude',
+        assistants: {
+          claude: { settingSources: ['project', 'user'] },
+          codex: {},
+        },
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+      });
+
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'hello');
+
+      expect(mockClient.sendQuery).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        expect.anything(),
+        expect.objectContaining({ settingSources: ['project', 'user'] })
+      );
+    });
+
+    test('does not pass settingSources for non-claude assistant', async () => {
+      const codexConversation: Conversation = {
+        ...mockConversation,
+        ai_assistant_type: 'codex',
+      };
+      mockGetOrCreateConversation.mockResolvedValueOnce(codexConversation);
+      mockLoadConfig.mockResolvedValueOnce({
+        botName: 'Archon',
+        assistant: 'codex',
+        assistants: {
+          claude: { settingSources: ['project', 'user'] },
+          codex: {},
+        },
+        streaming: { telegram: 'stream', discord: 'batch', slack: 'batch', github: 'batch' },
+        paths: { workspaces: '/tmp', worktrees: '/tmp' },
+        concurrency: { maxConversations: 10 },
+        commands: { autoLoad: true },
+        defaults: { copyDefaults: true, loadDefaultCommands: true, loadDefaultWorkflows: true },
+      });
+
+      const codexClient = {
+        sendQuery: mock(async function* () {
+          yield { type: 'result', sessionId: 'codex-session' };
+        }),
+      };
+      mockGetAssistantClient.mockReturnValueOnce(codexClient);
+
+      await handleMessage(platform, 'chat-456', 'hello');
+
+      // settingSources should NOT be in requestOptions since assistant type is codex
+      const callArgs = codexClient.sendQuery.mock.calls[0];
+      const requestOptions = callArgs?.[3] as Record<string, unknown> | undefined;
+      expect(requestOptions).toBeDefined();
+      expect(requestOptions).not.toHaveProperty('settingSources');
     });
   });
 

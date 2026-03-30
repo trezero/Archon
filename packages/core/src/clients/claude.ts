@@ -299,7 +299,7 @@ export class ClaudeClient implements IAssistantClient {
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         systemPrompt: { type: 'preset', preset: 'claude_code' },
-        settingSources: ['project'],
+        settingSources: requestOptions?.settingSources ?? ['project'],
         // Merge user-provided hooks with our PostToolUse capture hook
         hooks: {
           ...(requestOptions?.hooks ?? {}),

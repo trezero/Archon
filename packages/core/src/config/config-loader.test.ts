@@ -362,6 +362,63 @@ worktree:
     });
   });
 
+  describe('settingSources config', () => {
+    test('merges settingSources from global config', async () => {
+      mockReadConfigFile.mockResolvedValue(`
+assistants:
+  claude:
+    settingSources:
+      - project
+      - user
+`);
+      const config = await loadConfig();
+      expect(config.assistants.claude.settingSources).toEqual(['project', 'user']);
+    });
+
+    test('defaults to undefined settingSources when not configured', async () => {
+      mockReadConfigFile.mockResolvedValue('');
+      const config = await loadConfig();
+      expect(config.assistants.claude.settingSources).toBeUndefined();
+    });
+
+    test('repo settingSources overrides global', async () => {
+      const pathMatches = (path: string, pattern: string): boolean => {
+        const normalizedPath = path.replace(/\\/g, '/');
+        return normalizedPath.includes(pattern);
+      };
+
+      let globalConfigRead = false;
+      mockReadConfigFile.mockImplementation(async (path: string) => {
+        if (pathMatches(path, '/repo/.archon/config.yaml')) {
+          return `assistants:\n  claude:\n    settingSources:\n      - project\n`;
+        }
+        if (pathMatches(path, '.archon/config.yaml') && !globalConfigRead) {
+          globalConfigRead = true;
+          return `assistants:\n  claude:\n    settingSources:\n      - project\n      - user\n`;
+        }
+        const error = new Error('ENOENT') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      });
+
+      const config = await loadConfig('/test/repo');
+      expect(config.assistants.claude.settingSources).toEqual(['project']);
+    });
+
+    test('toSafeConfig does not expose settingSources (server-internal field)', async () => {
+      mockReadConfigFile.mockResolvedValue(`
+assistants:
+  claude:
+    settingSources:
+      - project
+      - user
+`);
+      const config = await loadConfig();
+      const safe = toSafeConfig(config);
+      expect(safe.assistants.claude).not.toHaveProperty('settingSources');
+    });
+  });
+
   describe('toSafeConfig', () => {
     test('strips paths from MergedConfig', async () => {
       mockReadConfigFile.mockResolvedValue('');
