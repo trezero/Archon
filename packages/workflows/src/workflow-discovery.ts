@@ -194,6 +194,9 @@ export async function discoverWorkflows(
         if (workflowsByFile.has(filename)) {
           getLog().debug({ filename }, 'global_workflow_overrides_default');
         }
+        // NOTE: Global workflows (~/.archon/.archon/workflows/) are classified as 'project'
+        // rather than a separate 'global' source. This is an intentional scope decision for
+        // the initial source badge feature — a 'global' source variant can be added later.
         workflowsByFile.set(filename, { workflow, source: 'project' });
       }
       allErrors.push(...globalResult.errors);

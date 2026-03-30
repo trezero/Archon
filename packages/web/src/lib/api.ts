@@ -182,6 +182,8 @@ export interface WorkflowEventResponse {
   created_at: string;
 }
 
+// TODO(#881): Replace with `components['schemas']['WorkflowListEntry']` from api.generated.d.ts
+// after running `bun generate:types` with updated workflow list schema
 export interface WorkflowListEntry {
   workflow: WorkflowDefinition;
   source: WorkflowSource;
@@ -307,6 +309,8 @@ export async function getWorkflowRunByWorker(
   }
 }
 
+// TODO(#881): Replace with `components['schemas']['WorkflowSource']` from api.generated.d.ts
+// after running `bun generate:types` with updated workflow list schema
 export type WorkflowSource = 'project' | 'bundled';
 
 export interface GetWorkflowResponse {
