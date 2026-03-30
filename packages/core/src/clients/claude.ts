@@ -185,7 +185,15 @@ const AUTH_PATTERNS = [
 ];
 
 /** Patterns indicating the subprocess crashed (transient, worth retrying) */
-const SUBPROCESS_CRASH_PATTERNS = ['exited with code', 'killed', 'signal'];
+const SUBPROCESS_CRASH_PATTERNS = [
+  'exited with code',
+  'killed',
+  'signal',
+  // "Operation aborted" can appear when the SDK's PostToolUse hook tries to write()
+  // back to a subprocess pipe that was closed by an abort signal. This is a race
+  // condition in SDK cleanup — safe to classify as a crash and retry.
+  'operation aborted',
+];
 
 function classifySubprocessError(
   errorMessage: string,

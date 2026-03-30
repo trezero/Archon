@@ -526,6 +526,20 @@ async function main(): Promise<void> {
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
 
+  // Guard against SDK cleanup races: when a DAG node is aborted mid-execution,
+  // the Claude Agent SDK's PostToolUse hook may be in-flight. After the hook
+  // returns { continue: true }, handleControlRequest() tries to write() back to
+  // the subprocess pipe — but the pipe is already closed (abort fired). The
+  // write() throws "Operation aborted", which becomes an unhandled rejection
+  // because it occurs AFTER the for-await generator loop exits (and thus outside
+  // the try/catch in claude.ts). These are SDK cleanup races, not fatal app errors.
+  process.on('unhandledRejection', (reason: unknown) => {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    // Log at error level so it's visible but don't exit — these are transient
+    // SDK cleanup artifacts, not application bugs.
+    getLog().error({ reason: message }, 'unhandled_rejection');
+  });
+
   // Show active platforms
   const activePlatforms = ['Web'];
   if (telegram) activePlatforms.push('Telegram');
