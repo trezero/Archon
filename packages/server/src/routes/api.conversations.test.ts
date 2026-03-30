@@ -77,14 +77,7 @@ mock.module('@archon/core/db/conversations', () => ({
 }));
 
 mock.module('@archon/core/db/isolation-environments', () => ({}));
-mock.module('@archon/core/db/workflows', () => ({
-  getRunningWorkflows: mock(async () => []),
-  getActiveWorkflowRun: mock(async () => null),
-  cancelWorkflowRun: mock(async () => {}),
-  getWorkflowRun: mock(async () => null),
-  listWorkflowRuns: mock(async () => []),
-  listDashboardRuns: mock(async () => ({ runs: [], total: 0, counts: {} })),
-}));
+mock.module('@archon/core/db/workflows', () => ({}));
 mock.module('@archon/core/db/workflow-events', () => ({}));
 const mockAddMessage = mock(async (_convId: string, _role: string, _content: string) => ({
   id: 'msg-uuid-1',
@@ -326,7 +319,7 @@ describe('POST /api/conversations with message (atomic create+send)', () => {
   } as unknown as WebAdapter;
 
   test('creates conversation and dispatches message atomically', async () => {
-    const app = new OpenAPIHono();
+    const app = new OpenAPIHono({ defaultHook: validationErrorHook });
     registerApiRoutes(app, mockWebAdapter, mockLockManager);
 
     const response = await app.request('/api/conversations', {
@@ -348,7 +341,7 @@ describe('POST /api/conversations with message (atomic create+send)', () => {
   test('persists user message during atomic creation', async () => {
     const callsBefore = mockAddMessage.mock.calls.length;
 
-    const app = new OpenAPIHono();
+    const app = new OpenAPIHono({ defaultHook: validationErrorHook });
     registerApiRoutes(app, mockWebAdapter, mockLockManager);
 
     await app.request('/api/conversations', {
@@ -362,7 +355,7 @@ describe('POST /api/conversations with message (atomic create+send)', () => {
   test('generates title for non-command messages', async () => {
     const callsBefore = mockGenerateAndSetTitle.mock.calls.length;
 
-    const app = new OpenAPIHono();
+    const app = new OpenAPIHono({ defaultHook: validationErrorHook });
     registerApiRoutes(app, mockWebAdapter, mockLockManager);
 
     await app.request('/api/conversations', {
@@ -376,7 +369,7 @@ describe('POST /api/conversations with message (atomic create+send)', () => {
   test('skips title generation for slash commands', async () => {
     const callsBefore = mockGenerateAndSetTitle.mock.calls.length;
 
-    const app = new OpenAPIHono();
+    const app = new OpenAPIHono({ defaultHook: validationErrorHook });
     registerApiRoutes(app, mockWebAdapter, mockLockManager);
 
     await app.request('/api/conversations', {
@@ -392,7 +385,7 @@ describe('POST /api/conversations with message (atomic create+send)', () => {
       setConversationDbId: mock((_platformId: string, _dbId: string) => {}),
     } as unknown as WebAdapter;
 
-    const app = new OpenAPIHono();
+    const app = new OpenAPIHono({ defaultHook: validationErrorHook });
     registerApiRoutes(app, simpleWebAdapter, {} as ConversationLockManager);
 
     const response = await app.request('/api/conversations', {
