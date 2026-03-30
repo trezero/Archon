@@ -15,14 +15,16 @@ mock.module('@archon/paths', () => ({
   getDefaultWorkflowsPath: mock(() => '/app/.archon/workflows/defaults'),
 }));
 
-// Mock for reading config files (replaces fs/promises mock)
+// Mock for reading/writing config files (replaces fs/promises mock)
 const mockReadConfigFile = mock(() => Promise.resolve(''));
+const mockWriteConfigFile = mock(() => Promise.resolve());
 
-// Import real config-loader to spread its exports, then override readConfigFile
+// Import real config-loader to spread its exports, then override readConfigFile/writeConfigFile
 import * as realConfigLoader from './config-loader';
 mock.module('./config-loader', () => ({
   ...realConfigLoader,
   readConfigFile: mockReadConfigFile,
+  writeConfigFile: mockWriteConfigFile,
 }));
 
 import {
@@ -31,6 +33,7 @@ import {
   loadConfig,
   clearConfigCache,
   toSafeConfig,
+  updateGlobalConfig,
 } from './config-loader';
 
 describe('config-loader', () => {
@@ -50,6 +53,7 @@ describe('config-loader', () => {
   beforeEach(() => {
     clearConfigCache();
     mockReadConfigFile.mockReset();
+    mockWriteConfigFile.mockReset();
 
     // Save original env vars
     envVars.forEach(key => {
@@ -70,6 +74,7 @@ describe('config-loader', () => {
 
     // No need to restore - we're mocking at config-loader level, not fs/promises
     mockReadConfigFile.mockClear();
+    mockWriteConfigFile.mockClear();
   });
 
   describe('loadGlobalConfig', () => {
@@ -359,6 +364,127 @@ worktree:
 
       expect(config.paths.workspaces).toBe(join(homedir(), '.archon', 'workspaces'));
       expect(config.paths.worktrees).toBe(join(homedir(), '.archon', 'worktrees'));
+    });
+  });
+
+  describe('settingSources config', () => {
+    test('merges settingSources from global config', async () => {
+      mockReadConfigFile.mockResolvedValue(`
+assistants:
+  claude:
+    settingSources:
+      - project
+      - user
+`);
+      const config = await loadConfig();
+      expect(config.assistants.claude.settingSources).toEqual(['project', 'user']);
+    });
+
+    test('defaults to undefined settingSources when not configured', async () => {
+      mockReadConfigFile.mockResolvedValue('');
+      const config = await loadConfig();
+      expect(config.assistants.claude.settingSources).toBeUndefined();
+    });
+
+    test('repo settingSources overrides global', async () => {
+      const pathMatches = (path: string, pattern: string): boolean => {
+        const normalizedPath = path.replace(/\\/g, '/');
+        return normalizedPath.includes(pattern);
+      };
+
+      let globalConfigRead = false;
+      mockReadConfigFile.mockImplementation(async (path: string) => {
+        if (pathMatches(path, '/repo/.archon/config.yaml')) {
+          return `assistants:\n  claude:\n    settingSources:\n      - project\n`;
+        }
+        if (pathMatches(path, '.archon/config.yaml') && !globalConfigRead) {
+          globalConfigRead = true;
+          return `assistants:\n  claude:\n    settingSources:\n      - project\n      - user\n`;
+        }
+        const error = new Error('ENOENT') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      });
+
+      const config = await loadConfig('/test/repo');
+      expect(config.assistants.claude.settingSources).toEqual(['project']);
+    });
+
+    test('toSafeConfig does not expose settingSources (server-internal field)', async () => {
+      mockReadConfigFile.mockResolvedValue(`
+assistants:
+  claude:
+    settingSources:
+      - project
+      - user
+`);
+      const config = await loadConfig();
+      const safe = toSafeConfig(config);
+      expect(safe.assistants.claude).not.toHaveProperty('settingSources');
+    });
+  });
+
+  describe('updateGlobalConfig', () => {
+    test('merges assistant config into existing file', async () => {
+      mockReadConfigFile.mockResolvedValue(`
+defaultAssistant: claude
+assistants:
+  claude:
+    model: sonnet
+`);
+
+      await updateGlobalConfig({
+        assistants: { claude: { model: 'opus' } },
+      });
+
+      expect(mockWriteConfigFile).toHaveBeenCalledTimes(1);
+      const writtenContent = mockWriteConfigFile.mock.calls[0]?.[1] as string;
+      expect(writtenContent).toContain('opus');
+    });
+
+    test('preserves existing non-updated fields', async () => {
+      mockReadConfigFile.mockResolvedValue(`
+defaultAssistant: codex
+botName: MyBot
+assistants:
+  codex:
+    model: gpt-5.3-codex
+    modelReasoningEffort: medium
+`);
+
+      await updateGlobalConfig({
+        defaultAssistant: 'claude',
+      });
+
+      expect(mockWriteConfigFile).toHaveBeenCalledTimes(1);
+      const writtenContent = mockWriteConfigFile.mock.calls[0]?.[1] as string;
+      expect(writtenContent).toContain('claude');
+      expect(writtenContent).toContain('MyBot');
+    });
+
+    test('creates config when file does not exist', async () => {
+      const error = new Error('ENOENT') as NodeJS.ErrnoException;
+      error.code = 'ENOENT';
+      mockReadConfigFile.mockRejectedValue(error);
+
+      await updateGlobalConfig({
+        defaultAssistant: 'codex',
+      });
+
+      expect(mockWriteConfigFile).toHaveBeenCalled();
+      const writtenContent = mockWriteConfigFile.mock.calls[0]?.[1] as string;
+      expect(writtenContent).toContain('codex');
+    });
+
+    test('throws on permission errors', async () => {
+      mockReadConfigFile.mockResolvedValue('');
+      const permError = new Error('Permission denied') as NodeJS.ErrnoException;
+      permError.code = 'EACCES';
+      mockWriteConfigFile.mockRejectedValue(permError);
+
+      await expect(updateGlobalConfig({ defaultAssistant: 'codex' })).rejects.toThrow(
+        'Permission denied'
+      );
     });
   });
 

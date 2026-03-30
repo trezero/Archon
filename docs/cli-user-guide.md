@@ -89,7 +89,7 @@ archon workflow run plan --cwd /path/to/repo --branch feature-x "Add caching"
 | `--branch <name>` | Explicit branch name for the worktree |
 | `--from <branch>`, `--from-branch <branch>` | Override base branch (start-point for worktree) |
 | `--no-worktree` | Opt out of isolation — run directly in live checkout |
-| `--resume` | Resume from last failed run |
+| `--resume` | Resume from last failed run at the working path (skips completed nodes) |
 
 **Default (no flags):**
 - Creates worktree with auto-generated branch (`archon/task-<workflow>-<timestamp>`)
@@ -102,6 +102,40 @@ archon workflow run plan --cwd /path/to/repo --branch feature-x "Add caching"
 **With `--no-worktree`:**
 - Runs in target directory directly (no isolation)
 - Mutually exclusive with `--branch` and `--from`
+
+### `workflow status`
+
+Show all running workflow runs across all worktrees.
+
+```bash
+archon workflow status
+archon workflow status --json
+```
+
+### `workflow resume`
+
+Resume a failed workflow run. Re-executes the workflow, automatically skipping nodes that completed in the prior run.
+
+```bash
+archon workflow resume <run-id>
+```
+
+### `workflow abandon`
+
+Discard a workflow run (marks it as failed). Use this to unblock a worktree when you don't want to resume.
+
+```bash
+archon workflow abandon <run-id>
+```
+
+### `workflow cleanup`
+
+Delete old terminal workflow run records from the database.
+
+```bash
+archon workflow cleanup        # Default: 7 days
+archon workflow cleanup 30     # Custom threshold
+```
 
 ### `workflow event emit`
 

@@ -209,7 +209,7 @@ completion when tests still fail.
 - `depends_on` — upstream dependencies
 - `when` — conditional execution
 - `trigger_rule` — join semantics
-- `idle_timeout` — per-iteration timeout (default: 5 minutes)
+- `idle_timeout` — per-iteration timeout (default: 30 minutes)
 - `$nodeId.output` — downstream nodes receive the last iteration's output
 
 ### What is NOT supported on loop nodes

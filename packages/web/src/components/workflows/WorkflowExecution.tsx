@@ -14,6 +14,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/componen
 import { useWorkflowStore } from '@/stores/workflow-store';
 import { getWorkflowRun, getWorkflowRunByWorker, getCodebase, getWorkflow } from '@/lib/api';
 import { ensureUtc, formatDurationMs } from '@/lib/format';
+import { selectInitialNode } from '@/lib/select-initial-node';
 import type {
   WorkflowState,
   ArtifactType,
@@ -301,6 +302,14 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       maxIterations: liveWorkflow.maxIterations ?? initialData.maxIterations,
     };
   })();
+
+  // Auto-select the first DAG node when workflow data loads and no node is selected.
+  // Prefer the currently executing node (for running workflows), otherwise pick the first node.
+  useEffect(() => {
+    if (selectedDagNode !== null) return;
+    const nodeId = selectInitialNode(workflow?.dagNodes);
+    if (nodeId) setSelectedDagNode(nodeId);
+  }, [selectedDagNode, workflow?.dagNodes]);
 
   // Force re-render every second while workflow is running (for live timer)
   const [, setTick] = useState(0);

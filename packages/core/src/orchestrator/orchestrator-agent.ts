@@ -8,7 +8,13 @@
  */
 import { existsSync } from 'fs';
 import { createLogger } from '@archon/paths';
-import type { IPlatformAdapter, HandleMessageContext, Conversation, Codebase } from '../types';
+import type {
+  IPlatformAdapter,
+  HandleMessageContext,
+  Conversation,
+  Codebase,
+  AssistantRequestOptions,
+} from '../types';
 import { ConversationNotFoundError } from '../types';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
@@ -29,10 +35,10 @@ import type {
   WorkflowDefinition,
   WorkflowLoadResult,
   WorkflowLoadError,
-  WorkflowWithSource,
 } from '@archon/workflows/schemas/workflow';
 import { createWorkflowDeps } from '../workflows/store-adapter';
 import { loadConfig } from '../config/config-loader';
+import type { MergedConfig } from '../config/config-types';
 import { generateAndSetTitle } from '../services/title-generator';
 import { validateAndResolveIsolation, dispatchBackgroundWorkflow } from './orchestrator';
 import { IsolationBlockedError } from '@archon/isolation';
@@ -314,20 +320,22 @@ async function inheritThreadContext(
 interface DiscoverResult extends WorkflowLoadResult {
   syncResult?: WorkspaceSyncResult;
   syncError?: string;
+  config?: MergedConfig;
 }
 
 /** Discover global + repo-specific workflows, merge by name (repo overrides global) */
 async function discoverAllWorkflows(conversation: Conversation): Promise<DiscoverResult> {
-  let workflowEntries: WorkflowWithSource[] = [];
+  let workflows: WorkflowDefinition[] = [];
   const allErrors: WorkflowLoadError[] = [];
   let syncResult: WorkspaceSyncResult | undefined;
   let syncError: string | undefined;
+  let config: MergedConfig | undefined;
 
   try {
     const result = await discoverWorkflowsWithConfig(getArchonWorkspacesPath(), loadConfig, {
       globalSearchPath: getArchonHome(),
     });
-    workflowEntries = [...result.workflows];
+    workflows = [...result.workflows];
     allErrors.push(...result.errors);
   } catch (error) {
     const err = error as Error;
@@ -365,12 +373,17 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Discove
         }
         const workflowCwd = conversation.cwd ?? codebase.default_cwd;
         await syncArchonToWorktree(workflowCwd);
-        const repoResult = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
-        const entryMap = new Map(workflowEntries.map(ws => [ws.workflow.name, ws]));
+        // Load config once for this codebase path; reuse below to avoid a second disk read
+        const loadedConfig = await loadConfig(workflowCwd);
+        config = loadedConfig;
+        const repoResult = await discoverWorkflowsWithConfig(workflowCwd, () =>
+          Promise.resolve(loadedConfig)
+        );
+        const workflowMap = new Map(workflows.map(w => [w.name, w]));
         for (const rw of repoResult.workflows) {
-          entryMap.set(rw.workflow.name, rw);
+          workflowMap.set(rw.name, rw);
         }
-        workflowEntries = Array.from(entryMap.values());
+        workflows = Array.from(workflowMap.values());
         allErrors.push(...repoResult.errors);
       }
     } catch (error) {
@@ -378,7 +391,7 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Discove
     }
   }
 
-  return { workflows: workflowEntries, errors: allErrors, syncResult, syncError };
+  return { workflows, errors: allErrors, syncResult, syncError, config };
 }
 
 /** Build the full prompt with system prompt, user message, and optional contexts */
@@ -512,12 +525,12 @@ export async function handleMessage(
     // 3. Load codebases, discover workflows, build prompt
     const codebases = await codebaseDb.listCodebases();
     const {
-      workflows: workflowEntries,
+      workflows,
       errors: workflowErrors,
       syncResult,
       syncError,
+      config: discoveredConfig,
     } = await discoverAllWorkflows(conversation);
-    const workflows = workflowEntries.map(ws => ws.workflow);
     if (workflowErrors.length > 0) {
       getLog().warn(
         { errorCount: workflowErrors.length, errors: workflowErrors },
@@ -562,6 +575,15 @@ export async function handleMessage(
     const aiClient = getAssistantClient(conversation.ai_assistant_type);
     getLog().debug({ assistantType: conversation.ai_assistant_type }, 'sending_to_ai');
 
+    // Reuse the config already loaded during workflow discovery (avoids a second disk read).
+    // Fall back to loadConfig only when no codebase is scoped (discoveredConfig is undefined).
+    const config = discoveredConfig ?? (await loadConfig());
+    const requestOptions: AssistantRequestOptions = {
+      ...(conversation.ai_assistant_type === 'claude' && config.assistants.claude.settingSources
+        ? { settingSources: config.assistants.claude.settingSources }
+        : {}),
+    };
+
     const mode = platform.getStreamingMode();
     if (mode === 'stream') {
       await handleStreamMode(
@@ -576,7 +598,8 @@ export async function handleMessage(
         session,
         isolationHints,
         conversation,
-        issueContext
+        issueContext,
+        requestOptions
       );
     } else {
       await handleBatchMode(
@@ -591,7 +614,8 @@ export async function handleMessage(
         session,
         isolationHints,
         conversation,
-        issueContext
+        issueContext,
+        requestOptions
       );
     }
 
@@ -626,7 +650,8 @@ async function handleStreamMode(
   session: { id: string; assistant_session_id: string | null },
   isolationHints: HandleMessageContext['isolationHints'],
   conversation: Conversation,
-  issueContext?: string
+  issueContext?: string,
+  requestOptions?: AssistantRequestOptions
 ): Promise<void> {
   const allMessages: string[] = [];
   let newSessionId: string | undefined;
@@ -635,7 +660,8 @@ async function handleStreamMode(
   for await (const msg of aiClient.sendQuery(
     fullPrompt,
     cwd,
-    session.assistant_session_id ?? undefined
+    session.assistant_session_id ?? undefined,
+    requestOptions
   )) {
     if (msg.type === 'assistant' && msg.content) {
       if (!commandDetected) {
@@ -740,7 +766,8 @@ async function handleBatchMode(
   session: { id: string; assistant_session_id: string | null },
   isolationHints: HandleMessageContext['isolationHints'],
   conversation: Conversation,
-  issueContext?: string
+  issueContext?: string,
+  requestOptions?: AssistantRequestOptions
 ): Promise<void> {
   const allChunks: { type: string; content: string }[] = [];
   const assistantMessages: string[] = [];
@@ -752,7 +779,8 @@ async function handleBatchMode(
   for await (const msg of aiClient.sendQuery(
     fullPrompt,
     cwd,
-    session.assistant_session_id ?? undefined
+    session.assistant_session_id ?? undefined,
+    requestOptions
   )) {
     if (msg.type === 'assistant' && msg.content) {
       if (!commandDetected) {
@@ -1130,12 +1158,9 @@ async function handleWorkflowRunCommand(
       return;
     }
 
-    const resolvedEntry =
-      discovery.workflows.find(ws => ws.workflow.name === workflow.name) ??
-      discovery.workflows.find(
-        ws => ws.workflow.name.toLowerCase() === workflow.name.toLowerCase()
-      );
-    const resolvedWorkflow = resolvedEntry?.workflow;
+    const resolvedWorkflow =
+      discovery.workflows.find(w => w.name === workflow.name) ??
+      discovery.workflows.find(w => w.name.toLowerCase() === workflow.name.toLowerCase());
 
     if (!resolvedWorkflow) {
       const loadError = discovery.errors.find(

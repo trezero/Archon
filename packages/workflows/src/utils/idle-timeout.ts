@@ -12,12 +12,14 @@
  */
 
 /**
- * Default idle timeout: 5 minutes.
+ * Default idle timeout: 30 minutes.
  *
- * Conservative — typical inter-message gaps are < 30 seconds even during
- * long tool calls (the SDK yields tool_use events before tool execution starts).
+ * This is a deadlock detector, not a work limiter. The timer resets on every
+ * message type, so it only fires when the subprocess goes completely silent.
+ * 30 minutes is generous enough to never interrupt legitimate work while still
+ * catching genuine hangs. Per-node `idle_timeout` overrides this default.
  */
-export const STEP_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+export const STEP_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** Sentinel value to distinguish idle timeout from normal generator completion */
 const IDLE_TIMEOUT_SENTINEL = Symbol('IDLE_TIMEOUT');
@@ -27,11 +29,9 @@ const IDLE_TIMEOUT_SENTINEL = Symbol('IDLE_TIMEOUT');
  * `timeoutMs`, the wrapper returns normally — converting a hang into a clean exit.
  *
  * When `shouldResetTimer` is provided and returns `false` for a yielded value, the
- * timer is NOT reset — it keeps counting from the previous reset point. This allows
- * callers to distinguish between "activity that indicates the system is alive" (reset)
- * and "activity that marks the start of a potentially long operation" (don't reset).
- *
- * Example: pass `(msg) => msg.type !== 'tool'` to keep counting through tool execution.
+ * timer is NOT reset — it keeps counting from the previous reset point. Most callers
+ * should omit this parameter (every message resets the timer, which is the correct
+ * default for a deadlock detector).
  *
  * When timeout fires:
  * 1. `onTimeout` callback is invoked (use this to abort the subprocess and log)
@@ -81,26 +81,32 @@ export async function* withIdleTimeout<T>(
         return;
       }
 
-      // result is IteratorResult<T> since it's not the sentinel
-      const iterResult = result;
-      if (iterResult.done) return;
+      if (result.done) return;
 
       // Reset the timer unless the predicate says not to
-      if (!shouldResetTimer || shouldResetTimer(iterResult.value)) {
+      if (!shouldResetTimer || shouldResetTimer(result.value)) {
         timerStartedAt = Date.now();
       }
-      // If shouldResetTimer returns false, timerStartedAt is unchanged — remaining time
-      // continues counting down through this value's processing
 
-      yield iterResult.value;
+      yield result.value;
     }
   } finally {
     if (!timedOut) {
       // Normal exit (generator exhausted or consumer broke out) — safe to clean up
       try {
         await generator.return(undefined as never);
-      } catch {
-        // Generator cleanup errors are non-fatal
+      } catch (e) {
+        // Generator cleanup errors are non-fatal but worth logging for diagnostics
+        // Dynamic import to avoid circular deps — this module has zero @archon/* imports
+        try {
+          const { createLogger } = await import('@archon/paths');
+          createLogger('idle-timeout').warn(
+            { err: e as Error },
+            'idle_timeout.generator_cleanup_failed'
+          );
+        } catch {
+          // If logger is unavailable, swallow — cleanup is best-effort
+        }
       }
     }
     // If timed out, don't call generator.return() — it would hang on the pending .next()

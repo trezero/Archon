@@ -74,7 +74,8 @@ export type LoadCommandResult =
  */
 export type WorkflowExecutionResult =
   | { success: true; workflowRunId: string; summary?: string }
-  | { success: false; workflowRunId?: string; error: string };
+  | { success: false; workflowRunId?: string; error: string }
+  | { success: true; paused: true; workflowRunId: string };
 
 // ---------------------------------------------------------------------------
 // WorkflowLoadError / WorkflowLoadResult — workflow discovery results

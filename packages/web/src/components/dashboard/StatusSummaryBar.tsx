@@ -18,7 +18,7 @@ interface StatusSummaryBarProps {
   health: HealthResponse | undefined;
 }
 
-const STATUS_CHIPS = ['running', 'completed', 'failed', 'cancelled', 'pending'] as const;
+const STATUS_CHIPS = ['running', 'paused', 'completed', 'failed', 'cancelled', 'pending'] as const;
 
 const DATE_RANGE_OPTIONS: { value: DateRange; label: string }[] = [
   { value: 'today', label: 'Today' },

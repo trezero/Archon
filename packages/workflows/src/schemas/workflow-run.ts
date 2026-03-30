@@ -13,9 +13,23 @@ export const workflowRunStatusSchema = z.enum([
   'completed',
   'failed',
   'cancelled',
+  'paused',
 ]);
 
 export type WorkflowRunStatus = z.infer<typeof workflowRunStatusSchema>;
+
+/** Statuses that indicate a run has finished and cannot transition further. */
+export const TERMINAL_WORKFLOW_STATUSES: readonly WorkflowRunStatus[] = [
+  'completed',
+  'failed',
+  'cancelled',
+] as const;
+
+/** Statuses that allow a user to resume execution. */
+export const RESUMABLE_WORKFLOW_STATUSES: readonly WorkflowRunStatus[] = [
+  'failed',
+  'paused',
+] as const;
 
 // ---------------------------------------------------------------------------
 // WorkflowStepStatus
@@ -92,6 +106,12 @@ export const workflowRunSchema = z.object({
 });
 
 export type WorkflowRun = z.infer<typeof workflowRunSchema>;
+
+/** Approval context stored in workflow run metadata when paused for human review. */
+export interface ApprovalContext {
+  nodeId: string;
+  message: string;
+}
 
 // ---------------------------------------------------------------------------
 // ArtifactType

@@ -60,7 +60,8 @@ function createMockStore(): IWorkflowStore {
       })
     ),
     getWorkflowRun: mock(() => Promise.resolve(null)),
-    getActiveWorkflowRun: mock(() => Promise.resolve(null)),
+    getActiveWorkflowRunByPath: mock(() => Promise.resolve(null)),
+    failOrphanedRuns: mock(() => Promise.resolve({ count: 0 })),
     findResumableRun: mock(() => Promise.resolve(null)),
     resumeWorkflowRun: mock(() =>
       Promise.resolve({
@@ -80,7 +81,7 @@ function createMockStore(): IWorkflowStore {
     ),
     updateWorkflowRun: mock(() => Promise.resolve()),
     updateWorkflowActivity: mock(() => Promise.resolve()),
-    getWorkflowRunStatus: mock(() => Promise.resolve(null)),
+    getWorkflowRunStatus: mock(() => Promise.resolve('running' as const)),
     completeWorkflowRun: mock(() => Promise.resolve()),
     failWorkflowRun: mock(() => Promise.resolve()),
     createWorkflowEvent: mock(() => Promise.resolve()),
@@ -3199,5 +3200,122 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
           .calls.length
       ).toBe(1);
     });
+  });
+});
+
+describe('executeDagWorkflow -- break after result (no hang on subprocess exit)', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-break-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'Command prompt $ARGUMENTS');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+  });
+
+  afterEach(async () => {
+    // Restore default sync generator so later tests aren't affected
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'DAG AI response' };
+      yield { type: 'result', sessionId: 'dag-session-id' };
+    });
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('command/prompt node completes immediately after result — does not block on post-result messages', async () => {
+    // Generator yields result then hangs forever (simulates subprocess that won't exit)
+    mockSendQueryDag.mockImplementation(async function* () {
+      yield { type: 'assistant', content: 'response' };
+      yield { type: 'result', sessionId: 'sess-break' };
+      // Subprocess hangs — without break, this blocks until idle timeout
+      await new Promise<void>(() => {});
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    // Should complete promptly (not hang for 30 min)
+    const result = await Promise.race([
+      executeDagWorkflow(
+        mockDeps,
+        platform,
+        'conv-dag',
+        testDir,
+        { name: 'break-test', nodes: [{ id: 'n1', command: 'my-cmd' }] },
+        workflowRun,
+        'claude',
+        undefined,
+        join(testDir, 'artifacts'),
+        join(testDir, 'logs'),
+        'main',
+        minimalConfig
+      ).then(() => 'completed'),
+      new Promise<string>((_, reject) =>
+        setTimeout(() => reject(new Error('Timed out — break after result not working')), 5000)
+      ),
+    ]);
+
+    expect(result).toBe('completed');
+  });
+
+  it('loop node completes immediately after result — does not block on post-result messages', async () => {
+    // Generator yields result then hangs forever
+    mockSendQueryDag.mockImplementation(async function* () {
+      yield { type: 'assistant', content: 'All done. COMPLETE' };
+      yield { type: 'result', sessionId: 'sess-loop-break' };
+      await new Promise<void>(() => {});
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    const result = await Promise.race([
+      executeDagWorkflow(
+        mockDeps,
+        platform,
+        'conv-dag',
+        testDir,
+        {
+          name: 'loop-break-test',
+          nodes: [
+            {
+              id: 'loop1',
+              loop: { until: 'COMPLETE', max_iterations: 3 },
+              prompt: 'Do the thing. Say COMPLETE when done.',
+            },
+          ],
+        },
+        workflowRun,
+        'claude',
+        undefined,
+        join(testDir, 'artifacts'),
+        join(testDir, 'logs'),
+        'main',
+        minimalConfig
+      ).then(() => 'completed'),
+      new Promise<string>((_, reject) =>
+        setTimeout(() => reject(new Error('Timed out — break after result not working')), 5000)
+      ),
+    ]);
+
+    expect(result).toBe('completed');
   });
 });

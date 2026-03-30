@@ -1,11 +1,12 @@
 import { Link } from 'react-router';
-import { Globe, Terminal, Hash, Send, GitBranch } from 'lucide-react';
+import { Globe, Terminal, Hash, Send, GitBranch, Trash2 } from 'lucide-react';
 import type { DashboardRunResponse } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { formatDuration, formatStarted } from '@/lib/format';
 
 interface WorkflowHistoryTableProps {
   runs: DashboardRunResponse[];
+  onDelete?: (runId: string) => void;
 }
 
 const STATUS_DOT_COLORS: Record<string, string> = {
@@ -22,7 +23,10 @@ const PLATFORM_ICONS: Record<string, React.ReactElement> = {
   github: <GitBranch className="h-3 w-3" />,
 };
 
-export function WorkflowHistoryTable({ runs }: WorkflowHistoryTableProps): React.ReactElement {
+export function WorkflowHistoryTable({
+  runs,
+  onDelete,
+}: WorkflowHistoryTableProps): React.ReactElement {
   if (runs.length === 0) {
     return (
       <div className="flex items-center justify-center py-8">
@@ -89,12 +93,31 @@ export function WorkflowHistoryTable({ runs }: WorkflowHistoryTableProps): React
               </td>
               <td className="px-3 py-2 text-text-secondary">{formatStarted(run.started_at)}</td>
               <td className="px-3 py-2">
-                <Link
-                  to={`/workflows/runs/${run.id}`}
-                  className="text-primary hover:text-primary/80 transition-colors"
-                >
-                  View Logs
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Link
+                    to={`/workflows/runs/${run.id}`}
+                    className="text-primary hover:text-primary/80 transition-colors"
+                  >
+                    View Logs
+                  </Link>
+                  {onDelete && (
+                    <button
+                      onClick={(): void => {
+                        if (
+                          window.confirm(
+                            `Delete workflow run "${run.workflow_name}"? This cannot be undone.`
+                          )
+                        ) {
+                          onDelete(run.id);
+                        }
+                      }}
+                      className="text-text-tertiary hover:text-error transition-colors"
+                      title="Delete run"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}

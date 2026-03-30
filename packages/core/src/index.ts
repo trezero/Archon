@@ -98,6 +98,7 @@ export {
   clearConfigCache,
   logConfig,
   toSafeConfig,
+  updateGlobalConfig,
 } from './config/config-loader';
 
 // =============================================================================

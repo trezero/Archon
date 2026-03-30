@@ -4,7 +4,7 @@ Connect Archon to Telegram so you can interact with your AI coding assistant fro
 
 ## Prerequisites
 
-- Archon server running (see [Getting Started](../getting-started-cli.md))
+- Archon server running (see [Getting Started](../getting-started.md))
 - A Telegram account
 
 ## Create Telegram Bot

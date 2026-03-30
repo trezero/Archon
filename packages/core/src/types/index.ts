@@ -268,6 +268,13 @@ export interface AssistantRequestOptions {
    * Claude only — ignored for Codex.
    */
   forkSession?: boolean;
+  /**
+   * Claude Code settingSources — controls which CLAUDE.md files are loaded.
+   * Passed directly to Claude Agent SDK Options.settingSources.
+   * Claude only — ignored for Codex.
+   * @default ['project']
+   */
+  settingSources?: ('project' | 'user')[];
 }
 
 /**

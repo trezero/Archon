@@ -3,67 +3,13 @@ import { useNavigate } from 'react-router';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowDown, Sparkles, ArrowRight, MessageSquare } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { MessageBubble } from './MessageBubble';
 import { ToolCallCard } from './ToolCallCard';
 import { ErrorCard } from './ErrorCard';
+import { WorkflowProgressCard } from './WorkflowProgressCard';
 import { useAutoScroll } from '@/hooks/useAutoScroll';
-import { getWorkflowRunByWorker } from '@/lib/api';
 import type { ChatMessage } from '@/lib/types';
-
-function WorkflowDispatchInline({
-  workflowName,
-  workerConversationId,
-}: {
-  workflowName: string;
-  workerConversationId: string;
-}): React.ReactElement {
-  const navigate = useNavigate();
-
-  const { data: runData, isError: isErrorRunData } = useQuery({
-    queryKey: ['workflowRunByWorker', workerConversationId],
-    queryFn: () => getWorkflowRunByWorker(workerConversationId),
-    refetchInterval: (query): number | false => {
-      const status = query.state.data?.run.status;
-      if (status === 'completed' || status === 'failed' || status === 'cancelled') return false;
-      return 3000;
-    },
-  });
-
-  const status = runData?.run.status;
-
-  const handleClick = (): void => {
-    if (runData?.run.id) {
-      navigate(`/workflows/runs/${runData.run.id}`);
-    } else {
-      navigate(`/chat/${encodeURIComponent(workerConversationId)}`);
-    }
-  };
-
-  const statusIcon = isErrorRunData ? (
-    <span className="text-error text-xs shrink-0">&#x26A0;</span>
-  ) : status === 'completed' ? (
-    <span className="text-success text-xs shrink-0">&#x2713;</span>
-  ) : status === 'failed' ? (
-    <span className="text-error text-xs shrink-0">&#x2717;</span>
-  ) : status === 'cancelled' ? (
-    <span className="text-text-secondary text-xs shrink-0">&#x2715;</span>
-  ) : (
-    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent shrink-0" />
-  );
-
-  return (
-    <button
-      onClick={handleClick}
-      className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs transition-colors hover:bg-surface-elevated hover:border-primary/50 text-left max-w-sm"
-    >
-      {statusIcon}
-      <span className="truncate text-text-primary font-medium">{workflowName}</span>
-      <span className="text-primary font-medium shrink-0">View &rarr;</span>
-    </button>
-  );
-}
 
 // Hoisted to module scope to prevent new references on every render
 const WORKFLOW_RESULT_MARKDOWN_COMPONENTS = {
@@ -246,7 +192,7 @@ function MessageListRaw({
                     ))}
                     {msg.error && <ErrorCard error={msg.error} />}
                     {msg.workflowDispatch && (
-                      <WorkflowDispatchInline
+                      <WorkflowProgressCard
                         workflowName={msg.workflowDispatch.workflowName}
                         workerConversationId={msg.workflowDispatch.workerConversationId}
                       />

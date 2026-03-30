@@ -2,7 +2,7 @@
  * Workflow loader - discovers and parses workflow YAML files
  */
 import type { WorkflowDefinition, WorkflowLoadError, DagNode, WorkflowNodeHooks } from './schemas';
-import { isLoopNode } from './schemas';
+import { isLoopNode, isApprovalNode } from './schemas';
 import { createLogger } from '@archon/paths';
 import { isModelCompatible } from './model-validation';
 import { dagNodeSchema, BASH_NODE_AI_FIELDS } from './schemas/dag-node';
@@ -56,9 +56,10 @@ function parseDagNode(raw: unknown, index: number, errors: string[]): DagNode | 
   const node = result.data;
 
   // Warn about AI-specific fields on bash/loop nodes (runtime behavior, not schema errors)
-  const isNonAiNode = ('bash' in node && typeof node.bash === 'string') || isLoopNode(node);
+  const isNonAiNode =
+    ('bash' in node && typeof node.bash === 'string') || isLoopNode(node) || isApprovalNode(node);
   if (isNonAiNode) {
-    const nodeType = isLoopNode(node) ? 'loop' : 'bash';
+    const nodeType = isApprovalNode(node) ? 'approval' : isLoopNode(node) ? 'loop' : 'bash';
     const presentAiFields = BASH_NODE_AI_FIELDS.filter(
       f => (raw as Record<string, unknown>)[f] !== undefined
     );

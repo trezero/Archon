@@ -9,12 +9,13 @@ import type { WebAdapter } from '../adapters/web';
 import { rm, readFile, writeFile, unlink, mkdir } from 'fs/promises';
 import { normalize, join, sep } from 'path';
 import type { Context } from 'hono';
-import type { ConversationLockManager } from '@archon/core';
+import type { ConversationLockManager, GlobalConfig } from '@archon/core';
 import {
   handleMessage,
   getDatabaseType,
   loadConfig,
   toSafeConfig,
+  updateGlobalConfig,
   cloneRepository,
   registerRepository,
   ConversationNotFoundError,
@@ -33,6 +34,11 @@ import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discover
 import { parseWorkflow } from '@archon/workflows/loader';
 import { isValidCommandName } from '@archon/workflows/command-validation';
 import { BUNDLED_WORKFLOWS, BUNDLED_COMMANDS, isBinaryBuild } from '@archon/workflows/defaults';
+import {
+  RESUMABLE_WORKFLOW_STATUSES,
+  TERMINAL_WORKFLOW_STATUSES,
+} from '@archon/workflows/schemas/workflow-run';
+import type { ApprovalContext } from '@archon/workflows/schemas/workflow-run';
 import { findMarkdownFilesRecursive } from '@archon/core/utils/commands';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -60,10 +66,13 @@ import {
   workflowRunDetailSchema,
   workflowRunByWorkerResponseSchema,
   cancelWorkflowRunResponseSchema,
+  workflowRunActionResponseSchema,
   dashboardRunsResponseSchema,
   runWorkflowBodySchema,
   dashboardRunsQuerySchema,
   workflowRunsQuerySchema,
+  approveWorkflowRunBodySchema,
+  rejectWorkflowRunBodySchema,
 } from './schemas/workflow.schemas';
 import {
   conversationListResponseSchema,
@@ -86,6 +95,12 @@ import {
   addCodebaseBodySchema,
   deleteCodebaseResponseSchema,
 } from './schemas/codebase.schemas';
+import {
+  updateAssistantConfigBodySchema,
+  updateAssistantConfigResponseSchema,
+  configResponseSchema,
+  codebaseEnvironmentsResponseSchema,
+} from './schemas/config.schemas';
 
 type WorkflowSource = 'project' | 'bundled';
 
@@ -516,6 +531,97 @@ const cancelWorkflowRunRoute = createRoute({
   },
 });
 
+const resumeWorkflowRunRoute = createRoute({
+  method: 'post',
+  path: '/api/workflows/runs/{runId}/resume',
+  tags: ['Workflows'],
+  summary: 'Resume a failed workflow run (re-run auto-resumes from completed nodes)',
+  request: { params: z.object({ runId: z.string() }) },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowRunActionResponseSchema } },
+      description: 'Resumed',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const abandonWorkflowRunRoute = createRoute({
+  method: 'post',
+  path: '/api/workflows/runs/{runId}/abandon',
+  tags: ['Workflows'],
+  summary: 'Abandon a workflow run (mark as failed)',
+  request: { params: z.object({ runId: z.string() }) },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowRunActionResponseSchema } },
+      description: 'Abandoned',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const approveWorkflowRunRoute = createRoute({
+  method: 'post',
+  path: '/api/workflows/runs/{runId}/approve',
+  tags: ['Workflows'],
+  summary: 'Approve a paused workflow run',
+  request: {
+    params: z.object({ runId: z.string() }),
+    body: { content: { 'application/json': { schema: approveWorkflowRunBodySchema } } },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowRunActionResponseSchema } },
+      description: 'Approved',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const rejectWorkflowRunRoute = createRoute({
+  method: 'post',
+  path: '/api/workflows/runs/{runId}/reject',
+  tags: ['Workflows'],
+  summary: 'Reject a paused workflow run',
+  request: {
+    params: z.object({ runId: z.string() }),
+    body: { content: { 'application/json': { schema: rejectWorkflowRunBodySchema } } },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowRunActionResponseSchema } },
+      description: 'Rejected',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const deleteWorkflowRunRoute = createRoute({
+  method: 'delete',
+  path: '/api/workflows/runs/{runId}',
+  tags: ['Workflows'],
+  summary: 'Delete a workflow run and its events',
+  request: { params: z.object({ runId: z.string() }) },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowRunActionResponseSchema } },
+      description: 'Deleted',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
 const getWorkflowRunRoute = createRoute({
   method: 'get',
   path: '/api/workflows/runs/{runId}',
@@ -545,13 +651,48 @@ const getConfigRoute = createRoute({
     200: {
       content: {
         'application/json': {
-          schema: z
-            .object({ config: z.record(z.unknown()), database: z.string() })
-            .openapi('ConfigResponse'),
+          schema: configResponseSchema,
         },
       },
       description: 'Configuration',
     },
+    500: jsonError('Server error'),
+  },
+});
+
+const patchAssistantConfigRoute = createRoute({
+  method: 'patch',
+  path: '/api/config/assistants',
+  tags: ['System'],
+  summary: 'Update assistant configuration',
+  request: {
+    body: {
+      content: { 'application/json': { schema: updateAssistantConfigBodySchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: updateAssistantConfigResponseSchema } },
+      description: 'Updated configuration',
+    },
+    400: jsonError('Invalid request body'),
+    500: jsonError('Server error'),
+  },
+});
+
+const getCodebaseEnvironmentsRoute = createRoute({
+  method: 'get',
+  path: '/api/codebases/{id}/environments',
+  tags: ['Codebases'],
+  summary: 'List isolation environments for a codebase',
+  request: { params: codebaseIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: codebaseEnvironmentsResponseSchema } },
+      description: 'List of isolation environments',
+    },
+    404: jsonError('Codebase not found'),
     500: jsonError('Server error'),
   },
 });
@@ -1240,7 +1381,7 @@ export function registerApiRoutes(
       if (!run) {
         return apiError(c, 404, 'Workflow run not found');
       }
-      if (run.status !== 'running' && run.status !== 'pending') {
+      if (run.status !== 'running' && run.status !== 'pending' && run.status !== 'paused') {
         return apiError(c, 400, `Cannot cancel workflow in '${run.status}' status`);
       }
       await workflowDb.cancelWorkflowRun(runId);
@@ -1251,12 +1392,161 @@ export function registerApiRoutes(
     }
   });
 
+  // POST /api/workflows/runs/:runId/resume - Resume a workflow run
+  registerOpenApiRoute(resumeWorkflowRunRoute, async c => {
+    const runId = c.req.param('runId') ?? '';
+    try {
+      const run = await workflowDb.getWorkflowRun(runId);
+      if (!run) {
+        return apiError(c, 404, 'Workflow run not found');
+      }
+      if (!RESUMABLE_WORKFLOW_STATUSES.includes(run.status)) {
+        return apiError(c, 400, `Cannot resume workflow in '${run.status}' status`);
+      }
+      // Run is already failed — the next invocation on the same path auto-resumes
+      const pathInfo = run.working_path ? ` at \`${run.working_path}\`` : '';
+      return c.json({
+        success: true,
+        message: `Workflow run ready to resume: ${run.workflow_name}${pathInfo}. Re-run the workflow to auto-resume from completed nodes.`,
+      });
+    } catch (error) {
+      getLog().error({ err: error, runId }, 'api.workflow_run_resume_failed');
+      return apiError(c, 500, 'Failed to resume workflow run');
+    }
+  });
+
+  // POST /api/workflows/runs/:runId/abandon - Abandon a workflow run
+  registerOpenApiRoute(abandonWorkflowRunRoute, async c => {
+    const runId = c.req.param('runId') ?? '';
+    try {
+      const run = await workflowDb.getWorkflowRun(runId);
+      if (!run) {
+        return apiError(c, 404, 'Workflow run not found');
+      }
+      if (TERMINAL_WORKFLOW_STATUSES.includes(run.status)) {
+        return apiError(c, 400, `Cannot abandon workflow in '${run.status}' status`);
+      }
+      await workflowDb.cancelWorkflowRun(runId);
+      return c.json({ success: true, message: `Abandoned workflow: ${run.workflow_name}` });
+    } catch (error) {
+      getLog().error({ err: error, runId }, 'api.workflow_run_abandon_failed');
+      return apiError(c, 500, 'Failed to abandon workflow run');
+    }
+  });
+
+  // POST /api/workflows/runs/:runId/approve - Approve a paused workflow run
+  registerOpenApiRoute(approveWorkflowRunRoute, async c => {
+    const runId = c.req.param('runId') ?? '';
+    try {
+      const run = await workflowDb.getWorkflowRun(runId);
+      if (!run) {
+        return apiError(c, 404, 'Workflow run not found');
+      }
+      if (run.status !== 'paused') {
+        return apiError(c, 400, `Cannot approve workflow in '${run.status}' status`);
+      }
+      const body = (await c.req.json().catch(() => ({}))) as { comment?: string };
+      const comment = body.comment ?? 'Approved';
+      const approval = run.metadata.approval as ApprovalContext | undefined;
+      if (!approval?.nodeId) {
+        return apiError(c, 400, 'Workflow run is paused but missing approval context');
+      }
+      // Write node_completed event for the approval node (with user's comment as output)
+      await workflowEventDb.createWorkflowEvent({
+        workflow_run_id: runId,
+        event_type: 'node_completed',
+        step_name: approval.nodeId,
+        data: { node_output: comment, approval_decision: 'approved' },
+      });
+      await workflowEventDb.createWorkflowEvent({
+        workflow_run_id: runId,
+        event_type: 'approval_received',
+        step_name: approval.nodeId,
+        data: { decision: 'approved', comment },
+      });
+      // Transition to 'failed' so findResumableRun picks it up on next invocation
+      await workflowDb.updateWorkflowRun(runId, {
+        status: 'failed',
+        metadata: { approval_response: 'approved' },
+      });
+      const pathInfo = run.working_path ? ` at \`${run.working_path}\`` : '';
+      return c.json({
+        success: true,
+        message: `Workflow approved: ${run.workflow_name}${pathInfo}. Re-run the workflow to auto-resume from completed nodes.`,
+      });
+    } catch (error) {
+      getLog().error({ err: error, runId }, 'api.workflow_run_approve_failed');
+      return apiError(c, 500, 'Failed to approve workflow run');
+    }
+  });
+
+  // POST /api/workflows/runs/:runId/reject - Reject a paused workflow run
+  registerOpenApiRoute(rejectWorkflowRunRoute, async c => {
+    const runId = c.req.param('runId') ?? '';
+    try {
+      const run = await workflowDb.getWorkflowRun(runId);
+      if (!run) {
+        return apiError(c, 404, 'Workflow run not found');
+      }
+      if (run.status !== 'paused') {
+        return apiError(c, 400, `Cannot reject workflow in '${run.status}' status`);
+      }
+      const body = (await c.req.json().catch(() => ({}))) as { reason?: string };
+      const reason = body.reason ?? 'Rejected';
+      const approval = run.metadata.approval as ApprovalContext | undefined;
+      await workflowEventDb.createWorkflowEvent({
+        workflow_run_id: runId,
+        event_type: 'approval_received',
+        step_name: approval?.nodeId ?? 'unknown',
+        data: { decision: 'rejected', reason },
+      });
+      await workflowDb.cancelWorkflowRun(runId);
+      return c.json({
+        success: true,
+        message: `Workflow rejected: ${run.workflow_name}`,
+      });
+    } catch (error) {
+      getLog().error({ err: error, runId }, 'api.workflow_run_reject_failed');
+      return apiError(c, 500, 'Failed to reject workflow run');
+    }
+  });
+
+  // DELETE /api/workflows/runs/:runId - Delete a workflow run
+  registerOpenApiRoute(deleteWorkflowRunRoute, async c => {
+    const runId = c.req.param('runId') ?? '';
+    try {
+      const run = await workflowDb.getWorkflowRun(runId);
+      if (!run) {
+        return apiError(c, 404, 'Workflow run not found');
+      }
+      if (!TERMINAL_WORKFLOW_STATUSES.includes(run.status)) {
+        return apiError(
+          c,
+          400,
+          `Cannot delete workflow in '${run.status}' status — cancel it first`
+        );
+      }
+      await workflowDb.deleteWorkflowRun(runId);
+      return c.json({ success: true, message: `Deleted workflow run: ${run.workflow_name}` });
+    } catch (error) {
+      getLog().error({ err: error, runId }, 'api.workflow_run_delete_failed');
+      return apiError(c, 500, 'Failed to delete workflow run');
+    }
+  });
+
   // GET /api/workflows/runs - List workflow runs
   registerOpenApiRoute(listWorkflowRunsRoute, async c => {
     try {
       const conversationId = c.req.query('conversationId') ?? undefined;
       const rawStatus = c.req.query('status');
-      const validStatuses = ['pending', 'running', 'completed', 'failed', 'cancelled'] as const;
+      const validStatuses = [
+        'pending',
+        'running',
+        'completed',
+        'failed',
+        'cancelled',
+        'paused',
+      ] as const;
       type WorkflowRunStatus = (typeof validStatuses)[number];
       const status: WorkflowRunStatus | undefined =
         rawStatus && (validStatuses as readonly string[]).includes(rawStatus)
@@ -1628,6 +1918,52 @@ export function registerApiRoutes(
     } catch (error) {
       getLog().error({ err: error }, 'get_config_failed');
       return apiError(c, 500, 'Failed to get config');
+    }
+  });
+
+  // PATCH /api/config/assistants - Update assistant configuration
+  registerOpenApiRoute(patchAssistantConfigRoute, async c => {
+    try {
+      const body = getValidatedBody(c, updateAssistantConfigBodySchema);
+
+      const updates: Partial<GlobalConfig> = {};
+      if (body.assistant !== undefined) {
+        updates.defaultAssistant = body.assistant;
+      }
+      if (body.claude !== undefined || body.codex !== undefined) {
+        updates.assistants = {
+          ...(body.claude ? { claude: body.claude } : {}),
+          ...(body.codex ? { codex: body.codex } : {}),
+        };
+      }
+
+      await updateGlobalConfig(updates);
+
+      const config = await loadConfig();
+      return c.json({
+        config: toSafeConfig(config),
+        database: getDatabaseType(),
+      });
+    } catch (error) {
+      getLog().error({ err: error }, 'config.assistants_update_failed');
+      return apiError(c, 500, 'Failed to update assistant configuration');
+    }
+  });
+
+  // GET /api/codebases/:id/environments - List isolation environments for a codebase
+  registerOpenApiRoute(getCodebaseEnvironmentsRoute, async c => {
+    try {
+      const { id } = c.req.param();
+      const codebase = await codebaseDb.getCodebase(id);
+      if (!codebase) {
+        return apiError(c, 404, 'Codebase not found');
+      }
+
+      const environments = await isolationEnvDb.listByCodebaseWithAge(id);
+      return c.json({ environments });
+    } catch (error) {
+      getLog().error({ err: error }, 'codebases.environments_list_failed');
+      return apiError(c, 500, 'Failed to list environments');
     }
   });
 

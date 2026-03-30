@@ -17,6 +17,7 @@ description: |
   8. Reports results back to the GitHub issue with follow-up suggestions
 
 provider: claude
+model: opus
 
 nodes:
   # ═══════════════════════════════════════════════════════════════

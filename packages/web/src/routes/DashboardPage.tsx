@@ -5,6 +5,11 @@ import { Workflow } from 'lucide-react';
 import {
   listDashboardRuns,
   cancelWorkflowRun,
+  resumeWorkflowRun,
+  abandonWorkflowRun,
+  deleteWorkflowRun,
+  approveWorkflowRun,
+  rejectWorkflowRun,
   listCodebases,
   getHealth,
   type DashboardCounts,
@@ -179,6 +184,7 @@ export function DashboardPage(): React.ReactElement {
     failed: 0,
     cancelled: 0,
     pending: 0,
+    paused: 0,
   };
 
   // Hydrate Zustand store from REST-polled data for active runs.
@@ -258,18 +264,34 @@ export function DashboardPage(): React.ReactElement {
     [runs]
   );
 
-  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const handleCancel = async (runId: string): Promise<void> => {
+  async function runAction(
+    action: (runId: string) => Promise<unknown>,
+    runId: string,
+    fallbackMessage: string
+  ): Promise<void> {
     try {
-      setCancelError(null);
-      await cancelWorkflowRun(runId);
+      setActionError(null);
+      await action(runId);
       void queryClient.invalidateQueries({ queryKey: ['dashboardRuns'] });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to cancel workflow';
-      setCancelError(message);
+      setActionError(err instanceof Error ? err.message : fallbackMessage);
     }
-  };
+  }
+
+  const handleCancel = (runId: string): Promise<void> =>
+    runAction(cancelWorkflowRun, runId, 'Failed to cancel workflow');
+  const handleResume = (runId: string): Promise<void> =>
+    runAction(resumeWorkflowRun, runId, 'Failed to resume workflow');
+  const handleAbandon = (runId: string): Promise<void> =>
+    runAction(abandonWorkflowRun, runId, 'Failed to abandon workflow');
+  const handleDelete = (runId: string): Promise<void> =>
+    runAction(deleteWorkflowRun, runId, 'Failed to delete workflow run');
+  const handleApprove = (runId: string): Promise<void> =>
+    runAction(approveWorkflowRun, runId, 'Failed to approve workflow');
+  const handleReject = (runId: string): Promise<void> =>
+    runAction(rejectWorkflowRun, runId, 'Failed to reject workflow');
 
   const totalPages = Math.ceil(total / pageSize);
   const hasMore = page + 1 < totalPages;
@@ -302,9 +324,9 @@ export function DashboardPage(): React.ReactElement {
           health={health}
         />
 
-        {cancelError && (
+        {actionError && (
           <div className="rounded-md border border-error/30 bg-error/5 px-4 py-3 text-sm text-error">
-            {cancelError}
+            {actionError}
           </div>
         )}
 
@@ -335,7 +357,16 @@ export function DashboardPage(): React.ReactElement {
                   {singletonRuns.length > 0 && (
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                       {singletonRuns.map(run => (
-                        <WorkflowRunCard key={run.id} run={run} onCancel={handleCancel} />
+                        <WorkflowRunCard
+                          key={run.id}
+                          run={run}
+                          onCancel={handleCancel}
+                          onResume={handleResume}
+                          onAbandon={handleAbandon}
+                          onDelete={handleDelete}
+                          onApprove={handleApprove}
+                          onReject={handleReject}
+                        />
                       ))}
                     </div>
                   )}
@@ -346,6 +377,11 @@ export function DashboardPage(): React.ReactElement {
                       parentPlatformId={group.parentPlatformId}
                       runs={group.runs}
                       onCancel={handleCancel}
+                      onResume={handleResume}
+                      onAbandon={handleAbandon}
+                      onDelete={handleDelete}
+                      onApprove={handleApprove}
+                      onReject={handleReject}
                     />
                   ))}
                 </div>
@@ -356,7 +392,7 @@ export function DashboardPage(): React.ReactElement {
             {historyRuns.length > 0 && (
               <section>
                 <h2 className="mb-3 text-sm font-semibold text-text-secondary">History</h2>
-                <WorkflowHistoryTable runs={historyRuns} />
+                <WorkflowHistoryTable runs={historyRuns} onDelete={handleDelete} />
               </section>
             )}
 

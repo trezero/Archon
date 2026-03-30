@@ -99,6 +99,17 @@ curl -fsSL https://claude.ai/install.sh | bash
 irm https://claude.ai/install.ps1 | iex
 ```
 
+**agent-browser** *(optional)* — [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser)
+
+Only needed for E2E/UI testing workflows (`archon-validate-pr`). Core functionality works without it.
+
+```bash
+npm install -g agent-browser
+agent-browser install
+```
+
+See the [E2E Testing Guide](docs/e2e-testing.md) for platform-specific setup.
+
 </details>
 
 ### Setup (2 min)
@@ -144,8 +155,7 @@ The coding agent handles workflow selection, branch naming, and worktree isolati
 
 ### Alternative setup paths
 
-- **[CLI Getting Started](docs/getting-started-cli.md)** — Manual CLI setup without the wizard
-- **[Web UI Quickstart](QUICKSTART.md)** — Full server setup with Web UI, Telegram, Slack, GitHub, and Discord
+- **[Getting Started](docs/getting-started.md)** — Full setup guide (Web UI or CLI)
 
 ## Web UI
 
@@ -240,7 +250,7 @@ The Web UI and CLI work out of the box. Optionally connect a chat platform for r
 
 | Topic | Description |
 |-------|-------------|
-| [Getting Started](docs/getting-started-cli.md) | CLI-focused setup guide |
+| [Getting Started](docs/getting-started.md) | Setup guide (Web UI or CLI) |
 | [CLI User Guide](docs/cli-user-guide.md) | Full CLI reference |
 | [Authoring Workflows](docs/authoring-workflows.md) | Create custom YAML workflows |
 | [Authoring Commands](docs/authoring-commands.md) | Create reusable AI commands |
@@ -251,6 +261,7 @@ The Web UI and CLI work out of the box. Optionally connect a chat platform for r
 | [Commands Reference](docs/commands-reference.md) | All slash commands |
 | [Architecture](docs/architecture.md) | System design and internals |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
+| [E2E Testing](docs/e2e-testing.md) | agent-browser setup for E2E workflows |
 | [Windows Setup](docs/windows.md) | Windows and WSL2 guide |
 
 ## Contributing

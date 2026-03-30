@@ -46,6 +46,11 @@ import {
   workflowListCommand,
   workflowRunCommand,
   workflowStatusCommand,
+  workflowResumeCommand,
+  workflowAbandonCommand,
+  workflowApproveCommand,
+  workflowRejectCommand,
+  workflowCleanupCommand,
   workflowEventEmitCommand,
   isValidEventType,
 } from './commands/workflow';
@@ -163,6 +168,8 @@ async function main(): Promise<number> {
         'run-id': { type: 'string' },
         type: { type: 'string' },
         data: { type: 'string' },
+        comment: { type: 'string' },
+        reason: { type: 'string' },
       },
       allowPositionals: true,
       strict: false, // Allow unknown flags to pass through
@@ -293,8 +300,61 @@ async function main(): Promise<number> {
           }
 
           case 'status':
-            await workflowStatusCommand();
+            await workflowStatusCommand(jsonFlag);
             break;
+
+          case 'resume': {
+            const resumeRunId = positionals[2];
+            if (!resumeRunId) {
+              console.error('Usage: archon workflow resume <run-id>');
+              return 1;
+            }
+            await workflowResumeCommand(resumeRunId);
+            break;
+          }
+
+          case 'abandon': {
+            const abandonRunId = positionals[2];
+            if (!abandonRunId) {
+              console.error('Usage: archon workflow abandon <run-id>');
+              return 1;
+            }
+            await workflowAbandonCommand(abandonRunId);
+            break;
+          }
+
+          case 'approve': {
+            const approveRunId = positionals[2];
+            if (!approveRunId) {
+              console.error('Usage: archon workflow approve <run-id> [--comment "..."]');
+              return 1;
+            }
+            const approveComment = values.comment as string | undefined;
+            await workflowApproveCommand(approveRunId, approveComment);
+            break;
+          }
+
+          case 'reject': {
+            const rejectRunId = positionals[2];
+            if (!rejectRunId) {
+              console.error('Usage: archon workflow reject <run-id> [--reason "..."]');
+              return 1;
+            }
+            const rejectReason = values.reason as string | undefined;
+            await workflowRejectCommand(rejectRunId, rejectReason);
+            break;
+          }
+
+          case 'cleanup': {
+            const days = positionals[2] ? Number(positionals[2]) : 7;
+            if (Number.isNaN(days) || days < 0) {
+              console.error('Usage: archon workflow cleanup [days]');
+              console.error('  days: delete terminal runs older than N days (default: 7)');
+              return 1;
+            }
+            await workflowCleanupCommand(days);
+            break;
+          }
 
           case 'event': {
             const action = positionals[2];
@@ -349,7 +409,9 @@ async function main(): Promise<number> {
             } else {
               console.error(`Unknown workflow subcommand: ${subcommand}`);
             }
-            console.error('Available: list, run, status, event');
+            console.error(
+              'Available: list, run, status, resume, abandon, approve, reject, cleanup, event'
+            );
             return 1;
         }
         break;

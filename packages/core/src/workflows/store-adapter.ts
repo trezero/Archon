@@ -28,8 +28,9 @@ export function createWorkflowStore(): IWorkflowStore {
   return {
     createWorkflowRun: workflowDb.createWorkflowRun,
     getWorkflowRun: workflowDb.getWorkflowRun,
-    getActiveWorkflowRun: workflowDb.getActiveWorkflowRun,
+    getActiveWorkflowRunByPath: workflowDb.getActiveWorkflowRunByPath,
     findResumableRun: workflowDb.findResumableRun,
+    failOrphanedRuns: workflowDb.failOrphanedRuns,
     resumeWorkflowRun: workflowDb.resumeWorkflowRun,
     updateWorkflowRun: workflowDb.updateWorkflowRun,
     updateWorkflowActivity: workflowDb.updateWorkflowActivity,
@@ -40,6 +41,7 @@ export function createWorkflowStore(): IWorkflowStore {
       workflowDb.getWorkflowRunStatus(id) as Promise<WorkflowRunStatus | null>,
     completeWorkflowRun: workflowDb.completeWorkflowRun,
     failWorkflowRun: workflowDb.failWorkflowRun,
+    pauseWorkflowRun: workflowDb.pauseWorkflowRun,
     createWorkflowEvent: async (data): Promise<void> => {
       try {
         await workflowEventDb.createWorkflowEvent(data);

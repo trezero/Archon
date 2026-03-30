@@ -330,14 +330,16 @@ This means a single transient crash may trigger up to **3 SDK retries** before a
 
 ## DAG Resume on Failure
 
-When a `nodes:` (DAG) workflow fails, the next invocation automatically resumes from where it left off — no `--resume` flag required.
+When a `nodes:` (DAG) workflow fails (including due to a server restart), the next invocation automatically resumes from where it left off — no `--resume` flag required.
 
 **How it works:**
 
-1. On each invocation, Archon checks for a prior failed run of the same workflow in the same conversation.
+1. On each invocation, Archon checks for a prior failed run of the same workflow at the same working path.
 2. If found, it loads the `node_completed` events from that run to determine which nodes finished successfully.
 3. Completed nodes are skipped; only failed and not-yet-run nodes are executed.
-4. You receive a platform message like: `▶️ Resuming DAG workflow — skipping 3 already-completed node(s).`
+4. You receive a platform message like: `▶️ Resuming workflow — skipping 3 already-completed node(s).`
+
+**Server restart**: If a server restart leaves runs in `running` status, they are automatically marked as `failed` on the next startup (with `metadata.failure_reason = 'server_restart'`). The next invocation of the same workflow at the same path auto-resumes from completed nodes.
 
 **Known limitation**: AI session context from prior nodes is not restored. If a downstream node relies on in-context knowledge from a prior run's session (rather than artifacts), it may need to re-read those artifacts explicitly.
 
@@ -761,30 +763,41 @@ If the workflow fails at `batch-2`, the next invocation skips `plan` and `batch-
 
 ### Pattern: Human-in-the-Loop
 
-Split into two workflows — one proposes, the other executes after human review:
+Use an `approval` node to pause for human review before continuing:
 
 ```yaml
 name: careful-refactor
-description: Refactor with human approval at each stage
+description: Refactor with human approval gate
 
 nodes:
   - id: propose
-    command: propose-refactor    # Creates proposal artifact
-```
+    command: propose-refactor
 
-Then a separate workflow to continue after human approval:
-```yaml
-name: execute-refactor
+  - id: review-gate
+    approval:
+      message: "Review the proposed refactor before proceeding. Check the artifacts directory."
+    depends_on: [propose]
 
-nodes:
   - id: execute
     command: execute-approved-refactor
+    depends_on: [review-gate]
 
   - id: pr
     command: create-pr
     depends_on: [execute]
     context: fresh
 ```
+
+When the workflow reaches `review-gate`, it pauses and notifies you. Approve or reject via:
+
+- **CLI**: `bun run cli workflow approve <run-id>` or `bun run cli workflow reject <run-id>`
+- **Chat**: `/workflow approve <run-id>` or `/workflow reject <run-id>`
+- **Web UI**: Click the Approve/Reject buttons on the dashboard card
+- **API**: `POST /api/workflows/runs/<run-id>/approve` or `/reject`
+
+After approval via CLI, the workflow auto-resumes from the next node. Via API or chat, the run is marked resumable and resumes on the next workflow invocation. The user's approval comment is available as `$review-gate.output` in downstream nodes.
+
+Rejecting cancels the workflow.
 
 ---
 

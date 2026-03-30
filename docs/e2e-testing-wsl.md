@@ -2,6 +2,8 @@
 
 `agent-browser` (Vercel) has a [known Windows bug](https://github.com/vercel-labs/agent-browser/issues/56) where the daemon fails to start due to Unix domain socket incompatibility. The workaround is to run agent-browser inside WSL while the dev servers run on Windows.
 
+> **General setup:** For non-WSL platforms (macOS, Linux, Docker), see the [E2E Testing Guide](e2e-testing.md) instead.
+
 ## Prerequisites
 
 - WSL2 with Ubuntu installed (`wsl --list --verbose`)

@@ -48,6 +48,9 @@ defaultAssistant: claude # or 'codex'
 assistants:
   claude:
     model: sonnet
+    settingSources:   # Which CLAUDE.md files the SDK loads (default: ['project'])
+      - project       # Project-level CLAUDE.md (always recommended)
+      - user          # Also load ~/.claude/CLAUDE.md (global preferences)
   codex:
     model: gpt-5.3-codex
     modelReasoningEffort: medium
@@ -84,6 +87,8 @@ assistant: claude
 assistants:
   claude:
     model: sonnet
+    settingSources:  # Override global settingSources for this repo
+      - project
   codex:
     model: gpt-5.3-codex
     webSearchMode: live
@@ -106,6 +111,28 @@ defaults:
   loadDefaultWorkflows: true  # Load app's bundled default workflows at runtime
   # copyDefaults was removed in v0.x — use loadDefaultCommands/loadDefaultWorkflows instead
 ```
+
+### Claude settingSources
+
+Controls which `CLAUDE.md` files the Claude Agent SDK loads during sessions:
+
+| Value | Description |
+|-------|-------------|
+| `project` | Load the project's `CLAUDE.md` (default, always included) |
+| `user` | Also load `~/.claude/CLAUDE.md` (user's global preferences) |
+
+**Default**: `['project']` — only project-level instructions are loaded.
+
+Set in global or repo config:
+```yaml
+assistants:
+  claude:
+    settingSources:
+      - project
+      - user
+```
+
+This is useful when you maintain coding style or identity preferences in `~/.claude/CLAUDE.md` and want Archon sessions to respect them.
 
 **Default behavior:** The `.archon/` directory is always copied to worktrees automatically (contains artifacts, plans, workflows). Use `copyFiles` only for additional files like `.env` or `.vscode`.
 

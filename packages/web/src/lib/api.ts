@@ -228,6 +228,7 @@ export interface DashboardCounts {
   failed: number;
   cancelled: number;
   pending: number;
+  paused: number;
 }
 
 /** Paginated dashboard runs response. */
@@ -263,6 +264,52 @@ export async function cancelWorkflowRun(
 ): Promise<{ success: boolean; message: string }> {
   return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}/cancel`, {
     method: 'POST',
+  });
+}
+
+export async function resumeWorkflowRun(
+  runId: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}/resume`, {
+    method: 'POST',
+  });
+}
+
+export async function abandonWorkflowRun(
+  runId: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}/abandon`, {
+    method: 'POST',
+  });
+}
+
+export async function deleteWorkflowRun(
+  runId: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function approveWorkflowRun(
+  runId: string,
+  comment?: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ comment }),
+  });
+}
+
+export async function rejectWorkflowRun(
+  runId: string,
+  reason?: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
   });
 }
 
@@ -361,8 +408,31 @@ export async function listCommands(cwd?: string): Promise<CommandEntry[]> {
   return result.commands;
 }
 
-export async function getConfig(): Promise<{ config: Record<string, unknown>; database: string }> {
+export type SafeConfigResponse = components['schemas']['SafeConfig'];
+
+export async function getConfig(): Promise<{ config: SafeConfigResponse; database: string }> {
   return fetchJSON('/api/config');
+}
+
+export type UpdateAssistantConfigBody = components['schemas']['UpdateAssistantConfigBody'];
+
+export async function updateAssistantConfig(
+  body: UpdateAssistantConfigBody
+): Promise<{ config: SafeConfigResponse; database: string }> {
+  return fetchJSON('/api/config/assistants', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export type IsolationEnvironment = components['schemas']['IsolationEnvironment'];
+
+export async function getCodebaseEnvironments(codebaseId: string): Promise<IsolationEnvironment[]> {
+  const result = await fetchJSON<{ environments: IsolationEnvironment[] }>(
+    `/api/codebases/${encodeURIComponent(codebaseId)}/environments`
+  );
+  return result.environments;
 }
 
 // System

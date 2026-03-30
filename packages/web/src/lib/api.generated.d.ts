@@ -1272,6 +1272,120 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/config/assistants': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Update assistant configuration */
+    patch: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': components['schemas']['UpdateAssistantConfigBody'];
+        };
+      };
+      responses: {
+        /** @description Updated configuration */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['ConfigResponse'];
+          };
+        };
+        /** @description Invalid request body */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Server error */
+        500: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    trace?: never;
+  };
+  '/api/codebases/{id}/environments': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List isolation environments for a codebase */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description List of isolation environments */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['CodebaseEnvironmentsResponse'];
+          };
+        };
+        /** @description Codebase not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Server error */
+        500: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/health': {
     parameters: {
       query?: never;
@@ -1608,7 +1722,7 @@ export interface components {
       message: string;
     };
     /** @enum {string} */
-    WorkflowRunStatus: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+    WorkflowRunStatus: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused';
     WorkflowRun: {
       id: string;
       workflow_name: string;
@@ -1709,11 +1823,71 @@ export interface components {
     CommandListResponse: {
       commands: components['schemas']['CommandEntry'][];
     };
-    ConfigResponse: {
-      config: {
-        [key: string]: unknown;
+    SafeConfig: {
+      botName: string;
+      /** @enum {string} */
+      assistant: 'claude' | 'codex';
+      assistants: {
+        claude: {
+          model?: string;
+        };
+        codex: {
+          model?: string;
+          /** @enum {string} */
+          modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+          /** @enum {string} */
+          webSearchMode?: 'disabled' | 'cached' | 'live';
+        };
       };
+      streaming: {
+        /** @enum {string} */
+        telegram: 'stream' | 'batch';
+        /** @enum {string} */
+        discord: 'stream' | 'batch';
+        /** @enum {string} */
+        slack: 'stream' | 'batch';
+        /** @enum {string} */
+        github: 'stream' | 'batch';
+      };
+      concurrency: {
+        maxConversations: number;
+      };
+      defaults: {
+        copyDefaults: boolean;
+        loadDefaultCommands: boolean;
+        loadDefaultWorkflows: boolean;
+      };
+    };
+    ConfigResponse: {
+      config: components['schemas']['SafeConfig'];
       database: string;
+    };
+    UpdateAssistantConfigBody: {
+      /** @enum {string} */
+      assistant?: 'claude' | 'codex';
+      claude?: {
+        model: string;
+      };
+      codex?: {
+        model: string;
+        /** @enum {string} */
+        modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+        /** @enum {string} */
+        webSearchMode?: 'disabled' | 'cached' | 'live';
+      };
+    };
+    IsolationEnvironment: {
+      id: string;
+      codebase_id: string;
+      branch_name: string;
+      working_path: string;
+      status: string;
+      created_at: string;
+      updated_at: string;
+      days_since_activity: number;
+    };
+    CodebaseEnvironmentsResponse: {
+      environments: components['schemas']['IsolationEnvironment'][];
     };
     HealthResponse: {
       status: string;

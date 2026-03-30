@@ -5,6 +5,27 @@ description: Automates browser interactions for web testing, form filling, scree
 
 # Browser Automation with agent-browser
 
+## Installation
+
+`agent-browser` is an external tool by [Vercel Labs](https://github.com/vercel-labs/agent-browser). It is **not** bundled with Archon and must be installed separately.
+
+> **Optional dependency** — Only needed for E2E/UI testing workflows (`archon-validate-pr`, `validate-ui` skill, `replicate-issue` skill). Core Archon functionality works without it.
+
+```bash
+# Install globally
+npm install -g agent-browser
+
+# Download browser engine (Chrome for Testing)
+agent-browser install
+```
+
+**Platform notes:**
+- **Docker**: Already included in the Archon Docker image — no action needed
+- **Windows**: Has a [known bug](https://github.com/vercel-labs/agent-browser/issues/56) with Unix domain sockets. Use WSL as a workaround — see [E2E Testing on WSL](../../docs/e2e-testing-wsl.md)
+- **macOS/Linux**: Works natively after install
+
+For full setup details, see [E2E Testing Guide](../../docs/e2e-testing.md).
+
 ## Quick start
 
 ```bash
