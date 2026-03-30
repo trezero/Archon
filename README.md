@@ -99,6 +99,17 @@ curl -fsSL https://claude.ai/install.sh | bash
 irm https://claude.ai/install.ps1 | iex
 ```
 
+**agent-browser** *(optional)* — [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser)
+
+Only needed for E2E/UI testing workflows (`archon-validate-pr`). Core functionality works without it.
+
+```bash
+npm install -g agent-browser
+agent-browser install
+```
+
+See the [E2E Testing Guide](docs/e2e-testing.md) for platform-specific setup.
+
 </details>
 
 ### Setup (2 min)
@@ -251,6 +262,7 @@ The Web UI and CLI work out of the box. Optionally connect a chat platform for r
 | [Commands Reference](docs/commands-reference.md) | All slash commands |
 | [Architecture](docs/architecture.md) | System design and internals |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
+| [E2E Testing](docs/e2e-testing.md) | agent-browser setup for E2E workflows |
 | [Windows Setup](docs/windows.md) | Windows and WSL2 guide |
 
 ## Contributing

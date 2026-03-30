@@ -166,6 +166,29 @@ PORT=4000 bun run dev
 
 When running in a git worktree, Archon automatically allocates a unique port (3190-4089 range) so you don't need to worry about conflicts with the main instance.
 
+## E2E Testing / agent-browser
+
+**`agent-browser: command not found`:**
+
+`agent-browser` is an optional external dependency — see the [E2E Testing Guide](e2e-testing.md) for installation.
+
+```bash
+npm install -g agent-browser
+agent-browser install
+```
+
+**agent-browser daemon fails to start (Windows):**
+
+agent-browser has a [known Windows bug](https://github.com/vercel-labs/agent-browser/issues/56). Use WSL as a workaround — see [E2E Testing on WSL](e2e-testing-wsl.md).
+
+**agent-browser daemon fails to start (macOS/Linux):**
+
+Kill stale daemons and retry:
+```bash
+pkill -f daemon.js
+agent-browser open http://localhost:3090
+```
+
 ## Docker
 
 These issues are specific to running Archon inside Docker containers.
