@@ -9,12 +9,13 @@ import type { WebAdapter } from '../adapters/web';
 import { rm, readFile, writeFile, unlink, mkdir } from 'fs/promises';
 import { normalize, join, sep } from 'path';
 import type { Context } from 'hono';
-import type { ConversationLockManager } from '@archon/core';
+import type { ConversationLockManager, GlobalConfig } from '@archon/core';
 import {
   handleMessage,
   getDatabaseType,
   loadConfig,
   toSafeConfig,
+  updateGlobalConfig,
   cloneRepository,
   registerRepository,
   ConversationNotFoundError,
@@ -94,6 +95,12 @@ import {
   addCodebaseBodySchema,
   deleteCodebaseResponseSchema,
 } from './schemas/codebase.schemas';
+import {
+  updateAssistantConfigBodySchema,
+  updateAssistantConfigResponseSchema,
+  configResponseSchema,
+  codebaseEnvironmentsResponseSchema,
+} from './schemas/config.schemas';
 
 type WorkflowSource = 'project' | 'bundled';
 
@@ -644,13 +651,48 @@ const getConfigRoute = createRoute({
     200: {
       content: {
         'application/json': {
-          schema: z
-            .object({ config: z.record(z.unknown()), database: z.string() })
-            .openapi('ConfigResponse'),
+          schema: configResponseSchema,
         },
       },
       description: 'Configuration',
     },
+    500: jsonError('Server error'),
+  },
+});
+
+const patchAssistantConfigRoute = createRoute({
+  method: 'patch',
+  path: '/api/config/assistants',
+  tags: ['System'],
+  summary: 'Update assistant configuration',
+  request: {
+    body: {
+      content: { 'application/json': { schema: updateAssistantConfigBodySchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: updateAssistantConfigResponseSchema } },
+      description: 'Updated configuration',
+    },
+    400: jsonError('Invalid request body'),
+    500: jsonError('Server error'),
+  },
+});
+
+const getCodebaseEnvironmentsRoute = createRoute({
+  method: 'get',
+  path: '/api/codebases/{id}/environments',
+  tags: ['Codebases'],
+  summary: 'List isolation environments for a codebase',
+  request: { params: codebaseIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: codebaseEnvironmentsResponseSchema } },
+      description: 'List of isolation environments',
+    },
+    404: jsonError('Codebase not found'),
     500: jsonError('Server error'),
   },
 });
@@ -1873,6 +1915,52 @@ export function registerApiRoutes(
     } catch (error) {
       getLog().error({ err: error }, 'get_config_failed');
       return apiError(c, 500, 'Failed to get config');
+    }
+  });
+
+  // PATCH /api/config/assistants - Update assistant configuration
+  registerOpenApiRoute(patchAssistantConfigRoute, async c => {
+    try {
+      const body = getValidatedBody(c, updateAssistantConfigBodySchema);
+
+      const updates: Partial<GlobalConfig> = {};
+      if (body.assistant !== undefined) {
+        updates.defaultAssistant = body.assistant;
+      }
+      if (body.claude !== undefined || body.codex !== undefined) {
+        updates.assistants = {
+          ...(body.claude ? { claude: body.claude } : {}),
+          ...(body.codex ? { codex: body.codex } : {}),
+        };
+      }
+
+      await updateGlobalConfig(updates);
+
+      const config = await loadConfig();
+      return c.json({
+        config: toSafeConfig(config),
+        database: getDatabaseType(),
+      });
+    } catch (error) {
+      getLog().error({ err: error }, 'config.assistants_update_failed');
+      return apiError(c, 500, 'Failed to update assistant configuration');
+    }
+  });
+
+  // GET /api/codebases/:id/environments - List isolation environments for a codebase
+  registerOpenApiRoute(getCodebaseEnvironmentsRoute, async c => {
+    try {
+      const { id } = c.req.param();
+      const codebase = await codebaseDb.getCodebase(id);
+      if (!codebase) {
+        return apiError(c, 404, 'Codebase not found');
+      }
+
+      const environments = await isolationEnvDb.listByCodebaseWithAge(id);
+      return c.json({ environments });
+    } catch (error) {
+      getLog().error({ err: error }, 'codebases.environments_list_failed');
+      return apiError(c, 500, 'Failed to list environments');
     }
   });
 

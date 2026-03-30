@@ -9,17 +9,25 @@
  */
 
 import { readFile as fsReadFile, writeFile, mkdir } from 'fs/promises';
-
-// Wrapper function for reading files - allows mocking without polluting fs/promises globally
-export async function readConfigFile(path: string): Promise<string> {
-  return fsReadFile(path, 'utf-8');
-}
 import { join, dirname } from 'path';
 import {
   getArchonConfigPath,
   getArchonWorkspacesPath,
   getArchonWorktreesPath,
 } from '@archon/paths';
+
+// Wrapper functions for file I/O - allows mocking without polluting fs/promises globally
+export async function readConfigFile(path: string): Promise<string> {
+  return fsReadFile(path, 'utf-8');
+}
+
+export async function writeConfigFile(
+  path: string,
+  content: string,
+  options?: { flag?: string }
+): Promise<void> {
+  await writeFile(path, content, { encoding: 'utf-8', ...options });
+}
 import type { GlobalConfig, RepoConfig, MergedConfig, SafeConfig } from './config-types';
 import { createLogger } from '@archon/paths';
 
@@ -97,7 +105,7 @@ function logConfigError(configPath: string, error: unknown): void {
 async function createDefaultConfig(configPath: string): Promise<void> {
   try {
     await mkdir(dirname(configPath), { recursive: true });
-    await writeFile(configPath, DEFAULT_CONFIG_CONTENT, { flag: 'wx' }); // wx = fail if exists
+    await writeConfigFile(configPath, DEFAULT_CONFIG_CONTENT, { flag: 'wx' }); // wx = fail if exists
     getLog().info({ configPath }, 'default_config_created');
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
@@ -407,6 +415,61 @@ export function logConfig(config: MergedConfig): void {
     },
     'config_loaded'
   );
+}
+
+/**
+ * Update global config (~/.archon/config.yaml) with partial updates.
+ * Reads current config, deep-merges updates, and writes back to YAML.
+ * Invalidates the cached config so next loadConfig() picks up changes.
+ */
+export async function updateGlobalConfig(updates: Partial<GlobalConfig>): Promise<void> {
+  const configPath = getArchonConfigPath();
+
+  try {
+    // Force reload to get fresh state
+    const current = await loadGlobalConfig(true);
+
+    // Deep-merge: only overwrite defined keys
+    const merged: GlobalConfig = { ...current };
+
+    if (updates.botName !== undefined) merged.botName = updates.botName;
+    if (updates.defaultAssistant !== undefined) merged.defaultAssistant = updates.defaultAssistant;
+
+    if (updates.assistants) {
+      merged.assistants = {
+        claude: { ...current.assistants?.claude, ...updates.assistants.claude },
+        codex: { ...current.assistants?.codex, ...updates.assistants.codex },
+      };
+    }
+
+    if (updates.streaming) {
+      merged.streaming = { ...current.streaming, ...updates.streaming };
+    }
+
+    if (updates.concurrency) {
+      merged.concurrency = { ...current.concurrency, ...updates.concurrency };
+    }
+
+    // Serialize to YAML and write
+    const yaml = Bun.YAML.stringify(merged);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeConfigFile(configPath, yaml);
+
+    // Invalidate cache so next loadConfig() re-reads
+    cachedGlobalConfig = null;
+
+    getLog().info({ configPath }, 'config.update_completed');
+  } catch (error) {
+    const err = error as { code?: string; message?: string };
+
+    if (err.code === 'EACCES' || err.code === 'EPERM') {
+      getLog().error({ configPath, err: error, code: err.code }, 'config.update_permission_denied');
+    } else {
+      getLog().error({ configPath, err: error }, 'config.update_failed');
+    }
+
+    throw error;
+  }
 }
 
 /**

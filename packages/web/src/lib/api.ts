@@ -406,8 +406,31 @@ export async function listCommands(cwd?: string): Promise<CommandEntry[]> {
   return result.commands;
 }
 
-export async function getConfig(): Promise<{ config: Record<string, unknown>; database: string }> {
+export type SafeConfigResponse = components['schemas']['SafeConfig'];
+
+export async function getConfig(): Promise<{ config: SafeConfigResponse; database: string }> {
   return fetchJSON('/api/config');
+}
+
+export type UpdateAssistantConfigBody = components['schemas']['UpdateAssistantConfigBody'];
+
+export async function updateAssistantConfig(
+  body: UpdateAssistantConfigBody
+): Promise<{ config: SafeConfigResponse; database: string }> {
+  return fetchJSON('/api/config/assistants', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export type IsolationEnvironment = components['schemas']['IsolationEnvironment'];
+
+export async function getCodebaseEnvironments(codebaseId: string): Promise<IsolationEnvironment[]> {
+  const result = await fetchJSON<{ environments: IsolationEnvironment[] }>(
+    `/api/codebases/${encodeURIComponent(codebaseId)}/environments`
+  );
+  return result.environments;
 }
 
 // System
