@@ -221,12 +221,22 @@ export async function discoverWorkflows(
     await access(workflowPath);
     const repoResult = await loadWorkflowsFromDir(workflowPath);
 
-    // Repo workflows override app defaults by exact filename match
+    // Repo workflows override app defaults by exact filename match.
+    // Preserve 'bundled' source for workflows loaded from the defaults/ subdirectory
+    // that were already registered as bundled in step 1.
     for (const [filename, workflow] of repoResult.workflows) {
-      if (workflowsByFile.has(filename)) {
-        getLog().debug({ filename }, 'repo_workflow_overrides_default');
+      const existing = workflowsByFile.get(filename);
+      if (existing?.source === 'bundled') {
+        // This file was already loaded as a bundled default — the repo's defaults/
+        // subdirectory is re-discovering it. Keep the bundled source label.
+        getLog().debug({ filename }, 'repo_default_preserves_bundled_source');
+        workflowsByFile.set(filename, { workflow, source: 'bundled' });
+      } else {
+        if (existing) {
+          getLog().debug({ filename }, 'repo_workflow_overrides_default');
+        }
+        workflowsByFile.set(filename, { workflow, source: 'project' });
       }
-      workflowsByFile.set(filename, { workflow, source: 'project' });
     }
 
     // Surface repo workflow errors to users (these are actionable)
