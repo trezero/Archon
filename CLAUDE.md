@@ -198,6 +198,19 @@ bun run cli workflow run implement --branch feature-auth "Add auth"
 # Opt out of isolation (run in live checkout)
 bun run cli workflow run quick-fix --no-worktree "Fix typo"
 
+# Show running workflows
+bun run cli workflow status
+
+# Resume a failed workflow (re-runs, skipping completed nodes)
+bun run cli workflow resume <run-id>
+
+# Discard a non-terminal run
+bun run cli workflow abandon <run-id>
+
+# Delete old workflow run records (default: 7 days)
+bun run cli workflow cleanup
+bun run cli workflow cleanup 30  # Custom days
+
 # Emit a workflow event (used inside workflow loop prompts)
 bun run cli workflow event emit --run-id <uuid> --type <event-type> [--data <json>]
 
@@ -642,7 +655,7 @@ async function createSession(conversationId: string, codebaseId: string) {
    - Provider inherited from `.archon/config.yaml` unless explicitly set; per-node `provider` and `model` overrides supported
    - Model and options can be set per workflow or inherited from config defaults
    - Model validation ensures provider/model compatibility at load time
-   - Commands: `/workflow list`, `/workflow reload`, `/workflow status`, `/workflow cancel`
+   - Commands: `/workflow list`, `/workflow reload`, `/workflow status`, `/workflow cancel`, `/workflow resume <id>` (re-runs failed workflow, skipping completed nodes), `/workflow abandon <id>`, `/workflow cleanup [days]` (CLI only — deletes old run records)
    - Resilient loading: One broken YAML doesn't abort discovery; errors shown in `/workflow list`
    - Router uses case-insensitive matching and provides helpful errors for unknown workflows
    - Router fallback: if no `/invoke-workflow` is produced, falls back to `archon-assist` (with "Routing unclear" notice); raw AI response returned only when `archon-assist` is unavailable
@@ -707,6 +720,11 @@ Pattern: Use `classifyIsolationError()` (from `@archon/isolation`) to map git er
 - `GET /api/workflows/:name` - Fetch a single workflow by name; optional `?cwd=` query param; returns `{ workflow, filename, source: 'project' | 'bundled' }`
 - `PUT /api/workflows/:name` - Save (create or update) a workflow YAML; body: `{ definition: object }`; validates before writing; requires `?cwd=` or registered codebase
 - `DELETE /api/workflows/:name` - Delete a user-defined workflow; bundled defaults cannot be deleted
+
+**Workflow Run Lifecycle:**
+- `POST /api/workflows/runs/{runId}/resume` - Mark a failed run as ready for auto-resume on next invocation
+- `POST /api/workflows/runs/{runId}/abandon` - Abandon a non-terminal run (marks as cancelled)
+- `DELETE /api/workflows/runs/{runId}` - Delete a terminal workflow run and its events
 
 **Command Listing:**
 - `GET /api/commands` - List available command names (bundled + project-defined); optional `?cwd=`; returns `{ commands: [{ name, source: 'bundled' | 'project' }] }`

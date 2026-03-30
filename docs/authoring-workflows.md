@@ -330,14 +330,16 @@ This means a single transient crash may trigger up to **3 SDK retries** before a
 
 ## DAG Resume on Failure
 
-When a `nodes:` (DAG) workflow fails, the next invocation automatically resumes from where it left off — no `--resume` flag required.
+When a `nodes:` (DAG) workflow fails (including due to a server restart), the next invocation automatically resumes from where it left off — no `--resume` flag required.
 
 **How it works:**
 
-1. On each invocation, Archon checks for a prior failed run of the same workflow in the same conversation.
+1. On each invocation, Archon checks for a prior failed run of the same workflow at the same working path.
 2. If found, it loads the `node_completed` events from that run to determine which nodes finished successfully.
 3. Completed nodes are skipped; only failed and not-yet-run nodes are executed.
-4. You receive a platform message like: `▶️ Resuming DAG workflow — skipping 3 already-completed node(s).`
+4. You receive a platform message like: `▶️ Resuming workflow — skipping 3 already-completed node(s).`
+
+**Server restart**: If a server restart leaves runs in `running` status, they are automatically marked as `failed` on the next startup (with `metadata.failure_reason = 'server_restart'`). The next invocation of the same workflow at the same path auto-resumes from completed nodes.
 
 **Known limitation**: AI session context from prior nodes is not restored. If a downstream node relies on in-context knowledge from a prior run's session (rather than artifacts), it may need to re-read those artifacts explicitly.
 

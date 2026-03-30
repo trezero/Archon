@@ -264,6 +264,30 @@ export async function cancelWorkflowRun(
   });
 }
 
+export async function resumeWorkflowRun(
+  runId: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}/resume`, {
+    method: 'POST',
+  });
+}
+
+export async function abandonWorkflowRun(
+  runId: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}/abandon`, {
+    method: 'POST',
+  });
+}
+
+export async function deleteWorkflowRun(
+  runId: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function listWorkflowRuns(options?: {
   conversationId?: string;
   status?: WorkflowRunStatus;

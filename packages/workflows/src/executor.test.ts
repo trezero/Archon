@@ -64,7 +64,8 @@ import type { WorkflowDefinition, WorkflowRun } from './schemas';
 
 function makeStore(overrides: Partial<IWorkflowStore> = {}): IWorkflowStore {
   return {
-    getActiveWorkflowRun: mock(async () => null),
+    getActiveWorkflowRunByPath: mock(async () => null),
+    failOrphanedRuns: mock(async () => ({ count: 0 })),
     createWorkflowRun: mock(async () => makeRun()),
     updateWorkflowRun: mock(async () => {}),
     failWorkflowRun: mock(async () => {}),
@@ -142,7 +143,7 @@ describe('executeWorkflow', () => {
 
   describe('concurrent-run guard', () => {
     it('allows workflow when no active workflow exists', async () => {
-      const store = makeStore({ getActiveWorkflowRun: mock(async () => null) });
+      const store = makeStore({ getActiveWorkflowRunByPath: mock(async () => null) });
       const deps = makeDeps(store);
       const result = await executeWorkflow(
         deps,
@@ -158,7 +159,7 @@ describe('executeWorkflow', () => {
 
     it('blocks workflow when active workflow check fails', async () => {
       const store = makeStore({
-        getActiveWorkflowRun: mock(async () => {
+        getActiveWorkflowRunByPath: mock(async () => {
           throw new Error('DB connection lost');
         }),
       });
@@ -182,7 +183,7 @@ describe('executeWorkflow', () => {
         started_at: new Date().toISOString(), // Recent — not stale
       });
       const store = makeStore({
-        getActiveWorkflowRun: mock(async () => activeRun),
+        getActiveWorkflowRunByPath: mock(async () => activeRun),
       });
       const deps = makeDeps(store);
       const result = await executeWorkflow(
@@ -344,11 +345,11 @@ describe('executeWorkflow', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Pre-created run (skip concurrent check)
+  // Pre-created run (uses existing row but still runs guards)
   // -------------------------------------------------------------------------
 
   describe('pre-created run', () => {
-    it('skips concurrent-run check when preCreatedRun is provided', async () => {
+    it('uses pre-created run row but still runs concurrent-run check', async () => {
       const preRun = makeRun({ id: 'pre-run-1' });
       const store = makeStore();
       const deps = makeDeps(store);
@@ -366,7 +367,10 @@ describe('executeWorkflow', () => {
         undefined,
         preRun
       );
-      expect(store.getActiveWorkflowRun).not.toHaveBeenCalled();
+      // Guards still run (no bypass)
+      expect(store.getActiveWorkflowRunByPath).toHaveBeenCalled();
+      // But uses the pre-created run instead of creating a new one
+      expect(store.createWorkflowRun).not.toHaveBeenCalled();
       expect(result.workflowRunId).toBe('pre-run-1');
     });
   });

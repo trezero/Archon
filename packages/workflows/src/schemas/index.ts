@@ -72,6 +72,8 @@ export {
   nodeOutputSchema,
   workflowRunSchema,
   artifactTypeSchema,
+  TERMINAL_WORKFLOW_STATUSES,
+  RESUMABLE_WORKFLOW_STATUSES,
 } from './workflow-run';
 export type {
   WorkflowRunStatus,

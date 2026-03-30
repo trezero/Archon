@@ -39,12 +39,9 @@ export interface IWorkflowStore {
     parent_conversation_id?: string;
   }): Promise<WorkflowRun>;
   getWorkflowRun(id: string): Promise<WorkflowRun | null>;
-  getActiveWorkflowRun(conversationId: string): Promise<WorkflowRun | null>;
-  findResumableRun(
-    workflowName: string,
-    workingPath: string,
-    conversationId: string
-  ): Promise<WorkflowRun | null>;
+  getActiveWorkflowRunByPath(workingPath: string): Promise<WorkflowRun | null>;
+  findResumableRun(workflowName: string, workingPath: string): Promise<WorkflowRun | null>;
+  failOrphanedRuns(): Promise<{ count: number }>;
   resumeWorkflowRun(id: string): Promise<WorkflowRun>;
   updateWorkflowRun(
     id: string,

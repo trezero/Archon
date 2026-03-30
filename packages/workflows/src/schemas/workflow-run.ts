@@ -17,6 +17,16 @@ export const workflowRunStatusSchema = z.enum([
 
 export type WorkflowRunStatus = z.infer<typeof workflowRunStatusSchema>;
 
+/** Statuses that indicate a run has finished and cannot transition further. */
+export const TERMINAL_WORKFLOW_STATUSES: readonly WorkflowRunStatus[] = [
+  'completed',
+  'failed',
+  'cancelled',
+] as const;
+
+/** Statuses that allow a user to resume execution. */
+export const RESUMABLE_WORKFLOW_STATUSES: readonly WorkflowRunStatus[] = ['failed'] as const;
+
 // ---------------------------------------------------------------------------
 // WorkflowStepStatus
 // ---------------------------------------------------------------------------

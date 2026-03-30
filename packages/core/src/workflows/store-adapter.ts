@@ -28,8 +28,9 @@ export function createWorkflowStore(): IWorkflowStore {
   return {
     createWorkflowRun: workflowDb.createWorkflowRun,
     getWorkflowRun: workflowDb.getWorkflowRun,
-    getActiveWorkflowRun: workflowDb.getActiveWorkflowRun,
+    getActiveWorkflowRunByPath: workflowDb.getActiveWorkflowRunByPath,
     findResumableRun: workflowDb.findResumableRun,
+    failOrphanedRuns: workflowDb.failOrphanedRuns,
     resumeWorkflowRun: workflowDb.resumeWorkflowRun,
     updateWorkflowRun: workflowDb.updateWorkflowRun,
     updateWorkflowActivity: workflowDb.updateWorkflowActivity,

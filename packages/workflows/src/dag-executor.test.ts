@@ -60,7 +60,8 @@ function createMockStore(): IWorkflowStore {
       })
     ),
     getWorkflowRun: mock(() => Promise.resolve(null)),
-    getActiveWorkflowRun: mock(() => Promise.resolve(null)),
+    getActiveWorkflowRunByPath: mock(() => Promise.resolve(null)),
+    failOrphanedRuns: mock(() => Promise.resolve({ count: 0 })),
     findResumableRun: mock(() => Promise.resolve(null)),
     resumeWorkflowRun: mock(() =>
       Promise.resolve({
@@ -80,7 +81,7 @@ function createMockStore(): IWorkflowStore {
     ),
     updateWorkflowRun: mock(() => Promise.resolve()),
     updateWorkflowActivity: mock(() => Promise.resolve()),
-    getWorkflowRunStatus: mock(() => Promise.resolve(null)),
+    getWorkflowRunStatus: mock(() => Promise.resolve('running' as const)),
     completeWorkflowRun: mock(() => Promise.resolve()),
     failWorkflowRun: mock(() => Promise.resolve()),
     createWorkflowEvent: mock(() => Promise.resolve()),

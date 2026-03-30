@@ -3,7 +3,14 @@
  */
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
 import { makeTestWorkflow } from '@archon/workflows/test-utils';
-import { workflowListCommand, workflowRunCommand, workflowStatusCommand } from './workflow';
+import {
+  workflowListCommand,
+  workflowRunCommand,
+  workflowStatusCommand,
+  workflowResumeCommand,
+  workflowAbandonCommand,
+  workflowCleanupCommand,
+} from './workflow';
 
 const mockLogger = {
   fatal: mock(() => undefined),
@@ -95,8 +102,12 @@ mock.module('@archon/core/db/messages', () => ({
 mock.module('@archon/core/db/workflows', () => ({
   getActiveWorkflowRun: mock(() => Promise.resolve(null)),
   failWorkflowRun: mock(() => Promise.resolve()),
-  findLastFailedRun: mock(() => Promise.resolve(null)),
+  cancelWorkflowRun: mock(() => Promise.resolve()),
+  findResumableRun: mock(() => Promise.resolve(null)),
   resumeWorkflowRun: mock(() => Promise.resolve(null)),
+  getWorkflowRun: mock(() => Promise.resolve(null)),
+  listWorkflowRuns: mock(() => Promise.resolve([])),
+  deleteOldWorkflowRuns: mock(() => Promise.resolve({ count: 0 })),
 }));
 
 describe('workflowListCommand', () => {
@@ -681,7 +692,218 @@ describe('workflowRunCommand', () => {
 });
 
 describe('workflowStatusCommand', () => {
-  it('should throw error indicating not implemented', async () => {
-    await expect(workflowStatusCommand()).rejects.toThrow('Workflow status not yet implemented');
+  let consoleSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it('should print message when no active runs', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.listWorkflowRuns as ReturnType<typeof mock>).mockResolvedValueOnce([]);
+
+    await workflowStatusCommand();
+
+    expect(consoleSpy).toHaveBeenCalledWith('No running workflows.');
+  });
+
+  it('should list active runs with ID, name, path, status, and age', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.listWorkflowRuns as ReturnType<typeof mock>).mockResolvedValueOnce([
+      {
+        id: 'run-abc',
+        workflow_name: 'implement',
+        working_path: '/path/to/worktree',
+        status: 'running',
+        started_at: new Date(Date.now() - 5 * 60 * 1000), // 5 minutes ago
+      },
+    ]);
+
+    await workflowStatusCommand();
+
+    const calls = consoleSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(calls.some(c => c.includes('run-abc'))).toBe(true);
+    expect(calls.some(c => c.includes('implement'))).toBe(true);
+    expect(calls.some(c => c.includes('/path/to/worktree'))).toBe(true);
+    expect(calls.some(c => c.includes('running'))).toBe(true);
+  });
+
+  it('should output JSON when json=true', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.listWorkflowRuns as ReturnType<typeof mock>).mockResolvedValueOnce([]);
+
+    await workflowStatusCommand(true);
+
+    expect(consoleSpy).toHaveBeenCalledWith(JSON.stringify({ runs: [] }, null, 2));
+  });
+});
+
+describe('workflowResumeCommand', () => {
+  let consoleSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it('should throw when run not found', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce(null);
+
+    await expect(workflowResumeCommand('missing-id')).rejects.toThrow(
+      'Workflow run not found: missing-id'
+    );
+  });
+
+  it('should throw when run is not resumable', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'run-1',
+      workflow_name: 'test',
+      status: 'completed',
+    });
+
+    await expect(workflowResumeCommand('run-1')).rejects.toThrow(
+      "is in status 'completed' and cannot be resumed"
+    );
+  });
+
+  it('should print resume info and delegate to workflowRunCommand', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'run-1',
+      workflow_name: 'implement',
+      status: 'failed',
+      user_message: 'add auth',
+      working_path: '/tmp/test-worktree',
+    });
+
+    // workflowResumeCommand calls workflowRunCommand internally which needs many
+    // mocks. The --resume execution flow is tested separately in workflowRunCommand tests.
+    // Here we only verify the initial output by catching the downstream error.
+    try {
+      await workflowResumeCommand('run-1');
+    } catch {
+      // workflowRunCommand will fail due to missing mocks — that's fine
+    }
+
+    // Printed resume message before delegating to workflowRunCommand
+    expect(consoleSpy).toHaveBeenCalledWith('Resuming workflow: implement');
+    expect(consoleSpy).toHaveBeenCalledWith('Path: /tmp/test-worktree');
+  });
+
+  it('should throw when run has no working path', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'run-no-path',
+      workflow_name: 'implement',
+      status: 'failed',
+      working_path: null,
+    });
+
+    await expect(workflowResumeCommand('run-no-path')).rejects.toThrow(
+      'has no working path recorded'
+    );
+  });
+});
+
+describe('workflowAbandonCommand', () => {
+  let consoleSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it('should throw when run not found', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce(null);
+
+    await expect(workflowAbandonCommand('missing-id')).rejects.toThrow(
+      'Workflow run not found: missing-id'
+    );
+  });
+
+  it('should throw when run is not abandonable', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'run-1',
+      workflow_name: 'test',
+      status: 'completed',
+    });
+
+    await expect(workflowAbandonCommand('run-1')).rejects.toThrow(
+      "is in status 'completed' and cannot be abandoned"
+    );
+  });
+
+  it('should abandon a running workflow', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'run-1',
+      workflow_name: 'implement',
+      status: 'running',
+    });
+    (workflowDb.cancelWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce(undefined);
+
+    await workflowAbandonCommand('run-1');
+
+    expect(workflowDb.cancelWorkflowRun).toHaveBeenCalledWith('run-1');
+    expect(consoleSpy).toHaveBeenCalledWith('Abandoned workflow run: run-1');
+  });
+});
+
+describe('workflowCleanupCommand', () => {
+  let consoleSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it('should print deletion count when runs are deleted', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.deleteOldWorkflowRuns as ReturnType<typeof mock>).mockResolvedValueOnce({
+      count: 5,
+    });
+
+    await workflowCleanupCommand(30);
+
+    expect(consoleSpy).toHaveBeenCalledWith('Deleted 5 workflow run(s) older than 30 days.');
+  });
+
+  it('should print no-op message when count is 0', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.deleteOldWorkflowRuns as ReturnType<typeof mock>).mockResolvedValueOnce({
+      count: 0,
+    });
+
+    await workflowCleanupCommand(7);
+
+    expect(consoleSpy).toHaveBeenCalledWith('No workflow runs older than 7 days to clean up.');
+  });
+
+  it('should throw when deleteOldWorkflowRuns fails', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.deleteOldWorkflowRuns as ReturnType<typeof mock>).mockRejectedValueOnce(
+      new Error('disk full')
+    );
+
+    await expect(workflowCleanupCommand(7)).rejects.toThrow(
+      'Failed to clean up workflow runs: disk full'
+    );
   });
 });

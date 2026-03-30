@@ -10,6 +10,9 @@ import {
   MessageSquare,
   FileText,
   XCircle,
+  PlayCircle,
+  Ban,
+  Trash2,
 } from 'lucide-react';
 import type { DashboardRunResponse } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -20,6 +23,9 @@ import type { WorkflowState } from '@/lib/types';
 interface WorkflowRunCardProps {
   run: DashboardRunResponse;
   onCancel: (runId: string) => void;
+  onResume?: (runId: string) => void;
+  onAbandon?: (runId: string) => void;
+  onDelete?: (runId: string) => void;
 }
 
 const PLATFORM_ICONS: Record<string, React.ReactElement> = {
@@ -81,7 +87,13 @@ function StepProgress({
   );
 }
 
-export function WorkflowRunCard({ run, onCancel }: WorkflowRunCardProps): React.ReactElement {
+export function WorkflowRunCard({
+  run,
+  onCancel,
+  onResume,
+  onAbandon,
+  onDelete,
+}: WorkflowRunCardProps): React.ReactElement {
   const navigate = useNavigate();
   const [elapsed, setElapsed] = useState(() => formatDuration(run.started_at, run.completed_at));
 
@@ -215,17 +227,62 @@ export function WorkflowRunCard({ run, onCancel }: WorkflowRunCardProps): React.
             Open in IDE
           </a>
         )}
-        <button
-          onClick={(): void => {
-            if (window.confirm(`Cancel workflow "${run.workflow_name}"?`)) {
-              onCancel(run.id);
-            }
-          }}
-          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-error/80 hover:bg-error/10 hover:text-error transition-colors ml-auto"
-        >
-          <XCircle className="h-3.5 w-3.5" />
-          Cancel
-        </button>
+        <div className="ml-auto flex items-center gap-1">
+          {run.status === 'failed' && onResume && (
+            <button
+              onClick={(): void => {
+                onResume(run.id);
+              }}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-primary/80 hover:bg-primary/10 hover:text-primary transition-colors"
+            >
+              <PlayCircle className="h-3.5 w-3.5" />
+              Resume
+            </button>
+          )}
+          {run.status === 'running' && onAbandon && (
+            <button
+              onClick={(): void => {
+                if (window.confirm(`Abandon workflow "${run.workflow_name}"?`)) {
+                  onAbandon(run.id);
+                }
+              }}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-warning/80 hover:bg-warning/10 hover:text-warning transition-colors"
+            >
+              <Ban className="h-3.5 w-3.5" />
+              Abandon
+            </button>
+          )}
+          {(run.status === 'running' || run.status === 'pending') && (
+            <button
+              onClick={(): void => {
+                if (window.confirm(`Cancel workflow "${run.workflow_name}"?`)) {
+                  onCancel(run.id);
+                }
+              }}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-error/80 hover:bg-error/10 hover:text-error transition-colors"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              Cancel
+            </button>
+          )}
+          {onDelete && run.status !== 'running' && run.status !== 'pending' && (
+            <button
+              onClick={(): void => {
+                if (
+                  window.confirm(
+                    `Delete workflow run "${run.workflow_name}"? This cannot be undone.`
+                  )
+                ) {
+                  onDelete(run.id);
+                }
+              }}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-tertiary hover:bg-error/10 hover:text-error transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

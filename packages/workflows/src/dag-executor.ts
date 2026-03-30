@@ -786,19 +786,22 @@ async function executeNodeInternal(
           );
         }
 
-        // Check for cancellation during node streaming (not just between layers)
+        // Check for non-running status during streaming (cancellation, deletion, or future: pause)
         try {
           const streamStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
-          if (streamStatus === 'cancelled') {
+          if (streamStatus === null || streamStatus !== 'running') {
             getLog().info(
-              { workflowRunId: workflowRun.id, nodeId: node.id },
-              'dag.cancel_detected_during_streaming'
+              { workflowRunId: workflowRun.id, nodeId: node.id, status: streamStatus ?? 'deleted' },
+              'dag.stop_detected_during_streaming'
             );
             nodeAbortController.abort();
             break;
           }
         } catch (cancelCheckErr) {
-          getLog().warn({ err: cancelCheckErr as Error }, 'dag.cancel_check_failed');
+          getLog().warn(
+            { err: cancelCheckErr as Error, workflowRunId: workflowRun.id, nodeId: node.id },
+            'dag.status_check_failed'
+          );
         }
       }
 
@@ -1351,20 +1354,21 @@ async function executeLoopNode(
   for (let i = 1; i <= loop.max_iterations; i++) {
     const iterationStart = Date.now();
 
-    // Check for workflow cancellation between iterations
+    // Check for non-running status between iterations (cancellation, deletion, or future: pause)
     const runStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
-    if (runStatus === 'cancelled') {
+    if (runStatus === null || runStatus !== 'running') {
+      const effectiveStatus = runStatus ?? 'deleted';
       getLog().info(
-        { workflowRunId: workflowRun.id, nodeId: node.id, iteration: i },
-        'loop_node.cancel_detected'
+        { workflowRunId: workflowRun.id, nodeId: node.id, iteration: i, status: effectiveStatus },
+        'loop_node.stop_detected'
       );
       await safeSendMessage(
         platform,
         conversationId,
-        `Loop node '${node.id}' cancelled at iteration ${String(i)}`,
+        `Loop node '${node.id}' stopped at iteration ${String(i)} (${effectiveStatus})`,
         msgContext
       );
-      return { state: 'failed', output: '', error: 'Workflow cancelled' };
+      return { state: 'failed', output: '', error: `Workflow ${effectiveStatus}` };
     }
 
     // Emit iteration started
@@ -2054,26 +2058,46 @@ export async function executeDagWorkflow(
       getLog().warn({ layerIdx, nodeCount: layer.length }, 'dag_layer_had_failures');
     }
 
-    // Check for cancellation between DAG layers
+    // Check for non-running status between DAG layers (cancellation, deletion, or future: pause)
     try {
       const dagStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
-      if (dagStatus === 'cancelled') {
+      if (dagStatus === null || dagStatus !== 'running') {
+        const effectiveStatus = dagStatus ?? 'deleted';
         getLog().info(
-          { workflowRunId: workflowRun.id, layerIdx, totalLayers: layers.length },
-          'dag.cancel_detected_between_layers'
+          {
+            workflowRunId: workflowRun.id,
+            layerIdx,
+            totalLayers: layers.length,
+            status: effectiveStatus,
+          },
+          'dag.stop_detected_between_layers'
         );
         await safeSendMessage(
           platform,
           conversationId,
-          `⚠️ **Workflow cancelled**: DAG execution stopped after layer ${String(layerIdx + 1)}/${String(layers.length)}`,
+          `⚠️ **Workflow stopped** (${effectiveStatus}): DAG execution stopped after layer ${String(layerIdx + 1)}/${String(layers.length)}`,
           { workflowId: workflowRun.id }
         );
         break;
       }
-    } catch (cancelErr) {
-      // Non-fatal — cancel check failure should not crash the workflow
-      getLog().warn({ err: cancelErr as Error }, 'dag.cancel_check_failed');
+    } catch (statusErr) {
+      // Non-fatal — status check failure should not crash the workflow
+      getLog().warn(
+        { err: statusErr as Error, workflowRunId: workflowRun.id },
+        'dag.status_check_failed'
+      );
     }
+  }
+
+  // Helper: bail out if the run was transitioned externally (cancelled, deleted, etc.)
+  async function skipIfStatusChanged(logEvent: string): Promise<boolean> {
+    const status = await deps.store.getWorkflowRunStatus(workflowRun.id);
+    if (status === null || status !== 'running') {
+      getLog().info({ workflowRunId: workflowRun.id, status: status ?? 'deleted' }, logEvent);
+      getWorkflowEventEmitter().unregisterRun(workflowRun.id);
+      return true;
+    }
+    return false;
   }
 
   // Determine workflow success: at least one node completed (not all failed/skipped)
@@ -2086,6 +2110,7 @@ export async function executeDagWorkflow(
   );
 
   if (!anyCompleted) {
+    if (await skipIfStatusChanged('dag.skip_fail_status_changed')) return;
     const failMsg =
       `DAG workflow '${workflow.name}' completed with no successful nodes. ` +
       'Check node conditions, trigger rules, and upstream failures.';
@@ -2125,6 +2150,9 @@ export async function executeDagWorkflow(
       { workflowId: workflowRun.id }
     );
   }
+
+  // Check if status was changed externally (e.g. cancelled) before marking complete.
+  if (await skipIfStatusChanged('dag.skip_complete_status_changed')) return;
 
   // Update DB and emit completion
   try {

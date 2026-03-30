@@ -50,8 +50,8 @@ import {
   loadConfig,
   logConfig,
   getPort,
+  createWorkflowStore,
 } from '@archon/core';
-import { failStaleWorkflowRuns } from '@archon/core/db/workflows';
 import type { IPlatformAdapter } from '@archon/core';
 import { createLogger, logArchonPaths, validateAppDefaultsPaths } from '@archon/paths';
 
@@ -143,10 +143,12 @@ async function main(): Promise<void> {
   // Start cleanup scheduler
   startCleanupScheduler();
 
-  // Clean up workflow runs orphaned by previous process termination
-  void failStaleWorkflowRuns().catch(err => {
-    getLog().error({ err }, 'stale_workflow_cleanup_failed');
-  });
+  // Mark workflow runs orphaned by previous process termination as failed
+  void createWorkflowStore()
+    .failOrphanedRuns()
+    .catch(err => {
+      getLog().error({ err }, 'workflow.fail_orphans_failed');
+    });
 
   // Log Archon paths configuration
   logArchonPaths();

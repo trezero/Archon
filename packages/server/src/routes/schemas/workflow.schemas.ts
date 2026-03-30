@@ -139,6 +139,11 @@ export const cancelWorkflowRunResponseSchema = z
   .object({ success: z.boolean(), message: z.string() })
   .openapi('CancelWorkflowRunResponse');
 
+/** Generic workflow run action response (resume, abandon, delete). */
+export const workflowRunActionResponseSchema = z
+  .object({ success: z.boolean(), message: z.string() })
+  .openapi('WorkflowRunActionResponse');
+
 /** Dashboard enriched workflow run (with joined codebase/conversation data). */
 export const dashboardWorkflowRunSchema = workflowRunSchema
   .extend({

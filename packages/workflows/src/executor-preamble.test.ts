@@ -80,7 +80,8 @@ import { executeWorkflow } from './executor';
 
 function makeStore(overrides: Partial<IWorkflowStore> = {}): IWorkflowStore {
   return {
-    getActiveWorkflowRun: mock(async () => null),
+    getActiveWorkflowRunByPath: mock(async () => null),
+    failOrphanedRuns: mock(async () => ({ count: 0 })),
     createWorkflowRun: mock(async () => makeRun()),
     updateWorkflowRun: mock(async () => {}),
     failWorkflowRun: mock(async () => {}),
@@ -163,54 +164,20 @@ describe('executeWorkflow preamble', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Staleness detection
+  // Concurrent run guard (path-based)
   // -------------------------------------------------------------------------
 
-  describe('staleness detection', () => {
-    it('should fail stale workflow and start new one when last_activity_at > 15 min ago', async () => {
-      const staleTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-      const staleRun = makeRun({
-        id: 'stale-workflow-id',
-        workflow_name: 'old-workflow',
-        started_at: staleTime,
-        last_activity_at: staleTime,
-      });
-      const store = makeStore({
-        getActiveWorkflowRun: mock(async () => staleRun),
-      });
-      const deps = makeDeps(store);
-
-      await executeWorkflow(
-        deps,
-        makePlatform(),
-        'conv-123',
-        '/tmp',
-        makeWorkflow(),
-        'User message',
-        'db-conv-id'
-      );
-
-      // Stale workflow was marked as failed
-      const failCalls = (store.failWorkflowRun as ReturnType<typeof mock>).mock.calls;
-      const staleFailCalls = failCalls.filter((call: unknown[]) => call[0] === 'stale-workflow-id');
-      expect(staleFailCalls.length).toBeGreaterThan(0);
-
-      // New workflow was created
-      expect(
-        (store.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length
-      ).toBeGreaterThan(0);
-    });
-
-    it('should block new workflow when active workflow is not stale', async () => {
+  describe('concurrent run guard', () => {
+    it('should block new workflow when a running workflow exists on the same path', async () => {
       const recentTime = new Date(Date.now() - 5 * 60 * 1000).toISOString();
       const activeRun = makeRun({
         id: 'active-workflow-id',
         workflow_name: 'active-workflow',
         started_at: recentTime,
-        last_activity_at: recentTime,
+        status: 'running',
       });
       const store = makeStore({
-        getActiveWorkflowRun: mock(async () => activeRun),
+        getActiveWorkflowRunByPath: mock(async () => activeRun),
       });
       const deps = makeDeps(store);
       const platform = makePlatform();
@@ -235,44 +202,6 @@ describe('executeWorkflow preamble', () => {
       // No new workflow was created
       expect((store.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(0);
     });
-
-    it('should show cleanup error message when failWorkflowRun fails for stale workflow', async () => {
-      const staleTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-      const staleRun = makeRun({
-        id: 'stale-workflow-id',
-        workflow_name: 'old-workflow',
-        started_at: staleTime,
-        last_activity_at: staleTime,
-      });
-      const store = makeStore({
-        getActiveWorkflowRun: mock(async () => staleRun),
-        failWorkflowRun: mock(async () => {
-          throw new Error('Database connection lost');
-        }),
-      });
-      const deps = makeDeps(store);
-      const platform = makePlatform();
-
-      const result = await executeWorkflow(
-        deps,
-        platform,
-        'conv-123',
-        '/tmp',
-        makeWorkflow(),
-        'User message',
-        'db-conv-id'
-      );
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Stale workflow cleanup failed');
-
-      // Cleanup error message was sent to user
-      const errorMsg = findMessage(platform, '/workflow cancel');
-      expect(errorMsg).toBeDefined();
-
-      // No new workflow was created
-      expect((store.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(0);
-    });
   });
 
   // -------------------------------------------------------------------------
@@ -281,7 +210,7 @@ describe('executeWorkflow preamble', () => {
 
   describe('concurrent workflow detection', () => {
     it('should allow workflow when no active workflow for conversation', async () => {
-      const store = makeStore({ getActiveWorkflowRun: mock(async () => null) });
+      const store = makeStore({ getActiveWorkflowRunByPath: mock(async () => null) });
       const deps = makeDeps(store);
       const platform = makePlatform();
 
@@ -296,7 +225,7 @@ describe('executeWorkflow preamble', () => {
       );
 
       expect(
-        (store.getActiveWorkflowRun as ReturnType<typeof mock>).mock.calls.length
+        (store.getActiveWorkflowRunByPath as ReturnType<typeof mock>).mock.calls.length
       ).toBeGreaterThan(0);
       expect(
         (store.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length
@@ -304,7 +233,7 @@ describe('executeWorkflow preamble', () => {
       expect(result.workflowRunId).toBe('run-123');
     });
 
-    it('should use database conversation ID for active workflow check', async () => {
+    it('should use working directory (cwd) for active workflow check', async () => {
       const store = makeStore();
       const deps = makeDeps(store);
 
@@ -319,15 +248,16 @@ describe('executeWorkflow preamble', () => {
         'codebase-789'
       );
 
-      const activeCheckCalls = (store.getActiveWorkflowRun as ReturnType<typeof mock>).mock.calls;
+      const activeCheckCalls = (store.getActiveWorkflowRunByPath as ReturnType<typeof mock>).mock
+        .calls;
       expect(activeCheckCalls.length).toBeGreaterThan(0);
-      // Must use the database conversation ID, not the platform conversation ID
-      expect(activeCheckCalls[0][0]).toBe('db-conv-456');
+      // Must use the working directory path, not the conversation ID
+      expect(activeCheckCalls[0][0]).toBe('/tmp');
     });
 
     it('should block workflow when active workflow check fails', async () => {
       const store = makeStore({
-        getActiveWorkflowRun: mock(async () => {
+        getActiveWorkflowRunByPath: mock(async () => {
           throw new Error('Database connection lost');
         }),
       });
@@ -400,6 +330,45 @@ describe('executeWorkflow preamble', () => {
 
       // Workflow run ID should be from the resumed run
       expect(result.workflowRunId).toBe('prior-run');
+    });
+
+    it('auto-resumes a prior failed DAG run when completed nodes exist (second test)', async () => {
+      const interruptedRun = makeRun({ id: 'prior-int', status: 'failed' });
+      const priorNodes = new Map([['node-a', 'output from node-a']]);
+      const resumedRun = makeRun({ id: 'prior-int', status: 'running' });
+
+      const store = makeStore({
+        findResumableRun: mock(async () => interruptedRun),
+        getCompletedDagNodeOutputs: mock(async () => priorNodes),
+        resumeWorkflowRun: mock(async () => resumedRun),
+      });
+      const deps = makeDeps(store);
+      const platform = makePlatform();
+
+      const result = await executeWorkflow(
+        deps,
+        platform,
+        'conv-123',
+        '/tmp',
+        makeWorkflow(),
+        'User message',
+        'db-conv-id'
+      );
+
+      // No createWorkflowRun — resume used existing run
+      expect((store.createWorkflowRun as ReturnType<typeof mock>).mock.calls.length).toBe(0);
+
+      // resumeWorkflowRun was called with the prior run ID
+      const resumeCalls = (store.resumeWorkflowRun as ReturnType<typeof mock>).mock.calls;
+      expect(resumeCalls.length).toBe(1);
+      expect(resumeCalls[0][0]).toBe('prior-int');
+
+      // Resume notification was sent to user
+      const resumeMsg = findMessage(platform, 'Resuming');
+      expect(resumeMsg).toBeDefined();
+
+      // Workflow run ID should be from the resumed run
+      expect(result.workflowRunId).toBe('prior-int');
     });
 
     it('returns error when DAG resumeWorkflowRun throws', async () => {

@@ -46,6 +46,9 @@ import {
   workflowListCommand,
   workflowRunCommand,
   workflowStatusCommand,
+  workflowResumeCommand,
+  workflowAbandonCommand,
+  workflowCleanupCommand,
   workflowEventEmitCommand,
   isValidEventType,
 } from './commands/workflow';
@@ -293,8 +296,39 @@ async function main(): Promise<number> {
           }
 
           case 'status':
-            await workflowStatusCommand();
+            await workflowStatusCommand(jsonFlag);
             break;
+
+          case 'resume': {
+            const resumeRunId = positionals[2];
+            if (!resumeRunId) {
+              console.error('Usage: archon workflow resume <run-id>');
+              return 1;
+            }
+            await workflowResumeCommand(resumeRunId);
+            break;
+          }
+
+          case 'abandon': {
+            const abandonRunId = positionals[2];
+            if (!abandonRunId) {
+              console.error('Usage: archon workflow abandon <run-id>');
+              return 1;
+            }
+            await workflowAbandonCommand(abandonRunId);
+            break;
+          }
+
+          case 'cleanup': {
+            const days = positionals[2] ? Number(positionals[2]) : 7;
+            if (Number.isNaN(days) || days < 0) {
+              console.error('Usage: archon workflow cleanup [days]');
+              console.error('  days: delete terminal runs older than N days (default: 7)');
+              return 1;
+            }
+            await workflowCleanupCommand(days);
+            break;
+          }
 
           case 'event': {
             const action = positionals[2];
@@ -349,7 +383,7 @@ async function main(): Promise<number> {
             } else {
               console.error(`Unknown workflow subcommand: ${subcommand}`);
             }
-            console.error('Available: list, run, status, event');
+            console.error('Available: list, run, status, resume, abandon, cleanup, event');
             return 1;
         }
         break;

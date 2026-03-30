@@ -165,11 +165,14 @@ mock.module('@archon/core/db/isolation-environments', () => ({
   updateStatus: mock(async () => {}),
 }));
 
+const mockDeleteWorkflowRun = mock(async (_id: string) => {});
+
 mock.module('@archon/core/db/workflows', () => ({
   listWorkflowRuns: mockListWorkflowRuns,
   listDashboardRuns: mockListDashboardRuns,
   getWorkflowRun: mockGetWorkflowRun,
   cancelWorkflowRun: mockCancelWorkflowRun,
+  deleteWorkflowRun: mockDeleteWorkflowRun,
   getWorkflowRunByWorkerPlatformId: mockGetWorkflowRunByWorkerPlatformId,
 }));
 
@@ -213,6 +216,13 @@ const MOCK_COMPLETED_RUN: MockWorkflowRun = {
   ...MOCK_RUNNING_RUN,
   id: 'run-uuid-2',
   status: 'completed',
+  completed_at: NOW,
+};
+
+const MOCK_FAILED_RUN: MockWorkflowRun = {
+  ...MOCK_RUNNING_RUN,
+  id: 'run-uuid-4',
+  status: 'failed',
   completed_at: NOW,
 };
 
@@ -989,5 +999,145 @@ describe('GET /api/workflows/runs/by-worker/:platformId', () => {
     const { app } = makeApp();
     const response = await app.request('/api/workflows/runs/by-worker/unknown-id');
     expect(response.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: POST /api/workflows/runs/:runId/resume
+// ---------------------------------------------------------------------------
+
+describe('POST /api/workflows/runs/:runId/resume', () => {
+  beforeEach(() => {
+    mockGetWorkflowRun.mockReset();
+  });
+
+  test('returns 404 when run not found', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(null);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-missing/resume', {
+      method: 'POST',
+    });
+    expect(response.status).toBe(404);
+  });
+
+  test('returns 400 when run is not in failed status', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(MOCK_RUNNING_RUN);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-uuid-1/resume', {
+      method: 'POST',
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('Cannot resume');
+  });
+
+  test('returns 200 with message when run is failed', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(MOCK_FAILED_RUN);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-uuid-4/resume', {
+      method: 'POST',
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { success: boolean; message: string };
+    expect(body.success).toBe(true);
+    expect(body.message).toContain('ready to resume');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: POST /api/workflows/runs/:runId/abandon
+// ---------------------------------------------------------------------------
+
+describe('POST /api/workflows/runs/:runId/abandon', () => {
+  beforeEach(() => {
+    mockGetWorkflowRun.mockReset();
+    mockCancelWorkflowRun.mockReset();
+  });
+
+  test('returns 404 when run not found', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(null);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-missing/abandon', {
+      method: 'POST',
+    });
+    expect(response.status).toBe(404);
+  });
+
+  test('returns 400 when run is already terminal', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(MOCK_COMPLETED_RUN);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-uuid-2/abandon', {
+      method: 'POST',
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('Cannot abandon');
+  });
+
+  test('returns 200 and calls cancelWorkflowRun for running run', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(MOCK_RUNNING_RUN);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-uuid-1/abandon', {
+      method: 'POST',
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { success: boolean; message: string };
+    expect(body.success).toBe(true);
+    expect(body.message).toContain('Abandoned');
+    expect(mockCancelWorkflowRun).toHaveBeenCalledWith('run-uuid-1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: DELETE /api/workflows/runs/:runId
+// ---------------------------------------------------------------------------
+
+describe('DELETE /api/workflows/runs/:runId', () => {
+  beforeEach(() => {
+    mockGetWorkflowRun.mockReset();
+    mockDeleteWorkflowRun.mockReset();
+  });
+
+  test('returns 404 when run not found', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(null);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-missing', {
+      method: 'DELETE',
+    });
+    expect(response.status).toBe(404);
+  });
+
+  test('returns 400 when run is not terminal', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(MOCK_RUNNING_RUN);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-uuid-1', {
+      method: 'DELETE',
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('Cannot delete');
+  });
+
+  test('returns 200 and deletes a completed run', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(MOCK_COMPLETED_RUN);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-uuid-2', {
+      method: 'DELETE',
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { success: boolean; message: string };
+    expect(body.success).toBe(true);
+    expect(body.message).toContain('Deleted');
+    expect(mockDeleteWorkflowRun).toHaveBeenCalledWith('run-uuid-2');
+  });
+
+  test('returns 200 and deletes a failed run', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(MOCK_FAILED_RUN);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-uuid-4', {
+      method: 'DELETE',
+    });
+    expect(response.status).toBe(200);
+    expect(mockDeleteWorkflowRun).toHaveBeenCalledWith('run-uuid-4');
   });
 });

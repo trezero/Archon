@@ -4,7 +4,21 @@
 import { pool, getDialect, getDatabaseType } from './connection';
 import type { IDatabase } from './adapters/types';
 import type { WorkflowRun, WorkflowRunStatus } from '@archon/workflows/schemas/workflow-run';
+import { TERMINAL_WORKFLOW_STATUSES } from '@archon/workflows/schemas/workflow-run';
 import { createLogger } from '@archon/paths';
+
+/** Best-effort ROLLBACK — log but swallow errors since we're already in an error path. */
+function rollback(): Promise<void> {
+  return pool.query('ROLLBACK', []).then(
+    () => undefined,
+    rollbackErr => {
+      getLog().warn({ err: rollbackErr as Error }, 'db.rollback_failed');
+    }
+  );
+}
+
+/** Guard error for deleteWorkflowRun — re-thrown without wrapping in the outer catch. */
+class WorkflowRunGuardError extends Error {}
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -126,6 +140,22 @@ export async function getActiveWorkflowRun(conversationId: string): Promise<Work
   }
 }
 
+export async function getActiveWorkflowRunByPath(workingPath: string): Promise<WorkflowRun | null> {
+  try {
+    const result = await pool.query<WorkflowRun>(
+      `SELECT * FROM remote_agent_workflow_runs
+       WHERE working_path = $1 AND status = 'running'
+       ORDER BY started_at DESC LIMIT 1`,
+      [workingPath]
+    );
+    return result.rows[0] ?? null;
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err, workingPath }, 'db.workflow_run_get_active_by_path_failed');
+    throw new Error(`Failed to get active workflow run by path: ${err.message}`);
+  }
+}
+
 export async function getRunningWorkflows(): Promise<
   { id: string; conversation_id: string; workflow_name: string; started_at: string }[]
 > {
@@ -149,53 +179,23 @@ export async function getRunningWorkflows(): Promise<
 
 export async function findResumableRun(
   workflowName: string,
-  workingPath: string,
-  conversationId: string
+  workingPath: string
 ): Promise<WorkflowRun | null> {
   try {
     const result = await pool.query<WorkflowRun>(
       `SELECT * FROM remote_agent_workflow_runs
        WHERE workflow_name = $1
          AND working_path = $2
-         AND conversation_id = $3
          AND status = 'failed'
        ORDER BY started_at DESC
        LIMIT 1`,
-      [workflowName, workingPath, conversationId]
+      [workflowName, workingPath]
     );
     return result.rows[0] ?? null;
   } catch (error) {
     const err = error as Error;
     getLog().warn({ err, workflowName, workingPath }, 'db.workflow_run_find_resumable_failed');
     throw new Error(`Failed to find resumable run: ${err.message}`);
-  }
-}
-
-/**
- * Find the most recent failed workflow run by workflow name and codebase.
- * Used by the CLI `--resume` flag to locate a prior failed run regardless of conversation ID,
- * since CLI re-runs always generate fresh conversation IDs.
- */
-export async function findLastFailedRun(
-  db: IDatabase,
-  workflowName: string,
-  codebaseId: string
-): Promise<WorkflowRun | null> {
-  try {
-    const result = await db.query<WorkflowRun>(
-      `SELECT * FROM remote_agent_workflow_runs
-       WHERE workflow_name = $1
-         AND codebase_id = $2
-         AND status = 'failed'
-       ORDER BY started_at DESC
-       LIMIT 1`,
-      [workflowName, codebaseId]
-    );
-    return result.rows[0] ?? null;
-  } catch (error) {
-    const err = error as Error;
-    getLog().warn({ err, workflowName, codebaseId }, 'db.workflow_run_find_last_failed_run_failed');
-    throw new Error(`Failed to find last failed run: ${err.message}`);
   }
 }
 
@@ -554,7 +554,14 @@ export async function listDashboardRuns(
       ),
     ]);
 
-    const counts = { all: 0, running: 0, completed: 0, failed: 0, cancelled: 0, pending: 0 };
+    const counts = {
+      all: 0,
+      running: 0,
+      completed: 0,
+      failed: 0,
+      cancelled: 0,
+      pending: 0,
+    };
     for (const row of countResult.rows) {
       const n = Number(row.cnt);
       counts.all += n;
@@ -581,7 +588,7 @@ export async function listDashboardRuns(
  */
 export async function listWorkflowRuns(options?: {
   conversationId?: string;
-  status?: WorkflowRunStatus;
+  status?: WorkflowRunStatus | WorkflowRunStatus[];
   limit?: number;
   codebaseId?: string;
 }): Promise<WorkflowRun[]> {
@@ -592,9 +599,14 @@ export async function listWorkflowRuns(options?: {
     values.push(options.conversationId);
     whereClauses.push(`conversation_id = $${String(values.length)}`);
   }
-  if (options?.status) {
-    values.push(options.status);
-    whereClauses.push(`status = $${String(values.length)}`);
+  if (options?.status !== undefined) {
+    const statuses = Array.isArray(options.status) ? options.status : [options.status];
+    if (statuses.length > 0) {
+      const startIdx = values.length + 1;
+      values.push(...statuses);
+      const placeholders = statuses.map((_, i) => `$${String(startIdx + i)}`).join(', ');
+      whereClauses.push(`status IN (${placeholders})`);
+    }
   }
   if (options?.codebaseId) {
     values.push(options.codebaseId);
@@ -656,40 +668,105 @@ export async function updateWorkflowActivity(id: string): Promise<void> {
 }
 
 /**
- * Transition stale 'running' workflow runs to 'failed'.
- * A run is stale if its last_activity_at (or started_at as fallback) is older than the threshold.
- * Called on server startup and periodically to clean up runs orphaned by process termination.
+ * Transition all 'running' workflow runs to 'failed'.
+ * Called on server startup to mark runs orphaned by process termination.
+ * The next invocation of the same workflow at the same path will auto-resume
+ * from completed nodes via findResumableRun.
  */
-export async function failStaleWorkflowRuns(
-  staleThresholdMinutes = 60
-): Promise<{ count: number }> {
+export async function failOrphanedRuns(): Promise<{ count: number }> {
   const dialect = getDialect();
-  const thresholdDays = staleThresholdMinutes / (60 * 24);
   try {
     const result = await pool.query(
       `UPDATE remote_agent_workflow_runs
        SET status = 'failed',
            completed_at = ${dialect.now()},
            metadata = ${dialect.jsonMerge('metadata', 1)}
-       WHERE status = 'running'
-         AND ${dialect.daysSince('COALESCE(last_activity_at, started_at)')} > ${String(thresholdDays)}`,
-      [
-        JSON.stringify({
-          error: 'Process terminated unexpectedly — marked as failed during cleanup',
-        }),
-      ]
+       WHERE status = 'running'`,
+      [JSON.stringify({ failure_reason: 'server_restart' })]
     );
     const count = result.rowCount ?? 0;
     if (count > 0) {
-      getLog().info(
-        { count, thresholdMinutes: staleThresholdMinutes },
-        'db.stale_workflow_runs_cleanup_completed'
-      );
+      getLog().info({ count }, 'db.orphaned_workflow_runs_failed');
     }
     return { count };
   } catch (error) {
     const err = error as Error;
-    getLog().error({ err }, 'db.stale_workflow_runs_cleanup_failed');
-    throw new Error(`Failed to clean up stale workflow runs: ${err.message}`);
+    getLog().error({ err }, 'db.orphaned_workflow_runs_fail_failed');
+    throw new Error(`Failed to fail orphaned workflow runs: ${err.message}`);
+  }
+}
+
+/**
+ * Delete terminal workflow runs older than the given number of days.
+ * Returns the count of deleted runs.
+ */
+export async function deleteOldWorkflowRuns(olderThanDays: number): Promise<{ count: number }> {
+  // Validate olderThanDays is a safe non-negative integer before SQL interpolation.
+  // The dialect has no "date subtract" helper, so we must interpolate — but only after validation.
+  if (!Number.isInteger(olderThanDays) || olderThanDays < 0) {
+    throw new Error(
+      `Invalid olderThanDays: ${String(olderThanDays)} (must be a non-negative integer)`
+    );
+  }
+  const cutoff =
+    getDatabaseType() === 'postgresql'
+      ? `NOW() - INTERVAL '${String(olderThanDays)} days'`
+      : `datetime('now', '-${String(olderThanDays)} days')`;
+  try {
+    await pool.query('BEGIN', []);
+    // Delete events first (FK reference)
+    await pool.query(
+      `DELETE FROM remote_agent_workflow_events WHERE workflow_run_id IN (
+        SELECT id FROM remote_agent_workflow_runs
+        WHERE status IN ('completed', 'failed', 'cancelled')
+          AND started_at < ${cutoff}
+      )`,
+      []
+    );
+    const result = await pool.query(
+      `DELETE FROM remote_agent_workflow_runs
+       WHERE status IN ('completed', 'failed', 'cancelled')
+         AND started_at < ${cutoff}`,
+      []
+    );
+    await pool.query('COMMIT', []);
+    return { count: result.rowCount ?? 0 };
+  } catch (error) {
+    await rollback();
+    const err = error as Error;
+    getLog().error({ err, olderThanDays }, 'db.workflow_runs_cleanup_failed');
+    throw new Error(`Failed to clean up old workflow runs: ${err.message}`);
+  }
+}
+
+/**
+ * Delete a workflow run and its associated events.
+ * Only terminal runs (completed, failed, cancelled) can be deleted.
+ */
+export async function deleteWorkflowRun(id: string): Promise<void> {
+  try {
+    await pool.query('BEGIN', []);
+    // Guard: verify run exists and is terminal before deleting
+    const check = await pool.query<{ status: string }>(
+      'SELECT status FROM remote_agent_workflow_runs WHERE id = $1',
+      [id]
+    );
+    if (check.rows.length === 0) {
+      throw new WorkflowRunGuardError(`Workflow run not found: ${id}`);
+    }
+    if (!TERMINAL_WORKFLOW_STATUSES.includes(check.rows[0].status as WorkflowRunStatus)) {
+      throw new WorkflowRunGuardError(
+        `Cannot delete workflow run in '${check.rows[0].status}' status — cancel it first`
+      );
+    }
+    await pool.query('DELETE FROM remote_agent_workflow_events WHERE workflow_run_id = $1', [id]);
+    await pool.query('DELETE FROM remote_agent_workflow_runs WHERE id = $1', [id]);
+    await pool.query('COMMIT', []);
+  } catch (error) {
+    await rollback();
+    if (error instanceof WorkflowRunGuardError) throw error;
+    const err = error as Error;
+    getLog().error({ err, workflowRunId: id }, 'db.workflow_run_delete_failed');
+    throw new Error(`Failed to delete workflow run: ${err.message}`);
   }
 }

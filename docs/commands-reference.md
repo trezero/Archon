@@ -43,8 +43,11 @@ All slash commands available in Archon. Type `/help` in any platform adapter (We
 |---------|-------------|
 | `/workflow list` | Show available workflows |
 | `/workflow reload` | Reload workflow definitions |
-| `/workflow status` | Show running workflow details |
+| `/workflow status` | Show active workflows |
 | `/workflow cancel` | Cancel running workflow |
+| `/workflow resume <id>` | Resume a failed run (re-runs, skipping completed nodes) |
+| `/workflow abandon <id>` | Discard a non-terminal run |
+| `/workflow cleanup [days]` | CLI only — delete old run records (default: 7 days) |
 
 > **Note:** Workflows are YAML files in `.archon/workflows/`
 

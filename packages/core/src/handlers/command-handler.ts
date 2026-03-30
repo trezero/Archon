@@ -22,6 +22,10 @@ import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '@archon/pa
 import { loadConfig } from '../config/config-loader';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import type { WorkflowDefinition, WorkflowLoadError } from '@archon/workflows/schemas/workflow';
+import {
+  TERMINAL_WORKFLOW_STATUSES,
+  RESUMABLE_WORKFLOW_STATUSES,
+} from '@archon/workflows/schemas/workflow-run';
 import * as workflowDb from '../db/workflows';
 import { getTriggerForCommand, type DeactivatingCommand } from '../state/session-transitions';
 import { SessionNotFoundError } from '../db/sessions';
@@ -35,10 +39,6 @@ function getLog(): ReturnType<typeof createLogger> {
   if (!cachedLog) cachedLog = createLogger('command-handler');
   return cachedLog;
 }
-
-// Workflow staleness thresholds (in milliseconds)
-const WORKFLOW_SLOW_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
-const WORKFLOW_STALE_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes (matches executor.ts)
 
 /**
  * Workflow timing information calculated from database values
@@ -957,42 +957,30 @@ async function handleWorkflowCommand(
     }
 
     case 'status': {
-      // Show detailed status of running workflow
+      // Show all running workflow runs across all worktrees
       try {
-        const activeWorkflow = await workflowDb.getActiveWorkflowRun(conversation.id);
-        if (!activeWorkflow) {
+        const activeRuns = await workflowDb.listWorkflowRuns({
+          status: 'running',
+          limit: 50,
+        });
+
+        if (activeRuns.length === 0) {
           return {
             success: true,
-            message: 'No workflow currently running.',
+            message: 'No active workflows.',
           };
         }
 
-        const timing = calculateWorkflowTiming(activeWorkflow);
-
-        if (!timing.isValid) {
-          // Graceful fallback for corrupted timing data
-          return {
-            success: true,
-            message: `Workflow: \`${activeWorkflow.workflow_name}\`\nID: ${activeWorkflow.id}\nStatus: ${activeWorkflow.status}\n\nTiming data unavailable.`,
-          };
+        let msg = `**Active Workflows (${String(activeRuns.length)})**\n\n`;
+        for (const run of activeRuns) {
+          msg += `**\`${run.workflow_name}\`**\n`;
+          msg += `  ID: ${run.id}\n`;
+          msg += `  Path: ${run.working_path ?? '(unknown)'}\n`;
+          msg += `  Started: ${new Date(run.started_at).toISOString()}\n\n`;
         }
 
-        let msg = `Workflow: \`${activeWorkflow.workflow_name}\`\n`;
-        msg += `ID: ${activeWorkflow.id}\n`;
-        msg += `Status: ${activeWorkflow.status}\n`;
-        msg += `Started: ${timing.startedAt.toISOString()}\n`;
-        msg += `Duration: ${timing.durationMin}m ${timing.durationSec}s\n`;
-        msg += `Last activity: ${timing.lastActivityMin}m ${timing.lastActivitySec}s ago\n`;
-
-        // Staleness check
-        if (timing.lastActivityMs > WORKFLOW_STALE_THRESHOLD_MS) {
-          msg += `\nThis workflow appears stale (no activity for ${timing.lastActivityMin} minutes).\n`;
-          msg += 'Consider cancelling with `/workflow cancel`.';
-        } else if (timing.lastActivityMs > WORKFLOW_SLOW_THRESHOLD_MS) {
-          msg += '\nActivity is slow - may be waiting on AI response or stuck.';
-        }
-
-        return { success: true, message: msg };
+        msg += 'Use `/workflow cancel` to stop a running workflow.';
+        return { success: true, message: msg.trim() };
       } catch (error) {
         const err = error as Error;
         getLog().error({ err, conversationId: conversation.id }, 'cmd.workflow_status_failed');
@@ -1000,6 +988,71 @@ async function handleWorkflowCommand(
           success: false,
           message: 'Failed to retrieve workflow status. Please try again.',
         };
+      }
+    }
+
+    case 'resume': {
+      const runId = args[1];
+      if (!runId) {
+        return {
+          success: false,
+          message:
+            'Usage: /workflow resume <id>\n\nResumes a failed workflow from completed nodes.',
+        };
+      }
+      try {
+        const run = await workflowDb.getWorkflowRun(runId);
+        if (!run) {
+          return { success: false, message: `Workflow run not found: ${runId}` };
+        }
+        if (!RESUMABLE_WORKFLOW_STATUSES.includes(run.status)) {
+          return {
+            success: false,
+            message: `Cannot resume run with status '${run.status}'. Only failed runs can be resumed.`,
+          };
+        }
+        // The run is already failed — the next workflow invocation on the same path
+        // will auto-resume from completed nodes via findResumableRun.
+        const pathInfo = run.working_path ? `\nPath: \`${run.working_path}\`` : '';
+        return {
+          success: true,
+          message: `Workflow run \`${run.workflow_name}\` (${runId}) is ready to resume.${pathInfo}\nRun the same workflow again to auto-resume from completed nodes.`,
+        };
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, runId }, 'cmd.workflow_resume_failed');
+        return { success: false, message: `Failed to resume workflow run: ${err.message}` };
+      }
+    }
+
+    case 'abandon': {
+      const runId = args[1];
+      if (!runId) {
+        return {
+          success: false,
+          message: 'Usage: /workflow abandon <id>\n\nUse /workflow status to see active runs.',
+        };
+      }
+      try {
+        const run = await workflowDb.getWorkflowRun(runId);
+        if (!run) {
+          return { success: false, message: `Workflow run not found: ${runId}` };
+        }
+        if (TERMINAL_WORKFLOW_STATUSES.includes(run.status)) {
+          return {
+            success: false,
+            message: `Cannot abandon run with status '${run.status}'. Run is already terminal.`,
+          };
+        }
+        await workflowDb.cancelWorkflowRun(runId);
+        return {
+          success: true,
+          message: `Abandoned workflow run \`${run.workflow_name}\` (${runId})`,
+        };
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, runId }, 'cmd.workflow_abandon_failed');
+        return { success: false, message: `Failed to abandon workflow run: ${err.message}` };
       }
     }
 
@@ -1100,7 +1153,7 @@ async function handleWorkflowCommand(
       return {
         success: false,
         message:
-          'Usage:\n  /workflow list - Show available workflows\n  /workflow reload - Reload workflow definitions\n  /workflow status - Show running workflow details\n  /workflow cancel - Cancel running workflow\n  /workflow run <name> [args] - Run a workflow directly',
+          'Usage:\n  /workflow list - Show available workflows\n  /workflow reload - Reload workflow definitions\n  /workflow status - Show all active workflows\n  /workflow cancel - Cancel running workflow\n  /workflow resume <id> - Resume a failed run\n  /workflow abandon <id> - Discard a failed run\n  /workflow run <name> [args] - Run a workflow directly',
       };
   }
 }
@@ -1129,8 +1182,10 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
 **Workflows**
 - \`/workflow list\` — List available workflows
 - \`/workflow run <name> [message]\` — Run a workflow explicitly
-- \`/workflow status\` — Show running workflow progress
+- \`/workflow status\` — Show all active workflows
 - \`/workflow cancel\` — Cancel the active workflow
+- \`/workflow resume <id>\` — Resume a failed run
+- \`/workflow abandon <id>\` — Discard a failed run
 
 **Projects**
 - \`/register-project <name> <path>\` — Register a local project
@@ -1196,9 +1251,6 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
             msg += `\n  ID: ${activeWorkflow.id.slice(0, 8)}`;
             msg += `\n  Duration: ${timing.durationMin}m ${timing.durationSec}s`;
             msg += `\n  Last activity: ${timing.lastActivitySec}s ago`;
-            if (timing.lastActivityMs > WORKFLOW_SLOW_THRESHOLD_MS) {
-              msg += ' (possibly stale)';
-            }
             msg += '\n  Cancel: `/workflow cancel`';
           } else {
             // Graceful fallback for corrupted timing data

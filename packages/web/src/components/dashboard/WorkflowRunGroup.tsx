@@ -7,12 +7,18 @@ interface WorkflowRunGroupProps {
   parentPlatformId: string | null;
   runs: DashboardRunResponse[];
   onCancel: (runId: string) => void;
+  onResume?: (runId: string) => void;
+  onAbandon?: (runId: string) => void;
+  onDelete?: (runId: string) => void;
 }
 
 export function WorkflowRunGroup({
   parentPlatformId,
   runs,
   onCancel,
+  onResume,
+  onAbandon,
+  onDelete,
 }: WorkflowRunGroupProps): React.ReactElement {
   const navigate = useNavigate();
 
@@ -38,7 +44,14 @@ export function WorkflowRunGroup({
       {/* Cards for this group */}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {runs.map(run => (
-          <WorkflowRunCard key={run.id} run={run} onCancel={onCancel} />
+          <WorkflowRunCard
+            key={run.id}
+            run={run}
+            onCancel={onCancel}
+            onResume={onResume}
+            onAbandon={onAbandon}
+            onDelete={onDelete}
+          />
         ))}
       </div>
     </div>

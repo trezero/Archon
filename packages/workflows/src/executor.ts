@@ -308,80 +308,39 @@ export async function executeWorkflow(
     getLog().debug({ configuredCommandFolder }, 'command_folder_configured');
   }
 
-  // Resume detection and concurrent-run checks (skip when run was pre-created by caller)
+  // Resume detection and concurrent-run checks
   let dagPriorCompletedNodes: Map<string, string> | undefined;
   let workflowRun: WorkflowRun | undefined = preCreatedRun;
 
-  if (preCreatedRun) {
-    getLog().info(
-      { workflowRunId: preCreatedRun.id, workflowName: workflow.name },
-      'workflow_using_pre_created_run'
-    );
-  }
-
-  // Check for concurrent workflow execution with staleness detection
-  let activeWorkflow;
-  if (!preCreatedRun)
-    try {
-      activeWorkflow = await deps.store.getActiveWorkflowRun(conversationDbId);
-    } catch (error) {
-      const err = error as Error;
-      getLog().error({ err, conversationId }, 'db_active_workflow_check_failed');
-      // Do NOT proceed when we can't verify safety - block workflow execution
-      await sendCriticalMessage(
-        platform,
-        conversationId,
-        '❌ **Workflow blocked**: Unable to verify if another workflow is running (database error). Please try again in a moment.'
-      );
-      return { success: false, error: 'Database error checking for active workflow' };
-    }
-  if (activeWorkflow) {
-    // Check staleness based on last activity, not start time
-    const lastActivity = activeWorkflow.last_activity_at ?? activeWorkflow.started_at;
-    const minutesSinceActivity = (Date.now() - new Date(lastActivity).getTime()) / (1000 * 60);
-
-    const STALE_MINUTES = 15; // Workflow is stale if no activity for 15 minutes
-    if (minutesSinceActivity > STALE_MINUTES) {
-      getLog().info(
-        { staleWorkflowId: activeWorkflow.id, minutesInactive: Math.floor(minutesSinceActivity) },
-        'stale_workflow_detected'
-      );
-      try {
-        await deps.store.failWorkflowRun(
-          activeWorkflow.id,
-          `Workflow timed out after ${Math.floor(minutesSinceActivity)} minutes of inactivity`
-        );
-      } catch (cleanupError) {
-        getLog().error(
-          { err: cleanupError as Error, staleWorkflowId: activeWorkflow.id },
-          'stale_workflow_cleanup_failed'
-        );
-        await sendCriticalMessage(
-          platform,
-          conversationId,
-          '❌ **Workflow blocked**: A stale workflow exists but cleanup failed. Try `/workflow cancel` first.'
-        );
-        return { success: false, error: 'Stale workflow cleanup failed' };
-      }
-      // Continue to create new workflow
-    } else {
+  // Check for concurrent workflow execution on the same path
+  try {
+    const activeWorkflow = await deps.store.getActiveWorkflowRunByPath(cwd);
+    if (activeWorkflow) {
       const startedAt = new Date(activeWorkflow.started_at).toLocaleString();
       await sendCriticalMessage(
         platform,
         conversationId,
-        `❌ **Workflow already running**: A \`${activeWorkflow.workflow_name}\` workflow (ID: ${activeWorkflow.id.slice(0, 8)}) has been running since ${startedAt}. Please wait for it to complete or use \`/workflow cancel\` to stop it.`
+        `❌ **Workflow already running**: \`${activeWorkflow.workflow_name}\` has been running since ${startedAt}. Please wait for it to complete or use \`/workflow cancel\` to stop it.`
       );
       return { success: false, error: `Workflow already running: ${activeWorkflow.workflow_name}` };
     }
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err, conversationId }, 'db_active_workflow_check_failed');
+    await sendCriticalMessage(
+      platform,
+      conversationId,
+      '❌ **Workflow blocked**: Unable to verify if another workflow is running (database error). Please try again in a moment.'
+    );
+    return { success: false, error: 'Database error checking for active workflow' };
   }
 
   // Resume detection: check for prior failed run on same workflow + worktree
-  // (skipped when run was pre-created by caller — background dispatches use fresh conversations)
-  if (!preCreatedRun) {
+  {
     // Step 1: Find prior failed run — non-critical, fall through on DB error
     let resumableRun: Awaited<ReturnType<typeof deps.store.findResumableRun>> = null;
     try {
-      resumableRun = await deps.store.findResumableRun(workflow.name, cwd, conversationDbId);
+      resumableRun = await deps.store.findResumableRun(workflow.name, cwd);
     } catch (error) {
       const err = error as Error;
       getLog().error(

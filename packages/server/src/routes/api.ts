@@ -33,6 +33,10 @@ import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discover
 import { parseWorkflow } from '@archon/workflows/loader';
 import { isValidCommandName } from '@archon/workflows/command-validation';
 import { BUNDLED_WORKFLOWS, BUNDLED_COMMANDS, isBinaryBuild } from '@archon/workflows/defaults';
+import {
+  RESUMABLE_WORKFLOW_STATUSES,
+  TERMINAL_WORKFLOW_STATUSES,
+} from '@archon/workflows/schemas/workflow-run';
 import { findMarkdownFilesRecursive } from '@archon/core/utils/commands';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -60,6 +64,7 @@ import {
   workflowRunDetailSchema,
   workflowRunByWorkerResponseSchema,
   cancelWorkflowRunResponseSchema,
+  workflowRunActionResponseSchema,
   dashboardRunsResponseSchema,
   runWorkflowBodySchema,
   dashboardRunsQuerySchema,
@@ -516,6 +521,57 @@ const cancelWorkflowRunRoute = createRoute({
   },
 });
 
+const resumeWorkflowRunRoute = createRoute({
+  method: 'post',
+  path: '/api/workflows/runs/{runId}/resume',
+  tags: ['Workflows'],
+  summary: 'Resume a failed workflow run (re-run auto-resumes from completed nodes)',
+  request: { params: z.object({ runId: z.string() }) },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowRunActionResponseSchema } },
+      description: 'Resumed',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const abandonWorkflowRunRoute = createRoute({
+  method: 'post',
+  path: '/api/workflows/runs/{runId}/abandon',
+  tags: ['Workflows'],
+  summary: 'Abandon a workflow run (mark as failed)',
+  request: { params: z.object({ runId: z.string() }) },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowRunActionResponseSchema } },
+      description: 'Abandoned',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const deleteWorkflowRunRoute = createRoute({
+  method: 'delete',
+  path: '/api/workflows/runs/{runId}',
+  tags: ['Workflows'],
+  summary: 'Delete a workflow run and its events',
+  request: { params: z.object({ runId: z.string() }) },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowRunActionResponseSchema } },
+      description: 'Deleted',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
 const getWorkflowRunRoute = createRoute({
   method: 'get',
   path: '/api/workflows/runs/{runId}',
@@ -727,8 +783,7 @@ export function registerApiRoutes(
         }
 
         // Set placeholder title immediately so the sidebar never shows "Untitled conversation"
-        const placeholderTitle =
-          message.length > 60 ? message.slice(0, 60) + '...' : message;
+        const placeholderTitle = message.length > 60 ? message.slice(0, 60) + '...' : message;
         await conversationDb.updateConversationTitle(conversation.id, placeholderTitle);
 
         // Generate proper AI title for non-command messages (fire-and-forget, overwrites placeholder)
@@ -1246,6 +1301,71 @@ export function registerApiRoutes(
     } catch (error) {
       getLog().error({ err: error }, 'cancel_workflow_run_api_failed');
       return apiError(c, 500, 'Failed to cancel workflow run');
+    }
+  });
+
+  // POST /api/workflows/runs/:runId/resume - Resume a workflow run
+  registerOpenApiRoute(resumeWorkflowRunRoute, async c => {
+    const runId = c.req.param('runId') ?? '';
+    try {
+      const run = await workflowDb.getWorkflowRun(runId);
+      if (!run) {
+        return apiError(c, 404, 'Workflow run not found');
+      }
+      if (!RESUMABLE_WORKFLOW_STATUSES.includes(run.status)) {
+        return apiError(c, 400, `Cannot resume workflow in '${run.status}' status`);
+      }
+      // Run is already failed — the next invocation on the same path auto-resumes
+      const pathInfo = run.working_path ? ` at \`${run.working_path}\`` : '';
+      return c.json({
+        success: true,
+        message: `Workflow run ready to resume: ${run.workflow_name}${pathInfo}. Re-run the workflow to auto-resume from completed nodes.`,
+      });
+    } catch (error) {
+      getLog().error({ err: error, runId }, 'api.workflow_run_resume_failed');
+      return apiError(c, 500, 'Failed to resume workflow run');
+    }
+  });
+
+  // POST /api/workflows/runs/:runId/abandon - Abandon a workflow run
+  registerOpenApiRoute(abandonWorkflowRunRoute, async c => {
+    const runId = c.req.param('runId') ?? '';
+    try {
+      const run = await workflowDb.getWorkflowRun(runId);
+      if (!run) {
+        return apiError(c, 404, 'Workflow run not found');
+      }
+      if (TERMINAL_WORKFLOW_STATUSES.includes(run.status)) {
+        return apiError(c, 400, `Cannot abandon workflow in '${run.status}' status`);
+      }
+      await workflowDb.cancelWorkflowRun(runId);
+      return c.json({ success: true, message: `Abandoned workflow: ${run.workflow_name}` });
+    } catch (error) {
+      getLog().error({ err: error, runId }, 'api.workflow_run_abandon_failed');
+      return apiError(c, 500, 'Failed to abandon workflow run');
+    }
+  });
+
+  // DELETE /api/workflows/runs/:runId - Delete a workflow run
+  registerOpenApiRoute(deleteWorkflowRunRoute, async c => {
+    const runId = c.req.param('runId') ?? '';
+    try {
+      const run = await workflowDb.getWorkflowRun(runId);
+      if (!run) {
+        return apiError(c, 404, 'Workflow run not found');
+      }
+      if (!TERMINAL_WORKFLOW_STATUSES.includes(run.status)) {
+        return apiError(
+          c,
+          400,
+          `Cannot delete workflow in '${run.status}' status — cancel it first`
+        );
+      }
+      await workflowDb.deleteWorkflowRun(runId);
+      return c.json({ success: true, message: `Deleted workflow run: ${run.workflow_name}` });
+    } catch (error) {
+      getLog().error({ err: error, runId }, 'api.workflow_run_delete_failed');
+      return apiError(c, 500, 'Failed to delete workflow run');
     }
   });
 

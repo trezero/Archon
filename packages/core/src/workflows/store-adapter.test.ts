@@ -4,7 +4,8 @@ import type { IWorkflowStore } from '@archon/workflows/store';
 // Mock DB modules before importing store-adapter
 const mockCreateWorkflowRun = mock(() => Promise.resolve({ id: 'run-1' }));
 const mockGetWorkflowRun = mock(() => Promise.resolve(null));
-const mockGetActiveWorkflowRun = mock(() => Promise.resolve(null));
+const mockGetActiveWorkflowRunByPath = mock(() => Promise.resolve(null));
+const mockFailOrphanedRuns = mock(() => Promise.resolve({ count: 0 }));
 const mockFindResumableRun = mock(() => Promise.resolve(null));
 const mockResumeWorkflowRun = mock(() => Promise.resolve({ id: 'run-1' }));
 const mockUpdateWorkflowRun = mock(() => Promise.resolve());
@@ -16,7 +17,8 @@ const mockFailWorkflowRun = mock(() => Promise.resolve());
 mock.module('../db/workflows', () => ({
   createWorkflowRun: mockCreateWorkflowRun,
   getWorkflowRun: mockGetWorkflowRun,
-  getActiveWorkflowRun: mockGetActiveWorkflowRun,
+  getActiveWorkflowRunByPath: mockGetActiveWorkflowRunByPath,
+  failOrphanedRuns: mockFailOrphanedRuns,
   findResumableRun: mockFindResumableRun,
   resumeWorkflowRun: mockResumeWorkflowRun,
   updateWorkflowRun: mockUpdateWorkflowRun,
@@ -54,7 +56,8 @@ describe('createWorkflowStore', () => {
     const requiredMethods: (keyof IWorkflowStore)[] = [
       'createWorkflowRun',
       'getWorkflowRun',
-      'getActiveWorkflowRun',
+      'getActiveWorkflowRunByPath',
+      'failOrphanedRuns',
       'findResumableRun',
       'resumeWorkflowRun',
       'updateWorkflowRun',
