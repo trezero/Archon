@@ -51,6 +51,7 @@ export interface WorkflowRunOptions {
   fromBranch?: string;
   noWorktree?: boolean;
   resume?: boolean;
+  codebaseId?: string; // Passed by resume/approve to skip path-based lookup
 }
 
 /**
@@ -248,7 +249,7 @@ export async function workflowRunCommand(
   } catch (error) {
     const err = error as Error;
     codebaseLookupError = err;
-    getLog().warn({ err, cwd }, 'codebase_lookup_failed');
+    getLog().warn({ err, cwd }, 'cli.codebase_lookup_failed');
     if (
       err.message.includes('connect') ||
       err.message.includes('ECONNREFUSED') ||
@@ -256,8 +257,23 @@ export async function workflowRunCommand(
     ) {
       getLog().warn(
         { hint: 'Check DATABASE_URL and that the database is running.' },
-        'db_connection_hint'
+        'cli.db_connection_hint'
       );
+    }
+  }
+
+  // If the caller supplied a codebase ID (e.g., from a stored run record on resume),
+  // use it directly to avoid path-based lookup that fails for worktree paths.
+  if (!codebase && !codebaseLookupError && options.codebaseId) {
+    try {
+      codebase = await codebaseDb.getCodebase(options.codebaseId);
+    } catch (error) {
+      const err = error as Error;
+      getLog().warn(
+        { err, errorType: err.constructor.name, codebaseId: options.codebaseId },
+        'cli.codebase_id_lookup_failed'
+      );
+      // Intentional: don't set codebaseLookupError — fall through to auto-registration
     }
   }
 
@@ -269,13 +285,13 @@ export async function workflowRunCommand(
         const result = await registerRepository(repoRoot);
         codebase = await codebaseDb.getCodebase(result.codebaseId);
         if (!result.alreadyExisted) {
-          getLog().info({ name: result.name }, 'codebase_auto_registered');
+          getLog().info({ name: result.name }, 'cli.codebase_auto_registered');
         }
       } catch (error) {
         const err = error as Error;
         getLog().warn(
           { err, errorType: err.constructor.name, repoRoot },
-          'codebase_auto_registration_failed'
+          'cli.codebase_auto_registration_failed'
         );
       }
     }
@@ -609,6 +625,7 @@ export async function workflowResumeCommand(runId: string): Promise<void> {
   try {
     await workflowRunCommand(run.working_path, run.workflow_name, run.user_message ?? '', {
       resume: true,
+      codebaseId: run.codebase_id ?? undefined,
     });
   } catch (error) {
     const err = error as Error;
@@ -690,6 +707,7 @@ export async function workflowApproveCommand(runId: string, comment?: string): P
   try {
     await workflowRunCommand(run.working_path, run.workflow_name, run.user_message ?? '', {
       resume: true,
+      codebaseId: run.codebase_id ?? undefined,
     });
   } catch (error) {
     const err = error as Error;
