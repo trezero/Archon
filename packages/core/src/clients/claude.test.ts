@@ -460,6 +460,45 @@ describe('ClaudeClient', () => {
       expect(mockQuery).toHaveBeenCalledTimes(1);
     });
 
+    test('classifies "Operation aborted" errors as crash and retries', async () => {
+      // Simulates the SDK cleanup race: PostToolUse hook writes to a closed pipe
+      // after a DAG node abort. Should be classified as 'crash' (not 'unknown')
+      // so the retry path is taken.
+      const error = new Error('Operation aborted');
+      mockQuery.mockImplementation(async function* () {
+        throw error;
+      });
+
+      const consumeGenerator = async (): Promise<void> => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        for await (const _ of client.sendQuery('test', '/workspace')) {
+          // consume
+        }
+      };
+
+      // crash classification = retried up to 3 times → 4 total calls
+      await expect(consumeGenerator()).rejects.toThrow(/Claude Code crash/);
+      expect(mockQuery).toHaveBeenCalledTimes(4);
+    }, 30_000);
+
+    test('classifies mixed-case "OPERATION ABORTED" errors as crash', async () => {
+      // Pattern matching uses .toLowerCase() — case must not matter
+      const error = new Error('OPERATION ABORTED');
+      mockQuery.mockImplementation(async function* () {
+        throw error;
+      });
+
+      const consumeGenerator = async (): Promise<void> => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        for await (const _ of client.sendQuery('test', '/workspace')) {
+          // consume
+        }
+      };
+
+      await expect(consumeGenerator()).rejects.toThrow(/Claude Code crash/);
+      expect(mockQuery).toHaveBeenCalledTimes(4);
+    }, 30_000);
+
     test('captures all stderr output for diagnostics', async () => {
       // When the subprocess crashes, the enriched error should include all stderr,
       // not just lines matching error keywords
