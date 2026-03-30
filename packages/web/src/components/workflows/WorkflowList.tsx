@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
@@ -18,10 +18,23 @@ export function WorkflowList(): React.ReactElement {
   const [activeCategory, setActiveCategory] = useState<WorkflowCategory>('All');
   const { codebases, selectedProjectId } = useProject();
   const [localProjectId, setLocalProjectId] = useState<string | null>(selectedProjectId);
+  const runPanelRef = useRef<HTMLDivElement>(null);
+  const messageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLocalProjectId(selectedProjectId);
   }, [selectedProjectId]);
+
+  // Scroll run panel into view and focus message input when a workflow is selected
+  useEffect(() => {
+    if (selectedWorkflow) {
+      // Small delay to let the panel render before scrolling
+      requestAnimationFrame(() => {
+        runPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        messageInputRef.current?.focus();
+      });
+    }
+  }, [selectedWorkflow]);
 
   // Reset selection when filters change so stale run panel state doesn't persist
   useEffect(() => {
@@ -163,10 +176,11 @@ export function WorkflowList(): React.ReactElement {
           No workflows match your search.
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {filteredWorkflows.map(wf => (
-            <div key={wf.name}>
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {filteredWorkflows.map(wf => (
               <WorkflowCard
+                key={wf.name}
                 workflow={wf}
                 isSelected={selectedWorkflow === wf.name}
                 onToggle={(name): void => {
@@ -180,59 +194,67 @@ export function WorkflowList(): React.ReactElement {
                   setRunError(null);
                 }}
               />
-              {/* Inline run panel — appears below the selected card */}
-              {selectedWorkflow === wf.name && (
-                <div className="mt-2 p-3 rounded-lg border border-border bg-surface-inset">
-                  <div className="flex items-center gap-2 mb-2">
-                    <label className="text-xs text-text-secondary shrink-0">Run on</label>
-                    <select
-                      value={localProjectId ?? ''}
-                      onChange={(e): void => {
-                        setLocalProjectId(e.target.value || null);
-                      }}
-                      className="flex-1 min-w-0 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
-                    >
-                      <option value="">No project (orchestrator decides)</option>
-                      {codebases?.map(cb => (
-                        <option key={cb.id} value={cb.id}>
-                          {cb.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <input
-                    type="text"
-                    value={runMessage}
-                    onChange={(e): void => {
-                      setRunMessage(e.target.value);
-                    }}
-                    placeholder="Enter a message for this workflow..."
-                    className="w-full px-3 py-2 rounded-md border border-border bg-surface text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
-                    onKeyDown={(e): void => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        void handleRun(wf.name);
-                      }
-                    }}
-                    disabled={running}
-                  />
-                  <div className="flex justify-end mt-2">
-                    <Button
-                      size="sm"
-                      onClick={(): void => {
-                        void handleRun(wf.name);
-                      }}
-                      disabled={running || !runMessage.trim()}
-                    >
-                      {running ? 'Starting...' : `Run ${wf.name}`}
-                    </Button>
-                  </div>
-                  {runError && <p className="text-xs text-error mt-1">{runError}</p>}
-                </div>
-              )}
+            ))}
+          </div>
+
+          {/* Run panel — rendered outside the grid so it's fully visible */}
+          {selectedWorkflow && (
+            <div
+              ref={runPanelRef}
+              className="p-4 rounded-lg border border-accent/50 bg-surface-inset"
+            >
+              <h3 className="text-sm font-medium text-text-primary mb-3">
+                Run <span className="font-mono text-accent-bright">{selectedWorkflow}</span>
+              </h3>
+              <div className="flex items-center gap-2 mb-2">
+                <label className="text-xs text-text-secondary shrink-0">Project</label>
+                <select
+                  value={localProjectId ?? ''}
+                  onChange={(e): void => {
+                    setLocalProjectId(e.target.value || null);
+                  }}
+                  className="flex-1 min-w-0 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+                >
+                  <option value="">No project (orchestrator decides)</option>
+                  {codebases?.map(cb => (
+                    <option key={cb.id} value={cb.id}>
+                      {cb.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  ref={messageInputRef}
+                  type="text"
+                  value={runMessage}
+                  onChange={(e): void => {
+                    setRunMessage(e.target.value);
+                  }}
+                  placeholder="Enter a message for this workflow..."
+                  className="flex-1 px-3 py-2 rounded-md border border-border bg-surface text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+                  onKeyDown={(e): void => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void handleRun(selectedWorkflow);
+                    }
+                  }}
+                  disabled={running}
+                />
+                <Button
+                  size="sm"
+                  onClick={(): void => {
+                    void handleRun(selectedWorkflow);
+                  }}
+                  disabled={running || !runMessage.trim()}
+                >
+                  {running ? 'Starting...' : 'Run'}
+                </Button>
+              </div>
+              {runError && <p className="text-xs text-error mt-2">{runError}</p>}
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </div>
   );
