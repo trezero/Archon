@@ -169,8 +169,13 @@ export function WorkflowList(): React.ReactElement {
               <WorkflowCard
                 workflow={wf}
                 isSelected={selectedWorkflow === wf.name}
-                onSelect={(name): void => {
+                onToggle={(name): void => {
                   setSelectedWorkflow(selectedWorkflow === name ? null : name);
+                  setRunMessage('');
+                  setRunError(null);
+                }}
+                onRun={(name): void => {
+                  setSelectedWorkflow(name);
                   setRunMessage('');
                   setRunError(null);
                 }}

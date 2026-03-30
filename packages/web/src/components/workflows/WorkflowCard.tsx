@@ -42,13 +42,15 @@ const ICON_MAP: Record<WorkflowIconName, LucideIcon> = {
 interface WorkflowCardProps {
   workflow: WorkflowDefinition;
   isSelected: boolean;
-  onSelect: (name: string) => void;
+  onToggle: (name: string) => void;
+  onRun: (name: string) => void;
 }
 
 export function WorkflowCard({
   workflow,
   isSelected,
-  onSelect,
+  onToggle,
+  onRun,
 }: WorkflowCardProps): React.ReactElement {
   const parsed = parseWorkflowDescription(workflow.description ?? '');
   const displayName = getWorkflowDisplayName(workflow.name);
@@ -67,12 +69,12 @@ export function WorkflowCard({
       aria-label={`Select workflow: ${displayName}`}
       aria-pressed={isSelected}
       onClick={(): void => {
-        onSelect(workflow.name);
+        onToggle(workflow.name);
       }}
       onKeyDown={(e): void => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onSelect(workflow.name);
+          onToggle(workflow.name);
         }
       }}
       className={`flex flex-col rounded-lg border p-4 transition-colors cursor-pointer h-full ${
@@ -190,7 +192,7 @@ export function WorkflowCard({
           <button
             onClick={(e): void => {
               e.stopPropagation();
-              onSelect(workflow.name);
+              onRun(workflow.name);
             }}
             className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary hover:bg-primary/20 transition-colors"
             title="Configure and run workflow"
