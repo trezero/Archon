@@ -78,7 +78,7 @@ export const commandListResponseSchema = z
 
 /** Workflow run status values. */
 export const workflowRunStatusSchema = z
-  .enum(['pending', 'running', 'completed', 'failed', 'cancelled'])
+  .enum(['pending', 'running', 'completed', 'failed', 'cancelled', 'paused'])
   .openapi('WorkflowRunStatus');
 
 /** A workflow run record. */
@@ -144,6 +144,16 @@ export const workflowRunActionResponseSchema = z
   .object({ success: z.boolean(), message: z.string() })
   .openapi('WorkflowRunActionResponse');
 
+/** POST /api/workflows/runs/:runId/approve request body. */
+export const approveWorkflowRunBodySchema = z
+  .object({ comment: z.string().optional() })
+  .openapi('ApproveWorkflowRunBody');
+
+/** POST /api/workflows/runs/:runId/reject request body. */
+export const rejectWorkflowRunBodySchema = z
+  .object({ reason: z.string().optional() })
+  .openapi('RejectWorkflowRunBody');
+
 /** Dashboard enriched workflow run (with joined codebase/conversation data). */
 export const dashboardWorkflowRunSchema = workflowRunSchema
   .extend({
@@ -172,6 +182,7 @@ export const dashboardRunsResponseSchema = z
       failed: z.number(),
       cancelled: z.number(),
       pending: z.number(),
+      paused: z.number(),
     }),
   })
   .openapi('DashboardRunsResponse');

@@ -125,6 +125,13 @@ interface ToolCompletedEvent {
   durationMs: number;
 }
 
+interface ApprovalPendingEvent {
+  type: 'approval_pending';
+  runId: string;
+  nodeId: string;
+  message: string;
+}
+
 export type WorkflowEmitterEvent =
   | WorkflowStartedEvent
   | WorkflowCompletedEvent
@@ -138,7 +145,8 @@ export type WorkflowEmitterEvent =
   | NodeSkippedEvent
   | WorkflowArtifactEvent
   | ToolStartedEvent
-  | ToolCompletedEvent;
+  | ToolCompletedEvent
+  | ApprovalPendingEvent;
 
 // ---------------------------------------------------------------------------
 // Emitter class

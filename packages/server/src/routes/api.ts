@@ -37,6 +37,7 @@ import {
   RESUMABLE_WORKFLOW_STATUSES,
   TERMINAL_WORKFLOW_STATUSES,
 } from '@archon/workflows/schemas/workflow-run';
+import type { ApprovalContext } from '@archon/workflows/schemas/workflow-run';
 import { findMarkdownFilesRecursive } from '@archon/core/utils/commands';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -69,6 +70,8 @@ import {
   runWorkflowBodySchema,
   dashboardRunsQuerySchema,
   workflowRunsQuerySchema,
+  approveWorkflowRunBodySchema,
+  rejectWorkflowRunBodySchema,
 } from './schemas/workflow.schemas';
 import {
   conversationListResponseSchema,
@@ -548,6 +551,46 @@ const abandonWorkflowRunRoute = createRoute({
     200: {
       content: { 'application/json': { schema: workflowRunActionResponseSchema } },
       description: 'Abandoned',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const approveWorkflowRunRoute = createRoute({
+  method: 'post',
+  path: '/api/workflows/runs/{runId}/approve',
+  tags: ['Workflows'],
+  summary: 'Approve a paused workflow run',
+  request: {
+    params: z.object({ runId: z.string() }),
+    body: { content: { 'application/json': { schema: approveWorkflowRunBodySchema } } },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowRunActionResponseSchema } },
+      description: 'Approved',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Not found'),
+    500: jsonError('Server error'),
+  },
+});
+
+const rejectWorkflowRunRoute = createRoute({
+  method: 'post',
+  path: '/api/workflows/runs/{runId}/reject',
+  tags: ['Workflows'],
+  summary: 'Reject a paused workflow run',
+  request: {
+    params: z.object({ runId: z.string() }),
+    body: { content: { 'application/json': { schema: rejectWorkflowRunBodySchema } } },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: workflowRunActionResponseSchema } },
+      description: 'Rejected',
     },
     400: jsonError('Bad request'),
     404: jsonError('Not found'),
@@ -1293,7 +1336,7 @@ export function registerApiRoutes(
       if (!run) {
         return apiError(c, 404, 'Workflow run not found');
       }
-      if (run.status !== 'running' && run.status !== 'pending') {
+      if (run.status !== 'running' && run.status !== 'pending' && run.status !== 'paused') {
         return apiError(c, 400, `Cannot cancel workflow in '${run.status}' status`);
       }
       await workflowDb.cancelWorkflowRun(runId);
@@ -1346,6 +1389,83 @@ export function registerApiRoutes(
     }
   });
 
+  // POST /api/workflows/runs/:runId/approve - Approve a paused workflow run
+  registerOpenApiRoute(approveWorkflowRunRoute, async c => {
+    const runId = c.req.param('runId') ?? '';
+    try {
+      const run = await workflowDb.getWorkflowRun(runId);
+      if (!run) {
+        return apiError(c, 404, 'Workflow run not found');
+      }
+      if (run.status !== 'paused') {
+        return apiError(c, 400, `Cannot approve workflow in '${run.status}' status`);
+      }
+      const body = (await c.req.json().catch(() => ({}))) as { comment?: string };
+      const comment = body.comment ?? 'Approved';
+      const approval = run.metadata.approval as ApprovalContext | undefined;
+      if (!approval?.nodeId) {
+        return apiError(c, 400, 'Workflow run is paused but missing approval context');
+      }
+      // Write node_completed event for the approval node (with user's comment as output)
+      await workflowEventDb.createWorkflowEvent({
+        workflow_run_id: runId,
+        event_type: 'node_completed',
+        step_name: approval.nodeId,
+        data: { node_output: comment, approval_decision: 'approved' },
+      });
+      await workflowEventDb.createWorkflowEvent({
+        workflow_run_id: runId,
+        event_type: 'approval_received',
+        step_name: approval.nodeId,
+        data: { decision: 'approved', comment },
+      });
+      // Transition to 'failed' so findResumableRun picks it up on next invocation
+      await workflowDb.updateWorkflowRun(runId, {
+        status: 'failed',
+        metadata: { approval_response: 'approved' },
+      });
+      const pathInfo = run.working_path ? ` at \`${run.working_path}\`` : '';
+      return c.json({
+        success: true,
+        message: `Workflow approved: ${run.workflow_name}${pathInfo}. Re-run the workflow to auto-resume from completed nodes.`,
+      });
+    } catch (error) {
+      getLog().error({ err: error, runId }, 'api.workflow_run_approve_failed');
+      return apiError(c, 500, 'Failed to approve workflow run');
+    }
+  });
+
+  // POST /api/workflows/runs/:runId/reject - Reject a paused workflow run
+  registerOpenApiRoute(rejectWorkflowRunRoute, async c => {
+    const runId = c.req.param('runId') ?? '';
+    try {
+      const run = await workflowDb.getWorkflowRun(runId);
+      if (!run) {
+        return apiError(c, 404, 'Workflow run not found');
+      }
+      if (run.status !== 'paused') {
+        return apiError(c, 400, `Cannot reject workflow in '${run.status}' status`);
+      }
+      const body = (await c.req.json().catch(() => ({}))) as { reason?: string };
+      const reason = body.reason ?? 'Rejected';
+      const approval = run.metadata.approval as ApprovalContext | undefined;
+      await workflowEventDb.createWorkflowEvent({
+        workflow_run_id: runId,
+        event_type: 'approval_received',
+        step_name: approval?.nodeId ?? 'unknown',
+        data: { decision: 'rejected', reason },
+      });
+      await workflowDb.cancelWorkflowRun(runId);
+      return c.json({
+        success: true,
+        message: `Workflow rejected: ${run.workflow_name}`,
+      });
+    } catch (error) {
+      getLog().error({ err: error, runId }, 'api.workflow_run_reject_failed');
+      return apiError(c, 500, 'Failed to reject workflow run');
+    }
+  });
+
   // DELETE /api/workflows/runs/:runId - Delete a workflow run
   registerOpenApiRoute(deleteWorkflowRunRoute, async c => {
     const runId = c.req.param('runId') ?? '';
@@ -1374,7 +1494,14 @@ export function registerApiRoutes(
     try {
       const conversationId = c.req.query('conversationId') ?? undefined;
       const rawStatus = c.req.query('status');
-      const validStatuses = ['pending', 'running', 'completed', 'failed', 'cancelled'] as const;
+      const validStatuses = [
+        'pending',
+        'running',
+        'completed',
+        'failed',
+        'cancelled',
+        'paused',
+      ] as const;
       type WorkflowRunStatus = (typeof validStatuses)[number];
       const status: WorkflowRunStatus | undefined =
         rawStatus && (validStatuses as readonly string[]).includes(rawStatus)

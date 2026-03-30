@@ -629,6 +629,8 @@ export async function executeWorkflow(
     const finalStatus = await deps.store.getWorkflowRun(workflowRun.id);
     if (finalStatus?.status === 'completed') {
       return { success: true, workflowRunId: workflowRun.id };
+    } else if (finalStatus?.status === 'paused') {
+      return { success: true, paused: true, workflowRunId: workflowRun.id };
     } else {
       return {
         success: false,

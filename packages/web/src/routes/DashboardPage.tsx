@@ -8,6 +8,8 @@ import {
   resumeWorkflowRun,
   abandonWorkflowRun,
   deleteWorkflowRun,
+  approveWorkflowRun,
+  rejectWorkflowRun,
   listCodebases,
   getHealth,
   type DashboardCounts,
@@ -182,6 +184,7 @@ export function DashboardPage(): React.ReactElement {
     failed: 0,
     cancelled: 0,
     pending: 0,
+    paused: 0,
   };
 
   // Hydrate Zustand store from REST-polled data for active runs.
@@ -285,6 +288,10 @@ export function DashboardPage(): React.ReactElement {
     runAction(abandonWorkflowRun, runId, 'Failed to abandon workflow');
   const handleDelete = (runId: string): Promise<void> =>
     runAction(deleteWorkflowRun, runId, 'Failed to delete workflow run');
+  const handleApprove = (runId: string): Promise<void> =>
+    runAction(approveWorkflowRun, runId, 'Failed to approve workflow');
+  const handleReject = (runId: string): Promise<void> =>
+    runAction(rejectWorkflowRun, runId, 'Failed to reject workflow');
 
   const totalPages = Math.ceil(total / pageSize);
   const hasMore = page + 1 < totalPages;
@@ -357,6 +364,8 @@ export function DashboardPage(): React.ReactElement {
                           onResume={handleResume}
                           onAbandon={handleAbandon}
                           onDelete={handleDelete}
+                          onApprove={handleApprove}
+                          onReject={handleReject}
                         />
                       ))}
                     </div>
@@ -371,6 +380,8 @@ export function DashboardPage(): React.ReactElement {
                       onResume={handleResume}
                       onAbandon={handleAbandon}
                       onDelete={handleDelete}
+                      onApprove={handleApprove}
+                      onReject={handleReject}
                     />
                   ))}
                 </div>

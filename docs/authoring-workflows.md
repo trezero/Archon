@@ -763,30 +763,41 @@ If the workflow fails at `batch-2`, the next invocation skips `plan` and `batch-
 
 ### Pattern: Human-in-the-Loop
 
-Split into two workflows — one proposes, the other executes after human review:
+Use an `approval` node to pause for human review before continuing:
 
 ```yaml
 name: careful-refactor
-description: Refactor with human approval at each stage
+description: Refactor with human approval gate
 
 nodes:
   - id: propose
-    command: propose-refactor    # Creates proposal artifact
-```
+    command: propose-refactor
 
-Then a separate workflow to continue after human approval:
-```yaml
-name: execute-refactor
+  - id: review-gate
+    approval:
+      message: "Review the proposed refactor before proceeding. Check the artifacts directory."
+    depends_on: [propose]
 
-nodes:
   - id: execute
     command: execute-approved-refactor
+    depends_on: [review-gate]
 
   - id: pr
     command: create-pr
     depends_on: [execute]
     context: fresh
 ```
+
+When the workflow reaches `review-gate`, it pauses and notifies you. Approve or reject via:
+
+- **CLI**: `bun run cli workflow approve <run-id>` or `bun run cli workflow reject <run-id>`
+- **Chat**: `/workflow approve <run-id>` or `/workflow reject <run-id>`
+- **Web UI**: Click the Approve/Reject buttons on the dashboard card
+- **API**: `POST /api/workflows/runs/<run-id>/approve` or `/reject`
+
+After approval via CLI, the workflow auto-resumes from the next node. Via API or chat, the run is marked resumable and resumes on the next workflow invocation. The user's approval comment is available as `$review-gate.output` in downstream nodes.
+
+Rejecting cancels the workflow.
 
 ---
 

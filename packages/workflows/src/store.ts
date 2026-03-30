@@ -23,6 +23,8 @@ export const WORKFLOW_EVENT_TYPES = [
   'tool_completed',
   'ralph_story_started',
   'ralph_story_completed',
+  'approval_requested',
+  'approval_received',
 ] as const;
 
 export type WorkflowEventType = (typeof WORKFLOW_EVENT_TYPES)[number];
@@ -51,6 +53,7 @@ export interface IWorkflowStore {
   getWorkflowRunStatus(id: string): Promise<WorkflowRunStatus | null>;
   completeWorkflowRun(id: string): Promise<void>;
   failWorkflowRun(id: string, error: string): Promise<void>;
+  pauseWorkflowRun(id: string, approvalContext: { message: string; nodeId: string }): Promise<void>;
 
   /**
    * Create a workflow event. Implementations MUST NOT throw — catch all errors

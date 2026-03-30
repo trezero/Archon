@@ -73,6 +73,7 @@ export type CommandNode = z.infer<typeof commandNodeSchema> & {
   prompt?: never;
   bash?: never;
   loop?: never;
+  approval?: never;
 };
 
 export const promptNodeSchema = dagNodeBaseSchema.extend({
@@ -84,6 +85,7 @@ export type PromptNode = z.infer<typeof promptNodeSchema> & {
   command?: never;
   bash?: never;
   loop?: never;
+  approval?: never;
 };
 
 /**
@@ -100,6 +102,7 @@ export type BashNode = z.infer<typeof bashNodeSchema> & {
   command?: never;
   prompt?: never;
   loop?: never;
+  approval?: never;
 };
 
 /**
@@ -116,10 +119,27 @@ export type LoopNode = z.infer<typeof loopNodeSchema> & {
   command?: never;
   prompt?: never;
   bash?: never;
+  approval?: never;
 };
 
-/** A single node in a DAG workflow. command, prompt, bash, and loop are mutually exclusive. */
-export type DagNode = CommandNode | PromptNode | BashNode | LoopNode;
+/**
+ * Approval node schema — pauses the workflow for human review.
+ * Extends full base for type compatibility; AI-specific fields are ignored at runtime.
+ */
+export const approvalNodeSchema = dagNodeBaseSchema.extend({
+  approval: z.object({ message: z.string().min(1, "'approval.message' must not be empty") }),
+});
+
+/** DAG node that pauses workflow execution for human approval */
+export type ApprovalNode = z.infer<typeof approvalNodeSchema> & {
+  command?: never;
+  prompt?: never;
+  bash?: never;
+  loop?: never;
+};
+
+/** A single node in a DAG workflow. command, prompt, bash, loop, and approval are mutually exclusive. */
+export type DagNode = CommandNode | PromptNode | BashNode | LoopNode | ApprovalNode;
 
 // ---------------------------------------------------------------------------
 // AI-specific fields that are meaningless on bash/loop nodes
@@ -161,6 +181,9 @@ export const dagNodeSchema = dagNodeBaseSchema
     prompt: z.string().optional(),
     bash: z.string().optional(),
     loop: loopNodeConfigSchema.optional(),
+    approval: z
+      .object({ message: z.string().min(1, "'approval.message' must not be empty") })
+      .optional(),
     // Bash-only
     timeout: z.number().optional(),
   })
@@ -181,20 +204,21 @@ export const dagNodeSchema = dagNodeBaseSchema
     const hasPrompt = typeof data.prompt === 'string' && data.prompt.trim().length > 0;
     const hasBash = typeof data.bash === 'string' && data.bash.trim().length > 0;
     const hasLoop = data.loop !== undefined;
+    const hasApproval = data.approval !== undefined;
 
-    const modeCount = [hasCommand, hasPrompt, hasBash, hasLoop].filter(Boolean).length;
+    const modeCount = [hasCommand, hasPrompt, hasBash, hasLoop, hasApproval].filter(Boolean).length;
 
     if (modeCount > 1) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "'command', 'prompt', 'bash', and 'loop' are mutually exclusive",
+        message: "'command', 'prompt', 'bash', 'loop', and 'approval' are mutually exclusive",
       });
       return z.NEVER;
     }
     if (modeCount === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "must have either 'command', 'prompt', 'bash', or 'loop'",
+        message: "must have either 'command', 'prompt', 'bash', 'loop', or 'approval'",
       });
       return z.NEVER;
     }
@@ -296,6 +320,9 @@ export const dagNodeSchema = dagNodeBaseSchema
         ...(data.timeout !== undefined ? { timeout: data.timeout } : {}),
       } as BashNode;
     }
+    if (data.approval !== undefined) {
+      return { ...base, ...shared, approval: data.approval } as ApprovalNode;
+    }
     // loop — guaranteed by superRefine to be defined at this point
     if (!data.loop) throw new Error('unreachable: loop must be defined after superRefine');
     return { ...base, loop: data.loop } as LoopNode;
@@ -314,6 +341,11 @@ export function isBashNode(node: DagNode): node is BashNode {
 /** Type guard: check if a DAG node is a loop (iterative) node */
 export function isLoopNode(node: DagNode): node is LoopNode {
   return 'loop' in node && typeof node.loop === 'object' && node.loop !== null;
+}
+
+/** Type guard: check if a DAG node is an approval (human-in-the-loop) node */
+export function isApprovalNode(node: DagNode): node is ApprovalNode {
+  return 'approval' in node && typeof node.approval === 'object' && node.approval !== null;
 }
 
 /** Type guard: validates a value is a known TriggerRule */

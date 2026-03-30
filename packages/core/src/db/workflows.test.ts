@@ -204,7 +204,7 @@ describe('workflows database', () => {
 
   describe('updateWorkflowRun', () => {
     test('updates status to completed', async () => {
-      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
 
       await updateWorkflowRun('workflow-run-123', { status: 'completed' });
 
@@ -214,7 +214,7 @@ describe('workflows database', () => {
     });
 
     test('updates status to failed', async () => {
-      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
 
       await updateWorkflowRun('workflow-run-123', { status: 'failed' });
 
@@ -224,7 +224,7 @@ describe('workflows database', () => {
     });
 
     test('updates metadata', async () => {
-      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
 
       await updateWorkflowRun('workflow-run-123', { metadata: { lastStep: 'plan' } });
 
@@ -235,7 +235,7 @@ describe('workflows database', () => {
     });
 
     test('updates multiple fields', async () => {
-      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
 
       await updateWorkflowRun('workflow-run-123', {
         status: 'running',
@@ -463,7 +463,7 @@ describe('workflows database', () => {
 
       expect(result).toEqual(failedRun);
       const [query, params] = mockQuery.mock.calls[0] as [string, unknown[]];
-      expect(query).toContain("status = 'failed'");
+      expect(query).toContain("status IN ('failed', 'paused')");
       expect(query).toContain('working_path = $2');
       expect(query).not.toContain('conversation_id');
       expect(query).toContain('ORDER BY started_at DESC');
@@ -496,7 +496,7 @@ describe('workflows database', () => {
 
       expect(result).toEqual(activeRun);
       const [query, params] = mockQuery.mock.calls[0] as [string, unknown[]];
-      expect(query).toContain("status = 'running'");
+      expect(query).toContain("status IN ('running', 'paused')");
       expect(query).toContain('working_path = $1');
       expect(params).toEqual(['/repo/path']);
     });

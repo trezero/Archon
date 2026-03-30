@@ -708,7 +708,7 @@ describe('workflowStatusCommand', () => {
 
     await workflowStatusCommand();
 
-    expect(consoleSpy).toHaveBeenCalledWith('No running workflows.');
+    expect(consoleSpy).toHaveBeenCalledWith('No active workflows.');
   });
 
   it('should list active runs with ID, name, path, status, and age', async () => {

@@ -26,7 +26,9 @@ import {
   TERMINAL_WORKFLOW_STATUSES,
   RESUMABLE_WORKFLOW_STATUSES,
 } from '@archon/workflows/schemas/workflow-run';
+import type { ApprovalContext } from '@archon/workflows/schemas/workflow-run';
 import * as workflowDb from '../db/workflows';
+import * as workflowEventDb from '../db/workflow-events';
 import { getTriggerForCommand, type DeactivatingCommand } from '../state/session-transitions';
 import { SessionNotFoundError } from '../db/sessions';
 import { cloneRepository } from './clone';
@@ -1008,7 +1010,7 @@ async function handleWorkflowCommand(
         if (!RESUMABLE_WORKFLOW_STATUSES.includes(run.status)) {
           return {
             success: false,
-            message: `Cannot resume run with status '${run.status}'. Only failed runs can be resumed.`,
+            message: `Cannot resume run with status '${run.status}'. Only failed or paused runs can be resumed.`,
           };
         }
         // The run is already failed — the next workflow invocation on the same path
@@ -1053,6 +1055,101 @@ async function handleWorkflowCommand(
         const err = error as Error;
         getLog().error({ err, runId }, 'cmd.workflow_abandon_failed');
         return { success: false, message: `Failed to abandon workflow run: ${err.message}` };
+      }
+    }
+
+    case 'approve': {
+      const runId = args[1];
+      if (!runId) {
+        return {
+          success: false,
+          message: 'Usage: /workflow approve <id> [comment]\n\nApproves a paused workflow run.',
+        };
+      }
+      const comment = args.slice(2).join(' ') || 'Approved';
+      try {
+        const run = await workflowDb.getWorkflowRun(runId);
+        if (!run) {
+          return { success: false, message: `Workflow run not found: ${runId}` };
+        }
+        if (run.status !== 'paused') {
+          return {
+            success: false,
+            message: `Cannot approve run with status '${run.status}'. Only paused runs can be approved.`,
+          };
+        }
+        const approval = run.metadata.approval as ApprovalContext | undefined;
+        if (!approval?.nodeId) {
+          return {
+            success: false,
+            message: 'Workflow run is paused but missing approval context.',
+          };
+        }
+        await workflowEventDb.createWorkflowEvent({
+          workflow_run_id: runId,
+          event_type: 'node_completed',
+          step_name: approval.nodeId,
+          data: { node_output: comment, approval_decision: 'approved' },
+        });
+        await workflowEventDb.createWorkflowEvent({
+          workflow_run_id: runId,
+          event_type: 'approval_received',
+          step_name: approval.nodeId,
+          data: { decision: 'approved', comment },
+        });
+        // Transition to 'failed' so findResumableRun picks it up
+        await workflowDb.updateWorkflowRun(runId, {
+          status: 'failed',
+          metadata: { approval_response: 'approved' },
+        });
+        const pathInfo = run.working_path ? `\nPath: \`${run.working_path}\`` : '';
+        return {
+          success: true,
+          message: `Workflow \`${run.workflow_name}\` approved.${pathInfo}\nRun the same workflow again to auto-resume from completed nodes.`,
+        };
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, runId }, 'cmd.workflow_approve_failed');
+        return { success: false, message: `Failed to approve workflow run: ${err.message}` };
+      }
+    }
+
+    case 'reject': {
+      const runId = args[1];
+      if (!runId) {
+        return {
+          success: false,
+          message: 'Usage: /workflow reject <id> [reason]\n\nRejects a paused workflow run.',
+        };
+      }
+      const reason = args.slice(2).join(' ') || 'Rejected';
+      try {
+        const run = await workflowDb.getWorkflowRun(runId);
+        if (!run) {
+          return { success: false, message: `Workflow run not found: ${runId}` };
+        }
+        if (run.status !== 'paused') {
+          return {
+            success: false,
+            message: `Cannot reject run with status '${run.status}'. Only paused runs can be rejected.`,
+          };
+        }
+        const approval = run.metadata.approval as ApprovalContext | undefined;
+        await workflowEventDb.createWorkflowEvent({
+          workflow_run_id: runId,
+          event_type: 'approval_received',
+          step_name: approval?.nodeId ?? 'unknown',
+          data: { decision: 'rejected', reason },
+        });
+        await workflowDb.cancelWorkflowRun(runId);
+        return {
+          success: true,
+          message: `Workflow \`${run.workflow_name}\` rejected and cancelled.`,
+        };
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, runId }, 'cmd.workflow_reject_failed');
+        return { success: false, message: `Failed to reject workflow run: ${err.message}` };
       }
     }
 
@@ -1153,7 +1250,7 @@ async function handleWorkflowCommand(
       return {
         success: false,
         message:
-          'Usage:\n  /workflow list - Show available workflows\n  /workflow reload - Reload workflow definitions\n  /workflow status - Show all active workflows\n  /workflow cancel - Cancel running workflow\n  /workflow resume <id> - Resume a failed run\n  /workflow abandon <id> - Discard a failed run\n  /workflow run <name> [args] - Run a workflow directly',
+          'Usage:\n  /workflow list - Show available workflows\n  /workflow reload - Reload workflow definitions\n  /workflow status - Show all active workflows\n  /workflow cancel - Cancel running workflow\n  /workflow resume <id> - Resume a failed run\n  /workflow abandon <id> - Discard a failed run\n  /workflow approve <id> [comment] - Approve a paused run\n  /workflow reject <id> [reason] - Reject a paused run\n  /workflow run <name> [args] - Run a workflow directly',
       };
   }
 }
@@ -1186,6 +1283,8 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
 - \`/workflow cancel\` — Cancel the active workflow
 - \`/workflow resume <id>\` — Resume a failed run
 - \`/workflow abandon <id>\` — Discard a failed run
+- \`/workflow approve <id>\` — Approve a paused run
+- \`/workflow reject <id>\` — Reject a paused run
 
 **Projects**
 - \`/register-project <name> <path>\` — Register a local project

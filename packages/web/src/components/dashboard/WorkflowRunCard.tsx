@@ -13,6 +13,8 @@ import {
   PlayCircle,
   Ban,
   Trash2,
+  CheckCircle,
+  Pause,
 } from 'lucide-react';
 import type { DashboardRunResponse } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -26,6 +28,8 @@ interface WorkflowRunCardProps {
   onResume?: (runId: string) => void;
   onAbandon?: (runId: string) => void;
   onDelete?: (runId: string) => void;
+  onApprove?: (runId: string) => void;
+  onReject?: (runId: string) => void;
 }
 
 const PLATFORM_ICONS: Record<string, React.ReactElement> = {
@@ -93,6 +97,8 @@ export function WorkflowRunCard({
   onResume,
   onAbandon,
   onDelete,
+  onApprove,
+  onReject,
 }: WorkflowRunCardProps): React.ReactElement {
   const navigate = useNavigate();
   const [elapsed, setElapsed] = useState(() => formatDuration(run.started_at, run.completed_at));
@@ -101,7 +107,7 @@ export function WorkflowRunCard({
   const liveState = useWorkflowStore(state => state.workflows.get(run.id));
 
   useEffect(() => {
-    if (run.status !== 'running') return;
+    if (run.status !== 'running' && run.status !== 'paused') return;
     const interval = setInterval(() => {
       setElapsed(formatDuration(run.started_at, null));
     }, 1000);
@@ -127,6 +133,7 @@ export function WorkflowRunCard({
           className={cn(
             'h-2.5 w-2.5 shrink-0 rounded-full',
             run.status === 'running' && 'bg-primary animate-pulse',
+            run.status === 'paused' && 'bg-warning animate-pulse',
             run.status === 'pending' && 'bg-text-tertiary'
           )}
         />
@@ -137,6 +144,7 @@ export function WorkflowRunCard({
           className={cn(
             'inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium',
             run.status === 'running' && 'bg-primary/10 text-primary',
+            run.status === 'paused' && 'bg-warning/10 text-warning',
             run.status === 'pending' && 'bg-surface-elevated text-text-secondary'
           )}
         >
@@ -187,6 +195,20 @@ export function WorkflowRunCard({
         </div>
       )}
 
+      {/* Approval request message */}
+      {run.status === 'paused' && run.metadata?.approval != null && (
+        <div className="rounded-md bg-warning/5 border border-warning/20 px-3 py-2 flex items-start gap-2">
+          <Pause className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+          <p className="text-xs text-text-secondary">
+            {(
+              run.metadata.approval as {
+                message?: string;
+              }
+            )?.message ?? 'Waiting for approval'}
+          </p>
+        </div>
+      )}
+
       {/* Working path */}
       {run.working_path && (
         <p className="text-[11px] text-text-tertiary truncate">
@@ -228,6 +250,30 @@ export function WorkflowRunCard({
           </a>
         )}
         <div className="ml-auto flex items-center gap-1">
+          {run.status === 'paused' && onApprove && (
+            <button
+              onClick={(): void => {
+                onApprove(run.id);
+              }}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-success/80 hover:bg-success/10 hover:text-success transition-colors"
+            >
+              <CheckCircle className="h-3.5 w-3.5" />
+              Approve
+            </button>
+          )}
+          {run.status === 'paused' && onReject && (
+            <button
+              onClick={(): void => {
+                if (window.confirm(`Reject workflow "${run.workflow_name}"?`)) {
+                  onReject(run.id);
+                }
+              }}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-error/80 hover:bg-error/10 hover:text-error transition-colors"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              Reject
+            </button>
+          )}
           {run.status === 'failed' && onResume && (
             <button
               onClick={(): void => {

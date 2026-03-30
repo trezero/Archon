@@ -10,6 +10,8 @@ interface WorkflowRunGroupProps {
   onResume?: (runId: string) => void;
   onAbandon?: (runId: string) => void;
   onDelete?: (runId: string) => void;
+  onApprove?: (runId: string) => void;
+  onReject?: (runId: string) => void;
 }
 
 export function WorkflowRunGroup({
@@ -19,6 +21,8 @@ export function WorkflowRunGroup({
   onResume,
   onAbandon,
   onDelete,
+  onApprove,
+  onReject,
 }: WorkflowRunGroupProps): React.ReactElement {
   const navigate = useNavigate();
 
@@ -51,6 +55,8 @@ export function WorkflowRunGroup({
             onResume={onResume}
             onAbandon={onAbandon}
             onDelete={onDelete}
+            onApprove={onApprove}
+            onReject={onReject}
           />
         ))}
       </div>

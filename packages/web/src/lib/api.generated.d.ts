@@ -1600,7 +1600,7 @@ export interface components {
       message: string;
     };
     /** @enum {string} */
-    WorkflowRunStatus: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+    WorkflowRunStatus: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused';
     WorkflowRun: {
       id: string;
       workflow_name: string;

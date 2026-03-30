@@ -20,6 +20,22 @@ function rollback(): Promise<void> {
 /** Guard error for deleteWorkflowRun — re-thrown without wrapping in the outer catch. */
 class WorkflowRunGuardError extends Error {}
 
+/**
+ * Normalize a WorkflowRun row from the database.
+ * SQLite stores metadata as TEXT (JSON string), PostgreSQL returns parsed objects.
+ * This ensures metadata is always a parsed object regardless of database backend.
+ */
+function normalizeWorkflowRun<T extends WorkflowRun>(row: T): T {
+  if (typeof row.metadata === 'string') {
+    try {
+      row.metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+    } catch {
+      row.metadata = {};
+    }
+  }
+  return row;
+}
+
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
 function getLog(): ReturnType<typeof createLogger> {
@@ -88,7 +104,7 @@ export async function createWorkflowRun(data: {
         `Failed to create workflow run: INSERT returned no rows (workflow: ${data.workflow_name})`
       );
     }
-    return row;
+    return normalizeWorkflowRun(row);
   } catch (error) {
     const err = error as Error;
     getLog().error({ err }, 'db.workflow_run_create_failed');
@@ -102,7 +118,8 @@ export async function getWorkflowRun(id: string): Promise<WorkflowRun | null> {
       'SELECT * FROM remote_agent_workflow_runs WHERE id = $1',
       [id]
     );
-    return result.rows[0] || null;
+    const row = result.rows[0];
+    return row ? normalizeWorkflowRun(row) : null;
   } catch (error) {
     const err = error as Error;
     getLog().error({ err }, 'db.workflow_run_get_failed');
@@ -132,7 +149,8 @@ export async function getActiveWorkflowRun(conversationId: string): Promise<Work
        ORDER BY started_at DESC LIMIT 1`,
       [conversationId, conversationId]
     );
-    return result.rows[0] || null;
+    const row = result.rows[0];
+    return row ? normalizeWorkflowRun(row) : null;
   } catch (error) {
     const err = error as Error;
     getLog().error({ err }, 'db.workflow_run_get_active_failed');
@@ -144,11 +162,12 @@ export async function getActiveWorkflowRunByPath(workingPath: string): Promise<W
   try {
     const result = await pool.query<WorkflowRun>(
       `SELECT * FROM remote_agent_workflow_runs
-       WHERE working_path = $1 AND status = 'running'
+       WHERE working_path = $1 AND status IN ('running', 'paused')
        ORDER BY started_at DESC LIMIT 1`,
       [workingPath]
     );
-    return result.rows[0] ?? null;
+    const row = result.rows[0];
+    return row ? normalizeWorkflowRun(row) : null;
   } catch (error) {
     const err = error as Error;
     getLog().error({ err, workingPath }, 'db.workflow_run_get_active_by_path_failed');
@@ -186,12 +205,13 @@ export async function findResumableRun(
       `SELECT * FROM remote_agent_workflow_runs
        WHERE workflow_name = $1
          AND working_path = $2
-         AND status = 'failed'
+         AND status IN ('failed', 'paused')
        ORDER BY started_at DESC
        LIMIT 1`,
       [workflowName, workingPath]
     );
-    return result.rows[0] ?? null;
+    const row = result.rows[0];
+    return row ? normalizeWorkflowRun(row) : null;
   } catch (error) {
     const err = error as Error;
     getLog().warn({ err, workflowName, workingPath }, 'db.workflow_run_find_resumable_failed');
@@ -242,7 +262,7 @@ export async function resumeWorkflowRun(id: string): Promise<WorkflowRun> {
     getLog().error({ workflowRunId: id }, 'db.workflow_run_resume_vanished');
     throw new Error(`Workflow run vanished after update (id: ${id})`);
   }
-  return row;
+  return normalizeWorkflowRun(row);
 }
 
 /**
@@ -260,7 +280,8 @@ export async function getWorkflowRunByWorkerPlatformId(
        ORDER BY r.started_at DESC LIMIT 1`,
       [platformConversationId]
     );
-    return result.rows[0] || null;
+    const row = result.rows[0];
+    return row ? normalizeWorkflowRun(row) : null;
   } catch (error) {
     const err = error as Error;
     getLog().error({ err }, 'db.workflow_run_get_by_worker_platform_id_failed');
@@ -291,10 +312,15 @@ export async function updateWorkflowRun(
 
   if (updates.status !== undefined) {
     addParam('status = ?', updates.status);
+    // Auto-set completed_at for terminal-like statuses, but skip when
+    // transitioning to 'failed' for approval resume (not a real completion)
+    const isApprovalTransition =
+      updates.status === 'failed' && updates.metadata?.approval_response !== undefined;
     if (
-      updates.status === 'completed' ||
-      updates.status === 'failed' ||
-      updates.status === 'cancelled'
+      !isApprovalTransition &&
+      (updates.status === 'completed' ||
+        updates.status === 'failed' ||
+        updates.status === 'cancelled')
     ) {
       setClauses.push(`completed_at = ${dialect.now()}`);
     }
@@ -312,11 +338,16 @@ export async function updateWorkflowRun(
   const idParam = `$${values.length}`;
 
   try {
-    await pool.query(
+    const result = await pool.query(
       `UPDATE remote_agent_workflow_runs SET ${setClauses.join(', ')} WHERE id = ${idParam}`,
       values
     );
+    if (result.rowCount === 0) {
+      getLog().warn({ workflowRunId: id }, 'db.workflow_run_update_no_match');
+      throw new Error(`Workflow run not found (id: ${id})`);
+    }
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Workflow run not found')) throw error;
     const err = error as Error;
     getLog().error({ err }, 'db.workflow_run_update_failed');
     throw new Error(`Failed to update workflow run: ${err.message}`);
@@ -382,6 +413,35 @@ export async function cancelWorkflowRun(id: string): Promise<void> {
 }
 
 /**
+ * Pause a running workflow run for human approval.
+ * Sets status to 'paused' and stores approval context in metadata.
+ * Does NOT set completed_at — the run is not finished.
+ */
+export async function pauseWorkflowRun(
+  id: string,
+  approvalContext: { message: string; nodeId: string }
+): Promise<void> {
+  const dialect = getDialect();
+  try {
+    const result = await pool.query(
+      `UPDATE remote_agent_workflow_runs
+       SET status = 'paused', metadata = ${dialect.jsonMerge('metadata', 2)}
+       WHERE id = $1 AND status = 'running'`,
+      [id, JSON.stringify({ approval: approvalContext })]
+    );
+    if (result.rowCount === 0) {
+      getLog().warn({ workflowRunId: id }, 'db.workflow_run_pause_no_match');
+      throw new Error(`Workflow run not found or not in running state (id: ${id})`);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Workflow run not found')) throw error;
+    const err = error as Error;
+    getLog().error({ err, workflowRunId: id }, 'db.workflow_run_pause_failed');
+    throw new Error(`Failed to pause workflow run: ${err.message}`);
+  }
+}
+
+/**
  * Enriched workflow run with joined data for the dashboard Command Center.
  */
 export interface DashboardWorkflowRun extends WorkflowRun {
@@ -421,6 +481,7 @@ export interface DashboardRunsResult {
     failed: number;
     cancelled: number;
     pending: number;
+    paused: number;
   };
 }
 
@@ -561,6 +622,7 @@ export async function listDashboardRuns(
       failed: 0,
       cancelled: 0,
       pending: 0,
+      paused: 0,
     };
     for (const row of countResult.rows) {
       const n = Number(row.cnt);
@@ -575,7 +637,7 @@ export async function listDashboardRuns(
       ? (counts[options.status as keyof typeof counts] ?? 0)
       : counts.all;
 
-    return { runs: [...listResult.rows], total, counts };
+    return { runs: listResult.rows.map(normalizeWorkflowRun), total, counts };
   } catch (error) {
     const err = error as Error;
     getLog().error({ err }, 'list_dashboard_runs_failed');
@@ -626,7 +688,7 @@ export async function listWorkflowRuns(options?: {
       `SELECT * FROM remote_agent_workflow_runs ${whereStr} ORDER BY started_at DESC LIMIT ${limitParam}`,
       values
     );
-    return [...result.rows];
+    return result.rows.map(normalizeWorkflowRun);
   } catch (error) {
     const err = error as Error;
     getLog().error({ err }, 'db.workflow_run_list_failed');

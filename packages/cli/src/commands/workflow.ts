@@ -15,7 +15,7 @@ import { createWorkflowDeps } from '@archon/core/workflows/store-adapter';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import { executeWorkflow } from '@archon/workflows/executor';
 import type { WorkflowLoadResult } from '@archon/workflows/schemas/workflow';
-import type { WorkflowRun } from '@archon/workflows/schemas/workflow-run';
+import type { WorkflowRun, ApprovalContext } from '@archon/workflows/schemas/workflow-run';
 import {
   TERMINAL_WORKFLOW_STATUSES,
   RESUMABLE_WORKFLOW_STATUSES,
@@ -494,7 +494,9 @@ export async function workflowRunCommand(
   );
 
   // Check result and exit appropriately
-  if (result.success) {
+  if (result.success && 'paused' in result && result.paused) {
+    console.log('\nWorkflow paused — waiting for approval.');
+  } else if (result.success) {
     console.log('\nWorkflow completed successfully.');
   } else {
     throw new Error(`Workflow failed: ${result.error}`);
@@ -547,7 +549,7 @@ export async function workflowStatusCommand(json?: boolean): Promise<void> {
   let runs: WorkflowRun[];
   try {
     runs = await workflowDb.listWorkflowRuns({
-      status: 'running',
+      status: ['running', 'paused'],
     });
   } catch (error) {
     const err = error as Error;
@@ -561,7 +563,7 @@ export async function workflowStatusCommand(json?: boolean): Promise<void> {
   }
 
   if (runs.length === 0) {
-    console.log('No running workflows.');
+    console.log('No active workflows.');
     return;
   }
 
@@ -588,7 +590,7 @@ export async function workflowResumeCommand(runId: string): Promise<void> {
   if (!RESUMABLE_WORKFLOW_STATUSES.includes(run.status)) {
     throw new Error(
       `Workflow run '${runId}' is in status '${run.status}' and cannot be resumed.\n` +
-        "Only 'failed' runs can be resumed."
+        "Only 'failed' or 'paused' runs can be resumed."
     );
   }
   if (!run.working_path) {
@@ -637,6 +639,98 @@ export async function workflowAbandonCommand(runId: string): Promise<void> {
     throw new Error(`Failed to abandon workflow run ${runId}: ${err.message}`);
   }
   console.log(`Abandoned workflow run: ${runId}`);
+  console.log(`Workflow: ${run.workflow_name}`);
+}
+
+/**
+ * Approve a paused workflow run by ID.
+ * Writes the approval events and transitions to 'failed' for auto-resume.
+ */
+export async function workflowApproveCommand(runId: string, comment?: string): Promise<void> {
+  const run = await getRunOrThrow(runId, 'cli.workflow_approve_lookup_failed');
+  if (run.status !== 'paused') {
+    throw new Error(
+      `Workflow run '${runId}' is in status '${run.status}' and cannot be approved.\n` +
+        "Only 'paused' runs can be approved."
+    );
+  }
+  if (!run.working_path) {
+    throw new Error(
+      `Workflow run '${runId}' has no working path recorded.\n` +
+        'Cannot determine where to resume.'
+    );
+  }
+  const approval = run.metadata.approval as ApprovalContext | undefined;
+  if (!approval?.nodeId) {
+    throw new Error('Workflow run is paused but missing approval context.');
+  }
+  const approvalComment = comment ?? 'Approved';
+  const store = createWorkflowStore();
+  await store.createWorkflowEvent({
+    workflow_run_id: runId,
+    event_type: 'node_completed',
+    step_name: approval.nodeId,
+    data: { node_output: approvalComment, approval_decision: 'approved' },
+  });
+  await store.createWorkflowEvent({
+    workflow_run_id: runId,
+    event_type: 'approval_received',
+    step_name: approval.nodeId,
+    data: { decision: 'approved', comment: approvalComment },
+  });
+  await workflowDb.updateWorkflowRun(runId, {
+    status: 'failed',
+    metadata: { approval_response: 'approved' },
+  });
+  console.log(`Approved workflow: ${run.workflow_name}`);
+  console.log(`Path: ${run.working_path}`);
+  console.log('');
+  console.log('Resuming workflow...');
+
+  try {
+    await workflowRunCommand(run.working_path, run.workflow_name, run.user_message ?? '', {
+      resume: true,
+    });
+  } catch (error) {
+    const err = error as Error;
+    getLog().error(
+      { err, runId, workflowName: run.workflow_name },
+      'cli.workflow_approve_resume_failed'
+    );
+    throw new Error(
+      `Approved but failed to resume workflow '${run.workflow_name}': ${err.message}\n` +
+        `The approval was recorded. Run 'bun run cli workflow resume ${runId}' to retry.`
+    );
+  }
+}
+
+/**
+ * Reject a paused workflow run by ID (marks it as cancelled).
+ */
+export async function workflowRejectCommand(runId: string, reason?: string): Promise<void> {
+  const run = await getRunOrThrow(runId, 'cli.workflow_reject_lookup_failed');
+  if (run.status !== 'paused') {
+    throw new Error(
+      `Workflow run '${runId}' is in status '${run.status}' and cannot be rejected.\n` +
+        "Only 'paused' runs can be rejected."
+    );
+  }
+  const approval = run.metadata.approval as ApprovalContext | undefined;
+  const store = createWorkflowStore();
+  await store.createWorkflowEvent({
+    workflow_run_id: runId,
+    event_type: 'approval_received',
+    step_name: approval?.nodeId ?? 'unknown',
+    data: { decision: 'rejected', reason: reason ?? 'Rejected' },
+  });
+  try {
+    await workflowDb.cancelWorkflowRun(runId);
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err, runId }, 'cli.workflow_reject_failed');
+    throw new Error(`Failed to reject workflow run ${runId}: ${err.message}`);
+  }
+  console.log(`Rejected workflow run: ${runId}`);
   console.log(`Workflow: ${run.workflow_name}`);
 }
 

@@ -127,6 +127,19 @@ export function mapWorkflowEvent(event: WorkflowEmitterEvent): string | null {
         timestamp: Date.now(),
       });
 
+    case 'approval_pending':
+      return JSON.stringify({
+        type: 'workflow_status',
+        runId: event.runId,
+        workflowName: '',
+        status: 'paused',
+        timestamp: Date.now(),
+        approval: {
+          nodeId: event.nodeId,
+          message: event.message,
+        },
+      });
+
     default: {
       const exhaustiveCheck: never = event;
       getLog().warn(

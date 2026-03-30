@@ -226,6 +226,7 @@ export interface DashboardCounts {
   failed: number;
   cancelled: number;
   pending: number;
+  paused: number;
 }
 
 /** Paginated dashboard runs response. */
@@ -285,6 +286,28 @@ export async function deleteWorkflowRun(
 ): Promise<{ success: boolean; message: string }> {
   return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}`, {
     method: 'DELETE',
+  });
+}
+
+export async function approveWorkflowRun(
+  runId: string,
+  comment?: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ comment }),
+  });
+}
+
+export async function rejectWorkflowRun(
+  runId: string,
+  reason?: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchJSON(`/api/workflows/runs/${encodeURIComponent(runId)}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
   });
 }
 

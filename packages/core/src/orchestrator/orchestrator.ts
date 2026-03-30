@@ -377,7 +377,7 @@ export async function dispatchBackgroundWorkflow(
           preCreatedRun
         );
         // Surface workflow output to parent conversation as a result card
-        if (result.success && result.summary) {
+        if (result.success && !('paused' in result) && result.summary) {
           try {
             await ctx.platform.sendMessage(ctx.conversationId, result.summary, {
               category: 'workflow_result',

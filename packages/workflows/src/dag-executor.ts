@@ -27,7 +27,7 @@ import type {
   WorkflowRun,
   WorkflowNodeHooks,
 } from './schemas';
-import { isBashNode, isLoopNode } from './schemas';
+import { isBashNode, isLoopNode, isApprovalNode } from './schemas';
 import { formatToolCall } from './utils/tool-formatter';
 import { createLogger } from '@archon/paths';
 import { getWorkflowEventEmitter } from './event-emitter';
@@ -1912,6 +1912,44 @@ export async function executeDagWorkflow(
             return { nodeId: node.id, output };
           }
 
+          // 3c. Approval node dispatch — pauses workflow for human review
+          if (isApprovalNode(node)) {
+            const approvalMsg =
+              `\u23f8 **Approval required**: ${node.approval.message}\n\n` +
+              `Run ID: \`${workflowRun.id}\`\n` +
+              `Approve: \`/workflow approve ${workflowRun.id}\` | Reject: \`/workflow reject ${workflowRun.id}\``;
+            await safeSendMessage(platform, conversationId, approvalMsg, {
+              workflowId: workflowRun.id,
+              nodeName: node.id,
+            });
+            deps.store
+              .createWorkflowEvent({
+                workflow_run_id: workflowRun.id,
+                event_type: 'approval_requested',
+                step_name: node.id,
+                data: { message: node.approval.message },
+              })
+              .catch((err: Error) => {
+                getLog().error(
+                  { err, workflowRunId: workflowRun.id, eventType: 'approval_requested' },
+                  'workflow.event_persist_failed'
+                );
+              });
+            await deps.store.pauseWorkflowRun(workflowRun.id, {
+              message: node.approval.message,
+              nodeId: node.id,
+            });
+            getWorkflowEventEmitter().emit({
+              type: 'approval_pending',
+              runId: workflowRun.id,
+              nodeId: node.id,
+              message: node.approval.message,
+            });
+            // Return completed — the between-layer status check will see 'paused' and break.
+            // On resume, the approve endpoint writes a real node_completed event with the user's response.
+            return { nodeId: node.id, output: { state: 'completed' as const, output: '' } };
+          }
+
           // 4. Resolve per-node provider/model/options
           const { provider, options: nodeOptions } = await resolveNodeProviderAndModel(
             node,
@@ -2056,7 +2094,7 @@ export async function executeDagWorkflow(
       getLog().warn({ layerIdx, nodeCount: layer.length }, 'dag_layer_had_failures');
     }
 
-    // Check for non-running status between DAG layers (cancellation, deletion, or future: pause)
+    // Check for non-running status between DAG layers (cancellation, deletion, pause)
     try {
       const dagStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
       if (dagStatus === null || dagStatus !== 'running') {
@@ -2070,12 +2108,15 @@ export async function executeDagWorkflow(
           },
           'dag.stop_detected_between_layers'
         );
-        await safeSendMessage(
-          platform,
-          conversationId,
-          `⚠️ **Workflow stopped** (${effectiveStatus}): DAG execution stopped after layer ${String(layerIdx + 1)}/${String(layers.length)}`,
-          { workflowId: workflowRun.id }
-        );
+        // Paused is intentional (approval gate) — the approval message was already sent
+        if (effectiveStatus !== 'paused') {
+          await safeSendMessage(
+            platform,
+            conversationId,
+            `⚠️ **Workflow stopped** (${effectiveStatus}): DAG execution stopped after layer ${String(layerIdx + 1)}/${String(layers.length)}`,
+            { workflowId: workflowRun.id }
+          );
+        }
         break;
       }
     } catch (statusErr) {

@@ -34,9 +34,11 @@ export {
   promptNodeSchema,
   bashNodeSchema,
   loopNodeSchema,
+  approvalNodeSchema,
   dagNodeSchema,
   isBashNode,
   isLoopNode,
+  isApprovalNode,
   isTriggerRule,
   BASH_NODE_AI_FIELDS,
 } from './dag-node';
@@ -47,6 +49,7 @@ export type {
   PromptNode,
   BashNode,
   LoopNode,
+  ApprovalNode,
   DagNode,
 } from './dag-node';
 
@@ -82,6 +85,7 @@ export type {
   NodeOutput,
   WorkflowRun,
   ArtifactType,
+  ApprovalContext,
 } from './workflow-run';
 
 // Result types (non-schema hand-written types)
