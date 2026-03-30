@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { listWorkflows, createConversation, runWorkflow, deleteConversation } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { useProject } from '@/contexts/ProjectContext';
 import { WorkflowCard } from '@/components/workflows/WorkflowCard';
-import { getWorkflowCategory, CATEGORIES, type WorkflowCategory } from '@/lib/workflow-metadata';
+import {
+  getWorkflowCategory,
+  getWorkflowDisplayName,
+  CATEGORIES,
+  type WorkflowCategory,
+} from '@/lib/workflow-metadata';
 
 export function WorkflowList(): React.ReactElement {
   const navigate = useNavigate();
@@ -18,19 +23,16 @@ export function WorkflowList(): React.ReactElement {
   const [activeCategory, setActiveCategory] = useState<WorkflowCategory>('All');
   const { codebases, selectedProjectId } = useProject();
   const [localProjectId, setLocalProjectId] = useState<string | null>(selectedProjectId);
-  const runPanelRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLocalProjectId(selectedProjectId);
   }, [selectedProjectId]);
 
-  // Scroll run panel into view and focus message input when a workflow is selected
+  // Focus message input when a workflow is selected
   useEffect(() => {
     if (selectedWorkflow) {
-      // Small delay to let the panel render before scrolling
       requestAnimationFrame(() => {
-        runPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         messageInputRef.current?.focus();
       });
     }
@@ -124,59 +126,60 @@ export function WorkflowList(): React.ReactElement {
   }
 
   const hasWorkflows = workflows != null && workflows.length > 0;
+  const displayName = selectedWorkflow ? getWorkflowDisplayName(selectedWorkflow) : '';
 
   return (
-    <div className="space-y-4">
-      {/* Search + Category Filters — only show when workflows exist */}
-      {hasWorkflows && (
-        <div className="space-y-3">
-          {/* Search bar */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-text-tertiary" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e): void => {
-                setSearchQuery(e.target.value);
-              }}
-              placeholder="Search workflows..."
-              className="w-full pl-9 pr-3 py-2 rounded-lg border border-border bg-surface text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
-            />
-          </div>
-
-          {/* Category filter tabs */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {CATEGORIES.map(cat => (
-              <button
-                key={cat}
-                onClick={(): void => {
-                  setActiveCategory(cat);
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-auto space-y-4 p-0">
+        {/* Search + Category Filters — only show when workflows exist */}
+        {hasWorkflows && (
+          <div className="space-y-3">
+            {/* Search bar */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-text-tertiary" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e): void => {
+                  setSearchQuery(e.target.value);
                 }}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                  activeCategory === cat
-                    ? 'bg-primary text-white'
-                    : 'bg-surface-elevated text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+                placeholder="Search workflows..."
+                className="w-full pl-9 pr-3 py-2 rounded-lg border border-border bg-surface text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </div>
 
-      {/* Workflow grid */}
-      {!hasWorkflows ? (
-        <div className="text-sm text-text-secondary">
-          No workflows found. Add workflow definitions to{' '}
-          <code className="text-xs bg-surface-inset px-1 py-0.5 rounded">.archon/workflows/</code>
-        </div>
-      ) : filteredWorkflows.length === 0 ? (
-        <div className="text-sm text-text-secondary py-8 text-center">
-          No workflows match your search.
-        </div>
-      ) : (
-        <>
+            {/* Category filter tabs */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {CATEGORIES.map(cat => (
+                <button
+                  key={cat}
+                  onClick={(): void => {
+                    setActiveCategory(cat);
+                  }}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    activeCategory === cat
+                      ? 'bg-primary text-white'
+                      : 'bg-surface-elevated text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Workflow grid */}
+        {!hasWorkflows ? (
+          <div className="text-sm text-text-secondary">
+            No workflows found. Add workflow definitions to{' '}
+            <code className="text-xs bg-surface-inset px-1 py-0.5 rounded">.archon/workflows/</code>
+          </div>
+        ) : filteredWorkflows.length === 0 ? (
+          <div className="text-sm text-text-secondary py-8 text-center">
+            No workflows match your search.
+          </div>
+        ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {filteredWorkflows.map(wf => (
               <WorkflowCard
@@ -196,65 +199,75 @@ export function WorkflowList(): React.ReactElement {
               />
             ))}
           </div>
+        )}
+      </div>
 
-          {/* Run panel — rendered outside the grid so it's fully visible */}
-          {selectedWorkflow && (
-            <div
-              ref={runPanelRef}
-              className="p-4 rounded-lg border border-accent/50 bg-surface-inset"
-            >
-              <h3 className="text-sm font-medium text-text-primary mb-3">
-                Run <span className="font-mono text-accent-bright">{selectedWorkflow}</span>
-              </h3>
-              <div className="flex items-center gap-2 mb-2">
-                <label className="text-xs text-text-secondary shrink-0">Project</label>
-                <select
-                  value={localProjectId ?? ''}
-                  onChange={(e): void => {
-                    setLocalProjectId(e.target.value || null);
-                  }}
-                  className="flex-1 min-w-0 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
-                >
-                  <option value="">No project (orchestrator decides)</option>
-                  {codebases?.map(cb => (
-                    <option key={cb.id} value={cb.id}>
-                      {cb.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-2">
-                <input
-                  ref={messageInputRef}
-                  type="text"
-                  value={runMessage}
-                  onChange={(e): void => {
-                    setRunMessage(e.target.value);
-                  }}
-                  placeholder="Enter a message for this workflow..."
-                  className="flex-1 px-3 py-2 rounded-md border border-border bg-surface text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
-                  onKeyDown={(e): void => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      void handleRun(selectedWorkflow);
-                    }
-                  }}
-                  disabled={running}
-                />
-                <Button
-                  size="sm"
-                  onClick={(): void => {
-                    void handleRun(selectedWorkflow);
-                  }}
-                  disabled={running || !runMessage.trim()}
-                >
-                  {running ? 'Starting...' : 'Run'}
-                </Button>
-              </div>
-              {runError && <p className="text-xs text-error mt-2">{runError}</p>}
+      {/* Sticky run bar — anchored at bottom of viewport, slides up when workflow selected */}
+      {selectedWorkflow && (
+        <div className="shrink-0 border-t border-border bg-surface-elevated px-4 py-3">
+          <div className="flex items-center gap-3">
+            {/* Workflow name + dismiss */}
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-sm font-medium text-text-primary">{displayName}</span>
+              <button
+                onClick={(): void => {
+                  setSelectedWorkflow(null);
+                  setRunMessage('');
+                  setRunError(null);
+                }}
+                className="p-0.5 rounded text-text-tertiary hover:text-text-primary transition-colors"
+                title="Dismiss"
+              >
+                <X className="size-3.5" />
+              </button>
             </div>
-          )}
-        </>
+
+            {/* Project picker */}
+            <select
+              value={localProjectId ?? ''}
+              onChange={(e): void => {
+                setLocalProjectId(e.target.value || null);
+              }}
+              className="w-48 shrink-0 rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+            >
+              <option value="">No project</option>
+              {codebases?.map(cb => (
+                <option key={cb.id} value={cb.id}>
+                  {cb.name}
+                </option>
+              ))}
+            </select>
+
+            {/* Message input + Run button */}
+            <input
+              ref={messageInputRef}
+              type="text"
+              value={runMessage}
+              onChange={(e): void => {
+                setRunMessage(e.target.value);
+              }}
+              placeholder="Enter a message for this workflow..."
+              className="flex-1 min-w-0 px-3 py-1.5 rounded-md border border-border bg-surface text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+              onKeyDown={(e): void => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void handleRun(selectedWorkflow);
+                }
+              }}
+              disabled={running}
+            />
+            <Button
+              size="sm"
+              onClick={(): void => {
+                void handleRun(selectedWorkflow);
+              }}
+              disabled={running || !runMessage.trim()}
+            >
+              {running ? 'Starting...' : 'Run'}
+            </Button>
+          </div>
+          {runError && <p className="text-xs text-error mt-1">{runError}</p>}
+        </div>
       )}
     </div>
   );
