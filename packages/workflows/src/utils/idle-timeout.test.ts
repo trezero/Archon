@@ -22,7 +22,7 @@ async function* hangAfter<T>(values: T[], _hangForever = true): AsyncGenerator<T
 
 describe('withIdleTimeout', () => {
   test('exports a default timeout constant', () => {
-    expect(STEP_IDLE_TIMEOUT_MS).toBe(5 * 60 * 1000);
+    expect(STEP_IDLE_TIMEOUT_MS).toBe(30 * 60 * 1000);
   });
 
   test('passes through all values from a normal generator', async () => {
@@ -128,7 +128,9 @@ describe('withIdleTimeout', () => {
     expect(result).toEqual([1, 2]);
   });
 
-  test('does not reset timer on tool events — fires if tool hangs after tool event', async () => {
+  // These two tests exercise the optional shouldResetTimer parameter.
+  // dag-executor omits it (all messages reset the timer by default).
+  test('shouldResetTimer predicate: does not reset timer on filtered events', async () => {
     type Msg = { type: string };
     const onTimeout = mock(() => {});
     const result: Msg[] = [];
@@ -158,7 +160,7 @@ describe('withIdleTimeout', () => {
     expect(onTimeout).toHaveBeenCalledTimes(1);
   });
 
-  test('resets timer on assistant events even after a tool event', async () => {
+  test('shouldResetTimer predicate: resets timer on non-filtered events', async () => {
     type Msg = { type: string };
     const onTimeout = mock(() => {});
     const result: Msg[] = [];

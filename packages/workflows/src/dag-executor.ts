@@ -766,8 +766,7 @@ async function executeNodeInternal(
           'dag_node_idle_timeout_reached'
         );
         nodeAbortController.abort();
-      },
-      msg => msg.type !== 'tool'
+      }
     )) {
       // Update activity timestamp + check cancel (throttled to once per 10s)
       const activityNow = Date.now();
@@ -919,6 +918,7 @@ async function executeNodeInternal(
         if (msg.sessionId) newSessionId = msg.sessionId;
         if (msg.tokens) nodeTokens = msg.tokens;
         if (msg.structuredOutput !== undefined) structuredOutput = msg.structuredOutput;
+        break; // Result is the "I'm done" signal — don't wait for subprocess to exit
       } else if (msg.type === 'system' && msg.content) {
         // Surface MCP connection failures to the user
         if (msg.content.startsWith('MCP server connection failed:')) {
@@ -1420,19 +1420,16 @@ async function executeLoopNode(
       const generator = aiClient.sendQuery(finalPrompt, cwd, resumeSessionId, iterationOptions);
       let lastToolStartedAt: { toolName: string; startedAt: number } | null = null;
 
-      for await (const msg of withIdleTimeout(
-        generator,
-        node.idle_timeout ?? STEP_IDLE_TIMEOUT_MS,
-        () => {
-          iterationIdleTimedOut = true;
-          getLog().warn(
-            { nodeId: node.id, iteration: i, timeoutMs: node.idle_timeout ?? STEP_IDLE_TIMEOUT_MS },
-            'loop_node.idle_timeout_reached'
-          );
-          iterationAbortController.abort();
-        },
-        m => m.type !== 'tool' // shouldResetTimer
-      )) {
+      const effectiveIdleTimeout = node.idle_timeout ?? STEP_IDLE_TIMEOUT_MS;
+
+      for await (const msg of withIdleTimeout(generator, effectiveIdleTimeout, () => {
+        iterationIdleTimedOut = true;
+        getLog().warn(
+          { nodeId: node.id, iteration: i, timeoutMs: effectiveIdleTimeout },
+          'loop_node.idle_timeout_reached'
+        );
+        iterationAbortController.abort();
+      })) {
         if (msg.type === 'assistant') {
           fullOutput += msg.content;
           const cleaned = stripCompletionTags(msg.content);
@@ -1468,6 +1465,7 @@ async function executeLoopNode(
             lastToolStartedAt = null;
           }
           if (msg.sessionId) currentSessionId = msg.sessionId;
+          break; // Result is the "I'm done" signal — don't wait for subprocess to exit
         } else if (msg.type === 'tool' && msg.toolName) {
           const now = Date.now();
 
