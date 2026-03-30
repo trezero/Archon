@@ -24,6 +24,7 @@ import {
   toWorktreePath,
   toBranchName,
 } from '@archon/git';
+import { getArchonWorkspacesPath } from '@archon/paths';
 import type { RepoPath, WorktreeInfo } from '@archon/git';
 import { copyWorktreeFiles } from '../worktree-copy';
 import type {
@@ -605,9 +606,15 @@ export class WorktreeProvider implements IIsolationProvider {
         { repoPath, branch: configuredBaseBranch ?? 'auto-detect' },
         'workspace_sync_starting'
       );
+      // Only hard-reset for Archon-managed clones (under ~/.archon/workspaces/).
+      // Locally-registered repos get fetch-only to avoid destroying uncommitted work.
+      const isManagedClone = repoPath
+        .replace(/\\/g, '/')
+        .startsWith(getArchonWorkspacesPath().replace(/\\/g, '/'));
       const { branch } = await syncWorkspace(
         repoPath,
-        configuredBaseBranch ? toBranchName(configuredBaseBranch) : undefined
+        configuredBaseBranch ? toBranchName(configuredBaseBranch) : undefined,
+        { resetAfterFetch: isManagedClone }
       );
       getLog().debug({ repoPath, branch }, 'workspace_synced');
       return branch;

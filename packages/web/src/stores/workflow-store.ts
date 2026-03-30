@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools, subscribeWithSelector } from 'zustand/middleware';
 import { queryClient } from '@/lib/query-client';
 import { getWorkflowRun } from '@/lib/api';
+import { isTerminalStatus } from '@/lib/workflow-utils';
 import type {
   WorkflowState,
   DagNodeState,
@@ -23,10 +24,6 @@ interface WorkflowStoreState {
 }
 
 // --- Helpers ---
-
-function isTerminalStatus(status: string): boolean {
-  return status === 'completed' || status === 'failed' || status === 'cancelled';
-}
 
 /** Update a single workflow entry in the Map. Returns unchanged state if runId not found. */
 function updateWorkflow(
