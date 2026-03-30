@@ -1,0 +1,207 @@
+name: archon-interactive-prd
+description: |
+  Use when: User wants to create a PRD through guided conversation.
+  Triggers: "create a prd", "new prd", "interactive prd", "plan a feature",
+            "product requirements", "write a prd".
+  NOT for: Autonomous PRD generation without human input (use archon-ralph-generate).
+
+  Interactive workflow that guides the user through problem-first PRD creation:
+  1. Understand the idea
+  2. Ask foundation questions (who/what/why) → wait for answers
+  3. Research market & codebase context
+  4. Ask deep dive questions (vision/users/constraints) → wait for answers
+  5. Research technical feasibility
+  6. Ask scope questions (MVP/hypothesis) → wait for answers
+  7. Generate the PRD document
+
+provider: claude
+
+nodes:
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 1: INITIATE — Understand the idea
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: initiate
+    model: sonnet
+    prompt: |
+      You are a sharp product manager starting a PRD creation process.
+
+      The user wants to build: $ARGUMENTS
+
+      If the input is clear, restate your understanding in 2-3 sentences and confirm:
+      "I understand you want to build: {restated understanding}. Is this correct?"
+
+      If the input is vague or empty, ask:
+      "What do you want to build? Describe the product, feature, or capability."
+
+      Then present the Foundation Questions (all at once — the user will answer in the next step):
+
+      **Foundation Questions:**
+
+      1. **Who** has this problem? Be specific — not just "users" but what type of person/role?
+      2. **What** problem are they facing? Describe the observable pain, not the assumed need.
+      3. **Why** can't they solve it today? What alternatives exist and why do they fail?
+      4. **Why now?** What changed that makes this worth building?
+      5. **How** will you know if you solved it? What would success look like?
+
+      Keep it conversational. Don't generate any PRD content yet.
+
+  # ═══════════════════════════════════════════════════════════════
+  # GATE 1: User answers foundation questions
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: foundation-gate
+    approval:
+      message: "Answer the foundation questions above. Your answers will guide the research phase."
+    depends_on: [initiate]
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 3: GROUNDING — Research market & codebase
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: research
+    model: sonnet
+    prompt: |
+      You are researching context for a PRD.
+
+      **The idea**: $ARGUMENTS
+
+      **User's foundation answers**:
+      $foundation-gate.output
+
+      Based on these answers, research the landscape:
+
+      1. Search the web for similar products, competitors, and how others solve this problem
+      2. If we're in a codebase, explore it for related existing functionality and patterns
+      3. Look for common patterns, anti-patterns, and recent trends
+
+      Then present a summary to the user:
+
+      **What I found:**
+      - {Market insights — similar products, competitor approaches}
+      - {Relevant codebase patterns, if applicable}
+      - {Key insight that might change the approach}
+
+      Then ask the **Deep Dive Questions**:
+
+      1. **Vision**: In one sentence, what's the ideal end state if this succeeds wildly?
+      2. **Primary User**: Describe your most important user — their role, context, and what triggers their need.
+      3. **Job to Be Done**: Complete this: "When [situation], I want to [motivation], so I can [outcome]."
+      4. **Non-Users**: Who is explicitly NOT the target?
+      5. **Constraints**: What limitations exist? (time, budget, technical, regulatory)
+
+      Does the research change or refine your thinking? Answer the deep dive questions.
+    depends_on: [foundation-gate]
+
+  # ═══════════════════════════════════════════════════════════════
+  # GATE 2: User answers deep dive questions
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: deepdive-gate
+    approval:
+      message: "Answer the deep dive questions above (vision, primary user, JTBD, constraints). Add any adjustments from the research."
+    depends_on: [research]
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 5: TECHNICAL GROUNDING — Feasibility check
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: technical
+    model: sonnet
+    prompt: |
+      You are assessing technical feasibility for a PRD.
+
+      **The idea**: $ARGUMENTS
+      **Foundation answers**: $foundation-gate.output
+      **Deep dive answers**: $deepdive-gate.output
+
+      Explore the codebase thoroughly:
+      1. Find existing infrastructure we can leverage
+      2. Identify similar patterns already implemented
+      3. Map integration points and dependencies
+      4. Estimate complexity based on similar features
+
+      If no codebase is available, research technical approaches others have used.
+
+      Present a summary:
+
+      **Technical Context:**
+      - Feasibility: {HIGH/MEDIUM/LOW} because {reason}
+      - Can leverage: {existing patterns/infrastructure}
+      - Key technical risk: {main concern}
+      - Estimated phases: {rough breakdown}
+
+      Then ask the **Scope Questions**:
+
+      1. **MVP Definition**: What's the absolute minimum to test if this works?
+      2. **Must Have vs Nice to Have**: What 2-3 things MUST be in v1? What can wait?
+      3. **Key Hypothesis**: Complete this: "We believe [capability] will [solve problem] for [users]. We'll know we're right when [measurable outcome]."
+      4. **Out of Scope**: What are you explicitly NOT building?
+      5. **Open Questions**: What uncertainties could change the approach?
+    depends_on: [deepdive-gate]
+
+  # ═══════════════════════════════════════════════════════════════
+  # GATE 3: User answers scope questions
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: scope-gate
+    approval:
+      message: "Answer the scope questions above (MVP, must-haves, hypothesis, exclusions). This is the final input before PRD generation."
+    depends_on: [technical]
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 7: GENERATE — Write the PRD
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: generate
+    model: sonnet
+    prompt: |
+      You are generating a PRD from the user's guided inputs.
+
+      **The idea**: $ARGUMENTS
+      **Foundation answers**: $foundation-gate.output
+      **Deep dive answers**: $deepdive-gate.output
+      **Scope answers**: $scope-gate.output
+
+      Generate a complete PRD file at `.claude/PRPs/prds/{kebab-case-name}.prd.md`.
+
+      First create the directory:
+      ```bash
+      mkdir -p .claude/PRPs/prds
+      ```
+
+      The PRD must include ALL of these sections, filled from the user's answers:
+
+      1. **Problem Statement** — from foundation answers (who/what/why)
+      2. **Evidence** — from research findings and user's evidence
+      3. **Proposed Solution** — synthesized from all inputs
+      4. **Key Hypothesis** — from scope answers
+      5. **What We're NOT Building** — from scope answers
+      6. **Success Metrics** — from foundation "how will you know" + scope
+      7. **Open Questions** — from scope answers
+      8. **Users & Context** — from deep dive (primary user, JTBD, non-users)
+      9. **Solution Detail** — MoSCoW table from scope must-haves, MVP definition
+      10. **Technical Approach** — from technical feasibility assessment
+      11. **Implementation Phases** — from technical breakdown, with status table
+      12. **Decisions Log** — key decisions made during the conversation
+
+      **Rules:**
+      - If info is missing, write "TBD — needs research" not filler
+      - Be specific and concrete, not generic
+      - Reference actual codebase files if applicable
+      - Include the phase dependency table with parallel opportunities
+
+      After writing the file, output a summary:
+
+      ```
+      ## PRD Created
+
+      **File**: `.claude/PRPs/prds/{name}.prd.md`
+      **Problem**: {one line}
+      **Hypothesis**: {the key hypothesis}
+      **Phases**: {count} implementation phases
+      **Open Questions**: {count}
+
+      To start implementation: `/prp-plan .claude/PRPs/prds/{name}.prd.md`
+      ```
+    depends_on: [scope-gate]
