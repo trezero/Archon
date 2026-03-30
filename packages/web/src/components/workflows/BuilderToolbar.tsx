@@ -83,9 +83,9 @@ export function BuilderToolbar({
             }
           >
             <option value="">{workflowsError ? 'Load failed' : 'Load...'}</option>
-            {(workflows ?? []).map(wf => (
-              <option key={wf.name} value={wf.name}>
-                {wf.name}
+            {(workflows ?? []).map(entry => (
+              <option key={entry.workflow.name} value={entry.workflow.name}>
+                {entry.workflow.name}
               </option>
             ))}
           </select>

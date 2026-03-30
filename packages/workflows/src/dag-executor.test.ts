@@ -500,7 +500,7 @@ nodes:
     expect(result.errors).toHaveLength(0);
     expect(result.workflows).toHaveLength(1);
 
-    const wf = result.workflows[0];
+    const wf = result.workflows[0].workflow;
     expect(wf.nodes).toHaveLength(4);
     expect(wf.nodes[0].id).toBe('classify');
     expect(wf.nodes[0].output_format).toBeDefined();
@@ -530,7 +530,7 @@ nodes:
     expect(result.errors).toHaveLength(0);
     expect(result.workflows).toHaveLength(1);
 
-    const wf = result.workflows[0];
+    const wf = result.workflows[0].workflow;
     expect(wf.nodes).toBeDefined();
     expect(wf.nodes[0].prompt).toBe('Output exactly: hello from A');
     expect(wf.nodes[1].depends_on).toEqual(['step-a']);
@@ -558,7 +558,7 @@ prompt: "do something"
     const result = await discoverWorkflows(testDir, { loadDefaults: false });
     expect(result.errors).toHaveLength(0);
     expect(result.workflows).toHaveLength(1);
-    expect(result.workflows[0].name).toBe('extra-fields');
+    expect(result.workflows[0].workflow.name).toBe('extra-fields');
   });
 
   it('rejects node with invalid trigger_rule', async () => {
@@ -609,7 +609,9 @@ nodes:
 
     const result = await discoverWorkflows(testDir, { loadDefaults: false });
     expect(result.errors).toHaveLength(0);
-    const wf = result.workflows.find(w => w.name === 'tool-restriction-test');
+    const wf = result.workflows
+      .map(ws => ws.workflow)
+      .find(w => w.name === 'tool-restriction-test');
     expect(wf).toBeDefined();
     if (!wf) return;
 

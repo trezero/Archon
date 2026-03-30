@@ -94,6 +94,8 @@ export type {
   WorkflowExecutionResult,
   WorkflowLoadError,
   WorkflowLoadResult,
+  WorkflowSource,
+  WorkflowWithSource,
 } from './workflow';
 
 // DagWorkflow — alias kept for backward compatibility

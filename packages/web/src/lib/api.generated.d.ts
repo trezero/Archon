@@ -1701,6 +1701,12 @@ export interface components {
       additionalDirectories?: string[];
       nodes: components['schemas']['DagNode'][];
     };
+    /** @enum {string} */
+    WorkflowSource: 'project' | 'bundled';
+    WorkflowListEntry: {
+      workflow: components['schemas']['WorkflowDefinition'];
+      source: components['schemas']['WorkflowSource'];
+    };
     WorkflowLoadError: {
       filename: string;
       error: string;
@@ -1708,7 +1714,7 @@ export interface components {
       errorType: 'read_error' | 'parse_error' | 'validation_error';
     };
     WorkflowListResponse: {
-      workflows: components['schemas']['WorkflowDefinition'][];
+      workflows: components['schemas']['WorkflowListEntry'][];
       errors?: components['schemas']['WorkflowLoadError'][];
     };
     RunWorkflowBody: {
@@ -1796,8 +1802,6 @@ export interface components {
         [key: string]: unknown;
       };
     };
-    /** @enum {string} */
-    WorkflowSource: 'project' | 'bundled';
     GetWorkflowResponse: {
       workflow: components['schemas']['WorkflowDefinition'];
       filename: string;

@@ -10,7 +10,7 @@
  */
 import { describe, test, expect, mock, beforeEach, afterAll, spyOn, type Mock } from 'bun:test';
 import { createMockLogger } from '../test/mocks/logger';
-import { makeTestWorkflow } from '@archon/workflows/test-utils';
+import { makeTestWorkflowWithSource } from '@archon/workflows/test-utils';
 import { Conversation } from '../types';
 import { resolve, join } from 'path';
 import * as fsPromises from 'fs/promises';
@@ -2013,7 +2013,7 @@ describe('CommandHandler', () => {
 
       test('should show load errors alongside workflows', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [makeTestWorkflow({ name: 'assist' })],
+          workflows: [makeTestWorkflowWithSource({ name: 'assist' })],
           errors: [
             {
               filename: 'broken.yaml',
@@ -2075,7 +2075,7 @@ describe('CommandHandler', () => {
 
       test('should pass loadConfig as second argument to discoverWorkflowsWithConfig', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [makeTestWorkflow({ name: 'test-wf', description: 'Test' })],
+          workflows: [makeTestWorkflowWithSource({ name: 'test-wf', description: 'Test' })],
           errors: [],
         });
 
@@ -2105,7 +2105,9 @@ describe('CommandHandler', () => {
 
       test('should show error count on reload', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [makeTestWorkflow({ name: 'assist', description: 'General assistant' })],
+          workflows: [
+            makeTestWorkflowWithSource({ name: 'assist', description: 'General assistant' }),
+          ],
           errors: [
             {
               filename: 'broken.yaml',
@@ -2131,7 +2133,9 @@ describe('CommandHandler', () => {
 
       test('should show clean reload when no errors', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [makeTestWorkflow({ name: 'assist', description: 'General assistant' })],
+          workflows: [
+            makeTestWorkflowWithSource({ name: 'assist', description: 'General assistant' }),
+          ],
           errors: [],
         });
 
@@ -2181,7 +2185,9 @@ describe('CommandHandler', () => {
 
       test('should match workflow name case-insensitively', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [makeTestWorkflow({ name: 'assist', description: 'General assistant' })],
+          workflows: [
+            makeTestWorkflowWithSource({ name: 'assist', description: 'General assistant' }),
+          ],
           errors: [],
         });
 
@@ -2536,7 +2542,10 @@ describe('CommandHandler', () => {
       test('should return error when workflow is not found', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
           workflows: [
-            makeTestWorkflow({ name: 'existing-workflow', description: 'An existing workflow' }),
+            makeTestWorkflowWithSource({
+              name: 'existing-workflow',
+              description: 'An existing workflow',
+            }),
           ],
           errors: [],
         });
@@ -2550,7 +2559,9 @@ describe('CommandHandler', () => {
 
       test('should return success with workflow info when workflow is found', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [makeTestWorkflow({ name: 'test-workflow', description: 'A test workflow' })],
+          workflows: [
+            makeTestWorkflowWithSource({ name: 'test-workflow', description: 'A test workflow' }),
+          ],
           errors: [],
         });
 
@@ -2565,7 +2576,9 @@ describe('CommandHandler', () => {
 
       test('should pass arguments to workflow', async () => {
         spyDiscoverWorkflows.mockResolvedValueOnce({
-          workflows: [makeTestWorkflow({ name: 'fix-issue', description: 'Fix a GitHub issue' })],
+          workflows: [
+            makeTestWorkflowWithSource({ name: 'fix-issue', description: 'Fix a GitHub issue' }),
+          ],
           errors: [],
         });
 

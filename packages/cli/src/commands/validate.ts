@@ -82,7 +82,10 @@ export async function validateWorkflowsCommand(
   json?: boolean
 ): Promise<number> {
   const config = await buildValidationConfig(cwd);
-  const { workflows, errors: loadErrors } = await discoverWorkflowsWithConfig(cwd, loadConfig);
+  const { workflows: workflowEntries, errors: loadErrors } = await discoverWorkflowsWithConfig(
+    cwd,
+    loadConfig
+  );
 
   // Build results from load errors (Level 1-2 failures)
   const results: WorkflowValidationResult[] = [];
@@ -98,7 +101,7 @@ export async function validateWorkflowsCommand(
   }
 
   // Validate successfully parsed workflows (Level 3)
-  for (const workflow of workflows) {
+  for (const { workflow } of workflowEntries) {
     const issues = await validateWorkflowResources(workflow, cwd, config);
     results.push(makeWorkflowResult(workflow.name, issues));
   }

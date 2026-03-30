@@ -3,7 +3,7 @@
  * Use these instead of inline fixture objects — schema changes update one file.
  */
 import { workflowDefinitionSchema } from './schemas/workflow';
-import type { WorkflowDefinition } from './schemas/workflow';
+import type { WorkflowDefinition, WorkflowWithSource, WorkflowSource } from './schemas/workflow';
 
 const DEFAULT_NODE = { id: 'default', command: 'test-command' };
 
@@ -22,4 +22,12 @@ export function makeTestWorkflow(overrides: TestWorkflowOverrides): WorkflowDefi
 
 export function makeTestWorkflowList(names: string[]): WorkflowDefinition[] {
   return names.map(name => makeTestWorkflow({ name }));
+}
+
+/** Wrap a WorkflowDefinition as a WorkflowWithSource entry for test mocks. */
+export function makeTestWorkflowWithSource(
+  overrides: TestWorkflowOverrides,
+  source: WorkflowSource = 'bundled'
+): WorkflowWithSource {
+  return { workflow: makeTestWorkflow(overrides), source };
 }

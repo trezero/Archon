@@ -182,9 +182,11 @@ export interface WorkflowEventResponse {
   created_at: string;
 }
 
-export async function listWorkflows(cwd?: string): Promise<WorkflowDefinition[]> {
+export type WorkflowListEntry = components['schemas']['WorkflowListEntry'];
+
+export async function listWorkflows(cwd?: string): Promise<WorkflowListEntry[]> {
   const params = cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
-  const result = await fetchJSON<{ workflows: WorkflowDefinition[] }>(`/api/workflows${params}`);
+  const result = await fetchJSON<{ workflows: WorkflowListEntry[] }>(`/api/workflows${params}`);
   return result.workflows;
 }
 
@@ -349,7 +351,7 @@ export async function getWorkflowRunByWorker(
   }
 }
 
-export type WorkflowSource = 'project' | 'bundled';
+export type WorkflowSource = components['schemas']['WorkflowSource'];
 
 export interface GetWorkflowResponse {
   workflow: WorkflowDefinition;

@@ -68,7 +68,7 @@ nodes:
       await writeFile(join(workflowDir, 'test.yaml'), validYaml);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].name).toBe('test-workflow');
@@ -91,7 +91,7 @@ nodes:
       await writeFile(join(workflowDir, 'invalid.yaml'), invalidYaml);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(0);
     });
@@ -108,7 +108,7 @@ nodes:
       await writeFile(join(workflowDir, 'invalid.yaml'), invalidYaml);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(0);
     });
@@ -147,7 +147,7 @@ nodes:
       await writeFile(join(workflowDir, 'test.yaml'), yamlNoProvider);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].provider).toBeUndefined();
@@ -167,7 +167,7 @@ nodes:
       await writeFile(join(workflowDir, 'test.yaml'), yamlInvalidProvider);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       // Invalid provider treated as undefined - executor will fall back to config
       expect(workflows).toHaveLength(1);
@@ -216,7 +216,7 @@ nodes:
       await writeFile(join(workflowDir, 'options.yaml'), yaml);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].modelReasoningEffort).toBe('medium');
@@ -239,7 +239,7 @@ nodes:
       await writeFile(join(workflowDir, 'workflow.yaml'), validYaml);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].name).toBe('discovered');
@@ -247,7 +247,7 @@ nodes:
 
     it('should return empty array when no workflow folders exist', async () => {
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
       expect(workflows).toHaveLength(0);
     });
 
@@ -271,7 +271,7 @@ nodes:
       await writeFile(join(workflowDir, 'two.yml'), yaml2);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(2);
     });
@@ -299,7 +299,7 @@ nodes:
       await writeFile(join(defaultsDir, 'sub.yaml'), subWorkflow);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(2);
       const names = workflows.map(w => w.name).sort();
@@ -321,7 +321,7 @@ nodes:
       await writeFile(join(workflowDir, 'invalid.yaml'), pathTraversalYaml);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(0);
     });
@@ -339,7 +339,7 @@ nodes:
       await writeFile(join(workflowDir, 'dotfile.yaml'), dotfileYaml);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(0);
     });
@@ -363,7 +363,7 @@ nodes:
       await writeFile(join(workflowDir, 'valid.yaml'), validYaml);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].nodes).toHaveLength(3);
@@ -388,7 +388,7 @@ nodes:
       await writeFile(join(workflowDir, '.gitkeep'), '');
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].name).toBe('valid-workflow');
@@ -408,7 +408,7 @@ nodes:
       await writeFile(join(workflowDir, 'malformed.yaml'), malformedYaml);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       // Should not throw, just return empty array
       expect(workflows).toHaveLength(0);
@@ -432,7 +432,7 @@ nodes:
       await writeFile(join(workflowDir, 'full.yaml'), fullWorkflow);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(1);
       expect(workflows[0].provider).toBe('codex');
@@ -445,7 +445,7 @@ nodes:
       // Directory exists but is empty
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(0);
     });
@@ -460,7 +460,7 @@ description: Missing nodes
       await writeFile(join(workflowDir, 'nonodes.yaml'), noNodes);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       expect(workflows).toHaveLength(0);
     });
@@ -478,7 +478,7 @@ nodes:
       await writeFile(join(workflowDir, 'nulltest.yaml'), nullValues);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       // Should fail validation due to null description
       expect(workflows).toHaveLength(0);
@@ -489,7 +489,7 @@ nodes:
     it('should load real app defaults when enabled', async () => {
       // Test dir has no .archon/workflows/
       const result = await discoverWorkflows(testDir, { loadDefaults: true });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       // Should load the real archon-* prefixed app defaults
       expect(workflows.length).toBeGreaterThanOrEqual(1);
@@ -512,7 +512,7 @@ nodes:
       await writeFile(join(repoWorkflowDir, 'archon-assist.yaml'), repoWorkflowYaml);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: true });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       // Should have the repo version, not the app default
       const assistWorkflow = workflows.find(
@@ -526,7 +526,7 @@ nodes:
 
     it('should skip app defaults when loadDefaults is false', async () => {
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       // Should NOT find any archon-* workflows since app defaults are disabled
       const archonWorkflow = workflows.find(w => w.name.startsWith('archon-'));
@@ -546,7 +546,7 @@ nodes:
       await writeFile(join(repoWorkflowDir, 'my-custom.yaml'), repoWorkflowYaml);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: true });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       // Should have both app defaults and repo workflows
       const archonAssist = workflows.find(w => w.name === 'archon-assist');
@@ -582,7 +582,7 @@ nodes:
         globalSearchPath: globalDir,
       });
 
-      const names = result.workflows.map(w => w.name);
+      const names = result.workflows.map(w => w.workflow.name);
       expect(names).toContain('global-workflow');
       expect(names).toContain('local-workflow');
 
@@ -616,9 +616,9 @@ nodes:
 
       // Local should override global by filename
       const shared = result.workflows.find(
-        w => w.name === 'global-version' || w.name === 'local-version'
+        w => w.workflow.name === 'global-version' || w.workflow.name === 'local-version'
       );
-      expect(shared?.name).toBe('local-version');
+      expect(shared?.workflow.name).toBe('local-version');
 
       await rm(globalDir, { recursive: true, force: true });
     });
@@ -644,7 +644,7 @@ nodes:
       const result = await discoverWorkflowsWithConfig(testDir, mockLoadConfig);
 
       // With loadDefaults: false, no archon-* defaults should appear
-      const archonWorkflow = result.workflows.find(w => w.name.startsWith('archon-'));
+      const archonWorkflow = result.workflows.find(w => w.workflow.name.startsWith('archon-'));
       expect(archonWorkflow).toBeUndefined();
       expect(mockLoadConfig).toHaveBeenCalledWith(testDir);
     });
@@ -658,7 +658,7 @@ nodes:
       const result = await discoverWorkflowsWithConfig(testDir, mockLoadConfig);
 
       // With config failure, defaults to true, so archon-* should appear
-      const archonWorkflow = result.workflows.find(w => w.name === 'archon-assist');
+      const archonWorkflow = result.workflows.find(w => w.workflow.name === 'archon-assist');
       expect(archonWorkflow).toBeDefined();
     });
 
@@ -683,7 +683,7 @@ nodes:
         globalSearchPath: globalDir,
       });
 
-      const names = result.workflows.map(w => w.name);
+      const names = result.workflows.map(w => w.workflow.name);
       expect(names).toContain('global-only');
 
       await rm(globalDir, { recursive: true, force: true });
@@ -706,7 +706,7 @@ nodes:
       isBinaryBuildSpy.mockReturnValue(true);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: true });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       // Should load bundled workflows
       expect(workflows.length).toBeGreaterThanOrEqual(1);
@@ -720,7 +720,7 @@ nodes:
       isBinaryBuildSpy.mockReturnValue(true);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       // Should not have any bundled defaults
       const archonWorkflow = workflows.find(w => w.name.startsWith('archon-'));
@@ -743,7 +743,7 @@ nodes:
       await writeFile(join(repoWorkflowDir, 'archon-assist.yaml'), repoWorkflowYaml);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: true });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       // Repo workflow should override bundled default
       const assistWorkflow = workflows.find(
@@ -769,7 +769,7 @@ nodes:
       await writeFile(join(repoWorkflowDir, 'my-repo.yaml'), repoWorkflowYaml);
 
       const result = await discoverWorkflows(testDir, { loadDefaults: true });
-      const workflows = result.workflows;
+      const workflows = result.workflows.map(ws => ws.workflow);
 
       // Should have both bundled and repo workflows
       const archonAssist = workflows.find(w => w.name === 'archon-assist');
@@ -814,7 +814,7 @@ nodes:
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
 
       expect(result.workflows).toHaveLength(1);
-      expect(result.workflows[0].name).toBe('good');
+      expect(result.workflows[0].workflow.name).toBe('good');
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0].filename).toBe('bad.yaml');
     });
@@ -957,7 +957,7 @@ nodes:
       expect(result.errors).toHaveLength(0);
       expect(result.workflows).toHaveLength(1);
 
-      const wf = result.workflows[0];
+      const wf = result.workflows[0].workflow;
       expect(wf.nodes).toBeDefined();
 
       expect(wf.nodes).toHaveLength(2);
@@ -985,7 +985,7 @@ nodes:
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
       expect(result.errors).toHaveLength(0);
-      const wf = result.workflows[0];
+      const wf = result.workflows[0].workflow;
       expect(wf.nodes).toBeDefined();
       if (isBashNode(wf.nodes[0])) {
         expect(wf.nodes[0].timeout).toBe(30000);
@@ -1094,7 +1094,7 @@ nodes:
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
       expect(result.errors).toHaveLength(0);
-      const wf = result.workflows[0];
+      const wf = result.workflows[0].workflow;
       expect(wf.nodes).toBeDefined();
       expect(wf.nodes[0].idle_timeout).toBe(1800000);
     });
@@ -1117,7 +1117,7 @@ nodes:
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
       expect(result.errors).toHaveLength(0);
-      const wf = result.workflows[0];
+      const wf = result.workflows[0].workflow;
       expect(wf.nodes).toBeDefined();
       expect(wf.nodes[0].idle_timeout).toBe(600000);
     });
@@ -1140,7 +1140,7 @@ nodes:
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
       expect(result.errors).toHaveLength(0);
-      const wf = result.workflows[0];
+      const wf = result.workflows[0].workflow;
       expect(wf.nodes).toBeDefined();
       if (isBashNode(wf.nodes[0])) {
         expect(wf.nodes[0].idle_timeout).toBe(900000);
@@ -1232,7 +1232,7 @@ nodes:
       expect(result.errors).toHaveLength(0);
       expect(result.workflows).toHaveLength(1);
 
-      const wf = result.workflows[0];
+      const wf = result.workflows[0].workflow;
       expect(wf.nodes).toBeDefined();
       // AI fields should NOT appear on the parsed bash node
       const node = wf.nodes[0];
@@ -1387,7 +1387,7 @@ nodes:
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
       expect(result.errors).toHaveLength(0);
-      const wf = result.workflows[0];
+      const wf = result.workflows[0].workflow;
       expect(wf.nodes[0].retry).toEqual({ max_attempts: 2 });
     });
 
@@ -1412,7 +1412,7 @@ nodes:
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
       expect(result.errors).toHaveLength(0);
-      const wf = result.workflows[0];
+      const wf = result.workflows[0].workflow;
       if (isBashNode(wf.nodes[0])) {
         expect(wf.nodes[0].retry).toEqual({
           max_attempts: 1,
@@ -1443,7 +1443,7 @@ nodes:
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
       expect(result.errors).toHaveLength(0);
-      const wf = result.workflows[0];
+      const wf = result.workflows[0].workflow;
       expect(wf.nodes[0].retry).toEqual({
         max_attempts: 2,
         delay_ms: 4000,
@@ -1560,7 +1560,7 @@ nodes:
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
       expect(result.errors).toHaveLength(0);
-      const wf = result.workflows[0];
+      const wf = result.workflows[0].workflow;
       expect(wf.nodes[0].retry).toEqual({ max_attempts: 1 });
       expect(wf.nodes[0].retry?.delay_ms).toBeUndefined();
       expect(wf.nodes[0].retry?.on_error).toBeUndefined();
@@ -1593,7 +1593,7 @@ nodes:
       expect(result.errors).toHaveLength(0);
       expect(result.workflows).toHaveLength(1);
 
-      const wf = result.workflows[0];
+      const wf = result.workflows[0].workflow;
       expect(wf.nodes).toBeDefined();
 
       expect(wf.nodes).toHaveLength(1);
@@ -1628,7 +1628,7 @@ nodes:
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
       expect(result.errors).toHaveLength(0);
-      const wf = result.workflows[0];
+      const wf = result.workflows[0].workflow;
       expect(wf.nodes).toBeDefined();
       expect(isLoopNode(wf.nodes[0])).toBe(true);
       if (isLoopNode(wf.nodes[0])) {
@@ -1798,7 +1798,7 @@ nodes:
 
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
       expect(result.errors).toHaveLength(0);
-      const wf = result.workflows[0];
+      const wf = result.workflows[0].workflow;
       expect(wf.nodes).toBeDefined();
       expect(wf.nodes).toHaveLength(2);
       expect(isLoopNode(wf.nodes[1])).toBe(true);

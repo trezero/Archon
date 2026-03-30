@@ -81,6 +81,15 @@ export type WorkflowExecutionResult =
 // WorkflowLoadError / WorkflowLoadResult — workflow discovery results
 // ---------------------------------------------------------------------------
 
+/** Workflow origin — bundled default or project-defined. */
+export type WorkflowSource = 'bundled' | 'project';
+
+/** A workflow definition paired with its discovery source. */
+export interface WorkflowWithSource {
+  readonly workflow: WorkflowDefinition;
+  readonly source: WorkflowSource;
+}
+
 /**
  * Error encountered while loading a workflow file
  */
@@ -94,6 +103,6 @@ export interface WorkflowLoadError {
  * Result of workflow discovery - includes both successful loads and errors
  */
 export interface WorkflowLoadResult {
-  readonly workflows: readonly WorkflowDefinition[];
+  readonly workflows: readonly WorkflowWithSource[];
   readonly errors: readonly WorkflowLoadError[];
 }

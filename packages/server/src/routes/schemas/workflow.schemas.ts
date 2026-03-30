@@ -17,16 +17,24 @@ export const workflowLoadErrorSchema = z
   })
   .openapi('WorkflowLoadError');
 
+/** Workflow source — project-defined or bundled default. */
+export const workflowSourceSchema = z.enum(['project', 'bundled']).openapi('WorkflowSource');
+
+/** A workflow entry in the list response, including its source. */
+export const workflowListEntrySchema = z
+  .object({
+    workflow: workflowDefinitionSchema,
+    source: workflowSourceSchema,
+  })
+  .openapi('WorkflowListEntry');
+
 /** GET /api/workflows response. */
 export const workflowListResponseSchema = z
   .object({
-    workflows: z.array(workflowDefinitionSchema),
+    workflows: z.array(workflowListEntrySchema),
     errors: z.array(workflowLoadErrorSchema).optional(),
   })
   .openapi('WorkflowListResponse');
-
-/** Workflow source — project-defined or bundled default. */
-export const workflowSourceSchema = z.enum(['project', 'bundled']).openapi('WorkflowSource');
 
 /** GET /api/workflows/:name response. */
 export const getWorkflowResponseSchema = z

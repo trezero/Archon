@@ -93,11 +93,11 @@ interface WorkflowJsonEntry {
  * List available workflows in the current directory
  */
 export async function workflowListCommand(cwd: string, json?: boolean): Promise<void> {
-  const { workflows, errors } = await loadWorkflows(cwd);
+  const { workflows: workflowEntries, errors } = await loadWorkflows(cwd);
 
   if (json) {
     const output = {
-      workflows: workflows.map(w => {
+      workflows: workflowEntries.map(({ workflow: w }) => {
         const entry: WorkflowJsonEntry = {
           name: w.name,
           description: w.description,
@@ -121,16 +121,16 @@ export async function workflowListCommand(cwd: string, json?: boolean): Promise<
 
   console.log(`Discovering workflows in: ${cwd}`);
 
-  if (workflows.length === 0 && errors.length === 0) {
+  if (workflowEntries.length === 0 && errors.length === 0) {
     console.log('\nNo workflows found.');
     console.log('Workflows should be in .archon/workflows/ directory.');
     return;
   }
 
-  if (workflows.length > 0) {
-    console.log(`\nFound ${String(workflows.length)} workflow(s):\n`);
+  if (workflowEntries.length > 0) {
+    console.log(`\nFound ${String(workflowEntries.length)} workflow(s):\n`);
 
-    for (const workflow of workflows) {
+    for (const { workflow } of workflowEntries) {
       console.log(`  ${workflow.name}`);
       console.log(`    ${workflow.description}`);
       if (workflow.provider) {
@@ -158,11 +158,13 @@ export async function workflowRunCommand(
   userMessage: string,
   options: WorkflowRunOptions = {}
 ): Promise<void> {
-  const { workflows, errors } = await loadWorkflows(cwd);
+  const { workflows: workflowEntries, errors } = await loadWorkflows(cwd);
 
-  if (workflows.length === 0 && errors.length === 0) {
+  if (workflowEntries.length === 0 && errors.length === 0) {
     throw new Error('No workflows found in .archon/workflows/');
   }
+
+  const workflows = workflowEntries.map(ws => ws.workflow);
 
   // Find the requested workflow (exact match first, then case-insensitive)
   let workflow = workflows.find(w => w.name === workflowName);

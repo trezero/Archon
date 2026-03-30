@@ -71,9 +71,9 @@ export function WorkflowInvoker({ codebaseId }: WorkflowInvokerProps): React.Rea
         className="w-full rounded-md border border-border bg-surface-elevated px-2 py-1.5 text-xs text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent"
       >
         <option value="">Run workflow...</option>
-        {workflows.map(wf => (
-          <option key={wf.name} value={wf.name}>
-            {wf.name}
+        {workflows.map(entry => (
+          <option key={entry.workflow.name} value={entry.workflow.name}>
+            {entry.workflow.name}
           </option>
         ))}
       </select>

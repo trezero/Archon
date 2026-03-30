@@ -1276,7 +1276,10 @@ export function registerApiRoutes(
       }
 
       const result = await discoverWorkflowsWithConfig(workingDir, loadConfig);
-      return c.json({ workflows: result.workflows, errors: result.errors });
+      return c.json({
+        workflows: result.workflows.map(ws => ({ workflow: ws.workflow, source: ws.source })),
+        errors: result.errors.length > 0 ? result.errors : undefined,
+      });
     } catch (error) {
       // Workflow discovery can fail if cwd is stale or deleted — return empty with warning
       const err = error instanceof Error ? error : new Error(String(error));
