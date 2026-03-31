@@ -1687,7 +1687,7 @@ export async function executeDagWorkflow(
   configuredCommandFolder?: string,
   issueContext?: string,
   priorCompletedNodes?: Map<string, string>
-): Promise<void> {
+): Promise<string | undefined> {
   const dagStartTime = Date.now();
   const layers = buildTopologicalLayers(workflow.nodes);
   const nodeOutputs = new Map<string, NodeOutput>();
@@ -2239,4 +2239,15 @@ export async function executeDagWorkflow(
       );
     });
   emitter.unregisterRun(workflowRun.id);
+
+  // Return the first terminal node's output (nodes with no dependents) for the parent
+  // conversation summary. For the common single-terminal case this is unambiguous; for
+  // multi-terminal DAGs the first completed node in definition order is used.
+  const allDependencies = new Set(workflow.nodes.flatMap(n => n.depends_on ?? []));
+  const terminalOutput = workflow.nodes
+    .filter(n => !allDependencies.has(n.id))
+    .map(n => nodeOutputs.get(n.id))
+    .find(o => o?.state === 'completed' && o.output.trim().length > 0)?.output;
+
+  return terminalOutput;
 }

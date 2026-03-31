@@ -3319,3 +3319,146 @@ describe('executeDagWorkflow -- break after result (no hang on subprocess exit)'
     expect(result).toBe('completed');
   });
 });
+
+describe('executeDagWorkflow -- terminal node output selection', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `dag-terminal-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'Command prompt $ARGUMENTS');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+  });
+
+  afterEach(async () => {
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'DAG AI response' };
+      yield { type: 'result', sessionId: 'dag-session-id' };
+    });
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('returns output of the single terminal node in a linear DAG', async () => {
+    mockSendQueryDag.mockImplementation(async function* () {
+      yield { type: 'assistant', content: 'Final summary text' };
+      yield { type: 'result', sessionId: 'sess-linear' };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    const result = await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'linear-dag',
+        nodes: [
+          { id: 'step1', command: 'my-cmd' },
+          { id: 'step2', command: 'my-cmd', depends_on: ['step1'] },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    expect(result).toBe('Final summary text');
+  });
+
+  it('returns undefined when the single terminal node produces no output', async () => {
+    mockSendQueryDag.mockImplementation(async function* () {
+      // No assistant content — empty output
+      yield { type: 'result', sessionId: 'sess-empty' };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    const result = await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      { name: 'empty-dag', nodes: [{ id: 'only', command: 'my-cmd' }] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    expect(result).toBeUndefined();
+  });
+
+  it('excludes intermediate nodes with dependents from terminal set (fan-in DAG)', async () => {
+    let callCount = 0;
+    mockSendQueryDag.mockImplementation(async function* () {
+      callCount++;
+      if (callCount === 3) {
+        // Third call is for node 'c' (terminal)
+        yield { type: 'assistant', content: 'C final output' };
+      } else {
+        yield { type: 'assistant', content: `Intermediate output ${callCount}` };
+      }
+      yield { type: 'result', sessionId: `sess-fanin-${callCount}` };
+    });
+
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    const result = await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'fanin-dag',
+        nodes: [
+          { id: 'a', command: 'my-cmd' },
+          { id: 'b', command: 'my-cmd' },
+          { id: 'c', command: 'my-cmd', depends_on: ['a', 'b'] },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // Only 'c' is terminal (no node depends on it); 'a' and 'b' are not terminal
+    expect(result).toBe('C final output');
+  });
+});

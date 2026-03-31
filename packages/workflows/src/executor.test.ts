@@ -33,7 +33,7 @@ mock.module('@archon/git', () => ({
 }));
 
 // --- Mock dag-executor ---
-const mockExecuteDagWorkflow = mock(async () => {});
+const mockExecuteDagWorkflow = mock(async (): Promise<string | undefined> => undefined);
 mock.module('./dag-executor', () => ({
   executeDagWorkflow: mockExecuteDagWorkflow,
 }));
@@ -134,7 +134,7 @@ describe('executeWorkflow', () => {
     mockEmitter.registerRun.mockClear();
     mockEmitter.unregisterRun.mockClear();
     mockEmitter.emit.mockClear();
-    mockExecuteDagWorkflow.mockImplementation(async () => {});
+    mockExecuteDagWorkflow.mockImplementation(async (): Promise<string | undefined> => undefined);
   });
 
   // -------------------------------------------------------------------------
@@ -341,6 +341,50 @@ describe('executeWorkflow', () => {
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain('Database error resuming');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Summary propagation
+  // -------------------------------------------------------------------------
+
+  describe('summary propagation', () => {
+    it('passes dag summary from executeDagWorkflow into WorkflowExecutionResult', async () => {
+      mockExecuteDagWorkflow.mockResolvedValueOnce('This is the workflow summary');
+      const store = makeStore();
+      const deps = makeDeps(store);
+      const result = await executeWorkflow(
+        deps,
+        makePlatform(),
+        'conv-1',
+        '/tmp',
+        makeWorkflow(),
+        'test message',
+        'db-conv-1'
+      );
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.summary).toBe('This is the workflow summary');
+      }
+    });
+
+    it('passes undefined summary when executeDagWorkflow returns undefined', async () => {
+      mockExecuteDagWorkflow.mockResolvedValueOnce(undefined);
+      const store = makeStore();
+      const deps = makeDeps(store);
+      const result = await executeWorkflow(
+        deps,
+        makePlatform(),
+        'conv-1',
+        '/tmp',
+        makeWorkflow(),
+        'test message',
+        'db-conv-1'
+      );
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.summary).toBeUndefined();
+      }
     });
   });
 

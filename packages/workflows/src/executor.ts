@@ -607,7 +607,7 @@ export async function executeWorkflow(
     }
 
     // Execute the DAG workflow
-    await executeDagWorkflow(
+    const dagSummary = await executeDagWorkflow(
       deps,
       platform,
       conversationId,
@@ -628,7 +628,7 @@ export async function executeWorkflow(
     // executeDagWorkflow throws on fatal errors; check DB status for result
     const finalStatus = await deps.store.getWorkflowRun(workflowRun.id);
     if (finalStatus?.status === 'completed') {
-      return { success: true, workflowRunId: workflowRun.id };
+      return { success: true, workflowRunId: workflowRun.id, summary: dagSummary };
     } else if (finalStatus?.status === 'paused') {
       return { success: true, paused: true, workflowRunId: workflowRun.id };
     } else {
