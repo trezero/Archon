@@ -361,7 +361,9 @@ async function inheritThreadContext(
   }
 }
 
-interface DiscoverResult extends WorkflowLoadResult {
+interface DiscoverResult {
+  workflows: WorkflowDefinition[];
+  errors: readonly WorkflowLoadError[];
   syncResult?: WorkspaceSyncResult;
   syncError?: string;
   config?: MergedConfig;
@@ -379,7 +381,7 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Discove
     const result = await discoverWorkflowsWithConfig(getArchonWorkspacesPath(), loadConfig, {
       globalSearchPath: getArchonHome(),
     });
-    workflows = [...result.workflows];
+    workflows = result.workflows.map(ws => ws.workflow);
     allErrors.push(...result.errors);
   } catch (error) {
     const err = error as Error;
