@@ -45,9 +45,9 @@ to the user on whatever platform they're using (CLI, Slack, GitHub, etc.). On th
 3. **Wait**: The workflow stays paused until the user takes action. Paused runs
    block the worktree path guard (no other workflow can start on the same path).
 4. **Approve**: The user approves, which writes a `node_completed` event for
-   the approval node and transitions the run to resumable. The CLI
-   auto-resumes immediately; the API and chat commands transition the run
-   so it resumes on the next workflow invocation.
+   the approval node and transitions the run to resumable. The CLI and chat
+   commands (`/workflow approve`) auto-resume immediately. The Web UI marks
+   the run resumable; it resumes when the user sends the next message.
 5. **Reject**: The user rejects, which cancels the workflow.
 
 ## YAML Schema

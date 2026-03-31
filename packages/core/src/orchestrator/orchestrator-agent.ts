@@ -33,6 +33,7 @@ import { findWorkflow } from '@archon/workflows/router';
 import { executeWorkflow } from '@archon/workflows/executor';
 import type {
   WorkflowDefinition,
+  WorkflowWithSource,
   WorkflowLoadResult,
   WorkflowLoadError,
 } from '@archon/workflows/schemas/workflow';
@@ -43,6 +44,7 @@ import { generateAndSetTitle } from '../services/title-generator';
 import { validateAndResolveIsolation, dispatchBackgroundWorkflow } from './orchestrator';
 import { IsolationBlockedError } from '@archon/isolation';
 import { buildOrchestratorPrompt, buildProjectScopedPrompt } from './prompt-builder';
+import * as workflowDb from '../db/workflows';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -242,20 +244,60 @@ async function dispatchOrchestratorWorkflow(
   }
 
   // Dispatch workflow
-  if (platform.getPlatformType() === 'web' && !workflow.interactive) {
-    await dispatchBackgroundWorkflow(
-      {
+  if (platform.getPlatformType() === 'web') {
+    // Check for a resumable run from a prior dispatch (e.g. approved approval gate).
+    // A new background dispatch would create a new worker conversation and never find
+    // the prior run's worktree. Execute in foreground to reuse the original working path.
+    const resumableRun = await workflowDb.findResumableRunByParentConversation(
+      workflow.name,
+      conversation.id
+    );
+    if (resumableRun?.working_path) {
+      getLog().info(
+        {
+          workflowName: workflow.name,
+          resumableRunId: resumableRun.id,
+          workingPath: resumableRun.working_path,
+        },
+        'orchestrator.foreground_resume_detected'
+      );
+      await executeWorkflow(
+        createWorkflowDeps(),
+        platform,
+        conversationId,
+        resumableRun.working_path,
+        workflow,
+        userMessage,
+        conversation.id,
+        codebase.id
+      );
+    } else if (workflow.interactive) {
+      // Interactive workflows run in foreground so output stays in the user's conversation
+      await executeWorkflow(
+        createWorkflowDeps(),
         platform,
         conversationId,
         cwd,
-        originalMessage: userMessage,
-        conversationDbId: conversation.id,
-        codebaseId: codebase.id,
-        availableWorkflows: [workflow],
-        isolationHints,
-      },
-      workflow
-    );
+        workflow,
+        userMessage,
+        conversation.id,
+        codebase.id
+      );
+    } else {
+      await dispatchBackgroundWorkflow(
+        {
+          platform,
+          conversationId,
+          cwd,
+          originalMessage: userMessage,
+          conversationDbId: conversation.id,
+          codebaseId: codebase.id,
+          availableWorkflows: [workflow],
+          isolationHints,
+        },
+        workflow
+      );
+    }
   } else {
     await executeWorkflow(
       createWorkflowDeps(),
@@ -325,7 +367,7 @@ interface DiscoverResult extends WorkflowLoadResult {
 
 /** Discover global + repo-specific workflows, merge by name (repo overrides global) */
 async function discoverAllWorkflows(conversation: Conversation): Promise<DiscoverResult> {
-  let workflows: WorkflowDefinition[] = [];
+  let workflows: WorkflowWithSource[] = [];
   const allErrors: WorkflowLoadError[] = [];
   let syncResult: WorkspaceSyncResult | undefined;
   let syncError: string | undefined;
@@ -379,9 +421,9 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Discove
         const repoResult = await discoverWorkflowsWithConfig(workflowCwd, () =>
           Promise.resolve(loadedConfig)
         );
-        const workflowMap = new Map(workflows.map(w => [w.name, w]));
+        const workflowMap = new Map(workflows.map(w => [w.workflow.name, w]));
         for (const rw of repoResult.workflows) {
-          workflowMap.set(rw.name, rw);
+          workflowMap.set(rw.workflow.name, rw);
         }
         workflows = Array.from(workflowMap.values());
         allErrors.push(...repoResult.errors);
@@ -518,6 +560,73 @@ export async function handleMessage(
             isolationHints
           );
         }
+        if (result.resumeRun) {
+          // Auto-resume: discover the workflow and dispatch (foreground resume
+          // will be detected by dispatchOrchestratorWorkflow)
+          const { workflowName, userMessage: resumeMessage } = result.resumeRun;
+          getLog().info({ workflowName, conversationId }, 'orchestrator.auto_resume_triggered');
+          try {
+            const { workflows: discoveredWorkflows } = await discoverAllWorkflows(conversation);
+            const allWorkflows: WorkflowDefinition[] = discoveredWorkflows.map(ws => ws.workflow);
+            const workflow = findWorkflow(workflowName, allWorkflows);
+            if (!workflow) {
+              getLog().error(
+                { workflowName, conversationId },
+                'orchestrator.auto_resume_workflow_not_found'
+              );
+              await platform.sendMessage(
+                conversationId,
+                `Approved, but workflow \`${workflowName}\` could not be found. ` +
+                  'Run `/workflow list` to verify the workflow exists.'
+              );
+              return;
+            }
+            if (!conversation.codebase_id) {
+              getLog().error(
+                { workflowName, conversationId },
+                'orchestrator.auto_resume_no_codebase'
+              );
+              await platform.sendMessage(
+                conversationId,
+                'Approved, but no project is attached to this conversation. ' +
+                  'Attach a project and try again.'
+              );
+              return;
+            }
+            const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
+            if (!codebase) {
+              getLog().error(
+                { workflowName, codebaseId: conversation.codebase_id, conversationId },
+                'orchestrator.auto_resume_codebase_not_found'
+              );
+              await platform.sendMessage(
+                conversationId,
+                'Approved, but the associated project could not be found. ' +
+                  'The project may have been removed.'
+              );
+              return;
+            }
+            await dispatchOrchestratorWorkflow(
+              platform,
+              conversationId,
+              conversation,
+              codebase,
+              workflow,
+              resumeMessage,
+              isolationHints
+            );
+          } catch (error) {
+            getLog().error(
+              { err: error as Error, workflowName, conversationId },
+              'orchestrator.auto_resume_failed'
+            );
+            await platform.sendMessage(
+              conversationId,
+              `Approved, but auto-resume failed: ${(error as Error).message}. ` +
+                'Send a message to trigger the workflow manually.'
+            );
+          }
+        }
         return;
       }
     }
@@ -525,12 +634,13 @@ export async function handleMessage(
     // 3. Load codebases, discover workflows, build prompt
     const codebases = await codebaseDb.listCodebases();
     const {
-      workflows,
+      workflows: workflowsWithSource,
       errors: workflowErrors,
       syncResult,
       syncError,
       config: discoveredConfig,
     } = await discoverAllWorkflows(conversation);
+    const workflows: readonly WorkflowDefinition[] = workflowsWithSource.map(ws => ws.workflow);
     if (workflowErrors.length > 0) {
       getLog().warn(
         { errorCount: workflowErrors.length, errors: workflowErrors },
@@ -1158,9 +1268,10 @@ async function handleWorkflowRunCommand(
       return;
     }
 
-    const resolvedWorkflow =
-      discovery.workflows.find(w => w.name === workflow.name) ??
-      discovery.workflows.find(w => w.name.toLowerCase() === workflow.name.toLowerCase());
+    const resolvedEntry =
+      discovery.workflows.find(w => w.workflow.name === workflow.name) ??
+      discovery.workflows.find(w => w.workflow.name.toLowerCase() === workflow.name.toLowerCase());
+    const resolvedWorkflow = resolvedEntry?.workflow;
 
     if (!resolvedWorkflow) {
       const loadError = discovery.errors.find(

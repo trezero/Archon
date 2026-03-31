@@ -86,6 +86,11 @@ export interface CommandResult {
     definition: WorkflowDefinition;
     args: string;
   };
+  resumeRun?: {
+    // If set, orchestrator should resume this workflow run
+    workflowName: string;
+    userMessage: string;
+  };
 }
 
 /**
