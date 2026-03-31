@@ -57,7 +57,7 @@ describe('Workflow Loader', () => {
       const yaml = `name: test\ndescription: test\ninteractive: true\nnodes:\n  - id: n\n    prompt: p\n`;
       await writeFile(join(workflowDir, 'test.yaml'), yaml);
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      expect(result.workflows[0].interactive).toBe(true);
+      expect(result.workflows[0].workflow.interactive).toBe(true);
     });
 
     it('should omit interactive field when not present', async () => {
@@ -66,7 +66,7 @@ describe('Workflow Loader', () => {
       const yaml = `name: test\ndescription: test\nnodes:\n  - id: n\n    prompt: p\n`;
       await writeFile(join(workflowDir, 'test.yaml'), yaml);
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      expect(result.workflows[0].interactive).toBeUndefined();
+      expect(result.workflows[0].workflow.interactive).toBeUndefined();
     });
 
     it('should preserve interactive: false when explicitly set', async () => {
@@ -75,7 +75,7 @@ describe('Workflow Loader', () => {
       const yaml = `name: test\ndescription: test\ninteractive: false\nnodes:\n  - id: n\n    prompt: p\n`;
       await writeFile(join(workflowDir, 'test.yaml'), yaml);
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      expect(result.workflows[0].interactive).toBe(false);
+      expect(result.workflows[0].workflow.interactive).toBe(false);
     });
 
     it('should treat non-boolean interactive value as undefined', async () => {
@@ -85,7 +85,7 @@ describe('Workflow Loader', () => {
       const yaml = `name: test\ndescription: test\ninteractive: "yes"\nnodes:\n  - id: n\n    prompt: p\n`;
       await writeFile(join(workflowDir, 'test.yaml'), yaml);
       const result = await discoverWorkflows(testDir, { loadDefaults: false });
-      expect(result.workflows[0].interactive).toBeUndefined();
+      expect(result.workflows[0].workflow.interactive).toBeUndefined();
     });
 
     it('should parse valid DAG workflow YAML', async () => {

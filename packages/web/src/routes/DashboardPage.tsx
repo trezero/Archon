@@ -191,7 +191,7 @@ export function DashboardPage(): React.ReactElement {
   // Only sets initial state if the run isn't already tracked by SSE.
   useEffect(() => {
     for (const run of runs) {
-      if (run.status === 'running' || run.status === 'pending') {
+      if (run.status === 'running' || run.status === 'pending' || run.status === 'paused') {
         hydrateWorkflow({
           runId: run.id,
           workflowName: run.workflow_name,
@@ -218,7 +218,8 @@ export function DashboardPage(): React.ReactElement {
 
   // Split into active and history (from server-filtered results)
   const activeRuns = useMemo(
-    () => runs.filter(r => r.status === 'running' || r.status === 'pending'),
+    () =>
+      runs.filter(r => r.status === 'running' || r.status === 'pending' || r.status === 'paused'),
     [runs]
   );
 

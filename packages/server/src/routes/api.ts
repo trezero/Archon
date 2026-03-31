@@ -1342,6 +1342,7 @@ export function registerApiRoutes(
         'completed',
         'failed',
         'cancelled',
+        'paused',
       ] as const;
       type DashboardRunStatus = (typeof dashboardValidStatuses)[number];
       const status: DashboardRunStatus | undefined =

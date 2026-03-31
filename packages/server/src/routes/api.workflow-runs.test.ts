@@ -879,6 +879,20 @@ describe('GET /api/dashboard/runs', () => {
     expect(callArgs?.status).toBe('running');
   });
 
+  test('accepts paused as valid status', async () => {
+    mockListDashboardRuns.mockImplementationOnce(async () => ({
+      runs: [],
+      total: 0,
+      counts: { all: 0, running: 0, completed: 0, failed: 0, cancelled: 0, pending: 0 },
+    }));
+
+    const { app } = makeApp();
+    await app.request('/api/dashboard/runs?status=paused');
+
+    const [[callArgs]] = mockListDashboardRuns.mock.calls as [[{ status?: string }]][];
+    expect(callArgs?.status).toBe('paused');
+  });
+
   test('ignores invalid status values in dashboard runs', async () => {
     mockListDashboardRuns.mockImplementationOnce(async () => ({
       runs: [],
