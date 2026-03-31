@@ -34,7 +34,6 @@ const mockToRepoPath = mock((p: string) => p);
 const mockGetOrCreateConversation = mock(() => Promise.resolve(null as unknown));
 const mockGetCodebase = mock(() => Promise.resolve(null as unknown));
 const mockExecuteWorkflow = mock(() => Promise.resolve());
-const mockDispatchBackgroundWorkflow = mock(() => Promise.resolve());
 const mockHandleCommand = mock(() =>
   Promise.resolve({ success: true, message: 'ok', workflow: undefined })
 );

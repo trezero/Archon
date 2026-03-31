@@ -34,7 +34,6 @@ import { executeWorkflow } from '@archon/workflows/executor';
 import type {
   WorkflowDefinition,
   WorkflowWithSource,
-  WorkflowLoadResult,
   WorkflowLoadError,
 } from '@archon/workflows/schemas/workflow';
 import { createWorkflowDeps } from '../workflows/store-adapter';
@@ -362,7 +361,7 @@ async function inheritThreadContext(
 }
 
 interface DiscoverResult {
-  workflows: WorkflowDefinition[];
+  workflows: WorkflowWithSource[];
   errors: readonly WorkflowLoadError[];
   syncResult?: WorkspaceSyncResult;
   syncError?: string;
@@ -381,7 +380,7 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Discove
     const result = await discoverWorkflowsWithConfig(getArchonWorkspacesPath(), loadConfig, {
       globalSearchPath: getArchonHome(),
     });
-    workflows = result.workflows.map(ws => ws.workflow);
+    workflows = [...result.workflows];
     allErrors.push(...result.errors);
   } catch (error) {
     const err = error as Error;
