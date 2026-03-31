@@ -705,7 +705,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   const isStreaming = messages.some(m => m.isStreaming);
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex flex-1 flex-col overflow-hidden min-h-0">
       <Header
         title={isNewChat ? 'New Chat' : headerTitle}
         subtitle={headerSubtitle}

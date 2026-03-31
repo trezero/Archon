@@ -494,7 +494,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
     }
     if (isDag && activeView === 'chat' && parentPlatformId) {
       return (
-        <div className="flex-1 overflow-hidden min-h-0">
+        <div className="flex flex-col flex-1 overflow-hidden min-h-0">
           <ChatInterface conversationId={parentPlatformId} />
         </div>
       );
