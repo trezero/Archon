@@ -242,7 +242,7 @@ async function dispatchOrchestratorWorkflow(
   }
 
   // Dispatch workflow
-  if (platform.getPlatformType() === 'web') {
+  if (platform.getPlatformType() === 'web' && !workflow.interactive) {
     await dispatchBackgroundWorkflow(
       {
         platform,

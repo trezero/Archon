@@ -33,6 +33,11 @@ const mockSyncWorkspace = mock(() =>
 const mockToRepoPath = mock((p: string) => p);
 const mockGetOrCreateConversation = mock(() => Promise.resolve(null as unknown));
 const mockGetCodebase = mock(() => Promise.resolve(null as unknown));
+const mockExecuteWorkflow = mock(() => Promise.resolve());
+const mockDispatchBackgroundWorkflow = mock(() => Promise.resolve());
+const mockHandleCommand = mock(() =>
+  Promise.resolve({ success: true, message: 'ok', workflow: undefined })
+);
 
 const mockLogger = createMockLogger();
 
@@ -62,8 +67,8 @@ mock.module('../db/sessions', () => ({
 }));
 
 mock.module('../handlers/command-handler', () => ({
-  parseCommand: mock(() => ({ command: 'help', args: [] })),
-  handleCommand: mock(() => Promise.resolve({ success: true, message: 'ok', workflow: undefined })),
+  parseCommand: mock(() => ({ command: 'workflow', args: [] })),
+  handleCommand: mockHandleCommand,
 }));
 
 mock.module('@archon/workflows/utils/tool-formatter', () => ({
@@ -78,7 +83,7 @@ mock.module('@archon/workflows/router', () => ({
   ),
 }));
 mock.module('@archon/workflows/executor', () => ({
-  executeWorkflow: mock(() => Promise.resolve()),
+  executeWorkflow: mockExecuteWorkflow,
 }));
 
 mock.module('../clients/factory', () => ({
@@ -110,7 +115,7 @@ mock.module('../services/title-generator', () => ({
 
 mock.module('./orchestrator', () => ({
   validateAndResolveIsolation: mock(() => Promise.resolve({ cwd: '/test/cwd' })),
-  dispatchBackgroundWorkflow: mock(() => Promise.resolve()),
+  dispatchBackgroundWorkflow: mockDispatchBackgroundWorkflow,
 }));
 
 mock.module('./prompt-builder', () => ({
@@ -926,5 +931,89 @@ describe('discoverAllWorkflows — remote sync', () => {
       expect.objectContaining({ codebaseId: 'codebase-1' }),
       'workspace.sync_failed'
     );
+  });
+});
+
+// ─── Workflow dispatch routing — interactive flag ─────────────────────────────
+
+describe('workflow dispatch routing — interactive flag', () => {
+  function makeDispatchConversation() {
+    return makeConversation({ codebase_id: 'codebase-1' });
+  }
+
+  function makeDispatchCodebase() {
+    return {
+      id: 'codebase-1',
+      name: 'test-repo',
+      repository_url: null,
+      default_cwd: '/repos/test-repo',
+      ai_assistant_type: 'claude' as const,
+      commands: {},
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+  }
+
+  function makeWorkflowResult(interactive?: boolean) {
+    return {
+      success: true,
+      message: 'ok',
+      workflow: {
+        definition: makeTestWorkflow({ name: 'test-workflow', interactive }),
+        args: 'test message',
+      },
+    };
+  }
+
+  beforeEach(() => {
+    mockExecuteWorkflow.mockClear();
+    mockDispatchBackgroundWorkflow.mockClear();
+    mockHandleCommand.mockReset();
+    mockHandleCommand.mockImplementation(() =>
+      Promise.resolve({ success: true, message: 'ok', workflow: undefined })
+    );
+    mockGetOrCreateConversation.mockReset();
+    mockGetOrCreateConversation.mockImplementation(() => Promise.resolve(null));
+    mockGetCodebase.mockReset();
+    mockGetCodebase.mockImplementation(() => Promise.resolve(null));
+  });
+
+  test('calls executeWorkflow (not dispatchBackground) for interactive workflow on web', async () => {
+    mockGetOrCreateConversation.mockReturnValueOnce(Promise.resolve(makeDispatchConversation()));
+    mockGetCodebase.mockReturnValueOnce(Promise.resolve(makeDispatchCodebase()));
+    mockHandleCommand.mockReturnValueOnce(Promise.resolve(makeWorkflowResult(true)));
+
+    const platform = makePlatform(); // getPlatformType returns 'web'
+    await handleMessage(platform, 'conv-1', '/workflow run test-workflow');
+
+    expect(mockExecuteWorkflow).toHaveBeenCalled();
+    expect(mockDispatchBackgroundWorkflow).not.toHaveBeenCalled();
+  });
+
+  test('calls dispatchBackgroundWorkflow for non-interactive workflow on web', async () => {
+    mockGetOrCreateConversation.mockReturnValueOnce(Promise.resolve(makeDispatchConversation()));
+    mockGetCodebase.mockReturnValueOnce(Promise.resolve(makeDispatchCodebase()));
+    mockHandleCommand.mockReturnValueOnce(Promise.resolve(makeWorkflowResult(undefined)));
+
+    const platform = makePlatform(); // getPlatformType returns 'web'
+    await handleMessage(platform, 'conv-1', '/workflow run test-workflow');
+
+    expect(mockDispatchBackgroundWorkflow).toHaveBeenCalled();
+    expect(mockExecuteWorkflow).not.toHaveBeenCalled();
+  });
+
+  test('calls executeWorkflow for interactive workflow on non-web platform', async () => {
+    mockGetOrCreateConversation.mockReturnValueOnce(Promise.resolve(makeDispatchConversation()));
+    mockGetCodebase.mockReturnValueOnce(Promise.resolve(makeDispatchCodebase()));
+    mockHandleCommand.mockReturnValueOnce(Promise.resolve(makeWorkflowResult(true)));
+
+    const platform = {
+      ...makePlatform(),
+      getPlatformType: mock(() => 'slack' as const),
+    };
+    await handleMessage(platform, 'conv-1', '/workflow run test-workflow');
+
+    expect(mockExecuteWorkflow).toHaveBeenCalled();
+    expect(mockDispatchBackgroundWorkflow).not.toHaveBeenCalled();
   });
 });

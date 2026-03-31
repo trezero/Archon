@@ -110,6 +110,7 @@ provider: claude
 model: sonnet
 modelReasoningEffort: medium     # Codex only
 webSearchMode: live              # Codex only
+interactive: true                # Web only: run in foreground instead of background
 
 # Required for DAG-based
 nodes:
@@ -440,6 +441,40 @@ additionalDirectories:
 - Codex can access files outside the codebase
 - Useful for shared libraries, documentation repos
 - Must be absolute paths
+
+### Web Execution Mode
+
+By default, workflows started from the **Web UI** run in the background — execution is
+dispatched to an internal worker conversation and results appear only in the workflow run
+log, not in the chat window.
+
+Set `interactive: true` to run the workflow in the **foreground** (same as CLI, Slack,
+Telegram, and GitHub): all AI output and approval gate messages stream directly to the
+user's chat window.
+
+```yaml
+name: my-interactive-workflow
+interactive: true   # Web UI: foreground execution (output visible in chat)
+
+nodes:
+  - id: plan
+    prompt: "Create a plan for $USER_MESSAGE"
+  - id: review-gate
+    approval:
+      message: "Does this plan look good?"
+    depends_on: [plan]
+  - id: implement
+    command: implement
+    depends_on: [review-gate]
+```
+
+**When to use `interactive: true`:**
+- Workflows with **approval nodes** — users must see the AI output and respond inline
+- Multi-turn workflows where the user needs to provide feedback at each step
+- Any workflow where the response must appear in the user's active chat thread
+
+**Platforms:** `interactive` only affects the web platform. CLI, Slack, Telegram, and
+GitHub always run workflows in foreground mode regardless of this setting.
 
 ### Model Validation
 
