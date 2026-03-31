@@ -1102,13 +1102,10 @@ async function handleWorkflowCommand(
           status: 'failed',
           metadata: { approval_response: 'approved' },
         });
+        const pathInfo = run.working_path ? `\nPath: \`${run.working_path}\`` : '';
         return {
           success: true,
-          message: `Workflow \`${run.workflow_name}\` approved. Resuming...`,
-          resumeRun: {
-            workflowName: run.workflow_name,
-            userMessage: run.user_message,
-          },
+          message: `Workflow \`${run.workflow_name}\` approved.${pathInfo}\nType your response in this conversation to resume the workflow.`,
         };
       } catch (error) {
         const err = error as Error;

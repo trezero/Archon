@@ -45,9 +45,10 @@ to the user on whatever platform they're using (CLI, Slack, GitHub, etc.). On th
 3. **Wait**: The workflow stays paused until the user takes action. Paused runs
    block the worktree path guard (no other workflow can start on the same path).
 4. **Approve**: The user approves, which writes a `node_completed` event for
-   the approval node and transitions the run to resumable. The CLI and chat
-   commands (`/workflow approve`) auto-resume immediately. The Web UI marks
-   the run resumable; it resumes when the user sends the next message.
+   the approval node and transitions the run to resumable. Natural-language
+   messages (recommended) and the CLI auto-resume immediately. The explicit
+   `/workflow approve` command records the approval; send a follow-up message
+   to resume.
 5. **Reject**: The user rejects, which cancels the workflow.
 
 ## YAML Schema
@@ -76,7 +77,24 @@ as expected.
 
 ## Approving and Rejecting
 
+### Natural Language (recommended)
+
+Just type your answer in the same conversation. The system detects the paused
+workflow and treats your message as the approval response:
+
+```
+User: "Looks good, but add error handling for the edge cases"
+→ System auto-approves, resumes workflow with your message as $gate.output
+```
+
+This works on all platforms (Web, Slack, Telegram, Discord, GitHub). Your
+message becomes available as `$<node-id>.output` in downstream nodes.
+
+To reject instead, use `/workflow reject <run-id>`.
+
 ### CLI
+
+The CLI is non-interactive — use explicit commands:
 
 ```bash
 # Approve (resumes the workflow immediately)
@@ -88,7 +106,7 @@ bun run cli workflow reject <run-id>
 bun run cli workflow reject <run-id> --reason "Plan needs more test coverage"
 ```
 
-### Chat Commands (Slack, Telegram, etc.)
+### Explicit Commands (all platforms)
 
 ```
 /workflow approve <run-id> looks good

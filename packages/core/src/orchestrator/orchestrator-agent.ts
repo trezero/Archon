@@ -45,6 +45,8 @@ import { validateAndResolveIsolation, dispatchBackgroundWorkflow } from './orche
 import { IsolationBlockedError } from '@archon/isolation';
 import { buildOrchestratorPrompt, buildProjectScopedPrompt } from './prompt-builder';
 import * as workflowDb from '../db/workflows';
+import * as workflowEventDb from '../db/workflow-events';
+import type { ApprovalContext } from '@archon/workflows/schemas/workflow-run';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -511,6 +513,114 @@ export async function handleMessage(
       );
     }
 
+    // Natural-language approval routing — if a workflow is paused in this
+    // conversation, treat any non-slash message as the approval response.
+    if (!message.startsWith('/')) {
+      const pausedRun = await workflowDb.getPausedWorkflowRun(conversation.id);
+      if (pausedRun) {
+        const approvalRaw = pausedRun.metadata.approval;
+        const hasValidApproval =
+          approvalRaw != null &&
+          typeof approvalRaw === 'object' &&
+          'nodeId' in approvalRaw &&
+          typeof (approvalRaw as Record<string, unknown>).nodeId === 'string';
+
+        if (!hasValidApproval) {
+          // Paused run exists but approval context is missing or corrupt —
+          // tell the user so they can use explicit commands instead.
+          await platform.sendMessage(
+            conversationId,
+            'A workflow is paused but its approval context is missing. ' +
+              `Use \`/workflow approve ${pausedRun.id}\` or \`/workflow reject ${pausedRun.id}\`.`
+          );
+          return;
+        }
+
+        const approval = approvalRaw as ApprovalContext;
+        getLog().info(
+          {
+            conversationId,
+            workflowRunId: pausedRun.id,
+            nodeId: approval.nodeId,
+            workflowName: pausedRun.workflow_name,
+          },
+          'orchestrator.natural_language_approval_started'
+        );
+
+        try {
+          // Write approval events (same pattern as command-handler approve)
+          await workflowEventDb.createWorkflowEvent({
+            workflow_run_id: pausedRun.id,
+            event_type: 'node_completed',
+            step_name: approval.nodeId,
+            data: { node_output: message, approval_decision: 'approved' },
+          });
+          await workflowEventDb.createWorkflowEvent({
+            workflow_run_id: pausedRun.id,
+            event_type: 'approval_received',
+            step_name: approval.nodeId,
+            data: { decision: 'approved', comment: message },
+          });
+          // Transition to 'failed' so findResumableRun() picks it up on the next
+          // workflow invocation. The approval_response metadata distinguishes this
+          // from a genuine failure.
+          await workflowDb.updateWorkflowRun(pausedRun.id, {
+            status: 'failed',
+            metadata: { approval_response: 'approved' },
+          });
+
+          // Discover workflow and resume
+          const { workflows: discoveredWorkflows } = await discoverAllWorkflows(conversation);
+          const allWorkflows: WorkflowDefinition[] = discoveredWorkflows.map(w => w.workflow);
+          const workflow = findWorkflow(pausedRun.workflow_name, allWorkflows);
+          if (!workflow) {
+            await platform.sendMessage(
+              conversationId,
+              `Approved, but workflow \`${pausedRun.workflow_name}\` not found. ` +
+                'The approval was recorded — use `/workflow list` to check available workflows.'
+            );
+            return;
+          }
+          const codebase = conversation.codebase_id
+            ? await codebaseDb.getCodebase(conversation.codebase_id)
+            : null;
+          if (!codebase) {
+            await platform.sendMessage(
+              conversationId,
+              'Approved, but no project is attached to this conversation. ' +
+                'The approval was recorded — re-run the workflow to resume.'
+            );
+            return;
+          }
+          await platform.sendMessage(conversationId, `▶️ Resuming **${workflow.name}**...`);
+          await dispatchOrchestratorWorkflow(
+            platform,
+            conversationId,
+            conversation,
+            codebase,
+            workflow,
+            pausedRun.user_message,
+            isolationHints
+          );
+          getLog().info(
+            { conversationId, workflowRunId: pausedRun.id, workflowName: pausedRun.workflow_name },
+            'orchestrator.natural_language_approval_completed'
+          );
+        } catch (error) {
+          getLog().error(
+            { err: error as Error, workflowRunId: pausedRun.id, conversationId },
+            'orchestrator.natural_language_approval_failed'
+          );
+          await platform.sendMessage(
+            conversationId,
+            `Approval failed: ${(error as Error).message}. ` +
+              `Try again or use \`/workflow approve ${pausedRun.id}\` explicitly.`
+          );
+        }
+        return;
+      }
+    }
+
     // 2. Check for deterministic commands
     if (message.startsWith('/')) {
       const { command } = commandHandler.parseCommand(message);
@@ -559,73 +669,6 @@ export async function handleMessage(
             result.workflow.args ?? message,
             isolationHints
           );
-        }
-        if (result.resumeRun) {
-          // Auto-resume: discover the workflow and dispatch (foreground resume
-          // will be detected by dispatchOrchestratorWorkflow)
-          const { workflowName, userMessage: resumeMessage } = result.resumeRun;
-          getLog().info({ workflowName, conversationId }, 'orchestrator.auto_resume_triggered');
-          try {
-            const { workflows: discoveredWorkflows } = await discoverAllWorkflows(conversation);
-            const allWorkflows: WorkflowDefinition[] = discoveredWorkflows.map(ws => ws.workflow);
-            const workflow = findWorkflow(workflowName, allWorkflows);
-            if (!workflow) {
-              getLog().error(
-                { workflowName, conversationId },
-                'orchestrator.auto_resume_workflow_not_found'
-              );
-              await platform.sendMessage(
-                conversationId,
-                `Approved, but workflow \`${workflowName}\` could not be found. ` +
-                  'Run `/workflow list` to verify the workflow exists.'
-              );
-              return;
-            }
-            if (!conversation.codebase_id) {
-              getLog().error(
-                { workflowName, conversationId },
-                'orchestrator.auto_resume_no_codebase'
-              );
-              await platform.sendMessage(
-                conversationId,
-                'Approved, but no project is attached to this conversation. ' +
-                  'Attach a project and try again.'
-              );
-              return;
-            }
-            const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
-            if (!codebase) {
-              getLog().error(
-                { workflowName, codebaseId: conversation.codebase_id, conversationId },
-                'orchestrator.auto_resume_codebase_not_found'
-              );
-              await platform.sendMessage(
-                conversationId,
-                'Approved, but the associated project could not be found. ' +
-                  'The project may have been removed.'
-              );
-              return;
-            }
-            await dispatchOrchestratorWorkflow(
-              platform,
-              conversationId,
-              conversation,
-              codebase,
-              workflow,
-              resumeMessage,
-              isolationHints
-            );
-          } catch (error) {
-            getLog().error(
-              { err: error as Error, workflowName, conversationId },
-              'orchestrator.auto_resume_failed'
-            );
-            await platform.sendMessage(
-              conversationId,
-              `Approved, but auto-resume failed: ${(error as Error).message}. ` +
-                'Send a message to trigger the workflow manually.'
-            );
-          }
         }
         return;
       }

@@ -158,6 +158,28 @@ export async function getActiveWorkflowRun(conversationId: string): Promise<Work
   }
 }
 
+/**
+ * Find a paused workflow run for a conversation (or its parent).
+ * Used by the message handler to detect approval gates awaiting a natural-language response.
+ * Non-throwing: returns null on DB error so the caller can fall through to normal routing.
+ */
+export async function getPausedWorkflowRun(conversationId: string): Promise<WorkflowRun | null> {
+  try {
+    const result = await pool.query<WorkflowRun>(
+      `SELECT * FROM remote_agent_workflow_runs
+       WHERE (conversation_id = $1 OR parent_conversation_id = $2) AND status = 'paused'
+       ORDER BY started_at DESC LIMIT 1`,
+      [conversationId, conversationId]
+    );
+    const row = result.rows[0];
+    return row ? normalizeWorkflowRun(row) : null;
+  } catch (error) {
+    const err = error as Error;
+    getLog().error({ err, conversationId }, 'db.workflow_run_get_paused_failed');
+    return null;
+  }
+}
+
 export async function getActiveWorkflowRunByPath(workingPath: string): Promise<WorkflowRun | null> {
   try {
     const result = await pool.query<WorkflowRun>(

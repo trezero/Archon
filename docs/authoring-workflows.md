@@ -825,12 +825,13 @@ nodes:
 
 When the workflow reaches `review-gate`, it pauses and notifies you. Approve or reject via:
 
+- **Natural language** (recommended): Just type your response in the conversation — the system detects the paused workflow and auto-resumes
 - **CLI**: `bun run cli workflow approve <run-id>` or `bun run cli workflow reject <run-id>`
-- **Chat**: `/workflow approve <run-id>` or `/workflow reject <run-id>`
+- **Explicit command**: `/workflow approve <run-id>` or `/workflow reject <run-id>` (records approval; send a follow-up message to resume)
 - **Web UI**: Click the Approve/Reject buttons on the dashboard card
 - **API**: `POST /api/workflows/runs/<run-id>/approve` or `/reject`
 
-After approval via CLI or chat, the workflow auto-resumes from the next node. Via the Web UI (API), the run is marked resumable and resumes when the user sends the next message. The user's approval comment is available as `$review-gate.output` in downstream nodes.
+After approval via natural language or CLI, the workflow auto-resumes from the next node. The user's approval comment is available as `$review-gate.output` in downstream nodes.
 
 Rejecting cancels the workflow.
 
