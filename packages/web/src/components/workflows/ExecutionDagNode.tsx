@@ -10,6 +10,7 @@ export interface ExecutionNodeData extends DagNodeData {
   status?: WorkflowStepStatus;
   duration?: number;
   error?: string;
+  selected?: boolean;
 }
 
 export type ExecutionFlowNode = Node<ExecutionNodeData>;
@@ -40,7 +41,7 @@ function ExecutionDagNodeRender({ data }: NodeProps<ExecutionFlowNode>): React.R
 
   return (
     <div
-      className={`rounded-lg border border-border px-3 py-2 min-w-[140px] transition-all duration-300 ${style}`}
+      className={`rounded-lg border border-border px-3 py-2 min-w-[140px] transition-all duration-300 ${style}${data.selected ? ' ring-2 ring-accent-bright' : ''}`}
     >
       <Handle type="target" position={Position.Top} className="!bg-border !w-2 !h-2" />
       <div className="flex items-center gap-2">
