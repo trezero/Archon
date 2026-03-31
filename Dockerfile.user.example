@@ -2,9 +2,9 @@
 # Copy this file to Dockerfile.user — do NOT modify Dockerfile.user.example.
 # Dockerfile.user is gitignored so your customizations stay local.
 #
-# Build the base image first, then build your custom image:
+# Build the base image first, then start the stack:
 #   docker compose build           # builds the base remote-coding-agent image
-#   docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
+#   docker compose up -d           # auto-merges docker-compose.override.yml
 #
 # This file extends the locally-built dev image. Add any tools you need below.
 

@@ -6,7 +6,8 @@
 # when both files are present — no extra flags needed:
 #   docker compose up -d
 #
-# This override tells Compose to build from Dockerfile.user instead of the default Dockerfile.
+# NOTE: The base docker-compose.yml uses `build: .` (Dockerfile by default). This override
+# switches it to Dockerfile.user so Compose builds your custom image instead.
 
 services:
   app:
