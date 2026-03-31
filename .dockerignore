@@ -29,6 +29,7 @@ packages/web/dist
 
 # Docker files (avoid recursive context)
 docker/
+Dockerfile.user
 
 # Documentation site (not needed in production)
 docs/
