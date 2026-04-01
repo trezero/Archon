@@ -450,6 +450,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
             isRunning={isRunning}
             currentlyExecuting={currentlyExecuting}
             toolEvents={toolEvents}
+            selectedNodeId={selectedDagNode}
           />
         ) : (
           <StepLogs runId={runId} lines={stepLogLines} />
@@ -474,6 +475,8 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
                 liveStatus={workflow.dagNodes}
                 isRunning={isRunning}
                 currentlyExecuting={currentlyExecuting ?? undefined}
+                selectedNodeId={selectedDagNode}
+                onNodeClick={setSelectedDagNode}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-text-secondary">

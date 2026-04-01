@@ -33,6 +33,7 @@ import { findWorkflow } from '@archon/workflows/router';
 import { executeWorkflow } from '@archon/workflows/executor';
 import type {
   WorkflowDefinition,
+  WorkflowWithSource,
   WorkflowLoadResult,
   WorkflowLoadError,
 } from '@archon/workflows/schemas/workflow';
@@ -43,6 +44,9 @@ import { generateAndSetTitle } from '../services/title-generator';
 import { validateAndResolveIsolation, dispatchBackgroundWorkflow } from './orchestrator';
 import { IsolationBlockedError } from '@archon/isolation';
 import { buildOrchestratorPrompt, buildProjectScopedPrompt } from './prompt-builder';
+import * as workflowDb from '../db/workflows';
+import * as workflowEventDb from '../db/workflow-events';
+import type { ApprovalContext } from '@archon/workflows/schemas/workflow-run';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -243,19 +247,59 @@ async function dispatchOrchestratorWorkflow(
 
   // Dispatch workflow
   if (platform.getPlatformType() === 'web') {
-    await dispatchBackgroundWorkflow(
-      {
+    // Check for a resumable run from a prior dispatch (e.g. approved approval gate).
+    // A new background dispatch would create a new worker conversation and never find
+    // the prior run's worktree. Execute in foreground to reuse the original working path.
+    const resumableRun = await workflowDb.findResumableRunByParentConversation(
+      workflow.name,
+      conversation.id
+    );
+    if (resumableRun?.working_path) {
+      getLog().info(
+        {
+          workflowName: workflow.name,
+          resumableRunId: resumableRun.id,
+          workingPath: resumableRun.working_path,
+        },
+        'orchestrator.foreground_resume_detected'
+      );
+      await executeWorkflow(
+        createWorkflowDeps(),
+        platform,
+        conversationId,
+        resumableRun.working_path,
+        workflow,
+        userMessage,
+        conversation.id,
+        codebase.id
+      );
+    } else if (workflow.interactive) {
+      // Interactive workflows run in foreground so output stays in the user's conversation
+      await executeWorkflow(
+        createWorkflowDeps(),
         platform,
         conversationId,
         cwd,
-        originalMessage: userMessage,
-        conversationDbId: conversation.id,
-        codebaseId: codebase.id,
-        availableWorkflows: [workflow],
-        isolationHints,
-      },
-      workflow
-    );
+        workflow,
+        userMessage,
+        conversation.id,
+        codebase.id
+      );
+    } else {
+      await dispatchBackgroundWorkflow(
+        {
+          platform,
+          conversationId,
+          cwd,
+          originalMessage: userMessage,
+          conversationDbId: conversation.id,
+          codebaseId: codebase.id,
+          availableWorkflows: [workflow],
+          isolationHints,
+        },
+        workflow
+      );
+    }
   } else {
     await executeWorkflow(
       createWorkflowDeps(),
@@ -325,7 +369,7 @@ interface DiscoverResult extends WorkflowLoadResult {
 
 /** Discover global + repo-specific workflows, merge by name (repo overrides global) */
 async function discoverAllWorkflows(conversation: Conversation): Promise<DiscoverResult> {
-  let workflows: WorkflowDefinition[] = [];
+  let workflows: WorkflowWithSource[] = [];
   const allErrors: WorkflowLoadError[] = [];
   let syncResult: WorkspaceSyncResult | undefined;
   let syncError: string | undefined;
@@ -379,9 +423,9 @@ async function discoverAllWorkflows(conversation: Conversation): Promise<Discove
         const repoResult = await discoverWorkflowsWithConfig(workflowCwd, () =>
           Promise.resolve(loadedConfig)
         );
-        const workflowMap = new Map(workflows.map(w => [w.name, w]));
+        const workflowMap = new Map(workflows.map(w => [w.workflow.name, w]));
         for (const rw of repoResult.workflows) {
-          workflowMap.set(rw.name, rw);
+          workflowMap.set(rw.workflow.name, rw);
         }
         workflows = Array.from(workflowMap.values());
         allErrors.push(...repoResult.errors);
@@ -469,6 +513,114 @@ export async function handleMessage(
       );
     }
 
+    // Natural-language approval routing — if a workflow is paused in this
+    // conversation, treat any non-slash message as the approval response.
+    if (!message.startsWith('/')) {
+      const pausedRun = await workflowDb.getPausedWorkflowRun(conversation.id);
+      if (pausedRun) {
+        const approvalRaw = pausedRun.metadata.approval;
+        const hasValidApproval =
+          approvalRaw != null &&
+          typeof approvalRaw === 'object' &&
+          'nodeId' in approvalRaw &&
+          typeof (approvalRaw as Record<string, unknown>).nodeId === 'string';
+
+        if (!hasValidApproval) {
+          // Paused run exists but approval context is missing or corrupt —
+          // tell the user so they can use explicit commands instead.
+          await platform.sendMessage(
+            conversationId,
+            'A workflow is paused but its approval context is missing. ' +
+              `Use \`/workflow approve ${pausedRun.id}\` or \`/workflow reject ${pausedRun.id}\`.`
+          );
+          return;
+        }
+
+        const approval = approvalRaw as ApprovalContext;
+        getLog().info(
+          {
+            conversationId,
+            workflowRunId: pausedRun.id,
+            nodeId: approval.nodeId,
+            workflowName: pausedRun.workflow_name,
+          },
+          'orchestrator.natural_language_approval_started'
+        );
+
+        try {
+          // Write approval events (same pattern as command-handler approve)
+          await workflowEventDb.createWorkflowEvent({
+            workflow_run_id: pausedRun.id,
+            event_type: 'node_completed',
+            step_name: approval.nodeId,
+            data: { node_output: message, approval_decision: 'approved' },
+          });
+          await workflowEventDb.createWorkflowEvent({
+            workflow_run_id: pausedRun.id,
+            event_type: 'approval_received',
+            step_name: approval.nodeId,
+            data: { decision: 'approved', comment: message },
+          });
+          // Transition to 'failed' so findResumableRun() picks it up on the next
+          // workflow invocation. The approval_response metadata distinguishes this
+          // from a genuine failure.
+          await workflowDb.updateWorkflowRun(pausedRun.id, {
+            status: 'failed',
+            metadata: { approval_response: 'approved' },
+          });
+
+          // Discover workflow and resume
+          const { workflows: discoveredWorkflows } = await discoverAllWorkflows(conversation);
+          const allWorkflows: WorkflowDefinition[] = discoveredWorkflows.map(w => w.workflow);
+          const workflow = findWorkflow(pausedRun.workflow_name, allWorkflows);
+          if (!workflow) {
+            await platform.sendMessage(
+              conversationId,
+              `Approved, but workflow \`${pausedRun.workflow_name}\` not found. ` +
+                'The approval was recorded — use `/workflow list` to check available workflows.'
+            );
+            return;
+          }
+          const codebase = conversation.codebase_id
+            ? await codebaseDb.getCodebase(conversation.codebase_id)
+            : null;
+          if (!codebase) {
+            await platform.sendMessage(
+              conversationId,
+              'Approved, but no project is attached to this conversation. ' +
+                'The approval was recorded — re-run the workflow to resume.'
+            );
+            return;
+          }
+          await platform.sendMessage(conversationId, `▶️ Resuming **${workflow.name}**...`);
+          await dispatchOrchestratorWorkflow(
+            platform,
+            conversationId,
+            conversation,
+            codebase,
+            workflow,
+            pausedRun.user_message,
+            isolationHints
+          );
+          getLog().info(
+            { conversationId, workflowRunId: pausedRun.id, workflowName: pausedRun.workflow_name },
+            'orchestrator.natural_language_approval_completed'
+          );
+        } catch (error) {
+          getLog().error(
+            { err: error as Error, workflowRunId: pausedRun.id, conversationId },
+            'orchestrator.natural_language_approval_failed'
+          );
+          await platform.sendMessage(
+            conversationId,
+            `Approval failed: ${(error as Error).message}. ` +
+              `Try again or use \`/workflow approve ${pausedRun.id}\` explicitly.`
+          );
+        }
+        return;
+      }
+    }
+
     // 2. Check for deterministic commands
     if (message.startsWith('/')) {
       const { command } = commandHandler.parseCommand(message);
@@ -525,12 +677,13 @@ export async function handleMessage(
     // 3. Load codebases, discover workflows, build prompt
     const codebases = await codebaseDb.listCodebases();
     const {
-      workflows,
+      workflows: workflowsWithSource,
       errors: workflowErrors,
       syncResult,
       syncError,
       config: discoveredConfig,
     } = await discoverAllWorkflows(conversation);
+    const workflows: readonly WorkflowDefinition[] = workflowsWithSource.map(ws => ws.workflow);
     if (workflowErrors.length > 0) {
       getLog().warn(
         { errorCount: workflowErrors.length, errors: workflowErrors },
@@ -1158,9 +1311,10 @@ async function handleWorkflowRunCommand(
       return;
     }
 
-    const resolvedWorkflow =
-      discovery.workflows.find(w => w.name === workflow.name) ??
-      discovery.workflows.find(w => w.name.toLowerCase() === workflow.name.toLowerCase());
+    const resolvedEntry =
+      discovery.workflows.find(w => w.workflow.name === workflow.name) ??
+      discovery.workflows.find(w => w.workflow.name.toLowerCase() === workflow.name.toLowerCase());
+    const resolvedWorkflow = resolvedEntry?.workflow;
 
     if (!resolvedWorkflow) {
       const loadError = discovery.errors.find(

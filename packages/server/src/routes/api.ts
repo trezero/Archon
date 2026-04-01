@@ -1342,6 +1342,7 @@ export function registerApiRoutes(
         'completed',
         'failed',
         'cancelled',
+        'paused',
       ] as const;
       type DashboardRunStatus = (typeof dashboardValidStatuses)[number];
       const status: DashboardRunStatus | undefined =
@@ -1469,10 +1470,9 @@ export function registerApiRoutes(
         status: 'failed',
         metadata: { approval_response: 'approved' },
       });
-      const pathInfo = run.working_path ? ` at \`${run.working_path}\`` : '';
       return c.json({
         success: true,
-        message: `Workflow approved: ${run.workflow_name}${pathInfo}. Re-run the workflow to auto-resume from completed nodes.`,
+        message: `Workflow approved: ${run.workflow_name}. Send a message to continue the workflow.`,
       });
     } catch (error) {
       getLog().error({ err: error, runId }, 'api.workflow_run_approve_failed');

@@ -35,7 +35,7 @@ import archonValidatePrE2eMainCmd from '../../../../.archon/commands/defaults/ar
 import archonValidatePrReportCmd from '../../../../.archon/commands/defaults/archon-validate-pr-report.md' with { type: 'text' };
 
 // =============================================================================
-// Default Workflows (9 total)
+// Default Workflows (10 total)
 // =============================================================================
 
 import archonAssistWf from '../../../../.archon/workflows/defaults/archon-assist.yaml' with { type: 'text' };
@@ -47,6 +47,7 @@ import archonResolveConflictsWf from '../../../../.archon/workflows/defaults/arc
 import archonSmartPrReviewWf from '../../../../.archon/workflows/defaults/archon-smart-pr-review.yaml' with { type: 'text' };
 import archonValidatePrWf from '../../../../.archon/workflows/defaults/archon-validate-pr.yaml' with { type: 'text' };
 import archonRemotionGenerateWf from '../../../../.archon/workflows/defaults/archon-remotion-generate.yaml' with { type: 'text' };
+import archonInteractivePrdWf from '../../../../.archon/workflows/defaults/archon-interactive-prd.yaml' with { type: 'text' };
 
 // =============================================================================
 // Exports
@@ -92,6 +93,7 @@ export const BUNDLED_WORKFLOWS: Record<string, string> = {
   'archon-smart-pr-review': archonSmartPrReviewWf,
   'archon-validate-pr': archonValidatePrWf,
   'archon-remotion-generate': archonRemotionGenerateWf,
+  'archon-interactive-prd': archonInteractivePrdWf,
 };
 
 /**

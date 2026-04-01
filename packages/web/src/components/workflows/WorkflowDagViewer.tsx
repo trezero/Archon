@@ -43,6 +43,8 @@ interface WorkflowDagViewerProps {
   liveStatus: readonly DagNodeState[];
   isRunning: boolean;
   currentlyExecuting?: { nodeName: string; startedAt: number };
+  selectedNodeId?: string | null;
+  onNodeClick?: (nodeId: string) => void;
 }
 
 export function WorkflowDagViewer({
@@ -50,6 +52,8 @@ export function WorkflowDagViewer({
   liveStatus,
   isRunning,
   currentlyExecuting,
+  selectedNodeId,
+  onNodeClick,
 }: WorkflowDagViewerProps): React.ReactElement {
   // Compute topology layout ONCE from the workflow definition.
   // Only re-layout when the definition changes (node/edge count), not on status updates.
@@ -84,10 +88,11 @@ export function WorkflowDagViewer({
           status: live?.status,
           duration: live?.duration,
           error: live?.error,
+          selected: node.id === selectedNodeId,
         },
       } as ExecutionFlowNode;
     });
-  }, [baseNodes, statusMap, dagNodes]);
+  }, [baseNodes, statusMap, dagNodes, selectedNodeId]);
 
   // Color edges based on target node status
   const edges: Edge[] = useMemo(() => {
@@ -122,7 +127,14 @@ export function WorkflowDagViewer({
           nodeTypes={nodeTypes}
           nodesDraggable={false}
           nodesConnectable={false}
-          elementsSelectable={false}
+          elementsSelectable={true}
+          onNodeClick={
+            onNodeClick
+              ? (_event, node): void => {
+                  onNodeClick(node.id);
+                }
+              : undefined
+          }
           fitView
           fitViewOptions={{ padding: 0.15 }}
           panOnDrag

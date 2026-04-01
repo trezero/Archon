@@ -15,6 +15,7 @@ interface WorkflowLogsProps {
   isRunning?: boolean;
   currentlyExecuting?: { nodeName: string; startedAt: number } | null;
   toolEvents?: ToolEvent[];
+  selectedNodeId?: string | null;
 }
 
 function hydrateMessages(
@@ -176,6 +177,7 @@ export function WorkflowLogs({
   isRunning,
   currentlyExecuting,
   toolEvents,
+  selectedNodeId,
 }: WorkflowLogsProps): React.ReactElement {
   const [sseMessages, setSseMessages] = useState<ChatMessage[]>([]);
   const queryClient = useQueryClient();
@@ -195,15 +197,20 @@ export function WorkflowLogs({
     };
   }, [isRunning, currentlyExecuting]);
 
+  // Filter tool events to selected node when one is selected
+  const filteredToolEvents = useMemo((): ToolEvent[] | undefined => {
+    if (!selectedNodeId || !toolEvents) return toolEvents;
+    return toolEvents.filter(te => te.stepName === selectedNodeId);
+  }, [toolEvents, selectedNodeId]);
+
   // Poll for messages from DB — 3s while running (or during grace period), disabled when terminal.
   // staleTime: 0 ensures post-completion navigation always fetches fresh data on mount.
-  // Tool calls are read from message metadata directly (not from toolEvents prop),
-  // so we don't need toolEvents?.length in the query key — avoids unnecessary re-fetches.
+  // Query key includes selectedNodeId so the query re-runs when node filter changes.
   const { data: queryMessages } = useQuery({
-    queryKey: ['workflowMessages', conversationId],
+    queryKey: ['workflowMessages', conversationId, selectedNodeId ?? 'all'],
     queryFn: async (): Promise<ChatMessage[]> => {
       const rows = await getMessages(conversationId);
-      return hydrateMessages(rows, startedAt, toolEvents);
+      return hydrateMessages(rows, startedAt, filteredToolEvents);
     },
     refetchInterval: isRunning || gracePolling ? 3000 : false,
     staleTime: 0,
@@ -214,10 +221,28 @@ export function WorkflowLogs({
   // Also force-scroll to bottom so the user sees the final output.
   useEffect(() => {
     if (prevIsRunningRef.current && !isRunning) {
+      // Finalize any in-flight SSE tool calls that never received tool_result.
+      // This is a safety net for when onLockChange fires late or is missed.
+      const now = Date.now();
+      setSseMessages(prev =>
+        prev.map(msg => {
+          const hasOpenTool = msg.toolCalls?.some(tc => tc.duration === undefined && !tc.output);
+          if (!hasOpenTool && !msg.isStreaming) return msg;
+          return {
+            ...msg,
+            isStreaming: false,
+            toolCalls: msg.toolCalls?.map(tc =>
+              tc.duration === undefined && !tc.output ? { ...tc, duration: now - tc.startedAt } : tc
+            ),
+          };
+        })
+      );
+
       setGracePolling(true);
       setScrollTrigger(prev => prev + 1);
       const timer = setTimeout(() => {
         setGracePolling(false);
+        // Invalidate all node-filtered variants (prefix match covers 'all' + per-node keys)
         void queryClient.invalidateQueries({ queryKey: ['workflowMessages', conversationId] });
         setScrollTrigger(prev => prev + 1);
       }, 6000);

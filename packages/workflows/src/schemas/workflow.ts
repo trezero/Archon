@@ -29,6 +29,7 @@ export const workflowBaseSchema = z.object({
   modelReasoningEffort: modelReasoningEffortSchema.optional(),
   webSearchMode: webSearchModeSchema.optional(),
   additionalDirectories: z.array(z.string()).optional(),
+  interactive: z.boolean().optional(),
 });
 
 export type WorkflowBase = z.infer<typeof workflowBaseSchema>;

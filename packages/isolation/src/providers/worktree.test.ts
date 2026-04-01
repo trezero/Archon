@@ -1823,7 +1823,10 @@ describe('WorktreeProvider', () => {
       await provider.create(baseRequest);
 
       // syncWorkspace called with undefined → triggers auto-detect via getDefaultBranch
-      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', undefined);
+      // resetAfterFetch: false because test path is not a managed clone under ~/.archon/workspaces
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', undefined, {
+        resetAfterFetch: false,
+      });
     });
 
     test('auto-detects base branch when fromBranch is set but no baseBranch configured', async () => {
@@ -1841,7 +1844,9 @@ describe('WorktreeProvider', () => {
       await provider.create(request);
 
       // fromBranch is the start-point for the branch, not for sync — sync auto-detects
-      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', undefined);
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', undefined, {
+        resetAfterFetch: false,
+      });
     });
 
     test('uses configuredBaseBranch over fromBranch when both are set', async () => {
@@ -1858,7 +1863,9 @@ describe('WorktreeProvider', () => {
 
       await provider.create(request);
 
-      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', 'main');
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', 'main', {
+        resetAfterFetch: false,
+      });
     });
 
     test('auto-detects when fromBranch is set but workflowType is not task and no baseBranch', async () => {
@@ -1875,7 +1882,9 @@ describe('WorktreeProvider', () => {
       await provider.create(request);
 
       // fromBranch is ignored for non-task types, so syncWorkspace gets undefined → auto-detect
-      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', undefined);
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', undefined, {
+        resetAfterFetch: false,
+      });
     });
 
     test('passes configured base branch to workspace sync when provided', async () => {
@@ -1887,7 +1896,9 @@ describe('WorktreeProvider', () => {
 
       await provider.create(baseRequest);
 
-      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', 'develop');
+      expect(syncWorkspaceSpy).toHaveBeenCalledWith('/workspace/owner/repo', 'develop', {
+        resetAfterFetch: false,
+      });
       expect(getDefaultBranchSpy).not.toHaveBeenCalled();
     });
 

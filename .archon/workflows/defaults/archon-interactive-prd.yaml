@@ -12,6 +12,7 @@ description: |
   4. Generate PRD → validate technical claims against codebase → output
 
 provider: claude
+interactive: true
 
 nodes:
   # ═══════════════════════════════════════════════════════════════

@@ -307,6 +307,11 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
         })
       : undefined;
 
+    const interactive = typeof raw.interactive === 'boolean' ? raw.interactive : undefined;
+    if (raw.interactive !== undefined && typeof raw.interactive !== 'boolean') {
+      getLog().warn({ filename, value: raw.interactive }, 'invalid_interactive_value_ignored');
+    }
+
     return {
       workflow: {
         name: raw.name,
@@ -316,6 +321,7 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
         modelReasoningEffort,
         webSearchMode,
         additionalDirectories,
+        interactive,
         nodes: dagNodes,
       },
       error: null,

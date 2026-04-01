@@ -21,7 +21,7 @@ import {
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '@archon/paths';
 import { loadConfig } from '../config/config-loader';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
-import type { WorkflowDefinition, WorkflowLoadError } from '@archon/workflows/schemas/workflow';
+import type { WorkflowWithSource, WorkflowLoadError } from '@archon/workflows/schemas/workflow';
 import {
   TERMINAL_WORKFLOW_STATUSES,
   RESUMABLE_WORKFLOW_STATUSES,
@@ -868,11 +868,11 @@ async function handleWorkflowCommand(
   switch (subcommand) {
     case 'list':
     case 'ls': {
-      let workflows: readonly WorkflowDefinition[];
+      let workflowEntries: readonly WorkflowWithSource[];
       let errors: readonly WorkflowLoadError[];
       try {
         const result = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
-        workflows = result.workflows;
+        workflowEntries = result.workflows;
         errors = result.errors;
       } catch (error) {
         const err = error as Error;
@@ -883,7 +883,7 @@ async function handleWorkflowCommand(
         };
       }
 
-      if (workflows.length === 0 && errors.length === 0) {
+      if (workflowEntries.length === 0 && errors.length === 0) {
         return {
           success: true,
           message: 'No workflows found.\n\nCreate workflows in `.archon/workflows/` as YAML files.',
@@ -892,9 +892,9 @@ async function handleWorkflowCommand(
 
       let msg = '';
 
-      if (workflows.length > 0) {
+      if (workflowEntries.length > 0) {
         msg += 'Available Workflows:\n\n';
-        for (const w of workflows) {
+        for (const { workflow: w } of workflowEntries) {
           const modeInfo = `DAG: ${String(w.nodes.length)} nodes`;
           msg += `**\`${w.name}\`**\n  ${w.description}\n  ${modeInfo}\n\n`;
         }
@@ -1105,7 +1105,7 @@ async function handleWorkflowCommand(
         const pathInfo = run.working_path ? `\nPath: \`${run.working_path}\`` : '';
         return {
           success: true,
-          message: `Workflow \`${run.workflow_name}\` approved.${pathInfo}\nRun the same workflow again to auto-resume from completed nodes.`,
+          message: `Workflow \`${run.workflow_name}\` approved.${pathInfo}\nType your response in this conversation to resume the workflow.`,
         };
       } catch (error) {
         const err = error as Error;
@@ -1172,11 +1172,11 @@ async function handleWorkflowCommand(
       );
 
       // Discover workflows with error handling
-      let workflows: readonly WorkflowDefinition[];
+      let workflowEntries: readonly WorkflowWithSource[];
       let loadErrors: readonly WorkflowLoadError[];
       try {
         const result = await discoverWorkflowsWithConfig(workflowCwd, loadConfig);
-        workflows = result.workflows;
+        workflowEntries = result.workflows;
         loadErrors = result.errors;
       } catch (error) {
         const err = error as Error;
@@ -1187,6 +1187,7 @@ async function handleWorkflowCommand(
         };
       }
 
+      const workflows = workflowEntries.map(ws => ws.workflow);
       getLog().debug(
         {
           count: workflows.length,
