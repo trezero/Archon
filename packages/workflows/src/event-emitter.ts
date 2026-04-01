@@ -132,6 +132,13 @@ interface ApprovalPendingEvent {
   message: string;
 }
 
+interface WorkflowCancelledEvent {
+  type: 'workflow_cancelled';
+  runId: string;
+  nodeId: string;
+  reason: string;
+}
+
 export type WorkflowEmitterEvent =
   | WorkflowStartedEvent
   | WorkflowCompletedEvent
@@ -146,7 +153,8 @@ export type WorkflowEmitterEvent =
   | WorkflowArtifactEvent
   | ToolStartedEvent
   | ToolCompletedEvent
-  | ApprovalPendingEvent;
+  | ApprovalPendingEvent
+  | WorkflowCancelledEvent;
 
 // ---------------------------------------------------------------------------
 // Emitter class

@@ -42,6 +42,7 @@ export function createWorkflowStore(): IWorkflowStore {
     completeWorkflowRun: workflowDb.completeWorkflowRun,
     failWorkflowRun: workflowDb.failWorkflowRun,
     pauseWorkflowRun: workflowDb.pauseWorkflowRun,
+    cancelWorkflowRun: workflowDb.cancelWorkflowRun,
     createWorkflowEvent: async (data): Promise<void> => {
       try {
         await workflowEventDb.createWorkflowEvent(data);

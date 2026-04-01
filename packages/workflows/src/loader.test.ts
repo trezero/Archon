@@ -29,7 +29,7 @@ mock.module('@archon/paths', () => ({
 }));
 
 import { discoverWorkflows } from './workflow-discovery';
-import { isBashNode, isLoopNode } from './schemas';
+import { isBashNode, isCancelNode, isLoopNode } from './schemas';
 import * as bundledDefaults from './defaults/bundled-defaults';
 
 describe('Workflow Loader', () => {
@@ -1842,6 +1842,102 @@ nodes:
       if (isLoopNode(wf.nodes[1])) {
         expect(wf.nodes[1].depends_on).toEqual(['setup']);
       }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Cancel nodes
+  // -------------------------------------------------------------------------
+  describe('cancel nodes', () => {
+    it('should parse a valid cancel node', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'cancel-test.yaml'),
+        `
+name: cancel-test
+description: Cancel node test
+nodes:
+  - id: check
+    bash: "echo ok"
+  - id: stop
+    depends_on: [check]
+    cancel: "Precondition failed"
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      const wf = result.workflows[0].workflow;
+      expect(wf.nodes).toHaveLength(2);
+      expect(isCancelNode(wf.nodes[1])).toBe(true);
+      if (isCancelNode(wf.nodes[1])) {
+        expect(wf.nodes[1].cancel).toBe('Precondition failed');
+      }
+    });
+
+    it('should reject cancel node with empty reason', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'cancel-empty.yaml'),
+        `
+name: cancel-empty
+description: Empty cancel
+nodes:
+  - id: stop
+    cancel: ""
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors.length).toBeGreaterThan(0);
+    });
+
+    it('should reject node with both cancel and prompt', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'cancel-prompt.yaml'),
+        `
+name: cancel-prompt-conflict
+description: Cancel + prompt conflict
+nodes:
+  - id: bad
+    cancel: "reason"
+    prompt: "Do something"
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0].error).toContain('mutually exclusive');
+    });
+
+    it('should warn about AI-specific fields on cancel nodes', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'cancel-ai-fields.yaml'),
+        `
+name: cancel-ai-fields
+description: Cancel with AI fields
+nodes:
+  - id: stop
+    cancel: "reason"
+    model: opus
+    provider: claude
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      // AI fields should produce a warning log
+      expect(mockLogger.warn).toHaveBeenCalled();
     });
   });
 });

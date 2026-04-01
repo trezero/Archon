@@ -13,6 +13,8 @@ const mockUpdateWorkflowActivity = mock(() => Promise.resolve());
 const mockGetWorkflowRunStatus = mock(() => Promise.resolve('running'));
 const mockCompleteWorkflowRun = mock(() => Promise.resolve());
 const mockFailWorkflowRun = mock(() => Promise.resolve());
+const mockCancelWorkflowRun = mock(() => Promise.resolve());
+const mockPauseWorkflowRun = mock(() => Promise.resolve());
 
 mock.module('../db/workflows', () => ({
   createWorkflowRun: mockCreateWorkflowRun,
@@ -26,6 +28,8 @@ mock.module('../db/workflows', () => ({
   getWorkflowRunStatus: mockGetWorkflowRunStatus,
   completeWorkflowRun: mockCompleteWorkflowRun,
   failWorkflowRun: mockFailWorkflowRun,
+  cancelWorkflowRun: mockCancelWorkflowRun,
+  pauseWorkflowRun: mockPauseWorkflowRun,
 }));
 
 const mockCreateWorkflowEvent = mock(() => Promise.resolve());
@@ -65,6 +69,8 @@ describe('createWorkflowStore', () => {
       'getWorkflowRunStatus',
       'completeWorkflowRun',
       'failWorkflowRun',
+      'pauseWorkflowRun',
+      'cancelWorkflowRun',
       'createWorkflowEvent',
       'getCompletedDagNodeOutputs',
       'getCodebase',
@@ -110,6 +116,13 @@ describe('createWorkflowStore', () => {
     const result = await store.getCompletedDagNodeOutputs('run-123');
     expect(result).toBe(expected);
     expect(mockGetCompletedDagNodeOutputs).toHaveBeenCalledWith('run-123');
+  });
+
+  test('delegates cancelWorkflowRun to DB', async () => {
+    mockCancelWorkflowRun.mockResolvedValueOnce(undefined);
+    const store = createWorkflowStore();
+    await store.cancelWorkflowRun('run-123');
+    expect(mockCancelWorkflowRun).toHaveBeenCalledWith('run-123');
   });
 
   test('delegates getCodebase to DB', async () => {

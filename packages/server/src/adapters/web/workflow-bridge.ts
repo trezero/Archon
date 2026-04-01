@@ -140,6 +140,15 @@ export function mapWorkflowEvent(event: WorkflowEmitterEvent): string | null {
         },
       });
 
+    case 'workflow_cancelled':
+      return JSON.stringify({
+        type: 'workflow_status',
+        runId: event.runId,
+        workflowName: '',
+        status: 'cancelled',
+        timestamp: Date.now(),
+      });
+
     default: {
       const exhaustiveCheck: never = event;
       getLog().warn(
