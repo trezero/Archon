@@ -382,7 +382,12 @@ export async function executeWorkflow(
           '⚠️ Could not load prior node outputs for resume (database error). Starting a fresh run instead.'
         );
       }
-      if (priorNodes.size > 0) {
+      // Resume if there are completed nodes OR if the run has interactive loop state
+      // (a paused interactive loop may have no completed nodes yet — just the loop itself pausing)
+      const hasInteractiveLoopState =
+        resumableRun.metadata?.approval &&
+        (resumableRun.metadata.approval as Record<string, unknown>).type === 'interactive_loop';
+      if (priorNodes.size > 0 || hasInteractiveLoopState) {
         try {
           workflowRun = await deps.store.resumeWorkflowRun(resumableRun.id);
           dagPriorCompletedNodes = priorNodes;
@@ -393,11 +398,11 @@ export async function executeWorkflow(
             },
             'workflow.dag_resuming'
           );
-          await safeSendMessage(
-            platform,
-            conversationId,
-            `▶️ **Resuming** workflow \`${workflow.name}\` — skipping ${String(priorNodes.size)} already-completed node(s).\n\nNote: AI session context from prior nodes is not restored. Nodes that depend on prior context may need to re-read artifacts.`
-          );
+          const resumeMsg =
+            priorNodes.size > 0
+              ? `▶️ **Resuming** workflow \`${workflow.name}\` — skipping ${String(priorNodes.size)} already-completed node(s).\n\nNote: AI session context from prior nodes is not restored. Nodes that depend on prior context may need to re-read artifacts.`
+              : `▶️ **Resuming** workflow \`${workflow.name}\` — continuing interactive loop.`;
+          await safeSendMessage(platform, conversationId, resumeMsg);
         } catch (error) {
           const err = error as Error;
           getLog().error(
