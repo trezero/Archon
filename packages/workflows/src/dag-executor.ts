@@ -1666,17 +1666,10 @@ async function executeLoopNode(
       durationMs: duration,
     });
 
-    if (completionDetected) {
-      await safeSendMessage(
-        platform,
-        conversationId,
-        `Loop node '${node.id}' completed after ${String(i)} iteration${i > 1 ? 's' : ''}`,
-        msgContext
-      );
-      return { state: 'completed', output: lastIterationOutput, sessionId: currentSessionId };
-    }
-
-    // Interactive loop gate — pause for user input if not completing
+    // Interactive loop gate — ALWAYS pause for user input, even if the AI emitted the
+    // completion signal. In interactive loops, the user decides when to exit, not the AI.
+    // The completion signal becomes the AI's suggestion ("I think this is ready"), but the
+    // user still reviews and explicitly approves before the loop exits.
     if (loop.interactive && loop.gate_message) {
       const gateMsg =
         `\u23f8 **Input required** (loop \`${node.id}\`, iteration ${String(i)}): ${loop.gate_message}\n\n` +
@@ -1727,6 +1720,17 @@ async function executeLoopNode(
       // in multi-node workflows. Resume correctness relies on the 'paused' DB status, not
       // on the node's output state.
       return { state: 'completed', output: lastIterationOutput };
+    }
+
+    // Non-interactive loops: exit when completion signal detected
+    if (completionDetected) {
+      await safeSendMessage(
+        platform,
+        conversationId,
+        `Loop node '${node.id}' completed after ${String(i)} iteration${i > 1 ? 's' : ''}`,
+        msgContext
+      );
+      return { state: 'completed', output: lastIterationOutput, sessionId: currentSessionId };
     }
   }
 

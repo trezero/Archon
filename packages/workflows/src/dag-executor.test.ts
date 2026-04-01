@@ -3273,7 +3273,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
       });
     });
 
-    it('interactive loop exits when completion signal detected', async () => {
+    it('interactive loop always pauses even when completion signal detected', async () => {
       mockSendQueryDag.mockImplementation(function* () {
         yield { type: 'assistant', content: 'All good. <promise>APPROVED</promise>' };
         yield { type: 'result', sessionId: 'loop-session-2' };
@@ -3312,20 +3312,20 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         minimalConfig
       );
 
-      // Should have completed without pausing
+      // In interactive loops, the user decides when to exit — not the AI.
+      // Even though the AI emitted the completion signal, the loop should
+      // pause for user review before exiting.
       const pauseCalls = (
         mockDeps.store.pauseWorkflowRun as Mock<
           (id: string, ctx: Record<string, unknown>) => Promise<void>
         >
       ).mock.calls;
-      expect(pauseCalls.length).toBe(0);
-      // Should have completed the workflow
-      const completeCalls = (
-        mockDeps.store.completeWorkflowRun as Mock<
-          (id: string, metadata?: Record<string, unknown>) => Promise<void>
-        >
-      ).mock.calls;
-      expect(completeCalls.length).toBe(1);
+      expect(pauseCalls.length).toBe(1);
+      expect(pauseCalls[0][1]).toMatchObject({
+        type: 'interactive_loop',
+        nodeId: 'refine',
+        iteration: 1,
+      });
     });
 
     it('interactive loop resumes from stored iteration with user input', async () => {
