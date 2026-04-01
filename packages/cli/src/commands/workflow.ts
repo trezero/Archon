@@ -179,6 +179,38 @@ export async function workflowRunCommand(
     }
   }
 
+  // 3. Suffix match (e.g., "assist" matches "archon-assist")
+  if (!workflow) {
+    const lowerName = workflowName.toLowerCase();
+    const suffixMatches = workflows.filter(w => w.name.toLowerCase().endsWith(`-${lowerName}`));
+    if (suffixMatches.length === 1) {
+      getLog().info(
+        { requested: workflowName, matched: suffixMatches[0].name },
+        'workflow_run_suffix_match'
+      );
+      workflow = suffixMatches[0];
+    } else if (suffixMatches.length > 1) {
+      const candidates = suffixMatches.map(w => `  - ${w.name}`).join('\n');
+      throw new Error(`Ambiguous workflow '${workflowName}'. Did you mean:\n${candidates}`);
+    }
+  }
+
+  // 4. Substring match (e.g., "smart" matches "archon-smart-pr-review")
+  if (!workflow) {
+    const lowerName = workflowName.toLowerCase();
+    const subMatches = workflows.filter(w => w.name.toLowerCase().includes(lowerName));
+    if (subMatches.length === 1) {
+      getLog().info(
+        { requested: workflowName, matched: subMatches[0].name },
+        'workflow_run_substring_match'
+      );
+      workflow = subMatches[0];
+    } else if (subMatches.length > 1) {
+      const candidates = subMatches.map(w => `  - ${w.name}`).join('\n');
+      throw new Error(`Ambiguous workflow '${workflowName}'. Did you mean:\n${candidates}`);
+    }
+  }
+
   if (!workflow) {
     // Check if the requested workflow had a load error
     const loadError = errors.find(

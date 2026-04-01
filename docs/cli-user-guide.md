@@ -103,6 +103,21 @@ archon workflow run plan --cwd /path/to/repo --branch feature-x "Add caching"
 - Runs in target directory directly (no isolation)
 - Mutually exclusive with `--branch` and `--from`
 
+**Name Matching:**
+
+Workflow names are resolved using a fallback hierarchy:
+1. **Exact match** - `archon-assist` matches `archon-assist`
+2. **Case-insensitive** - `Archon-Assist` matches `archon-assist`
+3. **Suffix match** - `assist` matches `archon-assist` (looks for `-assist` suffix)
+4. **Substring match** - `smart` matches `archon-smart-pr-review`
+
+If multiple workflows match at the same tier, an error lists the candidates:
+```
+Ambiguous workflow 'review'. Did you mean:
+  - archon-review
+  - custom-review
+```
+
 ### `workflow status`
 
 Show all running workflow runs across all worktrees.
