@@ -26,9 +26,8 @@ import type {
   TriggerRule,
   WorkflowRun,
   WorkflowNodeHooks,
-  ApprovalContext,
 } from './schemas';
-import { isBashNode, isLoopNode, isApprovalNode, isCancelNode } from './schemas';
+import { isBashNode, isLoopNode, isApprovalNode, isCancelNode, isApprovalContext } from './schemas';
 import { formatToolCall } from './utils/tool-formatter';
 import { createLogger } from '@archon/paths';
 import { getWorkflowEventEmitter } from './event-emitter';
@@ -1361,7 +1360,8 @@ async function executeLoopNode(
   }
 
   // Detect interactive loop resume — check if workflowRun.metadata has loop gate state for this node
-  const loopGateMeta = workflowRun.metadata?.approval as ApprovalContext | undefined;
+  const rawApproval = workflowRun.metadata?.approval;
+  const loopGateMeta = isApprovalContext(rawApproval) ? rawApproval : undefined;
   const isLoopResume = loopGateMeta?.type === 'interactive_loop' && loopGateMeta.nodeId === node.id;
   const startIteration = isLoopResume ? (loopGateMeta.iteration ?? 0) + 1 : 1;
   let currentSessionId: string | undefined = isLoopResume ? loopGateMeta.sessionId : undefined;
@@ -1428,7 +1428,8 @@ async function executeLoopNode(
 
     try {
       // Build prompt — substituteWorkflowVariables throws if $BASE_BRANCH referenced but empty
-      // Pass loopUserInput only on the first iteration of a resumed run
+      // Pass loopUserInput on the first resumed iteration; '' on all others (non-interactive
+      // or subsequent iterations) so $LOOP_USER_INPUT substitutes to empty string explicitly.
       const { prompt: substitutedPrompt } = substituteWorkflowVariables(
         loop.prompt,
         workflowRun.id,
@@ -1436,7 +1437,7 @@ async function executeLoopNode(
         artifactsDir,
         baseBranch,
         issueContext,
-        i === startIteration ? loopUserInput : undefined
+        i === startIteration ? loopUserInput : ''
       );
       const finalPrompt = substituteNodeOutputRefs(substitutedPrompt, nodeOutputs);
 
@@ -1681,10 +1682,23 @@ async function executeLoopNode(
         `\u23f8 **Input required** (loop \`${node.id}\`, iteration ${String(i)}): ${loop.gate_message}\n\n` +
         `Run ID: \`${workflowRun.id}\`\n` +
         `Respond: \`/workflow approve ${workflowRun.id} <your feedback>\` | Cancel: \`/workflow reject ${workflowRun.id}\``;
-      await safeSendMessage(platform, conversationId, gateMsg, {
+      const gateSent = await safeSendMessage(platform, conversationId, gateMsg, {
         workflowId: workflowRun.id,
         nodeName: node.id,
       });
+      if (!gateSent) {
+        // Gate message failed to deliver — do not pause; fail the node so the user
+        // sees a clear error rather than a silently orphaned paused run.
+        getLog().error(
+          { nodeId: node.id, workflowRunId: workflowRun.id, iteration: i },
+          'loop_node.gate_message_send_failed'
+        );
+        return {
+          state: 'failed',
+          output: lastIterationOutput,
+          error: `Loop gate message failed to deliver for node '${node.id}' — cannot pause safely`,
+        };
+      }
       deps.store
         .createWorkflowEvent({
           workflow_run_id: workflowRun.id,
@@ -1708,8 +1722,11 @@ async function executeLoopNode(
         nodeId: node.id,
         message: loop.gate_message,
       });
-      // Return failed — the between-layer status check sees 'paused' and halts cleanly
-      return { state: 'failed', output: lastIterationOutput, error: 'loop_interactive_paused' };
+      // Return completed — the between-layer status check sees 'paused' and halts cleanly.
+      // This mirrors the approval-node pattern, preventing false "DAG nodes failed" warnings
+      // in multi-node workflows. Resume correctness relies on the 'paused' DB status, not
+      // on the node's output state.
+      return { state: 'completed', output: lastIterationOutput };
     }
   }
 

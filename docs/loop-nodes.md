@@ -61,6 +61,10 @@ the executor checks for workflow cancellation.
     max_iterations: 10      # Required. Hard limit — node fails if exceeded.
     fresh_context: true     # Optional. Default: false.
     until_bash: "..."       # Optional. Bash script checked after each iteration.
+    interactive: true       # Optional. Default: false. Pause after each non-completing
+                            # iteration for user input via /workflow approve.
+    gate_message: "..."     # Required when interactive: true. Message shown to the
+                            # user at each pause with the run ID and approve command.
 ```
 
 ### `prompt`
@@ -75,6 +79,7 @@ substitution:
 | `$BASE_BRANCH` | Repository base branch |
 | `$WORKFLOW_ID` | Current workflow run ID |
 | `$nodeId.output` | Output from upstream nodes |
+| `$LOOP_USER_INPUT` | User feedback provided via `/workflow approve <id> <text>` at an interactive loop gate. Only populated on the first iteration of a resumed interactive loop; empty string on all other iterations. |
 
 `$USER_MESSAGE` is particularly important for `fresh_context: true` loops —
 the agent has no memory of prior iterations, so the prompt must include all
@@ -211,6 +216,38 @@ completion when tests still fail.
 - `trigger_rule` — join semantics
 - `idle_timeout` — per-iteration timeout (default: 30 minutes)
 - `$nodeId.output` — downstream nodes receive the last iteration's output
+
+### `interactive` and `gate_message`
+
+Set `interactive: true` to pause the loop between iterations and wait for human input.
+After each non-completing iteration the executor:
+
+1. Sends the `gate_message` to the user along with the run ID and a `/workflow approve` command
+2. Pauses the workflow run
+3. Waits — the workflow resumes when the user runs `/workflow approve <id> <feedback>`
+
+The user's feedback is injected into the next iteration's prompt via `$LOOP_USER_INPUT`.
+
+> **Note**: Interactive loop nodes require `interactive: true` at the **workflow level** as
+> well. If only the loop node has `interactive: true`, a loader warning is emitted and the
+> workflow will not pause correctly in web background mode.
+
+```yaml
+name: guided-refine
+description: Refine output with human review between iterations.
+interactive: true            # Required at workflow level for interactive loops
+nodes:
+  - id: refine
+    loop:
+      prompt: |
+        Review the current draft and improve it based on this feedback: $LOOP_USER_INPUT
+
+        When the output is satisfactory, output: <promise>DONE</promise>
+      until: DONE
+      max_iterations: 5
+      interactive: true
+      gate_message: Review the output above. Reply with your feedback or type DONE to finish.
+```
 
 ### What is NOT supported on loop nodes
 

@@ -372,7 +372,9 @@ export async function updateWorkflowRun(
     // Auto-set completed_at for terminal-like statuses, but skip when
     // transitioning to 'failed' for approval resume (not a real completion)
     const isApprovalTransition =
-      updates.status === 'failed' && updates.metadata?.approval_response !== undefined;
+      updates.status === 'failed' &&
+      (updates.metadata?.approval_response !== undefined ||
+        updates.metadata?.loop_user_input !== undefined);
     if (
       !isApprovalTransition &&
       (updates.status === 'completed' ||

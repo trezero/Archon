@@ -119,6 +119,21 @@ export interface ApprovalContext {
   sessionId?: string;
 }
 
+/**
+ * Type guard for ApprovalContext.
+ * Validates that the value is an object with the required nodeId and message fields.
+ * Use before accessing `workflowRun.metadata.approval` to prevent runtime throws on
+ * malformed metadata (e.g., stale data from older runs where metadata shape differs).
+ */
+export function isApprovalContext(val: unknown): val is ApprovalContext {
+  return (
+    typeof val === 'object' &&
+    val !== null &&
+    typeof (val as Record<string, unknown>).nodeId === 'string' &&
+    typeof (val as Record<string, unknown>).message === 'string'
+  );
+}
+
 // ---------------------------------------------------------------------------
 // ArtifactType
 // ---------------------------------------------------------------------------

@@ -26,7 +26,7 @@ nodes:
     context: fresh
 ```
 
-> **Using defaults as templates:** Archon ships 16 default workflows in `.archon/workflows/defaults/`. Browse them for real-world examples, then copy and modify:
+> **Using defaults as templates:** Archon ships 17 default workflows in `.archon/workflows/defaults/`. Browse them for real-world examples, then copy and modify:
 > ```bash
 > cp .archon/workflows/defaults/archon-fix-github-issue.yaml .archon/workflows/my-fix-issue.yaml
 > ```
@@ -470,6 +470,7 @@ nodes:
 
 **When to use `interactive: true`:**
 - Workflows with **approval nodes** — users must see the AI output and respond inline
+- Workflows with **interactive loop nodes** (`loop.interactive: true`) — the loop gate pause requires foreground execution to deliver the gate message and run ID to the user
 - Multi-turn workflows where the user needs to provide feedback at each step
 - Any workflow where the response must appear in the user's active chat thread
 

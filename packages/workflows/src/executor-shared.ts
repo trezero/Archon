@@ -228,7 +228,8 @@ export const CONTEXT_VAR_PATTERN_STR = '\\$(?:CONTEXT|EXTERNAL_CONTEXT|ISSUE_CON
  * - $ARTIFACTS_DIR - External artifacts directory for this workflow run
  * - $BASE_BRANCH - The base branch (from config or auto-detected)
  * - $CONTEXT, $EXTERNAL_CONTEXT, $ISSUE_CONTEXT - GitHub issue/PR context (if available)
- * - $LOOP_USER_INPUT - User feedback from interactive loop approval (empty string if absent)
+ * - $LOOP_USER_INPUT - User feedback from interactive loop approval. Only populated on the
+ *   first iteration of a resumed interactive loop; empty string on all other iterations.
  *
  * When issueContext is undefined, context variables are replaced with empty string
  * to avoid sending literal "$CONTEXT" to the AI.
