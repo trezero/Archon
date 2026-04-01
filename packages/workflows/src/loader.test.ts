@@ -1843,6 +1843,92 @@ nodes:
         expect(wf.nodes[1].depends_on).toEqual(['setup']);
       }
     });
+
+    it('should accept interactive loop with gate_message', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'valid-interactive.yaml'),
+        `
+name: valid-interactive
+description: Valid interactive loop
+interactive: true
+nodes:
+  - id: my-loop
+    loop:
+      prompt: Do something.
+      until: DONE
+      max_iterations: 5
+      interactive: true
+      gate_message: Review and respond.
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(0);
+      expect(result.workflows).toHaveLength(1);
+      if (isLoopNode(result.workflows[0].workflow.nodes[0])) {
+        expect(result.workflows[0].workflow.nodes[0].loop.interactive).toBe(true);
+        expect(result.workflows[0].workflow.nodes[0].loop.gate_message).toBe('Review and respond.');
+      }
+    });
+
+    it('should reject interactive loop without gate_message', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'bad-interactive.yaml'),
+        `
+name: bad-interactive
+description: Missing gate_message
+interactive: true
+nodes:
+  - id: my-loop
+    loop:
+      prompt: Do something.
+      until: DONE
+      max_iterations: 5
+      interactive: true
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].error).toContain('gate_message');
+    });
+
+    it('should warn when interactive loop node is in a non-interactive workflow', async () => {
+      const workflowDir = join(testDir, '.archon', 'workflows');
+      await mkdir(workflowDir, { recursive: true });
+
+      await writeFile(
+        join(workflowDir, 'warn-test.yaml'),
+        `
+name: warn-test
+description: Non-interactive workflow with interactive loop
+nodes:
+  - id: my-loop
+    loop:
+      prompt: Iterate.
+      until: DONE
+      max_iterations: 5
+      interactive: true
+      gate_message: Review.
+`
+      );
+
+      const result = await discoverWorkflows(testDir, { loadDefaults: false });
+      // Workflow loads successfully — this is a warning, not an error
+      expect(result.errors).toHaveLength(0);
+      expect(result.workflows).toHaveLength(1);
+      // Logger should have been called with the warning event
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ filename: expect.stringContaining('warn-test') }),
+        'interactive_loop_in_non_interactive_workflow'
+      );
+    });
   });
 
   // -------------------------------------------------------------------------

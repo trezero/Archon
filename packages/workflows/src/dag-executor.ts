@@ -27,7 +27,7 @@ import type {
   WorkflowRun,
   WorkflowNodeHooks,
 } from './schemas';
-import { isBashNode, isLoopNode, isApprovalNode, isCancelNode } from './schemas';
+import { isBashNode, isLoopNode, isApprovalNode, isCancelNode, isApprovalContext } from './schemas';
 import { formatToolCall } from './utils/tool-formatter';
 import { createLogger } from '@archon/paths';
 import { getWorkflowEventEmitter } from './event-emitter';
@@ -1359,7 +1359,16 @@ async function executeLoopNode(
     return { state: 'failed', output: '', error: errorMsg };
   }
 
-  let currentSessionId: string | undefined;
+  // Detect interactive loop resume — check if workflowRun.metadata has loop gate state for this node
+  const rawApproval = workflowRun.metadata?.approval;
+  const loopGateMeta = isApprovalContext(rawApproval) ? rawApproval : undefined;
+  const isLoopResume = loopGateMeta?.type === 'interactive_loop' && loopGateMeta.nodeId === node.id;
+  const startIteration = isLoopResume ? (loopGateMeta.iteration ?? 0) + 1 : 1;
+  let currentSessionId: string | undefined = isLoopResume ? loopGateMeta.sessionId : undefined;
+  const loopUserInput = isLoopResume
+    ? ((workflowRun.metadata?.loop_user_input as string | undefined) ?? '')
+    : '';
+
   let lastIterationOutput = '';
   const resolvedOptions = buildLoopNodeOptions(workflowProvider, workflowModel, config);
 
@@ -1368,7 +1377,7 @@ async function executeLoopNode(
     getLog().error({ err, nodeId: node.id, iteration }, 'loop_node.iteration_event_failed');
   };
 
-  for (let i = 1; i <= loop.max_iterations; i++) {
+  for (let i = startIteration; i <= loop.max_iterations; i++) {
     const iterationStart = Date.now();
 
     // Check for non-running status between iterations (cancellation, deletion, or future: pause)
@@ -1419,13 +1428,16 @@ async function executeLoopNode(
 
     try {
       // Build prompt — substituteWorkflowVariables throws if $BASE_BRANCH referenced but empty
+      // Pass loopUserInput on the first resumed iteration; '' on all others (non-interactive
+      // or subsequent iterations) so $LOOP_USER_INPUT substitutes to empty string explicitly.
       const { prompt: substitutedPrompt } = substituteWorkflowVariables(
         loop.prompt,
         workflowRun.id,
         workflowRun.user_message,
         artifactsDir,
         baseBranch,
-        issueContext
+        issueContext,
+        i === startIteration ? loopUserInput : ''
       );
       const finalPrompt = substituteNodeOutputRefs(substitutedPrompt, nodeOutputs);
 
@@ -1654,6 +1666,63 @@ async function executeLoopNode(
       durationMs: duration,
     });
 
+    // Interactive loop gate — ALWAYS pause for user input, even if the AI emitted the
+    // completion signal. In interactive loops, the user decides when to exit, not the AI.
+    // The completion signal becomes the AI's suggestion ("I think this is ready"), but the
+    // user still reviews and explicitly approves before the loop exits.
+    if (loop.interactive && loop.gate_message) {
+      const gateMsg =
+        `\u23f8 **Input required** (loop \`${node.id}\`, iteration ${String(i)}): ${loop.gate_message}\n\n` +
+        `Run ID: \`${workflowRun.id}\`\n` +
+        `Respond: \`/workflow approve ${workflowRun.id} <your feedback>\` | Cancel: \`/workflow reject ${workflowRun.id}\``;
+      const gateSent = await safeSendMessage(platform, conversationId, gateMsg, {
+        workflowId: workflowRun.id,
+        nodeName: node.id,
+      });
+      if (!gateSent) {
+        // Gate message failed to deliver — do not pause; fail the node so the user
+        // sees a clear error rather than a silently orphaned paused run.
+        getLog().error(
+          { nodeId: node.id, workflowRunId: workflowRun.id, iteration: i },
+          'loop_node.gate_message_send_failed'
+        );
+        return {
+          state: 'failed',
+          output: lastIterationOutput,
+          error: `Loop gate message failed to deliver for node '${node.id}' — cannot pause safely`,
+        };
+      }
+      deps.store
+        .createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'approval_requested',
+          step_name: node.id,
+          data: { message: loop.gate_message, iteration: i },
+        })
+        .catch((err: Error) => {
+          logEventStoreError(err, i);
+        });
+      await deps.store.pauseWorkflowRun(workflowRun.id, {
+        nodeId: node.id,
+        message: loop.gate_message,
+        type: 'interactive_loop',
+        iteration: i,
+        sessionId: currentSessionId,
+      });
+      getWorkflowEventEmitter().emit({
+        type: 'approval_pending',
+        runId: workflowRun.id,
+        nodeId: node.id,
+        message: loop.gate_message,
+      });
+      // Return completed — the between-layer status check sees 'paused' and halts cleanly.
+      // This mirrors the approval-node pattern, preventing false "DAG nodes failed" warnings
+      // in multi-node workflows. Resume correctness relies on the 'paused' DB status, not
+      // on the node's output state.
+      return { state: 'completed', output: lastIterationOutput };
+    }
+
+    // Non-interactive loops: exit when completion signal detected
     if (completionDetected) {
       await safeSendMessage(
         platform,

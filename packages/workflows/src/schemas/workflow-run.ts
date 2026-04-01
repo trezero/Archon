@@ -111,6 +111,27 @@ export type WorkflowRun = z.infer<typeof workflowRunSchema>;
 export interface ApprovalContext {
   nodeId: string;
   message: string;
+  /** Distinguishes approval-gate pauses from interactive-loop pauses. */
+  type?: 'approval' | 'interactive_loop';
+  /** Current loop iteration when paused (interactive loops only). */
+  iteration?: number;
+  /** Session ID to restore on resume (interactive loops only). */
+  sessionId?: string;
+}
+
+/**
+ * Type guard for ApprovalContext.
+ * Validates that the value is an object with the required nodeId and message fields.
+ * Use before accessing `workflowRun.metadata.approval` to prevent runtime throws on
+ * malformed metadata (e.g., stale data from older runs where metadata shape differs).
+ */
+export function isApprovalContext(val: unknown): val is ApprovalContext {
+  return (
+    typeof val === 'object' &&
+    val !== null &&
+    typeof (val as Record<string, unknown>).nodeId === 'string' &&
+    typeof (val as Record<string, unknown>).message === 'string'
+  );
 }
 
 // ---------------------------------------------------------------------------

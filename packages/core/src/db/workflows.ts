@@ -3,7 +3,11 @@
  */
 import { pool, getDialect, getDatabaseType } from './connection';
 import type { IDatabase } from './adapters/types';
-import type { WorkflowRun, WorkflowRunStatus } from '@archon/workflows/schemas/workflow-run';
+import type {
+  WorkflowRun,
+  WorkflowRunStatus,
+  ApprovalContext,
+} from '@archon/workflows/schemas/workflow-run';
 import { TERMINAL_WORKFLOW_STATUSES } from '@archon/workflows/schemas/workflow-run';
 import { createLogger } from '@archon/paths';
 
@@ -368,7 +372,9 @@ export async function updateWorkflowRun(
     // Auto-set completed_at for terminal-like statuses, but skip when
     // transitioning to 'failed' for approval resume (not a real completion)
     const isApprovalTransition =
-      updates.status === 'failed' && updates.metadata?.approval_response !== undefined;
+      updates.status === 'failed' &&
+      (updates.metadata?.approval_response !== undefined ||
+        updates.metadata?.loop_user_input !== undefined);
     if (
       !isApprovalTransition &&
       (updates.status === 'completed' ||
@@ -484,7 +490,7 @@ export async function cancelWorkflowRun(id: string): Promise<void> {
  */
 export async function pauseWorkflowRun(
   id: string,
-  approvalContext: { message: string; nodeId: string }
+  approvalContext: ApprovalContext
 ): Promise<void> {
   const dialect = getDialect();
   try {

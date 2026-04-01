@@ -62,13 +62,16 @@ function parseDagNode(raw: unknown, index: number, errors: string[]): DagNode | 
     isApprovalNode(node) ||
     isCancelNode(node);
   if (isNonAiNode) {
-    const nodeType = isCancelNode(node)
-      ? 'cancel'
-      : isApprovalNode(node)
-        ? 'approval'
-        : isLoopNode(node)
-          ? 'loop'
-          : 'bash';
+    let nodeType: string;
+    if (isCancelNode(node)) {
+      nodeType = 'cancel';
+    } else if (isApprovalNode(node)) {
+      nodeType = 'approval';
+    } else if (isLoopNode(node)) {
+      nodeType = 'loop';
+    } else {
+      nodeType = 'bash';
+    }
     const presentAiFields = BASH_NODE_AI_FIELDS.filter(
       f => (raw as Record<string, unknown>)[f] !== undefined
     );
@@ -319,6 +322,15 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     const interactive = typeof raw.interactive === 'boolean' ? raw.interactive : undefined;
     if (raw.interactive !== undefined && typeof raw.interactive !== 'boolean') {
       getLog().warn({ filename, value: raw.interactive }, 'invalid_interactive_value_ignored');
+    }
+
+    // Warn if any interactive loop node exists in a non-interactive workflow
+    // (approval messages won't reach the user in web background runs)
+    if (!interactive) {
+      const hasInteractiveLoop = dagNodes.some(n => isLoopNode(n) && n.loop.interactive === true);
+      if (hasInteractiveLoop) {
+        getLog().warn({ filename }, 'interactive_loop_in_non_interactive_workflow');
+      }
     }
 
     return {

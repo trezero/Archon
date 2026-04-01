@@ -25,6 +25,7 @@ import type { WorkflowWithSource, WorkflowLoadError } from '@archon/workflows/sc
 import {
   TERMINAL_WORKFLOW_STATUSES,
   RESUMABLE_WORKFLOW_STATUSES,
+  isApprovalContext,
 } from '@archon/workflows/schemas/workflow-run';
 import type { ApprovalContext } from '@archon/workflows/schemas/workflow-run';
 import * as workflowDb from '../db/workflows';
@@ -1078,13 +1079,40 @@ async function handleWorkflowCommand(
             message: `Cannot approve run with status '${run.status}'. Only paused runs can be approved.`,
           };
         }
-        const approval = run.metadata.approval as ApprovalContext | undefined;
+        const rawApproval = run.metadata.approval;
+        const approval: ApprovalContext | undefined = isApprovalContext(rawApproval)
+          ? rawApproval
+          : undefined;
         if (!approval?.nodeId) {
           return {
             success: false,
             message: 'Workflow run is paused but missing approval context.',
           };
         }
+
+        // Interactive loop gate — store user input in metadata; do NOT create node_completed event
+        if (approval.type === 'interactive_loop') {
+          await workflowEventDb.createWorkflowEvent({
+            workflow_run_id: runId,
+            event_type: 'approval_received',
+            step_name: approval.nodeId,
+            data: { decision: 'approved', comment, iteration: approval.iteration },
+          });
+          // Transition to 'failed' so findResumableRun picks it up.
+          // IMPORTANT: metadata is MERGED (not replaced) — the approval context must survive
+          // intact so the resumed executor can detect the correct startIteration.
+          await workflowDb.updateWorkflowRun(runId, {
+            status: 'failed',
+            metadata: { loop_user_input: comment },
+          });
+          const pathInfo = run.working_path ? `\nPath: \`${run.working_path}\`` : '';
+          return {
+            success: true,
+            message: `Workflow \`${run.workflow_name}\` loop input received.${pathInfo}\nType your next message in this conversation to resume the workflow.`,
+          };
+        }
+
+        // Standard approval node path
         await workflowEventDb.createWorkflowEvent({
           workflow_run_id: runId,
           event_type: 'node_completed',
@@ -1134,7 +1162,10 @@ async function handleWorkflowCommand(
             message: `Cannot reject run with status '${run.status}'. Only paused runs can be rejected.`,
           };
         }
-        const approval = run.metadata.approval as ApprovalContext | undefined;
+        const rawApprovalReject = run.metadata.approval;
+        const approval: ApprovalContext | undefined = isApprovalContext(rawApprovalReject)
+          ? rawApprovalReject
+          : undefined;
         await workflowEventDb.createWorkflowEvent({
           workflow_run_id: runId,
           event_type: 'approval_received',

@@ -5,7 +5,7 @@
  * Implementations live in @archon/core (backed by the real DB);
  * the workflow engine depends only on this narrow interface.
  */
-import type { WorkflowRun, WorkflowRunStatus } from './schemas';
+import type { WorkflowRun, WorkflowRunStatus, ApprovalContext } from './schemas';
 
 export const WORKFLOW_EVENT_TYPES = [
   'workflow_started',
@@ -54,7 +54,7 @@ export interface IWorkflowStore {
   getWorkflowRunStatus(id: string): Promise<WorkflowRunStatus | null>;
   completeWorkflowRun(id: string, metadata?: Record<string, unknown>): Promise<void>;
   failWorkflowRun(id: string, error: string): Promise<void>;
-  pauseWorkflowRun(id: string, approvalContext: { message: string; nodeId: string }): Promise<void>;
+  pauseWorkflowRun(id: string, approvalContext: ApprovalContext): Promise<void>;
   cancelWorkflowRun(id: string): Promise<void>;
 
   /**

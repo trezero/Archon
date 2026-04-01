@@ -112,13 +112,14 @@ describe('bundled-defaults', () => {
         'archon-validate-pr',
         'archon-remotion-generate',
         'archon-interactive-prd',
+        'archon-piv-loop',
       ];
 
       for (const wf of expectedWorkflows) {
         expect(BUNDLED_WORKFLOWS).toHaveProperty(wf);
       }
 
-      expect(Object.keys(BUNDLED_WORKFLOWS)).toHaveLength(10);
+      expect(Object.keys(BUNDLED_WORKFLOWS)).toHaveLength(11);
     });
 
     it('should have non-empty content for all workflows', () => {
