@@ -153,8 +153,10 @@ nodes:
         Then tell the user: "I have a clear picture. Say **ready** and I'll create
         the structured implementation plan, or share any final thoughts."
 
-        **If the user indicates they're ready** (says "ready", "looks good", "create the plan", etc.):
-        Output the completion signal: <promise>PLAN_READY</promise>
+        **CRITICAL**: Only output <promise>PLAN_READY</promise> if the user EXPLICITLY says
+        "ready", "create the plan", "let's go", or similar. If the user is asking questions,
+        requesting clarification, or giving feedback — answer them and do NOT emit the signal.
+        A question is not approval. Wait for clear confirmation.
       until: PLAN_READY
       max_iterations: 15
       interactive: true
