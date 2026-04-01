@@ -326,10 +326,12 @@ async function main(): Promise<number> {
           case 'approve': {
             const approveRunId = positionals[2];
             if (!approveRunId) {
-              console.error('Usage: archon workflow approve <run-id> [--comment "..."]');
+              console.error('Usage: archon workflow approve <run-id> [comment]');
               return 1;
             }
-            const approveComment = values.comment as string | undefined;
+            // Accept comment as positional args (everything after run ID) or --comment flag
+            const approveComment =
+              (values.comment as string | undefined) || positionals.slice(3).join(' ') || undefined;
             await workflowApproveCommand(approveRunId, approveComment);
             break;
           }
