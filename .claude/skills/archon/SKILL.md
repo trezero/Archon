@@ -41,6 +41,7 @@ Determine the user's intent and dispatch to the appropriate guide:
 | **Create a command file** | Read `references/authoring-commands.md` |
 | **Variable substitution reference** | Read `references/variables.md` |
 | **CLI command reference** | Read `references/cli-commands.md` |
+| **Run an interactive workflow** | Read `references/interactive-workflows.md` — transparent relay protocol |
 | **Run a workflow (default)** | Continue with "Running Workflows" below |
 
 If the intent is ambiguous, ask the user to clarify.
@@ -91,7 +92,11 @@ Match the user's intent to a workflow from the live list above. Common patterns:
 | "Review issue #X fully" | `archon-issue-review-full` | `review/issue-{N}` |
 | "Refactor safely" | `archon-refactor-safely` | `refactor/{name}` |
 | "Architecture review" | `archon-architect` | `review/{name}` |
+| "PIV loop" / "guided dev" | `archon-piv-loop` ⚡ | `piv/{name}` |
+| "Create a PRD" / "interactive PRD" | `archon-interactive-prd` ⚡ | `prd/{name}` |
 | General / debugging | `archon-assist` | `assist/{description}` |
+
+⚡ = **Interactive workflow** — requires the transparent relay protocol. Read `references/interactive-workflows.md` before running.
 
 If no specific workflow matches, use `archon-assist` as the fallback. The live workflow list above is always authoritative — it may include workflows not in this table.
 
