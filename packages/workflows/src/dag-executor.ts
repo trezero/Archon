@@ -1380,50 +1380,6 @@ async function executeLoopNode(
   for (let i = startIteration; i <= loop.max_iterations; i++) {
     const iterationStart = Date.now();
 
-    // Interactive loop exit check — runs BEFORE the AI iteration.
-    // When resuming an interactive loop, the user has seen the previous iteration's output
-    // and responded. If the completion signal was detected in the PREVIOUS iteration
-    // (i.e., the AI suggested it was done), the user's resume IS their approval —
-    // they saw the work and chose to continue rather than giving more feedback.
-    // On first iteration (i === 1) or non-resume, skip this check.
-    if (loop.interactive && isLoopResume && i === startIteration && loopUserInput) {
-      // Check if the user's input looks like approval (short, affirmative)
-      const trimmed = loopUserInput.trim().toLowerCase();
-      const approvalPhrases = [
-        'approved',
-        'approve',
-        'looks good',
-        'lgtm',
-        'ship it',
-        'ready',
-        'yes',
-        'ok',
-        'okay',
-        'good',
-        'done',
-        'go',
-        'proceed',
-        "let's go",
-        'confirmed',
-        'confirm',
-        'go ahead',
-        'move on',
-        'continue',
-      ];
-      const isApproval = approvalPhrases.some(
-        p => trimmed === p || trimmed === p + '.' || trimmed === p + '!'
-      );
-      if (isApproval) {
-        await safeSendMessage(
-          platform,
-          conversationId,
-          `Loop node '${node.id}' approved by user after ${String(i - 1)} iteration${i - 1 > 1 ? 's' : ''}`,
-          msgContext
-        );
-        return { state: 'completed', output: lastIterationOutput, sessionId: currentSessionId };
-      }
-    }
-
     // Check for non-running status between iterations (cancellation, deletion, or future: pause)
     const runStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
     if (runStatus === null || runStatus !== 'running') {
@@ -1648,11 +1604,10 @@ async function executeLoopNode(
 
     lastIterationOutput = cleanOutput || fullOutput;
 
-    // Check LLM completion signal — skipped for interactive loops where only
-    // the user's explicit approval (checked at the TOP of the next iteration) can exit.
-    const signalDetected = loop.interactive
-      ? false
-      : detectCompletionSignal(fullOutput, loop.until);
+    // Check LLM completion signal — the AI decides whether the user approved.
+    // For interactive loops, the AI emits the signal when the user explicitly approves
+    // (e.g., "approved", "looks good"). The prompt instructs the AI on when to emit it.
+    const signalDetected = detectCompletionSignal(fullOutput, loop.until);
 
     // Check deterministic bash condition (if configured)
     let bashComplete = false;
@@ -1713,9 +1668,47 @@ async function executeLoopNode(
       durationMs: duration,
     });
 
-    // Interactive loop gate — ALWAYS pause after every iteration, regardless of completion
-    // signal. The AI's signal is ignored for exit purposes — only the user's explicit
-    // approval (checked at the TOP of the next iteration) can exit the loop.
+    // Completion signal detected — exit the loop.
+    // For interactive loops: only honor the signal when the AI had user input to evaluate
+    // (i.e., this is a resume iteration with loopUserInput). On the first iteration of a
+    // fresh interactive loop, the user hasn't seen anything yet — always gate first.
+    // For non-interactive loops: the AI signals task completion at any point.
+    const interactiveFirstRun = loop.interactive && !isLoopResume;
+    if (completionDetected && !interactiveFirstRun) {
+      await safeSendMessage(
+        platform,
+        conversationId,
+        `Loop node '${node.id}' completed after ${String(i)} iteration${i > 1 ? 's' : ''}`,
+        msgContext
+      );
+      // Write node_completed event so resume logic (getCompletedDagNodeOutputs) knows this
+      // node is done. Without this, a resumed DAG would re-enter the loop node.
+      deps.store
+        .createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'node_completed',
+          step_name: node.id,
+          data: { duration_ms: Date.now() - iterationStart, node_output: lastIterationOutput },
+        })
+        .catch((err: Error) => {
+          getLog().error(
+            { err, workflowRunId: workflowRun.id, eventType: 'node_completed' },
+            'workflow_event_persist_failed'
+          );
+        });
+      getWorkflowEventEmitter().emit({
+        type: 'node_completed',
+        runId: workflowRun.id,
+        nodeId: node.id,
+        nodeName: node.id,
+        duration: Date.now() - iterationStart,
+      });
+      return { state: 'completed', output: lastIterationOutput, sessionId: currentSessionId };
+    }
+
+    // Interactive loop gate — pause after every iteration where the AI did NOT emit the
+    // completion signal. The user reviews the AI's output and provides feedback or approval.
+    // On approval, the AI will emit the signal in the next iteration, exiting above.
     if (loop.interactive && loop.gate_message) {
       const gateMsg =
         `\u23f8 **Input required** (loop \`${node.id}\`, iteration ${String(i)}): ${loop.gate_message}\n\n` +
@@ -1766,17 +1759,6 @@ async function executeLoopNode(
       // in multi-node workflows. Resume correctness relies on the 'paused' DB status, not
       // on the node's output state.
       return { state: 'completed', output: lastIterationOutput };
-    }
-
-    // Non-interactive loops: exit when completion signal detected
-    if (completionDetected) {
-      await safeSendMessage(
-        platform,
-        conversationId,
-        `Loop node '${node.id}' completed after ${String(i)} iteration${i > 1 ? 's' : ''}`,
-        msgContext
-      );
-      return { state: 'completed', output: lastIterationOutput, sessionId: currentSessionId };
     }
   }
 

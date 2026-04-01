@@ -153,10 +153,15 @@ nodes:
         Then tell the user: "I have a clear picture. Say **ready** and I'll create
         the structured implementation plan, or share any final thoughts."
 
-        **CRITICAL**: Only output <promise>PLAN_READY</promise> if the user EXPLICITLY says
-        "ready", "create the plan", "let's go", or similar. If the user is asking questions,
-        requesting clarification, or giving feedback — answer them and do NOT emit the signal.
-        A question is not approval. Wait for clear confirmation.
+        **CRITICAL — READ THIS CAREFULLY**:
+        - NEVER output <promise>PLAN_READY</promise> unless the user's LATEST message contains
+          an EXPLICIT phrase like "ready", "create the plan", "let's go", "proceed", or "I'm done".
+        - If the user asked a question → do NOT emit the signal. Answer the question.
+        - If the user gave feedback or requested changes → do NOT emit the signal. Address it.
+        - If the user said "also check X" or "one more thing" → do NOT emit the signal. Explore it.
+        - If you are unsure whether the user is approving → do NOT emit the signal. Ask them.
+        - The ONLY correct time to emit the signal is when the user's message CLEARLY means
+          "stop exploring, I'm ready for you to create the plan."
       until: PLAN_READY
       max_iterations: 15
       interactive: true
@@ -315,7 +320,13 @@ nodes:
 
         ## Step 2: Process Feedback
 
-        **If the user approved** (said "approved", "looks good", "let's go", etc.):
+        **If there is no user feedback yet** (first iteration, $LOOP_USER_INPUT is empty):
+        - Read the plan carefully
+        - Present a summary of the plan's key decisions and task list
+        - Ask the user to review and provide feedback
+        - Do NOT emit the completion signal on the first iteration
+
+        **If the user EXPLICITLY approved** (said "approved", "looks good", "let's go", etc.):
         - Make no changes
         - Output: "Plan approved. Proceeding to implementation."
         - Signal completion: <promise>PLAN_APPROVED</promise>
@@ -327,6 +338,10 @@ nodes:
           - Update success criteria if needed
           - Adjust testing strategy if needed
           - Re-verify file paths and patterns after changes
+
+        **CRITICAL**: NEVER emit <promise>PLAN_APPROVED</promise> unless the user's latest
+        message EXPLICITLY says "approved", "looks good", "ship it", or similar approval.
+        Questions, feedback, and requests for changes are NOT approval.
 
         ## Step 3: Show Changes
 
@@ -619,9 +634,16 @@ nodes:
 
         ## Step 2: Process Feedback
 
-        **If the user approved** (said "approved", "looks good", "ship it", etc.):
+        **If there is no user feedback yet** (first iteration, $LOOP_USER_INPUT is empty):
+        - Present the code review results and ask the user to test the implementation
+        - Do NOT emit the completion signal on the first iteration
+
+        **If the user EXPLICITLY approved** (said "approved", "looks good", "ship it", etc.):
         - Output: "Implementation approved!"
         - Signal: <promise>VALIDATED</promise>
+
+        **CRITICAL**: NEVER emit <promise>VALIDATED</promise> unless the user's latest
+        message EXPLICITLY says "approved", "looks good", "ship it", or similar approval.
 
         **If the user provided specific feedback:**
         1. Read the relevant files

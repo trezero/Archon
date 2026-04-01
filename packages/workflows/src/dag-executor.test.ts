@@ -3273,9 +3273,12 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
       });
     });
 
-    it('interactive loop always pauses even when completion signal detected', async () => {
+    it('interactive loop first iteration always gates even if AI emits signal', async () => {
       mockSendQueryDag.mockImplementation(function* () {
-        yield { type: 'assistant', content: 'All good. <promise>APPROVED</promise>' };
+        yield {
+          type: 'assistant',
+          content: 'Plan approved. Proceeding. <promise>APPROVED</promise>',
+        };
         yield { type: 'result', sessionId: 'loop-session-2' };
       });
 
@@ -3312,9 +3315,9 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         minimalConfig
       );
 
-      // In interactive loops, the user decides when to exit — not the AI.
-      // Even though the AI emitted the completion signal, the loop should
-      // pause for user review before exiting.
+      // On first iteration (fresh start, no user input), the loop MUST pause
+      // at the gate even if the AI emits the completion signal. The user hasn't
+      // seen anything yet — they must review before the loop can exit.
       const pauseCalls = (
         mockDeps.store.pauseWorkflowRun as Mock<
           (id: string, ctx: Record<string, unknown>) => Promise<void>
@@ -3326,6 +3329,70 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         nodeId: 'refine',
         iteration: 1,
       });
+    });
+
+    it('interactive loop exits on resume when AI emits completion signal (user approved)', async () => {
+      mockSendQueryDag.mockImplementation(function* () {
+        yield {
+          type: 'assistant',
+          content: 'Plan approved. Proceeding. <promise>APPROVED</promise>',
+        };
+        yield { type: 'result', sessionId: 'loop-session-3' };
+      });
+
+      const mockDeps = createMockDeps();
+      const platform = createMockPlatform();
+      // Simulate a resumed run where the user said "approved"
+      const workflowRun = makeWorkflowRun('resume-signal-run', {
+        metadata: {
+          approval: {
+            type: 'interactive_loop',
+            nodeId: 'refine',
+            iteration: 1,
+            sessionId: 'loop-session-2',
+            message: 'Review and provide feedback.',
+          },
+          loop_user_input: 'approved',
+        },
+      });
+
+      await executeDagWorkflow(
+        mockDeps,
+        platform,
+        'conv-dag',
+        testDir,
+        {
+          name: 'interactive-loop-resume-signal',
+          nodes: [
+            {
+              id: 'refine',
+              loop: {
+                prompt: 'User said: $LOOP_USER_INPUT. Refine.',
+                until: 'APPROVED',
+                max_iterations: 10,
+                interactive: true,
+                gate_message: 'Review and provide feedback.',
+              },
+            },
+          ],
+        },
+        workflowRun,
+        'claude',
+        undefined,
+        join(testDir, 'artifacts'),
+        join(testDir, 'logs'),
+        'main',
+        minimalConfig
+      );
+
+      // On resume with user input, the AI processes the approval and emits the
+      // completion signal. The loop exits immediately without pausing at the gate.
+      const pauseCalls = (
+        mockDeps.store.pauseWorkflowRun as Mock<
+          (id: string, ctx: Record<string, unknown>) => Promise<void>
+        >
+      ).mock.calls;
+      expect(pauseCalls.length).toBe(0);
     });
 
     it('interactive loop resumes from stored iteration with user input', async () => {

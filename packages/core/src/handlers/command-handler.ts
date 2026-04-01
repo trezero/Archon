@@ -1090,14 +1090,11 @@ async function handleWorkflowCommand(
           };
         }
 
-        // Interactive loop gate — store user input in metadata and record node completion
+        // Interactive loop gate — store user input in metadata for the next iteration.
+        // Note: node_completed is NOT written here. The executor writes it when the AI
+        // emits the completion signal (meaning the user actually approved). Writing it
+        // here would cause the resume to skip the loop node entirely.
         if (approval.type === 'interactive_loop') {
-          await workflowEventDb.createWorkflowEvent({
-            workflow_run_id: runId,
-            event_type: 'node_completed',
-            step_name: approval.nodeId,
-            data: { node_output: comment, approval_decision: 'approved' },
-          });
           await workflowEventDb.createWorkflowEvent({
             workflow_run_id: runId,
             event_type: 'approval_received',
