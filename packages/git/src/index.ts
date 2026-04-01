@@ -24,7 +24,6 @@ export {
   isWorktreePath,
   removeWorktree,
   getCanonicalRepoPath,
-  createWorktreeForIssue,
 } from './worktree';
 
 // Branch operations

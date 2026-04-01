@@ -57,14 +57,17 @@ export async function getDefaultBranch(repoPath: RepoPath): Promise<BranchName> 
     const err = error as Error & { stderr?: string };
     const errorText = `${err.message} ${err.stderr ?? ''}`;
 
-    // Expected: origin/main doesn't exist
+    // Expected: origin/main doesn't exist — no safe default, fail fast
     if (
       errorText.includes('Not a valid object name') ||
       errorText.includes('Needed a single revision') ||
       errorText.includes('unknown revision')
     ) {
-      getLog().debug({ repoPath, err }, 'origin_main_not_found_defaulting_to_master');
-      return toBranchName('master');
+      getLog().warn({ repoPath }, 'default_branch_detection_failed');
+      throw new Error(
+        `Cannot detect default branch for ${repoPath}: neither origin/HEAD nor origin/main exist. ` +
+          'Set worktree.baseBranch in .archon/config.yaml to specify the branch explicitly.'
+      );
     }
 
     // Unexpected error - surface it
