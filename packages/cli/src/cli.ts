@@ -300,7 +300,7 @@ async function main(): Promise<number> {
           }
 
           case 'status':
-            await workflowStatusCommand(jsonFlag, values.verbose as boolean | undefined);
+            await workflowStatusCommand(jsonFlag);
             break;
 
           case 'resume': {

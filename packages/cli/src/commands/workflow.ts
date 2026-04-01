@@ -25,8 +25,6 @@ import * as codebaseDb from '@archon/core/db/codebases';
 import * as isolationDb from '@archon/core/db/isolation-environments';
 import * as messageDb from '@archon/core/db/messages';
 import * as workflowDb from '@archon/core/db/workflows';
-import * as workflowEventsDb from '@archon/core/db/workflow-events';
-import type { WorkflowEventRow } from '@archon/core/db/workflow-events';
 import * as git from '@archon/git';
 import { CLIAdapter } from '../adapters/cli-adapter';
 
@@ -577,84 +575,6 @@ function formatAge(startedAt: Date | string): string {
 }
 
 /**
- * Format a duration in milliseconds as a compact string.
- */
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${String(ms)}ms`;
-  const secs = Math.round(ms / 100) / 10;
-  if (secs < 60) return `${String(secs)}s`;
-  const mins = Math.floor(secs / 60);
-  const remSecs = Math.round(secs % 60);
-  return `${String(mins)}m${String(remSecs)}s`;
-}
-
-interface NodeSummary {
-  nodeId: string;
-  state: 'running' | 'completed' | 'failed' | 'skipped';
-  durationMs?: number;
-  outputPreview?: string;
-  error?: string;
-}
-
-/**
- * Derive per-node summaries from a run's workflow events.
- * Processes node_started / node_completed / node_failed / node_skipped* events.
- */
-function buildNodeSummaries(events: WorkflowEventRow[]): NodeSummary[] {
-  const startTimes = new Map<string, number>();
-  const summaries = new Map<string, NodeSummary>();
-
-  for (const event of events) {
-    const nodeId = event.step_name;
-    if (!nodeId) continue;
-
-    switch (event.event_type) {
-      case 'node_started': {
-        startTimes.set(nodeId, new Date(event.created_at).getTime());
-        if (!summaries.has(nodeId)) {
-          summaries.set(nodeId, { nodeId, state: 'running' });
-        }
-        break;
-      }
-      case 'node_completed': {
-        const started = startTimes.get(nodeId);
-        const endTime = new Date(event.created_at).getTime();
-        const rawOutput = event.data.node_output;
-        const output = typeof rawOutput === 'string' ? rawOutput : undefined;
-        summaries.set(nodeId, {
-          nodeId,
-          state: 'completed',
-          durationMs: started !== undefined ? endTime - started : undefined,
-          outputPreview:
-            output !== undefined
-              ? output.slice(0, 200) + (output.length > 200 ? '...' : '')
-              : undefined,
-        });
-        break;
-      }
-      case 'node_failed': {
-        const started = startTimes.get(nodeId);
-        const endTime = new Date(event.created_at).getTime();
-        summaries.set(nodeId, {
-          nodeId,
-          state: 'failed',
-          durationMs: started !== undefined ? endTime - started : undefined,
-          error: typeof event.data.error === 'string' ? event.data.error : 'Unknown error',
-        });
-        break;
-      }
-      case 'node_skipped':
-      case 'node_skipped_prior_success': {
-        summaries.set(nodeId, { nodeId, state: 'skipped' });
-        break;
-      }
-    }
-  }
-
-  return [...summaries.values()];
-}
-
-/**
  * Look up a workflow run by ID, throwing with structured logging on failure.
  */
 async function getRunOrThrow(runId: string, logEvent: string): Promise<WorkflowRun> {
@@ -675,7 +595,7 @@ async function getRunOrThrow(runId: string, logEvent: string): Promise<WorkflowR
 /**
  * Show status of all running workflow runs.
  */
-export async function workflowStatusCommand(json?: boolean, verbose?: boolean): Promise<void> {
+export async function workflowStatusCommand(json?: boolean): Promise<void> {
   let runs: WorkflowRun[];
   try {
     runs = await workflowDb.listWorkflowRuns({
@@ -688,20 +608,7 @@ export async function workflowStatusCommand(json?: boolean, verbose?: boolean): 
   }
 
   if (json) {
-    if (verbose) {
-      const eventsPerRun = await Promise.all(
-        runs.map(run =>
-          workflowEventsDb.listWorkflowEvents(run.id).catch(() => [] as WorkflowEventRow[])
-        )
-      );
-      const runsWithEvents = runs.map((run, i) => ({
-        ...run,
-        events: eventsPerRun[i],
-      }));
-      console.log(JSON.stringify({ runs: runsWithEvents }, null, 2));
-    } else {
-      console.log(JSON.stringify({ runs }, null, 2));
-    }
+    console.log(JSON.stringify({ runs }, null, 2));
     return;
   }
 
@@ -718,40 +625,6 @@ export async function workflowStatusCommand(json?: boolean, verbose?: boolean): 
     console.log(`  Path:   ${run.working_path ?? '(none)'}`);
     console.log(`  Status: ${run.status}`);
     console.log(`  Age:    ${age}`);
-
-    if (verbose) {
-      let events: WorkflowEventRow[];
-      try {
-        events = await workflowEventsDb.listWorkflowEvents(run.id);
-      } catch {
-        events = [];
-      }
-      const nodes = buildNodeSummaries(events);
-      if (nodes.length > 0) {
-        console.log('  Nodes:');
-        for (const node of nodes) {
-          const icon =
-            node.state === 'completed'
-              ? '✓'
-              : node.state === 'failed'
-                ? '✗'
-                : node.state === 'skipped'
-                  ? '-'
-                  : '◌';
-          const duration =
-            node.durationMs !== undefined ? ` (${formatDuration(node.durationMs)})` : '';
-          const stateLabel = node.state === 'running' ? ' (running)' : '';
-          console.log(`    ${icon} ${node.nodeId}${duration}${stateLabel}`);
-          if (node.outputPreview !== undefined) {
-            console.log(`        Output: ${node.outputPreview}`);
-          }
-          if (node.error !== undefined) {
-            console.log(`        Error:  ${node.error}`);
-          }
-        }
-      }
-    }
-
     console.log('');
   }
 }
