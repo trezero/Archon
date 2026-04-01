@@ -20,6 +20,8 @@ import {
   registerCommand,
   findCodebaseByRepoUrl,
   findCodebaseByDefaultCwd,
+  findCodebaseByName,
+  updateCodebase,
   deleteCodebase,
 } from './codebases';
 
@@ -317,6 +319,80 @@ describe('codebases', () => {
 
       const result = await findCodebaseByDefaultCwd('/workspace/nonexistent');
       expect(result).toBeNull();
+    });
+  });
+
+  describe('findCodebaseByName', () => {
+    test('finds codebase by exact name', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([mockCodebase]));
+
+      const result = await findCodebaseByName('test-project');
+
+      expect(result).toEqual(mockCodebase);
+      expect(mockQuery).toHaveBeenCalledWith(
+        'SELECT * FROM remote_agent_codebases WHERE name = $1 ORDER BY created_at DESC LIMIT 1',
+        ['test-project']
+      );
+    });
+
+    test('returns null for non-existent name', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      const result = await findCodebaseByName('nonexistent/repo');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('updateCodebase', () => {
+    test('updates default_cwd only', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
+
+      await updateCodebase('codebase-123', { default_cwd: '/new/path' });
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        'UPDATE remote_agent_codebases SET default_cwd = $1, updated_at = NOW() WHERE id = $2',
+        ['/new/path', 'codebase-123']
+      );
+    });
+
+    test('updates repository_url only', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
+
+      await updateCodebase('codebase-123', { repository_url: 'https://github.com/owner/repo' });
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        'UPDATE remote_agent_codebases SET repository_url = $1, updated_at = NOW() WHERE id = $2',
+        ['https://github.com/owner/repo', 'codebase-123']
+      );
+    });
+
+    test('updates both default_cwd and repository_url', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
+
+      await updateCodebase('codebase-123', {
+        default_cwd: '/new/path',
+        repository_url: 'https://github.com/owner/repo',
+      });
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        'UPDATE remote_agent_codebases SET default_cwd = $1, repository_url = $2, updated_at = NOW() WHERE id = $3',
+        ['/new/path', 'https://github.com/owner/repo', 'codebase-123']
+      );
+    });
+
+    test('throws when codebase not found', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 0));
+
+      await expect(updateCodebase('nonexistent', { default_cwd: '/path' })).rejects.toThrow(
+        'Codebase nonexistent not found'
+      );
+    });
+
+    test('no-ops when no fields provided', async () => {
+      await updateCodebase('codebase-123', {});
+
+      expect(mockQuery).not.toHaveBeenCalled();
     });
   });
 

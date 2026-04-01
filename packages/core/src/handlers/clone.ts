@@ -61,6 +61,62 @@ async function registerRepoAtPath(
     }
   }
 
+  // Check if a codebase with this name already exists (dedup by project identity)
+  const existing = await codebaseDb.findCodebaseByName(name);
+  if (existing) {
+    // Determine if the new path is "better" (local > archon-managed clone)
+    const isNewPathLocal = !targetPath.includes('/.archon/workspaces/');
+    const isExistingPathManaged = existing.default_cwd.includes('/.archon/workspaces/');
+    const shouldUpdateCwd = isNewPathLocal && isExistingPathManaged;
+
+    const updates: { default_cwd?: string; repository_url?: string | null } = {};
+    if (shouldUpdateCwd) {
+      updates.default_cwd = targetPath;
+    }
+    // Fill in repository_url if the existing record doesn't have one
+    if (!existing.repository_url && repositoryUrl) {
+      updates.repository_url = repositoryUrl;
+    }
+    if (Object.keys(updates).length > 0) {
+      await codebaseDb.updateCodebase(existing.id, updates);
+    }
+
+    // Still reload commands for the existing codebase
+    const effectiveCwd = shouldUpdateCwd ? targetPath : existing.default_cwd;
+    let commandsLoaded = 0;
+    for (const folder of getCommandFolderSearchPaths()) {
+      const commandPath = join(effectiveCwd, folder);
+      try {
+        await access(commandPath);
+      } catch {
+        continue;
+      }
+      const markdownFiles = await findMarkdownFilesRecursive(commandPath);
+      if (markdownFiles.length > 0) {
+        const commands = { ...(await codebaseDb.getCodebaseCommands(existing.id)) };
+        markdownFiles.forEach(({ commandName, relativePath }) => {
+          commands[commandName] = {
+            path: join(folder, relativePath),
+            description: `From ${folder}`,
+          };
+        });
+        await codebaseDb.updateCodebaseCommands(existing.id, commands);
+        commandsLoaded = markdownFiles.length;
+        break;
+      }
+    }
+
+    return {
+      codebaseId: existing.id,
+      name: existing.name,
+      repositoryUrl: existing.repository_url,
+      defaultCwd: shouldUpdateCwd ? targetPath : existing.default_cwd,
+      commandCount: commandsLoaded,
+      alreadyExisted: true,
+    };
+  }
+
+  // No existing codebase — create new
   const codebase = await codebaseDb.createCodebase({
     name,
     repository_url: repositoryUrl ?? undefined,

@@ -1488,13 +1488,23 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
           throw updateError;
         }
 
-        // Reset session when cloning/switching codebases
-        const session = await sessionDb.getActiveSession(conversation.id);
-        if (session) {
-          await safeDeactivateSession(session.id, 'clone');
+        // Only reset session when actually switching to a different codebase
+        const isNewCodebase = conversation.codebase_id !== result.codebaseId;
+        if (isNewCodebase) {
+          const session = await sessionDb.getActiveSession(conversation.id);
+          if (session) {
+            await safeDeactivateSession(session.id, 'clone');
+          }
         }
 
         if (result.alreadyExisted) {
+          let responseMessage: string;
+          if (isNewCodebase) {
+            responseMessage = `Linked to existing codebase: ${result.name}\nPath: ${result.defaultCwd}\n\nSession reset - starting fresh on next message.`;
+          } else {
+            responseMessage = `Already linked to codebase: ${result.name}\nPath: ${result.defaultCwd}`;
+          }
+
           // Check for command folders
           let commandFolder: string | null = null;
           for (const folder of getCommandFolderSearchPaths()) {
@@ -1506,13 +1516,11 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
               /* ignore */
             }
           }
-
-          let responseMessage = `Repository already cloned.\n\nLinked to existing codebase: ${result.name}\nPath: ${result.defaultCwd}\n\nSession reset - starting fresh on next message.`;
           if (commandFolder) {
-            responseMessage += `\n\n📁 Found: ${commandFolder}/\nUse /load-commands ${commandFolder} to register commands.`;
+            responseMessage += `\n\nFound: ${commandFolder}/\nUse /load-commands ${commandFolder} to register commands.`;
           }
 
-          return { success: true, message: responseMessage, modified: true };
+          return { success: true, message: responseMessage, modified: isNewCodebase };
         }
 
         let responseMessage = `Repository cloned successfully!\n\nRepository: ${result.name}`;
