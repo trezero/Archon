@@ -776,12 +776,12 @@ async function executeNodeInternal(
         nodeAbortController.abort();
       }
     )) {
-      const now = Date.now();
+      const tickNow = Date.now();
       const nodeKey = `${workflowRun.id}:${node.id}`;
 
       // Cancel/pause check — read-only, no write contention in WAL mode (every 10s)
-      if (now - (lastNodeCancelCheck.get(nodeKey) ?? 0) > CANCEL_CHECK_INTERVAL_MS) {
-        lastNodeCancelCheck.set(nodeKey, now);
+      if (tickNow - (lastNodeCancelCheck.get(nodeKey) ?? 0) > CANCEL_CHECK_INTERVAL_MS) {
+        lastNodeCancelCheck.set(nodeKey, tickNow);
         try {
           const streamStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
           if (streamStatus === null || streamStatus !== 'running') {
@@ -801,8 +801,8 @@ async function executeNodeInternal(
       }
 
       // Activity heartbeat — write, throttled to every 60s (only for stale/zombie detection)
-      if (now - (lastNodeActivityUpdate.get(nodeKey) ?? 0) > ACTIVITY_HEARTBEAT_INTERVAL_MS) {
-        lastNodeActivityUpdate.set(nodeKey, now);
+      if (tickNow - (lastNodeActivityUpdate.get(nodeKey) ?? 0) > ACTIVITY_HEARTBEAT_INTERVAL_MS) {
+        lastNodeActivityUpdate.set(nodeKey, tickNow);
         try {
           await deps.store.updateWorkflowActivity(workflowRun.id);
         } catch (e) {
