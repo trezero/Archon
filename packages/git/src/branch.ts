@@ -14,8 +14,9 @@ function getLog(): ReturnType<typeof createLogger> {
  * Get the default branch name for a repository
  * Uses git symbolic-ref to get the remote HEAD reference
  *
- * Fallback chain: symbolic-ref -> origin/main -> origin/master
- * Note: Fallback is common for freshly cloned repos where origin/HEAD isn't set.
+ * Fallback chain: symbolic-ref -> origin/main -> throw
+ * Note: Throws if neither origin/HEAD nor origin/main can be resolved.
+ * Callers can set worktree.baseBranch in .archon/config.yaml as a manual override.
  *
  * Only falls back for expected git errors (ref not found, branch not found).
  * Throws for unexpected errors (permission denied, git corruption, etc.)
@@ -47,7 +48,7 @@ export async function getDefaultBranch(repoPath: RepoPath): Promise<BranchName> 
     }
   }
 
-  // Fallback: check if origin/main exists, otherwise assume master
+  // Fallback: check if origin/main exists, otherwise throw
   try {
     await execFileAsync('git', ['-C', repoPath, 'rev-parse', '--verify', 'origin/main'], {
       timeout: 10000,
@@ -57,14 +58,17 @@ export async function getDefaultBranch(repoPath: RepoPath): Promise<BranchName> 
     const err = error as Error & { stderr?: string };
     const errorText = `${err.message} ${err.stderr ?? ''}`;
 
-    // Expected: origin/main doesn't exist
+    // Expected: origin/main doesn't exist — no safe default, fail fast
     if (
       errorText.includes('Not a valid object name') ||
       errorText.includes('Needed a single revision') ||
       errorText.includes('unknown revision')
     ) {
-      getLog().debug({ repoPath, err }, 'origin_main_not_found_defaulting_to_master');
-      return toBranchName('master');
+      getLog().warn({ repoPath }, 'default_branch_detection_failed');
+      throw new Error(
+        `Cannot detect default branch for ${repoPath}: neither origin/HEAD nor origin/main exist. ` +
+          'Set worktree.baseBranch in .archon/config.yaml to specify the branch explicitly.'
+      );
     }
 
     // Unexpected error - surface it

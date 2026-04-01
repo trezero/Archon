@@ -47,7 +47,6 @@ let spyGetWorktreeBase: ReturnType<typeof spyOn>;
 let spyGetCanonicalRepoPath: ReturnType<typeof spyOn>;
 let spyIsWorktreePath: ReturnType<typeof spyOn>;
 let spyFindWorktreeByBranch: ReturnType<typeof spyOn>;
-let spyCreateWorktreeForIssue: ReturnType<typeof spyOn>;
 let spyMkdirAsync: ReturnType<typeof spyOn>;
 
 // Spies for fs/promises (avoid global mock.module pollution)
@@ -250,9 +249,6 @@ function setupSpies(): void {
   );
   spyIsWorktreePath = spyOn(gitUtils, 'isWorktreePath').mockResolvedValue(false);
   spyFindWorktreeByBranch = spyOn(gitUtils, 'findWorktreeByBranch').mockResolvedValue(null);
-  spyCreateWorktreeForIssue = spyOn(gitUtils, 'createWorktreeForIssue').mockResolvedValue(
-    '/workspace/worktrees/issue-1'
-  );
   spyMkdirAsync = spyOn(gitUtils, 'mkdirAsync').mockResolvedValue();
 
   // fs/promises spies (avoid global mock.module pollution)
@@ -280,7 +276,6 @@ function restoreSpies(): void {
   spyGetCanonicalRepoPath?.mockRestore();
   spyIsWorktreePath?.mockRestore();
   spyFindWorktreeByBranch?.mockRestore();
-  spyCreateWorktreeForIssue?.mockRestore();
   spyMkdirAsync?.mockRestore();
   spyFsAccess?.mockRestore();
   spyFsReaddir?.mockRestore();

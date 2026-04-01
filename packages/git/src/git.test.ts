@@ -529,279 +529,6 @@ branch refs/heads/feature/auth
     });
   });
 
-  describe('createWorktreeForIssue', () => {
-    let execSpy: Mock<typeof git.execFileAsync>;
-    let mkdirSpy: Mock<typeof git.mkdirAsync>;
-
-    beforeEach(() => {
-      execSpy = spyOn(git, 'execFileAsync');
-      mkdirSpy = spyOn(git, 'mkdirAsync');
-      mkdirSpy.mockResolvedValue(undefined);
-      execSpy.mockResolvedValue({ stdout: '', stderr: '' });
-    });
-
-    afterEach(() => {
-      execSpy.mockRestore();
-      mkdirSpy.mockRestore();
-    });
-
-    test('creates worktree with SHA-based checkout when prHeadSha provided', async () => {
-      const repoPath = '/workspace/repo';
-      const issueNumber = 42;
-      const prHeadBranch = 'feature/auth';
-      const prHeadSha = 'abc123def456';
-
-      await git.createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch, prHeadSha);
-
-      expect(execSpy).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['-C', repoPath, 'fetch', 'origin', 'pull/42/head']),
-        expect.any(Object)
-      );
-
-      expect(execSpy).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['-C', repoPath, 'worktree', 'add', expect.any(String), prHeadSha]),
-        expect.any(Object)
-      );
-
-      expect(execSpy).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining([
-          '-C',
-          expect.any(String),
-          'checkout',
-          '-b',
-          'pr-42-review',
-          prHeadSha,
-        ]),
-        expect.any(Object)
-      );
-    });
-
-    test('falls back to PR ref checkout when prHeadSha not provided', async () => {
-      const repoPath = '/workspace/repo';
-      const issueNumber = 42;
-      const prHeadBranch = 'feature/auth';
-
-      await git.createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch);
-
-      expect(execSpy).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['-C', repoPath, 'fetch', 'origin', 'pull/42/head:pr-42-review']),
-        expect.any(Object)
-      );
-
-      expect(execSpy).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining([
-          '-C',
-          repoPath,
-          'worktree',
-          'add',
-          expect.any(String),
-          'pr-42-review',
-        ]),
-        expect.any(Object)
-      );
-
-      const checkoutCalls = execSpy.mock.calls.filter((call: unknown[]) => {
-        const args = call[1] as string[];
-        return args.includes('checkout');
-      });
-      expect(checkoutCalls).toHaveLength(0);
-    });
-
-    test('handles fork PRs using GitHub PR refs', async () => {
-      const repoPath = '/workspace/repo';
-      const issueNumber = 123;
-      const prHeadBranch = 'fix-bug';
-      const prHeadSha = 'def789abc123';
-
-      await git.createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch, prHeadSha);
-
-      expect(execSpy).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['-C', repoPath, 'fetch', 'origin', 'pull/123/head']),
-        expect.any(Object)
-      );
-
-      const fetchCalls = execSpy.mock.calls.filter((call: unknown[]) => {
-        const args = call[1] as string[];
-        return args.includes('fetch') && args.includes(prHeadBranch);
-      });
-      expect(fetchCalls).toHaveLength(0);
-    });
-
-    test('creates issue branch for non-PR issues', async () => {
-      const repoPath = '/workspace/repo';
-      const issueNumber = 42;
-
-      await git.createWorktreeForIssue(repoPath, issueNumber, false);
-
-      expect(execSpy).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining([
-          '-C',
-          repoPath,
-          'worktree',
-          'add',
-          expect.any(String),
-          '-b',
-          'issue-42',
-        ]),
-        expect.any(Object)
-      );
-    });
-
-    test('reuses existing branch if it already exists', async () => {
-      const repoPath = '/workspace/repo';
-      const issueNumber = 42;
-
-      let callCount = 0;
-      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
-        callCount++;
-        if (callCount === 1 && args.includes('-b')) {
-          const error = new Error('fatal: A branch named issue-42 already exists.') as Error & {
-            stderr?: string;
-          };
-          error.stderr = 'fatal: A branch named issue-42 already exists.';
-          throw error;
-        }
-        return { stdout: '', stderr: '' };
-      });
-
-      await git.createWorktreeForIssue(repoPath, issueNumber, false);
-
-      expect(execSpy).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining([
-          '-C',
-          repoPath,
-          'worktree',
-          'add',
-          expect.any(String),
-          '-b',
-          'issue-42',
-        ]),
-        expect.any(Object)
-      );
-
-      expect(execSpy).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['-C', repoPath, 'worktree', 'add', expect.any(String), 'issue-42']),
-        expect.any(Object)
-      );
-    });
-
-    test('throws error if fetch fails', async () => {
-      const repoPath = '/workspace/repo';
-      const issueNumber = 42;
-      const prHeadBranch = 'feature/auth';
-
-      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
-        if (args.includes('fetch')) {
-          throw new Error('fatal: unable to access repository');
-        }
-        return { stdout: '', stderr: '' };
-      });
-
-      await expect(
-        git.createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch)
-      ).rejects.toThrow('Failed to create worktree for PR #42');
-    });
-
-    test('provides helpful error message with PR number', async () => {
-      const repoPath = '/workspace/repo';
-      const issueNumber = 42;
-      const prHeadBranch = 'feature/auth';
-
-      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
-        if (args.includes('fetch')) {
-          throw new Error('Network error');
-        }
-        return { stdout: '', stderr: '' };
-      });
-
-      try {
-        await git.createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch);
-        throw new Error('Should have thrown an error');
-      } catch (error) {
-        const err = error as Error;
-        expect(err.message).toContain('PR #42');
-        expect(err.message).toContain('Network error');
-      }
-    });
-
-    test('creates new branch when PR head branch not provided', async () => {
-      const repoPath = '/workspace/repo';
-      const issueNumber = 42;
-
-      await git.createWorktreeForIssue(repoPath, issueNumber, true);
-
-      expect(execSpy).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining([
-          '-C',
-          repoPath,
-          'worktree',
-          'add',
-          expect.any(String),
-          '-b',
-          'pr-42',
-        ]),
-        expect.any(Object)
-      );
-
-      const fetchCalls = execSpy.mock.calls.filter((call: unknown[]) => {
-        const args = call[1] as string[];
-        return args.includes('fetch');
-      });
-      expect(fetchCalls).toHaveLength(0);
-    });
-
-    test('finds and adopts worktree by PR head branch name', async () => {
-      const repoPath = '/workspace/repo';
-      const issueNumber = 42;
-      const prHeadBranch = 'feature/auth';
-
-      execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
-        if (args.includes('list')) {
-          const output = `worktree /workspace/repo
-HEAD abc123
-branch refs/heads/main
-
-worktree /workspace/worktrees/feature-auth
-HEAD def456
-branch refs/heads/feature/auth
-
-`;
-          return { stdout: output, stderr: '' };
-        }
-        return { stdout: '', stderr: '' };
-      });
-
-      const result = await git.createWorktreeForIssue(repoPath, issueNumber, true, prHeadBranch);
-
-      expect(result).toBe('/workspace/worktrees/feature-auth');
-
-      const createCalls = execSpy.mock.calls.filter((call: unknown[]) => {
-        const args = call[1] as string[];
-        return args.includes('add');
-      });
-      expect(createCalls).toHaveLength(0);
-    });
-
-    test('throws when repoPath has fewer than 2 segments', async () => {
-      const repoPath = '/repo'; // only one segment after split
-      const issueNumber = 42;
-
-      await expect(git.createWorktreeForIssue(repoPath, issueNumber, false)).rejects.toThrow(
-        'Cannot extract owner/repo from path "/repo"'
-      );
-    });
-  });
-
   // ==========================================================================
   // branch.ts
   // ==========================================================================
@@ -1023,7 +750,7 @@ branch refs/heads/feature/auth
       expect(result).toBe('main');
     });
 
-    test('falls back to master if symbolic-ref fails and origin/main does not exist', async () => {
+    test('throws when symbolic-ref fails and origin/main does not exist', async () => {
       execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
         if (args.includes('symbolic-ref')) {
           throw new Error('fatal: ref refs/remotes/origin/HEAD is not a symbolic ref');
@@ -1034,9 +761,11 @@ branch refs/heads/feature/auth
         return { stdout: '', stderr: '' };
       });
 
-      const result = await git.getDefaultBranch('/workspace/repo');
-
-      expect(result).toBe('master');
+      await expect(git.getDefaultBranch('/workspace/repo')).rejects.toThrow(
+        'Cannot detect default branch for /workspace/repo'
+      );
+      // Verify the error includes actionable config hint
+      await expect(git.getDefaultBranch('/workspace/repo')).rejects.toThrow('config.yaml');
     });
 
     test('throws for unexpected symbolic-ref errors (permission denied)', async () => {
@@ -1077,7 +806,7 @@ branch refs/heads/feature/auth
       );
     });
 
-    test('falls back to master for "unknown revision" error', async () => {
+    test('throws for "unknown revision" error when origin/main missing', async () => {
       execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
         if (args.includes('symbolic-ref')) {
           throw new Error('fatal: ref refs/remotes/origin/HEAD is not a symbolic ref');
@@ -1088,9 +817,11 @@ branch refs/heads/feature/auth
         return { stdout: '', stderr: '' };
       });
 
-      const result = await git.getDefaultBranch('/workspace/repo');
-
-      expect(result).toBe('master');
+      await expect(git.getDefaultBranch('/workspace/repo')).rejects.toThrow(
+        'Cannot detect default branch for /workspace/repo'
+      );
+      // Verify the error includes actionable config hint
+      await expect(git.getDefaultBranch('/workspace/repo')).rejects.toThrow('config.yaml');
     });
   });
 

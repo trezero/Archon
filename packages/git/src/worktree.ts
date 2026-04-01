@@ -1,12 +1,12 @@
 import { readFile, access } from 'fs/promises';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import {
   createLogger,
   getArchonWorktreesPath,
   getArchonWorkspacesPath,
   getProjectWorktreesPath,
 } from '@archon/paths';
-import { execFileAsync, mkdirAsync } from './exec';
+import { execFileAsync } from './exec';
 import type { RepoPath, BranchName, WorktreePath, WorktreeInfo } from './types';
 import { toRepoPath, toBranchName, toWorktreePath } from './types';
 
@@ -249,140 +249,4 @@ export function extractOwnerRepo(repoPath: RepoPath): { owner: string; repo: str
     );
   }
   return { owner: parts[parts.length - 2], repo: parts[parts.length - 1] };
-}
-
-/**
- * Create a git worktree for an issue or PR.
- * Returns the worktree path.
- *
- * For PRs: provide prHeadBranch and optionally prHeadSha for reproducible reviews.
- * For PRs without prHeadBranch: falls back to creating a new branch (pr-XX),
- * same as the issue path.
- * For issues: creates a new branch (issue-XX).
- *
- * Will adopt existing worktrees if found (enables skill-app symbiosis).
- */
-export async function createWorktreeForIssue(
-  repoPath: RepoPath,
-  issueNumber: number,
-  isPR: boolean,
-  prHeadBranch?: BranchName,
-  prHeadSha?: string
-): Promise<WorktreePath> {
-  const branchName = isPR ? `pr-${String(issueNumber)}` : `issue-${String(issueNumber)}`;
-
-  const worktreeBase = getWorktreeBase(repoPath);
-  let worktreePath: WorktreePath;
-
-  if (isProjectScopedWorktreeBase(repoPath)) {
-    // Project-scoped: worktreeBase already includes owner/repo context
-    worktreePath = toWorktreePath(join(worktreeBase, branchName));
-  } else {
-    // Legacy global: extract owner/repo from the last two path segments to avoid collisions
-    const { owner: ownerName, repo: repoName } = extractOwnerRepo(repoPath);
-    worktreePath = toWorktreePath(join(worktreeBase, ownerName, repoName, branchName));
-  }
-
-  // Check if worktree already exists at expected path (possibly created by skill)
-  if (await worktreeExists(worktreePath)) {
-    getLog().info({ worktreePath }, 'worktree_adopted');
-    return worktreePath;
-  }
-
-  // For PRs: also check if skill created a worktree with the PR's branch name
-  if (isPR && prHeadBranch) {
-    const existingByBranch = await findWorktreeByBranch(repoPath, prHeadBranch);
-    if (existingByBranch) {
-      getLog().info({ prHeadBranch, worktreePath: existingByBranch }, 'worktree_adopted_by_branch');
-      return existingByBranch;
-    }
-  }
-
-  // Ensure worktree parent directory exists
-  await mkdirAsync(dirname(worktreePath), { recursive: true });
-
-  if (isPR && prHeadBranch) {
-    // For PRs: fetch and checkout the PR's head branch
-    try {
-      // If SHA provided, use it for reproducible reviews (hybrid approach)
-      if (prHeadSha) {
-        // Fetch the specific commit SHA using PR refs (works for both fork and non-fork PRs)
-        // GitHub creates refs/pull/<number>/head for all PRs automatically
-        await execFileAsync(
-          'git',
-          ['-C', repoPath, 'fetch', 'origin', `pull/${String(issueNumber)}/head`],
-          {
-            timeout: 30000,
-          }
-        );
-
-        // Create worktree at the specific SHA
-        await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, prHeadSha], {
-          timeout: 30000,
-        });
-
-        // Create a local tracking branch so it's not detached HEAD
-        await execFileAsync(
-          'git',
-          ['-C', worktreePath, 'checkout', '-b', `pr-${String(issueNumber)}-review`, prHeadSha],
-          {
-            timeout: 30000,
-          }
-        );
-      } else {
-        // Use GitHub's PR refs which work for both fork and non-fork PRs
-        // GitHub automatically creates refs/pull/<number>/head for all PRs
-        await execFileAsync(
-          'git',
-          [
-            '-C',
-            repoPath,
-            'fetch',
-            'origin',
-            `pull/${String(issueNumber)}/head:pr-${String(issueNumber)}-review`,
-          ],
-          {
-            timeout: 30000,
-          }
-        );
-
-        // Create worktree using the fetched PR ref
-        await execFileAsync(
-          'git',
-          ['-C', repoPath, 'worktree', 'add', worktreePath, `pr-${String(issueNumber)}-review`],
-          {
-            timeout: 30000,
-          }
-        );
-      }
-    } catch (error) {
-      const err = error as Error & { stderr?: string };
-      const detail = err.stderr?.trim() || err.message;
-      throw new Error(`Failed to create worktree for PR #${String(issueNumber)}: ${detail}`);
-    }
-  } else {
-    // For issues (or PRs without branch info): create new branch
-    try {
-      // Try to create with new branch
-      await execFileAsync(
-        'git',
-        ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName],
-        {
-          timeout: 30000,
-        }
-      );
-    } catch (error) {
-      const err = error as Error & { stderr?: string };
-      // Branch already exists - use existing branch
-      if (err.stderr?.includes('already exists')) {
-        await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, branchName], {
-          timeout: 30000,
-        });
-      } else {
-        throw error;
-      }
-    }
-  }
-
-  return worktreePath;
 }
