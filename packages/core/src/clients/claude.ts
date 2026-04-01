@@ -214,10 +214,12 @@ export class ClaudeClient implements IAssistantClient {
   constructor() {
     // Claude Code SDK silently rejects bypassPermissions when running as root (UID 0).
     // Check once at construction time so the error surfaces early, not on first query.
-    if (getProcessUid() === 0) {
+    // IS_SANDBOX=1 bypasses this check — the SDK itself honours this env var in sandboxed
+    // environments (Docker, VPS, CI) where running as root is expected.
+    if (getProcessUid() === 0 && process.env.IS_SANDBOX !== '1') {
       throw new Error(
         'Claude Code SDK does not support bypassPermissions when running as root (UID 0). ' +
-          'Run as a non-root user, or use the Dockerfile which creates a non-root appuser.'
+          'Run as a non-root user, set IS_SANDBOX=1, or use the Dockerfile which creates a non-root appuser.'
       );
     }
   }
