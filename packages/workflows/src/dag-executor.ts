@@ -60,9 +60,13 @@ function getLog(): ReturnType<typeof createLogger> {
   return cachedLog;
 }
 
-/** Throttle state for activity updates + cancel checks inside streaming loops */
+/** Throttle state for cancel checks (reads — no write contention in WAL mode) */
+const lastNodeCancelCheck = new Map<string, number>();
+const CANCEL_CHECK_INTERVAL_MS = 10_000;
+
+/** Throttle state for activity heartbeat writes (only used for stale/zombie detection) */
 const lastNodeActivityUpdate = new Map<string, number>();
-const NODE_ACTIVITY_UPDATE_INTERVAL_MS = 10_000;
+const ACTIVITY_HEARTBEAT_INTERVAL_MS = 60_000;
 
 /** Context for platform message sending */
 interface SendMessageContext {
@@ -772,24 +776,12 @@ async function executeNodeInternal(
         nodeAbortController.abort();
       }
     )) {
-      // Update activity timestamp + check cancel (throttled to once per 10s)
-      const activityNow = Date.now();
+      const now = Date.now();
       const nodeKey = `${workflowRun.id}:${node.id}`;
-      if (
-        activityNow - (lastNodeActivityUpdate.get(nodeKey) ?? 0) >
-        NODE_ACTIVITY_UPDATE_INTERVAL_MS
-      ) {
-        lastNodeActivityUpdate.set(nodeKey, activityNow);
-        try {
-          await deps.store.updateWorkflowActivity(workflowRun.id);
-        } catch (e) {
-          getLog().warn(
-            { err: e as Error, workflowRunId: workflowRun.id },
-            'dag.activity_update_failed'
-          );
-        }
 
-        // Check for non-running status during streaming (cancellation, deletion, or future: pause)
+      // Cancel/pause check — read-only, no write contention in WAL mode (every 10s)
+      if (now - (lastNodeCancelCheck.get(nodeKey) ?? 0) > CANCEL_CHECK_INTERVAL_MS) {
+        lastNodeCancelCheck.set(nodeKey, now);
         try {
           const streamStatus = await deps.store.getWorkflowRunStatus(workflowRun.id);
           if (streamStatus === null || streamStatus !== 'running') {
@@ -804,6 +796,19 @@ async function executeNodeInternal(
           getLog().warn(
             { err: cancelCheckErr as Error, workflowRunId: workflowRun.id, nodeId: node.id },
             'dag.status_check_failed'
+          );
+        }
+      }
+
+      // Activity heartbeat — write, throttled to every 60s (only for stale/zombie detection)
+      if (now - (lastNodeActivityUpdate.get(nodeKey) ?? 0) > ACTIVITY_HEARTBEAT_INTERVAL_MS) {
+        lastNodeActivityUpdate.set(nodeKey, now);
+        try {
+          await deps.store.updateWorkflowActivity(workflowRun.id);
+        } catch (e) {
+          getLog().warn(
+            { err: e as Error, workflowRunId: workflowRun.id },
+            'dag.activity_update_failed'
           );
         }
       }
@@ -1044,7 +1049,8 @@ async function executeNodeInternal(
         error: 'Cancelled by user',
       });
 
-      // Clean up throttle entry
+      // Clean up throttle entries
+      lastNodeCancelCheck.delete(`${workflowRun.id}:${node.id}`);
       lastNodeActivityUpdate.delete(`${workflowRun.id}:${node.id}`);
 
       return { state: 'failed', output: nodeOutputText, error: 'Cancelled by user' };
@@ -1087,14 +1093,16 @@ async function executeNodeInternal(
       duration,
     });
 
-    // Clean up throttle entry on completion
+    // Clean up throttle entries on completion
+    lastNodeCancelCheck.delete(`${workflowRun.id}:${node.id}`);
     lastNodeActivityUpdate.delete(`${workflowRun.id}:${node.id}`);
 
     return { state: 'completed', output: nodeOutputText, sessionId: newSessionId };
   } catch (error) {
     const err = error as Error;
 
-    // Clean up throttle entry on failure
+    // Clean up throttle entries on failure
+    lastNodeCancelCheck.delete(`${workflowRun.id}:${node.id}`);
     lastNodeActivityUpdate.delete(`${workflowRun.id}:${node.id}`);
 
     // If the abort was triggered by user cancel (not idle timeout), classify as cancel
