@@ -18,9 +18,9 @@ argument-hint: (none - reads all review artifacts from $ARTIFACTS_DIR/review/)
 
 ## Your Mission
 
-Read all review artifacts and fix EVERYTHING surfaced. Unlike conservative auto-fix, you lean aggressively towards fixing. LLMs are fast at generating code — use that advantage to add tests, fix docs, simplify code, improve error handling, and address all findings.
+Read all review artifacts and fix EVERYTHING surfaced. Unlike conservative auto-fix, you lean aggressively towards fixing. LLMs are fast at generating code — use that advantage to add tests, fix docs, improve error handling, and address all findings.
 
-**Philosophy**: Fix it unless it's clearly a NEW unrelated concern that deserves its own issue. Adding tests for existing code? Fix it. Simplifying complex code? Fix it. Updating docs? Fix it. Adding missing error handling? Fix it. The bar for skipping is HIGH — only skip when the fix would introduce a genuinely new feature or concern outside the PR's scope.
+**Philosophy**: Fix it unless it's clearly a NEW unrelated concern that deserves its own issue. Adding tests for existing code? Fix it. Updating docs? Fix it. Adding missing error handling? Fix it. The bar for skipping is HIGH — only skip when the fix would introduce a genuinely new feature or concern outside the PR's scope.
 
 **Output artifact**: `$ARTIFACTS_DIR/review/fix-report.md`
 **Git action**: Commit AND push fixes to the PR branch
@@ -89,7 +89,6 @@ For each finding, decide: **FIX** or **SKIP**.
 - Real bugs, type errors, silent failures, code quality issues
 - Missing tests for changed or existing code touched by the PR
 - Missing or outdated documentation
-- Code simplification opportunities
 - Error handling gaps
 - Comment quality issues
 - Import organization
@@ -138,15 +137,7 @@ For ANY finding about docs:
 1. Update the relevant documentation
 2. Ensure accuracy with the current code
 
-### 3.4 Simplify Code
-
-For ANY finding about code complexity:
-
-1. Apply the simplification
-2. Verify behavior is preserved via tests
-3. Run type-check
-
-### 3.5 Handle Blocked Fixes
+### 3.4 Handle Blocked Fixes
 
 If a fix cannot be applied (code changed since review, fix would break other things), mark as **BLOCKED** with reason. Do not force a broken fix.
 
@@ -155,7 +146,6 @@ If a fix cannot be applied (code changed since review, fix would break other thi
 - [ ] All FIX findings attempted
 - [ ] Tests added where flagged
 - [ ] Docs updated where flagged
-- [ ] Code simplified where flagged
 - [ ] BLOCKED findings documented
 
 ---
@@ -275,16 +265,6 @@ Write to `$ARTIFACTS_DIR/review/fix-report.md`:
 | `{file}` | {what was updated} |
 
 *(none)* if no docs were updated
-
----
-
-## Code Simplified
-
-| File | Before | After |
-|------|--------|-------|
-| `{file}:{lines}` | {brief before} | {brief after} |
-
-*(none)* if no simplification
 
 ---
 
@@ -423,7 +403,6 @@ EOF
 Fixed: {n} (across all severities)
 Tests added: {n}
 Docs updated: {n}
-Code simplified: {n}
 Skipped: {n} (new concerns only)
 Blocked: {n}
 

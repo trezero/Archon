@@ -13,8 +13,9 @@ description: |
   4. Implements the fix/feature with validation
   5. Creates a draft PR using the repo's PR template
   6. Runs smart review (always code review + CLAUDE.md check, conditional additional agents)
-  7. Aggressively self-fixes all findings (tests, docs, simplification, error handling)
-  8. Reports results back to the GitHub issue with follow-up suggestions
+  7. Aggressively self-fixes all findings (tests, docs, error handling)
+  8. Simplifies changed code (implements fixes directly, not just reports)
+  9. Reports results back to the GitHub issue with follow-up suggestions
 
 provider: claude
 model: sonnet
@@ -291,10 +292,19 @@ nodes:
     context: fresh
 
   # ═══════════════════════════════════════════════════════════════
-  # PHASE 9: REPORT
+  # PHASE 9: SIMPLIFY
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: simplify
+    command: archon-simplify-changes
+    depends_on: [self-fix]
+    context: fresh
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 10: REPORT
   # ═══════════════════════════════════════════════════════════════
 
   - id: report
     command: archon-issue-completion-report
-    depends_on: [self-fix]
+    depends_on: [simplify]
     context: fresh
