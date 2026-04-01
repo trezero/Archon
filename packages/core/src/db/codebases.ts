@@ -96,7 +96,18 @@ export async function findCodebaseByDefaultCwd(defaultCwd: string): Promise<Code
   return result.rows[0] || null;
 }
 
-export async function updateCodebase(id: string, data: { default_cwd?: string }): Promise<void> {
+export async function findCodebaseByName(name: string): Promise<Codebase | null> {
+  const result = await pool.query<Codebase>(
+    'SELECT * FROM remote_agent_codebases WHERE name = $1 ORDER BY created_at DESC LIMIT 1',
+    [name]
+  );
+  return result.rows[0] || null;
+}
+
+export async function updateCodebase(
+  id: string,
+  data: { default_cwd?: string; repository_url?: string | null }
+): Promise<void> {
   const dialect = getDialect();
   const updates: string[] = [];
   const values: (string | null)[] = [];
@@ -105,6 +116,11 @@ export async function updateCodebase(id: string, data: { default_cwd?: string })
   if (data.default_cwd !== undefined) {
     updates.push(`default_cwd = $${paramIndex++}`);
     values.push(data.default_cwd);
+  }
+
+  if (data.repository_url !== undefined) {
+    updates.push(`repository_url = $${paramIndex++}`);
+    values.push(data.repository_url);
   }
 
   if (updates.length === 0) return;
