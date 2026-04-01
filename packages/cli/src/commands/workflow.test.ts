@@ -372,6 +372,172 @@ describe('workflowRunCommand', () => {
     }
   });
 
+  it('should resolve workflow by suffix match', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
+    const conversationDb = await import('@archon/core/db/conversations');
+    const codebaseDb = await import('@archon/core/db/codebases');
+
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [
+        makeTestWorkflowWithSource({ name: 'archon-assist', description: 'Help' }),
+        makeTestWorkflowWithSource({ name: 'archon-plan', description: 'Plan' }),
+      ],
+      errors: [],
+    });
+    (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'conv-1',
+      platform: 'cli',
+      platform_conversation_id: 'cli-123',
+      title: null,
+      is_active: true,
+      codebase_id: null,
+    });
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'cb-1',
+      name: 'test-repo',
+      default_cwd: '/test/path',
+    });
+
+    // Should resolve successfully — "assist" suffix-matches "archon-assist"
+    await workflowRunCommand('/test/path', 'assist', 'hello');
+
+    // Verify suffix matching tier was used
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ requested: 'assist', matched: 'archon-assist' }),
+      'workflow_run_suffix_match'
+    );
+  });
+
+  it('should resolve workflow by substring match', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
+
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [
+        makeTestWorkflowWithSource({ name: 'archon-smart-pr-review', description: 'Smart review' }),
+        makeTestWorkflowWithSource({ name: 'archon-assist', description: 'Help' }),
+      ],
+      errors: [],
+    });
+
+    // "smart" substring-matches only "archon-smart-pr-review"
+    // Will fail downstream at executeWorkflow mock, but must NOT throw "not found"
+    const error = await workflowRunCommand('/test/path', 'smart', 'hello').catch(
+      (e: unknown) => e as Error
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).not.toContain('not found');
+    expect((error as Error).message).not.toContain('Did you mean');
+  });
+
+  it('should prefer case-insensitive exact match over suffix match', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
+    const conversationDb = await import('@archon/core/db/conversations');
+    const codebaseDb = await import('@archon/core/db/codebases');
+
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [
+        makeTestWorkflowWithSource({ name: 'assist', description: 'Help' }),
+        makeTestWorkflowWithSource({ name: 'archon-assist', description: 'Long' }),
+      ],
+      errors: [],
+    });
+    (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'conv-1',
+      platform: 'cli',
+      platform_conversation_id: 'cli-123',
+      title: null,
+      is_active: true,
+      codebase_id: null,
+    });
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'cb-1',
+      name: 'test-repo',
+      default_cwd: '/test/path',
+    });
+
+    // "ASSIST" case-insensitive matches "assist" at tier 2, should not reach suffix tier
+    await workflowRunCommand('/test/path', 'ASSIST', 'hello');
+
+    // Verify case-insensitive match was used, not suffix match
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ requested: 'ASSIST', matched: 'assist' }),
+      'workflow_run_case_insensitive_match'
+    );
+    expect(mockLogger.info).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'workflow_run_suffix_match'
+    );
+  });
+
+  it('should throw ambiguous error for multiple suffix matches', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [
+        makeTestWorkflowWithSource({ name: 'archon-review', description: 'Review' }),
+        makeTestWorkflowWithSource({ name: 'custom-review', description: 'Custom review' }),
+      ],
+      errors: [],
+    });
+
+    await expect(workflowRunCommand('/test/path', 'review', 'hello')).rejects.toThrow(
+      "Ambiguous workflow 'review'. Did you mean:"
+    );
+  });
+
+  it('should throw ambiguous error for multiple substring matches', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [
+        makeTestWorkflowWithSource({
+          name: 'archon-comprehensive-pr-review',
+          description: 'Full review',
+        }),
+        makeTestWorkflowWithSource({ name: 'archon-smart-pr-review', description: 'Smart review' }),
+      ],
+      errors: [],
+    });
+
+    await expect(workflowRunCommand('/test/path', 'pr-review', 'hello')).rejects.toThrow(
+      "Ambiguous workflow 'pr-review'. Did you mean:"
+    );
+  });
+
+  it('should prefer exact match over suffix match', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
+    const conversationDb = await import('@archon/core/db/conversations');
+    const codebaseDb = await import('@archon/core/db/codebases');
+
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [
+        makeTestWorkflowWithSource({ name: 'assist', description: 'Short name' }),
+        makeTestWorkflowWithSource({ name: 'archon-assist', description: 'Long name' }),
+      ],
+      errors: [],
+    });
+    (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'conv-1',
+      platform: 'cli',
+      platform_conversation_id: 'cli-123',
+      title: null,
+      is_active: true,
+      codebase_id: null,
+    });
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'cb-1',
+      name: 'test-repo',
+      default_cwd: '/test/path',
+    });
+
+    // "assist" exact-matches "assist", should NOT go to suffix matching
+    await workflowRunCommand('/test/path', 'assist', 'hello');
+
+    // Should not have logged suffix/substring match — exact match takes priority
+    expect(mockLogger.info).not.toHaveBeenCalledWith(
+      expect.objectContaining({ requested: 'assist' }),
+      'workflow_run_suffix_match'
+    );
+  });
+
   it('should throw error when database access fails', async () => {
     const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
     const conversationDb = await import('@archon/core/db/conversations');
