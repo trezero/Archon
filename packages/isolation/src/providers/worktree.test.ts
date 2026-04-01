@@ -1818,6 +1818,50 @@ describe('WorktreeProvider', () => {
 
       removeWorktreeSpy.mockRestore();
     });
+
+    test('propagates original error when orphan worktree cleanup itself fails', async () => {
+      const removeWorktreeSpy = spyOn(git, 'removeWorktree');
+      // Cleanup will fail — but original error should still propagate
+      removeWorktreeSpy.mockRejectedValue(new Error('worktree is locked'));
+
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
+        workflowType: 'pr',
+        identifier: '42',
+        prBranch: 'feature/auth',
+        isForkPR: true,
+        prSha: 'abc123',
+      };
+
+      // Directory doesn't exist initially (no orphan directory to clean)
+      accessSpy.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+
+      // First call: worktreeExists returns false (not adopted)
+      // Second call (in cleanup): worktreeExists returns true (orphan exists)
+      worktreeExistsSpy
+        .mockResolvedValueOnce(false) // findExisting check
+        .mockResolvedValueOnce(true); // cleanOrphanWorktreeIfExists check
+
+      const checkoutError = new Error('fatal: unable to create branch') as Error & {
+        stderr?: string;
+      };
+      checkoutError.stderr = 'fatal: unable to create branch';
+      execSpy
+        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // fetch origin pull/42/head
+        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // worktree add (succeeds)
+        .mockRejectedValueOnce(checkoutError); // checkout -b (fails, non-retryable)
+
+      // Original error still propagates despite cleanup failure
+      await expect(provider.create(request)).rejects.toThrow(
+        'Failed to create worktree for PR #42'
+      );
+
+      // Cleanup was attempted (and failed)
+      expect(removeWorktreeSpy).toHaveBeenCalled();
+
+      removeWorktreeSpy.mockRestore();
+    });
   });
 
   describe('workspace sync before worktree creation', () => {

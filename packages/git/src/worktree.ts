@@ -72,7 +72,7 @@ export async function worktreeExists(worktreePath: WorktreePath): Promise<boolea
     if (err.code === 'ENOENT') {
       return false;
     }
-    getLog().error({ worktreePath, err, code: err.code }, 'worktree_existence_check_failed');
+    getLog().error({ worktreePath, err, code: err.code }, 'worktree.existence_check_failed');
     throw new Error(`Failed to check worktree at ${worktreePath}: ${err.message}`);
   }
 
@@ -88,7 +88,7 @@ export async function worktreeExists(worktreePath: WorktreePath): Promise<boolea
       getLog().warn({ worktreePath }, 'worktree.corruption_detected');
       return false;
     }
-    getLog().error({ worktreePath, err, code: err.code }, 'worktree_existence_check_failed');
+    getLog().error({ worktreePath, err, code: err.code }, 'worktree.existence_check_failed');
     throw new Error(`Failed to check worktree at ${worktreePath}: ${err.message}`);
   }
 }
@@ -139,7 +139,7 @@ export async function listWorktrees(repoPath: RepoPath): Promise<WorktreeInfo[]>
     }
 
     // Unexpected error - log and throw
-    getLog().error({ repoPath, err, code: err.code, stderr: err.stderr }, 'list_worktrees_failed');
+    getLog().error({ repoPath, err, code: err.code, stderr: err.stderr }, 'worktree.list_failed');
     throw new Error(`Failed to list worktrees for ${repoPath}: ${err.message}`);
   }
 }

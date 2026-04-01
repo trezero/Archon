@@ -959,7 +959,7 @@ export class WorktreeProvider implements IIsolationProvider {
     getLog().debug({ worktreePath }, 'orphan_directory_cleaning');
     try {
       await rm(worktreePath, { recursive: true, force: true });
-      getLog().debug({ worktreePath }, 'orphan_directory_removed');
+      getLog().debug({ worktreePath }, 'isolation.orphan_directory_removed');
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       // Provide context for the error - orphan cleanup is critical for worktree creation
@@ -974,15 +974,15 @@ export class WorktreeProvider implements IIsolationProvider {
   private async cleanOrphanWorktreeIfExists(repoPath: string, worktreePath: string): Promise<void> {
     try {
       if (await worktreeExists(toWorktreePath(worktreePath))) {
-        getLog().warn({ repoPath, worktreePath }, 'orphan_worktree_cleanup_started');
+        getLog().warn({ repoPath, worktreePath }, 'isolation.orphan_cleanup_started');
         await removeWorktree(toRepoPath(repoPath), toWorktreePath(worktreePath));
-        getLog().info({ repoPath, worktreePath }, 'orphan_worktree_cleanup_completed');
+        getLog().info({ repoPath, worktreePath }, 'isolation.orphan_cleanup_completed');
       }
     } catch (cleanupError) {
       const err = cleanupError as Error;
       getLog().error(
         { repoPath, worktreePath, error: err.message, errorType: err.constructor.name, err },
-        'orphan_worktree_cleanup_failed'
+        'isolation.orphan_cleanup_failed'
       );
       // Don't throw — the original creation error is more important
     }

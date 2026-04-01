@@ -387,7 +387,7 @@ describe('git utilities', () => {
             worktreePath: testPath,
             code: 'EACCES',
           }),
-          'worktree_existence_check_failed'
+          'worktree.existence_check_failed'
         );
       } finally {
         accessSpy.mockRestore();
@@ -487,7 +487,7 @@ branch refs/heads/feature/auth
           repoPath: '/path/to/repo',
           stderr: 'fatal: permission denied',
         }),
-        'list_worktrees_failed'
+        'worktree.list_failed'
       );
     });
   });
