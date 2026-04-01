@@ -64,18 +64,31 @@ export function isProjectScopedWorktreeBase(repoPath: RepoPath): boolean {
  * Throws for unexpected errors (permission denied, I/O errors, etc.)
  */
 export async function worktreeExists(worktreePath: WorktreePath): Promise<boolean> {
+  // Step 1: Check if directory exists
   try {
     await access(worktreePath);
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === 'ENOENT') {
+      return false;
+    }
+    getLog().error({ worktreePath, err, code: err.code }, 'worktree.existence_check_failed');
+    throw new Error(`Failed to check worktree at ${worktreePath}: ${err.message}`);
+  }
+
+  // Step 2: Check if .git entry exists (directory exists at this point)
+  try {
     const gitPath = join(worktreePath, '.git');
     await access(gitPath);
     return true;
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     if (err.code === 'ENOENT') {
+      // Directory exists but .git is missing — corruption signal
+      getLog().warn({ worktreePath }, 'worktree.corruption_detected');
       return false;
     }
-    // Unexpected error - permission denied, I/O error, etc.
-    getLog().error({ worktreePath, err, code: err.code }, 'worktree_existence_check_failed');
+    getLog().error({ worktreePath, err, code: err.code }, 'worktree.existence_check_failed');
     throw new Error(`Failed to check worktree at ${worktreePath}: ${err.message}`);
   }
 }
@@ -114,16 +127,19 @@ export async function listWorktrees(repoPath: RepoPath): Promise<WorktreeInfo[]>
     const err = error as Error & { code?: string; stderr?: string };
     const errorText = `${err.message} ${err.stderr ?? ''}`;
 
+    // ENOENT on repo path itself — distinct from "not a git repository"
+    if (errorText.includes('No such file or directory')) {
+      getLog().warn({ repoPath }, 'worktree.list_repo_missing');
+      return [];
+    }
+
     // Expected: not a git repository - return empty list
-    if (
-      errorText.includes('not a git repository') ||
-      errorText.includes('No such file or directory')
-    ) {
+    if (errorText.includes('not a git repository')) {
       return [];
     }
 
     // Unexpected error - log and throw
-    getLog().error({ repoPath, err, code: err.code, stderr: err.stderr }, 'list_worktrees_failed');
+    getLog().error({ repoPath, err, code: err.code, stderr: err.stderr }, 'worktree.list_failed');
     throw new Error(`Failed to list worktrees for ${repoPath}: ${err.message}`);
   }
 }

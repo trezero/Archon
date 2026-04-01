@@ -353,10 +353,18 @@ describe('git utilities', () => {
       expect(result).toBe(false);
     });
 
-    test('returns false when .git does not exist', async () => {
+    test('returns false and logs warning when directory exists but .git is missing (corruption)', async () => {
       await realMkdir(join(testDir, 'no-git'), { recursive: true });
+      mockLogger.warn.mockClear();
+
       const result = await git.worktreeExists(join(testDir, 'no-git'));
       expect(result).toBe(false);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          worktreePath: join(testDir, 'no-git'),
+        }),
+        'worktree.corruption_detected'
+      );
     });
 
     test('throws and logs for permission errors (EACCES)', async () => {
@@ -379,7 +387,7 @@ describe('git utilities', () => {
             worktreePath: testPath,
             code: 'EACCES',
           }),
-          'worktree_existence_check_failed'
+          'worktree.existence_check_failed'
         );
       } finally {
         accessSpy.mockRestore();
@@ -424,11 +432,16 @@ branch refs/heads/feature/auth
       expect(result).toEqual([]);
     });
 
-    test('returns empty array for "No such file or directory" error', async () => {
+    test('returns empty array and logs warning for "No such file or directory" error', async () => {
       execSpy.mockRejectedValue(new Error('No such file or directory'));
+      mockLogger.warn.mockClear();
 
       const result = await git.listWorktrees('/path/to/repo');
       expect(result).toEqual([]);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ repoPath: '/path/to/repo' }),
+        'worktree.list_repo_missing'
+      );
     });
 
     test('throws for unexpected errors', async () => {
@@ -448,13 +461,18 @@ branch refs/heads/feature/auth
       expect(result).toEqual([]);
     });
 
-    test('returns empty array when "No such file or directory" is in stderr', async () => {
+    test('returns empty array and logs warning when "No such file or directory" is in stderr', async () => {
       const error = new Error('Command failed') as Error & { stderr?: string };
       error.stderr = 'No such file or directory';
       execSpy.mockRejectedValue(error);
+      mockLogger.warn.mockClear();
 
       const result = await git.listWorktrees('/path/to/repo');
       expect(result).toEqual([]);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ repoPath: '/path/to/repo' }),
+        'worktree.list_repo_missing'
+      );
     });
 
     test('throws and logs for unexpected git errors', async () => {
@@ -469,7 +487,7 @@ branch refs/heads/feature/auth
           repoPath: '/path/to/repo',
           stderr: 'fatal: permission denied',
         }),
-        'list_worktrees_failed'
+        'worktree.list_failed'
       );
     });
   });

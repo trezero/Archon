@@ -1770,6 +1770,98 @@ describe('WorktreeProvider', () => {
 
       await expect(provider.create(request)).rejects.toThrow('Failed to check directory');
     });
+
+    test('cleans orphaned git-registered worktree when createFromForkPR fails after worktree add', async () => {
+      const removeWorktreeSpy = spyOn(git, 'removeWorktree');
+      removeWorktreeSpy.mockResolvedValue(undefined);
+
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
+        workflowType: 'pr',
+        identifier: '42',
+        prBranch: 'feature/auth',
+        isForkPR: true,
+        prSha: 'abc123',
+      };
+
+      // Directory doesn't exist initially (no orphan directory to clean)
+      accessSpy.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+
+      // First call: worktreeExists returns false (not adopted)
+      // Second call (in cleanup): worktreeExists returns true (orphan exists)
+      worktreeExistsSpy
+        .mockResolvedValueOnce(false) // findExisting check
+        .mockResolvedValueOnce(true); // cleanOrphanWorktreeIfExists check
+
+      // Simulate: fetch succeeds, worktree add succeeds, then checkout -b fails with non-retryable error
+      // Note: syncWorkspace and mkdirAsync are separately mocked, so execSpy only sees
+      // the git calls inside createFromForkPR
+      const checkoutError = new Error('fatal: unable to create branch') as Error & {
+        stderr?: string;
+      };
+      checkoutError.stderr = 'fatal: unable to create branch';
+      execSpy
+        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // fetch origin pull/42/head
+        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // worktree add (succeeds)
+        .mockRejectedValueOnce(checkoutError); // checkout -b (fails, non-retryable)
+
+      await expect(provider.create(request)).rejects.toThrow(
+        'Failed to create worktree for PR #42'
+      );
+
+      // Verify orphan worktree cleanup was attempted
+      expect(removeWorktreeSpy).toHaveBeenCalledWith(
+        '/workspace/repo',
+        expect.stringContaining('pr-42')
+      );
+
+      removeWorktreeSpy.mockRestore();
+    });
+
+    test('propagates original error when orphan worktree cleanup itself fails', async () => {
+      const removeWorktreeSpy = spyOn(git, 'removeWorktree');
+      // Cleanup will fail — but original error should still propagate
+      removeWorktreeSpy.mockRejectedValue(new Error('worktree is locked'));
+
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        canonicalRepoPath: '/workspace/repo',
+        workflowType: 'pr',
+        identifier: '42',
+        prBranch: 'feature/auth',
+        isForkPR: true,
+        prSha: 'abc123',
+      };
+
+      // Directory doesn't exist initially (no orphan directory to clean)
+      accessSpy.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+
+      // First call: worktreeExists returns false (not adopted)
+      // Second call (in cleanup): worktreeExists returns true (orphan exists)
+      worktreeExistsSpy
+        .mockResolvedValueOnce(false) // findExisting check
+        .mockResolvedValueOnce(true); // cleanOrphanWorktreeIfExists check
+
+      const checkoutError = new Error('fatal: unable to create branch') as Error & {
+        stderr?: string;
+      };
+      checkoutError.stderr = 'fatal: unable to create branch';
+      execSpy
+        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // fetch origin pull/42/head
+        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // worktree add (succeeds)
+        .mockRejectedValueOnce(checkoutError); // checkout -b (fails, non-retryable)
+
+      // Original error still propagates despite cleanup failure
+      await expect(provider.create(request)).rejects.toThrow(
+        'Failed to create worktree for PR #42'
+      );
+
+      // Cleanup was attempted (and failed)
+      expect(removeWorktreeSpy).toHaveBeenCalled();
+
+      removeWorktreeSpy.mockRestore();
+    });
   });
 
   describe('workspace sync before worktree creation', () => {
