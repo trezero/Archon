@@ -35,10 +35,12 @@ export {
   bashNodeSchema,
   loopNodeSchema,
   approvalNodeSchema,
+  cancelNodeSchema,
   dagNodeSchema,
   isBashNode,
   isLoopNode,
   isApprovalNode,
+  isCancelNode,
   isTriggerRule,
   BASH_NODE_AI_FIELDS,
 } from './dag-node';
@@ -50,6 +52,7 @@ export type {
   BashNode,
   LoopNode,
   ApprovalNode,
+  CancelNode,
   DagNode,
 } from './dag-node';
 

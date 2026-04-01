@@ -1,11 +1,12 @@
 import { describe, test, expect } from 'bun:test';
-import { isBashNode, isTriggerRule, TRIGGER_RULES } from './schemas';
+import { isBashNode, isCancelNode, isTriggerRule, TRIGGER_RULES } from './schemas';
 import type {
   WorkflowDefinition,
   DagNode,
   CommandNode,
   PromptNode,
   BashNode,
+  CancelNode,
   TriggerRule,
 } from './schemas';
 
@@ -16,6 +17,7 @@ import type {
 const commandNode: CommandNode = { id: 'n1', command: 'build' };
 const promptNode: PromptNode = { id: 'n2', prompt: 'Do this inline.' };
 const bashNode: BashNode = { id: 'n3', bash: 'echo hello' };
+const cancelNode: CancelNode = { id: 'n5', cancel: 'Precondition failed' };
 
 const dagWorkflow: WorkflowDefinition = {
   name: 'dag-workflow',
@@ -59,6 +61,33 @@ describe('isBashNode', () => {
     // Deliberately violate the type to ensure the runtime check catches it
     const malformed = { id: 'x', bash: 42 } as unknown as DagNode;
     expect(isBashNode(malformed)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isCancelNode
+// ---------------------------------------------------------------------------
+
+describe('isCancelNode', () => {
+  test('returns true for a CancelNode', () => {
+    expect(isCancelNode(cancelNode)).toBe(true);
+  });
+
+  test('returns false for a CommandNode', () => {
+    expect(isCancelNode(commandNode)).toBe(false);
+  });
+
+  test('returns false for a PromptNode', () => {
+    expect(isCancelNode(promptNode)).toBe(false);
+  });
+
+  test('returns false for a BashNode', () => {
+    expect(isCancelNode(bashNode)).toBe(false);
+  });
+
+  test('returns false when cancel is not a string (malformed node)', () => {
+    const malformed = { id: 'x', cancel: 42 } as unknown as DagNode;
+    expect(isCancelNode(malformed)).toBe(false);
   });
 });
 

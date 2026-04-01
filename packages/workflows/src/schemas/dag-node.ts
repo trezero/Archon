@@ -2,8 +2,8 @@
  * Zod schemas for DAG node types.
  *
  * Design: a flat "raw" schema validates all fields (with mutual exclusivity enforced via
- * superRefine), then a transform produces one of the four concrete variant types
- * (CommandNode, PromptNode, BashNode, LoopNode) as the DagNode union.
+ * superRefine), then a transform produces one of the six concrete variant types
+ * (CommandNode, PromptNode, BashNode, LoopNode, ApprovalNode, CancelNode) as the DagNode union.
  * Per-variant schemas (commandNodeSchema etc.) are exported for type derivation only —
  * use dagNodeSchema for validation.
  *
@@ -74,6 +74,7 @@ export type CommandNode = z.infer<typeof commandNodeSchema> & {
   bash?: never;
   loop?: never;
   approval?: never;
+  cancel?: never;
 };
 
 export const promptNodeSchema = dagNodeBaseSchema.extend({
@@ -86,6 +87,7 @@ export type PromptNode = z.infer<typeof promptNodeSchema> & {
   bash?: never;
   loop?: never;
   approval?: never;
+  cancel?: never;
 };
 
 /**
@@ -103,6 +105,7 @@ export type BashNode = z.infer<typeof bashNodeSchema> & {
   prompt?: never;
   loop?: never;
   approval?: never;
+  cancel?: never;
 };
 
 /**
@@ -120,6 +123,7 @@ export type LoopNode = z.infer<typeof loopNodeSchema> & {
   prompt?: never;
   bash?: never;
   approval?: never;
+  cancel?: never;
 };
 
 /**
@@ -136,10 +140,28 @@ export type ApprovalNode = z.infer<typeof approvalNodeSchema> & {
   prompt?: never;
   bash?: never;
   loop?: never;
+  cancel?: never;
 };
 
-/** A single node in a DAG workflow. command, prompt, bash, loop, and approval are mutually exclusive. */
-export type DagNode = CommandNode | PromptNode | BashNode | LoopNode | ApprovalNode;
+/**
+ * Cancel node schema — terminates the workflow run with a reason string.
+ * Extends full base for type compatibility; AI-specific fields are ignored at runtime.
+ */
+export const cancelNodeSchema = dagNodeBaseSchema.extend({
+  cancel: z.string().min(1, "'cancel' reason must not be empty"),
+});
+
+/** DAG node that cancels the workflow run with a reason string */
+export type CancelNode = z.infer<typeof cancelNodeSchema> & {
+  command?: never;
+  prompt?: never;
+  bash?: never;
+  loop?: never;
+  approval?: never;
+};
+
+/** A single node in a DAG workflow. command, prompt, bash, loop, approval, and cancel are mutually exclusive. */
+export type DagNode = CommandNode | PromptNode | BashNode | LoopNode | ApprovalNode | CancelNode;
 
 // ---------------------------------------------------------------------------
 // AI-specific fields that are meaningless on bash/loop nodes
@@ -184,6 +206,7 @@ export const dagNodeSchema = dagNodeBaseSchema
     approval: z
       .object({ message: z.string().min(1, "'approval.message' must not be empty") })
       .optional(),
+    cancel: z.string().optional(),
     // Bash-only
     timeout: z.number().optional(),
   })
@@ -205,20 +228,24 @@ export const dagNodeSchema = dagNodeBaseSchema
     const hasBash = typeof data.bash === 'string' && data.bash.trim().length > 0;
     const hasLoop = data.loop !== undefined;
     const hasApproval = data.approval !== undefined;
+    const hasCancel = typeof data.cancel === 'string' && data.cancel.trim().length > 0;
 
-    const modeCount = [hasCommand, hasPrompt, hasBash, hasLoop, hasApproval].filter(Boolean).length;
+    const modeCount = [hasCommand, hasPrompt, hasBash, hasLoop, hasApproval, hasCancel].filter(
+      Boolean
+    ).length;
 
     if (modeCount > 1) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "'command', 'prompt', 'bash', 'loop', and 'approval' are mutually exclusive",
+        message:
+          "'command', 'prompt', 'bash', 'loop', 'approval', and 'cancel' are mutually exclusive",
       });
       return z.NEVER;
     }
     if (modeCount === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "must have either 'command', 'prompt', 'bash', 'loop', or 'approval'",
+        message: "must have either 'command', 'prompt', 'bash', 'loop', 'approval', or 'cancel'",
       });
       return z.NEVER;
     }
@@ -323,6 +350,9 @@ export const dagNodeSchema = dagNodeBaseSchema
     if (data.approval !== undefined) {
       return { ...base, ...shared, approval: data.approval } as ApprovalNode;
     }
+    if (data.cancel !== undefined && data.cancel.trim().length > 0) {
+      return { ...base, ...shared, cancel: data.cancel.trim() } as CancelNode;
+    }
     // loop — guaranteed by superRefine to be defined at this point
     if (!data.loop) throw new Error('unreachable: loop must be defined after superRefine');
     return { ...base, loop: data.loop } as LoopNode;
@@ -346,6 +376,11 @@ export function isLoopNode(node: DagNode): node is LoopNode {
 /** Type guard: check if a DAG node is an approval (human-in-the-loop) node */
 export function isApprovalNode(node: DagNode): node is ApprovalNode {
   return 'approval' in node && typeof node.approval === 'object' && node.approval !== null;
+}
+
+/** Type guard: check if a DAG node is a cancel (workflow termination) node */
+export function isCancelNode(node: DagNode): node is CancelNode {
+  return 'cancel' in node && typeof node.cancel === 'string';
 }
 
 /** Type guard: validates a value is a known TriggerRule */

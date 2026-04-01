@@ -27,7 +27,7 @@ import type {
   WorkflowRun,
   WorkflowNodeHooks,
 } from './schemas';
-import { isBashNode, isLoopNode, isApprovalNode } from './schemas';
+import { isBashNode, isLoopNode, isApprovalNode, isCancelNode } from './schemas';
 import { formatToolCall } from './utils/tool-formatter';
 import { createLogger } from '@archon/paths';
 import { getWorkflowEventEmitter } from './event-emitter';
@@ -1957,6 +1957,38 @@ export async function executeDagWorkflow(
             // Return completed — the between-layer status check will see 'paused' and break.
             // On resume, the approve endpoint writes a real node_completed event with the user's response.
             return { nodeId: node.id, output: { state: 'completed' as const, output: '' } };
+          }
+
+          // 3d. Cancel node dispatch — terminates the workflow run
+          if (isCancelNode(node)) {
+            const reason = substituteNodeOutputRefs(node.cancel, nodeOutputs);
+            const cancelMsg = `\u274c **Workflow cancelled** (node \`${node.id}\`): ${reason}`;
+            await safeSendMessage(platform, conversationId, cancelMsg, {
+              workflowId: workflowRun.id,
+              nodeName: node.id,
+            });
+            deps.store
+              .createWorkflowEvent({
+                workflow_run_id: workflowRun.id,
+                event_type: 'workflow_cancelled',
+                step_name: node.id,
+                data: { reason },
+              })
+              .catch((err: Error) => {
+                getLog().error(
+                  { err, workflowRunId: workflowRun.id, eventType: 'workflow_cancelled' },
+                  'workflow.event_persist_failed'
+                );
+              });
+            await deps.store.cancelWorkflowRun(workflowRun.id);
+            getWorkflowEventEmitter().emit({
+              type: 'workflow_cancelled',
+              runId: workflowRun.id,
+              nodeId: node.id,
+              reason,
+            });
+            // Return completed — the between-layer status check will see 'cancelled' and break.
+            return { nodeId: node.id, output: { state: 'completed' as const, output: reason } };
           }
 
           // 4. Resolve per-node provider/model/options

@@ -84,6 +84,8 @@ function createMockStore(): IWorkflowStore {
     getWorkflowRunStatus: mock(() => Promise.resolve('running' as const)),
     completeWorkflowRun: mock(() => Promise.resolve()),
     failWorkflowRun: mock(() => Promise.resolve()),
+    pauseWorkflowRun: mock(() => Promise.resolve()),
+    cancelWorkflowRun: mock(() => Promise.resolve()),
     createWorkflowEvent: mock(() => Promise.resolve()),
     getCompletedDagNodeOutputs: mock(() => Promise.resolve(new Map<string, string>())),
     getCodebase: mock(() => Promise.resolve(null)),
@@ -3460,5 +3462,109 @@ describe('executeDagWorkflow -- terminal node output selection', () => {
 
     // Only 'c' is terminal (no node depends on it); 'a' and 'b' are not terminal
     expect(result).toBe('C final output');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cancel node dispatch
+// ---------------------------------------------------------------------------
+
+describe('executeDagWorkflow -- cancel node', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `dag-cancel-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    await mkdir(testDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('cancel node transitions run to cancelled and sends message', async () => {
+    const store = createMockStore();
+    (store.cancelWorkflowRun as Mock<() => Promise<void>>).mockResolvedValue(undefined);
+    // Track whether cancelWorkflowRun has been called to simulate status transition
+    let cancelled = false;
+    (store.cancelWorkflowRun as Mock<() => Promise<void>>).mockImplementation(async () => {
+      cancelled = true;
+    });
+    (store.getWorkflowRunStatus as Mock<() => Promise<string>>).mockImplementation(async () =>
+      cancelled ? 'cancelled' : 'running'
+    );
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'cancel-test',
+        nodes: [
+          { id: 'check', bash: 'echo blocked' },
+          { id: 'stop', depends_on: ['check'], cancel: 'Precondition failed' },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // cancelWorkflowRun should have been called
+    expect((store.cancelWorkflowRun as Mock<() => Promise<void>>).mock.calls.length).toBe(1);
+
+    // A message with the cancel reason should have been sent
+    const sendCalls = (platform.sendMessage as Mock<() => Promise<void>>).mock.calls;
+    const cancelMsg = sendCalls.find(
+      (call: unknown[]) => typeof call[1] === 'string' && call[1].includes('Workflow cancelled')
+    );
+    expect(cancelMsg).toBeDefined();
+  });
+
+  it('cancel node with when: false is skipped', async () => {
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'cancel-skip-test',
+        nodes: [
+          { id: 'check', bash: 'echo ok' },
+          { id: 'stop', depends_on: ['check'], cancel: 'Should not fire', when: '1 == 0' },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // cancelWorkflowRun should NOT have been called (when: condition is false)
+    if (store.cancelWorkflowRun && typeof store.cancelWorkflowRun === 'function') {
+      expect((store.cancelWorkflowRun as Mock<() => Promise<void>>).mock.calls.length).toBe(0);
+    }
   });
 });
