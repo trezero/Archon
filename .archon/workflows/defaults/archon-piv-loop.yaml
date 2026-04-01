@@ -8,9 +8,10 @@ description: |
   NOT for: Ralph story-based implementation (use archon-ralph-dag).
 
   Interactive PIV loop workflow — the foundational AI coding methodology:
-  1. PLAN: Explore ideas with human (3 rounds) -> create structured plan -> review & revise (2 rounds)
-  2. IMPLEMENT: Autonomous task-by-task implementation from plan (loop node)
-  3. VALIDATE: Automated code review -> human review & feedback (2 rounds) -> final summary
+  1. EXPLORE: Iterative conversation with human to understand the problem (arbitrary rounds)
+  2. PLAN: Create structured plan -> iterative review & revision (arbitrary rounds)
+  3. IMPLEMENT: Autonomous task-by-task implementation from plan (Ralph loop)
+  4. VALIDATE: Automated code review -> iterative human feedback & fixes (arbitrary rounds)
 
   The PIV loop comes AFTER a PRD exists. Each PIV loop focuses on ONE granular feature or bug fix.
   Input: A description of what to build, a path to an existing plan, or a GitHub issue number.
@@ -20,297 +21,164 @@ interactive: true
 
 nodes:
   # ═══════════════════════════════════════════════════════════════
-  # PHASE 1: PLAN — Exploration Round 1
-  # Understand the idea, explore the codebase, ask key questions
+  # PHASE 1: EXPLORE — Iterative exploration with human
+  # Understand the idea, explore the codebase, converge on approach
+  # Loops until the user says they're ready to create the plan.
   # ═══════════════════════════════════════════════════════════════
 
-  - id: explore-1
-    model: sonnet
-    prompt: |
-      # PIV Loop — Exploration (Round 1)
+  - id: explore
+    loop:
+      prompt: |
+        # PIV Loop — Exploration
 
-      You are a senior engineering partner starting a focused development session.
-      Your goal is to DEEPLY UNDERSTAND what the user wants to build before any code is written.
+        You are a senior engineering partner in an iterative exploration session.
+        Your goal: DEEPLY UNDERSTAND what to build before any code is written.
 
-      **User's request**: $ARGUMENTS
+        **User's request**: $ARGUMENTS
+        **User's latest input**: $LOOP_USER_INPUT
 
-      ---
+        ---
 
-      ## Step 1: Parse the Input
+        ## If this is the FIRST iteration (no user input yet):
 
-      Determine what the user provided:
+        ### Step 1: Parse the Input
 
-      **If it's a file path** (ends in `.md`, `.plan.md`, or `.prd.md`):
-      - Read the file
-      - If it's an existing plan → summarize it and ask if they want to refine or proceed to implementation
-      - If it's a PRD → identify the specific phase/feature to focus on
+        Determine what the user provided:
 
-      **If it's a GitHub issue** (`#123` format):
-      - Fetch it: `gh issue view {number} --json title,body,labels,comments`
-      - Summarize the issue context
+        **If it's a file path** (ends in `.md`, `.plan.md`, or `.prd.md`):
+        - Read the file
+        - If it's an existing plan → summarize it and ask if they want to refine or proceed
+        - If it's a PRD → identify the specific phase/feature to focus on
 
-      **If it's free text**:
-      - This is a feature idea or bug description. Use it directly.
+        **If it's a GitHub issue** (`#123` format):
+        - Fetch it: `gh issue view {number} --json title,body,labels,comments`
+        - Summarize the issue context
 
-      ## Step 2: Explore the Codebase
+        **If it's free text**:
+        - This is a feature idea or bug description. Use it directly.
 
-      Before asking questions, DO YOUR HOMEWORK. Spend time understanding:
+        ### Step 2: Explore the Codebase
 
-      1. **Read CLAUDE.md** — understand project conventions, architecture, and constraints
-      2. **Search for related code** — find existing implementations similar to what the user wants
-      3. **Read key files** — understand the current state of code the user wants to change
-      4. **Check recent git history** — `git log --oneline -20` for recent changes in the area
+        Before asking questions, DO YOUR HOMEWORK:
 
-      ## Step 3: Present Your Understanding
+        1. **Read CLAUDE.md** — understand project conventions, architecture, and constraints
+        2. **Search for related code** — find existing implementations similar to what the user wants
+        3. **Read key files** — understand the current state of code the user wants to change
+        4. **Check recent git history** — `git log --oneline -20` for recent changes in the area
 
-      Share what you found:
+        ### Step 3: Present Your Understanding
 
-      ```
-      ## What I Understand
+        ```
+        ## What I Understand
 
-      You want to: {restated understanding in 2-3 sentences}
+        You want to: {restated understanding in 2-3 sentences}
 
-      ## What Already Exists
+        ## What Already Exists
 
-      - {file:line} — {what it does and how it relates}
-      - {file:line} — {what it does and how it relates}
-      - {pattern/component} — {how it could be extended or reused}
+        - {file:line} — {what it does and how it relates}
+        - {file:line} — {what it does and how it relates}
+        - {pattern/component} — {how it could be extended or reused}
 
-      ## Initial Architecture Thoughts
+        ## Initial Architecture Thoughts
 
-      Based on what exists, I'm thinking:
-      - {approach 1 — extend existing X}
-      - {approach 2 — if approach 1 doesn't work}
-      - {key architectural decision that needs your input}
-      ```
+        Based on what exists, I'm thinking:
+        - {approach 1 — extend existing X}
+        - {approach 2 — if approach 1 doesn't work}
+        - {key architectural decision that needs your input}
+        ```
 
-      ## Step 4: Ask Targeted Questions
+        ### Step 4: Ask Targeted Questions
 
-      Ask 4-6 questions that will reduce YOUR assumptions. Focus on:
+        Ask 4-6 questions focused on DECISIONS, not information gathering:
+        - Scope boundaries, architecture preferences, tech decisions
+        - Constraints, existing code extension vs fresh build, testing expectations
+        - Reference actual code you found — don't ask generic questions
 
-      1. **Scope**: What's the exact boundary? What's explicitly NOT included?
-      2. **Architecture**: Do you have a preference for how this should be structured?
-      3. **Tech decisions**: Any specific libraries, patterns, or approaches you want?
-      4. **Constraints**: Performance requirements? Backward compatibility? Timeline?
-      5. **Existing code**: Should we extend {specific thing you found} or build fresh?
-      6. **Testing**: What level of test coverage do you expect?
+        ---
 
-      **Rules:**
-      - Be SPECIFIC — reference actual code you found, not generic questions
-      - Don't ask questions you could answer by reading the code
-      - Don't ask about things that are clearly stated in CLAUDE.md
-      - Ask about DECISIONS, not information gathering
+        ## If the user has provided input (subsequent iterations):
 
-  # ═══════════════════════════════════════════════════════════════
-  # GATE 1: User answers exploration questions
-  # ═══════════════════════════════════════════════════════════════
+        ### Step 1: Process Their Response
 
-  - id: explore-gate-1
-    approval:
-      message: |
-        Answer the questions above. Share your thoughts on architecture, scope, and approach.
-        Feel free to ask me to explore specific areas of the codebase or research specific topics.
-        Your answers will guide a deeper investigation in the next round.
-    depends_on: [explore-1]
+        Read their answers carefully. Identify:
+        - Decisions they've made
+        - Areas they want you to explore further
+        - Questions they asked YOU back (answer these with evidence!)
 
-  # ═══════════════════════════════════════════════════════════════
-  # PHASE 1b: PLAN — Exploration Round 2
-  # Go deeper based on user's answers, research specific topics
-  # ═══════════════════════════════════════════════════════════════
+        ### Step 2: Do Targeted Research
 
-  - id: explore-2
-    model: sonnet
-    depends_on: [explore-gate-1]
-    prompt: |
-      # PIV Loop — Exploration (Round 2)
+        Based on their response:
+        - If they mentioned specific technologies → research best practices
+        - If they pointed you to specific code → read it thoroughly
+        - If they asked you to explore an area → do a thorough investigation
+        - If they made architecture decisions → validate against the codebase
 
-      You are continuing the exploration phase of a PIV loop.
-      The user has answered your initial questions — now go DEEPER.
+        ### Step 3: Present Updated Understanding
 
-      **Original request**: $ARGUMENTS
-      **User's answers to Round 1 questions**: $explore-gate-1.output
+        Show what you learned, answer their questions with file:line references,
+        and present your refined architecture recommendation.
 
-      ---
+        ### Step 4: Converge or Continue
 
-      ## Step 1: Process the User's Answers
+        **If there are still important open questions:**
+        Ask 2-4 focused questions about remaining ambiguities.
 
-      Read their answers carefully. Identify:
-      - Decisions they've made (tech stack, architecture, scope)
-      - Areas they want you to explore further
-      - Constraints or preferences they've stated
-      - Questions they asked YOU back (answer these!)
+        **If the picture is clear and you have enough to create a plan:**
+        Present a final implementation summary:
 
-      ## Step 2: Deep Research
+        ```
+        ## Implementation Summary
 
-      Based on their answers, do targeted research:
+        ### What We're Building
+        {Clear, specific description}
 
-      1. **If they mentioned specific technologies** → search the web for current best practices,
-         gotchas, and version-specific documentation
-      2. **If they pointed you to specific code** → read it thoroughly, understand the patterns
-      3. **If they asked you to explore an area** → do a thorough investigation with file reads
-      4. **If they made architecture decisions** → validate those decisions against the codebase,
-         flag any potential issues or conflicts
+        ### Scope Boundary
+        - IN: {what's included}
+        - OUT: {what's explicitly excluded}
 
-      Read actual files. Don't guess.
+        ### Architecture
+        - {key decisions}
 
-      ## Step 3: Present Findings and Refined Understanding
+        ### Files That Will Change
+        - `{file}` — {what changes and why}
 
-      ```
-      ## Updated Understanding
+        ### Success Criteria
+        - [ ] {specific, testable criterion}
+        - [ ] All validation passes
 
-      Based on your answers, here's where we stand:
+        ### Key Risks
+        - {risk — and mitigation}
+        ```
 
-      ### Decisions Made
-      - {decision 1 — from their answers}
-      - {decision 2 — from their answers}
+        Then tell the user: "I have a clear picture. Say **ready** and I'll create
+        the structured implementation plan, or share any final thoughts."
 
-      ### What I Investigated
-      - {finding 1 — with file:line references}
-      - {finding 2 — with actual code patterns found}
-
-      ### Answers to Your Questions
-      - {if they asked you anything, answer it here with evidence}
-
-      ### Architecture Recommendation
-      {Your refined recommendation based on everything so far}
-
-      ### Remaining Concerns
-      - {concern 1 — specific, not generic}
-      - {concern 2 — things that could go wrong}
-      ```
-
-      ## Step 4: Final Clarification Questions
-
-      Ask 2-4 focused questions about:
-      - Any ambiguities that remain after their answers
-      - Architecture concerns you identified during research
-      - Specific implementation tradeoffs they should weigh in on
-      - Success criteria — how will we know this is done correctly?
-
-      **Keep it focused.** You should be converging toward a clear implementation picture,
-      not expanding scope.
+        **If the user indicates they're ready** (says "ready", "looks good", "create the plan", etc.):
+        Output the completion signal: <promise>PLAN_READY</promise>
+      until: PLAN_READY
+      max_iterations: 15
+      interactive: true
+      gate_message: |
+        Answer the questions above, ask me to explore specific areas,
+        or say "ready" when you're satisfied with the exploration.
 
   # ═══════════════════════════════════════════════════════════════
-  # GATE 2: User answers deep-dive questions
-  # ═══════════════════════════════════════════════════════════════
-
-  - id: explore-gate-2
-    approval:
-      message: |
-        Review the findings and answer the remaining questions.
-        If you have additional areas to explore, share them now.
-        If you're satisfied with the exploration, just say so — I'll move on to final synthesis.
-    depends_on: [explore-2]
-
-  # ═══════════════════════════════════════════════════════════════
-  # PHASE 1c: PLAN — Exploration Round 3 (Final Synthesis)
-  # Consolidate everything, prepare for plan creation
-  # ═══════════════════════════════════════════════════════════════
-
-  - id: explore-3
-    model: sonnet
-    depends_on: [explore-gate-2]
-    prompt: |
-      # PIV Loop — Exploration (Round 3 — Final Synthesis)
-
-      You are completing the exploration phase of a PIV loop.
-      This is the final round before creating the structured plan.
-
-      **Original request**: $ARGUMENTS
-      **Round 1 answers**: $explore-gate-1.output
-      **Round 2 answers**: $explore-gate-2.output
-
-      ---
-
-      ## Step 1: Process Round 2 Answers
-
-      Read their latest answers. Handle two scenarios:
-
-      **If they asked for more exploration:**
-      - Do the additional research they requested
-      - Answer their questions with evidence from the codebase
-      - Present your findings clearly
-
-      **If they said they're satisfied:**
-      - Acknowledge and move to synthesis
-
-      ## Step 2: Synthesize Everything
-
-      Compile a complete picture of what we're building:
-
-      ```
-      ## Implementation Summary
-
-      ### What We're Building
-      {Clear, specific description — not vague}
-
-      ### Scope Boundary
-      - IN: {what's included}
-      - OUT: {what's explicitly excluded}
-
-      ### Architecture
-      - {key architectural decision 1}
-      - {key architectural decision 2}
-      - {patterns to follow from existing codebase}
-
-      ### Files That Will Change
-      - `{file}` — {what changes and why}
-      - `{file}` — {what changes and why}
-      - `{new file if needed}` — {purpose}
-
-      ### Success Criteria
-      - [ ] {specific, testable criterion 1}
-      - [ ] {specific, testable criterion 2}
-      - [ ] All validation passes (type-check, lint, tests, format)
-
-      ### Key Risks
-      - {risk 1 — and how we'll mitigate it}
-      - {risk 2 — and how we'll mitigate it}
-
-      ### Testing Strategy
-      - {what tests to write}
-      - {what manual validation to do}
-      ```
-
-      ## Step 3: Confirm Readiness
-
-      Present this summary and ask:
-
-      "This is everything I'll use to create the structured implementation plan.
-      Any corrections, additions, or concerns before I create the plan?"
-
-      If any important decisions are still unmade, call them out explicitly.
-
-  # ═══════════════════════════════════════════════════════════════
-  # GATE 3: Final confirmation before plan creation
-  # ═══════════════════════════════════════════════════════════════
-
-  - id: explore-gate-3
-    approval:
-      message: |
-        Review the implementation summary above.
-        Provide any final corrections or additions, or confirm you're ready for the structured plan.
-    depends_on: [explore-3]
-
-  # ═══════════════════════════════════════════════════════════════
-  # PHASE 2: PLAN — Create Structured Plan
-  # Generate the full implementation plan document
+  # PHASE 2: PLAN — Create the structured implementation plan
   # ═══════════════════════════════════════════════════════════════
 
   - id: create-plan
     model: sonnet
-    depends_on: [explore-gate-3]
+    depends_on: [explore]
+    context: fresh
     prompt: |
       # PIV Loop — Create Structured Plan
 
-      You are creating a structured implementation plan from the completed exploration phase.
+      You are creating a structured implementation plan from a completed exploration phase.
       This plan will be the SOLE GUIDE for the implementation agent — it must be complete,
       specific, and actionable.
 
       **Original request**: $ARGUMENTS
-      **Exploration Round 1 answers**: $explore-gate-1.output
-      **Exploration Round 2 answers**: $explore-gate-2.output
-      **Final synthesis feedback**: $explore-gate-3.output
+      **Final exploration summary**: $explore.output
 
       ---
 
@@ -321,115 +189,75 @@ nodes:
       1. **Read CLAUDE.md** — capture all relevant conventions
       2. **Read every file you plan to change** — note exact current state
       3. **Read example test files** — understand testing patterns
-      4. **Check for any files created since exploration** — `git status`
+      4. **Check for any recent changes** — `git log --oneline -10`
 
       ## Step 2: Determine Plan Location
 
       Generate a kebab-case slug from the feature name.
       Save to `.claude/archon/plans/{slug}.plan.md`.
 
-      Create the directory if needed:
       ```bash
       mkdir -p .claude/archon/plans
       ```
 
       ## Step 3: Write the Plan
 
-      Use this exact template. Fill EVERY section with specific, verified information.
-      If something is unknown, write "TBD — needs investigation" not filler.
+      Use this template. Fill EVERY section with specific, verified information.
 
       ```markdown
       # Feature: {Title}
 
       ## Summary
-
       {1-2 sentences: what changes and why}
 
       ## Mission
-
-      {The core goal in one clear statement. What does success look like?}
+      {The core goal in one clear statement}
 
       ## Success Criteria
-
-      - [ ] {Specific, testable criterion — not vague}
-      - [ ] {Another specific criterion}
+      - [ ] {Specific, testable criterion}
       - [ ] All validation passes (`bun run validate` or equivalent)
       - [ ] No regressions in existing tests
 
       ## Scope
-
       ### In Scope
-      - {What we ARE building — be specific}
-
+      - {What we ARE building}
       ### Out of Scope
       - {What we are NOT building — and why}
 
       ## Codebase Context
-
       ### Key Files
-
       | File | Role | Action |
       |------|------|--------|
       | `{path}` | {what it does} | CREATE / UPDATE |
 
       ### Patterns to Follow
-
-      {Actual code snippets from the codebase that the implementation should mirror}
-
-      ```{language}
-      // SOURCE: {file}:{lines}
-      {actual code}
-      ```
-
-      ### Dependencies
-
-      - {What must exist before implementation starts}
-      - {External libraries needed, if any}
+      {Actual code snippets from the codebase to mirror}
 
       ## Architecture
-
-      {Key architectural decisions made during exploration}
-
       - {Decision 1 — with rationale}
       - {Decision 2 — with rationale}
 
       ## Task List
-
       Execute in order. Each task is atomic and independently verifiable.
 
       ### Task 1: {ACTION} `{file path}`
-
       **Action**: CREATE / UPDATE
       **Details**: {Exact changes — specific enough for an agent with no context}
       **Pattern**: Follow `{source file}:{lines}`
       **Validate**: `{command to verify this task}`
 
-      ### Task 2: {ACTION} `{file path}`
-
-      ...
-
       ## Testing Strategy
-
-      ### Tests to Write
-
       | Test File | Test Cases | Validates |
       |-----------|-----------|-----------|
       | `{path}` | {cases} | {what it validates} |
 
-      ### Manual Validation
-
-      {Specific commands to run, endpoints to test, UI flows to verify}
-
       ## Validation Commands
-
       1. Type check: `{command}`
       2. Lint: `{command}`
       3. Tests: `{command}`
       4. Full validation: `{command}`
-      5. Manual: `{specific verification steps}`
 
       ## Risks
-
       | Risk | Impact | Mitigation |
       |------|--------|------------|
       | {risk} | {HIGH/MED/LOW} | {specific mitigation} |
@@ -437,23 +265,19 @@ nodes:
 
       ## Step 4: Verify the Plan
 
-      After writing the plan file:
-
-      1. **Check every file path** referenced in the plan — verify they exist
-      2. **Check every pattern** cited — verify the code matches
-      3. **Check task ordering** — ensure dependencies are respected
-      4. **Check completeness** — could an agent with NO context implement this plan?
+      1. Check every file path referenced — verify they exist
+      2. Check every pattern cited — verify the code matches
+      3. Check task ordering — ensure dependencies are respected
+      4. Check completeness — could an agent with NO context implement this?
 
       ## Step 5: Report
 
-      Output:
       ```
       ## Plan Created
 
       **File**: `.claude/archon/plans/{slug}.plan.md`
       **Tasks**: {count}
       **Files to change**: {count}
-      **Confidence**: {1-10}/10
 
       Key decisions:
       - {decision 1}
@@ -463,134 +287,66 @@ nodes:
       ```
 
   # ═══════════════════════════════════════════════════════════════
-  # GATE 4: Human reviews the plan
+  # PHASE 2b: PLAN — Iterative plan refinement
+  # Review and revise the plan as many times as needed.
   # ═══════════════════════════════════════════════════════════════
 
-  - id: plan-review-gate
-    approval:
-      message: |
-        Review the structured plan document. Check:
-        - Are the success criteria correct and complete?
-        - Is the task list in the right order?
-        - Are there missing tasks or unnecessary ones?
-        - Is the testing strategy adequate?
-        - Are the architectural decisions sound?
-
-        Provide specific feedback on what to change, or say "approved" to proceed.
+  - id: refine-plan
     depends_on: [create-plan]
+    loop:
+      prompt: |
+        # PIV Loop — Plan Refinement
 
-  # ═══════════════════════════════════════════════════════════════
-  # PHASE 2b: PLAN — Revise Plan Based on Feedback
-  # ═══════════════════════════════════════════════════════════════
+        The user is reviewing the implementation plan and providing feedback.
 
-  - id: revise-plan
-    model: sonnet
-    depends_on: [plan-review-gate]
-    prompt: |
-      # PIV Loop — Revise Structured Plan
+        **User's feedback**: $LOOP_USER_INPUT
 
-      The user has reviewed the implementation plan and provided feedback.
-      Your job is to incorporate their feedback precisely.
+        ---
 
-      **User's feedback**: $plan-review-gate.output
+        ## Step 1: Find and Read the Plan
 
-      ---
+        ```bash
+        ls -t .claude/archon/plans/*.plan.md 2>/dev/null | head -1
+        ```
 
-      ## Step 1: Find the Plan
+        Read the entire plan file. Also read CLAUDE.md for conventions.
 
-      Look in `.claude/archon/plans/` for the most recently created `.plan.md` file:
-      ```bash
-      ls -t .claude/archon/plans/*.plan.md 2>/dev/null | head -1
-      ```
+        ## Step 2: Process Feedback
 
-      Read the entire plan file.
+        **If the user approved** (said "approved", "looks good", "let's go", etc.):
+        - Make no changes
+        - Output: "Plan approved. Proceeding to implementation."
+        - Signal completion: <promise>PLAN_APPROVED</promise>
 
-      ## Step 2: Process Feedback
+        **If the user provided specific feedback:**
+        - Parse each piece of feedback
+        - Edit the plan file directly:
+          - Add/remove/modify tasks as requested
+          - Update success criteria if needed
+          - Adjust testing strategy if needed
+          - Re-verify file paths and patterns after changes
 
-      **If the user said "approved" or similar** (ready to proceed):
-      - Make no changes to the plan
-      - Output: "Plan approved. Proceeding to implementation."
-      - Done.
+        ## Step 3: Show Changes
 
-      **If the user provided specific feedback:**
-      - Parse each piece of feedback
-      - For each item, edit the plan file directly
-      - Add/remove/modify tasks as requested
-      - Update success criteria if needed
-      - Adjust testing strategy if needed
-      - Re-verify file paths and patterns after changes
+        ```
+        ## Plan Revised
 
-      ## Step 3: Show Changes
+        Changes made:
+        - {change 1}
+        - {change 2}
 
-      After editing, summarize what changed:
+        Updated stats:
+        - Tasks: {count}
+        - Files to change: {count}
 
-      ```
-      ## Plan Revised
-
-      Changes made:
-      - {change 1}
-      - {change 2}
-
-      Updated stats:
-      - Tasks: {count}
-      - Files to change: {count}
-
-      Please review the updated plan.
-      ```
-
-  # ═══════════════════════════════════════════════════════════════
-  # GATE 5: Final plan approval
-  # ═══════════════════════════════════════════════════════════════
-
-  - id: plan-final-gate
-    approval:
-      message: |
-        Review the revised plan (or confirm the approval).
-        Say "approved" to begin implementation, or provide more feedback for a final revision.
-    depends_on: [revise-plan]
-
-  # ═══════════════════════════════════════════════════════════════
-  # PHASE 2c: PLAN — Final Revision (if needed)
-  # Handle any last feedback before implementation
-  # ═══════════════════════════════════════════════════════════════
-
-  - id: final-plan-revision
-    model: sonnet
-    depends_on: [plan-final-gate]
-    context: fresh
-    prompt: |
-      # PIV Loop — Final Plan Revision
-
-      The user provided final feedback on the implementation plan.
-
-      **User's feedback**: $plan-final-gate.output
-
-      ---
-
-      ## Instructions
-
-      Find the plan file:
-      ```bash
-      ls -t .claude/archon/plans/*.plan.md 2>/dev/null | head -1
-      ```
-
-      Read it entirely.
-
-      **If the user said "approved" or confirmed:**
-      - Output the plan file path
-      - Output: "Plan finalized. Beginning implementation."
-
-      **If the user provided more feedback:**
-      - Apply the changes to the plan file
-      - Summarize what changed
-      - Output the plan file path
-
-      The implementation phase will use this plan as its sole guide.
-
-      Output the plan file path on its own line at the end:
-      ```
-      PLAN_FILE: {path}
-      ```
+        Review the updated plan and provide more feedback, or say "approved" to proceed.
+        ```
+      until: PLAN_APPROVED
+      max_iterations: 10
+      interactive: true
+      gate_message: |
+        Review the plan document. Provide specific feedback on what to change,
+        or say "approved" to begin implementation.
 
   # ═══════════════════════════════════════════════════════════════
   # PHASE 3: IMPLEMENT — Setup
@@ -598,11 +354,10 @@ nodes:
   # ═══════════════════════════════════════════════════════════════
 
   - id: implement-setup
-    depends_on: [final-plan-revision]
+    depends_on: [refine-plan]
     bash: |
       set -e
 
-      # Find the plan file
       PLAN_FILE=$(ls -t .claude/archon/plans/*.plan.md 2>/dev/null | head -1)
 
       if [ -z "$PLAN_FILE" ]; then
@@ -610,7 +365,7 @@ nodes:
         exit 1
       fi
 
-      # Install dependencies if in a worktree
+      # Install dependencies if needed
       if [ -f "bun.lock" ] || [ -f "bun.lockb" ]; then
         echo "Installing dependencies..."
         bun install --frozen-lockfile 2>&1 | tail -3
@@ -622,23 +377,20 @@ nodes:
         pnpm install --frozen-lockfile 2>&1 | tail -3
       fi
 
-      # Git state
       echo "BRANCH=$(git branch --show-current)"
       echo "GIT_ROOT=$(git rev-parse --show-toplevel)"
       echo "PLAN_FILE=$PLAN_FILE"
 
-      # Output the plan content
       echo "=== PLAN_START ==="
       cat "$PLAN_FILE"
       echo ""
       echo "=== PLAN_END ==="
 
-      # Count tasks
       TASK_COUNT=$(grep -c "^### Task [0-9]" "$PLAN_FILE" || true)
       echo "TASK_COUNT=${TASK_COUNT:-0}"
 
   # ═══════════════════════════════════════════════════════════════
-  # PHASE 3: IMPLEMENT — Task-by-Task Loop
+  # PHASE 3b: IMPLEMENT — Task-by-Task Loop (Ralph pattern)
   # Fresh context each iteration. Reads plan from disk.
   # One task per iteration. Validates before committing.
   # ═══════════════════════════════════════════════════════════════
@@ -673,12 +425,11 @@ nodes:
 
         ### 0.2 Read Current State (from disk — not from context above)
 
-        The context above is a snapshot from before the loop started. Previous iterations may have changed things.
-        **You MUST re-read from disk:**
+        The context above is a snapshot from before the loop started. Previous iterations
+        may have changed things. **You MUST re-read from disk:**
 
         1. **Read the plan file** — your implementation guide
-        2. **Read progress tracking** — check if a `.claude/archon/plans/progress.txt` exists
-           with completed task tracking from prior iterations
+        2. **Read progress tracking** — check if `.claude/archon/plans/progress.txt` exists
         3. **Read CLAUDE.md** — project conventions and constraints
 
         ### 0.3 Check Git State
@@ -688,33 +439,22 @@ nodes:
         git status
         ```
 
-        Look for commits from previous iterations to understand what's already done.
-
         ---
 
         ## Phase 1: SELECT — Pick Next Task
 
-        ### 1.1 Find the Next Task
-
         From the plan file, identify tasks by `### Task N:` headers.
-        Cross-reference with:
-        - Commits from previous iterations (git log)
-        - The progress tracking file (if it exists)
-        - Actual file state (files that already exist or have been modified)
+        Cross-reference with commits from previous iterations and progress tracking.
 
         **If ALL tasks are complete** → Skip to Phase 5 (Completion).
 
-        **If tasks remain but depend on incomplete prerequisites** →
-        Report the blocker and end the iteration.
-
-        ### 1.2 Announce Selection
+        ### Announce Selection
 
         ```
         -- Task Selected ------------------------------------------------
         Task: {N} — {task title}
         Action: {CREATE / UPDATE}
         File: {file path}
-        Validate: {validation command from plan}
         -----------------------------------------------------------------
         ```
 
@@ -722,93 +462,43 @@ nodes:
 
         ## Phase 2: IMPLEMENT — Execute the Task
 
-        ### 2.1 Read Before Writing
-
-        Before making ANY changes:
         1. Read the file you're about to change (if it exists)
-        2. Read the pattern file referenced in the plan's "Pattern" field
-        3. Understand the current state completely
-
-        ### 2.2 Make Changes
-
-        Follow the plan's instructions EXACTLY:
-        - Use the specified patterns
-        - Follow the imports listed
-        - Watch for the gotchas mentioned
-        - Keep changes minimal and focused on THIS task only
-
-        ### 2.3 Type-Check After Each File
-
-        After modifying each file:
-        ```bash
-        bun run type-check 2>&1 || true
-        ```
-
-        If types fail, fix them before moving to the next file.
+        2. Read the pattern file referenced in the plan
+        3. Make changes following the plan EXACTLY
+        4. Type-check after each file: `bun run type-check 2>&1 || true`
 
         ---
 
         ## Phase 3: VALIDATE — Verify the Task
 
-        Run the validation command specified in the plan for this task.
-        Then run the full validation suite:
-
         ```bash
         bun run type-check && bun run lint && bun run test && bun run format:check
         ```
 
-        **If validation fails:**
-        1. Read the error output carefully
-        2. Fix the issue in your implementation
-        3. Re-run validation
-        4. Repeat until clean (up to 3 attempts)
-
-        **If you can't fix after 3 attempts:**
-        - Note the issue in progress tracking
-        - Do NOT commit broken code
-        - End the iteration
+        If validation fails: fix, re-run (up to 3 attempts). If unfixable, note in progress
+        tracking and do NOT commit broken code.
 
         ---
 
         ## Phase 4: COMMIT — Save Changes
 
-        ### 4.1 Stage and Review
-
         ```bash
         git add -A
-        git status
         git diff --cached --stat
-        ```
-
-        Verify only expected files are staged.
-
-        ### 4.2 Commit
-
-        ```bash
         git commit -m "$(cat <<'EOF'
         {type}: {task description}
 
         PIV Task {N}: {brief details}
-
-        Changes:
-        - {change 1}
-        - {change 2}
         EOF
         )"
         ```
 
-        Use: `feat:` for features, `fix:` for bugs, `refactor:` for refactors, `test:` for tests.
-
-        ### 4.3 Track Progress
-
-        Append to `.claude/archon/plans/progress.txt`:
-
+        Track progress in `.claude/archon/plans/progress.txt`:
         ```
         ## Task {N}: {title} — COMPLETED
         Date: {ISO date}
-        Files: {list of files changed}
+        Files: {list}
         Commit: {short hash}
-        Notes: {any learnings or gotchas encountered}
         ---
         ```
 
@@ -816,71 +506,19 @@ nodes:
 
         ## Phase 5: COMPLETE — Check All Tasks
 
-        Re-read the plan file. Count remaining tasks by checking progress tracking
-        and git log against the task list.
+        If ALL tasks are done:
+        1. Run full validation: `bun run validate 2>&1`
+        2. Push: `git push -u origin HEAD`
+        3. Signal: `<promise>COMPLETE</promise>`
 
-        ### If ALL Tasks Are Done:
-
-        1. Run full validation one final time:
-           ```bash
-           bun run validate 2>&1 || bun run type-check && bun run lint && bun run test
-           ```
-
-        2. Push the branch:
-           ```bash
-           git push -u origin HEAD
-           ```
-
-        3. Signal completion:
-           ```
-           <promise>COMPLETE</promise>
-           ```
-
-        ### If Tasks Remain:
-
-        Report status and end normally:
-        ```
-        -- Iteration Complete ------------------------------------------
-        Task completed: {N} — {title}
-        Tasks remaining: {count}
-        Next task: {N+1} — {title}
-        -----------------------------------------------------------------
-        ```
-
-        The loop engine will start the next iteration with a fresh context.
-
-        ---
-
-        ## Edge Cases
-
-        ### Validation fails repeatedly
-        - If the same error persists after 3 fix attempts, note it and end the iteration
-        - The next iteration (fresh context) may approach it differently
-
-        ### Task is too large
-        - Implement the core change that satisfies the plan's requirements
-        - Don't add extras not specified in the plan
-
-        ### Pre-existing failures
-        - If tests were failing BEFORE your changes, note them but don't fix unrelated code
-        - Document pre-existing failures in progress tracking
-
-        ---
-
-        ## Success Criteria
-
-        - **ONE_TASK**: Exactly one task implemented per iteration
-        - **VALIDATED**: Full validation passes before commit
-        - **COMMITTED**: Changes committed with clear message
-        - **TRACKED**: Progress file updated
-        - **NO_SCOPE_CREEP**: Only what the plan specifies, nothing more
+        If tasks remain, report status and end normally. The loop engine starts a fresh iteration.
       until: COMPLETE
       max_iterations: 15
       fresh_context: true
 
   # ═══════════════════════════════════════════════════════════════
-  # PHASE 4: VALIDATE — Automated Code Review
-  # Review all changes against the plan before human review
+  # PHASE 4: VALIDATE — Automated code review
+  # Review all changes against the plan
   # ═══════════════════════════════════════════════════════════════
 
   - id: code-review
@@ -890,20 +528,17 @@ nodes:
     prompt: |
       # PIV Loop — Automated Code Review
 
-      The implementation phase is complete. Review ALL changes against the plan
-      before the human reviews.
+      The implementation phase is complete. Review ALL changes against the plan.
 
-      **Implementation loop output**: $implement.output
+      **Implementation output**: $implement.output
 
       ---
 
-      ## Step 1: Find the Plan
+      ## Step 1: Find and Read the Plan
 
       ```bash
       ls -t .claude/archon/plans/*.plan.md 2>/dev/null | head -1
       ```
-
-      Read the plan file entirely.
 
       ## Step 2: Review All Changes
 
@@ -915,17 +550,8 @@ nodes:
 
       ## Step 3: Check Against Plan
 
-      For EACH task in the plan:
-      1. Was it implemented? Check the git log and diff.
-      2. Does the implementation match what was specified?
-      3. Are the success criteria met?
-
-      For EACH file changed:
-      1. Read the file
-      2. Check code quality — naming, patterns, error handling
-      3. Check for security issues (injection, XSS, etc.)
-      4. Check for missing edge cases
-      5. Verify it follows CLAUDE.md conventions
+      For EACH task: was it implemented correctly? Do success criteria hold?
+      For EACH file: check quality, security, patterns, CLAUDE.md compliance.
 
       ## Step 4: Run Validation
 
@@ -935,13 +561,7 @@ nodes:
 
       ## Step 5: Fix Obvious Issues
 
-      If you find:
-      - **Type errors** → fix them
-      - **Lint warnings** → fix them
-      - **Missing imports** → add them
-      - **Formatting issues** → run `bun run format`
-
-      Commit any fixes:
+      Fix type errors, lint warnings, missing imports, formatting. Commit any fixes:
       ```bash
       git add -A && git commit -m "fix: address code review findings" 2>/dev/null || true
       ```
@@ -952,130 +572,9 @@ nodes:
       ## Code Review Complete
 
       ### Implementation Status
-
       | Task | Status | Notes |
       |------|--------|-------|
-      | {task 1} | DONE / PARTIAL / MISSING | {notes} |
-
-      ### Success Criteria
-
-      | Criterion | Met? | Evidence |
-      |-----------|------|----------|
-      | {criterion} | YES / NO | {how verified} |
-
-      ### Validation Results
-
-      - Type-check: PASS / FAIL
-      - Lint: PASS / FAIL
-      - Tests: PASS / FAIL ({passed}/{total})
-      - Format: PASS / FAIL
-
-      ### Code Quality Findings
-
-      {List any issues found — bugs, patterns not followed, missing tests, etc.}
-      {If none: "No issues found."}
-
-      ### Files Changed
-
-      {git diff --stat output}
-
-      ### Recommendation
-
-      {READY FOR REVIEW / NEEDS FIXES — with specific items}
-      ```
-
-      The human reviewer will see this report and test the application themselves.
-
-  # ═══════════════════════════════════════════════════════════════
-  # GATE 6: Human validates the implementation
-  # ═══════════════════════════════════════════════════════════════
-
-  - id: validation-gate-1
-    approval:
-      message: |
-        Review the code review report above and test the implementation yourself.
-        - Run the application and verify it works as expected
-        - Check the code changes (git diff)
-        - Test edge cases and error scenarios
-
-        Provide specific feedback on what needs fixing, or say "approved" if everything looks good.
-    depends_on: [code-review]
-
-  # ═══════════════════════════════════════════════════════════════
-  # PHASE 4b: VALIDATE — Address Human Feedback
-  # Fix issues the human identified
-  # ═══════════════════════════════════════════════════════════════
-
-  - id: fix-feedback
-    model: sonnet
-    depends_on: [validation-gate-1]
-    context: fresh
-    prompt: |
-      # PIV Loop — Address Validation Feedback
-
-      The human has reviewed the implementation and provided feedback.
-
-      **Human's feedback**: $validation-gate-1.output
-
-      ---
-
-      ## Step 1: Read Context
-
-      Read the plan file:
-      ```bash
-      ls -t .claude/archon/plans/*.plan.md 2>/dev/null | head -1
-      ```
-
-      Read CLAUDE.md for conventions.
-
-      ## Step 2: Process Feedback
-
-      **If the user said "approved" or similar:**
-      - Output: "Implementation approved! Preparing final summary."
-      - Skip to final output.
-
-      **If the user provided specific feedback:**
-      Parse each piece of feedback and address it:
-
-      1. Read the relevant files
-      2. Understand the issue
-      3. Make the fix
-      4. Verify the fix works
-
-      For each fix:
-      ```bash
-      bun run type-check 2>&1
-      ```
-
-      ## Step 3: Full Validation After Fixes
-
-      ```bash
-      bun run validate 2>&1 || (bun run type-check && bun run lint && bun run test && bun run format:check)
-      ```
-
-      ## Step 4: Commit Fixes
-
-      If changes were made:
-      ```bash
-      git add -A
-      git commit -m "$(cat <<'EOF'
-      fix: address review feedback
-
-      Changes:
-      - {fix 1}
-      - {fix 2}
-      EOF
-      )"
-      ```
-
-      ## Step 5: Report
-
-      ```
-      ## Feedback Addressed
-
-      ### Changes Made
-      - {fix 1 — what was wrong and how it was fixed}
-      - {fix 2}
+      | {task} | DONE / PARTIAL / MISSING | {notes} |
 
       ### Validation Results
       - Type-check: PASS / FAIL
@@ -1083,93 +582,139 @@ nodes:
       - Tests: PASS / FAIL
       - Format: PASS / FAIL
 
-      {If approved: "No changes needed — implementation was approved."}
+      ### Code Quality Findings
+      {Issues found, or "No issues found."}
 
-      Ready for final review.
+      ### Recommendation
+      {READY FOR REVIEW / NEEDS FIXES}
       ```
 
   # ═══════════════════════════════════════════════════════════════
-  # GATE 7: Final human review
+  # PHASE 4b: VALIDATE — Iterative human feedback & fixes
+  # The user tests the implementation and provides feedback.
+  # Loops until the user approves.
   # ═══════════════════════════════════════════════════════════════
 
-  - id: validation-gate-2
-    approval:
-      message: |
-        Review the fixes (or confirm the approval).
-        Say "approved" to finalize, or provide additional feedback.
-    depends_on: [fix-feedback]
+  - id: fix-feedback
+    depends_on: [code-review]
+    loop:
+      prompt: |
+        # PIV Loop — Address Validation Feedback
 
-  # ═══════════════════════════════════════════════════════════════
-  # PHASE 4c: VALIDATE — Final Fixes and Wrap-up
-  # Handle any last feedback, create summary
-  # ═══════════════════════════════════════════════════════════════
+        The human has reviewed the implementation and provided feedback.
 
-  - id: final-fixes
-    model: sonnet
-    depends_on: [validation-gate-2]
-    context: fresh
-    prompt: |
-      # PIV Loop — Final Validation
+        **Human's feedback**: $LOOP_USER_INPUT
 
-      The human provided final feedback.
+        ---
 
-      **Human's feedback**: $validation-gate-2.output
+        ## Step 1: Read Context
 
-      ---
+        ```bash
+        ls -t .claude/archon/plans/*.plan.md 2>/dev/null | head -1
+        ```
 
-      ## Step 1: Handle Feedback
+        Read the plan file and CLAUDE.md for conventions.
 
-      **If the user said "approved":**
-      - No code changes needed.
+        ## Step 2: Process Feedback
 
-      **If the user provided more feedback:**
-      - Read the relevant files
-      - Make the fixes
-      - Run validation:
+        **If the user approved** (said "approved", "looks good", "ship it", etc.):
+        - Output: "Implementation approved!"
+        - Signal: <promise>VALIDATED</promise>
+
+        **If the user provided specific feedback:**
+        1. Read the relevant files
+        2. Understand each issue
+        3. Make the fixes
+        4. Type-check after each change
+
+        ## Step 3: Full Validation
+
         ```bash
         bun run validate 2>&1 || (bun run type-check && bun run lint && bun run test && bun run format:check)
         ```
-      - Commit:
+
+        ## Step 4: Commit Fixes
+
         ```bash
         git add -A
-        git commit -m "fix: final review adjustments" 2>/dev/null || true
+        git commit -m "$(cat <<'EOF'
+        fix: address review feedback
+
+        Changes:
+        - {fix 1}
+        - {fix 2}
+        EOF
+        )"
         ```
 
-      ## Step 2: Push Changes
+        ## Step 5: Report
+
+        ```
+        ## Feedback Addressed
+
+        Changes made:
+        - {fix 1}
+        - {fix 2}
+
+        Validation: {PASS / FAIL with details}
+
+        Review again, or say "approved" to finalize.
+        ```
+      until: VALIDATED
+      max_iterations: 10
+      interactive: true
+      gate_message: |
+        Test the implementation yourself and review the code changes.
+        Provide specific feedback on what needs fixing, or say "approved" to finalize.
+
+  # ═══════════════════════════════════════════════════════════════
+  # PHASE 5: FINALIZE — Push, create PR, generate summary
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: finalize
+    model: sonnet
+    depends_on: [fix-feedback]
+    context: fresh
+    prompt: |
+      # PIV Loop — Finalize
+
+      The implementation has been approved. Push changes and create a PR.
+
+      ---
+
+      ## Step 1: Push Changes
 
       ```bash
       git push -u origin HEAD 2>&1 || true
       ```
 
-      ## Step 3: Generate Final Summary
+      ## Step 2: Generate Summary
 
       ```bash
       git log --oneline --no-merges $(git merge-base HEAD $BASE_BRANCH)..HEAD
       git diff --stat $(git merge-base HEAD $BASE_BRANCH)..HEAD
       ```
 
-      Read the plan file and progress tracking.
+      Read the plan file and progress tracking for context.
 
-      ## Step 4: Create PR (if not already created)
+      ## Step 3: Create PR (if not already created)
 
-      Check if a PR exists:
       ```bash
       gh pr view HEAD --json url 2>/dev/null || echo "NO_PR"
       ```
 
-      If no PR exists, create one:
+      If no PR exists:
 
-      Read the plan file for context. Check for a PR template:
       ```bash
-      cat .github/pull_request_template.md 2>/dev/null || cat .github/PULL_REQUEST_TEMPLATE.md 2>/dev/null || echo "NO_TEMPLATE"
+      cat .github/pull_request_template.md 2>/dev/null || echo "NO_TEMPLATE"
       ```
 
-      Create the PR using `gh pr create --draft --base $BASE_BRANCH` with:
+      Create with `gh pr create --draft --base $BASE_BRANCH`:
       - Title from the plan's feature name
-      - Body summarizing the implementation, referencing the plan file
+      - Body summarizing the implementation
       - Use a HEREDOC for the body
 
-      ## Step 5: Output Summary
+      ## Step 4: Output Summary
 
       ```
       ===============================================================
@@ -1179,10 +724,10 @@ nodes:
       Feature: {from plan}
       Plan: {plan file path}
       Branch: {branch name}
-      PR: {url or "draft created at {url}"}
+      PR: {url}
 
       -- Tasks Completed -----------------------------------------------
-      {list of tasks from progress tracking}
+      {list from progress tracking}
 
       -- Commits -------------------------------------------------------
       {git log output}
@@ -1191,10 +736,6 @@ nodes:
       {git diff --stat output}
 
       -- Validation ----------------------------------------------------
-      Type-check: PASS
-      Lint: PASS
-      Tests: PASS
-      Format: PASS
-
+      All checks passed.
       ===============================================================
       ```
