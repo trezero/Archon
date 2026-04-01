@@ -1452,23 +1452,31 @@ export function registerApiRoutes(
       if (!approval?.nodeId) {
         return apiError(c, 400, 'Workflow run is paused but missing approval context');
       }
-      // Write node_completed event for the approval node (with user's comment as output)
-      await workflowEventDb.createWorkflowEvent({
-        workflow_run_id: runId,
-        event_type: 'node_completed',
-        step_name: approval.nodeId,
-        data: { node_output: comment, approval_decision: 'approved' },
-      });
+      // For interactive loops, do NOT write node_completed — the executor writes it when
+      // the AI emits the completion signal (actual loop exit). Writing it here would cause
+      // the resume to skip the loop node entirely via priorCompletedNodes.
+      if (approval.type !== 'interactive_loop') {
+        await workflowEventDb.createWorkflowEvent({
+          workflow_run_id: runId,
+          event_type: 'node_completed',
+          step_name: approval.nodeId,
+          data: { node_output: comment, approval_decision: 'approved' },
+        });
+      }
       await workflowEventDb.createWorkflowEvent({
         workflow_run_id: runId,
         event_type: 'approval_received',
         step_name: approval.nodeId,
         data: { decision: 'approved', comment },
       });
-      // Transition to 'failed' so findResumableRun picks it up on next invocation
+      // For interactive loops, store user input; for standard approvals, mark as approved.
+      const metadataUpdate =
+        approval.type === 'interactive_loop'
+          ? { loop_user_input: comment }
+          : { approval_response: 'approved' };
       await workflowDb.updateWorkflowRun(runId, {
         status: 'failed',
-        metadata: { approval_response: 'approved' },
+        metadata: metadataUpdate,
       });
       return c.json({
         success: true,

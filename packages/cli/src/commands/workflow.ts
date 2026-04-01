@@ -844,21 +844,32 @@ export async function workflowApproveCommand(runId: string, comment?: string): P
   }
   const approvalComment = comment ?? 'Approved';
   const store = createWorkflowStore();
-  await store.createWorkflowEvent({
-    workflow_run_id: runId,
-    event_type: 'node_completed',
-    step_name: approval.nodeId,
-    data: { node_output: approvalComment, approval_decision: 'approved' },
-  });
+  // For interactive loops, do NOT write node_completed — the executor writes it when the
+  // AI emits the completion signal (actual loop exit). Writing it here would cause the
+  // resume to skip the loop node entirely via priorCompletedNodes.
+  if (approval.type !== 'interactive_loop') {
+    await store.createWorkflowEvent({
+      workflow_run_id: runId,
+      event_type: 'node_completed',
+      step_name: approval.nodeId,
+      data: { node_output: approvalComment, approval_decision: 'approved' },
+    });
+  }
   await store.createWorkflowEvent({
     workflow_run_id: runId,
     event_type: 'approval_received',
     step_name: approval.nodeId,
     data: { decision: 'approved', comment: approvalComment },
   });
+  // For interactive loops, store user input in metadata so the executor can pass it to the AI.
+  // For standard approval nodes, just mark as approved.
+  const metadataUpdate =
+    approval.type === 'interactive_loop'
+      ? { loop_user_input: approvalComment }
+      : { approval_response: 'approved' };
   await workflowDb.updateWorkflowRun(runId, {
     status: 'failed',
-    metadata: { approval_response: 'approved' },
+    metadata: metadataUpdate,
   });
   console.log(`Approved workflow: ${run.workflow_name}`);
   console.log(`Path: ${run.working_path}`);
