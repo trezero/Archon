@@ -62,13 +62,16 @@ function parseDagNode(raw: unknown, index: number, errors: string[]): DagNode | 
     isApprovalNode(node) ||
     isCancelNode(node);
   if (isNonAiNode) {
-    const nodeType = isCancelNode(node)
-      ? 'cancel'
-      : isApprovalNode(node)
-        ? 'approval'
-        : isLoopNode(node)
-          ? 'loop'
-          : 'bash';
+    let nodeType: string;
+    if (isCancelNode(node)) {
+      nodeType = 'cancel';
+    } else if (isApprovalNode(node)) {
+      nodeType = 'approval';
+    } else if (isLoopNode(node)) {
+      nodeType = 'loop';
+    } else {
+      nodeType = 'bash';
+    }
     const presentAiFields = BASH_NODE_AI_FIELDS.filter(
       f => (raw as Record<string, unknown>)[f] !== undefined
     );
