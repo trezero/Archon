@@ -2188,9 +2188,15 @@ export async function executeDagWorkflow(
     return false;
   }
 
-  // Determine workflow success: at least one node completed (not all failed/skipped)
-  const anyCompleted = [...nodeOutputs.values()].some(o => o.state === 'completed');
-  const anyFailed = [...nodeOutputs.values()].some(o => o.state === 'failed');
+  // Single-pass: compute node outcome counts and derive success/failure booleans
+  const nodeCounts = { completed: 0, failed: 0, skipped: 0, total: workflow.nodes.length };
+  for (const o of nodeOutputs.values()) {
+    if (o.state === 'completed') nodeCounts.completed++;
+    else if (o.state === 'failed') nodeCounts.failed++;
+    else if (o.state === 'skipped') nodeCounts.skipped++;
+  }
+  const anyCompleted = nodeCounts.completed > 0;
+  const anyFailed = nodeCounts.failed > 0;
 
   getLog().info(
     { nodeCount: workflow.nodes.length, anyCompleted, anyFailed },
@@ -2202,6 +2208,8 @@ export async function executeDagWorkflow(
     const failMsg =
       `DAG workflow '${workflow.name}' completed with no successful nodes. ` +
       'Check node conditions, trigger rules, and upstream failures.';
+    // Note: nodeCounts not stored for failed runs — failWorkflowRun only stores { error }.
+    // Frontend guards with isValidNodeCounts so missing node_counts is safe.
     await deps.store.failWorkflowRun(workflowRun.id, failMsg).catch((dbErr: Error) => {
       getLog().error({ err: dbErr, workflowRunId: workflowRun.id }, 'dag_db_fail_failed');
     });
@@ -2244,7 +2252,7 @@ export async function executeDagWorkflow(
 
   // Update DB and emit completion
   try {
-    await deps.store.completeWorkflowRun(workflowRun.id);
+    await deps.store.completeWorkflowRun(workflowRun.id, { node_counts: nodeCounts });
   } catch (dbErr) {
     getLog().error(
       { err: dbErr as Error, workflowRunId: workflowRun.id },

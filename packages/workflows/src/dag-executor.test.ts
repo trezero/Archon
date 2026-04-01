@@ -2706,10 +2706,16 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
 
       // Should have called sendQuery exactly once (completed on iteration 1)
       expect(mockSendQueryDag.mock.calls.length).toBe(1);
-      // Workflow should be marked completed
-      expect(
-        (mockDeps.store.completeWorkflowRun as Mock<() => Promise<void>>).mock.calls.length
-      ).toBe(1);
+      // Workflow should be marked completed with node counts metadata
+      const completeCalls = (
+        mockDeps.store.completeWorkflowRun as Mock<
+          (id: string, metadata?: Record<string, unknown>) => Promise<void>
+        >
+      ).mock.calls;
+      expect(completeCalls.length).toBe(1);
+      expect(completeCalls[0][1]).toEqual({
+        node_counts: { completed: 1, failed: 0, skipped: 0, total: 1 },
+      });
     });
 
     it('completes after multiple iterations', async () => {
@@ -3152,9 +3158,15 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
 
       // Should complete on first iteration (plain signal on own line)
       expect(mockSendQueryDag.mock.calls.length).toBe(1);
-      expect(
-        (mockDeps.store.completeWorkflowRun as Mock<() => Promise<void>>).mock.calls.length
-      ).toBe(1);
+      const completeCalls = (
+        mockDeps.store.completeWorkflowRun as Mock<
+          (id: string, metadata?: Record<string, unknown>) => Promise<void>
+        >
+      ).mock.calls;
+      expect(completeCalls.length).toBe(1);
+      expect(completeCalls[0][1]).toEqual({
+        node_counts: { completed: 1, failed: 0, skipped: 0, total: 1 },
+      });
     });
 
     it('does NOT detect false positive plain signal in middle of text', async () => {

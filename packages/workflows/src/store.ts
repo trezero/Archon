@@ -52,7 +52,7 @@ export interface IWorkflowStore {
   ): Promise<void>;
   updateWorkflowActivity(id: string): Promise<void>;
   getWorkflowRunStatus(id: string): Promise<WorkflowRunStatus | null>;
-  completeWorkflowRun(id: string): Promise<void>;
+  completeWorkflowRun(id: string, metadata?: Record<string, unknown>): Promise<void>;
   failWorkflowRun(id: string, error: string): Promise<void>;
   pauseWorkflowRun(id: string, approvalContext: { message: string; nodeId: string }): Promise<void>;
   cancelWorkflowRun(id: string): Promise<void>;

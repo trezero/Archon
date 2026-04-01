@@ -14,6 +14,7 @@ import {
   Ban,
   Trash2,
   CheckCircle,
+  AlertTriangle,
   Pause,
 } from 'lucide-react';
 import type { DashboardRunResponse } from '@/lib/api';
@@ -91,6 +92,46 @@ function StepProgress({
   );
 }
 
+interface NodeCounts {
+  completed: number;
+  failed: number;
+  skipped: number;
+  total: number;
+}
+
+function isValidNodeCounts(value: unknown): value is NodeCounts {
+  if (typeof value !== 'object' || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.completed === 'number' &&
+    typeof obj.failed === 'number' &&
+    typeof obj.skipped === 'number' &&
+    typeof obj.total === 'number'
+  );
+}
+
+function NodeCountsSummary({ counts }: { counts: NodeCounts }): React.ReactElement {
+  const hasFailures = counts.failed > 0 || counts.skipped > 0;
+  return (
+    <div className="flex items-center gap-1.5 text-xs">
+      {hasFailures ? (
+        <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" />
+      ) : (
+        <CheckCircle className="h-3.5 w-3.5 text-success shrink-0" />
+      )}
+      <span className={hasFailures ? 'text-warning' : 'text-success'}>
+        {String(counts.completed)}/{String(counts.total)} nodes succeeded
+      </span>
+      {counts.failed > 0 && (
+        <span className="text-text-secondary">&middot; {String(counts.failed)} failed</span>
+      )}
+      {counts.skipped > 0 && (
+        <span className="text-text-secondary">&middot; {String(counts.skipped)} skipped</span>
+      )}
+    </div>
+  );
+}
+
 export function WorkflowRunCard({
   run,
   onCancel,
@@ -155,6 +196,12 @@ export function WorkflowRunCard({
 
       {/* Live progress */}
       <StepProgress run={run} liveState={liveState} />
+
+      {/* Node outcome summary for completed/failed runs */}
+      {(run.status === 'completed' || run.status === 'failed') &&
+        isValidNodeCounts(run.metadata?.node_counts) && (
+          <NodeCountsSummary counts={run.metadata.node_counts} />
+        )}
 
       {/* Metadata row */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
