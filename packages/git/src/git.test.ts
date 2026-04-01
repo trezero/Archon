@@ -746,6 +746,8 @@ branch refs/heads/feature/auth
       await expect(git.getDefaultBranch('/workspace/repo')).rejects.toThrow(
         'Cannot detect default branch for /workspace/repo'
       );
+      // Verify the error includes actionable config hint
+      await expect(git.getDefaultBranch('/workspace/repo')).rejects.toThrow('config.yaml');
     });
 
     test('throws for unexpected symbolic-ref errors (permission denied)', async () => {
@@ -800,6 +802,8 @@ branch refs/heads/feature/auth
       await expect(git.getDefaultBranch('/workspace/repo')).rejects.toThrow(
         'Cannot detect default branch for /workspace/repo'
       );
+      // Verify the error includes actionable config hint
+      await expect(git.getDefaultBranch('/workspace/repo')).rejects.toThrow('config.yaml');
     });
   });
 
