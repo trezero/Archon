@@ -407,16 +407,28 @@ export async function updateWorkflowRun(
   }
 }
 
-export async function completeWorkflowRun(id: string): Promise<void> {
+export async function completeWorkflowRun(
+  id: string,
+  metadata?: Record<string, unknown>
+): Promise<void> {
   const dialect = getDialect();
   let result: Awaited<ReturnType<IDatabase['query']>>;
   try {
-    result = await pool.query(
-      `UPDATE remote_agent_workflow_runs
-       SET status = 'completed', completed_at = ${dialect.now()}
-       WHERE id = $1 AND status = 'running'`,
-      [id]
-    );
+    if (metadata) {
+      result = await pool.query(
+        `UPDATE remote_agent_workflow_runs
+         SET status = 'completed', completed_at = ${dialect.now()}, metadata = ${dialect.jsonMerge('metadata', 2)}
+         WHERE id = $1 AND status = 'running'`,
+        [id, JSON.stringify(metadata)]
+      );
+    } else {
+      result = await pool.query(
+        `UPDATE remote_agent_workflow_runs
+         SET status = 'completed', completed_at = ${dialect.now()}
+         WHERE id = $1 AND status = 'running'`,
+        [id]
+      );
+    }
   } catch (error) {
     const err = error as Error;
     getLog().error({ err }, 'db.workflow_run_complete_failed');

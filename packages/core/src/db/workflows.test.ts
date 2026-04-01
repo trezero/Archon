@@ -279,6 +279,28 @@ describe('workflows database', () => {
         'not found or not in running state'
       );
     });
+
+    test('merges metadata when provided', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
+      const metadata = { node_counts: { completed: 3, failed: 1, skipped: 0, total: 4 } };
+
+      await completeWorkflowRun('workflow-run-123', metadata);
+
+      const [query, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(query).toContain("status = 'completed'");
+      expect(query).toContain('metadata = metadata ||');
+      expect(params).toEqual(['workflow-run-123', JSON.stringify(metadata)]);
+    });
+
+    test('uses simple query without metadata merge when no metadata provided', async () => {
+      mockQuery.mockResolvedValueOnce(createQueryResult([], 1));
+
+      await completeWorkflowRun('workflow-run-123');
+
+      const [query, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(query).not.toContain('metadata =');
+      expect(params).toEqual(['workflow-run-123']);
+    });
   });
 
   describe('failWorkflowRun', () => {

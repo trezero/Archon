@@ -2152,6 +2152,17 @@ export async function executeDagWorkflow(
   const anyCompleted = [...nodeOutputs.values()].some(o => o.state === 'completed');
   const anyFailed = [...nodeOutputs.values()].some(o => o.state === 'failed');
 
+  // Compute node outcome counts for metadata
+  const completedCount = [...nodeOutputs.values()].filter(o => o.state === 'completed').length;
+  const failedCount = [...nodeOutputs.values()].filter(o => o.state === 'failed').length;
+  const skippedCount = [...nodeOutputs.values()].filter(o => o.state === 'skipped').length;
+  const nodeCounts = {
+    completed: completedCount,
+    failed: failedCount,
+    skipped: skippedCount,
+    total: workflow.nodes.length,
+  };
+
   getLog().info(
     { nodeCount: workflow.nodes.length, anyCompleted, anyFailed },
     'dag_workflow_finished'
@@ -2204,7 +2215,7 @@ export async function executeDagWorkflow(
 
   // Update DB and emit completion
   try {
-    await deps.store.completeWorkflowRun(workflowRun.id);
+    await deps.store.completeWorkflowRun(workflowRun.id, { node_counts: nodeCounts });
   } catch (dbErr) {
     getLog().error(
       { err: dbErr as Error, workflowRunId: workflowRun.id },
