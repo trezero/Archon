@@ -18,6 +18,7 @@ import {
   isProjectScopedWorktreeBase,
   listWorktrees,
   mkdirAsync,
+  removeWorktree,
   syncWorkspace,
   worktreeExists,
   toRepoPath,
@@ -737,6 +738,9 @@ export class WorktreeProvider implements IIsolationProvider {
         await this.createFromForkPR(repoPath, worktreePath, prNumber, request.prSha);
       }
     } catch (error) {
+      // Clean up orphaned git-registered worktree from partial failure
+      // (e.g., worktree add succeeded but createBranchWithStaleRetry failed)
+      await this.cleanOrphanWorktreeIfExists(repoPath, worktreePath);
       const err = error as Error;
       throw new Error(`Failed to create worktree for PR #${prNumber}: ${err.message}`);
     }
@@ -960,6 +964,27 @@ export class WorktreeProvider implements IIsolationProvider {
       const err = error as NodeJS.ErrnoException;
       // Provide context for the error - orphan cleanup is critical for worktree creation
       throw new Error(`Failed to clean orphan directory at ${worktreePath}: ${err.message}`);
+    }
+  }
+
+  /**
+   * Clean up a git-registered worktree that was left by a partial failure.
+   * Best-effort: logs errors but doesn't throw (the original error is more important).
+   */
+  private async cleanOrphanWorktreeIfExists(repoPath: string, worktreePath: string): Promise<void> {
+    try {
+      if (await worktreeExists(toWorktreePath(worktreePath))) {
+        getLog().warn({ repoPath, worktreePath }, 'orphan_worktree_cleanup_started');
+        await removeWorktree(toRepoPath(repoPath), toWorktreePath(worktreePath));
+        getLog().info({ repoPath, worktreePath }, 'orphan_worktree_cleanup_completed');
+      }
+    } catch (cleanupError) {
+      const err = cleanupError as Error;
+      getLog().error(
+        { repoPath, worktreePath, error: err.message, errorType: err.constructor.name, err },
+        'orphan_worktree_cleanup_failed'
+      );
+      // Don't throw — the original creation error is more important
     }
   }
 
