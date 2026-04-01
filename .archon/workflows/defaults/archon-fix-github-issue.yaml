@@ -17,7 +17,7 @@ description: |
   8. Reports results back to the GitHub issue with follow-up suggestions
 
 provider: claude
-model: opus
+model: sonnet
 
 nodes:
   # ═══════════════════════════════════════════════════════════════
@@ -132,6 +132,7 @@ nodes:
     command: archon-fix-issue
     depends_on: [bridge-artifacts]
     context: fresh
+    model: opus
 
   # ═══════════════════════════════════════════════════════════════
   # PHASE 5: VALIDATE
