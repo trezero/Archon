@@ -1085,6 +1085,28 @@ async function handleWorkflowCommand(
             message: 'Workflow run is paused but missing approval context.',
           };
         }
+
+        // Interactive loop gate — store user input in metadata; do NOT create node_completed event
+        if (approval.type === 'interactive_loop') {
+          await workflowEventDb.createWorkflowEvent({
+            workflow_run_id: runId,
+            event_type: 'approval_received',
+            step_name: approval.nodeId,
+            data: { decision: 'approved', comment, iteration: approval.iteration },
+          });
+          // Transition to 'failed' so findResumableRun picks it up; merge loop_user_input into metadata
+          await workflowDb.updateWorkflowRun(runId, {
+            status: 'failed',
+            metadata: { loop_user_input: comment },
+          });
+          const pathInfo = run.working_path ? `\nPath: \`${run.working_path}\`` : '';
+          return {
+            success: true,
+            message: `Workflow \`${run.workflow_name}\` loop input received.${pathInfo}\nType your next message in this conversation to resume the workflow.`,
+          };
+        }
+
+        // Standard approval node path
         await workflowEventDb.createWorkflowEvent({
           workflow_run_id: runId,
           event_type: 'node_completed',

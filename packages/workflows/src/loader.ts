@@ -321,6 +321,15 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
       getLog().warn({ filename, value: raw.interactive }, 'invalid_interactive_value_ignored');
     }
 
+    // Warn if any interactive loop node exists in a non-interactive workflow
+    // (approval messages won't reach the user in web background runs)
+    if (!interactive) {
+      const hasInteractiveLoop = dagNodes.some(n => isLoopNode(n) && n.loop.interactive === true);
+      if (hasInteractiveLoop) {
+        getLog().warn({ filename }, 'interactive_loop_in_non_interactive_workflow');
+      }
+    }
+
     return {
       workflow: {
         name: raw.name,

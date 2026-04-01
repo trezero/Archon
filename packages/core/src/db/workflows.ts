@@ -3,7 +3,11 @@
  */
 import { pool, getDialect, getDatabaseType } from './connection';
 import type { IDatabase } from './adapters/types';
-import type { WorkflowRun, WorkflowRunStatus } from '@archon/workflows/schemas/workflow-run';
+import type {
+  WorkflowRun,
+  WorkflowRunStatus,
+  ApprovalContext,
+} from '@archon/workflows/schemas/workflow-run';
 import { TERMINAL_WORKFLOW_STATUSES } from '@archon/workflows/schemas/workflow-run';
 import { createLogger } from '@archon/paths';
 
@@ -484,7 +488,7 @@ export async function cancelWorkflowRun(id: string): Promise<void> {
  */
 export async function pauseWorkflowRun(
   id: string,
-  approvalContext: { message: string; nodeId: string }
+  approvalContext: ApprovalContext
 ): Promise<void> {
   const dialect = getDialect();
   try {

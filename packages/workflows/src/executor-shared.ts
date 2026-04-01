@@ -228,6 +228,7 @@ export const CONTEXT_VAR_PATTERN_STR = '\\$(?:CONTEXT|EXTERNAL_CONTEXT|ISSUE_CON
  * - $ARTIFACTS_DIR - External artifacts directory for this workflow run
  * - $BASE_BRANCH - The base branch (from config or auto-detected)
  * - $CONTEXT, $EXTERNAL_CONTEXT, $ISSUE_CONTEXT - GitHub issue/PR context (if available)
+ * - $LOOP_USER_INPUT - User feedback from interactive loop approval (empty string if absent)
  *
  * When issueContext is undefined, context variables are replaced with empty string
  * to avoid sending literal "$CONTEXT" to the AI.
@@ -238,7 +239,8 @@ export function substituteWorkflowVariables(
   userMessage: string,
   artifactsDir: string,
   baseBranch: string,
-  issueContext?: string
+  issueContext?: string,
+  loopUserInput?: string
 ): { prompt: string; contextSubstituted: boolean } {
   // Fail fast if the prompt references $BASE_BRANCH but no base branch could be resolved
   if (!baseBranch && prompt.includes('$BASE_BRANCH')) {
@@ -254,7 +256,8 @@ export function substituteWorkflowVariables(
     .replace(/\$USER_MESSAGE/g, userMessage)
     .replace(/\$ARGUMENTS/g, userMessage)
     .replace(/\$ARTIFACTS_DIR/g, artifactsDir)
-    .replace(/\$BASE_BRANCH/g, baseBranch);
+    .replace(/\$BASE_BRANCH/g, baseBranch)
+    .replace(/\$LOOP_USER_INPUT/g, loopUserInput ?? '');
 
   // Check if context variables exist (use fresh regex to avoid lastIndex issues)
   const hasContextVariables = new RegExp(CONTEXT_VAR_PATTERN_STR).test(result);
