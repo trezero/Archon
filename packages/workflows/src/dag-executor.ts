@@ -1648,8 +1648,11 @@ async function executeLoopNode(
 
     lastIterationOutput = cleanOutput || fullOutput;
 
-    // Check LLM completion signal
-    const signalDetected = detectCompletionSignal(fullOutput, loop.until);
+    // Check LLM completion signal — skipped for interactive loops where only
+    // the user's explicit approval (checked at the TOP of the next iteration) can exit.
+    const signalDetected = loop.interactive
+      ? false
+      : detectCompletionSignal(fullOutput, loop.until);
 
     // Check deterministic bash condition (if configured)
     let bashComplete = false;
