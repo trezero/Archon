@@ -1090,8 +1090,14 @@ async function handleWorkflowCommand(
           };
         }
 
-        // Interactive loop gate — store user input in metadata; do NOT create node_completed event
+        // Interactive loop gate — store user input in metadata and record node completion
         if (approval.type === 'interactive_loop') {
+          await workflowEventDb.createWorkflowEvent({
+            workflow_run_id: runId,
+            event_type: 'node_completed',
+            step_name: approval.nodeId,
+            data: { node_output: comment, approval_decision: 'approved' },
+          });
           await workflowEventDb.createWorkflowEvent({
             workflow_run_id: runId,
             event_type: 'approval_received',

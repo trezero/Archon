@@ -2807,7 +2807,7 @@ describe('CommandHandler', () => {
         });
       });
 
-      test('creates approval_received event (not node_completed) for interactive_loop', async () => {
+      test('creates both node_completed and approval_received events for interactive_loop', async () => {
         mockGetWorkflowRun.mockResolvedValueOnce({
           id: 'run-456',
           workflow_name: 'loop-wf',
@@ -2833,10 +2833,14 @@ describe('CommandHandler', () => {
         await handleCommand(baseConversation, '/workflow approve run-456 LGTM');
 
         expect(mockCreateWorkflowEvent).toHaveBeenCalledWith(
-          expect.objectContaining({ event_type: 'approval_received' })
+          expect.objectContaining({
+            event_type: 'node_completed',
+            step_name: 'implement',
+            data: expect.objectContaining({ node_output: 'LGTM', approval_decision: 'approved' }),
+          })
         );
-        expect(mockCreateWorkflowEvent).not.toHaveBeenCalledWith(
-          expect.objectContaining({ event_type: 'node_completed' })
+        expect(mockCreateWorkflowEvent).toHaveBeenCalledWith(
+          expect.objectContaining({ event_type: 'approval_received' })
         );
       });
 
