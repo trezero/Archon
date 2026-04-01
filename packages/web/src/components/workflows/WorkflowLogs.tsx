@@ -15,7 +15,10 @@ interface WorkflowLogsProps {
   isRunning?: boolean;
   currentlyExecuting?: { nodeName: string; startedAt: number } | null;
   toolEvents?: ToolEvent[];
-  selectedNodeId?: string | null;
+  /** Timestamp of the selected node's start — used to scroll the message list. */
+  scrollToNodeTimestamp?: number | null;
+  /** Incremented on every user node click to trigger scroll. */
+  nodeScrollTrigger?: number;
 }
 
 function hydrateMessages(
@@ -177,7 +180,8 @@ export function WorkflowLogs({
   isRunning,
   currentlyExecuting,
   toolEvents,
-  selectedNodeId,
+  scrollToNodeTimestamp,
+  nodeScrollTrigger,
 }: WorkflowLogsProps): React.ReactElement {
   const [sseMessages, setSseMessages] = useState<ChatMessage[]>([]);
   const queryClient = useQueryClient();
@@ -197,20 +201,13 @@ export function WorkflowLogs({
     };
   }, [isRunning, currentlyExecuting]);
 
-  // Filter tool events to selected node when one is selected
-  const filteredToolEvents = useMemo((): ToolEvent[] | undefined => {
-    if (!selectedNodeId || !toolEvents) return toolEvents;
-    return toolEvents.filter(te => te.stepName === selectedNodeId);
-  }, [toolEvents, selectedNodeId]);
-
   // Poll for messages from DB — 3s while running (or during grace period), disabled when terminal.
   // staleTime: 0 ensures post-completion navigation always fetches fresh data on mount.
-  // Query key includes selectedNodeId so the query re-runs when node filter changes.
   const { data: queryMessages } = useQuery({
-    queryKey: ['workflowMessages', conversationId, selectedNodeId ?? 'all'],
+    queryKey: ['workflowMessages', conversationId],
     queryFn: async (): Promise<ChatMessage[]> => {
       const rows = await getMessages(conversationId);
-      return hydrateMessages(rows, startedAt, filteredToolEvents);
+      return hydrateMessages(rows, startedAt, toolEvents);
     },
     refetchInterval: isRunning || gracePolling ? 3000 : false,
     staleTime: 0,
@@ -242,7 +239,7 @@ export function WorkflowLogs({
       setScrollTrigger(prev => prev + 1);
       const timer = setTimeout(() => {
         setGracePolling(false);
-        // Invalidate all node-filtered variants (prefix match covers 'all' + per-node keys)
+        // Final invalidation to pick up late DB flushes
         void queryClient.invalidateQueries({ queryKey: ['workflowMessages', conversationId] });
         setScrollTrigger(prev => prev + 1);
       }, 6000);
@@ -600,6 +597,8 @@ export function WorkflowLogs({
         messages={displayMessages}
         isStreaming={isStreaming}
         scrollTrigger={scrollTrigger}
+        scrollToTimestamp={scrollToNodeTimestamp}
+        scrollToTrigger={nodeScrollTrigger}
       />
     </div>
   );

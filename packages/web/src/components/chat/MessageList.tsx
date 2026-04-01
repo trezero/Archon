@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -91,6 +91,10 @@ interface MessageListProps {
   isStreaming: boolean;
   /** When this value changes, force-scroll to bottom regardless of user scroll position. */
   scrollTrigger?: number;
+  /** Scroll to the first message at or after this timestamp. */
+  scrollToTimestamp?: number | null;
+  /** Increment to re-trigger scroll even if scrollToTimestamp didn't change (e.g. clicking same node). */
+  scrollToTrigger?: number;
   /** When true, show welcoming empty state instead of generic placeholder. */
   isNewChat?: boolean;
   /** Project name to display as context in the welcoming view. */
@@ -103,6 +107,8 @@ function MessageListRaw({
   messages,
   isStreaming,
   scrollTrigger,
+  scrollToTimestamp,
+  scrollToTrigger,
   isNewChat,
   projectName,
   onQuickAction,
@@ -114,6 +120,28 @@ function MessageListRaw({
     [messages, isStreaming],
     scrollTrigger
   );
+
+  // Scroll to a specific message by timestamp (e.g., when user clicks a DAG node).
+  // Only fires on user-initiated clicks (scrollToTrigger > 0), not on mount/auto-select.
+  useEffect(() => {
+    if (scrollToTimestamp == null || !scrollToTrigger || !containerRef.current) return;
+    const raf = requestAnimationFrame(() => {
+      if (!containerRef.current) return;
+      const elements = containerRef.current.querySelectorAll<HTMLElement>('[data-timestamp]');
+      let target: HTMLElement | null = null;
+      for (const el of elements) {
+        const ts = Number(el.getAttribute('data-timestamp'));
+        if (ts >= scrollToTimestamp) {
+          target = el;
+          break;
+        }
+      }
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    return (): void => {
+      cancelAnimationFrame(raf);
+    };
+  }, [scrollToTimestamp, scrollToTrigger]);
 
   if (messages.length === 0) {
     if (isNewChat) {
@@ -170,6 +198,7 @@ function MessageListRaw({
             msg.role === 'system' ? (
               <div
                 key={msg.id}
+                data-timestamp={String(msg.timestamp)}
                 className="flex items-center justify-center gap-2 py-1 text-xs text-muted-foreground"
               >
                 <span className="h-px flex-1 bg-border" />
@@ -177,7 +206,11 @@ function MessageListRaw({
                 <span className="h-px flex-1 bg-border" />
               </div>
             ) : (
-              <div key={msg.id} className="flex flex-col gap-1.5">
+              <div
+                key={msg.id}
+                data-timestamp={String(msg.timestamp)}
+                className="flex flex-col gap-1.5"
+              >
                 {msg.workflowResult ? (
                   <WorkflowResultCard
                     workflowName={msg.workflowResult.workflowName}

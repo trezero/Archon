@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { MessageSquare } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -81,6 +81,8 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
   const [codebaseCwd, setCodebaseCwd] = useState<string | null>(null);
   const [workerRunId, setWorkerRunId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'graph' | 'logs' | 'chat'>('graph');
+  // Increments on every user-initiated node click to trigger scroll in WorkflowLogs
+  const [nodeScrollTrigger, setNodeScrollTrigger] = useState(0);
   // Track which codebaseId we've already fetched to avoid stale re-fetches during runId transitions
   const fetchedCodebaseIdRef = useRef<string | null>(null);
 
@@ -91,6 +93,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
     setCodebaseCwd(null);
     setWorkerRunId(null);
     setActiveView('graph');
+    setNodeScrollTrigger(0);
     fetchedCodebaseIdRef.current = null;
   }, [runId]);
 
@@ -403,6 +406,29 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
     return queryData.events.some(e => e.step_name === selectedDagNode);
   }, [queryData?.events, selectedDagNode]);
 
+  // Compute start timestamps for each DAG node from workflow events.
+  // Used to scroll the logs panel to the right position when a node is selected.
+  const nodeStartTimes = useMemo((): Map<string, number> => {
+    const map = new Map<string, number>();
+    for (const e of queryData?.events ?? []) {
+      if (e.event_type === 'node_started' && e.step_name) {
+        map.set(e.step_name, new Date(ensureUtc(e.created_at)).getTime());
+      }
+    }
+    return map;
+  }, [queryData?.events]);
+
+  const scrollToNodeTimestamp = selectedDagNode
+    ? (nodeStartTimes.get(selectedDagNode) ?? null)
+    : null;
+
+  // Handler for user-initiated node clicks (graph or sidebar).
+  // Increments scroll trigger so WorkflowLogs scrolls to the node's section.
+  const handleNodeClick = useCallback((nodeId: string): void => {
+    setSelectedDagNode(nodeId);
+    setNodeScrollTrigger(prev => prev + 1);
+  }, []);
+
   if (error) {
     return (
       <div className="flex items-center justify-center h-full text-error">
@@ -450,7 +476,8 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
             isRunning={isRunning}
             currentlyExecuting={currentlyExecuting}
             toolEvents={toolEvents}
-            selectedNodeId={selectedDagNode}
+            scrollToNodeTimestamp={scrollToNodeTimestamp}
+            nodeScrollTrigger={nodeScrollTrigger}
           />
         ) : (
           <StepLogs runId={runId} lines={stepLogLines} />
@@ -476,7 +503,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
                 isRunning={isRunning}
                 currentlyExecuting={currentlyExecuting ?? undefined}
                 selectedNodeId={selectedDagNode}
-                onNodeClick={setSelectedDagNode}
+                onNodeClick={handleNodeClick}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-text-secondary">
@@ -506,7 +533,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
           <DagNodeProgress
             nodes={workflow.dagNodes}
             activeNodeId={selectedDagNode}
-            onNodeClick={setSelectedDagNode}
+            onNodeClick={handleNodeClick}
           />
         </div>
         {logsPanel}
