@@ -1948,7 +1948,16 @@ export function registerApiRoutes(
   //  2. Response is raw text/markdown, not JSON
   app.get('/api/artifacts/:runId/*', async c => {
     const runId = c.req.param('runId');
-    const rawFilename = c.req.param('*');
+    // Hono wildcards match but don't capture — extract filename from the URL path.
+    // c.req.path is NOT percent-decoded, so we decode it manually.
+    const prefix = `/api/artifacts/${runId}/`;
+    const rawEncoded = c.req.path.startsWith(prefix) ? c.req.path.slice(prefix.length) : '';
+    let rawFilename: string;
+    try {
+      rawFilename = decodeURIComponent(rawEncoded);
+    } catch {
+      return apiError(c, 400, 'Invalid filename');
+    }
 
     // Block path traversal: reject if any segment is ".." or contains null bytes
     if (
