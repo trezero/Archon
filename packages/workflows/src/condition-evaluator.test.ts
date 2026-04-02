@@ -132,4 +132,214 @@ describe('evaluateCondition', () => {
     expect(evaluateCondition("$classify.output.run_tests == 'true'", outputs).result).toBe(false);
     expect(evaluateCondition("$classify.output.run_tests == 'false'", outputs).result).toBe(true);
   });
+
+  // --- Numeric comparison operators ---
+
+  it('> operator: returns true when actual is numerically greater', () => {
+    expect(evaluateCondition("$n.output > '5'", new Map([['n', makeOutput('10')]]))).toEqual({
+      result: true,
+      parsed: true,
+    });
+    expect(evaluateCondition("$n.output > '5'", new Map([['n', makeOutput('5')]])).result).toBe(
+      false
+    );
+    expect(evaluateCondition("$n.output > '5'", new Map([['n', makeOutput('3')]])).result).toBe(
+      false
+    );
+  });
+
+  it('>= operator: returns true when actual is greater than or equal', () => {
+    expect(evaluateCondition("$n.output >= '5'", new Map([['n', makeOutput('5')]])).result).toBe(
+      true
+    );
+    expect(evaluateCondition("$n.output >= '5'", new Map([['n', makeOutput('6')]])).result).toBe(
+      true
+    );
+    expect(evaluateCondition("$n.output >= '5'", new Map([['n', makeOutput('4')]])).result).toBe(
+      false
+    );
+  });
+
+  it('< operator: returns true when actual is numerically less', () => {
+    expect(evaluateCondition("$n.output < '5'", new Map([['n', makeOutput('3')]])).result).toBe(
+      true
+    );
+    expect(evaluateCondition("$n.output < '5'", new Map([['n', makeOutput('5')]])).result).toBe(
+      false
+    );
+  });
+
+  it('<= operator: returns true when actual is less than or equal', () => {
+    expect(evaluateCondition("$n.output <= '5'", new Map([['n', makeOutput('5')]])).result).toBe(
+      true
+    );
+    expect(evaluateCondition("$n.output <= '5'", new Map([['n', makeOutput('4')]])).result).toBe(
+      true
+    );
+    expect(evaluateCondition("$n.output <= '5'", new Map([['n', makeOutput('6')]])).result).toBe(
+      false
+    );
+  });
+
+  it('numeric operators: work with floating point values', () => {
+    expect(
+      evaluateCondition("$n.output >= '0.9'", new Map([['n', makeOutput('0.95')]])).result
+    ).toBe(true);
+    expect(
+      evaluateCondition("$n.output >= '0.9'", new Map([['n', makeOutput('0.85')]])).result
+    ).toBe(false);
+  });
+
+  it('numeric operators: work with dot-notation JSON fields', () => {
+    const outputs = new Map([['n', makeOutput(JSON.stringify({ score: 0.95 }))]]);
+    expect(evaluateCondition("$n.output.score >= '0.9'", outputs).result).toBe(true);
+  });
+
+  it('numeric operator: fail-closed when actual is not numeric', () => {
+    const res = evaluateCondition("$n.output > '5'", new Map([['n', makeOutput('hello')]]));
+    expect(res.result).toBe(false);
+    expect(res.parsed).toBe(false);
+  });
+
+  it('numeric operator: fail-closed when expected is not numeric', () => {
+    const res = evaluateCondition("$n.output > 'abc'", new Map([['n', makeOutput('10')]]));
+    expect(res.result).toBe(false);
+    expect(res.parsed).toBe(false);
+  });
+
+  // --- AND compound expressions ---
+
+  it('&& operator: true when both conditions are true', () => {
+    const outputs = new Map([
+      ['a', makeOutput('X')],
+      ['b', makeOutput('Y')],
+    ]);
+    expect(evaluateCondition("$a.output == 'X' && $b.output == 'Y'", outputs).result).toBe(true);
+  });
+
+  it('&& operator: false when first condition is false', () => {
+    const outputs = new Map([
+      ['a', makeOutput('Z')],
+      ['b', makeOutput('Y')],
+    ]);
+    expect(evaluateCondition("$a.output == 'X' && $b.output == 'Y'", outputs).result).toBe(false);
+  });
+
+  it('&& operator: false when second condition is false', () => {
+    const outputs = new Map([
+      ['a', makeOutput('X')],
+      ['b', makeOutput('Z')],
+    ]);
+    expect(evaluateCondition("$a.output == 'X' && $b.output == 'Y'", outputs).result).toBe(false);
+  });
+
+  it('&& operator: parsed: true for valid compound expression', () => {
+    const outputs = new Map([
+      ['a', makeOutput('X')],
+      ['b', makeOutput('Y')],
+    ]);
+    expect(evaluateCondition("$a.output == 'X' && $b.output == 'Y'", outputs).parsed).toBe(true);
+  });
+
+  // --- OR compound expressions ---
+
+  it('|| operator: true when first condition is true', () => {
+    const outputs = new Map([
+      ['a', makeOutput('X')],
+      ['b', makeOutput('Z')],
+    ]);
+    expect(evaluateCondition("$a.output == 'X' || $b.output == 'Y'", outputs).result).toBe(true);
+  });
+
+  it('|| operator: true when second condition is true', () => {
+    const outputs = new Map([
+      ['a', makeOutput('Z')],
+      ['b', makeOutput('Y')],
+    ]);
+    expect(evaluateCondition("$a.output == 'X' || $b.output == 'Y'", outputs).result).toBe(true);
+  });
+
+  it('|| operator: false when both conditions are false', () => {
+    const outputs = new Map([
+      ['a', makeOutput('Z')],
+      ['b', makeOutput('W')],
+    ]);
+    expect(evaluateCondition("$a.output == 'X' || $b.output == 'Y'", outputs).result).toBe(false);
+  });
+
+  // --- Operator precedence: && binds tighter than || ---
+
+  it('&& has higher precedence than ||: (A && B) || C', () => {
+    // A=false, B=true, C=true → (false && true) || true = true
+    const outputs = new Map([
+      ['a', makeOutput('Z')],
+      ['b', makeOutput('Y')],
+      ['c', makeOutput('V')],
+    ]);
+    expect(
+      evaluateCondition("$a.output == 'X' && $b.output == 'Y' || $c.output == 'V'", outputs).result
+    ).toBe(true);
+    // A=true, B=false, C=false → (true && false) || false = false
+    const outputs2 = new Map([
+      ['a', makeOutput('X')],
+      ['b', makeOutput('Z')],
+      ['c', makeOutput('W')],
+    ]);
+    expect(
+      evaluateCondition("$a.output == 'X' && $b.output == 'Y' || $c.output == 'V'", outputs2).result
+    ).toBe(false);
+  });
+
+  // --- Compound with numeric operators ---
+
+  it('compound with numeric operator', () => {
+    const outputs = new Map([
+      ['score', makeOutput('90')],
+      ['flag', makeOutput('true')],
+    ]);
+    expect(
+      evaluateCondition("$score.output > '80' && $flag.output == 'true'", outputs).result
+    ).toBe(true);
+    expect(
+      evaluateCondition("$score.output > '80' && $flag.output == 'false'", outputs).result
+    ).toBe(false);
+  });
+
+  // --- Compound fail-closed ---
+
+  it('compound: fail-closed when any atom is invalid', () => {
+    const outputs = new Map([
+      ['a', makeOutput('X')],
+      ['b', makeOutput('Y')],
+    ]);
+    const res = evaluateCondition("$a.output == 'X' && not-valid", outputs);
+    expect(res.result).toBe(false);
+    expect(res.parsed).toBe(false);
+  });
+
+  it('|| operator: short-circuits on true first clause — invalid second clause is not evaluated', () => {
+    // When the first OR clause is true, the second clause (even if invalid) is not reached.
+    // This is intentional short-circuit OR behavior. A typo in a later OR clause will still
+    // surface as a parse error on runs where the earlier clauses are false.
+    const outputs = new Map([['a', makeOutput('X')]]);
+    const res = evaluateCondition("$a.output == 'X' || not-valid", outputs);
+    expect(res.result).toBe(true);
+    expect(res.parsed).toBe(true); // short-circuit: invalid second clause never reached
+  });
+
+  // --- splitOutsideQuotes guard: operators inside quoted values are not treated as splitters ---
+
+  it('splitOutsideQuotes guard: value containing && is not split on the operator', () => {
+    const outputs = new Map([['n', makeOutput('A&&B')]]);
+    const res = evaluateCondition("$n.output == 'A&&B'", outputs);
+    expect(res.result).toBe(true);
+    expect(res.parsed).toBe(true);
+  });
+
+  it('splitOutsideQuotes guard: value containing || is not split on the operator', () => {
+    const outputs = new Map([['n', makeOutput('A||B')]]);
+    const res = evaluateCondition("$n.output == 'A||B'", outputs);
+    expect(res.result).toBe(true);
+    expect(res.parsed).toBe(true);
+  });
 });
