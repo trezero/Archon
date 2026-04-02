@@ -66,12 +66,12 @@ export class GitHubAdapter implements IPlatformAdapter {
     // Parse GitHub user whitelist (optional - empty = open access)
     this.allowedUsers = parseGitHubAllowedUsers(process.env.GITHUB_ALLOWED_USERS);
     if (this.allowedUsers.length > 0) {
-      getLog().info({ userCount: this.allowedUsers.length }, 'whitelist_enabled');
+      getLog().info({ userCount: this.allowedUsers.length }, 'github.whitelist_enabled');
     } else {
-      getLog().info('whitelist_disabled');
+      getLog().info('github.whitelist_disabled');
     }
 
-    getLog().info({ botMention: this.botMention }, 'adapter_initialized');
+    getLog().info({ botMention: this.botMention }, 'github.adapter_initialized');
   }
 
   /**
@@ -128,17 +128,17 @@ export class GitHubAdapter implements IPlatformAdapter {
   ): Promise<void> {
     const parsed = this.parseConversationId(conversationId);
     if (!parsed) {
-      getLog().error({ conversationId }, 'invalid_conversation_id');
+      getLog().error({ conversationId }, 'github.invalid_conversation_id');
       return;
     }
 
-    getLog().debug({ conversationId, messageLength: message.length }, 'send_message');
+    getLog().debug({ conversationId, messageLength: message.length }, 'github.send_message');
 
     // Check if message needs splitting
     if (message.length <= MAX_LENGTH) {
       await this.postComment(parsed, message);
     } else {
-      getLog().debug({ messageLength: message.length }, 'message_splitting');
+      getLog().debug({ messageLength: message.length }, 'github.message_splitting');
       const chunks = splitIntoParagraphChunks(message, MAX_LENGTH - 500);
 
       // Fail-fast: if any chunk fails, stop and propagate error with context
@@ -149,7 +149,7 @@ export class GitHubAdapter implements IPlatformAdapter {
           const err = error as Error;
           getLog().error(
             { err, chunkIndex: i + 1, totalChunks: chunks.length, conversationId },
-            'chunk_post_failed'
+            'github.chunk_post_failed'
           );
           // Wrap error with context about partial delivery
           const partialError = new Error(
@@ -184,7 +184,7 @@ export class GitHubAdapter implements IPlatformAdapter {
           issue_number: parsed.number,
           body: markedMessage,
         });
-        getLog().debug({ conversationId }, 'comment_posted');
+        getLog().debug({ conversationId }, 'github.comment_posted');
         return;
       } catch (error) {
         const isRetryable = this.isRetryableError(error);
@@ -192,7 +192,7 @@ export class GitHubAdapter implements IPlatformAdapter {
           const delay = 1000 * attempt;
           getLog().warn(
             { attempt, maxRetries, conversationId, delayMs: delay },
-            'comment_post_retry'
+            'github.comment_post_retry'
           );
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
@@ -207,7 +207,7 @@ export class GitHubAdapter implements IPlatformAdapter {
             wasRetryable: isRetryable,
             messageLength: message.length,
           },
-          'comment_post_failed'
+          'github.comment_post_failed'
         );
         // Re-throw so caller can handle (e.g., notify user, stop chunk loop)
         throw error;
@@ -233,14 +233,14 @@ export class GitHubAdapter implements IPlatformAdapter {
    * Start the adapter (no-op for webhook-based adapter)
    */
   async start(): Promise<void> {
-    getLog().info('webhook_adapter_ready');
+    getLog().info('github.webhook_adapter_ready');
   }
 
   /**
    * Stop the adapter (no-op for webhook-based adapter)
    */
   stop(): void {
-    getLog().info('adapter_stopped');
+    getLog().info('github.adapter_stopped');
   }
 
   /**
@@ -266,7 +266,7 @@ export class GitHubAdapter implements IPlatformAdapter {
       if (digestBuffer.length !== signatureBuffer.length) {
         getLog().error(
           { receivedLength: signatureBuffer.length, computedLength: digestBuffer.length },
-          'signature_length_mismatch'
+          'github.signature_length_mismatch'
         );
         return false;
       }
@@ -279,13 +279,13 @@ export class GitHubAdapter implements IPlatformAdapter {
             receivedPrefix: signature.substring(0, 15) + '...',
             computedPrefix: digest.substring(0, 15) + '...',
           },
-          'signature_mismatch'
+          'github.signature_mismatch'
         );
       }
 
       return isValid;
     } catch (error) {
-      getLog().error({ err: error }, 'signature_verification_error');
+      getLog().error({ err: error }, 'github.signature_verification_error');
       return false;
     }
   }
@@ -409,7 +409,7 @@ export class GitHubAdapter implements IPlatformAdapter {
     } catch (error) {
       getLog().error(
         { err: error, owner, repo, issueNumber: number },
-        'comment_history_fetch_failed'
+        'github.comment_history_fetch_failed'
       );
       return [];
     }
@@ -456,7 +456,7 @@ export class GitHubAdapter implements IPlatformAdapter {
       const err = error as NodeJS.ErrnoException;
       if (err.code !== 'ENOENT') {
         // Real error - permission denied, I/O failure, etc.
-        getLog().error({ repoPath, errorCode: err.code, err }, 'repo_path_access_failed');
+        getLog().error({ repoPath, errorCode: err.code, err }, 'github.repo_path_access_failed');
         throw new Error(
           `Cannot access repository at ${repoPath}: ${err.code ?? err.message}. ` +
             'Check permissions and disk health.'
@@ -467,10 +467,13 @@ export class GitHubAdapter implements IPlatformAdapter {
 
     if (directoryExists) {
       if (shouldSync) {
-        getLog().info({ repoPath, defaultBranch }, 'repo_syncing');
+        getLog().info({ repoPath, defaultBranch }, 'github.repo_syncing');
         const syncResult = await syncRepository(toRepoPath(repoPath), toBranchName(defaultBranch));
         if (!syncResult.ok) {
-          getLog().error({ error: syncResult.error, repoPath, defaultBranch }, 'repo_sync_failed');
+          getLog().error(
+            { error: syncResult.error, repoPath, defaultBranch },
+            'github.repo_sync_failed'
+          );
           throw new Error(
             `Failed to sync repository to ${defaultBranch}. ` +
               `Try /reset or check if the branch exists. Details: ${syncResult.error.code === 'branch_not_found' ? `Branch '${defaultBranch}' not found` : 'message' in syncResult.error ? syncResult.error.message : syncResult.error.code}`
@@ -481,7 +484,7 @@ export class GitHubAdapter implements IPlatformAdapter {
     }
 
     // Directory doesn't exist - clone the repository
-    getLog().info({ owner, repo, repoPath }, 'repo_cloning');
+    getLog().info({ owner, repo, repoPath }, 'github.repo_cloning');
     const ghToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
     const repoUrl = `https://github.com/${owner}/${repo}.git`;
 
@@ -492,7 +495,10 @@ export class GitHubAdapter implements IPlatformAdapter {
     );
 
     if (!cloneResult.ok) {
-      getLog().error({ error: cloneResult.error, owner, repo, repoPath }, 'repo_clone_failed');
+      getLog().error(
+        { error: cloneResult.error, owner, repo, repoPath },
+        'github.repo_clone_failed'
+      );
 
       if (cloneResult.error.code === 'not_a_repo') {
         throw new Error(
@@ -534,7 +540,7 @@ export class GitHubAdapter implements IPlatformAdapter {
         });
 
         await codebaseDb.updateCodebaseCommands(codebaseId, commands);
-        getLog().info({ commandCount: files.length, folder }, 'commands_loaded');
+        getLog().info({ commandCount: files.length, folder }, 'github.commands_loaded');
         return;
       } catch (error) {
         const err = error as NodeJS.ErrnoException;
@@ -543,7 +549,7 @@ export class GitHubAdapter implements IPlatformAdapter {
           continue;
         }
         // Log unexpected errors (database failures, permission issues) but don't fail setup
-        getLog().error({ err, folder, errorCode: err.code }, 'commands_load_error');
+        getLog().error({ err, folder, errorCode: err.code }, 'github.commands_load_error');
         continue;
       }
     }
@@ -578,14 +584,17 @@ export class GitHubAdapter implements IPlatformAdapter {
       // Either it's an actual worktree, or it looks like one (contains /worktrees/ in path)
       const looksLikeWorktreePath = existing.default_cwd.includes('/worktrees/');
       if (looksLikeWorktreePath || (await isWorktreePath(existing.default_cwd))) {
-        getLog().info({ codebaseName: existing.name, canonicalPath }, 'stale_worktree_path_fixed');
+        getLog().info(
+          { codebaseName: existing.name, canonicalPath },
+          'github.stale_worktree_path_fixed'
+        );
         await codebaseDb.updateCodebase(existing.id, { default_cwd: canonicalPath });
         existing.default_cwd = canonicalPath;
       }
 
       getLog().info(
         { codebaseName: existing.name, path: existing.default_cwd },
-        'existing_codebase_found'
+        'github.existing_codebase_found'
       );
       return { codebase: existing, repoPath: existing.default_cwd, isNew: false };
     }
@@ -598,7 +607,7 @@ export class GitHubAdapter implements IPlatformAdapter {
       default_cwd: canonicalPath,
     });
 
-    getLog().info({ codebaseName: codebase.name, path: canonicalPath }, 'codebase_created');
+    getLog().info({ codebaseName: codebase.name, path: canonicalPath }, 'github.codebase_created');
     return { codebase, repoPath: canonicalPath, isNew: true };
   }
 
@@ -613,15 +622,15 @@ export class GitHubAdapter implements IPlatformAdapter {
     merged = false
   ): Promise<void> {
     const conversationId = this.buildConversationId(owner, repo, number);
-    getLog().info({ conversationId, merged }, 'isolation_cleanup_started');
+    getLog().info({ conversationId, merged }, 'github.isolation_cleanup_started');
 
     try {
       await onConversationClosed('github', conversationId, { merged });
-      getLog().info({ conversationId }, 'isolation_cleanup_complete');
+      getLog().info({ conversationId }, 'github.isolation_cleanup_completed');
     } catch (error) {
       const err = error as Error;
       // Log full context for debugging - cleanup failures shouldn't break user flow
-      getLog().error({ err, conversationId }, 'isolation_cleanup_failed');
+      getLog().error({ err, conversationId }, 'github.isolation_cleanup_failed');
     }
   }
 
@@ -679,7 +688,7 @@ ${userComment}`;
     if (!this.verifySignature(payload, signature)) {
       getLog().error(
         { signaturePrefix: signature?.substring(0, 15) + '...', payloadSize: payload.length },
-        'invalid_webhook_signature'
+        'github.invalid_webhook_signature'
       );
       return;
     }
@@ -692,7 +701,7 @@ ${userComment}`;
     if (!isGitHubUserAuthorized(senderUsername, this.allowedUsers)) {
       // Log unauthorized attempt (mask username for privacy)
       const maskedUser = senderUsername ? `${senderUsername.slice(0, 3)}***` : 'unknown';
-      getLog().info({ maskedUser }, 'unauthorized_webhook');
+      getLog().info({ maskedUser }, 'github.unauthorized_webhook');
       return; // Silent rejection - no error response
     }
 
@@ -705,7 +714,7 @@ ${userComment}`;
     // 3. Handle close/merge events (cleanup worktree)
     if (isCloseEvent) {
       const mergeLabel = isMerged ? 'merge' : 'close';
-      getLog().info({ event: mergeLabel, owner, repo, number }, 'close_event_received');
+      getLog().info({ event: mergeLabel, owner, repo, number }, 'github.close_event_received');
       await this.cleanupWorktree(owner, repo, number, isMerged ?? false);
       return; // Don't process as a message
     }
@@ -714,20 +723,23 @@ ${userComment}`;
     // Primary: Check for hidden marker in comment body (works with user's PAT)
     const commentBody = event.comment?.body ?? '';
     if (commentBody.includes(BOT_RESPONSE_MARKER)) {
-      getLog().debug({ commentAuthor: event.comment?.user?.login }, 'ignoring_marked_comment');
+      getLog().debug(
+        { commentAuthor: event.comment?.user?.login },
+        'github.ignoring_marked_comment'
+      );
       return;
     }
     // Secondary: Check comment author (works with dedicated bot account)
     const commentAuthor = event.comment?.user?.login;
     if (commentAuthor?.toLowerCase() === this.botMention.toLowerCase()) {
-      getLog().debug({ commentAuthor }, 'ignoring_own_comment');
+      getLog().debug({ commentAuthor }, 'github.ignoring_own_comment');
       return;
     }
 
     // 5. Check @mention
     if (!this.hasMention(comment)) return;
 
-    getLog().info({ eventType, owner, repo, number }, 'webhook_processing');
+    getLog().info({ eventType, owner, repo, number }, 'github.webhook_processing');
 
     // 4. Build conversationId
     const conversationId = this.buildConversationId(owner, repo, number);
@@ -754,7 +766,7 @@ ${userComment}`;
         if (updateError instanceof ConversationNotFoundError) {
           getLog().error(
             { conversationId: existingConv.id, codebaseId: codebase.id },
-            'conversation_codebase_link_failed'
+            'github.conversation_codebase_link_failed'
           );
           // Re-throw as this is a critical setup step
           throw new Error('Failed to set up GitHub conversation - please try again');
@@ -791,7 +803,7 @@ ${userComment}`;
       const linkedIssues = await getLinkedIssueNumbers(owner, repo, number);
       if (linkedIssues.length > 0) {
         isolationHints.linkedIssues = linkedIssues;
-        getLog().info({ prNumber: number, linkedIssues }, 'pr_linked_issues');
+        getLog().info({ prNumber: number, linkedIssues }, 'github.pr_linked_issues');
       }
 
       // Fetch PR head branch, SHA, and fork status for isolation
@@ -820,7 +832,7 @@ ${userComment}`;
             headSha: prData.head.sha.substring(0, 7),
             isFork: isolationHints.isForkPR,
           },
-          'pr_head_info'
+          'github.pr_head_info'
         );
       } catch (error) {
         const err = error as Error;
@@ -833,9 +845,9 @@ ${userComment}`;
 
         const logData = { err, owner, repo, prNumber: number };
         if (isNonTransient) {
-          getLog().error(logData, 'pr_head_fetch_failed');
+          getLog().error(logData, 'github.pr_head_fetch_failed');
         } else {
-          getLog().warn(logData, 'pr_head_fetch_failed');
+          getLog().warn(logData, 'github.pr_head_fetch_failed');
         }
 
         // Mark degraded mode - worktree isolation will use fallback naming
@@ -854,7 +866,7 @@ ${userComment}`;
     if (isSlashCommand) {
       // For slash commands, use only the first line
       finalMessage = strippedComment.split('\n')[0].trim();
-      getLog().debug({ command: finalMessage }, 'slash_command_processing');
+      getLog().debug({ command: finalMessage }, 'github.slash_command_processing');
 
       // Add issue/PR reference context
       if (eventType === 'issue' && issue) {
@@ -890,7 +902,7 @@ ${userComment}`;
     const threadContext = commentHistory.length > 0 ? commentHistory.join('\n') : undefined;
     getLog().debug(
       { commentCount: threadContext ? commentHistory.length : 0, conversationId },
-      'thread_context_loaded'
+      'github.thread_context_loaded'
     );
 
     // 13. Route to orchestrator with isolation hints (with lock for concurrency control)
@@ -903,12 +915,15 @@ ${userComment}`;
         });
       } catch (error) {
         const err = toError(error);
-        getLog().error({ err, conversationId }, 'message_handling_error');
+        getLog().error({ err, conversationId }, 'github.message_handling_error');
         try {
           const userMessage = classifyAndFormatError(err);
           await this.sendMessage(conversationId, userMessage);
         } catch (sendError) {
-          getLog().error({ err: toError(sendError), conversationId }, 'error_message_send_failed');
+          getLog().error(
+            { err: toError(sendError), conversationId },
+            'github.error_message_send_failed'
+          );
         }
       }
     });
