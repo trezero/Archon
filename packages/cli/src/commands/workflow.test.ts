@@ -934,8 +934,6 @@ describe('workflowStatusCommand', () => {
       },
     ]);
 
-    const startTime = new Date(Date.now() - 25 * 1000).toISOString();
-    const endTime = new Date(Date.now() - 15 * 1000).toISOString();
     (workflowEventsDb.listWorkflowEvents as ReturnType<typeof mock>).mockResolvedValueOnce([
       {
         id: 'e1',
@@ -944,7 +942,7 @@ describe('workflowStatusCommand', () => {
         step_name: 'plan',
         step_index: null,
         data: {},
-        created_at: startTime,
+        created_at: new Date().toISOString(),
       },
       {
         id: 'e2',
@@ -952,8 +950,8 @@ describe('workflowStatusCommand', () => {
         event_type: 'node_completed',
         step_name: 'plan',
         step_index: null,
-        data: { node_output: 'Plan output here' },
-        created_at: endTime,
+        data: { node_output: 'Plan output here', duration_ms: 5000 },
+        created_at: new Date().toISOString(),
       },
     ]);
 
@@ -963,6 +961,7 @@ describe('workflowStatusCommand', () => {
     expect(calls.some(c => c.includes('Nodes:'))).toBe(true);
     expect(calls.some(c => c.includes('✓') && c.includes('plan'))).toBe(true);
     expect(calls.some(c => c.includes('Plan output here'))).toBe(true);
+    expect(calls.some(c => c.includes('Total:'))).toBe(true);
   });
 
   it('should show error message for failed node in verbose mode', async () => {
@@ -979,8 +978,6 @@ describe('workflowStatusCommand', () => {
       },
     ]);
 
-    const startTime = new Date(Date.now() - 20 * 1000).toISOString();
-    const endTime = new Date(Date.now() - 10 * 1000).toISOString();
     (workflowEventsDb.listWorkflowEvents as ReturnType<typeof mock>).mockResolvedValueOnce([
       {
         id: 'e3',
@@ -989,7 +986,7 @@ describe('workflowStatusCommand', () => {
         step_name: 'implement',
         step_index: null,
         data: {},
-        created_at: startTime,
+        created_at: new Date().toISOString(),
       },
       {
         id: 'e4',
@@ -997,8 +994,8 @@ describe('workflowStatusCommand', () => {
         event_type: 'node_failed',
         step_name: 'implement',
         step_index: null,
-        data: { error: 'Compilation failed' },
-        created_at: endTime,
+        data: { error: 'Compilation failed', duration_ms: 3000 },
+        created_at: new Date().toISOString(),
       },
     ]);
 
@@ -1007,6 +1004,51 @@ describe('workflowStatusCommand', () => {
     const calls = consoleSpy.mock.calls.map((c: unknown[]) => String(c[0]));
     expect(calls.some(c => c.includes('✗') && c.includes('implement'))).toBe(true);
     expect(calls.some(c => c.includes('Compilation failed'))).toBe(true);
+  });
+
+  it('should truncate output at word boundary in verbose mode', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    const workflowEventsDb = await import('@archon/core/db/workflow-events');
+
+    (workflowDb.listWorkflowRuns as ReturnType<typeof mock>).mockResolvedValueOnce([
+      {
+        id: 'run-truncate',
+        workflow_name: 'implement',
+        working_path: '/path/to/worktree',
+        status: 'running',
+        started_at: new Date(Date.now() - 5 * 1000),
+      },
+    ]);
+
+    // Build a 210-char string with spaces every 5 chars: "aaaaa bbbbb ccccc ..."
+    const words = Array.from({ length: 42 }, (_, i) =>
+      String.fromCharCode(97 + (i % 26)).repeat(5)
+    );
+    const longOutput = words.join(' '); // 5*42 + 41 spaces = 251 chars total
+
+    (workflowEventsDb.listWorkflowEvents as ReturnType<typeof mock>).mockResolvedValueOnce([
+      {
+        id: 'e-trunc',
+        workflow_run_id: 'run-truncate',
+        event_type: 'node_completed',
+        step_name: 'plan',
+        step_index: null,
+        data: { node_output: longOutput, duration_ms: 1000 },
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
+    await workflowStatusCommand(false, true);
+
+    const calls = consoleSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    const outputLine = calls.find(c => c.includes('Output:')) ?? '';
+    const preview = outputLine.replace(/^\s*Output:\s*/, '');
+    // Must end with '...' (was truncated)
+    expect(preview.endsWith('...')).toBe(true);
+    // The cut must be at a word boundary: char in original at cut position must be a space
+    const previewText = preview.slice(0, -3); // remove trailing '...'
+    const cutPos = previewText.length;
+    expect(longOutput[cutPos]).toBe(' '); // original char right after cut is a space
   });
 
   it('should not show nodes section when no events in verbose mode', async () => {

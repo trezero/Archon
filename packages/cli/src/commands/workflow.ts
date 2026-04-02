@@ -588,6 +588,18 @@ function formatDuration(ms: number): string {
   return `${String(mins)}m${String(remSecs)}s`;
 }
 
+/**
+ * Truncate text at the last word boundary at or before maxLen, appending '...'.
+ * Falls back to a hard cut at maxLen if no space is found in range.
+ */
+function truncateAtWordBoundary(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  const slice = text.slice(0, maxLen);
+  const lastSpace = slice.lastIndexOf(' ');
+  const cut = lastSpace > 0 ? lastSpace : maxLen;
+  return text.slice(0, cut) + '...';
+}
+
 interface NodeSummary {
   nodeId: string;
   state: 'running' | 'completed' | 'failed' | 'skipped';
@@ -601,7 +613,6 @@ interface NodeSummary {
  * Processes node_started / node_completed / node_failed / node_skipped* events.
  */
 function buildNodeSummaries(events: WorkflowEventRow[]): NodeSummary[] {
-  const startTimes = new Map<string, number>();
   const summaries = new Map<string, NodeSummary>();
 
   for (const event of events) {
@@ -610,35 +621,29 @@ function buildNodeSummaries(events: WorkflowEventRow[]): NodeSummary[] {
 
     switch (event.event_type) {
       case 'node_started': {
-        startTimes.set(nodeId, new Date(event.created_at).getTime());
         if (!summaries.has(nodeId)) {
           summaries.set(nodeId, { nodeId, state: 'running' });
         }
         break;
       }
       case 'node_completed': {
-        const started = startTimes.get(nodeId);
-        const endTime = new Date(event.created_at).getTime();
         const rawOutput = event.data.node_output;
         const output = typeof rawOutput === 'string' ? rawOutput : undefined;
+        const rawDuration = event.data.duration_ms;
         summaries.set(nodeId, {
           nodeId,
           state: 'completed',
-          durationMs: started !== undefined ? endTime - started : undefined,
-          outputPreview:
-            output !== undefined
-              ? output.slice(0, 200) + (output.length > 200 ? '...' : '')
-              : undefined,
+          durationMs: typeof rawDuration === 'number' ? rawDuration : undefined,
+          outputPreview: output !== undefined ? truncateAtWordBoundary(output, 200) : undefined,
         });
         break;
       }
       case 'node_failed': {
-        const started = startTimes.get(nodeId);
-        const endTime = new Date(event.created_at).getTime();
+        const rawDuration = event.data.duration_ms;
         summaries.set(nodeId, {
           nodeId,
           state: 'failed',
-          durationMs: started !== undefined ? endTime - started : undefined,
+          durationMs: typeof rawDuration === 'number' ? rawDuration : undefined,
           error: typeof event.data.error === 'string' ? event.data.error : 'Unknown error',
         });
         break;
@@ -748,6 +753,10 @@ export async function workflowStatusCommand(json?: boolean, verbose?: boolean): 
           if (node.error !== undefined) {
             console.log(`        Error:  ${node.error}`);
           }
+        }
+        const totalMs = nodes.reduce((sum, n) => sum + (n.durationMs ?? 0), 0);
+        if (totalMs > 0) {
+          console.log(`  Total:  ${formatDuration(totalMs)}`);
         }
       }
     }
