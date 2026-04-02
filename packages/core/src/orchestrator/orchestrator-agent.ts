@@ -34,7 +34,6 @@ import { executeWorkflow } from '@archon/workflows/executor';
 import type {
   WorkflowDefinition,
   WorkflowWithSource,
-  WorkflowLoadResult,
   WorkflowLoadError,
 } from '@archon/workflows/schemas/workflow';
 import { createWorkflowDeps } from '../workflows/store-adapter';
@@ -361,7 +360,9 @@ async function inheritThreadContext(
   }
 }
 
-interface DiscoverResult extends WorkflowLoadResult {
+interface DiscoverResult {
+  workflows: WorkflowWithSource[];
+  errors: readonly WorkflowLoadError[];
   syncResult?: WorkspaceSyncResult;
   syncError?: string;
   config?: MergedConfig;
