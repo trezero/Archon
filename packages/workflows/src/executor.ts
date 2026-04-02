@@ -248,10 +248,10 @@ export async function executeWorkflow(
   // Load config once for the entire workflow execution
   const fileConfig = await deps.loadConfig(cwd);
   const dbEnvVars = codebaseId ? await deps.store.getCodebaseEnvVars(codebaseId) : {};
-  const config: WorkflowConfig =
-    Object.keys(dbEnvVars).length > 0
-      ? { ...fileConfig, envVars: { ...fileConfig.envVars, ...dbEnvVars } }
-      : fileConfig;
+  const config: WorkflowConfig = {
+    ...fileConfig,
+    envVars: { ...fileConfig.envVars, ...dbEnvVars },
+  };
   const configuredCommandFolder = config.commands.folder;
 
   // Auto-detect base branch when not configured. Config takes priority.

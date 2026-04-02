@@ -1568,7 +1568,7 @@ export function registerApiRoutes(
   registerOpenApiRoute(setEnvVarRoute, async c => {
     const id = c.req.param('id') ?? '';
     try {
-      const body: { key: string; value: string } = await c.req.json();
+      const body = getValidatedBody(c, setEnvVarBodySchema);
       const codebase = await codebaseDb.getCodebase(id);
       if (!codebase) return apiError(c, 404, 'Codebase not found');
       await envVarDb.setCodebaseEnvVar(id, body.key, body.value);

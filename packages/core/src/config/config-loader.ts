@@ -369,7 +369,7 @@ function mergeRepoConfig(merged: MergedConfig, repo: RepoConfig): MergedConfig {
   }
 
   // Propagate per-project env vars from repo config
-  if (repo.env && Object.keys(repo.env).length > 0) {
+  if (repo.env) {
     result.envVars = { ...result.envVars, ...repo.env };
   }
 
