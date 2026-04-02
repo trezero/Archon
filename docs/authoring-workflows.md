@@ -861,6 +861,50 @@ Without `on_reject`: rejecting cancels the workflow.
 With `on_reject`: rejecting triggers an AI rework prompt and re-pauses for re-review.
 See [Approval Nodes](./approval-nodes.md) for full details.
 
+### Choosing: Interactive Loop vs Approval with on_reject
+
+Two primitives handle human-in-the-loop iteration. Use the right one for your pattern:
+
+| | Interactive Loop | Approval + on_reject |
+|---|---|---|
+| YAML | `loop.interactive: true` | `approval.on_reject: { prompt }` |
+| User input variable | `$LOOP_USER_INPUT` | `$REJECTION_REASON` |
+| How it works | Same prompt runs each iteration, user input injected as variable | Specific on_reject prompt runs only on rejection |
+| Best for | **Conversational iteration** — explore, refine, review cycles where the AI and human go back and forth | **Gate-then-fix** — approve to proceed, or reject to trigger a specific corrective action |
+| Approval signal | AI detects user intent in its output (`<promise>DONE</promise>`) | User explicitly approves or rejects via button/command |
+| Example | PIV loop: explore → user feedback → explore again | Report generation: generate → user rejects → AI revises specific section |
+
+**Interactive loop** (`loop.interactive: true`):
+
+```yaml
+- id: refine-plan
+  loop:
+    prompt: |
+      User's feedback: $LOOP_USER_INPUT
+      Read the plan, apply feedback, present changes.
+    until: PLAN_APPROVED
+    max_iterations: 10
+    interactive: true
+    gate_message: "Review the plan. Provide feedback or say 'approved'."
+```
+
+The AI runs each iteration, pauses for user input, user's text feeds into the next iteration via `$LOOP_USER_INPUT`. The AI decides when to emit the completion signal based on the user's response.
+
+**Approval with on_reject** (`approval.on_reject`):
+
+```yaml
+- id: review
+  approval:
+    message: "Review the report. Approve or request changes."
+    capture_response: true
+    on_reject: { prompt: "Revise based on: $REJECTION_REASON", max_attempts: 5 }
+  depends_on: [generate]
+```
+
+The workflow pauses at the approval gate. User approves → workflow continues. User rejects with feedback → the `on_reject` prompt runs with `$REJECTION_REASON`, then re-pauses at the same gate.
+
+**Rule of thumb**: If the human and AI are having a conversation (exploring, refining, iterating), use an interactive loop. If the workflow should proceed unless the human objects, use an approval gate with `on_reject`.
+
 ---
 
 ## Debugging Workflows
