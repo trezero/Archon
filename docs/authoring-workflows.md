@@ -152,24 +152,46 @@ nodes:
 
 ### Node Fields
 
+**Node types** — exactly one required per node (mutually exclusive):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | string | Command name to load from `.archon/commands/` |
+| `prompt` | string | Inline prompt string |
+| `bash` | string | Shell script (no AI). Stdout captured as `$nodeId.output`. Optional `timeout` (ms, default 120000) |
+| `loop` | object | Iterative AI prompt until completion signal. See [Loop Nodes](./loop-nodes.md) |
+| `approval` | object | Pauses workflow for human review. See [Approval Nodes](./approval-nodes.md) |
+| `cancel` | string | Terminates the workflow run with a reason string. Uses existing cancellation plumbing — in-flight parallel nodes are stopped |
+
+**Common fields** — apply to all node types:
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `id` | string | required | Unique node identifier. Used in `depends_on`, `when:`, and `$id.output` substitution |
-| `command` | string | — | Command name to load from `.archon/commands/`. Mutually exclusive with `prompt` |
-| `prompt` | string | — | Inline prompt string. Mutually exclusive with `command` |
 | `depends_on` | string[] | `[]` | Node IDs that must complete before this node runs |
-| `when` | string | — | Condition expression. Node is skipped if false |
+| `when` | string | — | Condition expression. Node is skipped if false. See [Condition Syntax](#when-condition-syntax) |
 | `trigger_rule` | string | `all_success` | Join semantics when multiple upstreams exist |
-| `output_format` | object | — | JSON Schema for structured output. Supported for Claude and Codex nodes |
 | `context` | `'fresh'` \| `'shared'` | — | `fresh` = new session; `shared` = inherit from prior node. Defaults to `fresh` for parallel layers, inherited for sequential |
+| `idle_timeout` | number | — | Kill node if idle for this many milliseconds |
+| `retry` | object | — | Per-node retry configuration. See [Retry Configuration](#retry-configuration) |
+
+**AI node options** — apply to `command`, `prompt`, and `loop` nodes:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
 | `provider` | `'claude'` \| `'codex'` | inherited | Per-node provider override |
 | `model` | string | inherited | Per-node model override |
-| `allowed_tools` | string[] | — | Whitelist of built-in tools for this node. `[]` disables all built-in tools (MCP-only mode). Claude only — Codex nodes emit a warning and ignore this field |
-| `denied_tools` | string[] | — | Blacklist of built-in tools to remove from this node. Applied after `allowed_tools` if both are set. Claude only — Codex nodes emit a warning and ignore this field |
-| `retry` | object | — | Per-node retry configuration. See [Retry Configuration](#retry-configuration). Omit to use the automatic default (2 retries, 3 s base delay, transient errors only) |
-| `hooks` | object | — | Per-node SDK hook callbacks. Claude only — Codex nodes emit a warning and ignore this field. See [docs/hooks.md](./hooks.md) |
-| `mcp` | string | — | Path to MCP server config JSON file (relative to cwd or absolute). Environment variables (`$VAR_NAME`) in `env`/`headers` values are expanded from `process.env` at execution time. Claude only — Codex nodes emit a warning and ignore this field. See [docs/mcp-servers.md](./mcp-servers.md) |
-| `skills` | string[] | — | Skill names to preload into this node's agent context. Skills must be installed in `.claude/skills/`. The node is wrapped in an AgentDefinition with these skills + `Skill` auto-added to allowedTools. Claude only — Codex nodes emit a warning and ignore this field. See [docs/skills.md](./skills.md) |
+| `output_format` | object | — | JSON Schema for structured output (Claude and Codex) |
+| `effort` | `'low'` \| `'medium'` \| `'high'` \| `'max'` | — | Controls thinking depth. `max` is Opus only. Claude only |
+| `thinking` | string or object | — | `'adaptive'`, `'enabled'`, `'disabled'`, or `{ type: 'enabled', budgetTokens: N }`. Claude only |
+| `maxBudgetUsd` | number | — | Cost cap per node. Node fails with clear message if exceeded. Claude only |
+| `systemPrompt` | string | — | Per-node system prompt override. Claude only |
+| `fallbackModel` | string | — | Auto-failover model if primary fails. Claude only |
+| `allowed_tools` | string[] | — | Whitelist of built-in tools. `[]` = no tools. Claude only |
+| `denied_tools` | string[] | — | Tools to remove. Applied after `allowed_tools`. Claude only |
+| `hooks` | object | — | Per-node SDK hook callbacks. Claude only. See [Hooks](./hooks.md) |
+| `mcp` | string | — | Path to MCP server config JSON file. Claude only. See [MCP Servers](./mcp-servers.md) |
+| `skills` | string[] | — | Skills to preload. Claude only. See [Skills](./skills.md) |
 
 ### `trigger_rule` Values
 
@@ -860,6 +882,28 @@ After approval via natural language or CLI, the workflow auto-resumes from the n
 Without `on_reject`: rejecting cancels the workflow.
 With `on_reject`: rejecting triggers an AI rework prompt and re-pauses for re-review.
 See [Approval Nodes](./approval-nodes.md) for full details.
+
+### Pattern: Early Termination with Cancel
+
+Use a `cancel:` node to stop a workflow when a precondition fails — preventing wasted compute on downstream branches:
+
+```yaml
+nodes:
+  - id: check
+    bash: "git merge-base --is-ancestor HEAD origin/main && echo ok || echo blocked"
+
+  - id: stop-if-blocked
+    cancel: "PR has merge conflicts — cannot proceed with review"
+    depends_on: [check]
+    when: "$check.output == 'blocked'"
+
+  - id: review
+    prompt: "Review the PR..."
+    depends_on: [check]
+    when: "$check.output == 'ok'"
+```
+
+When a `cancel:` node executes (passes its `when:` gate), it sets the workflow run to `cancelled` with the reason string and stops all in-flight nodes. Unlike node failure, cancellation is intentional — the status is `cancelled`, not `failed`.
 
 ### Choosing: Interactive Loop vs Approval with on_reject
 
