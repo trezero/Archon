@@ -407,5 +407,14 @@ CODEX_ACCOUNT_ID=account1
       const content = readFileSync(join(skillDir, 'SKILL.md'), 'utf-8');
       expect(content).not.toBe('old content');
     });
+
+    it('should create skill files even when target directory does not exist', () => {
+      const target = join(TEST_DIR, 'non-existent-parent', 'skill-target-new');
+      // Do NOT pre-create target — copyArchonSkill must handle it
+
+      copyArchonSkill(target);
+
+      expect(existsSync(join(target, '.claude', 'skills', 'archon', 'SKILL.md'))).toBe(true);
+    });
   });
 });

@@ -422,7 +422,11 @@ When you use the `--branch` flag, the CLI creates a git worktree so your work ha
 
 ## Using With Claude Code (Skill)
 
-If you want Claude Code to be able to invoke Archon workflows on your behalf, copy the Archon skill into your Claude configuration:
+If you want Claude Code to be able to invoke Archon workflows on your behalf, install the
+Archon skill into your project. The setup wizard handles this automatically — just run
+`archon setup` and accept the skill installation prompt.
+
+To install manually instead:
 
 ```bash
 cp -r remote-coding-agent/.claude/skills/archon /path/to/your/repo/.claude/skills/

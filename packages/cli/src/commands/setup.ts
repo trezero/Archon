@@ -1177,6 +1177,8 @@ function writeEnvFiles(
 
 /**
  * Copy the bundled Archon skill files to <targetPath>/.claude/skills/archon/
+ *
+ * Always overwrites existing files to ensure the latest skill version is installed.
  */
 export function copyArchonSkill(targetPath: string): void {
   const skillRoot = join(targetPath, '.claude', 'skills', 'archon');
@@ -1515,9 +1517,15 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
       process.exit(0);
     }
 
-    const skillTarget = skillTargetRaw || options.repoPath;
+    const skillTarget = skillTargetRaw;
     s.start('Installing Archon skill...');
-    copyArchonSkill(skillTarget);
+    try {
+      copyArchonSkill(skillTarget);
+    } catch (err) {
+      s.stop('Archon skill installation failed');
+      cancel(`Could not install skill: ${(err as NodeJS.ErrnoException).message}`);
+      process.exit(1);
+    }
     s.stop('Archon skill installed');
     skillInstalledPath = join(skillTarget, '.claude', 'skills', 'archon');
   }
