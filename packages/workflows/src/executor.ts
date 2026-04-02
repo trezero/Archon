@@ -4,7 +4,7 @@
 import { mkdir } from 'fs/promises';
 import { join } from 'path';
 import type { IWorkflowPlatform, WorkflowMessageMetadata } from './deps';
-import type { WorkflowDeps } from './deps';
+import type { WorkflowDeps, WorkflowConfig } from './deps';
 import * as archonPaths from '@archon/paths';
 import { createLogger } from '@archon/paths';
 import { getDefaultBranch, toRepoPath } from '@archon/git';
@@ -246,7 +246,12 @@ export async function executeWorkflow(
   preCreatedRun?: WorkflowRun
 ): Promise<WorkflowExecutionResult> {
   // Load config once for the entire workflow execution
-  const config = await deps.loadConfig(cwd);
+  const fileConfig = await deps.loadConfig(cwd);
+  const dbEnvVars = codebaseId ? await deps.store.getCodebaseEnvVars(codebaseId) : {};
+  const config: WorkflowConfig =
+    Object.keys(dbEnvVars).length > 0
+      ? { ...fileConfig, envVars: { ...fileConfig.envVars, ...dbEnvVars } }
+      : fileConfig;
   const configuredCommandFolder = config.commands.folder;
 
   // Auto-detect base branch when not configured. Config takes priority.

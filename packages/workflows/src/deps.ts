@@ -122,6 +122,12 @@ export interface WorkflowAssistantOptions {
    * References a key in `agents`. Claude only.
    */
   agent?: string;
+  /**
+   * Additional env vars to merge into the Claude subprocess environment.
+   * Merged after process.env: { ...process.env, ...env }.
+   * Claude only — ignored for Codex (Codex SDK does not expose env injection).
+   */
+  env?: Record<string, string>;
   abortSignal?: AbortSignal;
   /**
    * When false (default), skips writing session transcript to ~/.claude/projects/.
@@ -186,6 +192,11 @@ export interface WorkflowConfig {
   /** Default assistant provider ('claude' | 'codex') */
   assistant: 'claude' | 'codex';
   baseBranch?: string;
+  /**
+   * Merged per-project env vars (config file + DB). Injected into Options.env on Claude SDK calls.
+   * Populated by createWorkflowDeps — loadConfig returns file-based vars; DB vars added after.
+   */
+  envVars?: Record<string, string>;
   commands: { folder?: string };
   defaults?: {
     loadDefaultWorkflows?: boolean;

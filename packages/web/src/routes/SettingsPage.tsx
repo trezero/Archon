@@ -12,6 +12,9 @@ import {
   addCodebase,
   deleteCodebase,
   updateAssistantConfig,
+  getCodebaseEnvVars,
+  setCodebaseEnvVar,
+  deleteCodebaseEnvVar,
 } from '@/lib/api';
 import type { SafeConfigResponse, CodebaseResponse } from '@/lib/api';
 
@@ -91,10 +94,96 @@ function SystemHealthSection({
   );
 }
 
+function EnvVarsPanel({ codebaseId }: { codebaseId: string }): React.ReactElement {
+  const queryClient = useQueryClient();
+  const [newKey, setNewKey] = useState('');
+  const [newValue, setNewValue] = useState('');
+
+  const { data: envVars } = useQuery({
+    queryKey: ['codebaseEnvVars', codebaseId],
+    queryFn: () => getCodebaseEnvVars(codebaseId),
+  });
+
+  const setMutation = useMutation({
+    mutationFn: (data: { key: string; value: string }) => setCodebaseEnvVar(codebaseId, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['codebaseEnvVars', codebaseId] });
+      setNewKey('');
+      setNewValue('');
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (key: string) => deleteCodebaseEnvVar(codebaseId, key),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['codebaseEnvVars', codebaseId] });
+    },
+  });
+
+  function handleAdd(e: React.FormEvent): void {
+    e.preventDefault();
+    if (newKey.trim() && newValue !== '') {
+      setMutation.mutate({ key: newKey.trim(), value: newValue });
+    }
+  }
+
+  const entries = envVars ? Object.entries(envVars) : [];
+
+  return (
+    <div className="mt-2 pl-2 border-l border-border space-y-2">
+      {entries.length === 0 ? (
+        <div className="text-xs text-muted-foreground">No env vars set.</div>
+      ) : (
+        <div className="space-y-1">
+          {entries.map(([key]) => (
+            <div key={key} className="flex items-center gap-2 text-xs">
+              <span className="font-mono text-text-primary truncate flex-1">{key}</span>
+              <span className="text-muted-foreground">= ------</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 px-1 text-xs"
+                onClick={() => {
+                  deleteMutation.mutate(key);
+                }}
+                disabled={deleteMutation.isPending}
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      <form onSubmit={handleAdd} className="flex gap-1">
+        <Input
+          value={newKey}
+          onChange={e => {
+            setNewKey(e.target.value);
+          }}
+          placeholder="KEY"
+          className="flex-1 h-7 text-xs font-mono"
+        />
+        <Input
+          value={newValue}
+          onChange={e => {
+            setNewValue(e.target.value);
+          }}
+          placeholder="value"
+          className="flex-1 h-7 text-xs"
+        />
+        <Button type="submit" size="sm" className="h-7 text-xs" disabled={setMutation.isPending}>
+          Add
+        </Button>
+      </form>
+    </div>
+  );
+}
+
 function ProjectsSection(): React.ReactElement {
   const queryClient = useQueryClient();
   const [addPath, setAddPath] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [expandedEnvVars, setExpandedEnvVars] = useState<string | null>(null);
 
   const { data: codebases } = useQuery({
     queryKey: ['codebases'],
@@ -135,24 +224,36 @@ function ProjectsSection(): React.ReactElement {
         ) : (
           <div className="space-y-2">
             {codebases.map((cb: CodebaseResponse) => (
-              <div
-                key={cb.id}
-                className="flex items-center justify-between rounded-md border border-border p-2 text-sm"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium truncate">{cb.name}</div>
-                  <div className="text-xs text-muted-foreground truncate">{cb.default_cwd}</div>
+              <div key={cb.id} className="rounded-md border border-border p-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium truncate">{cb.name}</div>
+                    <div className="text-xs text-muted-foreground truncate">{cb.default_cwd}</div>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => {
+                        setExpandedEnvVars(expandedEnvVars === cb.id ? null : cb.id);
+                      }}
+                    >
+                      Env Vars {expandedEnvVars === cb.id ? '\u25B2' : '\u25BC'}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        deleteMutation.mutate(cb.id);
+                      }}
+                      disabled={deleteMutation.isPending}
+                    >
+                      Remove
+                    </Button>
+                  </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    deleteMutation.mutate(cb.id);
-                  }}
-                  disabled={deleteMutation.isPending}
-                >
-                  Remove
-                </Button>
+                {expandedEnvVars === cb.id && <EnvVarsPanel codebaseId={cb.id} />}
               </div>
             ))}
           </div>

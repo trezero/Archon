@@ -9,6 +9,7 @@ import type { MergedConfig } from '../config/config-types';
 import * as workflowDb from '../db/workflows';
 import * as workflowEventDb from '../db/workflow-events';
 import * as codebaseDb from '../db/codebases';
+import * as envVarDb from '../db/env-vars';
 import { getAssistantClient } from '../clients/factory';
 import { loadConfig as loadMergedConfig } from '../config/config-loader';
 import { createLogger } from '@archon/paths';
@@ -57,6 +58,7 @@ export function createWorkflowStore(): IWorkflowStore {
     },
     getCompletedDagNodeOutputs: workflowEventDb.getCompletedDagNodeOutputs,
     getCodebase: codebaseDb.getCodebase,
+    getCodebaseEnvVars: envVarDb.getCodebaseEnvVars,
   };
 }
 

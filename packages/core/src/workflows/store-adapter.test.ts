@@ -74,6 +74,7 @@ describe('createWorkflowStore', () => {
       'createWorkflowEvent',
       'getCompletedDagNodeOutputs',
       'getCodebase',
+      'getCodebaseEnvVars',
     ];
     for (const method of requiredMethods) {
       expect(typeof store[method]).toBe('function');

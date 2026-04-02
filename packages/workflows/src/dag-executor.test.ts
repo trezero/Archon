@@ -89,6 +89,7 @@ function createMockStore(): IWorkflowStore {
     createWorkflowEvent: mock(() => Promise.resolve()),
     getCompletedDagNodeOutputs: mock(() => Promise.resolve(new Map<string, string>())),
     getCodebase: mock(() => Promise.resolve(null)),
+    getCodebaseEnvVars: mock(() => Promise.resolve({})),
   };
 }
 

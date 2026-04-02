@@ -75,6 +75,7 @@ function makeStore(overrides: Partial<IWorkflowStore> = {}): IWorkflowStore {
     getCompletedDagNodeOutputs: mock(async () => new Map()),
     resumeWorkflowRun: mock(async () => makeRun()),
     getCodebase: mock(async () => null),
+    getCodebaseEnvVars: mock(async () => ({})),
     ...overrides,
   };
 }

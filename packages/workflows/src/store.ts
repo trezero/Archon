@@ -80,6 +80,9 @@ export interface IWorkflowStore {
    */
   getCompletedDagNodeOutputs(workflowRunId: string): Promise<Map<string, string>>;
 
+  // Per-codebase env vars for workflow node injection
+  getCodebaseEnvVars(codebaseId: string): Promise<Record<string, string>>;
+
   // Codebase lookup (for path resolution)
   getCodebase(id: string): Promise<{
     id: string;

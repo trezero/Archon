@@ -272,7 +272,9 @@ export class ClaudeClient implements IAssistantClient {
 
       const options: Options = {
         cwd,
-        env: buildSubprocessEnv(),
+        env: requestOptions?.env
+          ? { ...buildSubprocessEnv(), ...requestOptions.env }
+          : buildSubprocessEnv(),
         model: requestOptions?.model,
         abortController: controller,
         ...(requestOptions?.tools !== undefined ? { tools: requestOptions.tools } : {}),

@@ -540,6 +540,10 @@ async function resolveNodeProviderAndModel(
       }
       getLog().info({ nodeId: node.id, skills: node.skills, agentId }, 'dag.skills_agent_created');
     }
+    // Inject per-project env vars (config file + DB) into subprocess env
+    if (config.envVars && Object.keys(config.envVars).length > 0) {
+      claudeOptions.env = config.envVars;
+    }
     options = Object.keys(claudeOptions).length > 0 ? claudeOptions : undefined;
   }
 

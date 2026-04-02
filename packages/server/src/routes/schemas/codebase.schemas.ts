@@ -43,3 +43,29 @@ export const addCodebaseBodySchema = z
 export const deleteCodebaseResponseSchema = z
   .object({ success: z.boolean() })
   .openapi('DeleteCodebaseResponse');
+
+/** Response for GET /api/codebases/:id/env */
+export const codebaseEnvVarsResponseSchema = z
+  .object({
+    envVars: z.record(z.string()),
+  })
+  .openapi('CodebaseEnvVarsResponse');
+
+/** Body for PUT /api/codebases/:id/env — upsert one key-value pair */
+export const setEnvVarBodySchema = z
+  .object({
+    key: z.string().min(1).max(255),
+    value: z.string(),
+  })
+  .openapi('SetEnvVarBody');
+
+/** Path params for routes with :id/:key */
+export const codebaseEnvVarParamsSchema = z.object({
+  id: z.string(),
+  key: z.string(),
+});
+
+/** Response for PUT/DELETE /api/codebases/:id/env */
+export const envVarMutationResponseSchema = z
+  .object({ success: z.boolean() })
+  .openapi('EnvVarMutationResponse');

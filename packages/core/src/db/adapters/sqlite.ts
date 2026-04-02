@@ -241,6 +241,17 @@ export class SqliteAdapter implements IDatabase {
         updated_at TEXT DEFAULT (datetime('now'))
       );
 
+      -- Codebase env vars table
+      CREATE TABLE IF NOT EXISTS remote_agent_codebase_env_vars (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        codebase_id TEXT NOT NULL REFERENCES remote_agent_codebases(id) ON DELETE CASCADE,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(codebase_id, key)
+      );
+
       -- Conversations table
       CREATE TABLE IF NOT EXISTS remote_agent_conversations (
         id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
@@ -336,6 +347,7 @@ export class SqliteAdapter implements IDatabase {
       );
 
       -- Indexes
+      CREATE INDEX IF NOT EXISTS idx_codebase_env_vars_codebase_id ON remote_agent_codebase_env_vars(codebase_id);
       CREATE INDEX IF NOT EXISTS idx_conversations_platform ON remote_agent_conversations(platform_type, platform_conversation_id);
       CREATE INDEX IF NOT EXISTS idx_sessions_conversation ON remote_agent_sessions(conversation_id);
       CREATE INDEX IF NOT EXISTS idx_sessions_active ON remote_agent_sessions(active);
