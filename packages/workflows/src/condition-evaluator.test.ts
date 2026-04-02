@@ -316,4 +316,30 @@ describe('evaluateCondition', () => {
     expect(res.result).toBe(false);
     expect(res.parsed).toBe(false);
   });
+
+  it('|| operator: short-circuits on true first clause — invalid second clause is not evaluated', () => {
+    // When the first OR clause is true, the second clause (even if invalid) is not reached.
+    // This is intentional short-circuit OR behavior. A typo in a later OR clause will still
+    // surface as a parse error on runs where the earlier clauses are false.
+    const outputs = new Map([['a', makeOutput('X')]]);
+    const res = evaluateCondition("$a.output == 'X' || not-valid", outputs);
+    expect(res.result).toBe(true);
+    expect(res.parsed).toBe(true); // short-circuit: invalid second clause never reached
+  });
+
+  // --- splitOutsideQuotes guard: operators inside quoted values are not treated as splitters ---
+
+  it('splitOutsideQuotes guard: value containing && is not split on the operator', () => {
+    const outputs = new Map([['n', makeOutput('A&&B')]]);
+    const res = evaluateCondition("$n.output == 'A&&B'", outputs);
+    expect(res.result).toBe(true);
+    expect(res.parsed).toBe(true);
+  });
+
+  it('splitOutsideQuotes guard: value containing || is not split on the operator', () => {
+    const outputs = new Map([['n', makeOutput('A||B')]]);
+    const res = evaluateCondition("$n.output == 'A||B'", outputs);
+    expect(res.result).toBe(true);
+    expect(res.parsed).toBe(true);
+  });
 });

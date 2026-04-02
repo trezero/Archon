@@ -200,7 +200,7 @@ when: "$nodeId.output <= '5'"
 when: "$nodeId.output.score >= '0.9'"      # dot notation + numeric comparison
 ```
 
-**Compound expressions** (`&&` binds tighter than `||`, no parentheses):
+**Compound expressions** (`&&` binds tighter than `||`):
 ```yaml
 when: "$a.output == 'X' && $b.output != 'Y'"
 when: "$a.output == 'X' || $b.output == 'Y'"
@@ -213,6 +213,7 @@ when: "$a.output == 'X' && $b.output == 'Y' || $c.output == 'Z'"
 - `$nodeId.output.field` accesses a JSON field (for `output_format` nodes)
 - Invalid or unparseable expressions default to `false` (fail-closed — node is skipped with a warning)
 - Numeric operators fail-closed if either side is not a finite number
+- Parentheses are not supported — use standard AND/OR precedence to structure conditions
 - Skipped nodes propagate their skipped state to dependants
 
 ### `$node_id.output` Substitution
