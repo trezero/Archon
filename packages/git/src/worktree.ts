@@ -20,11 +20,12 @@ function getLog(): ReturnType<typeof createLogger> {
 /**
  * Get the base directory for worktrees.
  *
- * For paths under ~/.archon/workspaces/owner/repo/..., returns the project-scoped
- * worktrees path: ~/.archon/workspaces/owner/repo/worktrees/
- *
- * For paths outside the workspaces directory, returns the legacy global path:
- * ~/.archon/worktrees/
+ * Resolution order:
+ * 1. If `codebaseName` is provided in "owner/repo" format, returns the project-scoped
+ *    path directly: ~/.archon/workspaces/owner/repo/worktrees/
+ * 2. For paths under ~/.archon/workspaces/owner/repo/..., extracts owner/repo from path
+ *    and returns the project-scoped path.
+ * 3. Otherwise, returns the legacy global path: ~/.archon/worktrees/
  */
 export function getWorktreeBase(repoPath: RepoPath, codebaseName?: string): string {
   // If codebase name is known, use project-scoped path directly
@@ -33,6 +34,9 @@ export function getWorktreeBase(repoPath: RepoPath, codebaseName?: string): stri
     if (parts.length === 2 && parts[0] && parts[1]) {
       return getProjectWorktreesPath(parts[0], parts[1]);
     }
+    // codebaseName present but not "owner/repo" format — fall through to path detection.
+    // This is intentional: safe degradation to legacy global path.
+    getLog().warn({ codebaseName }, 'worktree.invalid_codebase_name_format');
   }
   // Existing path-prefix detection (cloned repos under workspaces/)
   const workspacesPath = getArchonWorkspacesPath();
@@ -53,12 +57,15 @@ export function getWorktreeBase(repoPath: RepoPath, codebaseName?: string): stri
  *
  * When project-scoped, the worktree base already includes the owner/repo context,
  * so callers should NOT append owner/repo again.
+ *
+ * Resolution order mirrors `getWorktreeBase`: codebaseName → path detection → legacy.
  */
 export function isProjectScopedWorktreeBase(repoPath: RepoPath, codebaseName?: string): boolean {
   // If codebase name is known, it's always project-scoped
   if (codebaseName) {
     const parts = codebaseName.split('/');
     if (parts.length === 2 && parts[0] && parts[1]) return true;
+    // Invalid format — fall through to path detection (same safe degradation as getWorktreeBase).
   }
   const workspacesPath = getArchonWorkspacesPath();
   if (!repoPath.startsWith(workspacesPath)) return false;

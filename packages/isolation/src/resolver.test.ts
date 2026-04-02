@@ -628,6 +628,41 @@ describe('IsolationResolver', () => {
     }
   });
 
+  // --- codebaseName propagation test ---
+
+  test('passes codebaseName from codebase to isolation request', async () => {
+    const capturedRequests: unknown[] = [];
+    const resolver = createResolver({
+      provider: {
+        ...makeMockProvider(),
+        create: async (request: unknown) => {
+          capturedRequests.push(request);
+          return {
+            id: '/worktrees/new-branch',
+            provider: 'worktree' as const,
+            workingPath: '/worktrees/new-branch',
+            branchName: 'new-branch',
+            status: 'active' as const,
+            createdAt: new Date(),
+            metadata: { adopted: false },
+          };
+        },
+      },
+    });
+
+    worktreeExistsSpy.mockResolvedValue(false);
+
+    await resolver.resolve({
+      existingEnvId: null,
+      codebase: { id: 'cb-1', name: 'owner/repo', defaultCwd: '/local/repo' },
+      hints: { workflowType: 'task', workflowId: 'wf-1' },
+      platformType: 'web',
+    });
+
+    expect(capturedRequests).toHaveLength(1);
+    expect(capturedRequests[0]).toMatchObject({ codebaseName: 'owner/repo' });
+  });
+
   // --- Constructor validation tests ---
 
   test('throws on zero staleThresholdDays', () => {

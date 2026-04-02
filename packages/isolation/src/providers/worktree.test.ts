@@ -1,4 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn, mock, type Mock } from 'bun:test';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 // Mock logger to suppress noisy output during tests
 mock.module('@archon/paths', () => ({
@@ -773,6 +775,38 @@ describe('WorktreeProvider', () => {
       );
 
       await expect(provider.create(request)).rejects.toThrow('Permission denied');
+    });
+
+    test('creates worktree under project-scoped path for locally-registered repo', async () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-local',
+        codebaseName: 'Widinglabs/sasha-demo',
+        canonicalRepoPath: '/Users/rasmus/Projects/sasha-demo', // not under workspaces
+        workflowType: 'task',
+        identifier: 'fix-issue-42',
+      };
+
+      worktreeExistsSpy.mockResolvedValue(false);
+      const env = await provider.create(request);
+
+      // workingPath should use project-scoped path, not legacy global worktrees
+      expect(env.workingPath).toBe(
+        join(
+          homedir(),
+          '.archon',
+          'workspaces',
+          'Widinglabs',
+          'sasha-demo',
+          'worktrees',
+          env.branchName
+        )
+      );
+
+      // mkdir should be called with the project-scoped base (no owner/repo appended)
+      expect(mkdirSpy).toHaveBeenCalledWith(
+        join(homedir(), '.archon', 'workspaces', 'Widinglabs', 'sasha-demo', 'worktrees'),
+        { recursive: true }
+      );
     });
   });
 
@@ -2113,10 +2147,17 @@ describe('WorktreeProvider', () => {
       };
       const branchName = provider.generateBranchName(request);
       const path = provider.getWorktreePath(request, branchName);
-      // Should be project-scoped (under workspaces), not global worktrees
-      expect(path).toContain('workspaces');
-      expect(path).toContain('Widinglabs');
-      expect(path).toContain('sasha-demo');
+      expect(path).toBe(
+        join(
+          homedir(),
+          '.archon',
+          'workspaces',
+          'Widinglabs',
+          'sasha-demo',
+          'worktrees',
+          branchName
+        )
+      );
     });
   });
 
