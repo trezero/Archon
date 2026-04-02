@@ -50,6 +50,7 @@ import archonRemotionGenerateWf from '../../../../.archon/workflows/defaults/arc
 import archonInteractivePrdWf from '../../../../.archon/workflows/defaults/archon-interactive-prd.yaml' with { type: 'text' };
 import archonPivLoopWf from '../../../../.archon/workflows/defaults/archon-piv-loop.yaml' with { type: 'text' };
 import archonAdversarialDevWf from '../../../../.archon/workflows/defaults/archon-adversarial-dev.yaml' with { type: 'text' };
+import archonWorkflowBuilderWf from '../../../../.archon/workflows/defaults/archon-workflow-builder.yaml' with { type: 'text' };
 
 // =============================================================================
 // Exports
@@ -98,6 +99,7 @@ export const BUNDLED_WORKFLOWS: Record<string, string> = {
   'archon-interactive-prd': archonInteractivePrdWf,
   'archon-piv-loop': archonPivLoopWf,
   'archon-adversarial-dev': archonAdversarialDevWf,
+  'archon-workflow-builder': archonWorkflowBuilderWf,
 };
 
 /**
