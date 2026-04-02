@@ -50,6 +50,8 @@ const mockExecFileAsync = mock((cmd: string) =>
   Promise.resolve({ stdout: cmd === 'gh' ? '[]' : '', stderr: '' })
 );
 
+const mockGetDefaultBranch = mock(() => Promise.resolve('main'));
+
 mock.module('@archon/git', () => ({
   hasUncommittedChanges: mockHasUncommittedChanges,
   execFileAsync: mockExecFileAsync,
@@ -57,6 +59,7 @@ mock.module('@archon/git', () => ({
   toRepoPath: mock((p: string) => p),
   toBranchName: mock((b: string) => b),
   worktreeExists: mock(() => Promise.resolve(true)),
+  getDefaultBranch: mockGetDefaultBranch,
 }));
 
 mock.module('@archon/isolation', () => ({
@@ -100,6 +103,8 @@ describe('isolationCompleteCommand', () => {
     mockExecFileAsync.mockImplementation((cmd: string) =>
       Promise.resolve({ stdout: cmd === 'gh' ? '[]' : '', stderr: '' })
     );
+    mockGetDefaultBranch.mockReset();
+    mockGetDefaultBranch.mockResolvedValue('main');
   });
 
   afterEach(() => {
@@ -286,7 +291,8 @@ describe('isolationCompleteCommand', () => {
     mockRemoveEnvironment.mockResolvedValueOnce(undefined);
     mockExecFileAsync.mockImplementation((cmd: string) => {
       if (cmd === 'gh') {
-        return Promise.reject(new Error('gh: command not found'));
+        const err = Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' });
+        return Promise.reject(err);
       }
       return Promise.resolve({ stdout: '', stderr: '' });
     });

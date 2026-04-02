@@ -11,6 +11,7 @@ import {
   hasUncommittedChanges,
   toWorktreePath,
   worktreeExists,
+  getDefaultBranch,
 } from '@archon/git';
 import { getIsolationProvider } from '@archon/isolation';
 import { cleanupMergedWorktrees, removeEnvironment } from '@archon/core/services/cleanup-service';
@@ -246,9 +247,17 @@ export async function isolationCompleteCommand(
       const blockers: string[] = [];
 
       // Check 1: uncommitted changes in worktree
-      const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
-      if (hasChanges) {
-        blockers.push('uncommitted changes in worktree');
+      try {
+        const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
+        if (hasChanges) {
+          blockers.push('uncommitted changes in worktree');
+        }
+      } catch (error) {
+        getLog().warn(
+          { err: error as Error, branch },
+          'isolation.complete_uncommitted_check_failed'
+        );
+        blockers.push('could not verify uncommitted changes (worktree path may be missing)');
       }
 
       // Check 2: running workflow on this branch
@@ -259,6 +268,7 @@ export async function isolationCompleteCommand(
         }
       } catch (error) {
         getLog().warn({ err: error as Error, branch }, 'isolation.complete_workflow_check_failed');
+        console.warn('  Warning: could not check for running workflows — skipping workflow check');
       }
 
       // Check 3: open PRs on this branch (requires gh CLI)
@@ -273,27 +283,30 @@ export async function isolationCompleteCommand(
           blockers.push(`open PR #${String(pr.number)} — "${pr.title}"`);
         }
       } catch (error) {
-        const err = error as Error;
-        if (err.message.includes('not found') || err.message.includes('command not found')) {
-          console.warn('  Warning: gh CLI not available — skipping open PR check');
-        } else {
-          getLog().warn({ err, branch }, 'isolation.complete_pr_check_failed');
-        }
+        const err = error as NodeJS.ErrnoException;
+        const isNotInstalled = err.code === 'ENOENT' || err.message.includes('command not found');
+        const reason = isNotInstalled ? 'gh CLI not available' : `gh error: ${err.message}`;
+        console.warn(`  Warning: ${reason} — skipping open PR check`);
+        getLog().warn({ err, branch }, 'isolation.complete_pr_check_failed');
       }
 
-      // Check 4: unmerged commits (not yet in main)
+      // Check 4: unmerged commits (not yet in default branch)
       try {
+        const defaultBranch = await getDefaultBranch(toRepoPath(env.codebase_default_cwd));
         const unmergedResult = await execFileAsync(
           'git',
-          ['-C', env.codebase_default_cwd, 'log', `main..${branch}`, '--oneline'],
+          ['-C', env.codebase_default_cwd, 'log', `${defaultBranch}..${branch}`, '--oneline'],
           { timeout: 15000 }
         );
         const unmergedLines = unmergedResult.stdout.trim().split('\n').filter(Boolean);
         if (unmergedLines.length > 0) {
-          blockers.push(`${String(unmergedLines.length)} commit(s) not merged into main`);
+          blockers.push(
+            `${String(unmergedLines.length)} commit(s) not merged into ${defaultBranch}`
+          );
         }
       } catch (error) {
         getLog().warn({ err: error as Error, branch }, 'isolation.complete_unmerged_check_failed');
+        console.warn('  Warning: could not check for unmerged commits — skipping unmerged check');
       }
 
       // Check 5: unpushed commits (not yet on remote)
