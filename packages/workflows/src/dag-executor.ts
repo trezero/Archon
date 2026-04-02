@@ -18,6 +18,7 @@ import type {
 } from './deps';
 import type {
   DagNode,
+  ApprovalNode,
   BashNode,
   CommandNode,
   PromptNode,
@@ -1810,6 +1811,153 @@ async function executeLoopNode(
 }
 
 /**
+ * Execute an approval node — pauses workflow for human review.
+ * On rejection resume (when on_reject is configured): runs the on_reject prompt via AI,
+ * then re-pauses at the approval gate. After max_attempts rejections, cancels normally.
+ */
+async function executeApprovalNode(
+  node: ApprovalNode,
+  workflowRun: WorkflowRun,
+  deps: WorkflowDeps,
+  platform: IWorkflowPlatform,
+  conversationId: string,
+  workflowProvider: 'claude' | 'codex',
+  workflowModel: string | undefined,
+  cwd: string,
+  artifactsDir: string,
+  logDir: string,
+  baseBranch: string,
+  nodeOutputs: Map<string, NodeOutput>,
+  config: WorkflowConfig,
+  configuredCommandFolder?: string,
+  issueContext?: string
+): Promise<NodeOutput> {
+  const msgContext = { workflowId: workflowRun.id, nodeName: node.id };
+
+  // Detect rejection resume — check metadata for rejection_reason set by reject handlers
+  const rawApproval = workflowRun.metadata?.approval;
+  const approvalMeta = isApprovalContext(rawApproval) ? rawApproval : undefined;
+  const rawRejection = workflowRun.metadata?.rejection_reason;
+  const rejectionReason =
+    approvalMeta?.type === 'approval' &&
+    approvalMeta.nodeId === node.id &&
+    typeof rawRejection === 'string' &&
+    rawRejection !== ''
+      ? rawRejection
+      : '';
+  const isRejectionResume = rejectionReason !== '';
+
+  // On rejection resume with on_reject configured: run the on_reject prompt via AI
+  if (isRejectionResume && node.approval.on_reject) {
+    const maxAttempts = node.approval.on_reject.max_attempts ?? 3;
+    const rejectionCount = (workflowRun.metadata?.rejection_count as number | undefined) ?? 0;
+
+    // Check if max attempts exhausted
+    if (rejectionCount >= maxAttempts) {
+      await deps.store.cancelWorkflowRun(workflowRun.id);
+      const cancelMsg = `❌ Approval node \`${node.id}\` cancelled after ${String(maxAttempts)} rejections.`;
+      await safeSendMessage(platform, conversationId, cancelMsg, msgContext);
+      return { state: 'completed' as const, output: '' };
+    }
+
+    // Run the on_reject prompt via AI
+    const { prompt: substitutedPrompt } = substituteWorkflowVariables(
+      node.approval.on_reject.prompt,
+      workflowRun.id,
+      workflowRun.user_message ?? '',
+      artifactsDir,
+      baseBranch,
+      issueContext,
+      undefined, // loopUserInput
+      rejectionReason
+    );
+
+    // Build a synthetic PromptNode to reuse executeNodeInternal
+    const syntheticNode: PromptNode = {
+      id: node.id,
+      prompt: substituteNodeOutputRefs(substitutedPrompt, nodeOutputs),
+      ...(node.depends_on ? { depends_on: node.depends_on } : {}),
+      ...(node.idle_timeout ? { idle_timeout: node.idle_timeout } : {}),
+    };
+
+    const { provider, options: nodeOptions } = await resolveNodeProviderAndModel(
+      syntheticNode,
+      workflowProvider,
+      workflowModel,
+      config,
+      platform,
+      conversationId,
+      workflowRun.id,
+      cwd
+    );
+
+    const output = await executeNodeInternal(
+      deps,
+      platform,
+      conversationId,
+      cwd,
+      workflowRun,
+      syntheticNode,
+      provider,
+      nodeOptions,
+      artifactsDir,
+      logDir,
+      baseBranch,
+      nodeOutputs,
+      undefined, // fresh session
+      configuredCommandFolder,
+      issueContext
+    );
+
+    if (output.state === 'failed') {
+      return output;
+    }
+    // Fall through to re-pause at the approval gate
+  }
+
+  // Standard approval gate — send message and pause
+  const approvalMsg =
+    `⏸ **Approval required**: ${node.approval.message}\n\n` +
+    `Run ID: \`${workflowRun.id}\`\n` +
+    `Approve: \`/workflow approve ${workflowRun.id}\` | Reject: \`/workflow reject ${workflowRun.id}\``;
+  await safeSendMessage(platform, conversationId, approvalMsg, msgContext);
+
+  deps.store
+    .createWorkflowEvent({
+      workflow_run_id: workflowRun.id,
+      event_type: 'approval_requested',
+      step_name: node.id,
+      data: { message: node.approval.message },
+    })
+    .catch((err: Error) => {
+      getLog().error(
+        { err, workflowRunId: workflowRun.id, eventType: 'approval_requested' },
+        'workflow.event_persist_failed'
+      );
+    });
+
+  await deps.store.pauseWorkflowRun(workflowRun.id, {
+    message: node.approval.message,
+    nodeId: node.id,
+    type: 'approval',
+    captureResponse: node.approval.capture_response,
+    onRejectPrompt: node.approval.on_reject?.prompt,
+    onRejectMaxAttempts: node.approval.on_reject?.max_attempts,
+  });
+
+  getWorkflowEventEmitter().emit({
+    type: 'approval_pending',
+    runId: workflowRun.id,
+    nodeId: node.id,
+    message: node.approval.message,
+  });
+
+  // Return completed — the between-layer status check will see 'paused' and break.
+  // On resume, the approve endpoint writes a real node_completed event with the user's response.
+  return { state: 'completed' as const, output: '' };
+}
+
+/**
  * Execute a complete DAG workflow.
  * Called from executeWorkflow() in executor.ts.
  */
@@ -2065,40 +2213,24 @@ export async function executeDagWorkflow(
 
           // 3c. Approval node dispatch — pauses workflow for human review
           if (isApprovalNode(node)) {
-            const approvalMsg =
-              `\u23f8 **Approval required**: ${node.approval.message}\n\n` +
-              `Run ID: \`${workflowRun.id}\`\n` +
-              `Approve: \`/workflow approve ${workflowRun.id}\` | Reject: \`/workflow reject ${workflowRun.id}\``;
-            await safeSendMessage(platform, conversationId, approvalMsg, {
-              workflowId: workflowRun.id,
-              nodeName: node.id,
-            });
-            deps.store
-              .createWorkflowEvent({
-                workflow_run_id: workflowRun.id,
-                event_type: 'approval_requested',
-                step_name: node.id,
-                data: { message: node.approval.message },
-              })
-              .catch((err: Error) => {
-                getLog().error(
-                  { err, workflowRunId: workflowRun.id, eventType: 'approval_requested' },
-                  'workflow.event_persist_failed'
-                );
-              });
-            await deps.store.pauseWorkflowRun(workflowRun.id, {
-              message: node.approval.message,
-              nodeId: node.id,
-            });
-            getWorkflowEventEmitter().emit({
-              type: 'approval_pending',
-              runId: workflowRun.id,
-              nodeId: node.id,
-              message: node.approval.message,
-            });
-            // Return completed — the between-layer status check will see 'paused' and break.
-            // On resume, the approve endpoint writes a real node_completed event with the user's response.
-            return { nodeId: node.id, output: { state: 'completed' as const, output: '' } };
+            const output = await executeApprovalNode(
+              node,
+              workflowRun,
+              deps,
+              platform,
+              conversationId,
+              workflowProvider,
+              workflowModel,
+              cwd,
+              artifactsDir,
+              logDir,
+              baseBranch,
+              nodeOutputs,
+              config,
+              configuredCommandFolder,
+              issueContext
+            );
+            return { nodeId: node.id, output };
           }
 
           // 3d. Cancel node dispatch — terminates the workflow run

@@ -552,11 +552,12 @@ export async function handleMessage(
           // Write approval events — for interactive loops, do NOT write node_completed
           // (the executor writes it when the AI emits the completion signal on actual exit).
           if (approval.type !== 'interactive_loop') {
+            const nodeOutput = approval.captureResponse === true ? message : '';
             await workflowEventDb.createWorkflowEvent({
               workflow_run_id: pausedRun.id,
               event_type: 'node_completed',
               step_name: approval.nodeId,
-              data: { node_output: message, approval_decision: 'approved' },
+              data: { node_output: nodeOutput, approval_decision: 'approved' },
             });
           }
           await workflowEventDb.createWorkflowEvent({
@@ -565,11 +566,12 @@ export async function handleMessage(
             step_name: approval.nodeId,
             data: { decision: 'approved', comment: message },
           });
-          // For interactive loops, store user input; for standard approvals, mark as approved.
+          // For interactive loops, store user input; for standard approvals, mark as approved
+          // and clear any rejection state.
           const metadataUpdate =
             approval.type === 'interactive_loop'
               ? { loop_user_input: message }
-              : { approval_response: 'approved' };
+              : { approval_response: 'approved', rejection_reason: '', rejection_count: 0 };
           await workflowDb.updateWorkflowRun(pausedRun.id, {
             status: 'failed',
             metadata: metadataUpdate,

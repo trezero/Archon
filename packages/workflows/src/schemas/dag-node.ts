@@ -126,12 +126,24 @@ export type LoopNode = z.infer<typeof loopNodeSchema> & {
   cancel?: never;
 };
 
+/** Schema for the `on_reject` sub-object on approval nodes. */
+export const approvalOnRejectSchema = z.object({
+  prompt: z.string().min(1, "'on_reject.prompt' must be a non-empty string"),
+  max_attempts: z.number().int().min(1).max(10).optional(),
+});
+
+export type ApprovalOnReject = z.infer<typeof approvalOnRejectSchema>;
+
 /**
  * Approval node schema — pauses the workflow for human review.
  * Extends full base for type compatibility; AI-specific fields are ignored at runtime.
  */
 export const approvalNodeSchema = dagNodeBaseSchema.extend({
-  approval: z.object({ message: z.string().min(1, "'approval.message' must not be empty") }),
+  approval: z.object({
+    message: z.string().min(1, "'approval.message' must not be empty"),
+    capture_response: z.boolean().optional(),
+    on_reject: approvalOnRejectSchema.optional(),
+  }),
 });
 
 /** DAG node that pauses workflow execution for human approval */
@@ -204,7 +216,11 @@ export const dagNodeSchema = dagNodeBaseSchema
     bash: z.string().optional(),
     loop: loopNodeConfigSchema.optional(),
     approval: z
-      .object({ message: z.string().min(1, "'approval.message' must not be empty") })
+      .object({
+        message: z.string().min(1, "'approval.message' must not be empty"),
+        capture_response: z.boolean().optional(),
+        on_reject: approvalOnRejectSchema.optional(),
+      })
       .optional(),
     cancel: z.string().optional(),
     // Bash-only

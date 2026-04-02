@@ -1116,11 +1116,12 @@ async function handleWorkflowCommand(
         }
 
         // Standard approval node path
+        const nodeOutput = approval.captureResponse === true ? comment : '';
         await workflowEventDb.createWorkflowEvent({
           workflow_run_id: runId,
           event_type: 'node_completed',
           step_name: approval.nodeId,
-          data: { node_output: comment, approval_decision: 'approved' },
+          data: { node_output: nodeOutput, approval_decision: 'approved' },
         });
         await workflowEventDb.createWorkflowEvent({
           workflow_run_id: runId,
@@ -1128,10 +1129,10 @@ async function handleWorkflowCommand(
           step_name: approval.nodeId,
           data: { decision: 'approved', comment },
         });
-        // Transition to 'failed' so findResumableRun picks it up
+        // Transition to 'failed' so findResumableRun picks it up. Clear any rejection state.
         await workflowDb.updateWorkflowRun(runId, {
           status: 'failed',
-          metadata: { approval_response: 'approved' },
+          metadata: { approval_response: 'approved', rejection_reason: '', rejection_count: 0 },
         });
         const pathInfo = run.working_path ? `\nPath: \`${run.working_path}\`` : '';
         return {
@@ -1175,6 +1176,30 @@ async function handleWorkflowCommand(
           step_name: approval?.nodeId ?? 'unknown',
           data: { decision: 'rejected', reason },
         });
+
+        const hasOnReject = approval?.onRejectPrompt !== undefined;
+        if (hasOnReject) {
+          const currentCount = (run.metadata.rejection_count as number | undefined) ?? 0;
+          const maxAttempts = approval?.onRejectMaxAttempts ?? 3;
+          if (currentCount + 1 >= maxAttempts) {
+            await workflowDb.cancelWorkflowRun(runId);
+            return {
+              success: true,
+              message: `Workflow \`${run.workflow_name}\` rejected and cancelled (max attempts reached).`,
+            };
+          }
+          await workflowDb.updateWorkflowRun(runId, {
+            status: 'failed',
+            metadata: { rejection_reason: reason, rejection_count: currentCount + 1 },
+          });
+          return {
+            success: true,
+            message:
+              `Workflow \`${run.workflow_name}\` rejected. Reworking with your feedback...\n` +
+              'Type your next message in this conversation to resume the workflow.',
+          };
+        }
+
         await workflowDb.cancelWorkflowRun(runId);
         return {
           success: true,
