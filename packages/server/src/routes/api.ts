@@ -1943,6 +1943,9 @@ export function registerApiRoutes(
   // GET /api/artifacts/:runId/* - Serve workflow artifact file contents
   // The wildcard captures the filename (e.g. "plan.md", "subdir/report.md").
   // Path traversal is blocked: any segment containing ".." is rejected.
+  // NOTE: Uses app.get() instead of registerOpenApiRoute because:
+  //  1. Wildcard path params (*) are not representable in OpenAPI 3.0
+  //  2. Response is raw text/markdown, not JSON
   app.get('/api/artifacts/:runId/*', async c => {
     const runId = c.req.param('runId');
     const rawFilename = c.req.param('*');
@@ -1975,14 +1978,19 @@ export function registerApiRoutes(
     }
 
     // Derive owner/repo from working_path (must be under ~/.archon/workspaces/owner/repo/...)
-    const workspacesPath = getArchonWorkspacesPath();
+    const normalizedWorkspacesPath = normalize(getArchonWorkspacesPath());
     const normalizedWorkingPath = normalize(run.working_path);
-    if (!normalizedWorkingPath.startsWith(normalize(workspacesPath) + sep)) {
+    if (!normalizedWorkingPath.startsWith(normalizedWorkspacesPath + sep)) {
+      getLog().error(
+        { runId, workingPath: run.working_path },
+        'artifacts.working_path_outside_workspaces'
+      );
       return apiError(c, 404, 'Artifact not available: working path not in workspaces');
     }
-    const relative = normalizedWorkingPath.substring(normalize(workspacesPath).length + 1);
+    const relative = normalizedWorkingPath.substring(normalizedWorkspacesPath.length + 1);
     const parts = relative.split(sep).filter(p => p.length > 0);
     if (parts.length < 2) {
+      getLog().error({ runId, workingPath: run.working_path }, 'artifacts.owner_repo_parse_failed');
       return apiError(c, 404, 'Artifact not available: could not determine owner/repo');
     }
     const [owner, repo] = parts;
@@ -1995,6 +2003,7 @@ export function registerApiRoutes(
       !normalize(filePath).startsWith(normalize(artifactDir) + sep) &&
       normalize(filePath) !== normalize(artifactDir)
     ) {
+      getLog().warn({ runId, filename, filePath, artifactDir }, 'artifacts.path_escape_blocked');
       return apiError(c, 400, 'Invalid filename');
     }
 

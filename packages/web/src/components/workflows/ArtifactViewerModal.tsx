@@ -85,23 +85,25 @@ export function ArtifactViewerModal({
     setContent(null);
     setError(null);
 
-    fetch(`/api/artifacts/${encodeURIComponent(runId)}/${filename}`)
-      .then(async res => {
+    const encodedFilename = filename.split('/').map(encodeURIComponent).join('/');
+
+    async function loadArtifact(): Promise<void> {
+      try {
+        const res = await fetch(`/api/artifacts/${encodeURIComponent(runId)}/${encodedFilename}`);
         if (!res.ok) {
           const body = await res.json().catch(() => ({ error: 'Failed to load artifact' }));
           throw new Error((body as { error?: string }).error ?? 'Failed to load artifact');
         }
-        return res.text();
-      })
-      .then(text => {
-        setContent(text);
-      })
-      .catch((err: unknown) => {
+        setContent(await res.text());
+      } catch (err: unknown) {
+        console.error('[ArtifactViewerModal] fetch failed', { runId, filename, err });
         setError(err instanceof Error ? err.message : 'Failed to load artifact');
-      })
-      .finally(() => {
+      } finally {
         setLoading(false);
-      });
+      }
+    }
+
+    void loadArtifact();
   }, [open, runId, filename]);
 
   const basename = filename.split('/').pop() ?? filename;

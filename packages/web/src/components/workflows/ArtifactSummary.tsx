@@ -9,6 +9,42 @@ interface ArtifactSummaryProps {
 
 const FILE_ARTIFACT_TYPES = new Set(['file', 'file_created', 'file_modified']);
 
+function ArtifactLabel({
+  artifact,
+  onFileClick,
+}: {
+  artifact: WorkflowArtifact;
+  onFileClick: (path: string) => void;
+}): React.ReactElement {
+  if (artifact.url) {
+    return (
+      <a
+        href={artifact.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-accent hover:text-accent-bright transition-colors truncate"
+      >
+        {artifact.label}
+      </a>
+    );
+  }
+  const filePath = artifact.path;
+  if (FILE_ARTIFACT_TYPES.has(artifact.type) && filePath) {
+    return (
+      <button
+        type="button"
+        className="text-accent hover:text-accent-bright transition-colors truncate text-left"
+        onClick={() => {
+          onFileClick(filePath);
+        }}
+      >
+        {artifact.label}
+      </button>
+    );
+  }
+  return <span className="text-text-primary truncate">{artifact.label}</span>;
+}
+
 function ArtifactIcon({ type }: { type: string }): React.ReactElement {
   switch (type) {
     case 'pr':
@@ -43,28 +79,7 @@ export function ArtifactSummary({ artifacts, runId }: ArtifactSummaryProps): Rea
           {artifacts.map((artifact, idx) => (
             <div key={idx} className="flex items-center gap-2 text-sm">
               <ArtifactIcon type={artifact.type} />
-              {artifact.url ? (
-                <a
-                  href={artifact.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-accent hover:text-accent-bright transition-colors truncate"
-                >
-                  {artifact.label}
-                </a>
-              ) : FILE_ARTIFACT_TYPES.has(artifact.type) && artifact.path ? (
-                <button
-                  type="button"
-                  className="text-accent hover:text-accent-bright transition-colors truncate text-left"
-                  onClick={() => {
-                    setViewerFilename(artifact.path ?? null);
-                  }}
-                >
-                  {artifact.label}
-                </button>
-              ) : (
-                <span className="text-text-primary truncate">{artifact.label}</span>
-              )}
+              <ArtifactLabel artifact={artifact} onFileClick={setViewerFilename} />
               {artifact.path && (
                 <span
                   className="text-xs text-text-secondary ml-auto shrink-0 truncate max-w-[200px]"
@@ -79,9 +94,9 @@ export function ArtifactSummary({ artifacts, runId }: ArtifactSummaryProps): Rea
       </div>
       {viewerFilename && (
         <ArtifactViewerModal
-          open={viewerFilename !== null}
-          onOpenChange={open => {
-            if (!open) setViewerFilename(null);
+          open={true}
+          onOpenChange={() => {
+            setViewerFilename(null);
           }}
           runId={runId}
           filename={viewerFilename}
