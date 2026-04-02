@@ -1,5 +1,11 @@
 import { describe, test, expect } from 'bun:test';
-import { isBashNode, isCancelNode, isTriggerRule, TRIGGER_RULES } from './schemas';
+import {
+  isBashNode,
+  isCancelNode,
+  isTriggerRule,
+  TRIGGER_RULES,
+  approvalOnRejectSchema,
+} from './schemas';
 import type {
   WorkflowDefinition,
   DagNode,
@@ -178,5 +184,40 @@ describe('TRIGGER_RULES', () => {
     expect(TRIGGER_RULES).toContain('one_success');
     expect(TRIGGER_RULES).toContain('none_failed_min_one_success');
     expect(TRIGGER_RULES).toContain('all_done');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// approvalOnRejectSchema
+// ---------------------------------------------------------------------------
+
+describe('approvalOnRejectSchema', () => {
+  test('accepts valid on_reject config', () => {
+    const result = approvalOnRejectSchema.safeParse({
+      prompt: 'Fix: $REJECTION_REASON',
+      max_attempts: 3,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test('accepts on_reject without max_attempts (uses default)', () => {
+    const result = approvalOnRejectSchema.safeParse({ prompt: 'Please revise' });
+    expect(result.success).toBe(true);
+  });
+
+  test('rejects empty prompt', () => {
+    const result = approvalOnRejectSchema.safeParse({ prompt: '' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0].message).toContain('on_reject.prompt');
+  });
+
+  test('rejects max_attempts: 0', () => {
+    const result = approvalOnRejectSchema.safeParse({ prompt: 'Fix it', max_attempts: 0 });
+    expect(result.success).toBe(false);
+  });
+
+  test('rejects max_attempts: 11', () => {
+    const result = approvalOnRejectSchema.safeParse({ prompt: 'Fix it', max_attempts: 11 });
+    expect(result.success).toBe(false);
   });
 });

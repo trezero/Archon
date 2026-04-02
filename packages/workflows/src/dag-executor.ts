@@ -1855,6 +1855,25 @@ async function executeApprovalNode(
     // Check if max attempts exhausted
     if (rejectionCount >= maxAttempts) {
       await deps.store.cancelWorkflowRun(workflowRun.id);
+      deps.store
+        .createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'workflow_cancelled',
+          step_name: node.id,
+          data: { reason: `max_attempts (${String(maxAttempts)}) exhausted` },
+        })
+        .catch((err: Error) => {
+          getLog().error(
+            { err, workflowRunId: workflowRun.id, eventType: 'workflow_cancelled' },
+            'workflow.event_persist_failed'
+          );
+        });
+      getWorkflowEventEmitter().emit({
+        type: 'workflow_cancelled',
+        runId: workflowRun.id,
+        nodeId: node.id,
+        reason: `max_attempts (${String(maxAttempts)}) exhausted`,
+      });
       const cancelMsg = `❌ Approval node \`${node.id}\` cancelled after ${String(maxAttempts)} rejections.`;
       await safeSendMessage(platform, conversationId, cancelMsg, msgContext);
       return { state: 'completed' as const, output: '' };

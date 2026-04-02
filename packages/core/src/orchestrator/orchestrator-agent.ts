@@ -568,7 +568,7 @@ export async function handleMessage(
           });
           // For interactive loops, store user input; for standard approvals, mark as approved
           // and clear any rejection state.
-          const metadataUpdate =
+          const metadataUpdate: Record<string, unknown> =
             approval.type === 'interactive_loop'
               ? { loop_user_input: message }
               : { approval_response: 'approved', rejection_reason: '', rejection_count: 0 };

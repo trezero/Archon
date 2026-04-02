@@ -122,6 +122,31 @@ describe('substituteWorkflowVariables', () => {
     expect(prompt).toBe('Context:  here');
     expect(contextSubstituted).toBe(false);
   });
+
+  it('replaces $REJECTION_REASON with rejection reason', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'Fix based on: $REJECTION_REASON',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main',
+      undefined,
+      undefined,
+      'Missing error handling'
+    );
+    expect(prompt).toBe('Fix based on: Missing error handling');
+  });
+
+  it('clears $REJECTION_REASON when not provided', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'Fix: $REJECTION_REASON',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main'
+    );
+    expect(prompt).toBe('Fix: ');
+  });
 });
 
 describe('buildPromptWithContext', () => {

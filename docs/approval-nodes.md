@@ -49,7 +49,12 @@ to the user on whatever platform they're using (CLI, Slack, GitHub, etc.). On th
    messages (recommended) and the CLI auto-resume immediately. The explicit
    `/workflow approve` command records the approval; send a follow-up message
    to resume.
-5. **Reject**: The user rejects, which cancels the workflow.
+5. **Reject**: The user rejects.
+   - **Without `on_reject`**: The workflow is cancelled immediately.
+   - **With `on_reject`**: The executor runs the `on_reject.prompt` via AI (with
+     `$REJECTION_REASON` substituted), then re-pauses at the same gate. This
+     repeats until the user approves or `on_reject.max_attempts` is reached, at
+     which point the workflow is cancelled.
 
 ## YAML Schema
 
@@ -57,6 +62,10 @@ to the user on whatever platform they're using (CLI, Slack, GitHub, etc.). On th
 - id: gate-name
   approval:
     message: "Human-readable prompt shown to the user"
+    capture_response: true    # optional: store comment as $gate-name.output
+    on_reject:                # optional: AI rework on rejection instead of cancel
+      prompt: "Fix based on feedback: $REJECTION_REASON"
+      max_attempts: 3         # optional: default 3, range 1–10
   depends_on: [upstream-node]  # optional
   when: "$plan.output != ''"   # optional condition
   trigger_rule: all_success    # optional (default: all_success)
@@ -67,10 +76,14 @@ to the user on whatever platform they're using (CLI, Slack, GitHub, etc.). On th
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `approval.message` | string | Yes | The message shown to the user when the workflow pauses |
+| `approval.capture_response` | boolean | No | When `true`, the user's approval comment is stored as `$<node-id>.output` for downstream nodes. Default: `false` |
+| `approval.on_reject.prompt` | string | No | Prompt template run via AI when the user rejects. `$REJECTION_REASON` is substituted with the reject reason. After running, the workflow re-pauses at the same gate |
+| `approval.on_reject.max_attempts` | integer | No | Max times the on_reject prompt runs before the workflow is cancelled. Range: 1–10. Default: 3 |
 
 Approval nodes do not support AI-specific fields (`model`, `provider`, `context`,
 `output_format`, `allowed_tools`, `denied_tools`, `hooks`, `mcp`, `skills`,
-`idle_timeout`) since they don't invoke an AI agent.
+`idle_timeout`) since they don't invoke an AI agent. (The `on_reject.prompt` runs
+as a separate AI node using the workflow's default provider.)
 
 Standard DAG fields (`id`, `depends_on`, `when`, `trigger_rule`, `retry`) work
 as expected.
@@ -85,10 +98,10 @@ workflow and treats your message as the approval response:
 ```
 User: "Looks good, but add error handling for the edge cases"
 → System auto-approves, resumes workflow with your message as $gate.output
+  (only if capture_response: true is set)
 ```
 
-This works on all platforms (Web, Slack, Telegram, Discord, GitHub). Your
-message becomes available as `$<node-id>.output` in downstream nodes.
+This works on all platforms (Web, Slack, Telegram, Discord, GitHub).
 
 To reject instead, use `/workflow reject <run-id>`.
 
@@ -101,7 +114,9 @@ The CLI is non-interactive — use explicit commands:
 bun run cli workflow approve <run-id>
 bun run cli workflow approve <run-id> --comment "Looks good, proceed"
 
-# Reject (cancels the workflow)
+# Reject
+# Without on_reject: cancels the workflow
+# With on_reject: records feedback, triggers AI rework, re-pauses
 bun run cli workflow reject <run-id>
 bun run cli workflow reject <run-id> --reason "Plan needs more test coverage"
 ```
@@ -134,21 +149,57 @@ curl -X POST http://localhost:3090/api/workflows/runs/<run-id>/reject \
 
 ## Downstream Output
 
-The user's approval comment is available as `$<node-id>.output` in downstream
-nodes. If no comment is provided, it defaults to `"Approved"`.
+By default, the user's approval comment is **not** available downstream —
+`$<node-id>.output` will be an empty string. To capture the comment as node
+output, set `capture_response: true`:
 
 ```yaml
 nodes:
   - id: gate
     approval:
       message: "Any special instructions for implementation?"
+      capture_response: true   # Makes the user's comment available as $gate.output
     depends_on: [plan]
 
   - id: implement
     prompt: |
-      Implement the plan. User feedback: $gate.output
+      Implement the plan. User instructions: $gate.output
     depends_on: [gate]
 ```
+
+Without `capture_response: true`, downstream nodes should not reference
+`$gate.output` — it will be an empty string.
+
+## Rejection with AI Rework (`on_reject`)
+
+When `on_reject` is configured, a rejection does not cancel the workflow —
+instead, the executor runs an AI prompt with the rejection reason and re-pauses
+at the same gate.
+
+```yaml
+- id: review-gate
+  approval:
+    message: "Review the implementation plan."
+    capture_response: true
+    on_reject:
+      prompt: |
+        The reviewer rejected the plan with this feedback: $REJECTION_REASON
+
+        Revise the plan to address the feedback, then summarize the changes.
+      max_attempts: 3   # After 3 rejections, the workflow is cancelled. Default: 3.
+  depends_on: [plan]
+```
+
+The `$REJECTION_REASON` variable is substituted with the `--reason` text provided
+by the rejecting user. After the AI rework, the workflow re-pauses so the reviewer
+can approve or reject again.
+
+### Lifecycle with on_reject
+
+1. Workflow pauses at approval gate
+2. Reviewer rejects: `rejection_count` incremented, `rejection_reason` stored
+3. If `rejection_count < max_attempts`: `on_reject.prompt` runs via AI, workflow re-pauses
+4. If `rejection_count >= max_attempts`: workflow cancelled
 
 ## Edge Cases
 

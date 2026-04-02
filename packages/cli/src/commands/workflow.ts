@@ -921,13 +921,25 @@ export async function workflowRejectCommand(runId: string, reason?: string): Pro
     const currentCount = (run.metadata.rejection_count as number | undefined) ?? 0;
     const maxAttempts = approval?.onRejectMaxAttempts ?? 3;
     if (currentCount + 1 >= maxAttempts) {
-      await workflowDb.cancelWorkflowRun(runId);
+      try {
+        await workflowDb.cancelWorkflowRun(runId);
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, runId }, 'cli.workflow_reject_failed');
+        throw new Error(`Failed to cancel workflow run ${runId}: ${err.message}`);
+      }
       console.log(`Rejected and cancelled (max attempts reached): ${run.workflow_name}`);
     } else {
-      await workflowDb.updateWorkflowRun(runId, {
-        status: 'failed',
-        metadata: { rejection_reason: rejectReason, rejection_count: currentCount + 1 },
-      });
+      try {
+        await workflowDb.updateWorkflowRun(runId, {
+          status: 'failed',
+          metadata: { rejection_reason: rejectReason, rejection_count: currentCount + 1 },
+        });
+      } catch (error) {
+        const err = error as Error;
+        getLog().error({ err, runId }, 'cli.workflow_reject_failed');
+        throw new Error(`Failed to record rejection for workflow run ${runId}: ${err.message}`);
+      }
       console.log(`Rejected workflow: ${run.workflow_name}`);
       if (!run.working_path) {
         throw new Error(

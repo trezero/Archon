@@ -598,6 +598,8 @@ All workflows support these variables in prompts and commands:
 | `$CONTEXT` | GitHub issue/PR context (if available) |
 | `$EXTERNAL_CONTEXT` | Same as `$CONTEXT` |
 | `$ISSUE_CONTEXT` | Same as `$CONTEXT` |
+| `$LOOP_USER_INPUT` | User feedback from an interactive loop approval gate (empty string on non-resume iterations) |
+| `$REJECTION_REASON` | Rejection feedback from an approval node's `--reason` (only available in `on_reject` prompts; empty string elsewhere) |
 | `$nodeId.output` | Output of a completed upstream DAG node (DAG workflows only) |
 | `$nodeId.output.field` | JSON field from a structured upstream node output (DAG workflows only) |
 
@@ -853,9 +855,11 @@ When the workflow reaches `review-gate`, it pauses and notifies you. Approve or 
 - **Web UI**: Click the Approve/Reject buttons on the dashboard card
 - **API**: `POST /api/workflows/runs/<run-id>/approve` or `/reject`
 
-After approval via natural language or CLI, the workflow auto-resumes from the next node. The user's approval comment is available as `$review-gate.output` in downstream nodes.
+After approval via natural language or CLI, the workflow auto-resumes from the next node. The user's approval comment is available as `$review-gate.output` in downstream nodes only when `capture_response: true` is set on the approval node.
 
-Rejecting cancels the workflow.
+Without `on_reject`: rejecting cancels the workflow.
+With `on_reject`: rejecting triggers an AI rework prompt and re-pauses for re-review.
+See [Approval Nodes](./approval-nodes.md) for full details.
 
 ---
 

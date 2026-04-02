@@ -10,6 +10,7 @@ import {
   workflowResumeCommand,
   workflowAbandonCommand,
   workflowApproveCommand,
+  workflowRejectCommand,
   workflowCleanupCommand,
 } from './workflow';
 
@@ -1365,5 +1366,160 @@ describe('workflowCleanupCommand', () => {
     await expect(workflowCleanupCommand(7)).rejects.toThrow(
       'Failed to clean up workflow runs: disk full'
     );
+  });
+});
+
+describe('workflowRejectCommand', () => {
+  let consoleSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it('should throw when run not found', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce(null);
+
+    await expect(workflowRejectCommand('missing-id')).rejects.toThrow();
+  });
+
+  it('should throw when run is not paused', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'run-1',
+      workflow_name: 'my-wf',
+      status: 'running',
+      metadata: {},
+    });
+
+    await expect(workflowRejectCommand('run-1')).rejects.toThrow('cannot be rejected');
+  });
+
+  it('cancels immediately when no on_reject configured', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    const core = await import('@archon/core');
+
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'run-plain',
+      workflow_name: 'plain-wf',
+      status: 'paused',
+      user_message: 'build it',
+      working_path: '/repo',
+      codebase_id: null,
+      metadata: { approval: { type: 'approval', nodeId: 'gate', message: 'Approve?' } },
+    });
+    (core.createWorkflowStore as ReturnType<typeof mock>).mockReturnValueOnce({
+      createWorkflowEvent: mock(() => Promise.resolve()),
+    });
+
+    await workflowRejectCommand('run-plain', 'not good');
+
+    expect(workflowDb.cancelWorkflowRun).toHaveBeenCalledWith('run-plain');
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('run-plain'));
+  });
+
+  it('updates metadata and auto-resumes when on_reject configured and under limit', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    const core = await import('@archon/core');
+
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'run-on-reject',
+      workflow_name: 'my-wf',
+      status: 'paused',
+      user_message: 'build it',
+      working_path: '/repo',
+      codebase_id: null,
+      metadata: {
+        approval: {
+          type: 'approval',
+          nodeId: 'gate',
+          message: 'Approve?',
+          onRejectPrompt: 'Fix: $REJECTION_REASON',
+          onRejectMaxAttempts: 3,
+        },
+        rejection_count: 0,
+      },
+    });
+    (core.createWorkflowStore as ReturnType<typeof mock>).mockReturnValueOnce({
+      createWorkflowEvent: mock(() => Promise.resolve()),
+    });
+
+    try {
+      await workflowRejectCommand('run-on-reject', 'needs work');
+    } catch {
+      // downstream workflowRunCommand failure is acceptable in this unit test
+    }
+
+    expect(workflowDb.updateWorkflowRun).toHaveBeenCalledWith('run-on-reject', {
+      status: 'failed',
+      metadata: { rejection_reason: 'needs work', rejection_count: 1 },
+    });
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Rejected workflow'));
+  });
+
+  it('cancels when max attempts reached', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    const core = await import('@archon/core');
+
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'run-max',
+      workflow_name: 'my-wf',
+      status: 'paused',
+      user_message: 'build it',
+      working_path: '/repo',
+      codebase_id: null,
+      metadata: {
+        approval: {
+          type: 'approval',
+          nodeId: 'gate',
+          message: 'Approve?',
+          onRejectPrompt: 'Fix: $REJECTION_REASON',
+          onRejectMaxAttempts: 3,
+        },
+        rejection_count: 2,
+      },
+    });
+    (core.createWorkflowStore as ReturnType<typeof mock>).mockReturnValueOnce({
+      createWorkflowEvent: mock(() => Promise.resolve()),
+    });
+
+    await workflowRejectCommand('run-max', 'still bad');
+
+    expect(workflowDb.cancelWorkflowRun).toHaveBeenCalledWith('run-max');
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('max attempts reached'));
+  });
+
+  it('throws when on_reject configured but working_path is null', async () => {
+    const workflowDb = await import('@archon/core/db/workflows');
+    const core = await import('@archon/core');
+
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'run-no-path',
+      workflow_name: 'my-wf',
+      status: 'paused',
+      user_message: 'build it',
+      working_path: null,
+      codebase_id: null,
+      metadata: {
+        approval: {
+          type: 'approval',
+          nodeId: 'gate',
+          message: 'Approve?',
+          onRejectPrompt: 'Fix: $REJECTION_REASON',
+          onRejectMaxAttempts: 3,
+        },
+        rejection_count: 0,
+      },
+    });
+    (core.createWorkflowStore as ReturnType<typeof mock>).mockReturnValueOnce({
+      createWorkflowEvent: mock(() => Promise.resolve()),
+    });
+    (workflowDb.updateWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce(undefined);
+
+    await expect(workflowRejectCommand('run-no-path', 'bad')).rejects.toThrow('no working path');
   });
 });
