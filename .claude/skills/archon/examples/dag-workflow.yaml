@@ -20,7 +20,11 @@ nodes:
   # ── BASH NODE: Shell script, no AI, stdout captured as output ──
   - id: fetch-issue
     bash: |
-      issue_num=$(echo "$ARGUMENTS" | grep -oE '[0-9]+' | head -1)
+      issue_num=$(echo "$ARGUMENTS" | grep -oE '/issues/[0-9]+' | grep -oE '[0-9]+' | head -1)
+      # Fallback: extract first number if no URL path found (e.g., "Fix issue #42")
+      if [ -z "$issue_num" ]; then
+        issue_num=$(echo "$ARGUMENTS" | grep -oE '[0-9]+' | head -1)
+      fi
       if [ -n "$issue_num" ]; then
         gh issue view "$issue_num" --json title,body,labels,comments
       else
