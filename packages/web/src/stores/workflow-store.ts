@@ -201,7 +201,7 @@ export const useWorkflowStore = create<WorkflowStoreState>()(
                 ...existing,
                 status: event.status,
                 error: event.error,
-                completedAt: event.status !== 'running' ? event.timestamp : undefined,
+                completedAt: isTerminalStatus(event.status) ? event.timestamp : undefined,
                 approval: event.status === 'paused' ? event.approval : undefined,
               });
             }

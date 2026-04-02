@@ -157,6 +157,48 @@ describe('handleWorkflowArtifact', () => {
   });
 });
 
+describe('handleWorkflowStatus — approval field', () => {
+  test('stores approval on new paused entry', () => {
+    useWorkflowStore.getState().handleWorkflowStatus(
+      statusEvent({
+        runId: 'run-ap1',
+        status: 'paused',
+        approval: { nodeId: 'gate', message: 'Please review' },
+      })
+    );
+    const wf = useWorkflowStore.getState().workflows.get('run-ap1');
+    expect(wf!.approval).toEqual({ nodeId: 'gate', message: 'Please review' });
+  });
+
+  test('sets approval when existing workflow transitions to paused', () => {
+    useWorkflowStore.getState().handleWorkflowStatus(statusEvent({ runId: 'run-ap2' }));
+    useWorkflowStore.getState().handleWorkflowStatus(
+      statusEvent({
+        runId: 'run-ap2',
+        status: 'paused',
+        approval: { nodeId: 'gate', message: 'Please review' },
+      })
+    );
+    const wf = useWorkflowStore.getState().workflows.get('run-ap2');
+    expect(wf!.approval).toEqual({ nodeId: 'gate', message: 'Please review' });
+  });
+
+  test('clears approval when workflow transitions out of paused', () => {
+    useWorkflowStore.getState().handleWorkflowStatus(
+      statusEvent({
+        runId: 'run-ap3',
+        status: 'paused',
+        approval: { nodeId: 'gate', message: 'Please review' },
+      })
+    );
+    useWorkflowStore
+      .getState()
+      .handleWorkflowStatus(statusEvent({ runId: 'run-ap3', status: 'running' }));
+    const wf = useWorkflowStore.getState().workflows.get('run-ap3');
+    expect(wf!.approval).toBeUndefined();
+  });
+});
+
 describe('handleWorkflowStatus — terminal guard', () => {
   test('does not allow running SSE event to resurrect a completed workflow', () => {
     useWorkflowStore

@@ -232,6 +232,14 @@ export function WorkflowProgressCard({
                   Reject
                 </button>
               </div>
+              {(approveMutation.isError || rejectMutation.isError) && (
+                <p className="text-xs text-error">
+                  {((): string => {
+                    const err = approveMutation.error ?? rejectMutation.error;
+                    return err instanceof Error ? err.message : 'Action failed — please try again';
+                  })()}
+                </p>
+              )}
             </div>
           )}
 
