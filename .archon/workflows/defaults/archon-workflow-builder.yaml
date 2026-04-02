@@ -7,10 +7,6 @@ description: |
   NOT for: Editing existing workflows or creating non-workflow files.
 
 nodes:
-  # ═══════════════════════════════════════════════════════════════
-  # NODE 1: SCAN — Gather codebase context
-  # ═══════════════════════════════════════════════════════════════
-
   - id: scan-codebase
     bash: |
       echo "=== Existing Commands ==="
@@ -43,10 +39,6 @@ nodes:
       else
         echo "(no CLAUDE.md)"
       fi
-
-  # ═══════════════════════════════════════════════════════════════
-  # NODE 2: EXTRACT — Classify user intent into structured JSON
-  # ═══════════════════════════════════════════════════════════════
 
   - id: extract-intent
     prompt: |
@@ -88,10 +80,6 @@ nodes:
           enum: ["dag", "loop"]
       required: [workflow_name, description, trigger_phrases, proposed_nodes, execution_mode]
     depends_on: [scan-codebase]
-
-  # ═══════════════════════════════════════════════════════════════
-  # NODE 3: GENERATE — Write the workflow YAML
-  # ═══════════════════════════════════════════════════════════════
 
   - id: generate-yaml
     prompt: |
@@ -186,10 +174,6 @@ nodes:
     denied_tools: [Edit, Bash]
     depends_on: [extract-intent]
 
-  # ═══════════════════════════════════════════════════════════════
-  # NODE 4: VALIDATE — Structural sanity check
-  # ═══════════════════════════════════════════════════════════════
-
   - id: validate-yaml
     bash: |
       FILE="$ARTIFACTS_DIR/generated-workflow.yaml"
@@ -216,10 +200,6 @@ nodes:
 
       echo "VALID"
     depends_on: [generate-yaml]
-
-  # ═══════════════════════════════════════════════════════════════
-  # NODE 5: SAVE — Copy to .archon/workflows/ and report
-  # ═══════════════════════════════════════════════════════════════
 
   - id: save-or-report
     prompt: |
