@@ -285,7 +285,8 @@ export class GitHubAdapter implements IPlatformAdapter {
 
       return isValid;
     } catch (error) {
-      getLog().error({ err: error }, 'github.signature_verification_error');
+      const err = error as Error;
+      getLog().error({ err }, 'github.signature_verification_error');
       return false;
     }
   }
@@ -776,8 +777,24 @@ ${userComment}`;
     }
 
     // 7. Get default branch
-    const { data: repoData } = await this.octokit.rest.repos.get({ owner, repo });
-    const defaultBranch = repoData.default_branch;
+    let defaultBranch: string;
+    try {
+      const { data: repoData } = await this.octokit.rest.repos.get({ owner, repo });
+      defaultBranch = repoData.default_branch;
+    } catch (error) {
+      const err = toError(error);
+      getLog().error({ err, owner, repo, conversationId }, 'github.repo_metadata_fetch_failed');
+      try {
+        const userMessage = classifyAndFormatError(err);
+        await this.sendMessage(conversationId, userMessage);
+      } catch (sendError) {
+        getLog().error(
+          { err: toError(sendError), conversationId },
+          'github.error_message_send_failed'
+        );
+      }
+      return;
+    }
 
     // 8. Ensure repo ready (clone if needed, sync if new conversation)
     await this.ensureRepoReady(owner, repo, defaultBranch, repoPath, isNewCodebase);
