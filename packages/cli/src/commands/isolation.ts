@@ -280,7 +280,7 @@ export async function isolationCompleteCommand(
         );
         const prs = JSON.parse(ghResult.stdout) as { number: number; title: string }[];
         for (const pr of prs) {
-          blockers.push(`open PR #${String(pr.number)} — "${pr.title}"`);
+          blockers.push(`open PR #${pr.number} — "${pr.title}"`);
         }
       } catch (error) {
         const err = error as NodeJS.ErrnoException;
@@ -300,9 +300,7 @@ export async function isolationCompleteCommand(
         );
         const unmergedLines = unmergedResult.stdout.trim().split('\n').filter(Boolean);
         if (unmergedLines.length > 0) {
-          blockers.push(
-            `${String(unmergedLines.length)} commit(s) not merged into ${defaultBranch}`
-          );
+          blockers.push(`${unmergedLines.length} commit(s) not merged into ${defaultBranch}`);
         }
       } catch (error) {
         getLog().warn({ err: error as Error, branch }, 'isolation.complete_unmerged_check_failed');
@@ -318,7 +316,7 @@ export async function isolationCompleteCommand(
         );
         const unpushedLines = unpushedResult.stdout.trim().split('\n').filter(Boolean);
         if (unpushedLines.length > 0) {
-          blockers.push(`${String(unpushedLines.length)} commit(s) not pushed to remote`);
+          blockers.push(`${unpushedLines.length} commit(s) not pushed to remote`);
         }
       } catch (error) {
         const err = error as Error;
