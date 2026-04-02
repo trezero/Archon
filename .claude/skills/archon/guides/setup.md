@@ -123,31 +123,38 @@ If Bun was just installed in Prerequisites (macOS/Linux), use `~/.bun/bin/bun` i
 
 The CLI loads infrastructure config (database, tokens) from `~/.archon/.env` only. This prevents conflicts with project `.env` files that may contain different database URLs.
 
-**IMPORTANT**: We'll now open an interactive setup wizard in a new terminal window. This allows you to enter API keys and tokens securely without exposing them to me (the AI assistant).
+Credential configuration runs in a separate terminal so your API keys stay private — the AI assistant won't see them.
 
-### 5a: Launch the Setup Wizard
+### 4a: Launch the Setup Wizard
 
-Run this command to open the setup wizard in a new terminal:
+Run this command to attempt opening the wizard in a new terminal:
 
 ```bash
 archon setup --spawn
 ```
 
-**CRITICAL**: Do NOT run `archon setup` directly via Bash — it requires interactive input that I cannot provide. The `--spawn` flag opens a new terminal window where the user can interact directly.
+**CRITICAL**: Do NOT run `archon setup` directly via Bash — it requires interactive input that I cannot provide. The `--spawn` flag attempts to open a new terminal window where the user can interact directly.
 
 Tell the user:
 
-> "I'm opening the Archon setup wizard in a new terminal window. In that window, you'll:
-> 1. Choose your database (SQLite default or PostgreSQL)
-> 2. Configure AI assistant(s) (Claude and/or Codex)
-> 3. Set up any platforms you selected (GitHub, Telegram, Slack, Discord)
-> 4. Enter API keys and tokens securely
+> "Time to configure your credentials. This runs in a separate terminal so your keys stay private — I won't see them.
 >
-> The wizard will save configuration to both `~/.archon/.env` and the repo `.env`.
+> The wizard will walk you through:
+> 1. Database selection (SQLite default or PostgreSQL)
+> 2. AI assistant configuration (Claude and/or Codex)
+> 3. Platform tokens for any integrations you selected
 >
-> **Tell me when you've completed the setup wizard** so I can verify the configuration."
+> It saves configuration to both `~/.archon/.env` and the repo `.env`."
 
-### 5b: Wait for User Confirmation
+**If the terminal opened automatically**, add:
+> "Complete the wizard in the new terminal window that just opened."
+
+**If the output says to run it manually** (common on VPS, WSL, SSH, Docker), add:
+> "Open a separate terminal or SSH session and run the command shown in the output. Come back here and let me know when you finish so I can continue with validation."
+
+Both paths are normal — the manual path is not an error.
+
+### 4b: Wait for User Confirmation
 
 Wait for the user to confirm they've completed the setup wizard before proceeding.
 
