@@ -697,7 +697,7 @@ describe('IsolationResolver', () => {
     const result = await resolver.resolve({
       existingEnvId: 'env-1',
       codebase: defaultCodebase,
-      hints: { baseBranch: 'dev' },
+      hints: { baseBranch: git.toBranchName('dev') },
       platformType: 'web',
     });
 
@@ -718,7 +718,7 @@ describe('IsolationResolver', () => {
     const result = await resolver.resolve({
       existingEnvId: 'env-1',
       codebase: defaultCodebase,
-      hints: { baseBranch: 'dev' },
+      hints: { baseBranch: git.toBranchName('dev') },
       platformType: 'web',
     });
 
@@ -741,7 +741,7 @@ describe('IsolationResolver', () => {
     const result = await resolver.resolve({
       existingEnvId: null,
       codebase: defaultCodebase,
-      hints: { workflowType: 'issue', workflowId: '42', baseBranch: 'dev' },
+      hints: { workflowType: 'issue', workflowId: '42', baseBranch: git.toBranchName('dev') },
       platformType: 'web',
     });
 
@@ -749,6 +749,29 @@ describe('IsolationResolver', () => {
     if (result.status === 'resolved') {
       expect(result.warnings).toBeDefined();
       expect(result.warnings?.[0]).toContain("not based on 'dev'");
+    }
+  });
+
+  test('workflow reuse — no warning when base branch matches', async () => {
+    const env = makeEnvRow();
+    isAncestorOfSpy.mockResolvedValue(true);
+    const resolver = createResolver({
+      store: makeMockStore({
+        findActiveByWorkflow: async (_cid, wt, wid) =>
+          wt === 'issue' && wid === '42' ? env : null,
+      }),
+    });
+
+    const result = await resolver.resolve({
+      existingEnvId: null,
+      codebase: defaultCodebase,
+      hints: { workflowType: 'issue', workflowId: '42', baseBranch: git.toBranchName('dev') },
+      platformType: 'web',
+    });
+
+    expect(result.status).toBe('resolved');
+    if (result.status === 'resolved') {
+      expect(result.warnings).toBeUndefined();
     }
   });
 

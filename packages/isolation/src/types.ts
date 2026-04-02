@@ -209,7 +209,7 @@ export interface IsolationHints {
   fromBranch?: BranchName;
 
   /** Expected base branch for this workflow. When set, reused worktrees are validated with merge-base. */
-  baseBranch?: string;
+  baseBranch?: BranchName;
 
   // Cross-reference hints
   linkedIssues?: number[];

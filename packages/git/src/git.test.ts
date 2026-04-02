@@ -1198,6 +1198,32 @@ branch refs/heads/feature/auth
       expect(result).toBe(false);
     });
 
+    test('returns false on expected errors (not a valid object name)', async () => {
+      execSpy.mockRejectedValue(
+        Object.assign(new Error('not a valid object name'), { stderr: 'not a valid object name' })
+      );
+
+      const result = await git.isAncestorOf(
+        '/worktrees/feature' as git.WorktreePath,
+        'origin/missing'
+      );
+      expect(result).toBe(false);
+    });
+
+    test('returns false on expected errors (no such file)', async () => {
+      execSpy.mockRejectedValue(new Error('no such file or directory'));
+
+      const result = await git.isAncestorOf('/nonexistent' as git.WorktreePath, 'origin/dev');
+      expect(result).toBe(false);
+    });
+
+    test('returns false when git binary not found (ENOENT)', async () => {
+      execSpy.mockRejectedValue(Object.assign(new Error('spawn git ENOENT'), { code: 'ENOENT' }));
+
+      const result = await git.isAncestorOf('/worktrees/feature' as git.WorktreePath, 'origin/dev');
+      expect(result).toBe(false);
+    });
+
     test('throws and logs on unexpected errors', async () => {
       mockLogger.error.mockClear();
       execSpy.mockRejectedValue(new Error('fatal: permission denied'));

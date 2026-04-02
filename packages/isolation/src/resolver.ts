@@ -15,7 +15,7 @@ import {
   toBranchName,
   isAncestorOf,
 } from '@archon/git';
-import type { RepoPath } from '@archon/git';
+import type { RepoPath, BranchName } from '@archon/git';
 
 import type {
   IIsolationProvider,
@@ -152,24 +152,31 @@ export class IsolationResolver {
    */
   private async checkExisting(
     envId: string,
-    baseBranch?: string
+    baseBranch?: BranchName
   ): Promise<IsolationResolution | null> {
     const env = await this.store.getById(envId);
     if (env && (await worktreeExists(toWorktreePath(env.working_path)))) {
       const warnings: string[] = [];
       if (baseBranch) {
-        const isValid = await isAncestorOf(
-          toWorktreePath(env.working_path),
-          `origin/${baseBranch}`
-        );
-        if (!isValid) {
-          warnings.push(
-            `Worktree branch '${env.branch_name}' is not based on '${baseBranch}'. ` +
-              `Recreate with: archon complete ${env.branch_name} --force`
+        try {
+          const isValid = await isAncestorOf(
+            toWorktreePath(env.working_path),
+            `origin/${baseBranch}`
           );
+          if (!isValid) {
+            warnings.push(
+              `Worktree branch '${env.branch_name}' is not based on '${baseBranch}'. ` +
+                `Recreate with: archon complete ${env.branch_name} --force`
+            );
+            getLog().warn(
+              { envId, branchName: env.branch_name, baseBranch },
+              'isolation.reuse_base_branch_mismatch'
+            );
+          }
+        } catch (err) {
           getLog().warn(
-            { envId, branchName: env.branch_name, baseBranch },
-            'isolation.reuse_base_branch_mismatch'
+            { err, branchName: env.branch_name, baseBranch },
+            'isolation.reuse_base_branch_check_failed'
           );
         }
       }
@@ -196,7 +203,7 @@ export class IsolationResolver {
     codebaseId: string,
     workflowType: IsolationWorkflowType,
     workflowId: string,
-    baseBranch?: string
+    baseBranch?: BranchName
   ): Promise<{ env: IsolationEnvironmentRow; warnings: string[] } | null> {
     const existing = await this.store.findActiveByWorkflow(codebaseId, workflowType, workflowId);
     if (!existing) return null;
@@ -205,18 +212,25 @@ export class IsolationResolver {
       getLog().debug({ workflowType, workflowId }, 'isolation_reuse_existing');
       const warnings: string[] = [];
       if (baseBranch) {
-        const isValid = await isAncestorOf(
-          toWorktreePath(existing.working_path),
-          `origin/${baseBranch}`
-        );
-        if (!isValid) {
-          warnings.push(
-            `Worktree branch '${existing.branch_name}' is not based on '${baseBranch}'. ` +
-              `Recreate with: archon complete ${existing.branch_name} --force`
+        try {
+          const isValid = await isAncestorOf(
+            toWorktreePath(existing.working_path),
+            `origin/${baseBranch}`
           );
+          if (!isValid) {
+            warnings.push(
+              `Worktree branch '${existing.branch_name}' is not based on '${baseBranch}'. ` +
+                `Recreate with: archon complete ${existing.branch_name} --force`
+            );
+            getLog().warn(
+              { workflowType, workflowId, branchName: existing.branch_name, baseBranch },
+              'isolation.reuse_base_branch_mismatch'
+            );
+          }
+        } catch (err) {
           getLog().warn(
-            { workflowType, workflowId, branchName: existing.branch_name, baseBranch },
-            'isolation.reuse_base_branch_mismatch'
+            { err, branchName: existing.branch_name, baseBranch },
+            'isolation.reuse_base_branch_check_failed'
           );
         }
       }
