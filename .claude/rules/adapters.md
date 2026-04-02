@@ -10,7 +10,9 @@ paths:
 - **Auth is inside adapters** — every adapter checks authorization before calling `onMessage()`. Silent rejection (no error response), log with masked user ID: `userId.slice(0, 4) + '***'`.
 - **Whitelist parsing in constructor** — parse env var (`SLACK_ALLOWED_USER_IDS`, `TELEGRAM_ALLOWED_USER_IDS`, `GITHUB_ALLOWED_USERS`) using a co-located `parseAllowedUserIds()` / `parseAllowedUsers()` function. Empty list = open access.
 - **Lazy logger pattern** — ALL adapter files use a module-level `cachedLog` + `getLog()` getter so test mocks intercept `createLogger` before the logger is instantiated. Never initialize logger at module scope.
-- **`onMessage()` is fire-and-forget** — handlers call `void this.messageHandler(event)`. Errors are handled by the caller (orchestrator/lock manager), not the adapter.
+- **Two handler patterns** (both valid):
+  - **Chat adapters** (Slack, Telegram, Discord): `onMessage(handler)` — adapter owns the event loop (polling/WebSocket), fires registered callback. Lock manager lives in the server's callback closure. Errors handled by caller via `createMessageErrorHandler`.
+  - **Forge adapters** (GitHub, Gitea): `handleWebhook(payload, signature)` — server HTTP route calls directly, returns 200 immediately. Full pipeline inside adapter (signature verification, repo cloning, command loading, context building). Lock manager injected in constructor. Errors caught internally and posted to issue/PR.
 - **Message splitting** — use shared `splitIntoParagraphChunks(message, maxLength)` from `../../utils/message-splitting`. Two-pass: paragraph breaks first, then line breaks. Limits: Slack 12000, Telegram 4096, GitHub 65000.
 - **`ensureThread()` is often a no-op** — Slack returns the same ID (already encoded as `channel:ts`), Telegram has no threads, GitHub issues are inherently threaded.
 
