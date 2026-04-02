@@ -373,24 +373,32 @@ describe('GitLabAdapter', () => {
     test('detects mention at end of string', async () => {
       const adapter = createAdapter();
       const payload = createNotePayload({ note: 'help me @archon' });
-      // Should not be ignored (mention at end-of-string)
-      // Will fail at DB setup but mention detection itself should pass
       await adapter.handleWebhook(payload, 'test-secret');
-      // If mention was NOT detected, mockHandleMessage would not be called
-      // Since DB is mocked to throw, the webhook_setup_failed path runs
-      // which still means mention WAS detected (passed step 6)
+      // DB mock throws, so mention detection succeeded if webhook_setup_failed was logged
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ conversationId: 'mygroup/myproject#1' }),
+        'gitlab.webhook_setup_failed'
+      );
     });
 
     test('detects mention with comma separator', async () => {
       const adapter = createAdapter();
       const payload = createNotePayload({ note: '@archon, please help' });
       await adapter.handleWebhook(payload, 'test-secret');
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ conversationId: 'mygroup/myproject#1' }),
+        'gitlab.webhook_setup_failed'
+      );
     });
 
     test('case-insensitive mention detection', async () => {
       const adapter = createAdapter();
       const payload = createNotePayload({ note: '@ARCHON help' });
       await adapter.handleWebhook(payload, 'test-secret');
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ conversationId: 'mygroup/myproject#1' }),
+        'gitlab.webhook_setup_failed'
+      );
     });
   });
 
@@ -538,6 +546,82 @@ describe('GitLabAdapter', () => {
       await adapter.handleWebhook(payload, 'test-secret');
       // The fork detection happens inside handleWebhook — if it reaches webhook_processing
       // log, the event was parsed correctly including the MR context
+    });
+  });
+
+  describe('sendMessage', () => {
+    let mockFetch: ReturnType<typeof mock>;
+
+    beforeEach(() => {
+      mockFetch = mock(() => Promise.resolve(new Response(JSON.stringify({}), { status: 200 })));
+      globalThis.fetch = mockFetch as typeof fetch;
+    });
+
+    test('posts to correct issue notes API endpoint', async () => {
+      const adapter = createAdapter();
+      await adapter.sendMessage('mygroup/myproject#42', 'Hello from Archon');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(
+        'https://gitlab.example.com/api/v4/projects/mygroup%2Fmyproject/issues/42/notes'
+      );
+      expect(options.method).toBe('POST');
+    });
+
+    test('posts to correct MR notes API endpoint', async () => {
+      const adapter = createAdapter();
+      await adapter.sendMessage('mygroup/myproject!15', 'Review complete');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(
+        'https://gitlab.example.com/api/v4/projects/mygroup%2Fmyproject/merge_requests/15/notes'
+      );
+    });
+
+    test('appends bot response marker to outgoing comments', async () => {
+      const adapter = createAdapter();
+      await adapter.sendMessage('mygroup/myproject#1', 'Test message');
+
+      const [, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(options.body as string) as { body: string };
+      expect(body.body).toContain('Test message');
+      expect(body.body).toContain('<!-- archon-bot-response -->');
+      expect(body.body).toBe('Test message\n\n<!-- archon-bot-response -->');
+    });
+
+    test('encodes nested project path in URL', async () => {
+      const adapter = createAdapter();
+      await adapter.sendMessage('org/team/subproject#7', 'Nested group test');
+
+      const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toContain('org%2Fteam%2Fsubproject');
+    });
+
+    test('rejects invalid conversation ID without calling API', async () => {
+      const adapter = createAdapter();
+      await adapter.sendMessage('invalid-format', 'Should not send');
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        { conversationId: 'invalid-format' },
+        'gitlab.invalid_conversation_id'
+      );
+    });
+
+    test('splits long messages into multiple API calls', async () => {
+      const adapter = createAdapter();
+      // Build a message with paragraph breaks that exceeds MAX_LENGTH (65000)
+      // Each paragraph is ~1000 chars, 80 paragraphs = ~80k + separators
+      const paragraphs = Array.from(
+        { length: 80 },
+        (_, i) => `Paragraph ${String(i)}: ${'x'.repeat(990)}`
+      );
+      const longMessage = paragraphs.join('\n\n');
+      await adapter.sendMessage('mygroup/myproject#1', longMessage);
+
+      expect(mockFetch.mock.calls.length).toBeGreaterThan(1);
     });
   });
 });

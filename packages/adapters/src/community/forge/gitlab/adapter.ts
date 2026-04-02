@@ -58,6 +58,13 @@ export class GitLabAdapter implements IPlatformAdapter {
     gitlabUrl?: string,
     botMention?: string
   ) {
+    if (!token) {
+      throw new Error('GitLabAdapter requires a non-empty token');
+    }
+    if (!webhookSecret) {
+      throw new Error('GitLabAdapter requires a non-empty webhookSecret');
+    }
+
     this.gitlabUrl = (gitlabUrl ?? 'https://gitlab.com').replace(/\/+$/, '');
     this.token = token;
     this.webhookSecret = webhookSecret;
@@ -431,7 +438,10 @@ Use 'glab mr view ${String(mr.iid)}' for full details and 'glab mr diff ${String
         getLog().info({ repoPath, defaultBranch }, 'gitlab.repo_syncing');
         const syncResult = await syncRepository(toRepoPath(repoPath), toBranchName(defaultBranch));
         if (!syncResult.ok) {
-          getLog().error({ repoPath, defaultBranch }, 'gitlab.repo_sync_failed');
+          getLog().error(
+            { error: syncResult.error, repoPath, defaultBranch },
+            'gitlab.repo_sync_failed'
+          );
           throw new Error(
             `Failed to sync repository to ${defaultBranch}. ` +
               'Try /reset or check if the branch exists.'
@@ -455,14 +465,18 @@ Use 'glab mr view ${String(mr.iid)}' for full details and 'glab mr diff ${String
       });
     } catch (error) {
       const err = error as Error;
-      // Sanitize token from error messages
-      const sanitized = err.message.replaceAll(this.token, '***');
+      // Sanitize token from all error properties (message, stack, cause)
+      const sanitize = (s: string): string => s.replaceAll(this.token, '***');
+      const sanitized = sanitize(err.message);
       const msg = sanitized.toLowerCase();
 
-      getLog().error(
-        { projectPath, repoPath, errorMessage: sanitized },
-        'gitlab.repo_clone_failed'
-      );
+      const sanitizedError: Record<string, unknown> = { message: sanitized };
+      if (err.stack) sanitizedError.stack = sanitize(err.stack);
+      if (err.cause && typeof (err.cause as Error).message === 'string') {
+        sanitizedError.cause = sanitize((err.cause as Error).message);
+      }
+
+      getLog().error({ projectPath, repoPath, error: sanitizedError }, 'gitlab.repo_clone_failed');
 
       if (msg.includes('not found') || msg.includes('404')) {
         throw new Error(
