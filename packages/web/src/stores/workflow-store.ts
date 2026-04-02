@@ -189,6 +189,7 @@ export const useWorkflowStore = create<WorkflowStoreState>()(
                 startedAt: event.timestamp,
                 completedAt: isTerminalStatus(event.status) ? event.timestamp : undefined,
                 error: event.error,
+                approval: event.approval,
                 currentTool: null,
               });
             } else {
@@ -201,6 +202,7 @@ export const useWorkflowStore = create<WorkflowStoreState>()(
                 status: event.status,
                 error: event.error,
                 completedAt: event.status !== 'running' ? event.timestamp : undefined,
+                approval: event.status === 'paused' ? event.approval : undefined,
               });
             }
             return { workflows: next, activeWorkflowId: deriveActiveId(next) };

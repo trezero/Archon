@@ -86,6 +86,7 @@ export interface WorkflowStatusEvent extends BaseSSEEvent {
   workflowName: string;
   status: ActiveWorkflowRunStatus;
   error?: string;
+  approval?: { nodeId: string; message: string };
 }
 
 // DAG node status (emitted during DAG workflow execution)
@@ -238,6 +239,7 @@ export interface WorkflowState {
   completedAt?: number;
   error?: string;
   stale?: boolean;
+  approval?: { nodeId: string; message: string };
   currentTool?: {
     name: string;
     status: 'running' | 'completed';

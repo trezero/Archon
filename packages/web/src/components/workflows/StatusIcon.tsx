@@ -1,3 +1,5 @@
+import { Pause } from 'lucide-react';
+
 export function StatusIcon({ status }: { status: string }): React.ReactElement {
   switch (status) {
     case 'completed':
@@ -6,6 +8,8 @@ export function StatusIcon({ status }: { status: string }): React.ReactElement {
       return (
         <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent" />
       );
+    case 'paused':
+      return <Pause className="h-3 w-3 text-warning" />;
     case 'failed':
       return <span className="text-error text-sm">&#x2717;</span>;
     case 'cancelled':
