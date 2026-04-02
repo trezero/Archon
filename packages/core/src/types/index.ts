@@ -187,7 +187,14 @@ export type MessageChunk =
   | { type: 'assistant'; content: string }
   | { type: 'system'; content: string }
   | { type: 'thinking'; content: string }
-  | { type: 'result'; sessionId?: string; tokens?: TokenUsage }
+  | {
+      type: 'result';
+      sessionId?: string;
+      tokens?: TokenUsage;
+      structuredOutput?: unknown;
+      isError?: boolean;
+      errorSubtype?: string;
+    }
   | { type: 'tool'; toolName: string; toolInput?: Record<string, unknown> }
   | { type: 'tool_result'; toolName: string; toolOutput: string }
   | { type: 'workflow_dispatch'; workerConversationId: string; workflowName: string };

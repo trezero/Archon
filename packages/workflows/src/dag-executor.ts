@@ -46,6 +46,7 @@ import {
 import { withIdleTimeout, STEP_IDLE_TIMEOUT_MS } from './utils/idle-timeout';
 import {
   classifyError,
+  detectCreditExhaustion,
   loadCommandPrompt,
   substituteWorkflowVariables,
   buildPromptWithContext,
@@ -1062,6 +1063,42 @@ async function executeNodeInternal(
           ? nodeOutputText
           : batchMessages.join('\n\n');
       await safeSendMessage(platform, conversationId, batchContent, nodeContext);
+    }
+
+    // Detect credit exhaustion: SDK returns it as assistant text, not a thrown error.
+    const creditError = detectCreditExhaustion(nodeOutputText);
+
+    if (creditError) {
+      const duration = Date.now() - nodeStartTime;
+      getLog().warn({ nodeId: node.id, durationMs: duration }, 'dag.node_credit_exhausted');
+      await logNodeError(logDir, workflowRun.id, node.id, creditError);
+
+      deps.store
+        .createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'node_failed',
+          step_name: node.id,
+          data: { error: creditError },
+        })
+        .catch((err: Error) => {
+          getLog().error(
+            { err, workflowRunId: workflowRun.id, eventType: 'node_failed' },
+            'workflow_event_persist_failed'
+          );
+        });
+
+      emitter.emit({
+        type: 'node_failed',
+        runId: workflowRun.id,
+        nodeId: node.id,
+        nodeName: node.command ?? node.id,
+        error: creditError,
+      });
+
+      lastNodeCancelCheck.delete(`${workflowRun.id}:${node.id}`);
+      lastNodeActivityUpdate.delete(`${workflowRun.id}:${node.id}`);
+
+      return { state: 'failed', output: nodeOutputText, error: creditError };
     }
 
     const duration = Date.now() - nodeStartTime;

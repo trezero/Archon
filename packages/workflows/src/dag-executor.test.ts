@@ -3869,3 +3869,79 @@ describe('executeDagWorkflow -- cancel node', () => {
     }
   });
 });
+
+describe('executeDagWorkflow -- credit exhaustion', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `dag-credit-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+  });
+
+  afterEach(async () => {
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'DAG AI response' };
+      yield { type: 'result', sessionId: 'dag-session-id' };
+    });
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('marks node as failed when assistant output contains credit exhaustion text', async () => {
+    const creditExhaustedQuery = mock(function* () {
+      yield { type: 'assistant', content: "You're out of extra usage · resets in 2h" };
+      yield { type: 'result', sessionId: 'dag-session-credit' };
+    });
+    mockGetAssistantClientDag.mockReturnValue({
+      sendQuery: creditExhaustedQuery,
+      getType: () => 'claude',
+    });
+
+    const store = createMockStore();
+    const deps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun('credit-exhaustion-run');
+
+    await executeDagWorkflow(
+      deps,
+      platform,
+      'conv-credit',
+      testDir,
+      {
+        name: 'credit-test',
+        nodes: [{ id: 'investigate', prompt: 'Investigate the issue' }],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      minimalConfig
+    );
+
+    // node_failed (not node_completed) must have been stored
+    const events = (store.createWorkflowEvent as Mock<() => Promise<void>>).mock.calls.map(
+      (c: unknown[]) => (c[0] as { event_type: string }).event_type
+    );
+    expect(events).toContain('node_failed');
+    expect(events).not.toContain('node_completed');
+
+    // Overall workflow should be marked failed
+    expect(store.failWorkflowRun).toHaveBeenCalled();
+  });
+});

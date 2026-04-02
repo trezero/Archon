@@ -18,7 +18,11 @@ mock.module('@archon/paths', () => ({
   createLogger: mock(() => mockLogger),
 }));
 
-import { substituteWorkflowVariables, buildPromptWithContext } from './executor-shared';
+import {
+  substituteWorkflowVariables,
+  buildPromptWithContext,
+  detectCreditExhaustion,
+} from './executor-shared';
 
 describe('substituteWorkflowVariables', () => {
   it('replaces $WORKFLOW_ID with the run ID', () => {
@@ -161,5 +165,32 @@ describe('buildPromptWithContext', () => {
       'test prompt'
     );
     expect(result).toBe('Do the thing');
+  });
+});
+
+describe('detectCreditExhaustion', () => {
+  it('detects "You\'re out of extra usage" (exact SDK phrase)', () => {
+    const result = detectCreditExhaustion("You're out of extra usage · resets in 2h");
+    expect(result).toBe('Credit exhaustion detected — resume when credits reset');
+  });
+
+  it('detects "out of credits" phrase', () => {
+    expect(detectCreditExhaustion('Sorry, you are out of credits.')).not.toBeNull();
+  });
+
+  it('detects "credit balance" phrase', () => {
+    expect(detectCreditExhaustion('Your credit balance is too low.')).not.toBeNull();
+  });
+
+  it('returns null for normal output', () => {
+    expect(detectCreditExhaustion('Here is the investigation summary...')).toBeNull();
+  });
+
+  it('detects "insufficient credit" phrase', () => {
+    expect(detectCreditExhaustion('Insufficient credit to continue.')).not.toBeNull();
+  });
+
+  it('is case-insensitive', () => {
+    expect(detectCreditExhaustion("YOU'RE OUT OF EXTRA USAGE")).not.toBeNull();
   });
 });

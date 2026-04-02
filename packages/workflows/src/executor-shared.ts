@@ -80,6 +80,31 @@ export function classifyError(error: Error): ErrorType {
   return 'UNKNOWN';
 }
 
+// ─── Credit Exhaustion Detection ────────────────────────────────────────────
+
+/** Patterns that indicate credit/quota exhaustion in streamed assistant output */
+const CREDIT_EXHAUSTION_OUTPUT_PATTERNS = [
+  "you're out of extra usage",
+  'out of credits',
+  'credit balance',
+  'insufficient credit',
+];
+
+/**
+ * Detect credit exhaustion in streamed node output text.
+ *
+ * The Claude SDK returns credit exhaustion as a normal assistant text message
+ * rather than throwing. This function checks the accumulated output for known
+ * credit exhaustion phrases.
+ */
+export function detectCreditExhaustion(text: string): string | null {
+  const lower = text.toLowerCase();
+  if (CREDIT_EXHAUSTION_OUTPUT_PATTERNS.some(p => lower.includes(p))) {
+    return 'Credit exhaustion detected — resume when credits reset';
+  }
+  return null;
+}
+
 // ─── Command Loading ─────────────────────────────────────────────────────────
 
 /**
