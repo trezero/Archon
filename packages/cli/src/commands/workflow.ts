@@ -532,7 +532,11 @@ export async function workflowRunCommand(
         return undefined;
       })
       .catch((err: unknown) => {
-        getLog().error({ err: err as Error }, 'workflow.termination_cleanup_failed');
+        const e = err as Error;
+        getLog().error(
+          { err: e, errorType: e.constructor.name },
+          'workflow.termination_cleanup_failed'
+        );
       })
       .finally(() => {
         process.exit(1);

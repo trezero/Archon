@@ -492,16 +492,8 @@ describe('workflows database', () => {
       expect(params).toEqual(['feature-development', '/repo/path', 1]);
     });
 
-    test('returns null when no resumable run exists', async () => {
-      mockQuery.mockResolvedValueOnce(createQueryResult([]));
-
-      const result = await findResumableRun('feature-development', '/repo/path');
-
-      expect(result).toBeNull();
-    });
-
     test('returns a stale running run (no activity for >1 day)', async () => {
-      const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 1000).toISOString();
+      const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
       const staleRun = {
         ...mockWorkflowRun,
         status: 'running' as const,
@@ -517,6 +509,22 @@ describe('workflows database', () => {
       expect(query).toContain("status = 'running'");
       expect(query).toContain('last_activity_at');
       expect(params).toEqual(['feature-development', '/repo/path', 1]);
+    });
+
+    test('returns a running run with null last_activity_at (never recorded activity)', async () => {
+      const staleRun = {
+        ...mockWorkflowRun,
+        status: 'running' as const,
+        working_path: '/repo/path',
+        last_activity_at: null,
+      };
+      mockQuery.mockResolvedValueOnce(createQueryResult([staleRun]));
+
+      const result = await findResumableRun('feature-development', '/repo/path');
+
+      expect(result).toEqual(staleRun);
+      const [query] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(query).toContain('last_activity_at IS NULL');
     });
 
     test('returns null when no resumable run exists', async () => {

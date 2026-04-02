@@ -219,7 +219,8 @@ async function main(): Promise<number> {
     void createWorkflowStore()
       .failOrphanedRuns()
       .catch((err: unknown) => {
-        getLog().warn({ err }, 'cli.fail_orphans_failed');
+        const e = err as Error;
+        getLog().warn({ err: e, errorType: e.constructor.name }, 'cli.fail_orphans_failed');
       });
 
     // Validate working directory exists

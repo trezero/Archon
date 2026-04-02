@@ -234,7 +234,7 @@ export async function findResumableRun(
          AND working_path = $2
          AND (
            status IN ('failed', 'paused')
-           OR (status = 'running' AND (last_activity_at IS NULL OR last_activity_at < ${dialect.nowMinusDays(3)}))
+           OR (status = 'running' AND (last_activity_at IS NULL OR last_activity_at < ${dialect.nowMinusDays(3)})) -- nowMinusDays(3): param index 3, value bound as $3 = 1 day
          )
        ORDER BY started_at DESC
        LIMIT 1`,
@@ -244,7 +244,10 @@ export async function findResumableRun(
     return row ? normalizeWorkflowRun(row) : null;
   } catch (error) {
     const err = error as Error;
-    getLog().warn({ err, workflowName, workingPath }, 'db.workflow_run_find_resumable_failed');
+    getLog().error(
+      { err, errorType: err.constructor.name, workflowName, workingPath },
+      'db.workflow_run_find_resumable_failed'
+    );
     throw new Error(`Failed to find resumable run: ${err.message}`);
   }
 }
