@@ -280,6 +280,7 @@ export class IsolationResolver {
     // Construct request based on workflow type
     const baseRequest = {
       codebaseId: codebase.id,
+      codebaseName: codebase.name,
       canonicalRepoPath: canonicalPath,
       identifier: workflowId,
     };
@@ -398,9 +399,7 @@ export class IsolationResolver {
       env,
       cwd: env.working_path,
       method: { type: 'created' },
-      ...(isolatedEnv.warnings && isolatedEnv.warnings.length > 0
-        ? { warnings: isolatedEnv.warnings }
-        : {}),
+      ...(isolatedEnv.warnings?.length ? { warnings: isolatedEnv.warnings } : {}),
     };
   }
 }

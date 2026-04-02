@@ -23,6 +23,13 @@ interface IsolationRequestBase {
   codebaseId: string;
 
   /**
+   * Codebase name in "owner/repo" format.
+   * When present, used to resolve the project-scoped worktree path directly,
+   * even for locally-registered repos whose path doesn't start with workspacesPath.
+   */
+  codebaseName?: string;
+
+  /**
    * Absolute, resolved filesystem path to the main repository checkout.
    *
    * "Canonical" means the real path with symlinks resolved and `~` expanded
