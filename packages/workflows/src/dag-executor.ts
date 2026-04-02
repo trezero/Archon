@@ -46,6 +46,7 @@ import {
 import { withIdleTimeout, STEP_IDLE_TIMEOUT_MS } from './utils/idle-timeout';
 import {
   classifyError,
+  detectCreditExhaustion,
   loadCommandPrompt,
   substituteWorkflowVariables,
   buildPromptWithContext,
@@ -748,6 +749,8 @@ async function executeNodeInternal(
   let structuredOutput: unknown;
   let newSessionId: string | undefined;
   let nodeTokens: WorkflowTokenUsage | undefined;
+  let resultIsError = false;
+  let resultErrorSubtype: string | undefined;
   const batchMessages: string[] = [];
 
   // Create per-node abort controller for idle timeout cleanup
@@ -927,6 +930,10 @@ async function executeNodeInternal(
         if (msg.sessionId) newSessionId = msg.sessionId;
         if (msg.tokens) nodeTokens = msg.tokens;
         if (msg.structuredOutput !== undefined) structuredOutput = msg.structuredOutput;
+        if (msg.isError) {
+          resultIsError = true;
+          resultErrorSubtype = msg.errorSubtype;
+        }
         break; // Result is the "I'm done" signal — don't wait for subprocess to exit
       } else if (msg.type === 'system' && msg.content) {
         // Surface MCP connection failures to the user
@@ -1062,6 +1069,49 @@ async function executeNodeInternal(
           ? nodeOutputText
           : batchMessages.join('\n\n');
       await safeSendMessage(platform, conversationId, batchContent, nodeContext);
+    }
+
+    // Detect credit exhaustion: SDK may return error text as normal assistant output
+    // rather than throwing. Check both the SDK result error flag and the output text.
+    const creditError =
+      (resultIsError && resultErrorSubtype?.startsWith('error_')
+        ? 'Credit exhaustion detected — resume when credits reset'
+        : null) ?? detectCreditExhaustion(nodeOutputText);
+
+    if (creditError) {
+      const duration = Date.now() - nodeStartTime;
+      getLog().warn(
+        { nodeId: node.id, durationMs: duration, errorSubtype: resultErrorSubtype },
+        'dag.node_credit_exhausted'
+      );
+      await logNodeError(logDir, workflowRun.id, node.id, creditError);
+
+      deps.store
+        .createWorkflowEvent({
+          workflow_run_id: workflowRun.id,
+          event_type: 'node_failed',
+          step_name: node.id,
+          data: { error: creditError },
+        })
+        .catch((err: Error) => {
+          getLog().error(
+            { err, workflowRunId: workflowRun.id, eventType: 'node_failed' },
+            'workflow_event_persist_failed'
+          );
+        });
+
+      emitter.emit({
+        type: 'node_failed',
+        runId: workflowRun.id,
+        nodeId: node.id,
+        nodeName: node.command ?? node.id,
+        error: creditError,
+      });
+
+      lastNodeCancelCheck.delete(`${workflowRun.id}:${node.id}`);
+      lastNodeActivityUpdate.delete(`${workflowRun.id}:${node.id}`);
+
+      return { state: 'failed', output: nodeOutputText, error: creditError };
     }
 
     const duration = Date.now() - nodeStartTime;

@@ -408,6 +408,8 @@ export class ClaudeClient implements IAssistantClient {
           } else if (msg.type === 'result') {
             const resultMsg = msg as {
               session_id?: string;
+              is_error?: boolean;
+              subtype?: string;
               usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
               structured_output?: unknown;
             };
@@ -419,6 +421,7 @@ export class ClaudeClient implements IAssistantClient {
               ...(resultMsg.structured_output !== undefined
                 ? { structuredOutput: resultMsg.structured_output }
                 : {}),
+              ...(resultMsg.is_error ? { isError: true, errorSubtype: resultMsg.subtype } : {}),
             };
           }
         }
