@@ -74,7 +74,7 @@ export async function continueCommand(
   // 6. Delegate to workflowRunCommand (fresh run, no resume)
   try {
     await workflowRunCommand(env.working_path, workflowName, enrichedMessage, {
-      branchName: env.workflow_id,
+      noWorktree: true,
       codebaseId: env.codebase_id,
     });
   } catch (error) {
