@@ -518,20 +518,36 @@ export async function workflowRunCommand(
   );
 
   // Register cleanup handlers for graceful termination
-  const cleanup = async (signal: string): Promise<void> => {
+  let terminating = false;
+  const cleanup = (signal: string): void => {
+    if (terminating) return;
+    terminating = true;
     getLog().info({ conversationId: conversation.id, signal }, 'workflow.process_terminating');
-    try {
-      const activeRun = await workflowDb.getActiveWorkflowRun(conversation.id);
-      if (activeRun) {
-        await workflowDb.failWorkflowRun(activeRun.id, `Process terminated (${signal})`);
-      }
-    } catch (err) {
-      getLog().error({ err: err as Error }, 'workflow.termination_cleanup_failed');
-    }
-    process.exit(1);
+    workflowDb
+      .getActiveWorkflowRun(conversation.id)
+      .then(activeRun => {
+        if (activeRun) {
+          return workflowDb.failWorkflowRun(activeRun.id, `Process terminated (${signal})`);
+        }
+        return undefined;
+      })
+      .catch((err: unknown) => {
+        const e = err as Error;
+        getLog().error(
+          { err: e, errorType: e.constructor.name },
+          'workflow.termination_cleanup_failed'
+        );
+      })
+      .finally(() => {
+        process.exit(1);
+      });
   };
-  process.on('SIGTERM', () => void cleanup('SIGTERM'));
-  process.on('SIGINT', () => void cleanup('SIGINT'));
+  process.once('SIGTERM', () => {
+    cleanup('SIGTERM');
+  });
+  process.once('SIGINT', () => {
+    cleanup('SIGINT');
+  });
 
   // Execute workflow with workingCwd (may be worktree path)
   const result = await executeWorkflow(
@@ -730,14 +746,13 @@ export async function workflowStatusCommand(json?: boolean, verbose?: boolean): 
       if (nodes.length > 0) {
         console.log('  Nodes:');
         for (const node of nodes) {
-          const icon =
-            node.state === 'completed'
-              ? '✓'
-              : node.state === 'failed'
-                ? '✗'
-                : node.state === 'skipped'
-                  ? '-'
-                  : '◌';
+          const iconMap: Record<string, string> = {
+            completed: '✓',
+            failed: '✗',
+            skipped: '-',
+            running: '◌',
+          };
+          const icon = iconMap[node.state] ?? '◌';
           const duration =
             node.durationMs !== undefined ? ` (${formatDuration(node.durationMs)})` : '';
           const stateLabel = node.state === 'running' ? ' (running)' : '';
