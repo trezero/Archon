@@ -746,14 +746,13 @@ export async function workflowStatusCommand(json?: boolean, verbose?: boolean): 
       if (nodes.length > 0) {
         console.log('  Nodes:');
         for (const node of nodes) {
-          const icon =
-            node.state === 'completed'
-              ? '✓'
-              : node.state === 'failed'
-                ? '✗'
-                : node.state === 'skipped'
-                  ? '-'
-                  : '◌';
+          const iconMap: Record<string, string> = {
+            completed: '✓',
+            failed: '✗',
+            skipped: '-',
+            running: '◌',
+          };
+          const icon = iconMap[node.state] ?? '◌';
           const duration =
             node.durationMs !== undefined ? ` (${formatDuration(node.durationMs)})` : '';
           const stateLabel = node.state === 'running' ? ' (running)' : '';
