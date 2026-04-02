@@ -96,8 +96,6 @@ const CREDIT_EXHAUSTION_OUTPUT_PATTERNS = [
  * The Claude SDK returns credit exhaustion as a normal assistant text message
  * rather than throwing. This function checks the accumulated output for known
  * credit exhaustion phrases.
- *
- * @returns An actionable error message string if exhaustion is detected, null otherwise.
  */
 export function detectCreditExhaustion(text: string): string | null {
   const lower = text.toLowerCase();

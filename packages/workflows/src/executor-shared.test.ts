@@ -179,7 +179,7 @@ describe('detectCreditExhaustion', () => {
   });
 
   it('detects "credit balance" phrase', () => {
-    expect(detectCreditExhaustion('Insufficient credit balance to continue.')).not.toBeNull();
+    expect(detectCreditExhaustion('Your credit balance is too low.')).not.toBeNull();
   });
 
   it('returns null for normal output', () => {
