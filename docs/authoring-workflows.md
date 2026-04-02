@@ -182,17 +182,37 @@ nodes:
 
 ### `when:` Condition Syntax
 
-Conditions use string equality against upstream node outputs:
+Conditions gate whether a node runs based on upstream node outputs.
 
+**String operators** (value compared as string):
 ```yaml
 when: "$nodeId.output == 'VALUE'"
 when: "$nodeId.output != 'VALUE'"
 when: "$nodeId.output.field == 'VALUE'"    # JSON dot notation for output_format nodes
 ```
 
-- Uses `$nodeId.output` to reference the full output string of a completed node
-- Use `$nodeId.output.field` to access a JSON field (for `output_format` nodes)
-- Invalid expressions default to `true` (fail open — node runs rather than silently skipping)
+**Numeric operators** (both sides must parse as numbers; fail-closed if not):
+```yaml
+when: "$nodeId.output > '80'"
+when: "$nodeId.output >= '0.9'"
+when: "$nodeId.output < '100'"
+when: "$nodeId.output <= '5'"
+when: "$nodeId.output.score >= '0.9'"      # dot notation + numeric comparison
+```
+
+**Compound expressions** (`&&` binds tighter than `||`, no parentheses):
+```yaml
+when: "$a.output == 'X' && $b.output != 'Y'"
+when: "$a.output == 'X' || $b.output == 'Y'"
+when: "$score.output > '80' && $flag.output == 'true'"
+# Precedence: (A && B) || C
+when: "$a.output == 'X' && $b.output == 'Y' || $c.output == 'Z'"
+```
+
+- `$nodeId.output` references the full output string of a completed node
+- `$nodeId.output.field` accesses a JSON field (for `output_format` nodes)
+- Invalid or unparseable expressions default to `false` (fail-closed — node is skipped with a warning)
+- Numeric operators fail-closed if either side is not a finite number
 - Skipped nodes propagate their skipped state to dependants
 
 ### `$node_id.output` Substitution
