@@ -82,6 +82,29 @@ function createMessageErrorHandler(
   };
 }
 
+/**
+ * Handles unhandled promise rejections from the process.
+ *
+ * Exported for testability. Filters specifically for SDK cleanup races
+ * ("Operation aborted" when the PostToolUse hook writes to a closed pipe after
+ * a DAG node abort). Those are logged at error level but do not exit the process.
+ * All other unhandled rejections are unexpected bugs — they are logged at fatal
+ * level and the process exits immediately (Fail Fast principle).
+ */
+export function handleUnhandledRejection(reason: unknown): void {
+  const message = (reason instanceof Error ? reason.message : String(reason)).toLowerCase();
+  // SDK cleanup race: PostToolUse hook writes to a closed pipe after a DAG node
+  // abort. Safe to absorb — these are transient artifacts, not application bugs.
+  if (message.includes('operation aborted')) {
+    getLog().error({ reason }, 'unhandled_rejection.sdk_cleanup_race');
+    return;
+  }
+  // All other unhandled rejections are unexpected — crash loudly so they are
+  // not silently swallowed (CLAUDE.md: "Fail Fast + Explicit Errors").
+  getLog().fatal({ reason }, 'unhandled_rejection.fatal');
+  process.exit(1);
+}
+
 async function main(): Promise<void> {
   getLog().info('server_starting');
 
@@ -525,6 +548,15 @@ async function main(): Promise<void> {
 
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
+
+  // Guard against SDK cleanup races: when a DAG node is aborted mid-execution,
+  // the Claude Agent SDK's PostToolUse hook may be in-flight. After the hook
+  // returns { continue: true }, handleControlRequest() tries to write() back to
+  // the subprocess pipe — but the pipe is already closed (abort fired). The
+  // write() throws "Operation aborted", which becomes an unhandled rejection
+  // because it occurs AFTER the for-await generator loop exits (and thus outside
+  // the try/catch in claude.ts). These are SDK cleanup races, not fatal app errors.
+  process.on('unhandledRejection', handleUnhandledRejection);
 
   // Show active platforms
   const activePlatforms = ['Web'];
