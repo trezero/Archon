@@ -1,7 +1,5 @@
 /**
  * RepositoryCard Component Tests
- *
- * Tests for repository card rendering and interactions.
  */
 
 import { render, screen } from "@testing-library/react";
@@ -13,7 +11,7 @@ import { RepositoryCard } from "../RepositoryCard";
 const mockRepository: ConfiguredRepository = {
   id: "repo-1",
   repository_url: "https://github.com/test/repository",
-  display_name: "test/repository",
+  display_name: "repository",
   owner: "test",
   default_branch: "main",
   is_verified: true,
@@ -25,86 +23,28 @@ const mockRepository: ConfiguredRepository = {
 };
 
 describe("RepositoryCard", () => {
-  it("should render repository name and URL", () => {
+  it("renders short repository name", () => {
     render(<RepositoryCard repository={mockRepository} stats={{ total: 5, active: 2, done: 3 }} />);
-
-    expect(screen.getByText("test/repository")).toBeInTheDocument();
-    expect(screen.getByText(/test\/repository/)).toBeInTheDocument();
+    expect(screen.getByText("repository")).toBeInTheDocument();
   });
 
-  it("should display work order stats", () => {
-    render(<RepositoryCard repository={mockRepository} stats={{ total: 5, active: 2, done: 3 }} />);
-
-    expect(screen.getByLabelText("5 total work orders")).toBeInTheDocument();
-    expect(screen.getByLabelText("2 active work orders")).toBeInTheDocument();
-    expect(screen.getByLabelText("3 completed work orders")).toBeInTheDocument();
-  });
-
-  it("should show verified status when repository is verified", () => {
-    render(<RepositoryCard repository={mockRepository} stats={{ total: 0, active: 0, done: 0 }} />);
-
-    expect(screen.getByText("✓ Verified")).toBeInTheDocument();
-  });
-
-  it("should call onSelect when clicked", async () => {
+  it("calls onSelect when clicked", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
 
     render(<RepositoryCard repository={mockRepository} onSelect={onSelect} stats={{ total: 0, active: 0, done: 0 }} />);
 
-    const card = screen.getByRole("button", { name: /test\/repository/i });
+    const card = screen.getByRole("button", { name: /repository/i });
     await user.click(card);
 
     expect(onSelect).toHaveBeenCalledOnce();
   });
 
-  it("should show pin indicator when isPinned is true", () => {
-    render(<RepositoryCard repository={mockRepository} isPinned={true} stats={{ total: 0, active: 0, done: 0 }} />);
+  it("shows copy action and no edit/delete actions", () => {
+    render(<RepositoryCard repository={mockRepository} stats={{ total: 0, active: 0, done: 0 }} />);
 
-    expect(screen.getByText("Pinned")).toBeInTheDocument();
-  });
-
-  it("should call onPin when pin button clicked", async () => {
-    const user = userEvent.setup();
-    const onPin = vi.fn();
-
-    render(<RepositoryCard repository={mockRepository} onPin={onPin} stats={{ total: 0, active: 0, done: 0 }} />);
-
-    const pinButton = screen.getByLabelText("Pin repository");
-    await user.click(pinButton);
-
-    expect(onPin).toHaveBeenCalledOnce();
-  });
-
-  it("should call onDelete when delete button clicked", async () => {
-    const user = userEvent.setup();
-    const onDelete = vi.fn();
-
-    render(<RepositoryCard repository={mockRepository} onDelete={onDelete} stats={{ total: 0, active: 0, done: 0 }} />);
-
-    const deleteButton = screen.getByLabelText("Delete repository");
-    await user.click(deleteButton);
-
-    expect(onDelete).toHaveBeenCalledOnce();
-  });
-
-  it("should support keyboard navigation (Enter key)", async () => {
-    const user = userEvent.setup();
-    const onSelect = vi.fn();
-
-    render(<RepositoryCard repository={mockRepository} onSelect={onSelect} stats={{ total: 0, active: 0, done: 0 }} />);
-
-    const card = screen.getByRole("button", { name: /test\/repository/i });
-    card.focus();
-    await user.keyboard("{Enter}");
-
-    expect(onSelect).toHaveBeenCalledOnce();
-  });
-
-  it("should have proper ARIA attributes", () => {
-    render(<RepositoryCard repository={mockRepository} isSelected={true} stats={{ total: 0, active: 0, done: 0 }} />);
-
-    const card = screen.getByRole("button");
-    expect(card).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Copy repository URL")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Edit repository")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Delete repository")).not.toBeInTheDocument();
   });
 });

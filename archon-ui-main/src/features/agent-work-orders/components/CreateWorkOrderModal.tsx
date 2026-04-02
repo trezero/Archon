@@ -39,6 +39,12 @@ const WORKFLOW_STEPS: { value: WorkflowStep; label: string; dependsOn?: Workflow
   { value: "create-pr", label: "Create Pull Request", dependsOn: ["commit"] },
 ];
 
+function getRepoName(displayName: string | null, repositoryUrl: string): string {
+  if (displayName?.trim()) return displayName;
+  const parts = repositoryUrl.split("/").filter(Boolean);
+  return parts[parts.length - 1] || repositoryUrl;
+}
+
 export function CreateWorkOrderModal({ open, onOpenChange }: CreateWorkOrderModalProps) {
   // Read preselected repository from Zustand store
   const preselectedRepositoryId = useAgentWorkOrdersStore((s) => s.preselectedRepositoryId);
@@ -216,7 +222,7 @@ export function CreateWorkOrderModal({ open, onOpenChange }: CreateWorkOrderModa
                   <SelectContent>
                     {repositories.map((repo) => (
                       <SelectItem key={repo.id} value={repo.id}>
-                        {repo.display_name || repo.repository_url}
+                        {getRepoName(repo.display_name, repo.repository_url)}
                       </SelectItem>
                     ))}
                   </SelectContent>

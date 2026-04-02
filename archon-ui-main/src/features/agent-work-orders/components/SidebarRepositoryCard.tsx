@@ -5,13 +5,12 @@
  * Shows repository name, pin badge, and inline stat pills.
  */
 
-import { Activity, CheckCircle2, Clock, Copy, Edit, Pin, Trash2 } from "lucide-react";
+import { Activity, CheckCircle2, Clock, Copy, Pin } from "lucide-react";
 import { StatPill } from "@/features/ui/primitives/pill";
 import { SelectableCard } from "@/features/ui/primitives/selectable-card";
 import { cn } from "@/features/ui/primitives/styles";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/features/ui/primitives/tooltip";
 import { copyToClipboard } from "@/features/shared/utils/clipboard";
-import { useAgentWorkOrdersStore } from "../state/agentWorkOrdersStore";
 import type { ConfiguredRepository } from "../types/repository";
 
 export interface SidebarRepositoryCardProps {
@@ -29,9 +28,6 @@ export interface SidebarRepositoryCardProps {
 
   /** Callback when repository is selected */
   onSelect?: () => void;
-
-  /** Callback when delete button is clicked */
-  onDelete?: () => void;
 
   /** Work order statistics for this repository */
   stats?: {
@@ -76,18 +72,22 @@ function getTitleClass(isSelected: boolean): string {
   return isSelected ? TITLE_CLASSES.selected : TITLE_CLASSES.default;
 }
 
+function getRepoName(repository: ConfiguredRepository): string {
+  const fromDisplay = repository.display_name?.trim();
+  if (fromDisplay) return fromDisplay;
+
+  const parts = repository.repository_url.split("/").filter(Boolean);
+  return parts[parts.length - 1] || repository.repository_url;
+}
+
 export function SidebarRepositoryCard({
   repository,
   isSelected = false,
   isPinned = false,
   showAuroraGlow = false,
   onSelect,
-  onDelete,
   stats = { total: 0, active: 0, done: 0 },
 }: SidebarRepositoryCardProps) {
-  // Get modal action from Zustand store (no prop drilling)
-  const openEditRepoModal = useAgentWorkOrdersStore((s) => s.openEditRepoModal);
-
   const backgroundClass = getBackgroundClass(isPinned, isSelected);
   const titleClass = getTitleClass(isSelected);
 
@@ -98,18 +98,6 @@ export function SidebarRepositoryCard({
       console.log("Repository URL copied to clipboard");
     } else {
       console.error("Failed to copy repository URL:", result.error);
-    }
-  };
-
-  const handleEdit = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    openEditRepoModal(repository);
-  };
-
-  const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (onDelete) {
-      onDelete();
     }
   };
 
@@ -128,7 +116,7 @@ export function SidebarRepositoryCard({
         {/* Title with pin badge - centered */}
         <div className="flex items-center justify-center gap-2">
           <h4 className={cn("font-medium text-sm line-clamp-1 text-center", titleClass)}>
-            {repository.display_name || repository.repository_url}
+            {getRepoName(repository)}
           </h4>
           {isPinned && (
             <div
@@ -169,21 +157,6 @@ export function SidebarRepositoryCard({
       {/* Action buttons bar */}
       <div className="flex items-center justify-center gap-2 px-2 py-2 mt-2 border-t border-gray-200/30 dark:border-gray-700/20">
         <TooltipProvider>
-          {/* Edit button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleEdit}
-                className="p-1.5 rounded-md hover:bg-purple-500/10 dark:hover:bg-purple-500/20 text-gray-500 dark:text-gray-400 hover:text-purple-500 dark:hover:text-purple-400 transition-colors"
-                aria-label="Edit repository"
-              >
-                <Edit className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Edit</TooltipContent>
-          </Tooltip>
-
           {/* Copy URL button */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -197,21 +170,6 @@ export function SidebarRepositoryCard({
               </button>
             </TooltipTrigger>
             <TooltipContent>Copy URL</TooltipContent>
-          </Tooltip>
-
-          {/* Delete button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleDelete}
-                className="p-1.5 rounded-md hover:bg-red-500/10 dark:hover:bg-red-500/20 text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-                aria-label="Delete repository"
-              >
-                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Delete</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>

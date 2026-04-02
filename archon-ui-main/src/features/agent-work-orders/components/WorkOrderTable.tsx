@@ -36,7 +36,7 @@ export function WorkOrderTable({ workOrders, selectedRepositoryId, onStartWorkOr
   // Create a map of repository URL to display name for quick lookup
   const repoUrlToDisplayName = repositories.reduce(
     (acc, repo) => {
-      acc[repo.repository_url] = repo.display_name || repo.repository_url.split("/").slice(-2).join("/");
+      acc[repo.repository_url] = repo.display_name || repo.repository_url.split("/").filter(Boolean).pop() || repo.repository_url;
       return acc;
     },
     {} as Record<string, string>,

@@ -8,14 +8,69 @@
 import { callAPIWithETag } from "@/features/shared/api/apiClient";
 import type { ConfiguredRepository, CreateRepositoryRequest, UpdateRepositoryRequest } from "../types/repository";
 
+interface ProjectRepositoryFallback {
+  id: string;
+  github_repo?: string;
+}
+
+const DEFAULT_WORKFLOW_COMMANDS: ConfiguredRepository["default_commands"] = ["create-branch", "planning", "execute"];
+
+function normalizeGithubUrl(url: string): string {
+  return url.trim().replace(/\.git$/i, "").replace(/\/+$/, "");
+}
+
+function extractOwnerAndRepo(url: string): { owner: string | null; repoName: string } {
+  const match = url.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)$/i);
+  if (!match) {
+    const fallback = url.split("/").filter(Boolean).pop() || url;
+    return { owner: null, repoName: fallback };
+  }
+  return { owner: match[1], repoName: match[2] };
+}
+
+function mapProjectsToRepositories(projects: ProjectRepositoryFallback[]): ConfiguredRepository[] {
+  const now = new Date().toISOString();
+  const seen = new Set<string>();
+  const repositories: ConfiguredRepository[] = [];
+
+  for (const project of projects) {
+    if (!project.github_repo) continue;
+
+    const normalizedUrl = normalizeGithubUrl(project.github_repo);
+    if (!/^https?:\/\/github\.com\/[^/]+\/[^/]+$/i.test(normalizedUrl)) continue;
+
+    const dedupeKey = normalizedUrl.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    const { owner, repoName } = extractOwnerAndRepo(normalizedUrl);
+
+    repositories.push({
+      id: `project-${project.id}`,
+      repository_url: normalizedUrl,
+      display_name: repoName,
+      owner,
+      default_branch: null,
+      is_verified: false,
+      last_verified_at: null,
+      default_sandbox_type: "git_worktree",
+      default_commands: DEFAULT_WORKFLOW_COMMANDS,
+      created_at: now,
+      updated_at: now,
+    });
+  }
+
+  return repositories;
+}
+
 /**
  * List all configured repositories
- * @returns Array of configured repositories ordered by created_at DESC
+ * @returns Project repositories mapped into ConfiguredRepository shape
  */
 export async function listRepositories(): Promise<ConfiguredRepository[]> {
-  return callAPIWithETag<ConfiguredRepository[]>("/api/agent-work-orders/repositories", {
+  const response = await callAPIWithETag<{ projects: ProjectRepositoryFallback[] }>("/api/projects", {
     method: "GET",
   });
+  return mapProjectsToRepositories(response.projects || []);
 }
 
 /**

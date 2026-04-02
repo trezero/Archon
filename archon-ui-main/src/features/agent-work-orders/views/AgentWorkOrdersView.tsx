@@ -6,21 +6,19 @@
  */
 
 import { ChevronLeft, ChevronRight, GitBranch, LayoutGrid, List, Plus, Search } from "lucide-react";
-import { useCallback, useEffect } from "react";
+import { useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/shallow";
 import { Button } from "@/features/ui/primitives/button";
 import { Input } from "@/features/ui/primitives/input";
 import { PillNavigation, type PillNavigationItem } from "@/features/ui/primitives/pill-navigation";
 import { cn } from "@/features/ui/primitives/styles";
-import { AddRepositoryModal } from "../components/AddRepositoryModal";
 import { CreateWorkOrderModal } from "../components/CreateWorkOrderModal";
-import { EditRepositoryModal } from "../components/EditRepositoryModal";
 import { RepositoryCard } from "../components/RepositoryCard";
 import { SidebarRepositoryCard } from "../components/SidebarRepositoryCard";
 import { WorkOrderTable } from "../components/WorkOrderTable";
 import { useStartWorkOrder, useWorkOrders } from "../hooks/useAgentWorkOrderQueries";
-import { useDeleteRepository, useRepositories } from "../hooks/useRepositoryQueries";
+import { useRepositories } from "../hooks/useRepositoryQueries";
 import { useAgentWorkOrdersStore } from "../state/agentWorkOrdersStore";
 
 export function AgentWorkOrdersView() {
@@ -39,20 +37,13 @@ export function AgentWorkOrdersView() {
   const setSidebarExpanded = useAgentWorkOrdersStore((s) => s.setSidebarExpanded);
 
   // Zustand Modals State - Group with useShallow
-  const { showAddRepoModal, showEditRepoModal, showCreateWorkOrderModal, editingRepository } = useAgentWorkOrdersStore(
+  const { showCreateWorkOrderModal } = useAgentWorkOrdersStore(
     useShallow((s) => ({
-      showAddRepoModal: s.showAddRepoModal,
-      showEditRepoModal: s.showEditRepoModal,
       showCreateWorkOrderModal: s.showCreateWorkOrderModal,
-      editingRepository: s.editingRepository,
     })),
   );
 
   // Zustand Modal Actions - Functions are stable, select individually
-  const openAddRepoModal = useAgentWorkOrdersStore((s) => s.openAddRepoModal);
-  const closeAddRepoModal = useAgentWorkOrdersStore((s) => s.closeAddRepoModal);
-  const openEditRepoModal = useAgentWorkOrdersStore((s) => s.openEditRepoModal);
-  const closeEditRepoModal = useAgentWorkOrdersStore((s) => s.closeEditRepoModal);
   const openCreateWorkOrderModal = useAgentWorkOrdersStore((s) => s.openCreateWorkOrderModal);
   const closeCreateWorkOrderModal = useAgentWorkOrdersStore((s) => s.closeCreateWorkOrderModal);
 
@@ -67,7 +58,6 @@ export function AgentWorkOrdersView() {
   const { data: repositories = [], isLoading: isLoadingRepos } = useRepositories();
   const { data: workOrders = [], isLoading: isLoadingWorkOrders } = useWorkOrders();
   const startWorkOrder = useStartWorkOrder();
-  const deleteRepository = useDeleteRepository();
 
   // Helper function to select repository (updates URL only)
   const selectRepository = useCallback(
@@ -79,22 +69,6 @@ export function AgentWorkOrdersView() {
       }
     },
     [setSearchParams],
-  );
-
-  /**
-   * Handle repository deletion
-   */
-  const handleDeleteRepository = useCallback(
-    async (id: string) => {
-      if (confirm("Are you sure you want to delete this repository configuration?")) {
-        await deleteRepository.mutateAsync(id);
-        // If this was the selected repository, clear selection
-        if (selectedRepositoryId === id) {
-          selectRepository(undefined);
-        }
-      }
-    },
-    [deleteRepository, selectedRepositoryId, selectRepository],
   );
 
   /**
@@ -195,16 +169,9 @@ export function AgentWorkOrdersView() {
           </Button>
         </div>
 
-        {/* New Repo Button */}
-        <Button onClick={openAddRepoModal} variant="cyan" aria-label="Add new repository">
-          <Plus className="w-4 h-4 mr-2" aria-hidden="true" />
-          New Repo
-        </Button>
       </div>
 
       {/* Modals */}
-      <AddRepositoryModal open={showAddRepoModal} onOpenChange={closeAddRepoModal} />
-      <EditRepositoryModal open={showEditRepoModal} onOpenChange={closeEditRepoModal} />
       <CreateWorkOrderModal open={showCreateWorkOrderModal} onOpenChange={closeCreateWorkOrderModal} />
 
       {/* Horizontal Layout */}
@@ -228,7 +195,6 @@ export function AgentWorkOrdersView() {
                       isSelected={selectedRepositoryId === repository.id}
                       showAuroraGlow={selectedRepositoryId === repository.id}
                       onSelect={() => selectRepository(repository.id)}
-                      onDelete={() => handleDeleteRepository(repository.id)}
                       stats={getRepositoryStats(repository.id)}
                     />
                   ))
@@ -293,7 +259,6 @@ export function AgentWorkOrdersView() {
                       isPinned={false}
                       showAuroraGlow={selectedRepositoryId === repository.id}
                       onSelect={() => selectRepository(repository.id)}
-                      onDelete={() => handleDeleteRepository(repository.id)}
                       stats={getRepositoryStats(repository.id)}
                     />
                   ))

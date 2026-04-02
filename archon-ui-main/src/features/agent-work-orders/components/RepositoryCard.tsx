@@ -5,11 +5,10 @@
  * Uses SelectableCard primitive with glassmorphism styling.
  */
 
-import { Activity, CheckCircle2, Clock, Copy, Edit, Trash2 } from "lucide-react";
+import { Activity, CheckCircle2, Clock, Copy } from "lucide-react";
 import { SelectableCard } from "@/features/ui/primitives/selectable-card";
 import { cn } from "@/features/ui/primitives/styles";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/features/ui/primitives/tooltip";
-import { useAgentWorkOrdersStore } from "../state/agentWorkOrdersStore";
 import type { ConfiguredRepository } from "../types/repository";
 
 export interface RepositoryCardProps {
@@ -24,9 +23,6 @@ export interface RepositoryCardProps {
 
   /** Callback when repository is selected */
   onSelect?: () => void;
-
-  /** Callback when delete button is clicked */
-  onDelete?: () => void;
 
   /** Work order statistics for this repository */
   stats?: {
@@ -59,17 +55,21 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
+function getRepoName(repository: ConfiguredRepository): string {
+  const fromDisplay = repository.display_name?.trim();
+  if (fromDisplay) return fromDisplay;
+
+  const parts = repository.repository_url.split("/").filter(Boolean);
+  return parts[parts.length - 1] || repository.repository_url;
+}
+
 export function RepositoryCard({
   repository,
   isSelected = false,
   showAuroraGlow = false,
   onSelect,
-  onDelete,
   stats = { total: 0, active: 0, done: 0 },
 }: RepositoryCardProps) {
-  // Get modal action from Zustand store (no prop drilling)
-  const openEditRepoModal = useAgentWorkOrdersStore((s) => s.openEditRepoModal);
-
   const backgroundClass = getBackgroundClass(isSelected);
 
   const handleCopyUrl = async (e: React.MouseEvent) => {
@@ -78,18 +78,6 @@ export function RepositoryCard({
     if (success) {
       // Could add toast notification here
       console.log("Repository URL copied to clipboard");
-    }
-  };
-
-  const handleEdit = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    openEditRepoModal(repository);
-  };
-
-  const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (onDelete) {
-      onDelete();
     }
   };
 
@@ -115,7 +103,7 @@ export function RepositoryCard({
                 : "text-gray-500 dark:text-gray-400",
             )}
           >
-            {repository.display_name || repository.repository_url.replace("https://github.com/", "")}
+            {getRepoName(repository)}
           </h3>
         </div>
 
@@ -271,21 +259,6 @@ export function RepositoryCard({
       {/* Bottom bar with action icons */}
       <div className="flex items-center justify-end gap-2 px-3 py-2 mt-auto border-t border-gray-200/30 dark:border-gray-700/20">
         <TooltipProvider>
-          {/* Edit button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleEdit}
-                className="p-1.5 rounded-md hover:bg-purple-500/10 dark:hover:bg-purple-500/20 text-gray-500 dark:text-gray-400 hover:text-purple-500 dark:hover:text-purple-400 transition-colors"
-                aria-label="Edit repository"
-              >
-                <Edit className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Edit</TooltipContent>
-          </Tooltip>
-
           {/* Copy URL button */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -299,21 +272,6 @@ export function RepositoryCard({
               </button>
             </TooltipTrigger>
             <TooltipContent>Copy URL</TooltipContent>
-          </Tooltip>
-
-          {/* Delete button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleDelete}
-                className="p-1.5 rounded-md hover:bg-red-500/10 dark:hover:bg-red-500/20 text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-                aria-label="Delete repository"
-              >
-                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Delete</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>

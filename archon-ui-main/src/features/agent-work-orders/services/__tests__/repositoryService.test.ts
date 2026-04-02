@@ -23,35 +23,36 @@ describe("repositoryService", () => {
   });
 
   describe("listRepositories", () => {
-    it("should call GET /api/agent-work-orders/repositories", async () => {
-      const mockRepositories: ConfiguredRepository[] = [
-        {
-          id: "repo-1",
-          repository_url: "https://github.com/test/repo",
-          display_name: "test/repo",
-          owner: "test",
-          default_branch: "main",
-          is_verified: true,
-          last_verified_at: "2024-01-01T00:00:00Z",
-          default_sandbox_type: "git_worktree",
-          default_commands: ["create-branch", "planning", "execute"],
-          created_at: "2024-01-01T00:00:00Z",
-          updated_at: "2024-01-01T00:00:00Z",
-        },
-      ];
-
-      vi.mocked(callAPIWithETag).mockResolvedValue(mockRepositories);
+    it("should call GET /api/projects and map github_repo entries", async () => {
+      vi.mocked(callAPIWithETag).mockResolvedValue({
+        projects: [
+          { id: "proj-1", github_repo: "https://github.com/test/repo.git" },
+          { id: "proj-2", github_repo: "https://github.com/example/repo-two/" },
+        ],
+      });
 
       const result = await repositoryService.listRepositories();
 
-      expect(callAPIWithETag).toHaveBeenCalledWith("/api/agent-work-orders/repositories", {
+      expect(callAPIWithETag).toHaveBeenCalledWith("/api/projects", {
         method: "GET",
       });
-      expect(result).toEqual(mockRepositories);
+      expect(result).toHaveLength(2);
+      expect(result[0]).toMatchObject({
+        id: "project-proj-1",
+        repository_url: "https://github.com/test/repo",
+        display_name: "repo",
+        owner: "test",
+      });
+      expect(result[1]).toMatchObject({
+        id: "project-proj-2",
+        repository_url: "https://github.com/example/repo-two",
+        display_name: "repo-two",
+        owner: "example",
+      });
     });
 
-    it("should handle empty repository list", async () => {
-      vi.mocked(callAPIWithETag).mockResolvedValue([]);
+    it("should handle empty project list", async () => {
+      vi.mocked(callAPIWithETag).mockResolvedValue({ projects: [] });
 
       const result = await repositoryService.listRepositories();
 
@@ -59,10 +60,10 @@ describe("repositoryService", () => {
     });
 
     it("should propagate API errors", async () => {
-      const error = new Error("Network error");
+      const error = new Error("Projects API unavailable");
       vi.mocked(callAPIWithETag).mockRejectedValue(error);
 
-      await expect(repositoryService.listRepositories()).rejects.toThrow("Network error");
+      await expect(repositoryService.listRepositories()).rejects.toThrow("Projects API unavailable");
     });
   });
 
