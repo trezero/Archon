@@ -186,6 +186,10 @@ describe('detectCreditExhaustion', () => {
     expect(detectCreditExhaustion('Here is the investigation summary...')).toBeNull();
   });
 
+  it('detects "insufficient credit" phrase', () => {
+    expect(detectCreditExhaustion('Insufficient credit to continue.')).not.toBeNull();
+  });
+
   it('is case-insensitive', () => {
     expect(detectCreditExhaustion("YOU'RE OUT OF EXTRA USAGE")).not.toBeNull();
   });
