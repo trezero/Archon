@@ -255,6 +255,7 @@ export const CONTEXT_VAR_PATTERN_STR = '\\$(?:CONTEXT|EXTERNAL_CONTEXT|ISSUE_CON
  * - $CONTEXT, $EXTERNAL_CONTEXT, $ISSUE_CONTEXT - GitHub issue/PR context (if available)
  * - $LOOP_USER_INPUT - User feedback from interactive loop approval. Only populated on the
  *   first iteration of a resumed interactive loop; empty string on all other iterations.
+ * - $REJECTION_REASON - Reviewer feedback from approval node rejection (on_reject prompts only).
  *
  * When issueContext is undefined, context variables are replaced with empty string
  * to avoid sending literal "$CONTEXT" to the AI.
@@ -266,7 +267,8 @@ export function substituteWorkflowVariables(
   artifactsDir: string,
   baseBranch: string,
   issueContext?: string,
-  loopUserInput?: string
+  loopUserInput?: string,
+  rejectionReason?: string
 ): { prompt: string; contextSubstituted: boolean } {
   // Fail fast if the prompt references $BASE_BRANCH but no base branch could be resolved
   if (!baseBranch && prompt.includes('$BASE_BRANCH')) {
@@ -283,7 +285,8 @@ export function substituteWorkflowVariables(
     .replace(/\$ARGUMENTS/g, userMessage)
     .replace(/\$ARTIFACTS_DIR/g, artifactsDir)
     .replace(/\$BASE_BRANCH/g, baseBranch)
-    .replace(/\$LOOP_USER_INPUT/g, loopUserInput ?? '');
+    .replace(/\$LOOP_USER_INPUT/g, loopUserInput ?? '')
+    .replace(/\$REJECTION_REASON/g, rejectionReason ?? '');
 
   // Check if context variables exist (use fresh regex to avoid lastIndex issues)
   const hasContextVariables = new RegExp(CONTEXT_VAR_PATTERN_STR).test(result);

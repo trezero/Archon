@@ -117,6 +117,12 @@ export interface ApprovalContext {
   iteration?: number;
   /** Session ID to restore on resume (interactive loops only). */
   sessionId?: string;
+  /** When true, the user's approval comment is stored as `$nodeId.output`. */
+  captureResponse?: boolean;
+  /** The on_reject prompt template (stored at pause time so reject handlers don't need the workflow def). */
+  onRejectPrompt?: string;
+  /** Max rejection attempts before cancellation (default 3). */
+  onRejectMaxAttempts?: number;
 }
 
 /**

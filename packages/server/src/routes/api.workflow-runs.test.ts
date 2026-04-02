@@ -56,7 +56,7 @@ type MockWorkflowRun = {
   conversation_id: string | null;
   parent_conversation_id: string | null;
   codebase_id: string | null;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused';
   user_message: string;
   started_at: string;
   completed_at: string | null;
@@ -166,6 +166,7 @@ mock.module('@archon/core/db/isolation-environments', () => ({
 }));
 
 const mockDeleteWorkflowRun = mock(async (_id: string) => {});
+const mockUpdateWorkflowRun = mock(async (_id: string, _update: unknown) => {});
 
 mock.module('@archon/core/db/workflows', () => ({
   listWorkflowRuns: mockListWorkflowRuns,
@@ -173,11 +174,15 @@ mock.module('@archon/core/db/workflows', () => ({
   getWorkflowRun: mockGetWorkflowRun,
   cancelWorkflowRun: mockCancelWorkflowRun,
   deleteWorkflowRun: mockDeleteWorkflowRun,
+  updateWorkflowRun: mockUpdateWorkflowRun,
   getWorkflowRunByWorkerPlatformId: mockGetWorkflowRunByWorkerPlatformId,
 }));
 
+const mockCreateWorkflowEvent = mock(async (_event: unknown) => {});
+
 mock.module('@archon/core/db/workflow-events', () => ({
   listWorkflowEvents: mockListWorkflowEvents,
+  createWorkflowEvent: mockCreateWorkflowEvent,
 }));
 
 mock.module('@archon/core/db/messages', () => ({
@@ -1153,5 +1158,207 @@ describe('DELETE /api/workflows/runs/:runId', () => {
     });
     expect(response.status).toBe(200);
     expect(mockDeleteWorkflowRun).toHaveBeenCalledWith('run-uuid-4');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: POST /api/workflows/runs/:runId/approve
+// ---------------------------------------------------------------------------
+
+const MOCK_PAUSED_RUN: MockWorkflowRun = {
+  ...MOCK_RUNNING_RUN,
+  id: 'run-paused-1',
+  status: 'paused',
+  metadata: {
+    approval: {
+      type: 'approval',
+      nodeId: 'review-gate',
+      message: 'Review the plan',
+    },
+  },
+};
+
+describe('POST /api/workflows/runs/:runId/approve', () => {
+  beforeEach(() => {
+    mockGetWorkflowRun.mockReset();
+    mockUpdateWorkflowRun.mockReset();
+    mockCreateWorkflowEvent.mockReset();
+  });
+
+  test('returns 404 when run not found', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(null);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/missing/approve', {
+      method: 'POST',
+      body: JSON.stringify({ comment: 'LGTM' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(response.status).toBe(404);
+  });
+
+  test('returns 400 when run is not paused', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(MOCK_RUNNING_RUN);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-uuid-1/approve', {
+      method: 'POST',
+      body: JSON.stringify({}),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(response.status).toBe(400);
+  });
+
+  test('stores user comment as node_output when captureResponse is true', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce({
+      ...MOCK_PAUSED_RUN,
+      id: 'run-capture',
+      metadata: {
+        approval: {
+          type: 'approval',
+          nodeId: 'review-gate',
+          message: 'Review the plan',
+          captureResponse: true,
+        },
+      },
+    });
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-capture/approve', {
+      method: 'POST',
+      body: JSON.stringify({ comment: 'Looks great, proceed' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(response.status).toBe(200);
+    const nodeCompletedCall = mockCreateWorkflowEvent.mock.calls.find(
+      (c: unknown[]) => (c[0] as Record<string, unknown>).event_type === 'node_completed'
+    );
+    expect(nodeCompletedCall?.[0]).toMatchObject({
+      data: { node_output: 'Looks great, proceed', approval_decision: 'approved' },
+    });
+  });
+
+  test('stores empty node_output when captureResponse is not set', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(MOCK_PAUSED_RUN);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-paused-1/approve', {
+      method: 'POST',
+      body: JSON.stringify({ comment: 'a comment' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(response.status).toBe(200);
+    const nodeCompletedCall = mockCreateWorkflowEvent.mock.calls.find(
+      (c: unknown[]) => (c[0] as Record<string, unknown>).event_type === 'node_completed'
+    );
+    expect(nodeCompletedCall?.[0]).toMatchObject({
+      data: { node_output: '', approval_decision: 'approved' },
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: POST /api/workflows/runs/:runId/reject
+// ---------------------------------------------------------------------------
+
+describe('POST /api/workflows/runs/:runId/reject', () => {
+  beforeEach(() => {
+    mockGetWorkflowRun.mockReset();
+    mockUpdateWorkflowRun.mockReset();
+    mockCancelWorkflowRun.mockReset();
+    mockCreateWorkflowEvent.mockReset();
+  });
+
+  test('returns 404 when run not found', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(null);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/missing/reject', {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'bad' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(response.status).toBe(404);
+  });
+
+  test('returns 400 when run is not paused', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(MOCK_RUNNING_RUN);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-uuid-1/reject', {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'bad' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(response.status).toBe(400);
+  });
+
+  test('cancels immediately when no on_reject configured', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce(MOCK_PAUSED_RUN);
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-paused-1/reject', {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'needs work' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { success: boolean; message: string };
+    expect(body.success).toBe(true);
+    expect(mockCancelWorkflowRun).toHaveBeenCalledWith('run-paused-1');
+  });
+
+  test('records rejection and increments count when on_reject configured and under limit', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce({
+      ...MOCK_PAUSED_RUN,
+      id: 'run-on-reject',
+      metadata: {
+        approval: {
+          type: 'approval',
+          nodeId: 'review-gate',
+          message: 'Approve?',
+          onRejectPrompt: 'Fix: $REJECTION_REASON',
+          onRejectMaxAttempts: 3,
+        },
+        rejection_count: 0,
+      },
+    });
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-on-reject/reject', {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'needs more tests' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { success: boolean; message: string };
+    expect(body.success).toBe(true);
+    expect(body.message).toContain('On-reject prompt');
+    expect(mockUpdateWorkflowRun).toHaveBeenCalledWith('run-on-reject', {
+      status: 'failed',
+      metadata: { rejection_reason: 'needs more tests', rejection_count: 1 },
+    });
+    expect(mockCancelWorkflowRun).not.toHaveBeenCalled();
+  });
+
+  test('cancels when max attempts reached', async () => {
+    mockGetWorkflowRun.mockResolvedValueOnce({
+      ...MOCK_PAUSED_RUN,
+      id: 'run-max-attempts',
+      metadata: {
+        approval: {
+          type: 'approval',
+          nodeId: 'review-gate',
+          message: 'Approve?',
+          onRejectPrompt: 'Fix: $REJECTION_REASON',
+          onRejectMaxAttempts: 3,
+        },
+        rejection_count: 2,
+      },
+    });
+    const { app } = makeApp();
+    const response = await app.request('/api/workflows/runs/run-max-attempts/reject', {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'still bad' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { success: boolean; message: string };
+    expect(body.success).toBe(true);
+    expect(body.message).toContain('max attempts reached');
+    expect(mockCancelWorkflowRun).toHaveBeenCalledWith('run-max-attempts');
+    expect(mockUpdateWorkflowRun).not.toHaveBeenCalled();
   });
 });

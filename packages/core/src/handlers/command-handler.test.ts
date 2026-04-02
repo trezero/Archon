@@ -2877,5 +2877,201 @@ describe('CommandHandler', () => {
         expect(result.message).toContain('not found');
       });
     });
+
+    describe('/workflow approve — standard approval node with captureResponse', () => {
+      const baseConversation: Conversation = {
+        id: 'conv-approve',
+        platform_type: 'telegram',
+        platform_conversation_id: 'chat-approve',
+        ai_assistant_type: 'claude',
+        codebase_id: null,
+        cwd: null,
+        isolation_env_id: null,
+        last_activity_at: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+
+      test('stores user comment as node_output when captureResponse is true', async () => {
+        mockGetWorkflowRun.mockResolvedValueOnce({
+          id: 'run-cap',
+          workflow_name: 'capture-wf',
+          conversation_id: 'conv-approve',
+          parent_conversation_id: null,
+          codebase_id: null,
+          status: 'paused',
+          user_message: 'start',
+          metadata: {
+            approval: {
+              type: 'approval',
+              nodeId: 'review',
+              message: 'Approve?',
+              captureResponse: true,
+            },
+          },
+          started_at: new Date(),
+          completed_at: null,
+          last_activity_at: new Date(),
+          working_path: '/repo',
+        });
+
+        await handleCommand(baseConversation, '/workflow approve run-cap LGTM looks good');
+
+        const nodeCompletedCall = mockCreateWorkflowEvent.mock.calls.find(
+          (c: unknown[]) => (c[0] as Record<string, unknown>).event_type === 'node_completed'
+        );
+        expect(nodeCompletedCall?.[0]).toMatchObject({
+          data: { node_output: 'LGTM looks good', approval_decision: 'approved' },
+        });
+      });
+
+      test('stores empty node_output when captureResponse is not set', async () => {
+        mockGetWorkflowRun.mockResolvedValueOnce({
+          id: 'run-nocap',
+          workflow_name: 'nocapture-wf',
+          conversation_id: 'conv-approve',
+          parent_conversation_id: null,
+          codebase_id: null,
+          status: 'paused',
+          user_message: 'start',
+          metadata: {
+            approval: {
+              type: 'approval',
+              nodeId: 'review',
+              message: 'Approve?',
+            },
+          },
+          started_at: new Date(),
+          completed_at: null,
+          last_activity_at: new Date(),
+          working_path: '/repo',
+        });
+
+        await handleCommand(baseConversation, '/workflow approve run-nocap a comment');
+
+        const nodeCompletedCall = mockCreateWorkflowEvent.mock.calls.find(
+          (c: unknown[]) => (c[0] as Record<string, unknown>).event_type === 'node_completed'
+        );
+        expect(nodeCompletedCall?.[0]).toMatchObject({
+          data: { node_output: '', approval_decision: 'approved' },
+        });
+      });
+    });
+
+    describe('/workflow reject — on_reject branch', () => {
+      const baseConversation: Conversation = {
+        id: 'conv-approve',
+        platform_type: 'telegram',
+        platform_conversation_id: 'chat-approve',
+        ai_assistant_type: 'claude',
+        codebase_id: null,
+        cwd: null,
+        isolation_env_id: null,
+        last_activity_at: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+
+      test('records rejection and increments count when on_reject configured', async () => {
+        mockGetWorkflowRun.mockResolvedValueOnce({
+          id: 'run-reject-1',
+          workflow_name: 'review-wf',
+          conversation_id: 'conv-approve',
+          parent_conversation_id: null,
+          codebase_id: null,
+          status: 'paused',
+          user_message: 'review this',
+          metadata: {
+            approval: {
+              type: 'approval',
+              nodeId: 'review',
+              message: 'Approve the plan?',
+              onRejectPrompt: 'Fix: $REJECTION_REASON',
+              onRejectMaxAttempts: 3,
+            },
+            rejection_count: 0,
+          },
+          started_at: new Date(),
+          completed_at: null,
+          last_activity_at: new Date(),
+          working_path: '/repo',
+        });
+
+        const result = await handleCommand(
+          baseConversation,
+          '/workflow reject run-reject-1 needs work'
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('Reworking');
+        expect(mockUpdateWorkflowRun).toHaveBeenCalledWith('run-reject-1', {
+          status: 'failed',
+          metadata: { rejection_reason: 'needs work', rejection_count: 1 },
+        });
+      });
+
+      test('cancels when max attempts reached', async () => {
+        mockGetWorkflowRun.mockResolvedValueOnce({
+          id: 'run-reject-max',
+          workflow_name: 'review-wf',
+          conversation_id: 'conv-approve',
+          parent_conversation_id: null,
+          codebase_id: null,
+          status: 'paused',
+          user_message: 'review this',
+          metadata: {
+            approval: {
+              type: 'approval',
+              nodeId: 'review',
+              message: 'Approve?',
+              onRejectPrompt: 'Fix: $REJECTION_REASON',
+              onRejectMaxAttempts: 3,
+            },
+            rejection_count: 2,
+          },
+          started_at: new Date(),
+          completed_at: null,
+          last_activity_at: new Date(),
+          working_path: '/repo',
+        });
+
+        const result = await handleCommand(baseConversation, '/workflow reject run-reject-max bad');
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('max attempts reached');
+        expect(mockCancelWorkflowRun).toHaveBeenCalledWith('run-reject-max');
+      });
+
+      test('cancels immediately without on_reject', async () => {
+        mockGetWorkflowRun.mockResolvedValueOnce({
+          id: 'run-reject-plain',
+          workflow_name: 'plain-wf',
+          conversation_id: 'conv-approve',
+          parent_conversation_id: null,
+          codebase_id: null,
+          status: 'paused',
+          user_message: 'start',
+          metadata: {
+            approval: {
+              type: 'approval',
+              nodeId: 'gate',
+              message: 'Approve?',
+            },
+          },
+          started_at: new Date(),
+          completed_at: null,
+          last_activity_at: new Date(),
+          working_path: '/repo',
+        });
+
+        const result = await handleCommand(
+          baseConversation,
+          '/workflow reject run-reject-plain reason'
+        );
+
+        expect(result.success).toBe(true);
+        expect(mockCancelWorkflowRun).toHaveBeenCalledWith('run-reject-plain');
+      });
+    });
   });
 });

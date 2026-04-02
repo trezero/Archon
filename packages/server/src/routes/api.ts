@@ -1456,11 +1456,12 @@ export function registerApiRoutes(
       // the AI emits the completion signal (actual loop exit). Writing it here would cause
       // the resume to skip the loop node entirely via priorCompletedNodes.
       if (approval.type !== 'interactive_loop') {
+        const nodeOutput = approval.captureResponse === true ? comment : '';
         await workflowEventDb.createWorkflowEvent({
           workflow_run_id: runId,
           event_type: 'node_completed',
           step_name: approval.nodeId,
-          data: { node_output: comment, approval_decision: 'approved' },
+          data: { node_output: nodeOutput, approval_decision: 'approved' },
         });
       }
       await workflowEventDb.createWorkflowEvent({
@@ -1469,11 +1470,12 @@ export function registerApiRoutes(
         step_name: approval.nodeId,
         data: { decision: 'approved', comment },
       });
-      // For interactive loops, store user input; for standard approvals, mark as approved.
+      // For interactive loops, store user input; for standard approvals, mark as approved
+      // and clear any rejection state.
       const metadataUpdate =
         approval.type === 'interactive_loop'
           ? { loop_user_input: comment }
-          : { approval_response: 'approved' };
+          : { approval_response: 'approved', rejection_reason: '', rejection_count: 0 };
       await workflowDb.updateWorkflowRun(runId, {
         status: 'failed',
         metadata: metadataUpdate,
@@ -1508,6 +1510,28 @@ export function registerApiRoutes(
         step_name: approval?.nodeId ?? 'unknown',
         data: { decision: 'rejected', reason },
       });
+
+      const hasOnReject = approval?.onRejectPrompt !== undefined;
+      if (hasOnReject) {
+        const currentCount = (run.metadata.rejection_count as number | undefined) ?? 0;
+        const maxAttempts = approval?.onRejectMaxAttempts ?? 3;
+        if (currentCount + 1 >= maxAttempts) {
+          await workflowDb.cancelWorkflowRun(runId);
+          return c.json({
+            success: true,
+            message: `Workflow rejected and cancelled (max attempts reached): ${run.workflow_name}`,
+          });
+        }
+        await workflowDb.updateWorkflowRun(runId, {
+          status: 'failed',
+          metadata: { rejection_reason: reason, rejection_count: currentCount + 1 },
+        });
+        return c.json({
+          success: true,
+          message: `Workflow rejected: ${run.workflow_name}. On-reject prompt will run on resume.`,
+        });
+      }
+
       await workflowDb.cancelWorkflowRun(runId);
       return c.json({
         success: true,
