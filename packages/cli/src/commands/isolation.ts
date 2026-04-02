@@ -2,10 +2,12 @@
  * Isolation commands - list, cleanup, and complete worktrees
  */
 import * as isolationDb from '@archon/core/db/isolation-environments';
+import * as workflowDb from '@archon/core/db/workflows';
 import { createLogger } from '@archon/paths';
 import {
   toRepoPath,
   toBranchName,
+  execFileAsync,
   hasUncommittedChanges,
   toWorktreePath,
   worktreeExists,
@@ -238,13 +240,89 @@ export async function isolationCompleteCommand(
       continue;
     }
 
-    // Explicitly check for uncommitted changes before calling removeEnvironment,
-    // which silently returns (no throw, no DB update) when the path has changes
-    // and force is not set. This surfaces the issue to the user as a blocked failure.
+    // Run all safety checks before removing — collect all blockers, report at once.
+    // Skipped entirely when --force is set.
     if (!options.force) {
+      const blockers: string[] = [];
+
+      // Check 1: uncommitted changes in worktree
       const hasChanges = await hasUncommittedChanges(toWorktreePath(env.working_path));
       if (hasChanges) {
-        console.error(`  Blocked: ${branch} has uncommitted changes. Use --force to override.`);
+        blockers.push('uncommitted changes in worktree');
+      }
+
+      // Check 2: running workflow on this branch
+      try {
+        const activeRun = await workflowDb.getActiveWorkflowRunByPath(env.working_path);
+        if (activeRun) {
+          blockers.push(`running workflow: ${activeRun.workflow_name} (id: ${activeRun.id})`);
+        }
+      } catch (error) {
+        getLog().warn({ err: error as Error, branch }, 'isolation.complete_workflow_check_failed');
+      }
+
+      // Check 3: open PRs on this branch (requires gh CLI)
+      try {
+        const ghResult = await execFileAsync(
+          'gh',
+          ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number,title'],
+          { timeout: 15000 }
+        );
+        const prs = JSON.parse(ghResult.stdout) as { number: number; title: string }[];
+        for (const pr of prs) {
+          blockers.push(`open PR #${String(pr.number)} — "${pr.title}"`);
+        }
+      } catch (error) {
+        const err = error as Error;
+        if (err.message.includes('not found') || err.message.includes('command not found')) {
+          console.warn('  Warning: gh CLI not available — skipping open PR check');
+        } else {
+          getLog().warn({ err, branch }, 'isolation.complete_pr_check_failed');
+        }
+      }
+
+      // Check 4: unmerged commits (not yet in main)
+      try {
+        const unmergedResult = await execFileAsync(
+          'git',
+          ['-C', env.codebase_default_cwd, 'log', `main..${branch}`, '--oneline'],
+          { timeout: 15000 }
+        );
+        const unmergedLines = unmergedResult.stdout.trim().split('\n').filter(Boolean);
+        if (unmergedLines.length > 0) {
+          blockers.push(`${String(unmergedLines.length)} commit(s) not merged into main`);
+        }
+      } catch (error) {
+        getLog().warn({ err: error as Error, branch }, 'isolation.complete_unmerged_check_failed');
+      }
+
+      // Check 5: unpushed commits (not yet on remote)
+      try {
+        const unpushedResult = await execFileAsync(
+          'git',
+          ['-C', env.codebase_default_cwd, 'log', `origin/${branch}..${branch}`, '--oneline'],
+          { timeout: 15000 }
+        );
+        const unpushedLines = unpushedResult.stdout.trim().split('\n').filter(Boolean);
+        if (unpushedLines.length > 0) {
+          blockers.push(`${String(unpushedLines.length)} commit(s) not pushed to remote`);
+        }
+      } catch (error) {
+        const err = error as Error;
+        // origin/<branch> doesn't exist means branch was never pushed
+        if (err.message.includes('unknown revision') || err.message.includes('bad revision')) {
+          blockers.push('branch has never been pushed to remote');
+        } else {
+          getLog().warn({ err, branch }, 'isolation.complete_unpushed_check_failed');
+        }
+      }
+
+      if (blockers.length > 0) {
+        console.error(`  Blocked: ${branch}`);
+        for (const blocker of blockers) {
+          console.error(`    ✗ ${blocker}`);
+        }
+        console.error('  Use --force to override.');
         failed++;
         continue;
       }
