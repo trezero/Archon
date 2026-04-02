@@ -35,7 +35,7 @@ import archonValidatePrE2eMainCmd from '../../../../.archon/commands/defaults/ar
 import archonValidatePrReportCmd from '../../../../.archon/commands/defaults/archon-validate-pr-report.md' with { type: 'text' };
 
 // =============================================================================
-// Default Workflows (12 total)
+// Default Workflows (13 total)
 // =============================================================================
 
 import archonAssistWf from '../../../../.archon/workflows/defaults/archon-assist.yaml' with { type: 'text' };

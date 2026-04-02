@@ -137,6 +137,15 @@ describe('bundled-defaults', () => {
       }
     });
 
+    it('archon-workflow-builder should have validate-before-save node ordering and key constraints', () => {
+      const content = BUNDLED_WORKFLOWS['archon-workflow-builder'];
+      expect(content).toContain('id: validate-yaml');
+      expect(content).toContain('depends_on: [validate-yaml]');
+      expect(content).toContain('denied_tools: [Edit, Bash]');
+      expect(content).toContain('output_format:');
+      expect(content).toContain('workflow_name');
+    });
+
     it('should have valid YAML structure', () => {
       // Workflows are YAML files, should parse without error
       for (const [name, content] of Object.entries(BUNDLED_WORKFLOWS)) {

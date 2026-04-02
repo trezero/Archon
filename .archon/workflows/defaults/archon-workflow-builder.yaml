@@ -23,7 +23,7 @@ nodes:
       echo ""
       echo "=== Existing Workflows ==="
       if [ -d ".archon/workflows" ]; then
-        find .archon/workflows -type f -name "*.yaml" -o -name "*.yml" 2>/dev/null | head -30
+        find .archon/workflows -type f \( -name "*.yaml" -o -name "*.yml" \) 2>/dev/null | head -30
       else
         echo "(no .archon/workflows/ directory)"
       fi
