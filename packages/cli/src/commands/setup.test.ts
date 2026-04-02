@@ -10,6 +10,7 @@ import {
   generateEnvContent,
   generateWebhookSecret,
   spawnTerminalWithSetup,
+  copyArchonSkill,
 } from './setup';
 
 // Test directory for file operations
@@ -359,6 +360,61 @@ CODEX_ACCOUNT_ID=account1
     it('should export spawnTerminalWithSetup function', () => {
       // Just verify the function is exported and callable
       expect(typeof spawnTerminalWithSetup).toBe('function');
+    });
+  });
+
+  describe('copyArchonSkill', () => {
+    it('should create skill files in target directory', () => {
+      const target = join(TEST_DIR, 'skill-target');
+      mkdirSync(target, { recursive: true });
+
+      copyArchonSkill(target);
+
+      expect(existsSync(join(target, '.claude', 'skills', 'archon', 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(target, '.claude', 'skills', 'archon', 'guides', 'setup.md'))).toBe(
+        true
+      );
+      expect(
+        existsSync(join(target, '.claude', 'skills', 'archon', 'references', 'workflow-dag.md'))
+      ).toBe(true);
+      expect(
+        existsSync(join(target, '.claude', 'skills', 'archon', 'examples', 'dag-workflow.yaml'))
+      ).toBe(true);
+    });
+
+    it('should write non-empty content to skill files', () => {
+      const target = join(TEST_DIR, 'skill-target-content');
+      mkdirSync(target, { recursive: true });
+
+      copyArchonSkill(target);
+
+      const content = readFileSync(
+        join(target, '.claude', 'skills', 'archon', 'SKILL.md'),
+        'utf-8'
+      );
+      expect(content.length).toBeGreaterThan(0);
+      expect(content).toContain('archon');
+    });
+
+    it('should overwrite existing skill files', () => {
+      const target = join(TEST_DIR, 'skill-target-overwrite');
+      const skillDir = join(target, '.claude', 'skills', 'archon');
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, 'SKILL.md'), 'old content');
+
+      copyArchonSkill(target);
+
+      const content = readFileSync(join(skillDir, 'SKILL.md'), 'utf-8');
+      expect(content).not.toBe('old content');
+    });
+
+    it('should create skill files even when target directory does not exist', () => {
+      const target = join(TEST_DIR, 'non-existent-parent', 'skill-target-new');
+      // Do NOT pre-create target — copyArchonSkill must handle it
+
+      copyArchonSkill(target);
+
+      expect(existsSync(join(target, '.claude', 'skills', 'archon', 'SKILL.md'))).toBe(true);
     });
   });
 });

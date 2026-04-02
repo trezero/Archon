@@ -188,7 +188,7 @@ function filterToolIndicators(assistantMessages: string[]): string {
     /^(?:\u{1F527}|\u{1F4AD}|\u{1F4DD}|\u{270F}\u{FE0F}|\u{1F5D1}\u{FE0F}|\u{1F4C2}|\u{1F50D})/u;
   const cleanSections = sections.filter(section => {
     const trimmed = section.trim();
-    return !toolIndicatorRegex.exec(trimmed);
+    return !toolIndicatorRegex.test(trimmed);
   });
 
   const finalMessage = cleanSections.join('\n\n').trim();

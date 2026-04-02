@@ -23,7 +23,8 @@ import {
   log,
 } from '@clack/prompts';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { BUNDLED_SKILL_FILES } from '../bundled-skill';
 import { homedir } from 'os';
 import { randomBytes } from 'crypto';
 import { spawn, execSync, type ChildProcess } from 'child_process';
@@ -1174,6 +1175,23 @@ function writeEnvFiles(
   return { globalPath, repoEnvPath };
 }
 
+/**
+ * Copy the bundled Archon skill files to <targetPath>/.claude/skills/archon/
+ *
+ * Always overwrites existing files to ensure the latest skill version is installed.
+ */
+export function copyArchonSkill(targetPath: string): void {
+  const skillRoot = join(targetPath, '.claude', 'skills', 'archon');
+  for (const [relativePath, content] of Object.entries(BUNDLED_SKILL_FILES)) {
+    const dest = join(skillRoot, relativePath);
+    const destDir = dirname(dest);
+    if (!existsSync(destDir)) {
+      mkdirSync(destDir, { recursive: true });
+    }
+    writeFileSync(dest, content);
+  }
+}
+
 // =============================================================================
 // Terminal Spawning
 // =============================================================================
@@ -1474,6 +1492,44 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
 
   s.stop('Configuration files written');
 
+  // Offer to install the Archon skill
+  const shouldCopySkill = await confirm({
+    message: 'Install the Archon skill in your project? (recommended)',
+    initialValue: true,
+  });
+
+  if (isCancel(shouldCopySkill)) {
+    cancel('Setup cancelled.');
+    process.exit(0);
+  }
+
+  let skillInstalledPath: string | null = null;
+
+  if (shouldCopySkill) {
+    const skillTargetRaw = await text({
+      message: 'Project path to install the skill:',
+      defaultValue: options.repoPath,
+      placeholder: options.repoPath,
+    });
+
+    if (isCancel(skillTargetRaw)) {
+      cancel('Setup cancelled.');
+      process.exit(0);
+    }
+
+    const skillTarget = skillTargetRaw;
+    s.start('Installing Archon skill...');
+    try {
+      copyArchonSkill(skillTarget);
+    } catch (err) {
+      s.stop('Archon skill installation failed');
+      cancel(`Could not install skill: ${(err as NodeJS.ErrnoException).message}`);
+      process.exit(1);
+    }
+    s.stop('Archon skill installed');
+    skillInstalledPath = join(skillTarget, '.claude', 'skills', 'archon');
+  }
+
   // Summary
   const configuredPlatforms: string[] = [];
   if (config.platforms.github) configuredPlatforms.push('GitHub');
@@ -1511,6 +1567,12 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
     summaryLines.push('GitHub Webhook Setup:');
     summaryLines.push(`  Secret: ${config.github.webhookSecret}`);
     summaryLines.push('  Add this secret to your GitHub webhook configuration');
+  }
+
+  if (skillInstalledPath) {
+    summaryLines.push('');
+    summaryLines.push('Archon skill installed:');
+    summaryLines.push(`  ${skillInstalledPath}`);
   }
 
   note(summaryLines.join('\n'), 'Configuration Complete');
