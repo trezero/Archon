@@ -61,6 +61,7 @@ import {
   isolationCleanupMergedCommand,
   isolationCompleteCommand,
 } from './commands/isolation';
+import { continueCommand } from './commands/continue';
 import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
 import { validateWorkflowsCommand, validateCommandsCommand } from './commands/validate';
@@ -94,6 +95,7 @@ Commands:
   isolation list             List all active worktrees/environments
   isolation cleanup [days]   Remove stale environments (default: 7 days)
   isolation cleanup --merged Remove environments with branches merged into main
+  continue <branch> [msg]    Continue work on an existing worktree with prior context
   complete <branch> [...]    Complete branch lifecycle (remove worktree + branches)
   validate workflows [name]  Validate workflow definitions and their references
   validate commands [name]   Validate command files
@@ -110,6 +112,8 @@ Options:
   --quiet, -q                Reduce log verbosity to warnings and errors only
   --verbose, -v              Show debug-level output
   --json                     Output machine-readable JSON (for workflow list)
+  --workflow <name>          Workflow to run for 'continue' (default: archon-assist)
+  --no-context               Skip context injection for 'continue'
 
 Examples:
   archon chat "What does the orchestrator do?"
@@ -118,6 +122,7 @@ Examples:
   archon workflow run plan --cwd /path/to/repo "Add dark mode"
   archon workflow run implement --branch feature-auth "Implement auth"
   archon workflow run quick-fix --no-worktree "Fix typo"
+  archon continue fix/issue-42 --workflow archon-smart-pr-review "Review the changes"
 `);
 }
 
@@ -170,6 +175,8 @@ async function main(): Promise<number> {
         data: { type: 'string' },
         comment: { type: 'string' },
         reason: { type: 'string' },
+        workflow: { type: 'string' },
+        'no-context': { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false, // Allow unknown flags to pass through
@@ -203,7 +210,7 @@ async function main(): Promise<number> {
   const subcommand = positionals[1];
 
   // Commands that don't require git repo validation
-  const noGitCommands = ['version', 'help', 'setup', 'chat'];
+  const noGitCommands = ['version', 'help', 'setup', 'chat', 'continue'];
   const requiresGitRepo = !noGitCommands.includes(command ?? '');
 
   try {
@@ -477,6 +484,22 @@ async function main(): Promise<number> {
         }
         const forceFlag = args.includes('--force');
         await isolationCompleteCommand(branches, { force: forceFlag, deleteRemote: true });
+        break;
+      }
+
+      case 'continue': {
+        const continueBranch = positionals[1];
+        if (!continueBranch) {
+          console.error('Usage: archon continue <branch> [--workflow <name>] "instruction"');
+          return 1;
+        }
+        const continueMessage = positionals.slice(2).join(' ') || '';
+        const continueWorkflow = values.workflow as string | undefined;
+        const noContextFlag = values['no-context'] as boolean | undefined;
+        await continueCommand(continueBranch, continueMessage, {
+          workflow: continueWorkflow,
+          noContext: noContextFlag,
+        });
         break;
       }
 
