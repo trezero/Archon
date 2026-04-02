@@ -1,7 +1,7 @@
 /**
  * Tests for isolation complete command
  */
-import { describe, it, expect, beforeEach, mock, spyOn } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 import { isolationCompleteCommand } from './isolation';
 
 const mockLogger = {
@@ -30,6 +30,12 @@ mock.module('@archon/core/db/isolation-environments', () => ({
   updateStatus: mock(() => Promise.resolve()),
 }));
 
+const mockGetActiveWorkflowRunByPath = mock(() => Promise.resolve(null));
+
+mock.module('@archon/core/db/workflows', () => ({
+  getActiveWorkflowRunByPath: mockGetActiveWorkflowRunByPath,
+}));
+
 const mockRemoveEnvironment = mock(() => Promise.resolve());
 const mockCleanupMergedWorktrees = mock(() => Promise.resolve({ removed: [], skipped: [] }));
 
@@ -39,13 +45,21 @@ mock.module('@archon/core/services/cleanup-service', () => ({
 }));
 
 const mockHasUncommittedChanges = mock(() => Promise.resolve(false));
+// Default: gh returns empty PR array, git log returns empty string (no commits to report)
+const mockExecFileAsync = mock((cmd: string) =>
+  Promise.resolve({ stdout: cmd === 'gh' ? '[]' : '', stderr: '' })
+);
+
+const mockGetDefaultBranch = mock(() => Promise.resolve('main'));
 
 mock.module('@archon/git', () => ({
   hasUncommittedChanges: mockHasUncommittedChanges,
+  execFileAsync: mockExecFileAsync,
   toWorktreePath: mock((p: string) => p),
   toRepoPath: mock((p: string) => p),
   toBranchName: mock((b: string) => b),
-  getIsolationProvider: mock(() => ({})),
+  worktreeExists: mock(() => Promise.resolve(true)),
+  getDefaultBranch: mockGetDefaultBranch,
 }));
 
 mock.module('@archon/isolation', () => ({
@@ -72,17 +86,34 @@ const mockEnv = {
 describe('isolationCompleteCommand', () => {
   let consoleLogSpy: ReturnType<typeof spyOn>;
   let consoleErrorSpy: ReturnType<typeof spyOn>;
+  let consoleWarnSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     consoleLogSpy = spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = spyOn(console, 'error').mockImplementation(() => {});
+    consoleWarnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     mockFindActiveByBranchName.mockReset();
     mockRemoveEnvironment.mockReset();
     mockHasUncommittedChanges.mockReset();
     mockHasUncommittedChanges.mockResolvedValue(false);
+    mockGetActiveWorkflowRunByPath.mockReset();
+    mockGetActiveWorkflowRunByPath.mockResolvedValue(null);
+    mockExecFileAsync.mockReset();
+    // Default: gh returns empty PR array, git log returns empty string (no commits)
+    mockExecFileAsync.mockImplementation((cmd: string) =>
+      Promise.resolve({ stdout: cmd === 'gh' ? '[]' : '', stderr: '' })
+    );
+    mockGetDefaultBranch.mockReset();
+    mockGetDefaultBranch.mockResolvedValue('main');
   });
 
-  it('completes a branch when env is found and no uncommitted changes', async () => {
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('completes a branch when env is found and all checks pass', async () => {
     mockFindActiveByBranchName.mockResolvedValueOnce(mockEnv);
     mockRemoveEnvironment.mockResolvedValueOnce(undefined);
 
@@ -115,21 +146,182 @@ describe('isolationCompleteCommand', () => {
     await isolationCompleteCommand(['dirty-branch'], { force: false, deleteRemote: true });
 
     expect(mockRemoveEnvironment).not.toHaveBeenCalled();
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      '  Blocked: dirty-branch has uncommitted changes. Use --force to override.'
-    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Blocked: dirty-branch');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('    ✗ uncommitted changes in worktree');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Use --force to override.');
     expect(consoleLogSpy).toHaveBeenCalledWith('\nComplete: 0 completed, 1 failed, 0 not found');
   });
 
-  it('proceeds despite uncommitted changes when --force is set', async () => {
+  it('blocks when there is a running workflow on the branch', async () => {
+    mockFindActiveByBranchName.mockResolvedValueOnce(mockEnv);
+    mockGetActiveWorkflowRunByPath.mockResolvedValueOnce({
+      id: 'run-abc',
+      workflow_name: 'implement',
+    });
+
+    await isolationCompleteCommand(['feature-branch'], { force: false, deleteRemote: true });
+
+    expect(mockRemoveEnvironment).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Blocked: feature-branch');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('    ✗ running workflow: implement (id: run-abc)');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Use --force to override.');
+    expect(consoleLogSpy).toHaveBeenCalledWith('\nComplete: 0 completed, 1 failed, 0 not found');
+  });
+
+  it('blocks when there is an open PR on the branch', async () => {
+    mockFindActiveByBranchName.mockResolvedValueOnce(mockEnv);
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'gh') {
+        return Promise.resolve({
+          stdout: JSON.stringify([{ number: 140, title: 'fix: add metrics session_id' }]),
+          stderr: '',
+        });
+      }
+      // git log: empty (no unmerged/unpushed)
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await isolationCompleteCommand(['feature-branch'], { force: false, deleteRemote: true });
+
+    expect(mockRemoveEnvironment).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Blocked: feature-branch');
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '    ✗ open PR #140 — "fix: add metrics session_id"'
+    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Use --force to override.');
+    expect(consoleLogSpy).toHaveBeenCalledWith('\nComplete: 0 completed, 1 failed, 0 not found');
+  });
+
+  it('blocks when there are unmerged commits', async () => {
+    mockFindActiveByBranchName.mockResolvedValueOnce(mockEnv);
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'gh') {
+        return Promise.resolve({ stdout: '[]', stderr: '' });
+      }
+      if (cmd === 'git' && args.includes(`main..feature-branch`)) {
+        return Promise.resolve({
+          stdout: 'abc1234 fix: something\ndef5678 fix: other\n',
+          stderr: '',
+        });
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await isolationCompleteCommand(['feature-branch'], { force: false, deleteRemote: true });
+
+    expect(mockRemoveEnvironment).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Blocked: feature-branch');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('    ✗ 2 commit(s) not merged into main');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Use --force to override.');
+    expect(consoleLogSpy).toHaveBeenCalledWith('\nComplete: 0 completed, 1 failed, 0 not found');
+  });
+
+  it('blocks when there are unpushed commits', async () => {
+    mockFindActiveByBranchName.mockResolvedValueOnce(mockEnv);
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'gh') {
+        return Promise.resolve({ stdout: '[]', stderr: '' });
+      }
+      if (cmd === 'git' && args.some((a: string) => a.startsWith('origin/'))) {
+        return Promise.resolve({ stdout: 'abc1234 wip: unpushed commit\n', stderr: '' });
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await isolationCompleteCommand(['feature-branch'], { force: false, deleteRemote: true });
+
+    expect(mockRemoveEnvironment).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Blocked: feature-branch');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('    ✗ 1 commit(s) not pushed to remote');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Use --force to override.');
+    expect(consoleLogSpy).toHaveBeenCalledWith('\nComplete: 0 completed, 1 failed, 0 not found');
+  });
+
+  it('blocks with "never pushed" when origin/<branch> does not exist', async () => {
+    mockFindActiveByBranchName.mockResolvedValueOnce(mockEnv);
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'gh') {
+        return Promise.resolve({ stdout: '[]', stderr: '' });
+      }
+      if (cmd === 'git' && args.some((a: string) => a.startsWith('origin/'))) {
+        return Promise.reject(new Error('fatal: unknown revision origin/feature-branch'));
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await isolationCompleteCommand(['feature-branch'], { force: false, deleteRemote: true });
+
+    expect(mockRemoveEnvironment).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Blocked: feature-branch');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('    ✗ branch has never been pushed to remote');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Use --force to override.');
+    expect(consoleLogSpy).toHaveBeenCalledWith('\nComplete: 0 completed, 1 failed, 0 not found');
+  });
+
+  it('reports all blockers together when multiple checks fail', async () => {
     mockFindActiveByBranchName.mockResolvedValueOnce(mockEnv);
     mockHasUncommittedChanges.mockResolvedValueOnce(true);
+    mockGetActiveWorkflowRunByPath.mockResolvedValueOnce({
+      id: 'run-abc',
+      workflow_name: 'implement',
+    });
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'gh') {
+        return Promise.resolve({
+          stdout: JSON.stringify([{ number: 140, title: 'fix: metrics' }]),
+          stderr: '',
+        });
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await isolationCompleteCommand(['feature-branch'], { force: false, deleteRemote: true });
+
+    expect(mockRemoveEnvironment).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Blocked: feature-branch');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('    ✗ uncommitted changes in worktree');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('    ✗ running workflow: implement (id: run-abc)');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('    ✗ open PR #140 — "fix: metrics"');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('  Use --force to override.');
+    expect(consoleLogSpy).toHaveBeenCalledWith('\nComplete: 0 completed, 1 failed, 0 not found');
+  });
+
+  it('skips PR check with warning when gh CLI is not available', async () => {
+    mockFindActiveByBranchName.mockResolvedValueOnce(mockEnv);
+    mockRemoveEnvironment.mockResolvedValueOnce(undefined);
+    mockExecFileAsync.mockImplementation((cmd: string) => {
+      if (cmd === 'gh') {
+        const err = Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' });
+        return Promise.reject(err);
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await isolationCompleteCommand(['feature-branch'], { force: false, deleteRemote: true });
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      '  Warning: gh CLI not available — skipping open PR check'
+    );
+    // Should still complete since gh check is non-fatal
+    expect(mockRemoveEnvironment).toHaveBeenCalled();
+    expect(consoleLogSpy).toHaveBeenCalledWith('  Completed: feature-branch');
+  });
+
+  it('proceeds despite all checks when --force is set', async () => {
+    mockFindActiveByBranchName.mockResolvedValueOnce(mockEnv);
+    mockHasUncommittedChanges.mockResolvedValueOnce(true);
+    mockGetActiveWorkflowRunByPath.mockResolvedValueOnce({
+      id: 'run-abc',
+      workflow_name: 'implement',
+    });
     mockRemoveEnvironment.mockResolvedValueOnce(undefined);
 
     await isolationCompleteCommand(['dirty-branch'], { force: true, deleteRemote: true });
 
-    // hasUncommittedChanges should NOT be called when force is true
+    // All safety checks should NOT be called when force is true
     expect(mockHasUncommittedChanges).not.toHaveBeenCalled();
+    expect(mockGetActiveWorkflowRunByPath).not.toHaveBeenCalled();
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
     expect(mockRemoveEnvironment).toHaveBeenCalledWith('env-123', {
       force: true,
       deleteRemoteBranch: true,
