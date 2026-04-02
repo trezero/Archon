@@ -193,7 +193,7 @@ nodes:
         exit 1
       fi
 
-      if ! grep -q "nodes:" "$FILE"; then
+      if ! grep -q "^nodes:" "$FILE"; then
         echo "ERROR: missing 'nodes:' field"
         exit 1
       fi
