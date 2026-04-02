@@ -21,7 +21,7 @@ nodes:
   - id: fetch-pr
     bash: |
       # Extract PR number from arguments
-      PR_NUMBER=$(echo "$ARGUMENTS" | grep -oE '[0-9]+' | head -1)
+      PR_NUMBER=$(echo "$ARGUMENTS" | grep -oE '/pull/[0-9]+' | grep -oE '[0-9]+' | head -1)
       if [ -z "$PR_NUMBER" ]; then
         # Try getting PR from current branch
         PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null)
