@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, Loader2 } from 'lucide-react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { CheckCircle, ChevronRight, Loader2, Pause, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getWorkflowRunByWorker } from '@/lib/api';
+import { approveWorkflowRun, getWorkflowRunByWorker, rejectWorkflowRun } from '@/lib/api';
 import { useWorkflowStore } from '@/stores/workflow-store';
 import { StatusIcon } from '@/components/workflows/StatusIcon';
 import { formatDurationMs } from '@/lib/format';
@@ -46,26 +46,28 @@ export function WorkflowProgressCard({
   const status = liveState?.status ?? restStatus;
   const dagNodes: DagNodeState[] = liveState?.dagNodes ?? [];
   const currentTool = liveState?.currentTool ?? null;
+  const approval = liveState?.approval ?? null;
   const error = liveState?.error;
   const startedAt = liveState?.startedAt;
 
   const completedCount = dagNodes.filter(n => n.status === 'completed').length;
   const totalNodes = dagNodes.length;
   const isRunning = status === 'running' || status === 'pending';
+  const isPaused = status === 'paused';
 
   // Expand/collapse state
   const [expanded, setExpanded] = useState(false);
   const userToggled = useRef(false);
 
-  // Auto-expand when running, auto-collapse when terminal (unless user toggled)
+  // Auto-expand when running or paused, auto-collapse when terminal (unless user toggled)
   useEffect(() => {
     if (userToggled.current) return;
-    if (isRunning) {
+    if (isRunning || isPaused) {
       setExpanded(true);
     } else if (isTerminalStatus(status)) {
       setExpanded(false);
     }
-  }, [isRunning, status]);
+  }, [isRunning, isPaused, status]);
 
   // Live elapsed timer
   const [elapsed, setElapsed] = useState(0);
@@ -79,6 +81,15 @@ export function WorkflowProgressCard({
       clearInterval(interval);
     };
   }, [isRunning, startedAt]);
+
+  // Approve/reject mutations
+  const approveMutation = useMutation({
+    mutationFn: () => approveWorkflowRun(runId ?? ''),
+  });
+  const rejectMutation = useMutation({
+    mutationFn: () => rejectWorkflowRun(runId ?? ''),
+  });
+  const mutationError = approveMutation.error ?? rejectMutation.error;
 
   // Completed duration from live state
   const completedAt = liveState?.completedAt;
@@ -130,7 +141,8 @@ export function WorkflowProgressCard({
     <div
       className={cn(
         'rounded-lg border border-border bg-surface transition-colors max-w-md overflow-hidden',
-        isRunning && 'border-l-2 border-l-primary'
+        isRunning && 'border-l-2 border-l-primary',
+        isPaused && 'border-l-2 border-l-warning'
       )}
     >
       {/* Header bar - always visible, clickable */}
@@ -185,6 +197,49 @@ export function WorkflowProgressCard({
                   )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Approval request banner */}
+          {isPaused && (
+            <div className="border-t border-border px-3 py-2 space-y-2">
+              <div className="rounded-md bg-warning/5 border border-warning/20 px-3 py-2 flex items-start gap-2">
+                <Pause className="h-3.5 w-3.5 text-warning shrink-0 mt-0.5" />
+                <p className="text-xs text-text-secondary">
+                  {approval?.message ?? 'Waiting for approval'}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    approveMutation.mutate();
+                  }}
+                  disabled={!runId || approveMutation.isPending || rejectMutation.isPending}
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-success/80 hover:bg-success/10 hover:text-success transition-colors disabled:opacity-50"
+                >
+                  <CheckCircle className="h-3.5 w-3.5" />
+                  Approve
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Reject workflow "${workflowName}"?`)) {
+                      rejectMutation.mutate();
+                    }
+                  }}
+                  disabled={!runId || approveMutation.isPending || rejectMutation.isPending}
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-error/80 hover:bg-error/10 hover:text-error transition-colors disabled:opacity-50"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                  Reject
+                </button>
+              </div>
+              {(approveMutation.isError || rejectMutation.isError) && (
+                <p className="text-xs text-error">
+                  {mutationError instanceof Error
+                    ? mutationError.message
+                    : 'Action failed — please try again'}
+                </p>
+              )}
             </div>
           )}
 
