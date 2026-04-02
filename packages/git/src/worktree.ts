@@ -26,17 +26,24 @@ function getLog(): ReturnType<typeof createLogger> {
  * For paths outside the workspaces directory, returns the legacy global path:
  * ~/.archon/worktrees/
  */
-export function getWorktreeBase(repoPath: RepoPath): string {
+export function getWorktreeBase(repoPath: RepoPath, codebaseName?: string): string {
+  // If codebase name is known, use project-scoped path directly
+  if (codebaseName) {
+    const parts = codebaseName.split('/');
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      return getProjectWorktreesPath(parts[0], parts[1]);
+    }
+  }
+  // Existing path-prefix detection (cloned repos under workspaces/)
   const workspacesPath = getArchonWorkspacesPath();
   if (repoPath.startsWith(workspacesPath)) {
-    // Extract owner/repo from the path
     const relative = repoPath.substring(workspacesPath.length + 1);
     const parts = relative.split(/[/\\]/).filter(p => p.length > 0);
     if (parts.length >= 2) {
       return getProjectWorktreesPath(parts[0], parts[1]);
     }
   }
-  // Legacy fallback
+  // Legacy global fallback (no codebase name, no workspace path match)
   return getArchonWorktreesPath();
 }
 
@@ -47,7 +54,12 @@ export function getWorktreeBase(repoPath: RepoPath): string {
  * When project-scoped, the worktree base already includes the owner/repo context,
  * so callers should NOT append owner/repo again.
  */
-export function isProjectScopedWorktreeBase(repoPath: RepoPath): boolean {
+export function isProjectScopedWorktreeBase(repoPath: RepoPath, codebaseName?: string): boolean {
+  // If codebase name is known, it's always project-scoped
+  if (codebaseName) {
+    const parts = codebaseName.split('/');
+    if (parts.length === 2 && parts[0] && parts[1]) return true;
+  }
   const workspacesPath = getArchonWorkspacesPath();
   if (!repoPath.startsWith(workspacesPath)) return false;
   const relative = repoPath.substring(workspacesPath.length + 1);

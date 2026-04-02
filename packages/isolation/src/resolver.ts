@@ -280,6 +280,7 @@ export class IsolationResolver {
     // Construct request based on workflow type
     const baseRequest = {
       codebaseId: codebase.id,
+      codebaseName: codebase.name,
       canonicalRepoPath: canonicalPath,
       identifier: workflowId,
     };

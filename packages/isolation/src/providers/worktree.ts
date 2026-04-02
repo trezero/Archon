@@ -464,9 +464,9 @@ export class WorktreeProvider implements IIsolationProvider {
    * avoid collisions between repos.
    */
   getWorktreePath(request: IsolationRequest, branchName: string): string {
-    const worktreeBase = getWorktreeBase(request.canonicalRepoPath);
+    const worktreeBase = getWorktreeBase(request.canonicalRepoPath, request.codebaseName);
 
-    if (isProjectScopedWorktreeBase(request.canonicalRepoPath)) {
+    if (isProjectScopedWorktreeBase(request.canonicalRepoPath, request.codebaseName)) {
       return join(worktreeBase, branchName);
     }
 
@@ -547,9 +547,9 @@ export class WorktreeProvider implements IIsolationProvider {
     // request.fromBranch is the start-point for worktree creation, not a sync target.
     const baseBranch = await this.syncWorkspaceBeforeCreate(repoPath, worktreeConfig?.baseBranch);
 
-    const worktreeBase = getWorktreeBase(repoPath);
+    const worktreeBase = getWorktreeBase(repoPath, request.codebaseName);
 
-    if (isProjectScopedWorktreeBase(repoPath)) {
+    if (isProjectScopedWorktreeBase(repoPath, request.codebaseName)) {
       await mkdirAsync(worktreeBase, { recursive: true });
     } else {
       const { owner, repo } = this.extractOwnerRepo(repoPath);

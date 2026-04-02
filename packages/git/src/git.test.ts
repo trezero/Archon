@@ -257,6 +257,35 @@ describe('git utilities', () => {
         join('/', 'custom', 'archon', 'workspaces', 'acme', 'widget', 'worktrees')
       );
     });
+
+    test('uses codebaseName to resolve project-scoped path for local repo', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_DOCKER;
+      delete process.env.ARCHON_HOME;
+      const localRepoPath = '/Users/rasmus/Projects/sasha-demo';
+      const result = git.getWorktreeBase(localRepoPath, 'Widinglabs/sasha-demo');
+      expect(result).toBe(
+        join(homedir(), '.archon', 'workspaces', 'Widinglabs', 'sasha-demo', 'worktrees')
+      );
+    });
+
+    test('codebaseName takes priority over workspaces path detection', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_DOCKER;
+      delete process.env.ARCHON_HOME;
+      const workspacesPath = join(homedir(), '.archon', 'workspaces');
+      const repoPath = join(workspacesPath, 'old-owner', 'old-repo', 'source');
+      const result = git.getWorktreeBase(repoPath, 'new-owner/new-repo');
+      expect(result).toBe(join(workspacesPath, 'new-owner', 'new-repo', 'worktrees'));
+    });
+
+    test('ignores invalid codebaseName and falls back to path detection', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_DOCKER;
+      delete process.env.ARCHON_HOME;
+      const result = git.getWorktreeBase('/local/repo', 'invalid-no-slash');
+      expect(result).toBe(join(homedir(), '.archon', 'worktrees'));
+    });
   });
 
   describe('isProjectScopedWorktreeBase', () => {
@@ -305,6 +334,22 @@ describe('git utilities', () => {
       delete process.env.ARCHON_HOME;
       const workspacesPath = join(homedir(), '.archon', 'workspaces');
       expect(git.isProjectScopedWorktreeBase(join(workspacesPath, 'acme'))).toBe(false);
+    });
+
+    test('returns true when codebaseName is provided (local repo)', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_DOCKER;
+      delete process.env.ARCHON_HOME;
+      expect(git.isProjectScopedWorktreeBase('/Users/rasmus/Projects/repo', 'owner/repo')).toBe(
+        true
+      );
+    });
+
+    test('returns false when codebaseName is invalid', () => {
+      delete process.env.WORKSPACE_PATH;
+      delete process.env.ARCHON_DOCKER;
+      delete process.env.ARCHON_HOME;
+      expect(git.isProjectScopedWorktreeBase('/local/repo', 'invalid')).toBe(false);
     });
   });
 

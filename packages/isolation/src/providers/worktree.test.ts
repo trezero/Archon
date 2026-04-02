@@ -2102,6 +2102,22 @@ describe('WorktreeProvider', () => {
         'Cannot extract owner/repo from path "/repo"'
       );
     });
+
+    test('getWorktreePath uses codebaseName for locally-registered repo', () => {
+      const request: IsolationRequest = {
+        codebaseId: 'cb-123',
+        codebaseName: 'Widinglabs/sasha-demo',
+        canonicalRepoPath: '/Users/rasmus/Projects/sasha-demo', // not under workspaces
+        workflowType: 'task',
+        identifier: 'fix-issue-42',
+      };
+      const branchName = provider.generateBranchName(request);
+      const path = provider.getWorktreePath(request, branchName);
+      // Should be project-scoped (under workspaces), not global worktrees
+      expect(path).toContain('workspaces');
+      expect(path).toContain('Widinglabs');
+      expect(path).toContain('sasha-demo');
+    });
   });
 
   // ---------------------------------------------------------------------------
