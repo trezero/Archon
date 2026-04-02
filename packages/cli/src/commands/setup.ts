@@ -1351,9 +1351,12 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
     if (result.success) {
       console.log('Setup wizard opened. Complete the setup in the new terminal window.');
     } else {
-      console.error(`Failed to open terminal: ${result.error}`);
       console.log('');
-      console.log('Please run `archon setup` directly in your terminal.');
+      console.log('Next step: run the setup wizard in a separate terminal.');
+      console.log('');
+      console.log(`    cd ${options.repoPath} && archon setup`);
+      console.log('');
+      console.log('Come back here when done — the AI will verify your configuration.');
     }
     return;
   }
