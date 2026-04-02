@@ -1356,7 +1356,9 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
       console.log('');
       console.log(`    cd ${options.repoPath} && archon setup`);
       console.log('');
-      console.log('Come back here when done — the AI will verify your configuration.');
+      console.log(
+        'Come back here and let me know when you finish so I can verify your configuration.'
+      );
     }
     return;
   }

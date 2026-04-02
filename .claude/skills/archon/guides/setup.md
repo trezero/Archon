@@ -150,7 +150,7 @@ Tell the user:
 > "Complete the wizard in the new terminal window that just opened."
 
 **If the output says to run it manually** (common on VPS, WSL, SSH, Docker), add:
-> "Open a separate terminal or SSH session and run the command shown in the output. Come back here when you're done."
+> "Open a separate terminal or SSH session and run the command shown in the output. Come back here and let me know when you finish so I can continue with validation."
 
 Both paths are normal — the manual path is not an error.
 
