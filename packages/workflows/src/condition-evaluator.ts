@@ -85,7 +85,7 @@ function splitOutsideQuotes(expr: string, sep: string): string[] {
 
 /** Pattern matching a single condition atom: $nodeId.output[.field] OPERATOR 'value' */
 const atomPattern =
-  /^\$([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?(?:\s*)(==|!=|<=|>=|<|>)(?:\s*)'([^']*)'$/;
+  /^\$([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?\s*(==|!=|<=|>=|<|>)\s*'([^']*)'$/;
 
 /**
  * Evaluate a single atomic condition expression against upstream node outputs.
