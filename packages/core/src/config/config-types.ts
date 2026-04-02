@@ -221,7 +221,7 @@ export interface MergedConfig {
   baseBranch?: string;
   /**
    * Merged per-project env vars from .archon/config.yaml env: section.
-   * DB env vars (from Web UI) are merged on top by createWorkflowDeps.
+   * DB env vars (from Web UI) are merged on top by executeWorkflow.
    * Undefined when no env vars are configured.
    */
   envVars?: Record<string, string>;

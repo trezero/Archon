@@ -63,6 +63,7 @@ psql $DATABASE_URL < migrations/016_session_ended_reason.sql
 psql $DATABASE_URL < migrations/017_drop_command_templates.sql
 psql $DATABASE_URL < migrations/018_fix_workflow_status_default.sql
 psql $DATABASE_URL < migrations/019_workflow_resume_path.sql
+psql $DATABASE_URL < migrations/020_codebase_env_vars.sql
 ```
 
 ## Local PostgreSQL via Docker
@@ -92,14 +93,15 @@ docker compose exec postgres psql -U postgres -d remote_coding_agent
 \i /migrations/017_drop_command_templates.sql
 \i /migrations/018_fix_workflow_status_default.sql
 \i /migrations/019_workflow_resume_path.sql
+\i /migrations/020_codebase_env_vars.sql
 \q
 ```
 
 Or from your host machine (requires `psql` installed):
 
 ```bash
-psql postgresql://postgres:postgres@localhost:5432/remote_coding_agent < migrations/012_workflow_events.sql
-# ... and so on for each migration
+psql postgresql://postgres:postgres@localhost:5432/remote_coding_agent < migrations/020_codebase_env_vars.sql
+# ... and so on for each migration not yet applied
 ```
 
 ## Verifying the Database
@@ -117,7 +119,7 @@ psql $DATABASE_URL -c "\dt"
 
 ## Schema Overview
 
-The database has 7 tables, all prefixed with `remote_agent_`:
+The database has 8 tables, all prefixed with `remote_agent_`:
 
 1. **`remote_agent_codebases`** - Repository metadata
    - Commands stored as JSONB: `{command_name: {path, description}}`
@@ -153,6 +155,11 @@ The database has 7 tables, all prefixed with `remote_agent_`:
    - Stores tool call metadata (name, input, duration) in JSONB
    - Enables message history in Web UI across page refreshes
 
+8. **`remote_agent_codebase_env_vars`** - Per-project env vars for workflow execution
+   - Key-value pairs scoped to a codebase
+   - Injected into Claude SDK subprocess environment at execution time
+   - Managed via Web UI Settings panel; `env:` in `.archon/config.yaml` for CLI users
+
 ## Migration List
 
 | Migration | Description |
@@ -177,3 +184,4 @@ The database has 7 tables, all prefixed with `remote_agent_`:
 | `017_drop_command_templates.sql` | Drop command templates table |
 | `018_fix_workflow_status_default.sql` | Fix workflow status default value |
 | `019_workflow_resume_path.sql` | Workflow resume path support |
+| `020_codebase_env_vars.sql` | Per-project environment variables |

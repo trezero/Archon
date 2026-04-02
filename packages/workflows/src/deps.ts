@@ -124,7 +124,7 @@ export interface WorkflowAssistantOptions {
   agent?: string;
   /**
    * Additional env vars to merge into the Claude subprocess environment.
-   * Merged after process.env: { ...process.env, ...env }.
+   * Merged after buildSubprocessEnv() (auth tokens conditionally filtered): { ...buildSubprocessEnv(), ...env }.
    * Claude only — ignored for Codex (Codex SDK does not expose env injection).
    */
   env?: Record<string, string>;
@@ -194,7 +194,7 @@ export interface WorkflowConfig {
   baseBranch?: string;
   /**
    * Merged per-project env vars (config file + DB). Injected into Options.env on Claude SDK calls.
-   * Populated by createWorkflowDeps — loadConfig returns file-based vars; DB vars added after.
+   * Populated by executeWorkflow — loadConfig returns file-based vars; DB vars merged on top after.
    */
   envVars?: Record<string, string>;
   commands: { folder?: string };

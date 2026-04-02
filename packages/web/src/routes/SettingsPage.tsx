@@ -104,12 +104,18 @@ function EnvVarsPanel({ codebaseId }: { codebaseId: string }): React.ReactElemen
     queryFn: () => getCodebaseEnvVars(codebaseId),
   });
 
+  const [mutationError, setMutationError] = useState<string | null>(null);
+
   const setMutation = useMutation({
     mutationFn: (data: { key: string; value: string }) => setCodebaseEnvVar(codebaseId, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['codebaseEnvVars', codebaseId] });
       setNewKey('');
       setNewValue('');
+      setMutationError(null);
+    },
+    onError: (err: Error) => {
+      setMutationError(err.message);
     },
   });
 
@@ -117,6 +123,10 @@ function EnvVarsPanel({ codebaseId }: { codebaseId: string }): React.ReactElemen
     mutationFn: (key: string) => deleteCodebaseEnvVar(codebaseId, key),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['codebaseEnvVars', codebaseId] });
+      setMutationError(null);
+    },
+    onError: (err: Error) => {
+      setMutationError(err.message);
     },
   });
 
@@ -127,15 +137,16 @@ function EnvVarsPanel({ codebaseId }: { codebaseId: string }): React.ReactElemen
     }
   }
 
-  const entries = envVars ? Object.entries(envVars) : [];
+  const keys = envVars ?? [];
 
   return (
     <div className="mt-2 pl-2 border-l border-border space-y-2">
-      {entries.length === 0 ? (
+      {mutationError && <div className="text-xs text-destructive">{mutationError}</div>}
+      {keys.length === 0 ? (
         <div className="text-xs text-muted-foreground">No env vars set.</div>
       ) : (
         <div className="space-y-1">
-          {entries.map(([key]) => (
+          {keys.map(key => (
             <div key={key} className="flex items-center gap-2 text-xs">
               <span className="font-mono text-text-primary truncate flex-1">{key}</span>
               <span className="text-muted-foreground">= ------</span>

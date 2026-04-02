@@ -1550,33 +1550,48 @@ export function registerApiRoutes(
     }
   });
 
-  // GET /api/codebases/:id/env - List env vars for a codebase
+  // GET /api/codebases/:id/env - List env var keys for a codebase (values never returned)
   registerOpenApiRoute(listEnvVarsRoute, async c => {
     const id = c.req.param('id') ?? '';
-    const codebase = await codebaseDb.getCodebase(id);
-    if (!codebase) return apiError(c, 404, 'Codebase not found');
-    const envVars = await envVarDb.getCodebaseEnvVars(id);
-    return c.json({ envVars });
+    try {
+      const codebase = await codebaseDb.getCodebase(id);
+      if (!codebase) return apiError(c, 404, 'Codebase not found');
+      const envVars = await envVarDb.getCodebaseEnvVars(id);
+      return c.json({ keys: Object.keys(envVars) });
+    } catch (error) {
+      getLog().error({ err: error, codebaseId: id }, 'list_env_vars_failed');
+      return apiError(c, 500, 'Failed to list env vars');
+    }
   });
 
   // PUT /api/codebases/:id/env - Set (upsert) an env var
   registerOpenApiRoute(setEnvVarRoute, async c => {
     const id = c.req.param('id') ?? '';
-    const body: { key: string; value: string } = await c.req.json();
-    const codebase = await codebaseDb.getCodebase(id);
-    if (!codebase) return apiError(c, 404, 'Codebase not found');
-    await envVarDb.setCodebaseEnvVar(id, body.key, body.value);
-    return c.json({ success: true });
+    try {
+      const body: { key: string; value: string } = await c.req.json();
+      const codebase = await codebaseDb.getCodebase(id);
+      if (!codebase) return apiError(c, 404, 'Codebase not found');
+      await envVarDb.setCodebaseEnvVar(id, body.key, body.value);
+      return c.json({ success: true });
+    } catch (error) {
+      getLog().error({ err: error, codebaseId: id }, 'set_env_var_failed');
+      return apiError(c, 500, 'Failed to set env var');
+    }
   });
 
   // DELETE /api/codebases/:id/env/:key - Delete an env var
   registerOpenApiRoute(deleteEnvVarRoute, async c => {
     const id = c.req.param('id') ?? '';
     const key = c.req.param('key') ?? '';
-    const codebase = await codebaseDb.getCodebase(id);
-    if (!codebase) return apiError(c, 404, 'Codebase not found');
-    await envVarDb.deleteCodebaseEnvVar(id, key);
-    return c.json({ success: true });
+    try {
+      const codebase = await codebaseDb.getCodebase(id);
+      if (!codebase) return apiError(c, 404, 'Codebase not found');
+      await envVarDb.deleteCodebaseEnvVar(id, key);
+      return c.json({ success: true });
+    } catch (error) {
+      getLog().error({ err: error, codebaseId: id, key }, 'delete_env_var_failed');
+      return apiError(c, 500, 'Failed to delete env var');
+    }
   });
 
   /**

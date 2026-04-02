@@ -561,6 +561,45 @@ describe('ClaudeClient', () => {
       expect(callArgs.options.settingSources).toEqual(['project']);
     });
 
+    test('passes env from requestOptions into SDK options', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', session_id: 'sid' };
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of client.sendQuery('test', '/tmp', undefined, {
+        env: { MY_SECRET: 'abc123' },
+      })) {
+        // consume
+      }
+
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
+      const env = callArgs.options.env as Record<string, string>;
+      expect(env.MY_SECRET).toBe('abc123');
+      // Verify process.env entries are still present (not fully replaced)
+      expect(env.PATH).toBeDefined();
+    });
+
+    test('requestOptions.env overrides buildSubprocessEnv values', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', session_id: 'sid' };
+      });
+
+      // HOME is always in process.env — override it to verify priority
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of client.sendQuery('test', '/tmp', undefined, {
+        env: { HOME: '/custom/home' },
+      })) {
+        // consume
+      }
+
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
+      const env = callArgs.options.env as Record<string, string>;
+      expect(env.HOME).toBe('/custom/home');
+    });
+
     test('ignores empty text blocks', async () => {
       mockQuery.mockImplementation(async function* () {
         yield {

@@ -44,10 +44,10 @@ export const deleteCodebaseResponseSchema = z
   .object({ success: z.boolean() })
   .openapi('DeleteCodebaseResponse');
 
-/** Response for GET /api/codebases/:id/env */
+/** Response for GET /api/codebases/:id/env — returns only keys, never values */
 export const codebaseEnvVarsResponseSchema = z
   .object({
-    envVars: z.record(z.string()),
+    keys: z.array(z.string()),
   })
   .openapi('CodebaseEnvVarsResponse');
 

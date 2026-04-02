@@ -363,7 +363,7 @@ import type { DagNode, WorkflowDefinition } from '@/lib/api';
 
 ### Database Schema
 
-**7 Tables (all prefixed with `remote_agent_`):**
+**8 Tables (all prefixed with `remote_agent_`):**
 1. **`codebases`** - Repository metadata and commands (JSONB)
 2. **`conversations`** - Track platform conversations with titles and soft-delete support
 3. **`sessions`** - Track AI SDK sessions with resume capability
@@ -371,6 +371,7 @@ import type { DagNode, WorkflowDefinition } from '@/lib/api';
 5. **`workflow_runs`** - Workflow execution tracking and state
 6. **`workflow_events`** - Step-level workflow event log (step transitions, artifacts, errors)
 7. **`messages`** - Conversation message history with tool call metadata (JSONB)
+8. **`codebase_env_vars`** - Per-project env vars injected into Claude SDK subprocess env (managed via Web UI or `env:` in config)
 
 **Key Patterns:**
 - Conversation ID format: Platform-specific (`thread_ts`, `chat_id`, `user/repo#123`)

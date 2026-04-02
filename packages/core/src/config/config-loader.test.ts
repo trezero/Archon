@@ -355,6 +355,36 @@ worktree:
       expect(config.baseBranch).toBeUndefined();
     });
 
+    test('propagates env vars from repo config', async () => {
+      const pathMatches = (path: string, pattern: string): boolean =>
+        path.replace(/\\/g, '/').includes(pattern);
+
+      mockReadConfigFile.mockImplementation(async (path: string) => {
+        if (pathMatches(path, '/repo/.archon/config.yaml')) {
+          return `
+env:
+  MY_TOKEN: abc123
+  API_BASE: https://api.example.com
+`;
+        }
+        const error = new Error('ENOENT') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      });
+
+      const config = await loadConfig('/test/repo');
+      expect(config.envVars).toEqual({ MY_TOKEN: 'abc123', API_BASE: 'https://api.example.com' });
+    });
+
+    test('envVars is undefined when repo config has no env section', async () => {
+      const error = new Error('ENOENT') as NodeJS.ErrnoException;
+      error.code = 'ENOENT';
+      mockReadConfigFile.mockRejectedValue(error);
+
+      const config = await loadConfig('/test/repo');
+      expect(config.envVars).toBeUndefined();
+    });
+
     test('paths use archon defaults', async () => {
       const error = new Error('ENOENT') as NodeJS.ErrnoException;
       error.code = 'ENOENT';

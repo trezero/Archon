@@ -450,11 +450,11 @@ export async function getCodebaseEnvironments(codebaseId: string): Promise<Isola
 }
 
 // Codebase env vars
-export async function getCodebaseEnvVars(codebaseId: string): Promise<Record<string, string>> {
-  const result = await fetchJSON<{ envVars: Record<string, string> }>(
+export async function getCodebaseEnvVars(codebaseId: string): Promise<string[]> {
+  const result = await fetchJSON<{ keys: string[] }>(
     `/api/codebases/${encodeURIComponent(codebaseId)}/env`
   );
-  return result.envVars;
+  return result.keys;
 }
 
 export async function setCodebaseEnvVar(
