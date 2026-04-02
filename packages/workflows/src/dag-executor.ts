@@ -1845,10 +1845,9 @@ async function executeApprovalNode(
     rawRejection !== ''
       ? rawRejection
       : '';
-  const isRejectionResume = rejectionReason !== '';
 
   // On rejection resume with on_reject configured: run the on_reject prompt via AI
-  if (isRejectionResume && node.approval.on_reject) {
+  if (rejectionReason !== '' && node.approval.on_reject) {
     const maxAttempts = node.approval.on_reject.max_attempts ?? 3;
     const rejectionCount = (workflowRun.metadata?.rejection_count as number | undefined) ?? 0;
 
