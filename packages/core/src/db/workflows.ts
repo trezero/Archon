@@ -226,15 +226,19 @@ export async function findResumableRun(
   workflowName: string,
   workingPath: string
 ): Promise<WorkflowRun | null> {
+  const dialect = getDialect();
   try {
     const result = await pool.query<WorkflowRun>(
       `SELECT * FROM remote_agent_workflow_runs
        WHERE workflow_name = $1
          AND working_path = $2
-         AND status IN ('failed', 'paused')
+         AND (
+           status IN ('failed', 'paused')
+           OR (status = 'running' AND (last_activity_at IS NULL OR last_activity_at < ${dialect.nowMinusDays(3)}))
+         )
        ORDER BY started_at DESC
        LIMIT 1`,
-      [workflowName, workingPath]
+      [workflowName, workingPath, 1]
     );
     const row = result.rows[0];
     return row ? normalizeWorkflowRun(row) : null;
