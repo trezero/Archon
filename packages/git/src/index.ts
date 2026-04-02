@@ -33,6 +33,7 @@ export {
   hasUncommittedChanges,
   commitAllChanges,
   isBranchMerged,
+  isAncestorOf,
   getLastCommitDate,
 } from './branch';
 

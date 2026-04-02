@@ -687,3 +687,107 @@ describe('IsolationResolver', () => {
     ).toThrow('staleThresholdDays must be positive, got -1');
   });
 });
+  test('existing env — emits warning when base branch mismatches', async () => {
+    const env = makeEnvRow();
+    isAncestorOfSpy.mockResolvedValue(false);
+    const resolver = createResolver({
+      store: makeMockStore({ getById: async () => env }),
+    });
+
+    const result = await resolver.resolve({
+      existingEnvId: 'env-1',
+      codebase: defaultCodebase,
+      hints: { baseBranch: 'dev' },
+      platformType: 'web',
+    });
+
+    expect(result.status).toBe('resolved');
+    if (result.status === 'resolved') {
+      expect(result.warnings).toBeDefined();
+      expect(result.warnings?.[0]).toContain("not based on 'dev'");
+    }
+  });
+
+  test('existing env — no warning when base branch matches', async () => {
+    const env = makeEnvRow();
+    isAncestorOfSpy.mockResolvedValue(true);
+    const resolver = createResolver({
+      store: makeMockStore({ getById: async () => env }),
+    });
+
+    const result = await resolver.resolve({
+      existingEnvId: 'env-1',
+      codebase: defaultCodebase,
+      hints: { baseBranch: 'dev' },
+      platformType: 'web',
+    });
+
+    expect(result.status).toBe('resolved');
+    if (result.status === 'resolved') {
+      expect(result.warnings).toBeUndefined();
+    }
+  });
+
+  test('workflow reuse — emits warning when base branch mismatches', async () => {
+    const env = makeEnvRow();
+    isAncestorOfSpy.mockResolvedValue(false);
+    const resolver = createResolver({
+      store: makeMockStore({
+        findActiveByWorkflow: async (_cid, wt, wid) =>
+          wt === 'issue' && wid === '42' ? env : null,
+      }),
+    });
+
+    const result = await resolver.resolve({
+      existingEnvId: null,
+      codebase: defaultCodebase,
+      hints: { workflowType: 'issue', workflowId: '42', baseBranch: 'dev' },
+      platformType: 'web',
+    });
+
+    expect(result.status).toBe('resolved');
+    if (result.status === 'resolved') {
+      expect(result.warnings).toBeDefined();
+      expect(result.warnings?.[0]).toContain("not based on 'dev'");
+    }
+  });
+
+  test('existing env — no base branch check when baseBranch not in hints', async () => {
+    const env = makeEnvRow();
+    const resolver = createResolver({
+      store: makeMockStore({ getById: async () => env }),
+    });
+
+    await resolver.resolve({
+      existingEnvId: 'env-1',
+      codebase: defaultCodebase,
+      platformType: 'web',
+    });
+
+    expect(isAncestorOfSpy).not.toHaveBeenCalled();
+  });
+
+  // --- Constructor validation tests ---
+
+  test('throws on zero staleThresholdDays', () => {
+    expect(
+      () =>
+        new IsolationResolver({
+          store: makeMockStore(),
+          provider: makeMockProvider(),
+          staleThresholdDays: 0,
+        })
+    ).toThrow('staleThresholdDays must be positive, got 0');
+  });
+
+  test('throws on negative staleThresholdDays', () => {
+    expect(
+      () =>
+        new IsolationResolver({
+          store: makeMockStore(),
+          provider: makeMockProvider(),
+          staleThresholdDays: -1,
+        })
+    ).toThrow('staleThresholdDays must be positive, got -1');
+  });
+});

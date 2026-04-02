@@ -1139,6 +1139,79 @@ branch refs/heads/feature/auth
     });
   });
 
+  describe('isAncestorOf', () => {
+    let execSpy: Mock<typeof git.execFileAsync>;
+
+    beforeEach(() => {
+      execSpy = spyOn(git, 'execFileAsync');
+    });
+
+    afterEach(() => {
+      execSpy.mockRestore();
+    });
+
+    test('returns true when ref is ancestor of HEAD (exit 0)', async () => {
+      execSpy.mockResolvedValue({ stdout: '', stderr: '' });
+
+      const result = await git.isAncestorOf('/worktrees/feature' as git.WorktreePath, 'origin/dev');
+      expect(result).toBe(true);
+      expect(execSpy).toHaveBeenCalledWith('git', [
+        '-C',
+        '/worktrees/feature',
+        'merge-base',
+        '--is-ancestor',
+        'origin/dev',
+        'HEAD',
+      ]);
+    });
+
+    test('returns false when ref is not ancestor of HEAD (exit code 1)', async () => {
+      const err = Object.assign(new Error(''), { code: 1, stderr: '' });
+      execSpy.mockRejectedValue(err);
+
+      const result = await git.isAncestorOf(
+        '/worktrees/feature' as git.WorktreePath,
+        'origin/main'
+      );
+      expect(result).toBe(false);
+    });
+
+    test('returns false on expected errors (not a git repository)', async () => {
+      execSpy.mockRejectedValue(new Error('fatal: not a git repository'));
+
+      const result = await git.isAncestorOf(
+        '/worktrees/feature' as git.WorktreePath,
+        'origin/main'
+      );
+      expect(result).toBe(false);
+    });
+
+    test('returns false on expected errors (unknown revision)', async () => {
+      execSpy.mockRejectedValue(
+        Object.assign(new Error('unknown revision'), { stderr: 'unknown revision' })
+      );
+
+      const result = await git.isAncestorOf(
+        '/worktrees/feature' as git.WorktreePath,
+        'origin/missing'
+      );
+      expect(result).toBe(false);
+    });
+
+    test('throws and logs on unexpected errors', async () => {
+      mockLogger.error.mockClear();
+      execSpy.mockRejectedValue(new Error('fatal: permission denied'));
+
+      await expect(
+        git.isAncestorOf('/worktrees/feature' as git.WorktreePath, 'origin/dev')
+      ).rejects.toThrow('Failed to check if origin/dev is ancestor of HEAD');
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ ancestorRef: 'origin/dev' }),
+        'branch.ancestor_check_failed'
+      );
+    });
+  });
+
   // ==========================================================================
   // repo.ts
   // ==========================================================================

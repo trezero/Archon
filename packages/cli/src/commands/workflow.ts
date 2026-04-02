@@ -429,6 +429,25 @@ export async function workflowRunCommand(
             `--from ${options.fromBranch} was not applied (worktree already exists).`
         );
       }
+      // Validate base branch before reuse
+      const repoConfig = await loadRepoConfig(codebase.default_cwd);
+      const configuredBase =
+        repoConfig?.worktree?.baseBranch ??
+        (await git.getDefaultBranch(git.toRepoPath(codebase.default_cwd)));
+      const isValidBase = await git.isAncestorOf(
+        git.toWorktreePath(existingEnv.working_path),
+        `origin/${configuredBase}`
+      );
+      if (!isValidBase) {
+        getLog().warn(
+          { path: existingEnv.working_path, configuredBase, branch: existingEnv.branch_name },
+          'worktree.reuse_base_branch_mismatch'
+        );
+        console.warn(
+          `Warning: Worktree '${existingEnv.branch_name}' is not based on '${configuredBase}'. ` +
+            `Recreate with: bun run cli complete ${existingEnv.branch_name} --force`
+        );
+      }
       getLog().info({ path: existingEnv.working_path }, 'worktree_reused');
       workingCwd = existingEnv.working_path;
       isolationEnvId = existingEnv.id;
