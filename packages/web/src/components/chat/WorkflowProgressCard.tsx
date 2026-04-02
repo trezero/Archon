@@ -89,6 +89,7 @@ export function WorkflowProgressCard({
   const rejectMutation = useMutation({
     mutationFn: () => rejectWorkflowRun(runId ?? ''),
   });
+  const mutationError = approveMutation.error ?? rejectMutation.error;
 
   // Completed duration from live state
   const completedAt = liveState?.completedAt;
@@ -234,10 +235,9 @@ export function WorkflowProgressCard({
               </div>
               {(approveMutation.isError || rejectMutation.isError) && (
                 <p className="text-xs text-error">
-                  {((): string => {
-                    const err = approveMutation.error ?? rejectMutation.error;
-                    return err instanceof Error ? err.message : 'Action failed — please try again';
-                  })()}
+                  {mutationError instanceof Error
+                    ? mutationError.message
+                    : 'Action failed — please try again'}
                 </p>
               )}
             </div>
