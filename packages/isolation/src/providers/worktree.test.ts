@@ -4,11 +4,12 @@ import { join } from 'node:path';
 
 // Compute archon home to match getArchonHome() behavior (Docker-aware).
 // @archon/git uses the real getArchonHome() internally; test assertions must match.
+// SOURCE: packages/paths/src/archon-paths.ts (isDocker + getArchonHome) — keep condition order in sync.
 const archonHome = (() => {
   if (
-    process.env.ARCHON_DOCKER === 'true' ||
     process.env.WORKSPACE_PATH === '/workspace' ||
-    (process.env.HOME === '/root' && Boolean(process.env.WORKSPACE_PATH))
+    (process.env.HOME === '/root' && Boolean(process.env.WORKSPACE_PATH)) ||
+    process.env.ARCHON_DOCKER === 'true'
   ) {
     return '/.archon';
   }

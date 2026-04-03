@@ -212,7 +212,8 @@ export function DashboardPage(): React.ReactElement {
 
   const { data: health } = useQuery({
     queryKey: ['health'],
-    queryFn: () => getHealth(),
+    queryFn: getHealth,
+    staleTime: 10_000,
     refetchInterval: 30_000,
   });
 
