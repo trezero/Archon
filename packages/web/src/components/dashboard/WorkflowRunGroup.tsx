@@ -6,6 +6,7 @@ import { WorkflowRunCard } from './WorkflowRunCard';
 interface WorkflowRunGroupProps {
   parentPlatformId: string | null;
   runs: DashboardRunResponse[];
+  isDocker?: boolean;
   onCancel: (runId: string) => void;
   onResume?: (runId: string) => void;
   onAbandon?: (runId: string) => void;
@@ -17,6 +18,7 @@ interface WorkflowRunGroupProps {
 export function WorkflowRunGroup({
   parentPlatformId,
   runs,
+  isDocker,
   onCancel,
   onResume,
   onAbandon,
@@ -51,6 +53,7 @@ export function WorkflowRunGroup({
           <WorkflowRunCard
             key={run.id}
             run={run}
+            isDocker={isDocker}
             onCancel={onCancel}
             onResume={onResume}
             onAbandon={onAbandon}

@@ -7,6 +7,7 @@ interface HeaderProps {
   subtitle?: string;
   projectName?: string;
   connected?: boolean;
+  isDocker?: boolean;
 }
 
 function smartPath(fullPath: string): string {
@@ -20,6 +21,7 @@ export function Header({
   subtitle,
   projectName,
   connected,
+  isDocker,
 }: HeaderProps): React.ReactElement {
   const [copied, setCopied] = useState(false);
 
@@ -66,7 +68,7 @@ export function Header({
         ) : null}
       </div>
       <div className="ml-auto flex items-center gap-3">
-        {subtitle && (
+        {subtitle && !isDocker && (
           <button
             onClick={openInVSCode}
             className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-text-secondary hover:bg-surface hover:text-text-primary transition-colors"

@@ -25,6 +25,7 @@ import type { WorkflowState } from '@/lib/types';
 
 interface WorkflowRunCardProps {
   run: DashboardRunResponse;
+  isDocker?: boolean;
   onCancel: (runId: string) => void;
   onResume?: (runId: string) => void;
   onAbandon?: (runId: string) => void;
@@ -134,6 +135,7 @@ function NodeCountsSummary({ counts }: { counts: NodeCounts }): React.ReactEleme
 
 export function WorkflowRunCard({
   run,
+  isDocker,
   onCancel,
   onResume,
   onAbandon,
@@ -285,7 +287,7 @@ export function WorkflowRunCard({
             Open Chat
           </button>
         )}
-        {run.working_path && (
+        {run.working_path && !isDocker && (
           <a
             href={`vscode://file/${run.working_path.replace(/\\/g, '/')}`}
             target="_blank"

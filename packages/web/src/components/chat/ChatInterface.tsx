@@ -18,6 +18,7 @@ import {
   getMessages,
   createConversation,
   getWorkflowRunByWorker,
+  getHealth,
 } from '@/lib/api';
 import type { ConversationResponse, CodebaseResponse, MessageResponse } from '@/lib/api';
 import type {
@@ -123,6 +124,13 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   }, [messages]);
   const activeWorkflow = useWorkflowStore(selectActiveWorkflow);
   const hydrateWorkflow = useWorkflowStore(s => s.hydrateWorkflow);
+
+  const { data: health } = useQuery({
+    queryKey: ['health'],
+    queryFn: getHealth,
+    staleTime: 10_000,
+    refetchOnWindowFocus: true,
+  });
 
   // Sync messages to cache for persistence across navigation
   useEffect(() => {
@@ -741,6 +749,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         subtitle={headerSubtitle}
         projectName={currentCodebase?.name ?? contextCodebase?.name}
         connected={isNewChat ? undefined : connected}
+        isDocker={health?.is_docker}
       />
       {(conversationsError || codebasesError) && (
         <div className="flex gap-2 px-4 py-1">
