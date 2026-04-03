@@ -2,6 +2,20 @@ import { describe, test, expect, beforeEach, afterEach, spyOn, mock, type Mock }
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+// Compute archon home to match getArchonHome() behavior (Docker-aware).
+// @archon/git uses the real getArchonHome() internally; test assertions must match.
+const archonHome = (() => {
+  if (
+    process.env.ARCHON_DOCKER === 'true' ||
+    process.env.WORKSPACE_PATH === '/workspace' ||
+    (process.env.HOME === '/root' && Boolean(process.env.WORKSPACE_PATH))
+  ) {
+    return '/.archon';
+  }
+  if (process.env.ARCHON_HOME) return process.env.ARCHON_HOME;
+  return join(homedir(), '.archon');
+})();
+
 // Mock logger to suppress noisy output during tests
 mock.module('@archon/paths', () => ({
   createLogger: () => ({
@@ -791,20 +805,12 @@ describe('WorktreeProvider', () => {
 
       // workingPath should use project-scoped path, not legacy global worktrees
       expect(env.workingPath).toBe(
-        join(
-          homedir(),
-          '.archon',
-          'workspaces',
-          'Widinglabs',
-          'sasha-demo',
-          'worktrees',
-          env.branchName
-        )
+        join(archonHome, 'workspaces', 'Widinglabs', 'sasha-demo', 'worktrees', env.branchName)
       );
 
       // mkdir should be called with the project-scoped base (no owner/repo appended)
       expect(mkdirSpy).toHaveBeenCalledWith(
-        join(homedir(), '.archon', 'workspaces', 'Widinglabs', 'sasha-demo', 'worktrees'),
+        join(archonHome, 'workspaces', 'Widinglabs', 'sasha-demo', 'worktrees'),
         { recursive: true }
       );
     });
@@ -2148,15 +2154,7 @@ describe('WorktreeProvider', () => {
       const branchName = provider.generateBranchName(request);
       const path = provider.getWorktreePath(request, branchName);
       expect(path).toBe(
-        join(
-          homedir(),
-          '.archon',
-          'workspaces',
-          'Widinglabs',
-          'sasha-demo',
-          'worktrees',
-          branchName
-        )
+        join(archonHome, 'workspaces', 'Widinglabs', 'sasha-demo', 'worktrees', branchName)
       );
     });
   });
