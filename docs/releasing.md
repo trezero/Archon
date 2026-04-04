@@ -65,7 +65,7 @@ If you maintain a Homebrew tap (`homebrew-archon`), copy the updated formula the
 
 ```bash
 # Test the install script (only works if repo is public)
-curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/coleam00/Archon/main/scripts/install.sh | bash
 
 # Verify version
 archon version
@@ -78,7 +78,7 @@ archon version
 >
 > ```bash
 > # Download and install using gh (requires GitHub authentication)
-> gh release download v0.2.0 --repo dynamous-community/remote-coding-agent \
+> gh release download v0.2.0 --repo coleam00/Archon \
 >   --pattern "archon-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" \
 >   --dir /tmp/archon-install
 >

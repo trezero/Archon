@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for your interest in contributing to the Remote Agentic Coding Platform.
+Thank you for your interest in contributing to Archon!
 
 ## Getting Started
 
@@ -20,8 +20,13 @@ Before submitting a PR, ensure:
 bun run type-check  # TypeScript types
 bun run lint        # ESLint
 bun run format      # Prettier
-bun test            # Bun tests
+bun run test        # All tests (per-package isolation)
+
+# Or run the full validation suite:
+bun run validate
 ```
+
+**Important:** Use `bun run test` (not `bun test` from the repo root) to avoid mock pollution across packages.
 
 ### Commit Messages
 
@@ -31,7 +36,7 @@ bun test            # Bun tests
 
 ### Pull Requests
 
-1. Create a feature branch from `main`
+1. Create a feature branch from `dev`
 2. Make your changes
 3. Ensure all checks pass
 4. Submit a PR with a clear description
@@ -49,4 +54,4 @@ See [CLAUDE.md](./CLAUDE.md) for detailed architecture documentation.
 
 ## Questions?
 
-Open an issue for questions or discussion.
+Open an [issue](https://github.com/coleam00/Archon/issues) or start a [discussion](https://github.com/coleam00/Archon/discussions).

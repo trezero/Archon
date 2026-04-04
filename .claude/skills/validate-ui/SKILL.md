@@ -67,17 +67,17 @@ which agent-browser 2>/dev/null || npx agent-browser --version 2>/dev/null
 Start both services. Backend must be up before frontend SSE connections work.
 
 ```bash
-# From the repo root: /mnt/c/Users/colem/dynamous-community/remote-coding-agent
+# From the repo root: /path/to/archon
 
 # Start backend (port 3090)
-cd /mnt/c/Users/colem/dynamous-community/remote-coding-agent && bun run dev:server &
+cd /path/to/archon && bun run dev:server &
 sleep 5  # Wait for server initialization + DB
 
 # Verify backend is healthy
 curl -s http://localhost:3090/api/health | head -c 200
 
 # Start frontend (port 5173)
-cd /mnt/c/Users/colem/dynamous-community/remote-coding-agent && bun run dev:web &
+cd /path/to/archon && bun run dev:web &
 sleep 5  # Wait for Vite dev server
 
 # Verify frontend is serving
@@ -100,7 +100,7 @@ curl -s http://localhost:3090/api/codebases | python3 -m json.tool 2>/dev/null |
 # Register the current repo as a codebase (if none exist)
 curl -s -X POST http://localhost:3090/api/codebases \
   -H "Content-Type: application/json" \
-  -d '{"path": "/mnt/c/Users/colem/dynamous-community/remote-coding-agent"}'
+  -d '{"path": "/path/to/archon"}'
 
 # Create a test conversation
 curl -s -X POST http://localhost:3090/api/conversations \
@@ -154,7 +154,7 @@ Take screenshots at each major test point: `agent-browser screenshot /tmp/archon
 
 **2.2 Add Project (Local Path)**
 - Click `+` again
-- Fill in a local path (e.g., `/mnt/c/Users/colem/dynamous-community/remote-coding-agent`)
+- Fill in a local path (e.g., `/path/to/archon`)
 - Submit and verify the project appears
 - Verify deduplication: if the path was already registered, it should not create a duplicate
 

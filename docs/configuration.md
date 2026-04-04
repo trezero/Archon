@@ -244,7 +244,7 @@ commands:
 ### Docker with Custom Volume
 
 ```bash
-docker run -v /my/data:/.archon ghcr.io/dynamous-community/remote-coding-agent
+docker run -v /my/data:/.archon ghcr.io/coleam00/archon
 ```
 
 ## Streaming Modes

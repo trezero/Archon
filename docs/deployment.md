@@ -20,8 +20,8 @@ Local development with SQLite is the recommended default. No database setup is n
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/dynamous-community/remote-coding-agent
-cd remote-coding-agent
+git clone https://github.com/coleam00/Archon
+cd Archon
 bun install
 
 # 2. Configure environment
@@ -84,8 +84,8 @@ Use this option when your database is hosted externally (Supabase, Neon, AWS RDS
 ```bash
 # 1. Get the deployment files
 mkdir remote-agent && cd remote-agent
-curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/deploy/docker-compose.yml -o docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/deploy/.env.example -o .env
+curl -fsSL https://raw.githubusercontent.com/coleam00/Archon/main/deploy/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/coleam00/Archon/main/deploy/.env.example -o .env
 
 # 2. Configure (edit .env with your tokens and DATABASE_URL)
 nano .env

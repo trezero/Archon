@@ -1,37 +1,37 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { isBinaryBuild, BUNDLED_COMMANDS, BUNDLED_WORKFLOWS } from './bundled-defaults';
+import { describe, it, expect } from 'bun:test';
+import {
+  isBinaryBuild,
+  isBunVirtualFs,
+  BUNDLED_COMMANDS,
+  BUNDLED_WORKFLOWS,
+} from './bundled-defaults';
 
 describe('bundled-defaults', () => {
+  describe('isBunVirtualFs', () => {
+    it('should detect Linux/macOS virtual filesystem paths', () => {
+      expect(isBunVirtualFs('/$bunfs/root/bundled-defaults')).toBe(true);
+      expect(isBunVirtualFs('/$bunfs/root/')).toBe(true);
+    });
+
+    it('should detect Windows virtual filesystem paths (backslash)', () => {
+      expect(isBunVirtualFs('B:\\~BUN\\root\\bundled-defaults')).toBe(true);
+      expect(isBunVirtualFs('B:\\~BUN\\root')).toBe(true);
+    });
+
+    it('should detect Windows virtual filesystem paths (forward slash)', () => {
+      expect(isBunVirtualFs('B:/~BUN/root/bundled-defaults')).toBe(true);
+      expect(isBunVirtualFs('B:/~BUN/root')).toBe(true);
+    });
+
+    it('should return false for real filesystem paths', () => {
+      expect(isBunVirtualFs('/home/user/project/src')).toBe(false);
+      expect(isBunVirtualFs('C:\\Users\\user\\project\\src')).toBe(false);
+      expect(isBunVirtualFs('/tmp/test')).toBe(false);
+    });
+  });
+
   describe('isBinaryBuild', () => {
-    let originalVersions: NodeJS.ProcessVersions;
-
-    beforeEach(() => {
-      originalVersions = process.versions;
-    });
-
-    afterEach(() => {
-      Object.defineProperty(process, 'versions', { value: originalVersions, writable: true });
-    });
-
-    it('should return false when running with Bun', () => {
-      // In test environment, process.versions.bun is set by the Bun runtime
-      expect((process.versions as Record<string, string | undefined>).bun).toBeDefined();
-      expect(isBinaryBuild()).toBe(false);
-    });
-
-    it('should return true when process.versions.bun is absent (compiled binary)', () => {
-      Object.defineProperty(process, 'versions', {
-        value: { node: '18.0.0' },
-        writable: true,
-      });
-      expect(isBinaryBuild()).toBe(true);
-    });
-
-    it('should return false when process.versions.bun is present', () => {
-      Object.defineProperty(process, 'versions', {
-        value: { ...process.versions, bun: '1.1.0' },
-        writable: true,
-      });
+    it('should return false when running in test environment (not compiled)', () => {
       expect(isBinaryBuild()).toBe(false);
     });
   });

@@ -231,7 +231,7 @@ sudo chown deploy:deploy /remote-coding-agent
 
 # Clone repository into the directory
 cd /remote-coding-agent
-git clone https://github.com/dynamous-community/remote-coding-agent .
+git clone https://github.com/coleam00/Archon .
 ```
 
 ---

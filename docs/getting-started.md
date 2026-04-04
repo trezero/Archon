@@ -41,16 +41,16 @@ Linux/macOS:
 
 ```bash
 cd ~  # or your preferred directory
-git clone https://github.com/dynamous-community/remote-coding-agent
-cd remote-coding-agent
+git clone https://github.com/coleam00/Archon
+cd Archon
 ```
 
 Windows (PowerShell):
 
 ```powershell
 cd $HOME  # or your preferred directory
-git clone https://github.com/dynamous-community/remote-coding-agent
-cd remote-coding-agent
+git clone https://github.com/coleam00/Archon
+cd Archon
 ```
 
 **Option B: /opt** (Linux/macOS server installs — keeps things tidy)
@@ -58,7 +58,7 @@ cd remote-coding-agent
 ```bash
 sudo mkdir -p /opt/archon
 sudo chown $USER:$USER /opt/archon
-git clone https://github.com/dynamous-community/remote-coding-agent /opt/archon
+git clone https://github.com/coleam00/Archon /opt/archon
 cd /opt/archon
 ```
 

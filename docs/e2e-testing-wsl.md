@@ -76,8 +76,8 @@ Screenshots must be saved to a WSL-native path first, then copied to the Windows
 ```bash
 # Save to WSL home, then copy to project
 wsl -d Ubuntu -- bash -c '
-  agent-browser screenshot /home/coleam/screenshot.png 2>&1 &&
-  cp /home/coleam/screenshot.png /mnt/c/Users/colem/dynamous-community/remote-coding-agent/e2e-screenshots/my-test.png
+  agent-browser screenshot /home/user/screenshot.png 2>&1 &&
+  cp /home/user/screenshot.png /path/to/archon/e2e-screenshots/my-test.png
 '
 ```
 

@@ -8,11 +8,11 @@
 #   3. Run: docker compose up -d
 #
 # For full documentation, see:
-# https://github.com/dynamous-community/remote-coding-agent
+# https://github.com/coleam00/Archon
 
 services:
   app:
-    image: ghcr.io/dynamous-community/remote-coding-agent:latest
+    image: ghcr.io/coleam00/archon:latest
     restart: unless-stopped
     env_file: .env
     environment:

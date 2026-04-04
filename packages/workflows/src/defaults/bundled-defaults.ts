@@ -101,9 +101,22 @@ export const BUNDLED_WORKFLOWS: Record<string, string> = {
 };
 
 /**
+ * Check if a given module directory path belongs to a compiled Bun binary.
+ *
+ * Compiled Bun binaries use a virtual filesystem for bundled modules:
+ * - Linux/macOS: `/$bunfs/root/`
+ * - Windows: `B:\~BUN\root\` or `B:/~BUN/root/`
+ */
+export function isBunVirtualFs(dir: string): boolean {
+  return dir.startsWith('/$bunfs/') || dir.startsWith('B:\\~BUN\\') || dir.startsWith('B:/~BUN/');
+}
+
+/**
  * Check if the current process is running as a compiled binary (not via Bun CLI).
- * `process.versions.bun` is set by the Bun runtime; absent in standalone binaries.
+ *
+ * Note: `process.versions.bun` is still set in compiled binaries as of Bun 1.3.5,
+ * so we use the virtual filesystem path prefix for detection instead.
  */
 export function isBinaryBuild(): boolean {
-  return (process.versions as Record<string, string | undefined>).bun === undefined;
+  return isBunVirtualFs(import.meta.dir);
 }

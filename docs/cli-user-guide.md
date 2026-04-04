@@ -8,8 +8,8 @@ Run AI-powered workflows from your terminal.
 
 1. Clone the repository and install dependencies:
    ```bash
-   git clone https://github.com/dynamous-community/remote-coding-agent
-   cd remote-coding-agent
+   git clone https://github.com/coleam00/Archon
+   cd Archon
    bun install
    ```
 

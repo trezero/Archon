@@ -1833,7 +1833,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
 
         // Create default config.yaml
         const defaultConfig = `# Archon repository configuration
-# See: https://github.com/dynamous-community/remote-coding-agent
+# See: https://github.com/coleam00/Archon
 
 # AI assistant preference (optional - overrides global default)
 # assistant: claude

@@ -126,7 +126,7 @@ export function parseOrchestratorCommands(
     const workflow = findWorkflow(workflowName, [...workflows]);
     if (workflow) {
       // Validate project exists (case-insensitive, supports partial name matching)
-      // e.g., "remote-coding-agent" matches "dynamous-community/remote-coding-agent"
+      // e.g., "Archon" matches "coleam00/Archon"
       const matchedCodebase = findCodebaseByName(codebases, projectName);
       if (matchedCodebase) {
         // Extract message before the command

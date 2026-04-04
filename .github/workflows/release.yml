@@ -26,6 +26,9 @@ jobs:
           - os: ubuntu-latest
             target: bun-linux-arm64
             binary: archon-linux-arm64
+          - os: ubuntu-latest
+            target: bun-windows-x64
+            binary: archon-windows-x64.exe
           - os: macos-latest
             target: bun-darwin-x64
             binary: archon-darwin-x64
@@ -48,7 +51,7 @@ jobs:
       - name: Build binary
         run: |
           mkdir -p dist
-          bun build --compile --target=${{ matrix.target }} --outfile=dist/${{ matrix.binary }} packages/cli/src/cli.ts
+          bun build --compile --minify --bytecode --target=${{ matrix.target }} --outfile=dist/${{ matrix.binary }} packages/cli/src/cli.ts
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
@@ -101,35 +104,55 @@ jobs:
             ## Installation
 
             ### Quick Install (Recommended)
+
+            **macOS / Linux**
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/scripts/install.sh | bash
+            curl -fsSL https://archon.diy/install | bash
+            ```
+
+            **Windows (PowerShell)**
+            ```powershell
+            irm https://archon.diy/install.ps1 | iex
+            ```
+
+            **Homebrew (macOS / Linux)**
+            ```bash
+            brew install coleam00/archon/archon
+            ```
+
+            **Docker**
+            ```bash
+            docker run --rm -v "$PWD:/workspace" ghcr.io/coleam00/archon:latest workflow list
             ```
 
             ### Manual Installation
 
             **macOS (Apple Silicon)**
             ```bash
-            curl -fsSL https://github.com/dynamous-community/remote-coding-agent/releases/latest/download/archon-darwin-arm64 -o /usr/local/bin/archon
+            curl -fsSL https://github.com/coleam00/Archon/releases/latest/download/archon-darwin-arm64 -o /usr/local/bin/archon
             chmod +x /usr/local/bin/archon
             ```
 
             **macOS (Intel)**
             ```bash
-            curl -fsSL https://github.com/dynamous-community/remote-coding-agent/releases/latest/download/archon-darwin-x64 -o /usr/local/bin/archon
+            curl -fsSL https://github.com/coleam00/Archon/releases/latest/download/archon-darwin-x64 -o /usr/local/bin/archon
             chmod +x /usr/local/bin/archon
             ```
 
             **Linux (x64)**
             ```bash
-            curl -fsSL https://github.com/dynamous-community/remote-coding-agent/releases/latest/download/archon-linux-x64 -o /usr/local/bin/archon
+            curl -fsSL https://github.com/coleam00/Archon/releases/latest/download/archon-linux-x64 -o /usr/local/bin/archon
             chmod +x /usr/local/bin/archon
             ```
 
             **Linux (ARM64)**
             ```bash
-            curl -fsSL https://github.com/dynamous-community/remote-coding-agent/releases/latest/download/archon-linux-arm64 -o /usr/local/bin/archon
+            curl -fsSL https://github.com/coleam00/Archon/releases/latest/download/archon-linux-arm64 -o /usr/local/bin/archon
             chmod +x /usr/local/bin/archon
             ```
+
+            **Windows (Manual)**
+            Download `archon-windows-x64.exe` from the assets below, rename to `archon.exe`, and add to your PATH.
 
             ### Verify installation
             ```bash

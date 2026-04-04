@@ -46,7 +46,7 @@ RUN bun run build:web && \
 FROM oven/bun:1.2-slim AS production
 
 # OCI Labels for GHCR
-LABEL org.opencontainers.image.source="https://github.com/dynamous-community/remote-coding-agent"
+LABEL org.opencontainers.image.source="https://github.com/coleam00/Archon"
 LABEL org.opencontainers.image.description="Control AI coding assistants remotely from Telegram, Slack, Discord, and GitHub"
 LABEL org.opencontainers.image.licenses="MIT"
 
