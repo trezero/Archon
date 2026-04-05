@@ -98,6 +98,8 @@ function EnvVarsPanel({ codebaseId }: { codebaseId: string }): React.ReactElemen
   const queryClient = useQueryClient();
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
 
   const { data: envVars } = useQuery({
     queryKey: ['codebaseEnvVars', codebaseId],
@@ -110,8 +112,13 @@ function EnvVarsPanel({ codebaseId }: { codebaseId: string }): React.ReactElemen
     mutationFn: (data: { key: string; value: string }) => setCodebaseEnvVar(codebaseId, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['codebaseEnvVars', codebaseId] });
-      setNewKey('');
-      setNewValue('');
+      if (editingKey) {
+        setEditingKey(null);
+        setEditValue('');
+      } else {
+        setNewKey('');
+        setNewValue('');
+      }
       setMutationError(null);
     },
     onError: (err: Error) => {
@@ -137,6 +144,12 @@ function EnvVarsPanel({ codebaseId }: { codebaseId: string }): React.ReactElemen
     }
   }
 
+  function handleEditSave(key: string): void {
+    if (editValue !== '') {
+      setMutation.mutate({ key, value: editValue });
+    }
+  }
+
   const keys = envVars ?? [];
 
   return (
@@ -147,20 +160,67 @@ function EnvVarsPanel({ codebaseId }: { codebaseId: string }): React.ReactElemen
       ) : (
         <div className="space-y-1">
           {keys.map(key => (
-            <div key={key} className="flex items-center gap-2 text-xs">
-              <span className="font-mono text-text-primary truncate flex-1">{key}</span>
-              <span className="text-muted-foreground">= ------</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-5 px-1 text-xs"
-                onClick={() => {
-                  deleteMutation.mutate(key);
-                }}
-                disabled={deleteMutation.isPending}
-              >
-                Remove
-              </Button>
+            <div key={key} className="space-y-1">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-mono text-text-primary truncate flex-1">{key}</span>
+                <span className="text-muted-foreground">= ------</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 px-1 text-xs"
+                  onClick={() => {
+                    if (editingKey === key) {
+                      setEditingKey(null);
+                      setEditValue('');
+                    } else {
+                      setEditingKey(key);
+                      setEditValue('');
+                    }
+                  }}
+                >
+                  {editingKey === key ? 'Cancel' : 'Edit'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 px-1 text-xs"
+                  onClick={() => {
+                    deleteMutation.mutate(key);
+                  }}
+                  disabled={deleteMutation.isPending}
+                >
+                  Remove
+                </Button>
+              </div>
+              {editingKey === key && (
+                <div className="flex gap-1 pl-2">
+                  <Input
+                    value={editValue}
+                    onChange={e => {
+                      setEditValue(e.target.value);
+                    }}
+                    placeholder="new value"
+                    className="flex-1 h-7 text-xs"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleEditSave(key);
+                      }
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      handleEditSave(key);
+                    }}
+                    disabled={setMutation.isPending}
+                  >
+                    Save
+                  </Button>
+                </div>
+              )}
             </div>
           ))}
         </div>
