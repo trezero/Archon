@@ -574,11 +574,14 @@ docker compose down -v         # Stop + delete volumes (destructive!)
 
 ### Database Migrations (PostgreSQL)
 
-Migrations run automatically on first startup. For subsequent migrations:
+Migrations run automatically on first startup via `000_combined.sql`. When upgrading to a newer version that adds database tables, you need to apply incremental migrations manually:
 
 ```bash
-docker compose exec postgres psql -U postgres -d remote_coding_agent -f /migrations/019_workflow_resume_path.sql
+# Example: apply the env vars migration (required when upgrading to v0.3.x)
+docker compose exec postgres psql -U postgres -d remote_coding_agent -f /migrations/020_codebase_env_vars.sql
 ```
+
+The `migrations/` directory is mounted read-only into the postgres container. Check for any new migration files after pulling updates.
 
 ### Clean Up Docker Resources
 
