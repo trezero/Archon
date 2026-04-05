@@ -129,8 +129,11 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
     queryKey: ['health'],
     queryFn: getHealth,
     staleTime: 10_000,
+    refetchInterval: 30_000,
     refetchOnWindowFocus: true,
   });
+  // Default to true (hide button) until server confirms non-Docker — prevents broken vscode:// links
+  const isDocker = health?.is_docker ?? true;
 
   // Sync messages to cache for persistence across navigation
   useEffect(() => {
@@ -749,7 +752,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         subtitle={headerSubtitle}
         projectName={currentCodebase?.name ?? contextCodebase?.name}
         connected={isNewChat ? undefined : connected}
-        isDocker={health?.is_docker}
+        isDocker={isDocker}
       />
       {(conversationsError || codebasesError) && (
         <div className="flex gap-2 px-4 py-1">

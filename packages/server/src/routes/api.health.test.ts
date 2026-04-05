@@ -199,7 +199,7 @@ describe('GET /api/health', () => {
   beforeEach(() => {
     mockGetStats.mockReset();
     mockGetRunningWorkflows.mockReset();
-    mockIsDocker.mockReset();
+    mockIsDocker.mockClear(); // preserve base () => false implementation; only clear call records
   });
 
   test('returns status ok with adapter and concurrency info', async () => {

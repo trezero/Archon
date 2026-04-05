@@ -214,6 +214,7 @@ export function DashboardPage(): React.ReactElement {
     queryKey: ['health'],
     queryFn: getHealth,
     staleTime: 10_000,
+    refetchOnWindowFocus: true,
     refetchInterval: 30_000,
   });
 

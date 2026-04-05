@@ -1,23 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn, mock, type Mock } from 'bun:test';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-// Compute archon home to match getArchonHome() behavior (Docker-aware).
-// @archon/git uses the real getArchonHome() internally; test assertions must match.
-// SOURCE: packages/paths/src/archon-paths.ts (isDocker + getArchonHome) — keep condition order in sync.
-const archonHome = (() => {
-  if (
-    process.env.WORKSPACE_PATH === '/workspace' ||
-    (process.env.HOME === '/root' && Boolean(process.env.WORKSPACE_PATH)) ||
-    process.env.ARCHON_DOCKER === 'true'
-  ) {
-    return '/.archon';
-  }
-  if (process.env.ARCHON_HOME) return process.env.ARCHON_HOME;
-  return join(homedir(), '.archon');
-})();
+// Fixed test home — path assertions use this constant; no duplication of production isDocker() logic.
+const TEST_ARCHON_HOME = '/test/.archon';
 
-// Mock logger to suppress noisy output during tests
+// Mock @archon/paths: provide getArchonHome + workspaces path helpers so @archon/git (getWorktreeBase,
+// isProjectScopedWorktreeBase) and worktree.ts resolve paths against TEST_ARCHON_HOME consistently.
 mock.module('@archon/paths', () => ({
   createLogger: () => ({
     fatal: () => undefined,
@@ -28,6 +16,12 @@ mock.module('@archon/paths', () => ({
     trace: () => undefined,
     child: () => undefined,
   }),
+  getArchonHome: () => TEST_ARCHON_HOME,
+  getArchonWorkspacesPath: () => join(TEST_ARCHON_HOME, 'workspaces'),
+  getArchonWorktreesPath: () => join(TEST_ARCHON_HOME, 'worktrees'),
+  getProjectWorktreesPath: (owner: string, repo: string) =>
+    join(TEST_ARCHON_HOME, 'workspaces', owner, repo, 'worktrees'),
+  isDocker: () => false,
 }));
 
 import * as git from '@archon/git';
@@ -806,12 +800,19 @@ describe('WorktreeProvider', () => {
 
       // workingPath should use project-scoped path, not legacy global worktrees
       expect(env.workingPath).toBe(
-        join(archonHome, 'workspaces', 'Widinglabs', 'sasha-demo', 'worktrees', env.branchName)
+        join(
+          TEST_ARCHON_HOME,
+          'workspaces',
+          'Widinglabs',
+          'sasha-demo',
+          'worktrees',
+          env.branchName
+        )
       );
 
       // mkdir should be called with the project-scoped base (no owner/repo appended)
       expect(mkdirSpy).toHaveBeenCalledWith(
-        join(archonHome, 'workspaces', 'Widinglabs', 'sasha-demo', 'worktrees'),
+        join(TEST_ARCHON_HOME, 'workspaces', 'Widinglabs', 'sasha-demo', 'worktrees'),
         { recursive: true }
       );
     });
@@ -2155,7 +2156,7 @@ describe('WorktreeProvider', () => {
       const branchName = provider.generateBranchName(request);
       const path = provider.getWorktreePath(request, branchName);
       expect(path).toBe(
-        join(archonHome, 'workspaces', 'Widinglabs', 'sasha-demo', 'worktrees', branchName)
+        join(TEST_ARCHON_HOME, 'workspaces', 'Widinglabs', 'sasha-demo', 'worktrees', branchName)
       );
     });
   });
