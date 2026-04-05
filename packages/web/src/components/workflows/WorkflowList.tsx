@@ -94,21 +94,23 @@ export function WorkflowList(): React.ReactElement {
   // Filter workflows by search query and category
   const filteredWorkflows = useMemo(() => {
     if (!workflows) return [];
-    return workflows.filter(wf => {
-      // Search filter
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase();
-        const matchesName = wf.name.toLowerCase().includes(query);
-        const matchesDesc = wf.description?.toLowerCase().includes(query) ?? false;
-        if (!matchesName && !matchesDesc) return false;
-      }
-      // Category filter
-      if (activeCategory !== 'All') {
-        const cat = getWorkflowCategory(wf.name, wf.description ?? '');
-        if (cat !== activeCategory) return false;
-      }
-      return true;
-    });
+    return workflows
+      .map(entry => entry.workflow)
+      .filter(wf => {
+        // Search filter
+        if (searchQuery) {
+          const query = searchQuery.toLowerCase();
+          const matchesName = wf.name.toLowerCase().includes(query);
+          const matchesDesc = wf.description?.toLowerCase().includes(query) ?? false;
+          if (!matchesName && !matchesDesc) return false;
+        }
+        // Category filter
+        if (activeCategory !== 'All') {
+          const cat = getWorkflowCategory(wf.name, wf.description ?? '');
+          if (cat !== activeCategory) return false;
+        }
+        return true;
+      });
   }, [workflows, searchQuery, activeCategory]);
 
   if (loadingWorkflows) {
