@@ -202,7 +202,14 @@ export function WorkflowRunCard({
       {/* Node outcome summary for completed/failed runs */}
       {(run.status === 'completed' || run.status === 'failed') &&
         isValidNodeCounts(run.metadata?.node_counts) && (
-          <NodeCountsSummary counts={run.metadata.node_counts} />
+          <div className="flex items-center gap-2">
+            <NodeCountsSummary counts={run.metadata.node_counts} />
+            {typeof run.metadata?.total_cost_usd === 'number' && (
+              <span className="text-xs text-text-secondary">
+                ${run.metadata.total_cost_usd.toFixed(4)} USD
+              </span>
+            )}
+          </div>
         )}
 
       {/* Metadata row */}

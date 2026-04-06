@@ -4618,3 +4618,200 @@ describe('executeDagWorkflow -- Claude SDK advanced options', () => {
     expect(warning).toBeDefined();
   });
 });
+
+describe('executeDagWorkflow -- cost tracking', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-cost-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const commandsDir = join(testDir, '.archon', 'commands');
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(join(commandsDir, 'my-cmd.md'), 'My command prompt');
+
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockClear();
+    mockLogFn.mockClear();
+
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+  });
+
+  afterEach(async () => {
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('passes total_cost_usd to completeWorkflowRun when node yields cost', async () => {
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'assistant', content: 'done' };
+      yield { type: 'result', sessionId: 'sid-cost', cost: 0.0042 };
+    });
+
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      { name: 'dag-cost', nodes: [{ id: 'step', prompt: 'Do thing.' }] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      'docs/',
+      minimalConfig
+    );
+
+    const completeCalls = (
+      store.completeWorkflowRun as Mock<
+        (id: string, metadata?: Record<string, unknown>) => Promise<void>
+      >
+    ).mock.calls;
+    expect(completeCalls.length).toBe(1);
+    expect(completeCalls[0][1]).toEqual({
+      node_counts: { completed: 1, failed: 0, skipped: 0, total: 1 },
+      total_cost_usd: 0.0042,
+    });
+  });
+
+  it('sums total_cost_usd across multiple sequential nodes', async () => {
+    let callCount = 0;
+    mockSendQueryDag.mockImplementation(function* () {
+      callCount++;
+      yield { type: 'result', sessionId: `sid-${String(callCount)}`, cost: 0.001 };
+    });
+
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-cost-multi',
+        nodes: [
+          { id: 'step1', prompt: 'Step 1.' },
+          { id: 'step2', prompt: 'Step 2.', depends_on: ['step1'] },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      'docs/',
+      minimalConfig
+    );
+
+    const completeCalls = (
+      store.completeWorkflowRun as Mock<
+        (id: string, metadata?: Record<string, unknown>) => Promise<void>
+      >
+    ).mock.calls;
+    expect(completeCalls.length).toBe(1);
+    expect(completeCalls[0][1]).toMatchObject({ total_cost_usd: 0.002 });
+  });
+
+  it('omits total_cost_usd from completeWorkflowRun when no cost yielded', async () => {
+    mockSendQueryDag.mockImplementation(function* () {
+      yield { type: 'result', sessionId: 'sid-no-cost' };
+    });
+
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      { name: 'dag-no-cost', nodes: [{ id: 'step', prompt: 'Do thing.' }] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      'docs/',
+      minimalConfig
+    );
+
+    const completeCalls = (
+      store.completeWorkflowRun as Mock<
+        (id: string, metadata?: Record<string, unknown>) => Promise<void>
+      >
+    ).mock.calls;
+    expect(completeCalls.length).toBe(1);
+    expect(completeCalls[0][1]).not.toHaveProperty('total_cost_usd');
+  });
+
+  it('accumulates cost across loop iterations and includes in completeWorkflowRun', async () => {
+    let callCount = 0;
+    mockSendQueryDag.mockImplementation(function* () {
+      callCount++;
+      if (callCount < 3) {
+        yield { type: 'assistant', content: 'Still working...' };
+        yield { type: 'result', sessionId: `loop-sid-${String(callCount)}`, cost: 0.001 };
+      } else {
+        yield { type: 'assistant', content: 'All done! <promise>COMPLETE</promise>' };
+        yield { type: 'result', sessionId: `loop-sid-${String(callCount)}`, cost: 0.002 };
+      }
+    });
+
+    const store = createMockStore();
+    const mockDeps = createMockDeps(store);
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      {
+        name: 'dag-loop-cost',
+        nodes: [
+          {
+            id: 'my-loop',
+            loop: { prompt: 'Work.', until: 'COMPLETE', max_iterations: 5 },
+          },
+        ],
+      },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      'docs/',
+      minimalConfig
+    );
+
+    // 3 iterations: 0.001 + 0.001 + 0.002 = 0.004
+    const completeCalls = (
+      store.completeWorkflowRun as Mock<
+        (id: string, metadata?: Record<string, unknown>) => Promise<void>
+      >
+    ).mock.calls;
+    expect(completeCalls.length).toBe(1);
+    expect(completeCalls[0][1]).toMatchObject({ total_cost_usd: 0.004 });
+  });
+});

@@ -92,6 +92,9 @@ interface NodeCompletedEvent {
   nodeId: string;
   nodeName: string;
   duration: number;
+  costUsd?: number;
+  stopReason?: string;
+  numTurns?: number;
 }
 
 interface NodeFailedEvent {

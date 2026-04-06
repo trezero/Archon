@@ -147,6 +147,113 @@ describe('ClaudeClient', () => {
       });
     });
 
+    test('yields result with cost, stopReason, numTurns, modelUsage when SDK provides them', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield {
+          type: 'result',
+          session_id: 'sid-cost',
+          total_cost_usd: 0.0042,
+          stop_reason: 'end_turn',
+          num_turns: 3,
+          model_usage: {
+            'claude-sonnet-4-6': {
+              input_tokens: 100,
+              output_tokens: 50,
+              cache_read_input_tokens: 10,
+            },
+          },
+        };
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toMatchObject({
+        type: 'result',
+        sessionId: 'sid-cost',
+        cost: 0.0042,
+        stopReason: 'end_turn',
+        numTurns: 3,
+        modelUsage: {
+          'claude-sonnet-4-6': {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_read_input_tokens: 10,
+          },
+        },
+      });
+    });
+
+    test('omits cost, stopReason, numTurns, modelUsage when SDK result has none', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', session_id: 'sid-bare' };
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[0]).not.toHaveProperty('cost');
+      expect(chunks[0]).not.toHaveProperty('stopReason');
+      expect(chunks[0]).not.toHaveProperty('numTurns');
+      expect(chunks[0]).not.toHaveProperty('modelUsage');
+    });
+
+    test('omits stopReason when stop_reason is null', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', session_id: 'sid-null-stop', stop_reason: null };
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[0]).not.toHaveProperty('stopReason');
+    });
+
+    test('yields rate_limit chunk and logs warn on rate_limit_event with info', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield {
+          type: 'rate_limit_event',
+          rate_limit_info: { requests_remaining: 0, retry_after_ms: 5000 },
+        };
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toEqual({
+        type: 'rate_limit',
+        rateLimitInfo: { requests_remaining: 0, retry_after_ms: 5000 },
+      });
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        { rateLimitInfo: { requests_remaining: 0, retry_after_ms: 5000 } },
+        'claude.rate_limit_event'
+      );
+    });
+
+    test('yields rate_limit chunk with empty object when rate_limit_info absent', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'rate_limit_event' };
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toEqual({ type: 'rate_limit', rateLimitInfo: {} });
+    });
+
     test('yields result without structuredOutput when SDK result has no structured_output', async () => {
       mockQuery.mockImplementation(async function* () {
         yield {
