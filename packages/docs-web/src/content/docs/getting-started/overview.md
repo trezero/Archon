@@ -573,7 +573,7 @@ Want to message Archon from your phone? Pick one:
 | Platform            | Difficulty      | Guide                                                                 |
 | ------------------- | --------------- | --------------------------------------------------------------------- |
 | **Telegram**        | Easy (5 min)    | [Adapter Setup](/adapters/telegram/) |
-| **Discord**         | Easy (5 min)    | [Adapter Setup](/adapters/discord/)  |
+| **Discord**         | Easy (5 min)    | [Adapter Setup](/adapters/community/discord/)  |
 | **Slack**           | Medium (15 min) | [Adapter Setup](/adapters/slack/)                                 |
 | **GitHub Webhooks** | Medium (15 min) | [Adapter Setup](/adapters/github/)   |
 
