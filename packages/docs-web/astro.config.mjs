@@ -9,7 +9,7 @@ export default defineConfig({
       description: 'AI workflow engine — package your coding workflows as YAML, run them anywhere.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/coleam00/Archon' }],
       editLink: {
-        baseUrl: 'https://github.com/coleam00/Archon/edit/main/website/',
+        baseUrl: 'https://github.com/coleam00/Archon/edit/main/packages/docs-web/',
       },
       sidebar: [
         {
