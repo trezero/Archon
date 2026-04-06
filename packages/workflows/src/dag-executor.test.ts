@@ -1746,7 +1746,7 @@ describe('executeDagWorkflow -- node-level retry for transient errors', () => {
       minimalConfig
     );
 
-    // Default retry is 2 retries → 3 total attempts
+    // max_attempts: 2 = 2 retries → 3 total attempts (delay_ms: 1 keeps test fast)
     expect(callCount).toBe(3);
     expect(mockDeps.store.failWorkflowRun as ReturnType<typeof mock>).toHaveBeenCalled();
   }, 5_000);

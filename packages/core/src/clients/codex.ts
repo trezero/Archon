@@ -141,6 +141,7 @@ export class CodexClient implements IAssistantClient {
   constructor(options?: { retryBaseDelayMs?: number }) {
     this.retryBaseDelayMs = options?.retryBaseDelayMs ?? RETRY_BASE_DELAY_MS;
   }
+
   /**
    * Send a query to Codex and stream responses
    * @param prompt - User message or prompt
