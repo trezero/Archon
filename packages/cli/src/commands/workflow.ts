@@ -72,13 +72,7 @@ function generateConversationId(): string {
   return `cli-${String(timestamp)}-${random}`;
 }
 
-/**
- * Render a workflow event to stderr as a progress line.
- * Called only when --quiet is not set.
- *
- * @param event - The workflow emitter event to render.
- * @param verbose - When true, also renders tool_started/tool_completed events.
- */
+/** Render a workflow event to stderr as a progress line. Called only when --quiet is not set. */
 function renderWorkflowEvent(event: WorkflowEmitterEvent, verbose: boolean): void {
   switch (event.type) {
     case 'node_started':
