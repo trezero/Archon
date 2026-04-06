@@ -184,7 +184,7 @@ nodes:
 | `idle_timeout` | number | — | Kill node if idle for this many milliseconds |
 | `retry` | object | — | Per-node retry configuration. See [Retry Configuration](#retry-configuration) |
 
-**AI node options** — apply to `command`, `prompt`, and `loop` nodes:
+**AI node options** — apply to `command` and `prompt` nodes:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
