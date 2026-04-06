@@ -153,6 +153,25 @@ Return:
 
 ## Phase 3: ANALYZE - Form Approach
 
+### 3.0 First-Principles Analysis
+
+Before diving into bug analysis or enhancement scoping, identify the primitive:
+
+1. **What primitive is involved?** What is the core abstraction this bug/feature touches?
+   (e.g., the condition evaluator, the approval system, the isolation provider)
+2. **Is the primitive sound?** Does the existing design handle this case, or is the
+   primitive itself incomplete or missing a case?
+3. **Root cause vs symptom** — are we fixing where the error manifests, or where it
+   originates? Trace the data flow back to the source.
+4. **What's the minimal change?** What is the smallest edit that fixes the root cause?
+   Avoid adding new abstractions when extending existing ones works.
+5. **What does this unlock?** If we add/change a primitive, what other improvements
+   become possible?
+
+| Primitive | File:Lines | Sound? | Notes |
+|-----------|-----------|--------|-------|
+| {abstraction name} | `src/x.ts:10-30` | Yes/No/Partial | {if incomplete: what's missing} |
+
 ### 3.1 For BUG Issues - Root Cause Analysis
 
 Apply the 5 Whys:
