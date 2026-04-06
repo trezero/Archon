@@ -144,12 +144,12 @@ export async function approveWorkflow(
 
   const approvalComment = comment ?? 'Approved';
 
-  // Interactive loop gate — store user input in metadata for the next iteration.
-  // Note: node_completed is NOT written here. The executor writes it when the AI
-  // emits the completion signal (meaning the user actually approved). Writing it
-  // here would cause the resume to skip the loop node entirely.
-  if (approval.type === 'interactive_loop') {
-    try {
+  try {
+    // Interactive loop gate — store user input in metadata for the next iteration.
+    // Note: node_completed is NOT written here. The executor writes it when the AI
+    // emits the completion signal (meaning the user actually approved). Writing it
+    // here would cause the resume to skip the loop node entirely.
+    if (approval.type === 'interactive_loop') {
       await workflowEventDb.createWorkflowEvent({
         workflow_run_id: runId,
         event_type: 'approval_received',
@@ -163,26 +163,17 @@ export async function approveWorkflow(
         status: 'failed',
         metadata: { loop_user_input: approvalComment },
       });
-    } catch (error) {
-      const err = error as Error;
-      getLog().error(
-        { err, errorType: err.constructor.name, runId },
-        'operations.workflow_approve_failed'
-      );
-      throw new Error(`Failed to approve workflow run ${runId}: ${err.message}`);
+      return {
+        workflowName: run.workflow_name,
+        workingPath: run.working_path,
+        userMessage: run.user_message,
+        codebaseId: run.codebase_id,
+        type: 'interactive_loop',
+      };
     }
-    return {
-      workflowName: run.workflow_name,
-      workingPath: run.working_path,
-      userMessage: run.user_message,
-      codebaseId: run.codebase_id,
-      type: 'interactive_loop',
-    };
-  }
 
-  // Standard approval node path
-  const nodeOutput = approval.captureResponse === true ? approvalComment : '';
-  try {
+    // Standard approval node path
+    const nodeOutput = approval.captureResponse === true ? approvalComment : '';
     await workflowEventDb.createWorkflowEvent({
       workflow_run_id: runId,
       event_type: 'node_completed',
@@ -238,6 +229,8 @@ export async function rejectWorkflow(
     ? rawApproval
     : undefined;
   const rejectReason = reason ?? 'Rejected';
+  const currentCount = (run.metadata.rejection_count as number | undefined) ?? 0;
+  const maxAttempts = approval?.onRejectMaxAttempts ?? 3;
 
   try {
     await workflowEventDb.createWorkflowEvent({
@@ -246,63 +239,33 @@ export async function rejectWorkflow(
       step_name: approval?.nodeId ?? 'unknown',
       data: { decision: 'rejected', reason: rejectReason },
     });
-  } catch (error) {
-    const err = error as Error;
-    getLog().error(
-      { err, errorType: err.constructor.name, runId },
-      'operations.workflow_reject_failed'
-    );
-    throw new Error(`Failed to reject workflow run ${runId}: ${err.message}`);
-  }
 
-  const hasOnReject = approval?.onRejectPrompt !== undefined;
-  if (hasOnReject) {
-    const currentCount = (run.metadata.rejection_count as number | undefined) ?? 0;
-    const maxAttempts = approval?.onRejectMaxAttempts ?? 3;
-    if (currentCount + 1 >= maxAttempts) {
-      try {
+    if (approval?.onRejectPrompt !== undefined) {
+      if (currentCount + 1 >= maxAttempts) {
         await workflowDb.cancelWorkflowRun(runId);
-      } catch (error) {
-        const err = error as Error;
-        getLog().error(
-          { err, errorType: err.constructor.name, runId },
-          'operations.workflow_reject_failed'
-        );
-        throw new Error(`Failed to reject workflow run ${runId}: ${err.message}`);
+        return {
+          workflowName: run.workflow_name,
+          workingPath: run.working_path,
+          userMessage: run.user_message,
+          codebaseId: run.codebase_id,
+          cancelled: true,
+          maxAttemptsReached: true,
+        };
       }
+      await workflowDb.updateWorkflowRun(runId, {
+        status: 'failed',
+        metadata: { rejection_reason: rejectReason, rejection_count: currentCount + 1 },
+      });
       return {
         workflowName: run.workflow_name,
         workingPath: run.working_path,
         userMessage: run.user_message,
         codebaseId: run.codebase_id,
-        cancelled: true,
-        maxAttemptsReached: true,
+        cancelled: false,
+        maxAttemptsReached: false,
       };
     }
-    try {
-      await workflowDb.updateWorkflowRun(runId, {
-        status: 'failed',
-        metadata: { rejection_reason: rejectReason, rejection_count: currentCount + 1 },
-      });
-    } catch (error) {
-      const err = error as Error;
-      getLog().error(
-        { err, errorType: err.constructor.name, runId },
-        'operations.workflow_reject_failed'
-      );
-      throw new Error(`Failed to reject workflow run ${runId}: ${err.message}`);
-    }
-    return {
-      workflowName: run.workflow_name,
-      workingPath: run.working_path,
-      userMessage: run.user_message,
-      codebaseId: run.codebase_id,
-      cancelled: false,
-      maxAttemptsReached: false,
-    };
-  }
 
-  try {
     await workflowDb.cancelWorkflowRun(runId);
   } catch (error) {
     const err = error as Error;
