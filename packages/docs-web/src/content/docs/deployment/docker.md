@@ -74,6 +74,61 @@ docker compose --profile with-db --profile cloud up -d
 
 ---
 
+## Local Docker Desktop (Windows / macOS)
+
+Run Archon locally with Docker Desktop — no domain, no VPS required. Uses SQLite and the Web UI only.
+
+### Quick start
+
+```bash
+git clone https://github.com/coleam00/Archon.git
+cd Archon
+cp .env.example .env
+# Edit .env: set CLAUDE_CODE_OAUTH_TOKEN or CLAUDE_API_KEY
+docker compose up -d
+```
+
+Access the Web UI at **http://localhost:3000**.
+
+### Windows-specific notes
+
+**Build from WSL, not PowerShell.** Docker Desktop on Windows cannot follow Bun workspace symlinks during the build context transfer. If you see `The file cannot be accessed by the system`, open a WSL terminal:
+
+```bash
+cd /mnt/c/Users/YourName/path/to/remote-coding-agent
+docker compose up -d
+```
+
+**Line endings:** The repo uses `.gitattributes` to force LF endings for shell scripts. If you cloned before this was added and see `exec docker-entrypoint.sh: no such file or directory`, re-clone or run:
+
+```bash
+git rm --cached -r .
+git reset --hard
+```
+
+### What you get
+
+| Feature | Status |
+|---------|--------|
+| Web UI | http://localhost:3000 |
+| Database | SQLite (automatic, zero setup) |
+| HTTPS / Caddy | Not needed locally |
+| Auth | None (single-user, localhost only) |
+| Platform adapters | Optional (Telegram, Slack, etc.) |
+
+### Using PostgreSQL locally (optional)
+
+```bash
+docker compose --profile with-db up -d
+```
+
+Then add to `.env`:
+```env
+DATABASE_URL=postgresql://postgres:postgres@postgres:5432/remote_coding_agent
+```
+
+---
+
 ## Manual Server Setup
 
 Step-by-step alternative if you prefer not to use cloud-init, or need more control.
