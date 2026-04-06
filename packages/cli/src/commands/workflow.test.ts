@@ -122,6 +122,7 @@ mock.module('@archon/core/db/workflows', () => ({
 
 mock.module('@archon/core/db/workflow-events', () => ({
   listWorkflowEvents: mock(() => Promise.resolve([])),
+  createWorkflowEvent: mock(() => Promise.resolve()),
 }));
 
 describe('workflowListCommand', () => {
@@ -1318,7 +1319,9 @@ describe('workflowApproveCommand', () => {
     const workflowDb = await import('@archon/core/db/workflows');
     (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce(null);
 
-    await expect(workflowApproveCommand('missing-id')).rejects.toThrow();
+    await expect(workflowApproveCommand('missing-id')).rejects.toThrow(
+      'Workflow run not found: missing-id'
+    );
   });
 
   it('should pass codebase_id from run record to workflowRunCommand', async () => {
@@ -1532,10 +1535,7 @@ describe('workflowRejectCommand', () => {
         rejection_count: 0,
       },
     };
-    // First call: rejectWorkflow (operations layer), second call: CLI re-fetch for resume
-    (workflowDb.getWorkflowRun as ReturnType<typeof mock>)
-      .mockResolvedValueOnce(runData)
-      .mockResolvedValueOnce(runData);
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce(runData);
 
     try {
       await workflowRejectCommand('run-on-reject', 'needs work');

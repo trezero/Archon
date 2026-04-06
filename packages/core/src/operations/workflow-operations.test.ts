@@ -281,6 +281,18 @@ describe('resumeWorkflow', () => {
       "Cannot resume run with status 'completed'"
     );
   });
+
+  test('throws wrapped message and logs when DB throws', async () => {
+    mockGetWorkflowRun.mockRejectedValueOnce(new Error('connection reset'));
+
+    await expect(resumeWorkflow('run-1')).rejects.toThrow(
+      'Failed to look up workflow run run-1: connection reset'
+    );
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: 'run-1' }),
+      'operations.workflow_resume_lookup_failed'
+    );
+  });
 });
 
 describe('abandonWorkflow', () => {

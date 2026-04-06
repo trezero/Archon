@@ -57,12 +57,15 @@ async function reconcileGhosts(
       const exists = await worktreeExists(toWorktreePath(env.working_path));
       if (!exists) {
         await isolationDb.updateStatus(env.id, 'destroyed');
-        getLog().info({ envId: env.id, path: env.working_path }, 'ghost_environment_reconciled');
+        getLog().info({ envId: env.id, path: env.working_path }, 'isolation.ghost_reconciled');
         reconciled++;
       }
     } catch (error) {
       const err = error as Error;
-      getLog().warn({ err, envId: env.id, path: env.working_path }, 'ghost_reconciliation_failed');
+      getLog().warn(
+        { err, envId: env.id, path: env.working_path },
+        'isolation.ghost_reconciliation_failed'
+      );
     }
   }
   return reconciled;
@@ -117,6 +120,10 @@ export async function listEnvironments(): Promise<EnvironmentListData> {
   let totalGhosts = 0;
   const result: CodebaseEnvironments[] = [];
 
+  // N+1 pattern: listAllActiveWithCodebase() already returns all rows, but
+  // listByCodebaseWithAge() is needed for the days_since_activity field which
+  // isn't included in the initial query. A future optimisation could add a
+  // single JOIN query returning all fields to eliminate the per-codebase fetches.
   for (const codebase of codebases) {
     const envs = await isolationDb.listByCodebaseWithAge(codebase.id);
     if (envs.length === 0) continue;

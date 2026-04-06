@@ -791,27 +791,26 @@ export async function workflowApproveCommand(runId: string, comment?: string): P
   const result = await approveWorkflow(runId, comment);
 
   // CLI auto-resumes after approval (unlike chat, which defers to next user message)
-  const run = await workflowDb.getWorkflowRun(runId);
-  if (!run?.working_path) {
+  if (!result.workingPath) {
     throw new Error(
       `Workflow run '${runId}' has no working path recorded.\n` +
         'Cannot determine where to resume.'
     );
   }
   console.log(`Approved workflow: ${result.workflowName}`);
-  console.log(`Path: ${run.working_path}`);
+  console.log(`Path: ${result.workingPath}`);
   console.log('');
   console.log('Resuming workflow...');
 
   try {
-    await workflowRunCommand(run.working_path, run.workflow_name, run.user_message ?? '', {
+    await workflowRunCommand(result.workingPath, result.workflowName, result.userMessage ?? '', {
       resume: true,
-      codebaseId: run.codebase_id ?? undefined,
+      codebaseId: result.codebaseId ?? undefined,
     });
   } catch (error) {
     const err = error as Error;
     getLog().error(
-      { err, runId, workflowName: run.workflow_name },
+      { err, runId, workflowName: result.workflowName },
       'cli.workflow_approve_resume_failed'
     );
     throw new Error(
@@ -834,8 +833,7 @@ export async function workflowRejectCommand(runId: string, reason?: string): Pro
   }
 
   // Not cancelled = has onRejectPrompt, CLI auto-resumes with rejection feedback
-  const run = await workflowDb.getWorkflowRun(runId);
-  if (!run?.working_path) {
+  if (!result.workingPath) {
     throw new Error(
       `Workflow run '${runId}' has no working path recorded.\n` +
         'Cannot determine where to resume.'
@@ -844,14 +842,14 @@ export async function workflowRejectCommand(runId: string, reason?: string): Pro
   console.log(`Rejected workflow: ${result.workflowName}`);
   console.log('Resuming with on_reject prompt...');
   try {
-    await workflowRunCommand(run.working_path, run.workflow_name, run.user_message ?? '', {
+    await workflowRunCommand(result.workingPath, result.workflowName, result.userMessage ?? '', {
       resume: true,
-      codebaseId: run.codebase_id ?? undefined,
+      codebaseId: result.codebaseId ?? undefined,
     });
   } catch (error) {
     const err = error as Error;
     getLog().error(
-      { err, runId, workflowName: run.workflow_name },
+      { err, runId, workflowName: result.workflowName },
       'cli.workflow_reject_resume_failed'
     );
     throw new Error(

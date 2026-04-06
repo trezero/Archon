@@ -660,13 +660,18 @@ async function handleWorkflowCommand(
 
         let msg = `**Active Workflows (${String(activeRuns.length)})**\n\n`;
         for (const run of activeRuns) {
-          msg += `**\`${run.workflow_name}\`**\n`;
+          msg += `**\`${run.workflow_name}\`** (${run.status})\n`;
           msg += `  ID: ${run.id}\n`;
           msg += `  Path: ${run.working_path ?? '(unknown)'}\n`;
           msg += `  Started: ${new Date(run.started_at).toISOString()}\n\n`;
         }
 
-        msg += 'Use `/workflow cancel` to stop a running workflow.';
+        const hasRunning = activeRuns.some(r => r.status === 'running');
+        const hasPaused = activeRuns.some(r => r.status === 'paused');
+        if (hasRunning) msg += 'Use `/workflow cancel` to stop a running workflow.';
+        if (hasPaused)
+          msg +=
+            '\nUse `/workflow approve <id>` or `/workflow reject <id> <reason>` for paused runs.';
         return { success: true, message: msg.trim() };
       } catch (error) {
         const err = error as Error;
