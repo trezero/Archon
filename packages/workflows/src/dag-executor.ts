@@ -74,6 +74,9 @@ interface WorkflowLevelOptions {
   sandbox?: SandboxSettings;
 }
 
+/** Internal node execution result — extends NodeOutput with cost data for aggregation. */
+type NodeExecutionResult = NodeOutput & { costUsd?: number };
+
 /** Throttle state for cancel checks (reads — no write contention in WAL mode) */
 const lastNodeCancelCheck = new Map<string, number>();
 const CANCEL_CHECK_INTERVAL_MS = 10_000;
@@ -713,7 +716,7 @@ async function executeNodeInternal(
   resumeSessionId: string | undefined,
   configuredCommandFolder?: string,
   issueContext?: string
-): Promise<NodeOutput> {
+): Promise<NodeExecutionResult> {
   const nodeStartTime = Date.now();
   const nodeContext: SendMessageContext = { workflowId: workflowRun.id, nodeName: node.id };
 
@@ -813,6 +816,10 @@ async function executeNodeInternal(
   let structuredOutput: unknown;
   let newSessionId: string | undefined;
   let nodeTokens: WorkflowTokenUsage | undefined;
+  let nodeCostUsd: number | undefined;
+  let nodeStopReason: string | undefined;
+  let nodeNumTurns: number | undefined;
+  let nodeModelUsage: Record<string, unknown> | undefined;
   const batchMessages: string[] = [];
 
   // Create per-node abort controller for idle timeout cleanup
@@ -991,6 +998,10 @@ async function executeNodeInternal(
         }
         if (msg.sessionId) newSessionId = msg.sessionId;
         if (msg.tokens) nodeTokens = msg.tokens;
+        if (msg.cost !== undefined) nodeCostUsd = msg.cost;
+        if (msg.stopReason) nodeStopReason = msg.stopReason;
+        if (msg.numTurns !== undefined) nodeNumTurns = msg.numTurns;
+        if (msg.modelUsage) nodeModelUsage = msg.modelUsage;
         if (msg.structuredOutput !== undefined) structuredOutput = msg.structuredOutput;
         // Fail the node if the SDK reports a cost cap exceeded error
         if (msg.isError && msg.errorSubtype === 'error_max_budget_usd') {
@@ -1188,7 +1199,14 @@ async function executeNodeInternal(
         workflow_run_id: workflowRun.id,
         event_type: 'node_completed',
         step_name: node.id,
-        data: { duration_ms: duration, node_output: nodeOutputText },
+        data: {
+          duration_ms: duration,
+          node_output: nodeOutputText,
+          ...(nodeCostUsd !== undefined ? { cost_usd: nodeCostUsd } : {}),
+          ...(nodeStopReason ? { stop_reason: nodeStopReason } : {}),
+          ...(nodeNumTurns !== undefined ? { num_turns: nodeNumTurns } : {}),
+          ...(nodeModelUsage ? { model_usage: nodeModelUsage } : {}),
+        },
       })
       .catch((err: Error) => {
         getLog().error(
@@ -1203,13 +1221,21 @@ async function executeNodeInternal(
       nodeId: node.id,
       nodeName: node.command ?? node.id,
       duration,
+      ...(nodeCostUsd !== undefined ? { costUsd: nodeCostUsd } : {}),
+      ...(nodeStopReason ? { stopReason: nodeStopReason } : {}),
+      ...(nodeNumTurns !== undefined ? { numTurns: nodeNumTurns } : {}),
     });
 
     // Clean up throttle entries on completion
     lastNodeCancelCheck.delete(`${workflowRun.id}:${node.id}`);
     lastNodeActivityUpdate.delete(`${workflowRun.id}:${node.id}`);
 
-    return { state: 'completed', output: nodeOutputText, sessionId: newSessionId };
+    return {
+      state: 'completed',
+      output: nodeOutputText,
+      sessionId: newSessionId,
+      costUsd: nodeCostUsd,
+    };
   } catch (error) {
     const err = error as Error;
 
@@ -1220,7 +1246,12 @@ async function executeNodeInternal(
     // If the abort was triggered by user cancel (not idle timeout), classify as cancel
     if (nodeAbortController.signal.aborted && !nodeIdleTimedOut) {
       getLog().info({ nodeId: node.id }, 'dag_node_cancelled_via_abort');
-      return { state: 'failed', output: nodeOutputText, error: 'Cancelled by user' };
+      return {
+        state: 'failed',
+        output: nodeOutputText,
+        error: 'Cancelled by user',
+        costUsd: nodeCostUsd,
+      };
     }
 
     getLog().error({ err, nodeId: node.id }, 'dag_node_failed');
@@ -1248,7 +1279,7 @@ async function executeNodeInternal(
       error: err.message,
     });
 
-    return { state: 'failed', output: '', error: err.message };
+    return { state: 'failed', output: '', error: err.message, costUsd: nodeCostUsd };
   }
 }
 
@@ -1456,7 +1487,7 @@ async function executeLoopNode(
   nodeOutputs: Map<string, NodeOutput>,
   config: WorkflowConfig,
   issueContext?: string
-): Promise<NodeOutput> {
+): Promise<NodeExecutionResult> {
   const loop = node.loop;
   const msgContext = { workflowId: workflowRun.id, nodeName: node.id };
 
@@ -1485,6 +1516,9 @@ async function executeLoopNode(
     : '';
 
   let lastIterationOutput = '';
+  let loopTotalCostUsd: number | undefined;
+  let loopFinalStopReason: string | undefined;
+  let loopTotalNumTurns: number | undefined;
   const resolvedOptions = buildLoopNodeOptions(workflowProvider, workflowModel, config);
 
   // Helper to log event store errors consistently
@@ -1610,6 +1644,13 @@ async function executeLoopNode(
             lastToolStartedAt = null;
           }
           if (msg.sessionId) currentSessionId = msg.sessionId;
+          if (msg.cost !== undefined) {
+            loopTotalCostUsd = (loopTotalCostUsd ?? 0) + msg.cost;
+          }
+          if (msg.stopReason) loopFinalStopReason = msg.stopReason;
+          if (msg.numTurns !== undefined) {
+            loopTotalNumTurns = (loopTotalNumTurns ?? 0) + msg.numTurns;
+          }
           break; // Result is the "I'm done" signal — don't wait for subprocess to exit
         } else if (msg.type === 'tool' && msg.toolName) {
           const now = Date.now();
@@ -1700,7 +1741,12 @@ async function executeLoopNode(
         .catch((evtErr: Error) => {
           logEventStoreError(evtErr, i);
         });
-      return { state: 'failed', output: '', error: `Loop iteration ${i} failed: ${err.message}` };
+      return {
+        state: 'failed',
+        output: '',
+        error: `Loop iteration ${i} failed: ${err.message}`,
+        costUsd: loopTotalCostUsd,
+      };
     }
 
     // Notify on idle timeout
@@ -1805,7 +1851,13 @@ async function executeLoopNode(
           workflow_run_id: workflowRun.id,
           event_type: 'node_completed',
           step_name: node.id,
-          data: { duration_ms: Date.now() - iterationStart, node_output: lastIterationOutput },
+          data: {
+            duration_ms: Date.now() - iterationStart,
+            node_output: lastIterationOutput,
+            ...(loopTotalCostUsd !== undefined ? { cost_usd: loopTotalCostUsd } : {}),
+            ...(loopFinalStopReason ? { stop_reason: loopFinalStopReason } : {}),
+            ...(loopTotalNumTurns !== undefined ? { num_turns: loopTotalNumTurns } : {}),
+          },
         })
         .catch((err: Error) => {
           getLog().error(
@@ -1819,8 +1871,16 @@ async function executeLoopNode(
         nodeId: node.id,
         nodeName: node.id,
         duration: Date.now() - iterationStart,
+        ...(loopTotalCostUsd !== undefined ? { costUsd: loopTotalCostUsd } : {}),
+        ...(loopFinalStopReason ? { stopReason: loopFinalStopReason } : {}),
+        ...(loopTotalNumTurns !== undefined ? { numTurns: loopTotalNumTurns } : {}),
       });
-      return { state: 'completed', output: lastIterationOutput, sessionId: currentSessionId };
+      return {
+        state: 'completed',
+        output: lastIterationOutput,
+        sessionId: currentSessionId,
+        costUsd: loopTotalCostUsd,
+      };
     }
 
     // Interactive loop gate — pause after every iteration where the AI did NOT emit the
@@ -1875,7 +1935,7 @@ async function executeLoopNode(
       // This mirrors the approval-node pattern, preventing false "DAG nodes failed" warnings
       // in multi-node workflows. Resume correctness relies on the 'paused' DB status, not
       // on the node's output state.
-      return { state: 'completed', output: lastIterationOutput };
+      return { state: 'completed', output: lastIterationOutput, costUsd: loopTotalCostUsd };
     }
   }
 
@@ -1886,7 +1946,12 @@ async function executeLoopNode(
     'loop_node.max_iterations_reached'
   );
   await safeSendMessage(platform, conversationId, errorMsg, msgContext);
-  return { state: 'failed', output: lastIterationOutput, error: errorMsg };
+  return {
+    state: 'failed',
+    output: lastIterationOutput,
+    error: errorMsg,
+    costUsd: loopTotalCostUsd,
+  };
 }
 
 /**
@@ -2118,6 +2183,7 @@ export async function executeDagWorkflow(
   // Session threading: for sequential single-node layers, thread the session forward.
   // For parallel layers (>1 node), always fresh (can't share a session).
   let lastSequentialSessionId: string | undefined;
+  let totalCostUsd = 0;
 
   for (let layerIdx = 0; layerIdx < layers.length; layerIdx++) {
     const layer = layers[layerIdx];
@@ -2129,7 +2195,7 @@ export async function executeDagWorkflow(
 
     // Execute all nodes in the layer concurrently
     const layerResults = await Promise.allSettled(
-      layer.map(async (node): Promise<{ nodeId: string; output: NodeOutput }> => {
+      layer.map(async (node): Promise<{ nodeId: string; output: NodeExecutionResult }> => {
         try {
           // 0. Skip if this node completed successfully in a prior run (resume path)
           if (priorCompletedNodes?.has(node.id)) {
@@ -2400,7 +2466,11 @@ export async function executeDagWorkflow(
 
           // 6. Execute with retry for transient failures
           const retryConfig = getEffectiveNodeRetryConfig(node);
-          let output: NodeOutput = { state: 'failed', output: '', error: 'Node did not execute' };
+          let output: NodeExecutionResult = {
+            state: 'failed',
+            output: '',
+            error: 'Node did not execute',
+          };
 
           for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt++) {
             output = await executeNodeInternal(
@@ -2502,6 +2572,7 @@ export async function executeDagWorkflow(
     for (const result of layerResults) {
       if (result.status === 'fulfilled') {
         const { nodeId, output } = result.value;
+        if (output.costUsd !== undefined) totalCostUsd += output.costUsd;
         nodeOutputs.set(nodeId, output);
         if (output.state === 'completed' && !isParallelLayer && output.sessionId !== undefined) {
           lastSequentialSessionId = output.sessionId;
@@ -2634,7 +2705,10 @@ export async function executeDagWorkflow(
 
   // Update DB and emit completion
   try {
-    await deps.store.completeWorkflowRun(workflowRun.id, { node_counts: nodeCounts });
+    await deps.store.completeWorkflowRun(workflowRun.id, {
+      node_counts: nodeCounts,
+      ...(totalCostUsd > 0 ? { total_cost_usd: totalCostUsd } : {}),
+    });
   } catch (dbErr) {
     getLog().error(
       { err: dbErr as Error, workflowRunId: workflowRun.id },

@@ -203,7 +203,12 @@ export type MessageChunk =
       structuredOutput?: unknown;
       isError?: boolean;
       errorSubtype?: string;
+      cost?: number;
+      stopReason?: string;
+      numTurns?: number;
+      modelUsage?: Record<string, unknown>;
     }
+  | { type: 'rate_limit'; rateLimitInfo: Record<string, unknown> }
   | { type: 'tool'; toolName: string; toolInput?: Record<string, unknown> }
   | { type: 'tool_result'; toolName: string; toolOutput: string }
   | { type: 'workflow_dispatch'; workerConversationId: string; workflowName: string };

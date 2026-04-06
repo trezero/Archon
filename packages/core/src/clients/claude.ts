@@ -441,6 +441,13 @@ export class ClaudeClient implements IAssistantClient {
             } else {
               getLog().debug({ subtype: sysMsg.subtype }, 'claude.system_message_unhandled');
             }
+          } else if (msg.type === 'rate_limit_event') {
+            const rateLimitMsg = msg as { rate_limit_info?: Record<string, unknown> };
+            getLog().warn(
+              { rateLimitInfo: rateLimitMsg.rate_limit_info },
+              'claude.rate_limit_event'
+            );
+            yield { type: 'rate_limit', rateLimitInfo: rateLimitMsg.rate_limit_info ?? {} };
           } else if (msg.type === 'result') {
             const resultMsg = msg as {
               session_id?: string;
@@ -448,6 +455,18 @@ export class ClaudeClient implements IAssistantClient {
               subtype?: string;
               usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
               structured_output?: unknown;
+              total_cost_usd?: number;
+              stop_reason?: string | null;
+              num_turns?: number;
+              model_usage?: Record<
+                string,
+                {
+                  input_tokens: number;
+                  output_tokens: number;
+                  cache_read_input_tokens?: number;
+                  cache_creation_input_tokens?: number;
+                }
+              >;
             };
             const tokens = normalizeClaudeUsage(resultMsg.usage);
             yield {
@@ -458,6 +477,12 @@ export class ClaudeClient implements IAssistantClient {
                 ? { structuredOutput: resultMsg.structured_output }
                 : {}),
               ...(resultMsg.is_error ? { isError: true, errorSubtype: resultMsg.subtype } : {}),
+              ...(resultMsg.total_cost_usd !== undefined ? { cost: resultMsg.total_cost_usd } : {}),
+              ...(resultMsg.stop_reason != null ? { stopReason: resultMsg.stop_reason } : {}),
+              ...(resultMsg.num_turns !== undefined ? { numTurns: resultMsg.num_turns } : {}),
+              ...(resultMsg.model_usage
+                ? { modelUsage: resultMsg.model_usage as Record<string, unknown> }
+                : {}),
             };
           }
         }
