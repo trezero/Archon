@@ -196,6 +196,102 @@ nodes:
 | `hooks` | object | — | Per-node SDK hook callbacks. Claude only. See [Hooks](/guides/hooks/) |
 | `mcp` | string | — | Path to MCP server config JSON file. Claude only. See [MCP Servers](/guides/mcp-servers/) |
 | `skills` | string[] | — | Skills to preload. Claude only. See [Skills](/guides/skills/) |
+| `effort` | `'low'`\|`'medium'`\|`'high'`\|`'max'` | — | Reasoning depth. Claude only. Also settable at workflow level |
+| `thinking` | string \| object | — | Thinking mode: `'adaptive'`, `'disabled'`, or `{type:'enabled', budgetTokens:N}`. Claude only. Also settable at workflow level |
+| `maxBudgetUsd` | number | — | USD cost cap; node fails if exceeded. Claude only. Per-node only |
+| `systemPrompt` | string | — | Override the default `claude_code` system prompt for this node. Claude only. Per-node only |
+| `fallbackModel` | string | — | Model to use if primary model fails. Claude only. Also settable at workflow level |
+| `betas` | string[] | — | SDK beta feature flags (e.g., `'context-1m-2025-08-07'`). Claude only. Also settable at workflow level |
+| `sandbox` | object | — | OS-level filesystem/network restrictions for the Claude subprocess. Claude only. Also settable at workflow level |
+
+### Claude SDK Advanced Options
+
+These fields map directly to Claude Agent SDK options. All are Claude-only — Codex nodes emit a warning and ignore them. They can be set **per-node** or at the **workflow level** as defaults (per-node takes precedence). `maxBudgetUsd` and `systemPrompt` are per-node only.
+
+**effort** — reasoning depth:
+
+```yaml
+- id: thorough-review
+  command: review
+  effort: high   # 'low' | 'medium' | 'high' | 'max'
+```
+
+**thinking** — extended thinking mode (string shorthand or object form):
+
+```yaml
+- id: deep-analysis
+  command: analyze
+  thinking: adaptive              # 'adaptive' | 'disabled'
+  # thinking: { type: enabled, budgetTokens: 8000 }  # object form
+```
+
+**maxBudgetUsd** — per-node USD cost cap (node fails with error if exceeded):
+
+```yaml
+- id: expensive-step
+  command: generate
+  maxBudgetUsd: 2.50
+```
+
+**systemPrompt** — override the default `claude_code` system prompt:
+
+```yaml
+- id: security-review
+  prompt: "Review this code for vulnerabilities"
+  systemPrompt: "You are a security expert specializing in TypeScript. Focus only on security issues."
+```
+
+**fallbackModel** — use a different model if the primary fails:
+
+```yaml
+- id: implement
+  command: implement
+  model: claude-opus-4-5
+  fallbackModel: claude-sonnet-4-6
+```
+
+**betas** — SDK beta feature flags:
+
+```yaml
+- id: long-context-node
+  command: summarize
+  betas: ['context-1m-2025-08-07']
+```
+
+**sandbox** — OS-level filesystem/network restrictions (layers on top of worktree isolation):
+
+```yaml
+- id: untrusted-code-analysis
+  command: analyze-external
+  sandbox:
+    enabled: true
+    network:
+      allowedDomains: []
+      allowManagedDomainsOnly: true
+    filesystem:
+      denyWrite: ['/etc', '/usr']
+```
+
+**Workflow-level defaults** (inherited by all Claude nodes unless overridden per-node):
+
+```yaml
+name: my-workflow
+effort: high         # All Claude nodes use high effort by default
+thinking: adaptive   # All Claude nodes use adaptive thinking
+fallbackModel: claude-haiku-4-5-20251001
+betas: ['context-1m-2025-08-07']
+sandbox:
+  enabled: true
+
+nodes:
+  - id: step1
+    command: step1
+    # Inherits workflow-level effort, thinking, fallbackModel, betas, sandbox
+
+  - id: step2
+    command: step2
+    effort: low      # Per-node override — ignores workflow-level effort
+```
 
 ### `trigger_rule` Values
 
@@ -1023,6 +1119,10 @@ Before deploying a workflow:
 10. **`hooks`** — attach SDK hook callbacks to Claude nodes for tool control and context injection
 11. **`mcp:`** — attach per-node MCP servers via JSON config (Claude only)
 12. **`skills:`** — preload skills into Claude nodes for domain expertise
-13. **Loop nodes** — use `loop:` within a DAG node for iterative execution until completion signal
-14. **Defaults as templates** — browse `.archon/workflows/defaults/` for real examples to copy and modify
-15. **Test thoroughly** — each command, the artifact flow, and edge cases
+13. **`effort` / `thinking`** — control reasoning depth and thinking mode per node or workflow (Claude only)
+14. **`maxBudgetUsd`** — set a USD cost cap per node; fails with error if exceeded (Claude only)
+15. **`systemPrompt`** — override the default system prompt per node (Claude only)
+16. **`sandbox`** — OS-level filesystem/network restrictions per node or workflow (Claude only)
+17. **Loop nodes** — use `loop:` within a DAG node for iterative execution until completion signal
+18. **Defaults as templates** — browse `.archon/workflows/defaults/` for real examples to copy and modify
+19. **Test thoroughly** — each command, the artifact flow, and edge cases

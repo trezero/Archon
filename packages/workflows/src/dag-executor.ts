@@ -65,6 +65,15 @@ function getLog(): ReturnType<typeof createLogger> {
   return cachedLog;
 }
 
+/** Workflow-level Claude SDK options — per-node overrides take precedence via ?? */
+interface WorkflowLevelOptions {
+  effort?: EffortLevel;
+  thinking?: ThinkingConfig;
+  fallbackModel?: string;
+  betas?: string[];
+  sandbox?: SandboxSettings;
+}
+
 /** Throttle state for cancel checks (reads — no write contention in WAL mode) */
 const lastNodeCancelCheck = new Map<string, number>();
 const CANCEL_CHECK_INTERVAL_MS = 10_000;
@@ -347,13 +356,7 @@ async function resolveNodeProviderAndModel(
   conversationId: string,
   workflowRunId: string,
   cwd: string,
-  workflowLevelOptions: {
-    effort?: EffortLevel;
-    thinking?: ThinkingConfig;
-    fallbackModel?: string;
-    betas?: string[];
-    sandbox?: SandboxSettings;
-  }
+  workflowLevelOptions: WorkflowLevelOptions
 ): Promise<{
   provider: 'claude' | 'codex';
   model: string | undefined;
@@ -1005,7 +1008,11 @@ async function executeNodeInternal(
         if (msg.structuredOutput !== undefined) structuredOutput = msg.structuredOutput;
         // Fail the node if the SDK reports a cost cap exceeded error
         if (msg.isError && msg.errorSubtype === 'error_max_budget_usd') {
-          const cap = (node as { maxBudgetUsd?: number }).maxBudgetUsd;
+          const cap = nodeOptions?.maxBudgetUsd;
+          getLog().warn(
+            { nodeId: node.id, maxBudgetUsd: cap, durationMs: Date.now() - nodeStartTime },
+            'dag.node_budget_cap_exceeded'
+          );
           throw new Error(
             `Node '${node.id}' exceeded cost cap${cap !== undefined ? ` of $${cap.toFixed(2)}` : ''}.`
           );
@@ -1916,13 +1923,7 @@ async function executeApprovalNode(
   docsDir: string,
   nodeOutputs: Map<string, NodeOutput>,
   config: WorkflowConfig,
-  workflowLevelOptions: {
-    effort?: EffortLevel;
-    thinking?: ThinkingConfig;
-    fallbackModel?: string;
-    betas?: string[];
-    sandbox?: SandboxSettings;
-  },
+  workflowLevelOptions: WorkflowLevelOptions,
   configuredCommandFolder?: string,
   issueContext?: string
 ): Promise<NodeOutput> {
@@ -2081,15 +2082,7 @@ export async function executeDagWorkflow(
   platform: IWorkflowPlatform,
   conversationId: string,
   cwd: string,
-  workflow: {
-    name: string;
-    nodes: readonly DagNode[];
-    effort?: EffortLevel;
-    thinking?: ThinkingConfig;
-    fallbackModel?: string;
-    betas?: string[];
-    sandbox?: SandboxSettings;
-  },
+  workflow: { name: string; nodes: readonly DagNode[] } & WorkflowLevelOptions,
   workflowRun: WorkflowRun,
   workflowProvider: 'claude' | 'codex',
   workflowModel: string | undefined,

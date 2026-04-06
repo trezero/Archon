@@ -5,7 +5,13 @@
  * Callers in @archon/core satisfy these structurally — no adapter wrappers needed.
  */
 import type { IWorkflowStore } from './store';
-import type { ModelReasoningEffort, WebSearchMode } from './schemas';
+import type {
+  ModelReasoningEffort,
+  WebSearchMode,
+  EffortLevel,
+  ThinkingConfig,
+  SandboxSettings,
+} from './schemas';
 
 // ---------------------------------------------------------------------------
 // Workflow-local type copies — structurally identical to the originals in
@@ -146,16 +152,13 @@ export interface WorkflowAssistantOptions {
    * Controls reasoning depth for Claude. Claude only — ignored for Codex.
    * Maps to SDK Options.effort.
    */
-  effort?: 'low' | 'medium' | 'high' | 'max';
+  effort?: EffortLevel;
   /**
    * Controls Claude's thinking/reasoning behavior. Claude only — ignored for Codex.
    * Maps to SDK Options.thinking (ThinkingConfig).
    * String shorthand is resolved at the schema level before reaching here.
    */
-  thinking?:
-    | { type: 'adaptive' }
-    | { type: 'enabled'; budgetTokens?: number }
-    | { type: 'disabled' };
+  thinking?: ThinkingConfig;
   /**
    * Maximum USD cost for this node. SDK returns error_max_budget_usd if exceeded.
    * Claude only — ignored for Codex.
@@ -181,34 +184,7 @@ export interface WorkflowAssistantOptions {
    * Claude only — ignored for Codex.
    * Structural match for SDK SandboxSettings.
    */
-  sandbox?: {
-    [key: string]: unknown;
-    enabled?: boolean;
-    autoAllowBashIfSandboxed?: boolean;
-    allowUnsandboxedCommands?: boolean;
-    network?: {
-      allowedDomains?: string[];
-      allowManagedDomainsOnly?: boolean;
-      allowUnixSockets?: string[];
-      allowAllUnixSockets?: boolean;
-      allowLocalBinding?: boolean;
-      httpProxyPort?: number;
-      socksProxyPort?: number;
-    };
-    filesystem?: {
-      allowWrite?: string[];
-      denyWrite?: string[];
-      denyRead?: string[];
-    };
-    ignoreViolations?: Record<string, string[]>;
-    enableWeakerNestedSandbox?: boolean;
-    enableWeakerNetworkIsolation?: boolean;
-    excludedCommands?: string[];
-    ripgrep?: {
-      command: string;
-      args?: string[];
-    };
-  };
+  sandbox?: SandboxSettings;
 }
 
 // ---------------------------------------------------------------------------

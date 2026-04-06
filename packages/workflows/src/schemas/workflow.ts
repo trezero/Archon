@@ -37,8 +37,8 @@ export const workflowBaseSchema = z.object({
   interactive: z.boolean().optional(),
   effort: effortLevelSchema.optional(),
   thinking: thinkingConfigSchema.optional(),
-  fallbackModel: z.string().optional(),
-  betas: z.array(z.string()).optional(),
+  fallbackModel: z.string().min(1).optional(),
+  betas: z.array(z.string().min(1)).nonempty("'betas' must be a non-empty array").optional(),
   sandbox: sandboxSettingsSchema.optional(),
 });
 
