@@ -3,7 +3,12 @@
  * workflow loading and execution (non-schema hand-written discriminated unions).
  */
 import { z } from '@hono/zod-openapi';
-import { dagNodeSchema } from './dag-node';
+import {
+  dagNodeSchema,
+  effortLevelSchema,
+  thinkingConfigSchema,
+  sandboxSettingsSchema,
+} from './dag-node';
 
 // ---------------------------------------------------------------------------
 // Shared enum schemas
@@ -30,6 +35,11 @@ export const workflowBaseSchema = z.object({
   webSearchMode: webSearchModeSchema.optional(),
   additionalDirectories: z.array(z.string()).optional(),
   interactive: z.boolean().optional(),
+  effort: effortLevelSchema.optional(),
+  thinking: thinkingConfigSchema.optional(),
+  fallbackModel: z.string().optional(),
+  betas: z.array(z.string()).optional(),
+  sandbox: sandboxSettingsSchema.optional(),
 });
 
 export type WorkflowBase = z.infer<typeof workflowBaseSchema>;

@@ -142,6 +142,73 @@ export interface WorkflowAssistantOptions {
    * Claude only — ignored for Codex.
    */
   forkSession?: boolean;
+  /**
+   * Controls reasoning depth for Claude. Claude only — ignored for Codex.
+   * Maps to SDK Options.effort.
+   */
+  effort?: 'low' | 'medium' | 'high' | 'max';
+  /**
+   * Controls Claude's thinking/reasoning behavior. Claude only — ignored for Codex.
+   * Maps to SDK Options.thinking (ThinkingConfig).
+   * String shorthand is resolved at the schema level before reaching here.
+   */
+  thinking?:
+    | { type: 'adaptive' }
+    | { type: 'enabled'; budgetTokens?: number }
+    | { type: 'disabled' };
+  /**
+   * Maximum USD cost for this node. SDK returns error_max_budget_usd if exceeded.
+   * Claude only — ignored for Codex.
+   */
+  maxBudgetUsd?: number;
+  /**
+   * Per-node system prompt override. Replaces the default claude_code preset.
+   * Claude only — ignored for Codex.
+   */
+  systemPrompt?: string;
+  /**
+   * Fallback model if primary model fails. Claude only — ignored for Codex.
+   */
+  fallbackModel?: string;
+  /**
+   * SDK beta features to enable (e.g., 'context-1m-2025-08-07').
+   * Claude only — ignored for Codex.
+   */
+  betas?: string[];
+  /**
+   * OS-level sandbox restrictions for the Claude subprocess.
+   * Layers on top of worktree isolation — NOT a replacement for it.
+   * Claude only — ignored for Codex.
+   * Structural match for SDK SandboxSettings.
+   */
+  sandbox?: {
+    [key: string]: unknown;
+    enabled?: boolean;
+    autoAllowBashIfSandboxed?: boolean;
+    allowUnsandboxedCommands?: boolean;
+    network?: {
+      allowedDomains?: string[];
+      allowManagedDomainsOnly?: boolean;
+      allowUnixSockets?: string[];
+      allowAllUnixSockets?: boolean;
+      allowLocalBinding?: boolean;
+      httpProxyPort?: number;
+      socksProxyPort?: number;
+    };
+    filesystem?: {
+      allowWrite?: string[];
+      denyWrite?: string[];
+      denyRead?: string[];
+    };
+    ignoreViolations?: Record<string, string[]>;
+    enableWeakerNestedSandbox?: boolean;
+    enableWeakerNetworkIsolation?: boolean;
+    excludedCommands?: string[];
+    ripgrep?: {
+      command: string;
+      args?: string[];
+    };
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -34,6 +34,79 @@ export type TriggerRule = z.infer<typeof triggerRuleSchema>;
 export const TRIGGER_RULES: readonly TriggerRule[] = triggerRuleSchema.options;
 
 // ---------------------------------------------------------------------------
+// Claude SDK option schemas
+// ---------------------------------------------------------------------------
+
+/** Claude Agent SDK effort level — controls reasoning depth. Different from Codex modelReasoningEffort. */
+export const effortLevelSchema = z.enum(['low', 'medium', 'high', 'max']);
+
+export type EffortLevel = z.infer<typeof effortLevelSchema>;
+
+/**
+ * Claude Agent SDK ThinkingConfig — string shorthand or full object form.
+ * Shorthand: 'adaptive' → { type: 'adaptive' }, 'enabled' → { type: 'enabled' }, 'disabled' → { type: 'disabled' }.
+ */
+export const thinkingConfigSchema = z.preprocess(
+  val => {
+    if (typeof val === 'string') {
+      if (val === 'adaptive') return { type: 'adaptive' };
+      if (val === 'enabled') return { type: 'enabled' };
+      if (val === 'disabled') return { type: 'disabled' };
+    }
+    return val;
+  },
+  z.discriminatedUnion('type', [
+    z.object({ type: z.literal('adaptive') }),
+    z.object({ type: z.literal('enabled'), budgetTokens: z.number().int().positive().optional() }),
+    z.object({ type: z.literal('disabled') }),
+  ])
+);
+
+export type ThinkingConfig = z.infer<typeof thinkingConfigSchema>;
+
+/**
+ * Claude Agent SDK SandboxSettings — OS-level filesystem/network restrictions.
+ * Uses passthrough() to match the SDK's loose schema (index signature allows extra fields).
+ */
+export const sandboxSettingsSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    autoAllowBashIfSandboxed: z.boolean().optional(),
+    allowUnsandboxedCommands: z.boolean().optional(),
+    network: z
+      .object({
+        allowedDomains: z.array(z.string()).optional(),
+        allowManagedDomainsOnly: z.boolean().optional(),
+        allowUnixSockets: z.array(z.string()).optional(),
+        allowAllUnixSockets: z.boolean().optional(),
+        allowLocalBinding: z.boolean().optional(),
+        httpProxyPort: z.number().optional(),
+        socksProxyPort: z.number().optional(),
+      })
+      .optional(),
+    filesystem: z
+      .object({
+        allowWrite: z.array(z.string()).optional(),
+        denyWrite: z.array(z.string()).optional(),
+        denyRead: z.array(z.string()).optional(),
+      })
+      .optional(),
+    ignoreViolations: z.record(z.array(z.string())).optional(),
+    enableWeakerNestedSandbox: z.boolean().optional(),
+    enableWeakerNetworkIsolation: z.boolean().optional(),
+    excludedCommands: z.array(z.string()).optional(),
+    ripgrep: z
+      .object({
+        command: z.string(),
+        args: z.array(z.string()).optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+
+export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;
+
+// ---------------------------------------------------------------------------
 // DagNodeBase — common fields shared by all node types
 // ---------------------------------------------------------------------------
 
@@ -56,6 +129,13 @@ export const dagNodeBaseSchema = z.object({
     .array(z.string().min(1, 'each skill must be a non-empty string'))
     .nonempty("'skills' must be a non-empty array")
     .optional(),
+  effort: effortLevelSchema.optional(),
+  thinking: thinkingConfigSchema.optional(),
+  maxBudgetUsd: z.number().positive().optional(),
+  systemPrompt: z.string().min(1).optional(),
+  fallbackModel: z.string().min(1).optional(),
+  betas: z.array(z.string().min(1)).nonempty("'betas' must be a non-empty array").optional(),
+  sandbox: sandboxSettingsSchema.optional(),
 });
 
 export type DagNodeBase = z.infer<typeof dagNodeBaseSchema>;
@@ -190,6 +270,13 @@ export const BASH_NODE_AI_FIELDS: readonly string[] = [
   'hooks',
   'mcp',
   'skills',
+  'effort',
+  'thinking',
+  'maxBudgetUsd',
+  'systemPrompt',
+  'fallbackModel',
+  'betas',
+  'sandbox',
 ];
 
 // ---------------------------------------------------------------------------
@@ -347,6 +434,13 @@ export const dagNodeSchema = dagNodeBaseSchema
       ...(data.hooks !== undefined ? { hooks: data.hooks } : {}),
       ...(data.mcp !== undefined ? { mcp: data.mcp.trim() } : {}),
       ...(data.skills !== undefined ? { skills: data.skills.map(s => s.trim()) } : {}),
+      ...(data.effort !== undefined ? { effort: data.effort } : {}),
+      ...(data.thinking !== undefined ? { thinking: data.thinking } : {}),
+      ...(data.maxBudgetUsd !== undefined ? { maxBudgetUsd: data.maxBudgetUsd } : {}),
+      ...(data.systemPrompt !== undefined ? { systemPrompt: data.systemPrompt } : {}),
+      ...(data.fallbackModel !== undefined ? { fallbackModel: data.fallbackModel } : {}),
+      ...(data.betas !== undefined ? { betas: data.betas } : {}),
+      ...(data.sandbox !== undefined ? { sandbox: data.sandbox } : {}),
     };
 
     if (data.command !== undefined && data.command.trim().length > 0) {

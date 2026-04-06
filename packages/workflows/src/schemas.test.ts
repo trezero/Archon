@@ -5,6 +5,7 @@ import {
   isTriggerRule,
   TRIGGER_RULES,
   approvalOnRejectSchema,
+  dagNodeSchema,
 } from './schemas';
 import type {
   WorkflowDefinition,
@@ -219,5 +220,139 @@ describe('approvalOnRejectSchema', () => {
   test('rejects max_attempts: 11', () => {
     const result = approvalOnRejectSchema.safeParse({ prompt: 'Fix it', max_attempts: 11 });
     expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dagNodeSchema — Claude SDK options
+// ---------------------------------------------------------------------------
+
+describe('dagNodeSchema — new Claude SDK options', () => {
+  test('parses effort enum on prompt node', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n', prompt: 'do it', effort: 'high' });
+    expect(result.success).toBe(true);
+    if (result.success) expect((result.data as PromptNode).effort).toBe('high');
+  });
+
+  test('rejects invalid effort value', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n', prompt: 'do it', effort: 'ultra' });
+    expect(result.success).toBe(false);
+  });
+
+  test('parses thinking string shorthand: adaptive', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n', prompt: 'do it', thinking: 'adaptive' });
+    expect(result.success).toBe(true);
+    if (result.success) expect((result.data as PromptNode).thinking).toEqual({ type: 'adaptive' });
+  });
+
+  test('parses thinking string shorthand: disabled', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n', prompt: 'do it', thinking: 'disabled' });
+    expect(result.success).toBe(true);
+    if (result.success) expect((result.data as PromptNode).thinking).toEqual({ type: 'disabled' });
+  });
+
+  test('parses thinking object form with budgetTokens', () => {
+    const result = dagNodeSchema.safeParse({
+      id: 'n',
+      prompt: 'do it',
+      thinking: { type: 'enabled', budgetTokens: 8000 },
+    });
+    expect(result.success).toBe(true);
+    if (result.success)
+      expect((result.data as PromptNode).thinking).toEqual({
+        type: 'enabled',
+        budgetTokens: 8000,
+      });
+  });
+
+  test('rejects invalid thinking value', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n', prompt: 'do it', thinking: 'quantum' });
+    expect(result.success).toBe(false);
+  });
+
+  test('parses maxBudgetUsd as positive number', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n', prompt: 'do it', maxBudgetUsd: 2.5 });
+    expect(result.success).toBe(true);
+    if (result.success) expect((result.data as PromptNode).maxBudgetUsd).toBe(2.5);
+  });
+
+  test('rejects negative maxBudgetUsd', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n', prompt: 'do it', maxBudgetUsd: -1 });
+    expect(result.success).toBe(false);
+  });
+
+  test('rejects zero maxBudgetUsd', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n', prompt: 'do it', maxBudgetUsd: 0 });
+    expect(result.success).toBe(false);
+  });
+
+  test('parses betas array', () => {
+    const result = dagNodeSchema.safeParse({
+      id: 'n',
+      prompt: 'do it',
+      betas: ['context-1m-2025-08-07'],
+    });
+    expect(result.success).toBe(true);
+    if (result.success)
+      expect((result.data as PromptNode).betas).toEqual(['context-1m-2025-08-07']);
+  });
+
+  test('rejects empty betas array', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n', prompt: 'do it', betas: [] });
+    expect(result.success).toBe(false);
+  });
+
+  test('parses sandbox object', () => {
+    const result = dagNodeSchema.safeParse({
+      id: 'n',
+      prompt: 'do it',
+      sandbox: { enabled: true, filesystem: { allowWrite: ['src/'] } },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect((result.data as PromptNode).sandbox?.enabled).toBe(true);
+    }
+  });
+
+  test('parses systemPrompt string', () => {
+    const result = dagNodeSchema.safeParse({
+      id: 'n',
+      prompt: 'do it',
+      systemPrompt: 'You are a security reviewer',
+    });
+    expect(result.success).toBe(true);
+    if (result.success)
+      expect((result.data as PromptNode).systemPrompt).toBe('You are a security reviewer');
+  });
+
+  test('rejects empty systemPrompt string', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n', prompt: 'do it', systemPrompt: '' });
+    expect(result.success).toBe(false);
+  });
+
+  test('parses fallbackModel string', () => {
+    const result = dagNodeSchema.safeParse({
+      id: 'n',
+      prompt: 'do it',
+      fallbackModel: 'claude-haiku-4-5-20251001',
+    });
+    expect(result.success).toBe(true);
+    if (result.success)
+      expect((result.data as PromptNode).fallbackModel).toBe('claude-haiku-4-5-20251001');
+  });
+
+  test('strips AI-only fields from bash nodes', () => {
+    const result = dagNodeSchema.safeParse({
+      id: 'b',
+      bash: 'echo hi',
+      effort: 'high',
+      thinking: 'adaptive',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // bash nodes don't get AI-only fields in the transform
+      expect('effort' in result.data).toBe(false);
+      expect('thinking' in result.data).toBe(false);
+    }
   });
 });

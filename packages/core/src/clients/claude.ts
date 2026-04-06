@@ -316,9 +316,27 @@ export class ClaudeClient implements IAssistantClient {
         ...(requestOptions?.forkSession !== undefined
           ? { forkSession: requestOptions.forkSession }
           : {}),
+        // Forward Claude-only SDK options (effort, thinking, maxBudgetUsd, fallbackModel, betas, sandbox)
+        ...(requestOptions?.effort !== undefined ? { effort: requestOptions.effort } : {}),
+        ...(requestOptions?.thinking !== undefined ? { thinking: requestOptions.thinking } : {}),
+        ...(requestOptions?.maxBudgetUsd !== undefined
+          ? { maxBudgetUsd: requestOptions.maxBudgetUsd }
+          : {}),
+        ...(requestOptions?.fallbackModel !== undefined
+          ? { fallbackModel: requestOptions.fallbackModel }
+          : {}),
+        // betas: string[] from user config; SDK expects SdkBeta[] (string literal union).
+        // User-provided values are validated upstream — cast is safe.
+        ...(requestOptions?.betas !== undefined
+          ? { betas: requestOptions.betas as Options['betas'] }
+          : {}),
+        ...(requestOptions?.sandbox !== undefined ? { sandbox: requestOptions.sandbox } : {}),
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
-        systemPrompt: { type: 'preset', preset: 'claude_code' },
+        systemPrompt:
+          requestOptions?.systemPrompt !== undefined
+            ? requestOptions.systemPrompt
+            : { type: 'preset', preset: 'claude_code' },
         settingSources: requestOptions?.settingSources ?? ['project'],
         // Merge user-provided hooks with our PostToolUse capture hook
         hooks: {
