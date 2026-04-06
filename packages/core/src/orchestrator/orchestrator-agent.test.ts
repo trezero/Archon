@@ -195,7 +195,7 @@ describe('parseOrchestratorCommands', () => {
   const planWorkflow = makeTestWorkflow({ name: 'plan' });
 
   const myProject = makeCodebase('my-project');
-  const orgProject = makeCodebase('dynamous-community/remote-coding-agent');
+  const orgProject = makeCodebase('coleam00/Archon');
 
   const workflows = [assistWorkflow, implementWorkflow, planWorkflow];
   const codebases = [myProject, orgProject];
@@ -390,19 +390,19 @@ describe('parseOrchestratorCommands', () => {
     });
 
     test('matches project by last path segment (partial match)', () => {
-      // "dynamous-community/remote-coding-agent" matched by "remote-coding-agent"
-      const response = '/invoke-workflow assist --project remote-coding-agent';
+      // "coleam00/Archon" matched by "Archon"
+      const response = '/invoke-workflow assist --project Archon';
       const result = parseOrchestratorCommands(response, codebases, workflows);
 
       expect(result.workflowInvocation).not.toBeNull();
-      expect(result.workflowInvocation?.projectName).toBe('dynamous-community/remote-coding-agent');
+      expect(result.workflowInvocation?.projectName).toBe('coleam00/Archon');
     });
 
     test('partial match is case-insensitive', () => {
-      const response = '/invoke-workflow assist --project REMOTE-CODING-AGENT';
+      const response = '/invoke-workflow assist --project archon';
       const result = parseOrchestratorCommands(response, codebases, workflows);
 
-      expect(result.workflowInvocation?.projectName).toBe('dynamous-community/remote-coding-agent');
+      expect(result.workflowInvocation?.projectName).toBe('coleam00/Archon');
     });
 
     test('returns null workflowInvocation when project does not exist', () => {
@@ -420,11 +420,11 @@ describe('parseOrchestratorCommands', () => {
     });
 
     test('uses matched codebase name (not the input name) in result', () => {
-      // Input "remote-coding-agent" should resolve to full name "dynamous-community/remote-coding-agent"
-      const response = '/invoke-workflow assist --project remote-coding-agent';
+      // Input "Archon" should resolve to full name "coleam00/Archon"
+      const response = '/invoke-workflow assist --project Archon';
       const result = parseOrchestratorCommands(response, codebases, workflows);
 
-      expect(result.workflowInvocation?.projectName).toBe('dynamous-community/remote-coding-agent');
+      expect(result.workflowInvocation?.projectName).toBe('coleam00/Archon');
     });
   });
 

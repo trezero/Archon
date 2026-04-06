@@ -35,8 +35,8 @@ WSL2 provides a full Linux environment that runs seamlessly on Windows.
 
 4. **Clone and install Archon**:
    ```bash
-   git clone https://github.com/dynamous-community/remote-coding-agent
-   cd remote-coding-agent
+   git clone https://github.com/coleam00/Archon
+   cd Archon
    bun install
    ```
 

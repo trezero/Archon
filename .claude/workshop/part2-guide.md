@@ -2,7 +2,7 @@
 
 **Host**: Rasmus
 **Duration**: ~35 min
-**Codebase**: `dynamous-community/remote-coding-agent` (this repo)
+**Codebase**: `coleam00/Archon` (this repo)
 **Required**: Claude Code v2.1.63+, GitHub CLI (`gh`)
 
 ---

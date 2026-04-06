@@ -30,7 +30,7 @@ Deploy the Remote Coding Agent to a cloud VPS for 24/7 operation with automatic 
 
 ```bash
 # Generate SSH key (ed25519 recommended)
-ssh-keygen -t ed25519 -C "remote-coding-agent"
+ssh-keygen -t ed25519 -C "archon"
 
 # When prompted:
 # - File location: Press Enter (uses default ~/.ssh/id_ed25519)
@@ -226,12 +226,12 @@ TTL: Auto
 
 ```bash
 # Create application directory
-sudo mkdir -p /remote-coding-agent
-sudo chown deploy:deploy /remote-coding-agent
+sudo mkdir -p /opt/archon
+sudo chown deploy:deploy /opt/archon
 
 # Clone repository into the directory
-cd /remote-coding-agent
-git clone https://github.com/dynamous-community/remote-coding-agent .
+cd /opt/archon
+git clone https://github.com/coleam00/Archon .
 ```
 
 ---
@@ -671,7 +671,7 @@ docker compose --profile cloud logs --tail=100 app
 
 ```bash
 # Pull latest changes
-cd /remote-coding-agent
+cd /opt/archon
 git pull
 
 # Rebuild and restart

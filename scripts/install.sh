@@ -3,7 +3,7 @@
 # Install Archon CLI from GitHub releases
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/coleam00/Archon/main/scripts/install.sh | bash
 #
 # Options (via environment variables):
 #   VERSION       - Specific version to install (default: latest)
@@ -12,7 +12,7 @@
 #
 # Examples:
 #   # Install latest
-#   curl -fsSL https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/coleam00/Archon/main/scripts/install.sh | bash
 #
 #   # Install specific version
 #   VERSION=v0.2.0 curl -fsSL ... | bash
@@ -23,7 +23,7 @@
 set -euo pipefail
 
 # Configuration
-REPO="dynamous-community/remote-coding-agent"
+REPO="coleam00/Archon"
 BINARY_NAME="archon"
 VERSION="${VERSION:-latest}"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"

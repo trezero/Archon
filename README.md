@@ -1,10 +1,38 @@
 # Archon
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/coleam00/Archon/actions/workflows/test.yml/badge.svg)](https://github.com/coleam00/Archon/actions/workflows/test.yml)
+[![Docs](https://img.shields.io/badge/docs-archon.diy-blue)](https://archon.diy)
+
 Make AI coding deterministic and repeatable.
 
 Archon is a workflow engine for AI coding agents. Define your development processes as YAML workflows — planning, implementation, validation, code review, PR creation — and run them reliably across all your projects.
 
 Think n8n, but for software development.
+
+## Install
+
+**macOS / Linux**
+```bash
+curl -fsSL https://archon.diy/install | bash
+```
+
+**Windows (PowerShell)**
+```powershell
+irm https://archon.diy/install.ps1 | iex
+```
+
+**Homebrew**
+```bash
+brew install coleam00/archon/archon
+```
+
+**Docker**
+```bash
+docker run --rm -v "$PWD:/workspace" ghcr.io/coleam00/archon:latest workflow list
+```
+
+See the [Installation Guide](https://archon.diy/getting-started/installation/) for all options.
 
 ## Why Archon?
 
@@ -115,8 +143,8 @@ See the [E2E Testing Guide](docs/e2e-testing.md) for platform-specific setup.
 ### Setup (2 min)
 
 ```bash
-git clone https://github.com/dynamous-community/remote-coding-agent
-cd remote-coding-agent
+git clone https://github.com/coleam00/Archon
+cd Archon
 bun install
 claude
 ```
@@ -249,6 +277,8 @@ The Web UI and CLI work out of the box. Optionally connect a chat platform for r
 
 ## Documentation
 
+Full documentation is available at **[archon.diy](https://archon.diy)**.
+
 | Topic | Description |
 |-------|-------------|
 | [Getting Started](docs/getting-started.md) | Setup guide (Web UI or CLI) |
@@ -267,8 +297,10 @@ The Web UI and CLI work out of the box. Optionally connect a chat platform for r
 
 ## Contributing
 
-Contributions welcome. See the open [issues](https://github.com/dynamous-community/remote-coding-agent/issues) for things to work on.
+Contributions welcome! See the open [issues](https://github.com/coleam00/Archon/issues) for things to work on.
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a pull request.
 
 ## License
 
-MIT
+[MIT](LICENSE)

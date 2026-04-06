@@ -48,6 +48,8 @@ jobs:
             type=semver,pattern={{major}}
             type=sha
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+          flavor: |
+            latest=auto
 
       - name: Build and push
         uses: docker/build-push-action@v5

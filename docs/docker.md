@@ -88,8 +88,8 @@ docker compose version
 ### 2. Clone the repo
 
 ```bash
-git clone https://github.com/dynamous-community/remote-coding-agent.git
-cd remote-coding-agent
+git clone https://github.com/coleam00/Archon.git
+cd Archon
 ```
 
 ### 3. Configure environment
@@ -400,8 +400,8 @@ For users who don't need to build from source:
 
 ```bash
 mkdir archon && cd archon
-curl -O https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/deploy/docker-compose.yml
-curl -O https://raw.githubusercontent.com/dynamous-community/remote-coding-agent/main/.env.example
+curl -O https://raw.githubusercontent.com/coleam00/Archon/main/deploy/docker-compose.yml
+curl -O https://raw.githubusercontent.com/coleam00/Archon/main/.env.example
 
 cp .env.example .env
 # Edit .env — set AI credentials, DOMAIN, etc.
@@ -409,7 +409,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Uses `ghcr.io/dynamous-community/remote-coding-agent:latest`. To add PostgreSQL, uncomment the `postgres` service in the compose file and set `DATABASE_URL` in `.env`.
+Uses `ghcr.io/coleam00/archon:latest`. To add PostgreSQL, uncomment the `postgres` service in the compose file and set `DATABASE_URL` in `.env`.
 
 ---
 

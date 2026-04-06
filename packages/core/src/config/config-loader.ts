@@ -52,7 +52,7 @@ let cachedGlobalConfig: GlobalConfig | null = null;
  * Default config file content
  */
 const DEFAULT_CONFIG_CONTENT = `# Archon Global Configuration
-# See: https://github.com/dynamous-community/remote-coding-agent/blob/main/docs/configuration.md
+# See: https://github.com/coleam00/Archon/blob/main/docs/configuration.md
 
 # Bot display name (shown in messages)
 # botName: Archon

@@ -409,7 +409,7 @@ describe('POST /api/conversations with message (atomic create+send)', () => {
 // Platform conversation IDs from forge adapters contain slashes and # characters:
 // e.g. "CyberFitz-LLC/devops-platform#24" — these must be URL-encoded by the client
 // and correctly decoded by the server route params.
-// Ref: https://github.com/dynamous-community/remote-coding-agent/issues/476
+// Ref: https://github.com/coleam00/Archon/issues/476
 describe('GET /api/conversations/:id — forge platform IDs with encoded slashes', () => {
   const GITEA_CONV = {
     id: 'gitea-internal-uuid',

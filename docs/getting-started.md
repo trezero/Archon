@@ -41,16 +41,16 @@ Linux/macOS:
 
 ```bash
 cd ~  # or your preferred directory
-git clone https://github.com/dynamous-community/remote-coding-agent
-cd remote-coding-agent
+git clone https://github.com/coleam00/Archon
+cd Archon
 ```
 
 Windows (PowerShell):
 
 ```powershell
 cd $HOME  # or your preferred directory
-git clone https://github.com/dynamous-community/remote-coding-agent
-cd remote-coding-agent
+git clone https://github.com/coleam00/Archon
+cd Archon
 ```
 
 **Option B: /opt** (Linux/macOS server installs — keeps things tidy)
@@ -58,7 +58,7 @@ cd remote-coding-agent
 ```bash
 sudo mkdir -p /opt/archon
 sudo chown $USER:$USER /opt/archon
-git clone https://github.com/dynamous-community/remote-coding-agent /opt/archon
+git clone https://github.com/coleam00/Archon /opt/archon
 cd /opt/archon
 ```
 
@@ -429,7 +429,7 @@ Archon skill into your project. The setup wizard handles this automatically — 
 To install manually instead:
 
 ```bash
-cp -r remote-coding-agent/.claude/skills/archon /path/to/your/repo/.claude/skills/
+cp -r Archon/.claude/skills/archon /path/to/your/repo/.claude/skills/
 ```
 
 Then in Claude Code, say things like "use archon to fix issue #42" and it will invoke the appropriate workflow.

@@ -34,7 +34,7 @@ If `$ARGUMENTS` is empty, ask the user for the issue number before proceeding.
 Ensure you are testing against the latest code on `main` so results are accurate.
 
 ```bash
-cd /mnt/c/Users/colem/dynamous-community/remote-coding-agent
+cd /path/to/archon
 
 # Stash any local changes to avoid conflicts
 git stash 2>/dev/null || true
@@ -67,7 +67,7 @@ sleep 2
 ### 0.3 Start Archon Backend + Frontend
 
 ```bash
-cd /mnt/c/Users/colem/dynamous-community/remote-coding-agent
+cd /path/to/archon
 
 # Start both backend and frontend together
 bun run dev &

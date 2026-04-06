@@ -43,7 +43,7 @@ runcmd:
   - ufw --force enable
 
   # --- Clone and configure ---
-  - git clone https://github.com/dynamous-community/remote-coding-agent.git /opt/archon
+  - git clone https://github.com/coleam00/Archon.git /opt/archon
   - cp /opt/archon/.env.example /opt/archon/.env
   - cp /opt/archon/Caddyfile.example /opt/archon/Caddyfile
 
@@ -85,7 +85,7 @@ runcmd:
 
     Logs:     docker compose logs -f
     Health:   curl https://your-domain.com/api/health
-    Docs:     https://github.com/dynamous-community/remote-coding-agent/blob/main/docs/docker.md
+    Docs:     https://github.com/coleam00/Archon/blob/main/docs/docker.md
     ============================================
     DONE
   - echo "[archon] Setup complete. Edit /opt/archon/.env and run docker compose up."

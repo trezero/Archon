@@ -1,10 +1,10 @@
 # Archon Architecture
 
-This document explains the Archon directory structure and configuration system for developers contributing to or extending the remote-coding-agent.
+This document explains the Archon directory structure and configuration system for developers contributing to or extending Archon.
 
 ## Overview
 
-Archon is the unified directory and configuration system for the remote-coding-agent. It provides:
+Archon is the unified directory and configuration system for Archon. It provides:
 
 1. **Consistent paths** across all platforms (Mac, Linux, Windows, Docker)
 2. **Configuration precedence** chain (env > global > repo > defaults)
