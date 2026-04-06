@@ -16,7 +16,3 @@ Guides for developers contributing to the Archon codebase.
 - **[Releasing](/contributing/releasing/)** — Version management and release process
 - **[DX Quirks](/contributing/dx-quirks/)** — Known development experience issues and workarounds
 
-## Migration Guides
-
-- **[Migration Guide](/contributing/migration-guide/)** — Upgrading between Archon versions (runtime defaults)
-- **[Sequential-to-DAG Migration](/contributing/sequential-dag-migration/)** — Converting legacy sequential workflows to DAG format (deprecated)
