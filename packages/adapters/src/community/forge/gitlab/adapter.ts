@@ -270,9 +270,7 @@ export class GitLabAdapter implements IPlatformAdapter {
   }
 
   private stripMention(text: string): string {
-    // `+` (not `|$` alone) consumes all trailing separators after the mention so
-    // the result doesn't begin with ", " etc. hasMention uses `?:[\s,:;]|$` (single
-    // char) because detection only needs one separator; stripping needs to eat them all.
+    // `+` consumes all trailing separators (e.g. "@archon, " not just "@archon")
     const pattern = new RegExp(`@${this.botMention}(?:[\\s,:;]+|$)`, 'gi');
     return text.replace(pattern, '').trim();
   }
