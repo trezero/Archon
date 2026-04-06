@@ -11,7 +11,12 @@ import { readFileSync } from 'fs';
 import { normalize, join, sep, basename } from 'path';
 import { randomUUID } from 'crypto';
 import type { Context } from 'hono';
-import type { ConversationLockManager, AttachedFile, HandleMessageContext, GlobalConfig } from '@archon/core';
+import type {
+  ConversationLockManager,
+  AttachedFile,
+  HandleMessageContext,
+  GlobalConfig,
+} from '@archon/core';
 import {
   handleMessage,
   getDatabaseType,
@@ -89,8 +94,6 @@ import {
   successResponseSchema,
   messageListResponseSchema,
   listMessagesQuerySchema,
-  sendMessageBodySchema,
-  sendMessageMultipartSchema,
   dispatchResponseSchema,
 } from './schemas/conversation.schemas';
 import {
@@ -364,20 +367,20 @@ const listMessagesRoute = createRoute({
   },
 });
 
+// Body validation is handled manually in the handler (multipart vs JSON branching).
+// Declaring both content types in the OpenAPI route causes @hono/zod-openapi to
+// validate JSON bodies against the multipart schema. We keep `request.body` empty
+// and document the schemas via the OpenAPI spec comments instead.
 const sendMessageRoute = createRoute({
   method: 'post',
   path: '/api/conversations/{id}/message',
   tags: ['Conversations'],
   summary: 'Send a message (JSON or multipart with file uploads)',
+  description:
+    'Accepts `application/json` with `{ message: string }` or `multipart/form-data` ' +
+    'with a `message` field and optional file attachments (max 5 files, 10 MB each).',
   request: {
     params: conversationIdParamsSchema,
-    body: {
-      content: {
-        'application/json': { schema: sendMessageBodySchema },
-        'multipart/form-data': { schema: sendMessageMultipartSchema },
-      },
-      required: true,
-    },
   },
   responses: {
     200: {
@@ -797,11 +800,67 @@ export function registerApiRoutes(
     'application/json',
   ]);
 
+  /** Extensions accepted when browser reports an empty MIME type (code/config files). */
+  const ALLOWED_UPLOAD_EXTENSIONS = new Set([
+    '.md',
+    '.txt',
+    '.csv',
+    '.xml',
+    '.html',
+    '.htm',
+    '.json',
+    '.yaml',
+    '.yml',
+    '.toml',
+    '.ini',
+    '.cfg',
+    '.conf',
+    '.env',
+    '.log',
+    '.css',
+    '.js',
+    '.jsx',
+    '.ts',
+    '.tsx',
+    '.mjs',
+    '.cjs',
+    '.py',
+    '.rb',
+    '.go',
+    '.java',
+    '.c',
+    '.cpp',
+    '.cc',
+    '.cxx',
+    '.h',
+    '.hpp',
+    '.cs',
+    '.php',
+    '.sh',
+    '.bash',
+    '.zsh',
+    '.fish',
+    '.rs',
+    '.swift',
+    '.kt',
+    '.scala',
+    '.r',
+    '.sql',
+  ]);
+
   /** Returns true if the MIME type is allowed for upload. */
-  function isAllowedUploadType(mimeType: string): boolean {
+  function isAllowedUploadType(mimeType: string, fileName: string): boolean {
     // All text/* types are acceptable (covers .md, .py, .rs, .go, .sh, .yaml, etc.)
     if (mimeType.startsWith('text/')) return true;
-    return ALLOWED_UPLOAD_BINARY_MIME_TYPES.has(mimeType);
+    if (ALLOWED_UPLOAD_BINARY_MIME_TYPES.has(mimeType)) return true;
+    // Browsers assign empty MIME types to many code/config extensions — fall back to extension
+    if (!mimeType) {
+      const dotIndex = fileName.lastIndexOf('.');
+      if (dotIndex !== -1) {
+        return ALLOWED_UPLOAD_EXTENSIONS.has(fileName.slice(dotIndex).toLowerCase());
+      }
+    }
+    return false;
   }
 
   async function dispatchToOrchestrator(
@@ -1058,7 +1117,8 @@ export function registerApiRoutes(
       let body: Record<string, string | File | (string | File)[]>;
       try {
         body = await c.req.parseBody({ all: true });
-      } catch {
+      } catch (parseErr: unknown) {
+        getLog().warn({ err: parseErr, conversationId }, 'upload.parse_failed');
         return c.json({ error: 'Invalid multipart form data' }, 400);
       }
 
@@ -1069,11 +1129,14 @@ export function registerApiRoutes(
       message = rawMessage;
 
       const rawFiles = body.files;
-      const fileList: (string | File)[] = Array.isArray(rawFiles)
-        ? rawFiles
-        : rawFiles !== undefined
-          ? [rawFiles]
-          : [];
+      let fileList: (string | File)[];
+      if (Array.isArray(rawFiles)) {
+        fileList = rawFiles;
+      } else if (rawFiles !== undefined) {
+        fileList = [rawFiles];
+      } else {
+        fileList = [];
+      }
 
       // Enforce server-side file count limit
       const fileEntries = fileList.filter((e): e is File => e instanceof File);
@@ -1091,17 +1154,18 @@ export function registerApiRoutes(
 
       // Validate all files before writing any to disk
       for (const entry of fileEntries) {
+        const displayName = basename(entry.name).replace(/[^a-zA-Z0-9._-]/g, '_');
         // Server-side MIME type allowlist (client-side accept= is not a security boundary;
         // entry.type is the Content-Type supplied by the client and is not verified against
         // actual file contents — suitable for a single-developer self-hosted tool)
-        if (!isAllowedUploadType(entry.type)) {
+        if (!isAllowedUploadType(entry.type, entry.name)) {
           return c.json(
-            { error: `File "${entry.name}" has an unsupported type: ${entry.type}` },
+            { error: `File "${displayName}" has an unsupported type: ${entry.type}` },
             400
           );
         }
         if (entry.size > MAX_UPLOAD_BYTES) {
-          return c.json({ error: `File "${entry.name}" exceeds the 10 MB size limit` }, 400);
+          return c.json({ error: `File "${displayName}" exceeds the 10 MB size limit` }, 400);
         }
       }
 
@@ -1113,18 +1177,25 @@ export function registerApiRoutes(
           const safeName = basename(entry.name).replace(/[^a-zA-Z0-9._-]/g, '_');
           const filePath = join(uploadDir, `${fileId}_${safeName}`);
           await writeFile(filePath, Buffer.from(await entry.arrayBuffer()));
+          // Normalise MIME: strip parameters to prevent prompt injection via crafted Content-Type
+          const normalizedMime =
+            entry.type.split(';')[0].trim().toLowerCase() || 'application/octet-stream';
           savedFiles.push({
             path: filePath,
             // Use safeName for display to avoid prompt injection via crafted filenames
             name: safeName || fileId,
-            mimeType: entry.type,
+            mimeType: normalizedMime,
             size: entry.size,
           });
         }
       } catch (writeErr: unknown) {
         // Roll back any files written before the failure
         for (const f of savedFiles) {
-          await unlink(f.path).catch(() => undefined);
+          await unlink(f.path).catch((err: NodeJS.ErrnoException) => {
+            if (err.code !== 'ENOENT') {
+              getLog().warn({ err, filePath: f.path, conversationId }, 'upload.rollback_failed');
+            }
+          });
         }
         getLog().error({ err: writeErr, conversationId }, 'upload.write_failed');
         return c.json({ error: 'Failed to save uploaded file. Check available disk space.' }, 500);
@@ -1135,7 +1206,8 @@ export function registerApiRoutes(
       let body: { message?: unknown };
       try {
         body = await c.req.json();
-      } catch {
+      } catch (parseErr: unknown) {
+        getLog().warn({ err: parseErr, conversationId }, 'message.json_parse_failed');
         return c.json({ error: 'Invalid JSON in request body' }, 400);
       }
 
@@ -1157,16 +1229,12 @@ export function registerApiRoutes(
     if (conv) {
       // Omit path from persisted metadata — the on-disk file is ephemeral and will be
       // deleted after the AI processes it; storing stale paths would confuse future readers.
-      const fileMeta =
+      const meta =
         savedFiles.length > 0
-          ? savedFiles.map(f => ({ name: f.name, mimeType: f.mimeType, size: f.size }))
+          ? { files: savedFiles.map(f => ({ name: f.name, mimeType: f.mimeType, size: f.size })) }
           : undefined;
       try {
-        if (fileMeta) {
-          await messageDb.addMessage(conv.id, 'user', message, { files: fileMeta });
-        } else {
-          await messageDb.addMessage(conv.id, 'user', message);
-        }
+        await messageDb.addMessage(conv.id, 'user', message, meta);
       } catch (e: unknown) {
         getLog().error({ err: e, conversationId: conv.id }, 'message_persistence_failed');
         try {
@@ -1185,11 +1253,15 @@ export function registerApiRoutes(
       webAdapter.setConversationDbId(conversationId, conv.id);
     }
 
-    const extraContext = savedFiles.length > 0 ? { attachedFiles: savedFiles } : undefined;
     // Pass savedFiles to dispatchToOrchestrator so cleanup happens inside the lock handler,
     // AFTER handleMessage completes — not in the HTTP handler's finally block where the
     // fire-and-forget lock callback may still be running and the AI has not yet read the files.
-    const filesToCleanup = savedFiles.length > 0 ? { files: savedFiles, uploadDir } : undefined;
+    let extraContext: Omit<HandleMessageContext, 'isolationHints'> | undefined;
+    let filesToCleanup: { files: AttachedFile[]; uploadDir: string } | undefined;
+    if (savedFiles.length > 0) {
+      extraContext = { attachedFiles: savedFiles };
+      filesToCleanup = { files: savedFiles, uploadDir };
+    }
     const result = await dispatchToOrchestrator(
       conversationId,
       message,

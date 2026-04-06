@@ -18,6 +18,8 @@ const ACCEPTED_BINARY_MIME_TYPES = new Set([
   'image/gif',
   'image/webp',
   'application/pdf',
+  // application/json may be reported by browsers for .json files
+  'application/json',
 ]);
 
 /** Extensions for the file-picker `accept` attribute. Covers images, PDFs, and text/code files. */
@@ -89,7 +91,6 @@ const ACCEPTED_EXTENSIONS_SET = new Set(ACCEPTED_EXTENSIONS_LIST);
 /** Returns true if the file type is accepted (any text/* or an explicitly allowed binary). */
 function isAcceptedFileType(file: File): boolean {
   if (file.type.startsWith('text/')) return true;
-  if (file.type === 'application/json') return true;
   if (ACCEPTED_BINARY_MIME_TYPES.has(file.type)) return true;
   // Browsers assign empty MIME types to many code/config extensions (.md, .py, .rs, etc.)
   // Fall back to checking the file extension from the accepted list
@@ -141,20 +142,24 @@ const messageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
     setFileError(null);
     setFiles(prev => {
       const combined = [...prev];
+      const rejections: string[] = [];
       for (const file of incoming) {
         if (combined.length >= MAX_FILES) {
-          setFileError(`Maximum ${String(MAX_FILES)} files per message`);
+          rejections.push(`Maximum ${String(MAX_FILES)} files per message`);
           break;
         }
         if (file.size > MAX_FILE_BYTES) {
-          setFileError(`"${file.name}" exceeds the 10 MB size limit`);
+          rejections.push(`"${file.name}" exceeds the 10 MB size limit`);
           continue;
         }
         if (!isAcceptedFileType(file)) {
-          setFileError(`"${file.name}" is not a supported file type`);
+          rejections.push(`"${file.name}" is not a supported file type`);
           continue;
         }
         combined.push({ file, id: crypto.randomUUID() });
+      }
+      if (rejections.length > 0) {
+        setFileError(rejections.join('; '));
       }
       return combined;
     });

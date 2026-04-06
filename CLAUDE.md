@@ -516,6 +516,8 @@ curl http://localhost:3637/api/conversations/<conversationId>/messages
 │   ├── source/                   # Clone (from /clone) or symlink → local path
 │   ├── worktrees/                # Git worktrees for this project
 │   ├── artifacts/                # Workflow artifacts (NEVER in git)
+│   │   ├── runs/{id}/            # Per-run artifacts ($ARTIFACTS_DIR)
+│   │   └── uploads/{convId}/     # Web UI file uploads (ephemeral)
 │   └── logs/                     # Workflow execution logs
 ├── archon.db                     # SQLite database (when DATABASE_URL not set)
 └── config.yaml                   # Global configuration (non-secrets)

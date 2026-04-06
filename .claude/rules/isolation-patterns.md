@@ -14,7 +14,8 @@
 ├── source/          # Clone or symlink to local path
 ├── worktrees/       # Git worktrees for this project
 ├── artifacts/       # Workflow artifacts (NEVER in git)
-│   └── runs/{id}/   # Per-run artifacts ($ARTIFACTS_DIR)
+│   ├── runs/{id}/   # Per-run artifacts ($ARTIFACTS_DIR)
+│   └── uploads/{convId}/  # Web UI file uploads (ephemeral)
 └── logs/            # Workflow execution logs
 ```
 

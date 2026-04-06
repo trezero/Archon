@@ -79,12 +79,16 @@ function mapMessageRow(row: MessageResponse): ChatMessage {
     error: meta.error,
     workflowDispatch: meta.workflowDispatch,
     workflowResult: meta.workflowResult,
-    files: meta.files?.map((f, i) => ({
-      id: f.id ?? `${row.id}-file-${String(i)}`,
-      name: f.name,
-      mimeType: f.mimeType,
-      size: f.size,
-    })),
+    files: Array.isArray(meta.files)
+      ? meta.files
+          .filter(f => typeof f.name === 'string' && typeof f.mimeType === 'string')
+          .map((f, i) => ({
+            id: f.id ?? `${row.id}-file-${String(i)}`,
+            name: f.name,
+            mimeType: f.mimeType,
+            size: typeof f.size === 'number' ? f.size : 0,
+          }))
+      : undefined,
     timestamp: new Date(ensureUtc(row.created_at)).getTime(),
     isStreaming: false,
   };
@@ -635,7 +639,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         role: 'user',
         content: message,
         timestamp: Date.now(),
-        ...(fileAttachments ? { files: fileAttachments } : {}),
+        files: fileAttachments,
       };
       const thinkingMsg: ChatMessage = {
         id: `thinking-${String(Date.now())}`,
@@ -704,8 +708,14 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         void queryClient.invalidateQueries({ queryKey: ['workflowRuns'] });
       } catch (error) {
         console.error('[Chat] Failed to send message', { error });
+        // Extract server error details from fetchJSON errors (e.g. "API error 400 (...): File ... exceeds...")
+        const errMsg = error instanceof Error ? error.message : undefined;
+        const userMessage =
+          errMsg && /API error 4\d\d/.test(errMsg)
+            ? errMsg.replace(/^API error \d+ \([^)]*\): /, '')
+            : 'Failed to send message. Please try again.';
         onError({
-          message: 'Failed to send message. Please try again.',
+          message: userMessage,
           classification: 'transient',
           suggestedActions: ['Retry'],
         });
