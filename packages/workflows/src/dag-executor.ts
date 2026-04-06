@@ -695,7 +695,7 @@ export function buildTopologicalLayers(nodes: readonly DagNode[]): DagNode[][] {
 }
 
 /**
- * Execute a single DAG node. Returns NodeOutput regardless of success/failure.
+ * Execute a single DAG node. Returns NodeExecutionResult regardless of success/failure.
  * Always accumulates assistant text output (for $node_id.output substitution).
  * Parallel nodes and context: 'fresh' nodes always receive fresh sessions (caller ensures resumeSessionId is undefined).
  */
@@ -999,7 +999,7 @@ async function executeNodeInternal(
         if (msg.sessionId) newSessionId = msg.sessionId;
         if (msg.tokens) nodeTokens = msg.tokens;
         if (msg.cost !== undefined) nodeCostUsd = msg.cost;
-        if (msg.stopReason) nodeStopReason = msg.stopReason;
+        if (msg.stopReason !== undefined) nodeStopReason = msg.stopReason;
         if (msg.numTurns !== undefined) nodeNumTurns = msg.numTurns;
         if (msg.modelUsage) nodeModelUsage = msg.modelUsage;
         if (msg.structuredOutput !== undefined) structuredOutput = msg.structuredOutput;
@@ -1041,6 +1041,7 @@ async function executeNodeInternal(
           );
         }
       }
+      // rate_limit chunks: already log.warn'd in claude.ts; not surfaced to SSE per design
     }
 
     // When output_format is set and the SDK returned structured_output,
@@ -1467,7 +1468,7 @@ function buildLoopNodeOptions(
  * Execute a loop node — runs prompt repeatedly until completion signal or max iterations.
  *
  * Key behaviors:
- * - Returns NodeOutput (not void) — DAG executor owns workflow lifecycle
+ * - Returns NodeExecutionResult (not void) — DAG executor owns workflow lifecycle
  * - Receives upstream node outputs for $nodeId.output substitution
  * - Does not write current_step_index (DAG tracks per-node completion)
  */
@@ -1647,7 +1648,7 @@ async function executeLoopNode(
           if (msg.cost !== undefined) {
             loopTotalCostUsd = (loopTotalCostUsd ?? 0) + msg.cost;
           }
-          if (msg.stopReason) loopFinalStopReason = msg.stopReason;
+          if (msg.stopReason !== undefined) loopFinalStopReason = msg.stopReason;
           if (msg.numTurns !== undefined) {
             loopTotalNumTurns = (loopTotalNumTurns ?? 0) + msg.numTurns;
           }
@@ -1719,6 +1720,7 @@ async function executeLoopNode(
         } else if (msg.type === 'tool_result' && platform.sendStructuredEvent) {
           await platform.sendStructuredEvent(conversationId, msg);
         }
+        // rate_limit chunks: already log.warn'd in claude.ts; not surfaced to SSE per design
       }
     } catch (error) {
       const err = error as Error;
@@ -2183,6 +2185,8 @@ export async function executeDagWorkflow(
   // Session threading: for sequential single-node layers, thread the session forward.
   // For parallel layers (>1 node), always fresh (can't share a session).
   let lastSequentialSessionId: string | undefined;
+  // Note: accumulates cost for this invocation only. If this is a resume, nodes skipped
+  // from the prior run are not included — total_cost_usd will reflect resumed-portion cost only.
   let totalCostUsd = 0;
 
   for (let layerIdx = 0; layerIdx < layers.length; layerIdx++) {
@@ -2707,6 +2711,7 @@ export async function executeDagWorkflow(
   try {
     await deps.store.completeWorkflowRun(workflowRun.id, {
       node_counts: nodeCounts,
+      // totalCostUsd starts at 0; only write metadata when at least one node reported cost
       ...(totalCostUsd > 0 ? { total_cost_usd: totalCostUsd } : {}),
     });
   } catch (dbErr) {
