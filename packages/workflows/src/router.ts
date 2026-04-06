@@ -177,7 +177,7 @@ export function parseWorkflowInvocation(
     if (caseMatch) {
       getLog().info(
         { requested: workflowName, matched: caseMatch.name },
-        'workflow_case_insensitive_match'
+        'workflow.invoke_case_insensitive_match'
       );
       const remainingMessage = trimmed.slice(match.index + match[0].length).trim();
       return { workflowName: caseMatch.name, remainingMessage };
@@ -185,7 +185,7 @@ export function parseWorkflowInvocation(
 
     // No match - build helpful error
     const available = workflows.map(w => w.name);
-    getLog().warn({ workflowName, available }, 'unknown_workflow');
+    getLog().warn({ workflowName, available }, 'workflow.invoke_unknown');
 
     return {
       workflowName: null,
@@ -230,13 +230,16 @@ export function resolveWorkflowName(
 
   // Tier 2: Case-insensitive match
   const lowerName = name.toLowerCase();
-  const caseMatch = workflows.find(w => w.name.toLowerCase() === lowerName);
-  if (caseMatch) {
+  const caseMatches = workflows.filter(w => w.name.toLowerCase() === lowerName);
+  if (caseMatches.length === 1) {
     getLog().info(
-      { requested: name, matched: caseMatch.name },
+      { requested: name, matched: caseMatches[0].name },
       'workflow.resolve_case_insensitive_match'
     );
-    return caseMatch;
+    return caseMatches[0];
+  } else if (caseMatches.length > 1) {
+    const candidates = caseMatches.map(w => `  - ${w.name}`).join('\n');
+    throw new Error(`Ambiguous workflow '${name}'. Did you mean:\n${candidates}`);
   }
 
   // Tier 3: Suffix match (e.g. "assist" matches "archon-assist")

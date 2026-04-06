@@ -22,7 +22,11 @@ import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '@archon/pa
 import { loadConfig } from '../config/config-loader';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import { resolveWorkflowName } from '@archon/workflows/router';
-import type { WorkflowWithSource, WorkflowLoadError } from '@archon/workflows/schemas/workflow';
+import type {
+  WorkflowWithSource,
+  WorkflowLoadError,
+  WorkflowDefinition,
+} from '@archon/workflows/schemas/workflow';
 import {
   TERMINAL_WORKFLOW_STATUSES,
   RESUMABLE_WORKFLOW_STATUSES,
@@ -1257,11 +1261,15 @@ async function handleWorkflowCommand(
         'cmd.workflows_discovered'
       );
 
-      let workflow;
+      let workflow: WorkflowDefinition | undefined;
       try {
         workflow = resolveWorkflowName(workflowName, workflows);
       } catch (err) {
         // Ambiguous match — surface the candidates to the user
+        getLog().warn(
+          { requested: workflowName, error: (err as Error).message },
+          'cmd.workflow_resolve_ambiguous'
+        );
         return {
           success: false,
           message: (err as Error).message,
