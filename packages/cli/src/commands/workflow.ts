@@ -15,6 +15,8 @@ import { createWorkflowDeps } from '@archon/core/workflows/store-adapter';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import { resolveWorkflowName } from '@archon/workflows/router';
 import { executeWorkflow } from '@archon/workflows/executor';
+import { getWorkflowEventEmitter } from '@archon/workflows/event-emitter';
+import type { WorkflowEmitterEvent } from '@archon/workflows/event-emitter';
 import type { WorkflowLoadResult } from '@archon/workflows/schemas/workflow';
 import type { WorkflowRun, ApprovalContext } from '@archon/workflows/schemas/workflow-run';
 import {
@@ -55,6 +57,8 @@ export interface WorkflowRunOptions {
   noWorktree?: boolean;
   resume?: boolean;
   codebaseId?: string; // Passed by resume/approve to skip path-based lookup
+  quiet?: boolean;
+  verbose?: boolean;
 }
 
 /**
@@ -64,6 +68,44 @@ function generateConversationId(): string {
   const timestamp = Date.now();
   const random = Math.random().toString(36).substring(2, 8);
   return `cli-${String(timestamp)}-${random}`;
+}
+
+/**
+ * Render a workflow event to stderr as a progress line.
+ * Called only when --quiet is not set.
+ */
+function renderWorkflowEvent(event: WorkflowEmitterEvent, verbose: boolean): void {
+  switch (event.type) {
+    case 'node_started':
+      process.stderr.write(`[${event.nodeId}] Started\n`);
+      break;
+    case 'node_completed':
+      process.stderr.write(`[${event.nodeId}] Completed (${formatDuration(event.duration)})\n`);
+      break;
+    case 'node_failed':
+      process.stderr.write(`[${event.nodeId}] Failed: ${event.error}\n`);
+      break;
+    case 'node_skipped':
+      process.stderr.write(`[${event.nodeId}] Skipped (${event.reason})\n`);
+      break;
+    case 'approval_pending':
+      process.stderr.write(`[${event.nodeId}] Waiting for approval: ${event.message}\n`);
+      break;
+    case 'tool_started':
+      if (verbose) {
+        process.stderr.write(`[${event.stepName}] tool: ${event.toolName} (started)\n`);
+      }
+      break;
+    case 'tool_completed':
+      if (verbose) {
+        process.stderr.write(
+          `[${event.stepName}] tool: ${event.toolName} (${String(event.durationMs)}ms)\n`
+        );
+      }
+      break;
+    default:
+      break;
+  }
 }
 
 /**
@@ -532,17 +574,30 @@ export async function workflowRunCommand(
     cleanup('SIGINT');
   });
 
+  // Subscribe to workflow events for progress rendering on stderr
+  const { quiet, verbose } = options;
+  const unsubscribe = quiet
+    ? undefined
+    : getWorkflowEventEmitter().subscribeForConversation(conversationId, event => {
+        renderWorkflowEvent(event, verbose ?? false);
+      });
+
   // Execute workflow with workingCwd (may be worktree path)
-  const result = await executeWorkflow(
-    createWorkflowDeps(),
-    adapter,
-    conversationId,
-    workingCwd,
-    workflow,
-    userMessage,
-    conversation.id,
-    codebase?.id
-  );
+  let result: Awaited<ReturnType<typeof executeWorkflow>>;
+  try {
+    result = await executeWorkflow(
+      createWorkflowDeps(),
+      adapter,
+      conversationId,
+      workingCwd,
+      workflow,
+      userMessage,
+      conversation.id,
+      codebase?.id
+    );
+  } finally {
+    unsubscribe?.();
+  }
 
   // Check result and exit appropriately
   if (result.success && 'paused' in result && result.paused) {

@@ -2,6 +2,7 @@
  * Tests for workflow commands
  */
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
+import type { WorkflowEmitterEvent } from '@archon/workflows/event-emitter';
 import { makeTestWorkflowWithSource } from '@archon/workflows/test-utils';
 import {
   workflowListCommand,
@@ -74,6 +75,21 @@ mock.module('@archon/workflows/workflow-discovery', () => ({
 }));
 mock.module('@archon/workflows/executor', () => ({
   executeWorkflow: mock(() => Promise.resolve({ success: true, workflowRunId: 'test-run-id' })),
+}));
+
+// Capture the subscription handler so tests can trigger events
+let capturedSubscribeHandler: ((event: WorkflowEmitterEvent) => void) | null = null;
+const mockUnsubscribe = mock(() => undefined);
+
+mock.module('@archon/workflows/event-emitter', () => ({
+  getWorkflowEventEmitter: mock(() => ({
+    subscribeForConversation: mock(
+      (_convId: string, handler: (event: WorkflowEmitterEvent) => void) => {
+        capturedSubscribeHandler = handler;
+        return mockUnsubscribe;
+      }
+    ),
+  })),
 }));
 
 mock.module('@archon/git', () => ({
@@ -1610,5 +1626,239 @@ describe('workflowRejectCommand', () => {
     (workflowDb.updateWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce(undefined);
 
     await expect(workflowRejectCommand('run-no-path', 'bad')).rejects.toThrow('no working path');
+  });
+});
+
+describe('workflowRunCommand — progress rendering', () => {
+  let consoleSpy: ReturnType<typeof spyOn>;
+  let stderrSpy: ReturnType<typeof spyOn>;
+
+  function setupWorkflowMocks(): void {
+    // These need to be set up for each test since workflowRunCommand has many dependencies
+    const discoverMock = require('@archon/workflows/workflow-discovery')
+      .discoverWorkflowsWithConfig as ReturnType<typeof mock>;
+    discoverMock.mockResolvedValueOnce({
+      workflows: [makeTestWorkflowWithSource({ name: 'plan', description: 'Plan work' })],
+      errors: [],
+    });
+
+    const conversationDb = require('@archon/core/db/conversations');
+    (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'conv-1',
+      platform: 'cli',
+      platform_conversation_id: 'cli-123',
+      title: null,
+      is_active: true,
+      codebase_id: null,
+    });
+
+    const codebaseDb = require('@archon/core/db/codebases');
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'cb-1',
+      name: 'test-repo',
+      default_cwd: '/test/path',
+    });
+  }
+
+  beforeEach(() => {
+    consoleSpy = spyOn(console, 'log').mockImplementation(() => {});
+    stderrSpy = spyOn(process.stderr, 'write').mockImplementation(() => true);
+    capturedSubscribeHandler = null;
+    mockUnsubscribe.mockClear();
+    mockLogger.info.mockClear();
+    mockLogger.warn.mockClear();
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+    stderrSpy.mockRestore();
+  });
+
+  it('should subscribe to emitter when not quiet', async () => {
+    setupWorkflowMocks();
+
+    await workflowRunCommand('/test/path', 'plan', 'hello', {});
+
+    // capturedSubscribeHandler is set when subscribeForConversation is called
+    expect(capturedSubscribeHandler).not.toBeNull();
+    expect(mockUnsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('should not subscribe to emitter when quiet', async () => {
+    setupWorkflowMocks();
+
+    await workflowRunCommand('/test/path', 'plan', 'hello', { quiet: true });
+
+    // quiet = true skips subscription entirely
+    expect(capturedSubscribeHandler).toBeNull();
+    expect(mockUnsubscribe).not.toHaveBeenCalled();
+  });
+
+  it('should call unsubscribe after executeWorkflow completes', async () => {
+    setupWorkflowMocks();
+
+    await workflowRunCommand('/test/path', 'plan', 'hello', {});
+
+    expect(mockUnsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('should write node_started event to stderr', async () => {
+    setupWorkflowMocks();
+
+    const { executeWorkflow } = require('@archon/workflows/executor');
+    (executeWorkflow as ReturnType<typeof mock>).mockImplementationOnce(async () => {
+      if (capturedSubscribeHandler) {
+        capturedSubscribeHandler({
+          type: 'node_started',
+          runId: 'run-1',
+          nodeId: 'classify',
+          nodeName: 'classify',
+        });
+      }
+      return { success: true, workflowRunId: 'run-1' };
+    });
+
+    await workflowRunCommand('/test/path', 'plan', 'hello', {});
+
+    expect(stderrSpy).toHaveBeenCalledWith('[classify] Started\n');
+  });
+
+  it('should write node_completed event with duration to stderr', async () => {
+    setupWorkflowMocks();
+
+    const { executeWorkflow } = require('@archon/workflows/executor');
+    (executeWorkflow as ReturnType<typeof mock>).mockImplementationOnce(async () => {
+      if (capturedSubscribeHandler) {
+        capturedSubscribeHandler({
+          type: 'node_completed',
+          runId: 'run-1',
+          nodeId: 'classify',
+          nodeName: 'classify',
+          duration: 12400,
+        });
+      }
+      return { success: true, workflowRunId: 'run-1' };
+    });
+
+    await workflowRunCommand('/test/path', 'plan', 'hello', {});
+
+    expect(stderrSpy).toHaveBeenCalledWith('[classify] Completed (12.4s)\n');
+  });
+
+  it('should write node_failed event to stderr', async () => {
+    setupWorkflowMocks();
+
+    const { executeWorkflow } = require('@archon/workflows/executor');
+    (executeWorkflow as ReturnType<typeof mock>).mockImplementationOnce(async () => {
+      if (capturedSubscribeHandler) {
+        capturedSubscribeHandler({
+          type: 'node_failed',
+          runId: 'run-1',
+          nodeId: 'classify',
+          nodeName: 'classify',
+          error: 'timeout exceeded',
+        });
+      }
+      return { success: true, workflowRunId: 'run-1' };
+    });
+
+    await workflowRunCommand('/test/path', 'plan', 'hello', {});
+
+    expect(stderrSpy).toHaveBeenCalledWith('[classify] Failed: timeout exceeded\n');
+  });
+
+  it('should write node_skipped event to stderr', async () => {
+    setupWorkflowMocks();
+
+    const { executeWorkflow } = require('@archon/workflows/executor');
+    (executeWorkflow as ReturnType<typeof mock>).mockImplementationOnce(async () => {
+      if (capturedSubscribeHandler) {
+        capturedSubscribeHandler({
+          type: 'node_skipped',
+          runId: 'run-1',
+          nodeId: 'deploy',
+          nodeName: 'deploy',
+          reason: 'when_condition',
+        });
+      }
+      return { success: true, workflowRunId: 'run-1' };
+    });
+
+    await workflowRunCommand('/test/path', 'plan', 'hello', {});
+
+    expect(stderrSpy).toHaveBeenCalledWith('[deploy] Skipped (when_condition)\n');
+  });
+
+  it('should write approval_pending event to stderr', async () => {
+    setupWorkflowMocks();
+
+    const { executeWorkflow } = require('@archon/workflows/executor');
+    (executeWorkflow as ReturnType<typeof mock>).mockImplementationOnce(async () => {
+      if (capturedSubscribeHandler) {
+        capturedSubscribeHandler({
+          type: 'approval_pending',
+          runId: 'run-1',
+          nodeId: 'review',
+          message: 'Please review the changes',
+        });
+      }
+      return { success: true, workflowRunId: 'run-1', paused: true };
+    });
+
+    await workflowRunCommand('/test/path', 'plan', 'hello', {});
+
+    expect(stderrSpy).toHaveBeenCalledWith(
+      '[review] Waiting for approval: Please review the changes\n'
+    );
+  });
+
+  it('should not write tool_started without verbose', async () => {
+    setupWorkflowMocks();
+
+    const { executeWorkflow } = require('@archon/workflows/executor');
+    (executeWorkflow as ReturnType<typeof mock>).mockImplementationOnce(async () => {
+      if (capturedSubscribeHandler) {
+        capturedSubscribeHandler({
+          type: 'tool_started',
+          runId: 'run-1',
+          toolName: 'Bash',
+          stepName: 'classify',
+        });
+      }
+      return { success: true, workflowRunId: 'run-1' };
+    });
+
+    await workflowRunCommand('/test/path', 'plan', 'hello', {});
+
+    expect(stderrSpy).not.toHaveBeenCalledWith(expect.stringContaining('tool: Bash'));
+  });
+
+  it('should write tool_started with verbose', async () => {
+    setupWorkflowMocks();
+
+    const { executeWorkflow } = require('@archon/workflows/executor');
+    (executeWorkflow as ReturnType<typeof mock>).mockImplementationOnce(async () => {
+      if (capturedSubscribeHandler) {
+        capturedSubscribeHandler({
+          type: 'tool_started',
+          runId: 'run-1',
+          toolName: 'Bash',
+          stepName: 'classify',
+        });
+        capturedSubscribeHandler({
+          type: 'tool_completed',
+          runId: 'run-1',
+          toolName: 'Bash',
+          stepName: 'classify',
+          durationMs: 42,
+        });
+      }
+      return { success: true, workflowRunId: 'run-1' };
+    });
+
+    await workflowRunCommand('/test/path', 'plan', 'hello', { verbose: true });
+
+    expect(stderrSpy).toHaveBeenCalledWith('[classify] tool: Bash (started)\n');
+    expect(stderrSpy).toHaveBeenCalledWith('[classify] tool: Bash (42ms)\n');
   });
 });
