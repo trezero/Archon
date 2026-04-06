@@ -89,6 +89,7 @@ function createMockStore(): IWorkflowStore {
     createWorkflowEvent: mock(() => Promise.resolve()),
     getCompletedDagNodeOutputs: mock(() => Promise.resolve(new Map<string, string>())),
     getCodebase: mock(() => Promise.resolve(null)),
+    getCodebaseEnvVars: mock(() => Promise.resolve({})),
   };
 }
 
@@ -4243,5 +4244,86 @@ describe('executeDagWorkflow -- approval node', () => {
     expect((store.cancelWorkflowRun as Mock<(id: string) => Promise<void>>).mock.calls.length).toBe(
       1
     );
+  });
+});
+describe('executeDagWorkflow -- env var injection', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `dag-env-test-${Date.now()}`);
+    await mkdir(testDir, { recursive: true });
+    await writeFile(join(testDir, '.archon', 'commands', 'my-cmd.md'), '# Test', {
+      flag: 'w',
+    }).catch(async () => {
+      await mkdir(join(testDir, '.archon', 'commands'), { recursive: true });
+      await writeFile(join(testDir, '.archon', 'commands', 'my-cmd.md'), '# Test');
+    });
+    mockSendQueryDag.mockClear();
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+  });
+
+  afterEach(async () => {
+    mockGetAssistantClientDag.mockImplementation(() => ({
+      sendQuery: mockSendQueryDag,
+      getType: () => 'claude',
+    }));
+    try {
+      await rm(testDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('passes config.envVars as env to sendQuery for Claude node', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      { name: 'dag-env-test', nodes: [{ id: 'task', command: 'my-cmd' }] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      { ...minimalConfig, envVars: { MY_SECRET: 'abc123' } }
+    );
+
+    expect(mockSendQueryDag.mock.calls.length).toBeGreaterThan(0);
+    const optionsArg = mockSendQueryDag.mock.calls[0][3] as Record<string, unknown>;
+    expect(optionsArg?.env).toEqual({ MY_SECRET: 'abc123' });
+  });
+
+  it('does not set env on claudeOptions when config.envVars is empty', async () => {
+    const mockDeps = createMockDeps();
+    const platform = createMockPlatform();
+    const workflowRun = makeWorkflowRun();
+
+    await executeDagWorkflow(
+      mockDeps,
+      platform,
+      'conv-dag',
+      testDir,
+      { name: 'dag-no-env', nodes: [{ id: 'task', command: 'my-cmd' }] },
+      workflowRun,
+      'claude',
+      undefined,
+      join(testDir, 'artifacts'),
+      join(testDir, 'logs'),
+      'main',
+      { ...minimalConfig, envVars: {} }
+    );
+
+    expect(mockSendQueryDag.mock.calls.length).toBeGreaterThan(0);
+    const optionsArg = mockSendQueryDag.mock.calls[0]?.[3] as Record<string, unknown> | undefined;
+    expect(optionsArg?.env).toBeUndefined();
   });
 });

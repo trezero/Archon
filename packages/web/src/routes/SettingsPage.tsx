@@ -12,6 +12,9 @@ import {
   addCodebase,
   deleteCodebase,
   updateAssistantConfig,
+  getCodebaseEnvVars,
+  setCodebaseEnvVar,
+  deleteCodebaseEnvVar,
 } from '@/lib/api';
 import type { SafeConfigResponse, CodebaseResponse } from '@/lib/api';
 
@@ -91,10 +94,167 @@ function SystemHealthSection({
   );
 }
 
+function EnvVarsPanel({ codebaseId }: { codebaseId: string }): React.ReactElement {
+  const queryClient = useQueryClient();
+  const [newKey, setNewKey] = useState('');
+  const [newValue, setNewValue] = useState('');
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+
+  const { data: envVars } = useQuery({
+    queryKey: ['codebaseEnvVars', codebaseId],
+    queryFn: () => getCodebaseEnvVars(codebaseId),
+  });
+
+  const [mutationError, setMutationError] = useState<string | null>(null);
+
+  const setMutation = useMutation({
+    mutationFn: (data: { key: string; value: string }) => setCodebaseEnvVar(codebaseId, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['codebaseEnvVars', codebaseId] });
+      if (editingKey) {
+        setEditingKey(null);
+        setEditValue('');
+      } else {
+        setNewKey('');
+        setNewValue('');
+      }
+      setMutationError(null);
+    },
+    onError: (err: Error) => {
+      setMutationError(err.message);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (key: string) => deleteCodebaseEnvVar(codebaseId, key),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['codebaseEnvVars', codebaseId] });
+      setMutationError(null);
+    },
+    onError: (err: Error) => {
+      setMutationError(err.message);
+    },
+  });
+
+  function handleAdd(e: React.FormEvent): void {
+    e.preventDefault();
+    if (newKey.trim() && newValue !== '') {
+      setMutation.mutate({ key: newKey.trim(), value: newValue });
+    }
+  }
+
+  function handleEditSave(key: string): void {
+    if (editValue !== '') {
+      setMutation.mutate({ key, value: editValue });
+    }
+  }
+
+  const keys = envVars ?? [];
+
+  return (
+    <div className="mt-2 pl-2 border-l border-border space-y-2">
+      {mutationError && <div className="text-xs text-destructive">{mutationError}</div>}
+      {keys.length === 0 ? (
+        <div className="text-xs text-muted-foreground">No env vars set.</div>
+      ) : (
+        <div className="space-y-1">
+          {keys.map(key => (
+            <div key={key} className="space-y-1">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-mono text-text-primary truncate flex-1">{key}</span>
+                <span className="text-muted-foreground">= ------</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 px-1 text-xs"
+                  onClick={() => {
+                    if (editingKey === key) {
+                      setEditingKey(null);
+                      setEditValue('');
+                    } else {
+                      setEditingKey(key);
+                      setEditValue('');
+                    }
+                  }}
+                >
+                  {editingKey === key ? 'Cancel' : 'Edit'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 px-1 text-xs"
+                  onClick={() => {
+                    deleteMutation.mutate(key);
+                  }}
+                  disabled={deleteMutation.isPending}
+                >
+                  Remove
+                </Button>
+              </div>
+              {editingKey === key && (
+                <div className="flex gap-1 pl-2">
+                  <Input
+                    value={editValue}
+                    onChange={e => {
+                      setEditValue(e.target.value);
+                    }}
+                    placeholder="new value"
+                    className="flex-1 h-7 text-xs"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleEditSave(key);
+                      }
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      handleEditSave(key);
+                    }}
+                    disabled={setMutation.isPending}
+                  >
+                    Save
+                  </Button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <form onSubmit={handleAdd} className="flex gap-1">
+        <Input
+          value={newKey}
+          onChange={e => {
+            setNewKey(e.target.value);
+          }}
+          placeholder="KEY"
+          className="flex-1 h-7 text-xs font-mono"
+        />
+        <Input
+          value={newValue}
+          onChange={e => {
+            setNewValue(e.target.value);
+          }}
+          placeholder="value"
+          className="flex-1 h-7 text-xs"
+        />
+        <Button type="submit" size="sm" className="h-7 text-xs" disabled={setMutation.isPending}>
+          Add
+        </Button>
+      </form>
+    </div>
+  );
+}
+
 function ProjectsSection(): React.ReactElement {
   const queryClient = useQueryClient();
   const [addPath, setAddPath] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [expandedEnvVars, setExpandedEnvVars] = useState<string | null>(null);
 
   const { data: codebases } = useQuery({
     queryKey: ['codebases'],
@@ -135,24 +295,36 @@ function ProjectsSection(): React.ReactElement {
         ) : (
           <div className="space-y-2">
             {codebases.map((cb: CodebaseResponse) => (
-              <div
-                key={cb.id}
-                className="flex items-center justify-between rounded-md border border-border p-2 text-sm"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium truncate">{cb.name}</div>
-                  <div className="text-xs text-muted-foreground truncate">{cb.default_cwd}</div>
+              <div key={cb.id} className="rounded-md border border-border p-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium truncate">{cb.name}</div>
+                    <div className="text-xs text-muted-foreground truncate">{cb.default_cwd}</div>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => {
+                        setExpandedEnvVars(expandedEnvVars === cb.id ? null : cb.id);
+                      }}
+                    >
+                      Env Vars {expandedEnvVars === cb.id ? '\u25B2' : '\u25BC'}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        deleteMutation.mutate(cb.id);
+                      }}
+                      disabled={deleteMutation.isPending}
+                    >
+                      Remove
+                    </Button>
+                  </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    deleteMutation.mutate(cb.id);
-                  }}
-                  disabled={deleteMutation.isPending}
-                >
-                  Remove
-                </Button>
+                {expandedEnvVars === cb.id && <EnvVarsPanel codebaseId={cb.id} />}
               </div>
             ))}
           </div>

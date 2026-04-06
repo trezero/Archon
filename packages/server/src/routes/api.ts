@@ -58,6 +58,7 @@ function getLog(): ReturnType<typeof createLogger> {
 }
 import * as conversationDb from '@archon/core/db/conversations';
 import * as codebaseDb from '@archon/core/db/codebases';
+import * as envVarDb from '@archon/core/db/env-vars';
 import * as isolationEnvDb from '@archon/core/db/isolation-environments';
 import * as workflowDb from '@archon/core/db/workflows';
 import * as workflowEventDb from '@archon/core/db/workflow-events';
@@ -102,6 +103,10 @@ import {
   codebaseIdParamsSchema,
   addCodebaseBodySchema,
   deleteCodebaseResponseSchema,
+  codebaseEnvVarsResponseSchema,
+  setEnvVarBodySchema,
+  codebaseEnvVarParamsSchema,
+  envVarMutationResponseSchema,
 } from './schemas/codebase.schemas';
 import {
   updateAssistantConfigBodySchema,
@@ -464,6 +469,58 @@ const deleteCodebaseRoute = createRoute({
     },
     404: jsonError('Not found'),
     500: jsonError('Server error'),
+  },
+});
+
+// =========================================================================
+// Codebase env var route configs
+// =========================================================================
+
+const listEnvVarsRoute = createRoute({
+  method: 'get',
+  path: '/api/codebases/{id}/env',
+  tags: ['Codebases'],
+  summary: 'List env vars for a codebase',
+  request: { params: codebaseIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: codebaseEnvVarsResponseSchema } },
+      description: 'Env vars for codebase',
+    },
+    404: jsonError('Codebase not found'),
+  },
+});
+
+const setEnvVarRoute = createRoute({
+  method: 'put',
+  path: '/api/codebases/{id}/env',
+  tags: ['Codebases'],
+  summary: 'Set (upsert) an env var for a codebase',
+  request: {
+    params: codebaseIdParamsSchema,
+    body: { content: { 'application/json': { schema: setEnvVarBodySchema } } },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: envVarMutationResponseSchema } },
+      description: 'Env var set',
+    },
+    404: jsonError('Codebase not found'),
+  },
+});
+
+const deleteEnvVarRoute = createRoute({
+  method: 'delete',
+  path: '/api/codebases/{id}/env/{key}',
+  tags: ['Codebases'],
+  summary: 'Delete an env var from a codebase',
+  request: { params: codebaseEnvVarParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: envVarMutationResponseSchema } },
+      description: 'Env var deleted',
+    },
+    404: jsonError('Codebase not found'),
   },
 });
 
@@ -1490,6 +1547,50 @@ export function registerApiRoutes(
     } catch (error) {
       getLog().error({ err: error }, 'delete_codebase_failed');
       return apiError(c, 500, 'Failed to delete codebase');
+    }
+  });
+
+  // GET /api/codebases/:id/env - List env var keys for a codebase (values never returned)
+  registerOpenApiRoute(listEnvVarsRoute, async c => {
+    const id = c.req.param('id') ?? '';
+    try {
+      const codebase = await codebaseDb.getCodebase(id);
+      if (!codebase) return apiError(c, 404, 'Codebase not found');
+      const envVars = await envVarDb.getCodebaseEnvVars(id);
+      return c.json({ keys: Object.keys(envVars) });
+    } catch (error) {
+      getLog().error({ err: error, codebaseId: id }, 'list_env_vars_failed');
+      return apiError(c, 500, 'Failed to list env vars');
+    }
+  });
+
+  // PUT /api/codebases/:id/env - Set (upsert) an env var
+  registerOpenApiRoute(setEnvVarRoute, async c => {
+    const id = c.req.param('id') ?? '';
+    try {
+      const body = getValidatedBody(c, setEnvVarBodySchema);
+      const codebase = await codebaseDb.getCodebase(id);
+      if (!codebase) return apiError(c, 404, 'Codebase not found');
+      await envVarDb.setCodebaseEnvVar(id, body.key, body.value);
+      return c.json({ success: true });
+    } catch (error) {
+      getLog().error({ err: error, codebaseId: id }, 'set_env_var_failed');
+      return apiError(c, 500, 'Failed to set env var');
+    }
+  });
+
+  // DELETE /api/codebases/:id/env/:key - Delete an env var
+  registerOpenApiRoute(deleteEnvVarRoute, async c => {
+    const id = c.req.param('id') ?? '';
+    const key = c.req.param('key') ?? '';
+    try {
+      const codebase = await codebaseDb.getCodebase(id);
+      if (!codebase) return apiError(c, 404, 'Codebase not found');
+      await envVarDb.deleteCodebaseEnvVar(id, key);
+      return c.json({ success: true });
+    } catch (error) {
+      getLog().error({ err: error, codebaseId: id, key }, 'delete_env_var_failed');
+      return apiError(c, 500, 'Failed to delete env var');
     }
   });
 

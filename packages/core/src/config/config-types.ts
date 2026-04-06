@@ -142,6 +142,13 @@ export interface RepoConfig {
   };
 
   /**
+   * Per-project environment variables injected into Claude SDK subprocess env.
+   * Values here override process.env for workflow node execution.
+   * Sensitive — do not commit actual secrets to version-controlled repos.
+   */
+  env?: Record<string, string>;
+
+  /**
    * Default commands/workflows configuration
    */
   defaults?: {
@@ -212,6 +219,12 @@ export interface MergedConfig {
    * When undefined, workflows referencing $BASE_BRANCH will fail with an error.
    */
   baseBranch?: string;
+  /**
+   * Merged per-project env vars from .archon/config.yaml env: section.
+   * DB env vars (from Web UI) are merged on top by executeWorkflow.
+   * Undefined when no env vars are configured.
+   */
+  envVars?: Record<string, string>;
 }
 
 /**

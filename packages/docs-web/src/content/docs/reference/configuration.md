@@ -118,6 +118,12 @@ worktree:
 defaults:
   loadDefaultCommands: true   # Load app's bundled default commands at runtime
   loadDefaultWorkflows: true  # Load app's bundled default workflows at runtime
+
+# Per-project environment variables for workflow execution (Claude SDK only)
+# Injected into the Claude subprocess env. Use the Web UI Settings panel for secrets.
+# env:
+#   MY_API_KEY: value
+#   CUSTOM_ENDPOINT: https://...
 ```
 
 ### Claude settingSources

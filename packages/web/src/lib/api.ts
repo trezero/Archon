@@ -449,6 +449,35 @@ export async function getCodebaseEnvironments(codebaseId: string): Promise<Isola
   return result.environments;
 }
 
+// Codebase env vars
+export async function getCodebaseEnvVars(codebaseId: string): Promise<string[]> {
+  const result = await fetchJSON<{ keys: string[] }>(
+    `/api/codebases/${encodeURIComponent(codebaseId)}/env`
+  );
+  return result.keys;
+}
+
+export async function setCodebaseEnvVar(
+  codebaseId: string,
+  data: { key: string; value: string }
+): Promise<{ success: boolean }> {
+  return fetchJSON<{ success: boolean }>(`/api/codebases/${encodeURIComponent(codebaseId)}/env`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteCodebaseEnvVar(
+  codebaseId: string,
+  key: string
+): Promise<{ success: boolean }> {
+  return fetchJSON<{ success: boolean }>(
+    `/api/codebases/${encodeURIComponent(codebaseId)}/env/${encodeURIComponent(key)}`,
+    { method: 'DELETE' }
+  );
+}
+
 // System
 export async function getHealth(): Promise<HealthResponse> {
   return fetchJSON<HealthResponse>('/api/health');

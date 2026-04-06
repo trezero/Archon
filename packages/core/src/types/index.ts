@@ -291,6 +291,12 @@ export interface AssistantRequestOptions {
    * @default ['project']
    */
   settingSources?: ('project' | 'user')[];
+  /**
+   * Additional env vars merged into Claude subprocess environment after buildSubprocessEnv().
+   * Final env: { ...buildSubprocessEnv(), ...env } (auth tokens conditionally filtered).
+   * Claude only — Codex SDK does not support env injection.
+   */
+  env?: Record<string, string>;
 }
 
 /**

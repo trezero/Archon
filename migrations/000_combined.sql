@@ -1,9 +1,10 @@
 -- Remote Coding Agent - Combined Schema
--- Version: Combined (final state after migrations 001-018)
+-- Version: Combined (final state after migrations 001-020)
 -- Description: Complete database schema (idempotent - safe to run multiple times)
 --
--- 7 Tables:
+-- 8 Tables:
 --   1. remote_agent_codebases
+--   1b. remote_agent_codebase_env_vars
 --   2. remote_agent_conversations
 --   3. remote_agent_sessions
 --   4. remote_agent_isolation_environments
@@ -36,6 +37,26 @@ CREATE TABLE IF NOT EXISTS remote_agent_codebases (
 
 COMMENT ON TABLE remote_agent_codebases IS
   'Repository metadata: name, URL, working directory, AI assistant type, and command paths (JSONB)';
+
+-- ============================================================================
+-- Table 1b: Codebase Env Vars
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS remote_agent_codebase_env_vars (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  codebase_id UUID NOT NULL REFERENCES remote_agent_codebases(id) ON DELETE CASCADE,
+  key VARCHAR(255) NOT NULL,
+  value TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(codebase_id, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_codebase_env_vars_codebase_id
+  ON remote_agent_codebase_env_vars(codebase_id);
+
+COMMENT ON TABLE remote_agent_codebase_env_vars IS
+  'Per-project env vars merged into Options.env on Claude SDK calls. Managed via Web UI or config.';
 
 -- ============================================================================
 -- Table 2: Conversations

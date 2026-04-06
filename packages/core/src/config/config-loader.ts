@@ -368,6 +368,11 @@ function mergeRepoConfig(merged: MergedConfig, repo: RepoConfig): MergedConfig {
     result.baseBranch = repo.worktree.baseBranch.trim();
   }
 
+  // Propagate per-project env vars from repo config
+  if (repo.env) {
+    result.envVars = { ...result.envVars, ...repo.env };
+  }
+
   return result;
 }
 

@@ -75,6 +75,7 @@ function makeStore(overrides: Partial<IWorkflowStore> = {}): IWorkflowStore {
     getCompletedDagNodeOutputs: mock(async () => new Map()),
     resumeWorkflowRun: mock(async () => makeRun()),
     getCodebase: mock(async () => null),
+    getCodebaseEnvVars: mock(async () => ({})),
     ...overrides,
   };
 }
@@ -416,6 +417,63 @@ describe('executeWorkflow', () => {
       // But uses the pre-created run instead of creating a new one
       expect(store.createWorkflowRun).not.toHaveBeenCalled();
       expect(result.workflowRunId).toBe('pre-run-1');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // DB env var merge
+  // -------------------------------------------------------------------------
+
+  describe('DB env var merge', () => {
+    it('merges DB env vars on top of file config envVars when codebaseId provided', async () => {
+      const store = makeStore({
+        getCodebaseEnvVars: mock(async () => ({ DB_KEY: 'db_val' })),
+      });
+      const deps = makeDeps(store);
+      // Override loadConfig to return file-level envVars
+      (deps.loadConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+        assistant: 'claude' as const,
+        assistants: { claude: {}, codex: {} },
+        baseBranch: '',
+        commands: { folder: '' },
+        envVars: { FILE_KEY: 'file_val' },
+      });
+
+      await executeWorkflow(
+        deps,
+        makePlatform(),
+        'conv-1',
+        '/tmp',
+        makeWorkflow(),
+        'test message',
+        'db-conv-1',
+        'codebase-1'
+      );
+
+      // DB env vars should have been fetched for the codebaseId
+      expect(store.getCodebaseEnvVars).toHaveBeenCalledWith('codebase-1');
+
+      // The config passed to executeDagWorkflow (arg index 11) should have merged envVars
+      const configArg = mockExecuteDagWorkflow.mock.calls[0]?.[11] as WorkflowConfig | undefined;
+      expect(configArg?.envVars).toEqual({ FILE_KEY: 'file_val', DB_KEY: 'db_val' });
+    });
+
+    it('does not call getCodebaseEnvVars when no codebaseId', async () => {
+      const store = makeStore();
+      const deps = makeDeps(store);
+
+      await executeWorkflow(
+        deps,
+        makePlatform(),
+        'conv-1',
+        '/tmp',
+        makeWorkflow(),
+        'test message',
+        'db-conv-1'
+        // no codebaseId
+      );
+
+      expect(store.getCodebaseEnvVars).not.toHaveBeenCalled();
     });
   });
 });
