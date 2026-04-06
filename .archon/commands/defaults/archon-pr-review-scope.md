@@ -226,11 +226,6 @@ cat CLAUDE.md 2>/dev/null | head -100
 
 Note key rules that reviewers should check against.
 
-**PHASE_3_CHECKPOINT:**
-- [ ] Diff available
-- [ ] Files categorized by type
-- [ ] CLAUDE.md rules noted
-
 ### 3.4 Identify New Abstractions
 
 Scan the diff for new abstractions introduced by this PR:
@@ -243,8 +238,14 @@ For each new abstraction found, note it in the scope manifest under "Review Focu
 
 ```bash
 # Quick scan for new abstractions in diff
-gh pr diff {number} | grep "^+" | grep -E "(^interface |^export interface |^type |^abstract class |^export class )" | head -20
+gh pr diff {number} | grep "^+" | sed 's/^+//' | grep -E "(^interface |^export interface |^type |^abstract class |^export class )" | head -20
 ```
+
+**PHASE_3_CHECKPOINT:**
+- [ ] Diff available
+- [ ] Files categorized by type
+- [ ] CLAUDE.md rules noted
+- [ ] New abstractions scanned
 
 ---
 
