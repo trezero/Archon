@@ -33,7 +33,13 @@ if (existsSync(globalEnvPath)) {
 
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { validationErrorHook } from './routes/openapi-defaults';
-import { TelegramAdapter, GitHubAdapter, DiscordAdapter, SlackAdapter } from '@archon/adapters';
+import {
+  TelegramAdapter,
+  GitHubAdapter,
+  GitLabAdapter,
+  DiscordAdapter,
+  SlackAdapter,
+} from '@archon/adapters';
 import { GiteaAdapter } from '@archon/adapters/community/forge/gitea';
 import { WebAdapter } from './adapters/web';
 import { MessagePersistence } from './adapters/web/persistence';
@@ -216,8 +222,9 @@ async function main(): Promise<void> {
   const hasGitea = Boolean(
     process.env.GITEA_URL && process.env.GITEA_TOKEN && process.env.GITEA_WEBHOOK_SECRET
   );
+  const hasGitLab = Boolean(process.env.GITLAB_TOKEN && process.env.GITLAB_WEBHOOK_SECRET);
 
-  if (!hasTelegram && !hasDiscord && !hasGitHub && !hasGitea) {
+  if (!hasTelegram && !hasDiscord && !hasGitHub && !hasGitea && !hasGitLab) {
     getLog().warn('no_platform_adapters_configured');
   }
 
@@ -252,6 +259,23 @@ async function main(): Promise<void> {
     await gitea.start();
   } else {
     getLog().info('gitea_adapter_skipped');
+  }
+
+  // Initialize GitLab adapter (conditional)
+  let gitlab: GitLabAdapter | null = null;
+  if (process.env.GITLAB_TOKEN && process.env.GITLAB_WEBHOOK_SECRET) {
+    const gitlabBotMention =
+      process.env.GITLAB_BOT_MENTION || process.env.BOT_DISPLAY_NAME || config.botName;
+    gitlab = new GitLabAdapter(
+      process.env.GITLAB_TOKEN,
+      process.env.GITLAB_WEBHOOK_SECRET,
+      lockManager,
+      process.env.GITLAB_URL || undefined,
+      gitlabBotMention
+    );
+    await gitlab.start();
+  } else {
+    getLog().info('gitlab_adapter_skipped');
   }
 
   // Initialize Discord adapter (conditional)
@@ -443,6 +467,32 @@ async function main(): Promise<void> {
     getLog().info('gitea_webhook_registered');
   }
 
+  // GitLab webhook endpoint
+  if (gitlab) {
+    app.post('/webhooks/gitlab', async c => {
+      const eventType = c.req.header('x-gitlab-event');
+
+      try {
+        const token = c.req.header('x-gitlab-token');
+        if (!token) {
+          return c.json({ error: 'Missing token header' }, 400);
+        }
+
+        const payload = await c.req.text();
+
+        gitlab.handleWebhook(payload, token).catch((error: unknown) => {
+          getLog().error({ err: error, eventType }, 'gitlab.webhook_processing_error');
+        });
+
+        return c.text('OK', 200);
+      } catch (error) {
+        getLog().error({ err: error, eventType }, 'gitlab.webhook_endpoint_error');
+        return c.json({ error: 'Internal server error' }, 500);
+      }
+    });
+    getLog().info('gitlab_webhook_registered');
+  }
+
   // Health check endpoints
   app.get('/health', c => {
     return c.json({ status: 'ok' });
@@ -529,6 +579,7 @@ async function main(): Promise<void> {
           discord?.stop();
           slack?.stop();
           gitea?.stop();
+          gitlab?.stop();
           await webAdapter.stop();
         } catch (error) {
           getLog().error({ err: error }, 'adapter_stop_error');
@@ -565,6 +616,7 @@ async function main(): Promise<void> {
   if (slack) activePlatforms.push('Slack');
   if (github) activePlatforms.push('GitHub');
   if (gitea) activePlatforms.push('Gitea');
+  if (gitlab) activePlatforms.push('GitLab');
 
   getLog().info({ activePlatforms, port }, 'server_ready');
 
