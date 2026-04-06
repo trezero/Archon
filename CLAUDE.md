@@ -656,7 +656,7 @@ async function createSession(conversationId: string, codebaseId: string) {
 2. **Workflows** (YAML-based):
    - Stored in `.archon/workflows/` (searched recursively)
    - Multi-step AI execution chains, discovered at runtime
-   - **`nodes:` (DAG format)**: Nodes with explicit `depends_on` edges; independent nodes in the same topological layer run concurrently. Node types: `command:` (named command file), `prompt:` (inline prompt), `bash:` (shell script, stdout captured as `$nodeId.output`, no AI), `loop:` (iterative AI prompt until completion signal) — see docs/loop-nodes.md. Supports `when:` conditions, `trigger_rule` join semantics, `$nodeId.output` substitution, `output_format` for structured JSON output (Claude and Codex), `allowed_tools`/`denied_tools` for per-node tool restrictions (Claude only), `hooks` for per-node SDK hook callbacks (Claude only) — see docs/hooks.md, `mcp` for per-node MCP server config files (Claude only, env vars expanded at execution time) — see docs/mcp-servers.md, and `skills` for per-node skill preloading via AgentDefinition wrapping (Claude only) — see docs/skills.md
+   - **`nodes:` (DAG format)**: Nodes with explicit `depends_on` edges; independent nodes in the same topological layer run concurrently. Node types: `command:` (named command file), `prompt:` (inline prompt), `bash:` (shell script, stdout captured as `$nodeId.output`, no AI), `loop:` (iterative AI prompt until completion signal) . Supports `when:` conditions, `trigger_rule` join semantics, `$nodeId.output` substitution, `output_format` for structured JSON output (Claude and Codex), `allowed_tools`/`denied_tools` for per-node tool restrictions (Claude only), `hooks` for per-node SDK hook callbacks (Claude only), `mcp` for per-node MCP server config files (Claude only, env vars expanded at execution time), and `skills` for per-node skill preloading via AgentDefinition wrapping (Claude only)
    - Provider inherited from `.archon/config.yaml` unless explicitly set; per-node `provider` and `model` overrides supported
    - Model and options can be set per workflow or inherited from config defaults
    - `interactive: true` at the workflow level forces foreground execution on web (required for approval-gate workflows in the web UI)
@@ -678,7 +678,7 @@ async function createSession(conversationId: string, codebaseId: string) {
 **Global workflows** (user-level, applies to every project):
 - Path: `~/.archon/.archon/workflows/` (or `$ARCHON_HOME/.archon/workflows/`)
 - Load priority: bundled < global < repo-specific (repo overrides global by filename)
-- See `docs/global-workflows.md` for details
+- See the docs site at `packages/docs-web/` for details
 
 ### Error Handling
 

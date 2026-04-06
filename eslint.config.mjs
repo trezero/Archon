@@ -12,7 +12,7 @@ export default tseslint.config(
       'dist/**',
       'coverage/**',
       '.agents/examples/**',
-      'website/**',
+      'packages/docs-web/**',
       'workspace/**',
       'worktrees/**',
       '.claude/worktrees/**',

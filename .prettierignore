@@ -28,7 +28,7 @@ package-lock.json
 .archon/
 
 # Website (Astro/Starlight - uses own formatting)
-website/
+packages/docs-web/
 
 # GitHub templates (don't auto-format)
 .github/
