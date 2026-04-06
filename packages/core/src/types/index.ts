@@ -215,6 +215,12 @@ export type MessageChunk =
 
 import type { ModelReasoningEffort, WebSearchMode } from '@archon/workflows/schemas/workflow';
 export type { ModelReasoningEffort, WebSearchMode };
+import type {
+  EffortLevel,
+  ThinkingConfig,
+  SandboxSettings,
+} from '@archon/workflows/schemas/dag-node';
+export type { EffortLevel, ThinkingConfig, SandboxSettings };
 
 export interface AssistantRequestOptions {
   model?: string;
@@ -305,14 +311,11 @@ export interface AssistantRequestOptions {
   /**
    * Controls reasoning depth for Claude. Claude only — ignored for Codex.
    */
-  effort?: 'low' | 'medium' | 'high' | 'max';
+  effort?: EffortLevel;
   /**
    * Controls Claude's thinking/reasoning behavior. Claude only — ignored for Codex.
    */
-  thinking?:
-    | { type: 'adaptive' }
-    | { type: 'enabled'; budgetTokens?: number }
-    | { type: 'disabled' };
+  thinking?: ThinkingConfig;
   /**
    * Maximum USD cost budget. SDK returns error_max_budget_usd result if exceeded.
    * Claude only — ignored for Codex.
@@ -335,34 +338,7 @@ export interface AssistantRequestOptions {
    * OS-level sandbox settings passed to Claude subprocess.
    * Claude only — ignored for Codex.
    */
-  sandbox?: {
-    [key: string]: unknown;
-    enabled?: boolean;
-    autoAllowBashIfSandboxed?: boolean;
-    allowUnsandboxedCommands?: boolean;
-    network?: {
-      allowedDomains?: string[];
-      allowManagedDomainsOnly?: boolean;
-      allowUnixSockets?: string[];
-      allowAllUnixSockets?: boolean;
-      allowLocalBinding?: boolean;
-      httpProxyPort?: number;
-      socksProxyPort?: number;
-    };
-    filesystem?: {
-      allowWrite?: string[];
-      denyWrite?: string[];
-      denyRead?: string[];
-    };
-    ignoreViolations?: Record<string, string[]>;
-    enableWeakerNestedSandbox?: boolean;
-    enableWeakerNetworkIsolation?: boolean;
-    excludedCommands?: string[];
-    ripgrep?: {
-      command: string;
-      args?: string[];
-    };
-  };
+  sandbox?: SandboxSettings;
 }
 
 /**
