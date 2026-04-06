@@ -136,6 +136,12 @@ function extractUsageFromCodexEvent(event: TurnCompletedEvent): TokenUsage {
  * Implements generic IAssistantClient interface
  */
 export class CodexClient implements IAssistantClient {
+  private readonly retryBaseDelayMs: number;
+
+  constructor(options?: { retryBaseDelayMs?: number }) {
+    this.retryBaseDelayMs = options?.retryBaseDelayMs ?? RETRY_BASE_DELAY_MS;
+  }
+
   /**
    * Send a query to Codex and stream responses
    * @param prompt - User message or prompt
@@ -455,7 +461,7 @@ export class CodexClient implements IAssistantClient {
           attempt < MAX_SUBPROCESS_RETRIES &&
           (errorClass === 'rate_limit' || errorClass === 'crash')
         ) {
-          const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+          const delayMs = this.retryBaseDelayMs * Math.pow(2, attempt);
           getLog().info({ attempt, delayMs, errorClass }, 'retrying_query');
           await new Promise(resolve => setTimeout(resolve, delayMs));
           lastError = err;

@@ -73,7 +73,7 @@ describe('SSETransport', () => {
 
     test('cancels pending cleanup timer on reconnection', () => {
       const cleanup = mock((_id: string) => undefined);
-      const transport = new SSETransport(cleanup);
+      const transport = new SSETransport(cleanup, 1);
       const stream1 = createMockStream();
       const stream2 = createMockStream();
 
@@ -88,9 +88,9 @@ describe('SSETransport', () => {
         setTimeout(() => {
           expect(cleanup).not.toHaveBeenCalled();
           resolve();
-        }, 6_000);
+        }, 50);
       });
-    }, 10_000);
+    }, 1_000);
   });
 
   describe('removeStream', () => {
@@ -130,7 +130,7 @@ describe('SSETransport', () => {
 
     test('calls onCleanup after grace period if stream not re-registered', () => {
       const cleanup = mock((_id: string) => undefined);
-      const transport = new SSETransport(cleanup);
+      const transport = new SSETransport(cleanup, 1);
       const stream = createMockStream();
 
       transport.registerStream('conv-1', stream);
@@ -140,9 +140,9 @@ describe('SSETransport', () => {
         setTimeout(() => {
           expect(cleanup).toHaveBeenCalledWith('conv-1');
           resolve();
-        }, 6_000);
+        }, 50);
       });
-    }, 10_000);
+    }, 1_000);
   });
 
   describe('emit', () => {
@@ -254,7 +254,7 @@ describe('SSETransport', () => {
 
     test('stop cancels cleanup timers', () => {
       const cleanup = mock((_id: string) => undefined);
-      const transport = new SSETransport(cleanup);
+      const transport = new SSETransport(cleanup, 1);
       const stream = createMockStream();
 
       transport.start();
@@ -267,8 +267,8 @@ describe('SSETransport', () => {
         setTimeout(() => {
           expect(cleanup).not.toHaveBeenCalled();
           resolve();
-        }, 6_000);
+        }, 50);
       });
-    }, 10_000);
+    }, 1_000);
   });
 });

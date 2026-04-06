@@ -111,12 +111,15 @@ const mockLockManager = {
  * Reduces duplication across tests that need to verify comment posting behavior.
  */
 async function createTestAdapterWithMockedOctokit(
-  mockCreateComment: ReturnType<typeof mock>
+  mockCreateComment: ReturnType<typeof mock>,
+  options?: { retryDelayMs?: (attempt: number) => number }
 ): Promise<GitHubAdapter> {
   const testAdapter = new GitHubAdapter(
     'fake-token-for-testing',
     'fake-webhook-secret',
-    mockLockManager
+    mockLockManager,
+    undefined,
+    options
   );
   await testAdapter.start();
   // @ts-expect-error - accessing private property for testing
@@ -610,7 +613,9 @@ describe('GitHubAdapter', () => {
       const mockCreateComment = mock()
         .mockRejectedValueOnce(new Error('fetch failed')) // First attempt fails
         .mockResolvedValueOnce({ data: {} }); // Second attempt succeeds
-      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment, {
+        retryDelayMs: () => 1,
+      });
 
       await testAdapter.sendMessage('owner/repo#123', 'test message');
 
@@ -623,7 +628,9 @@ describe('GitHubAdapter', () => {
       const mockCreateComment = mock()
         .mockRejectedValueOnce(transientError) // First attempt fails
         .mockResolvedValueOnce({ data: {} }); // Second attempt succeeds
-      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment, {
+        retryDelayMs: () => 1,
+      });
 
       await testAdapter.sendMessage('owner/repo#123', 'test message');
 
@@ -660,7 +667,9 @@ describe('GitHubAdapter', () => {
 
     test('should throw after exhausting retries', async () => {
       const mockCreateComment = mock().mockRejectedValue(new Error('fetch failed'));
-      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment);
+      const testAdapter = await createTestAdapterWithMockedOctokit(mockCreateComment, {
+        retryDelayMs: () => 1,
+      });
 
       // Should throw after 3 attempts
       await expect(testAdapter.sendMessage('owner/repo#123', 'test message')).rejects.toThrow(

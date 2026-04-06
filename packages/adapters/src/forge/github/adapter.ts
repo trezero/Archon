@@ -51,12 +51,14 @@ export class GitHubAdapter implements IPlatformAdapter {
   private allowedUsers: string[];
   private botMention: string;
   private lockManager: ConversationLockManager;
+  private readonly retryDelayFn: (attempt: number) => number;
 
   constructor(
     token: string,
     webhookSecret: string,
     lockManager: ConversationLockManager,
-    botMention?: string
+    botMention?: string,
+    options?: { retryDelayMs?: (attempt: number) => number }
   ) {
     this.octokit = new Octokit({ auth: token });
     this.webhookSecret = webhookSecret;
@@ -70,6 +72,8 @@ export class GitHubAdapter implements IPlatformAdapter {
     } else {
       getLog().info('github.whitelist_disabled');
     }
+
+    this.retryDelayFn = options?.retryDelayMs ?? ((attempt: number): number => 1000 * attempt);
 
     getLog().info({ botMention: this.botMention }, 'github.adapter_initialized');
   }
@@ -189,7 +193,7 @@ export class GitHubAdapter implements IPlatformAdapter {
       } catch (error) {
         const isRetryable = this.isRetryableError(error);
         if (attempt < maxRetries && isRetryable) {
-          const delay = 1000 * attempt;
+          const delay = this.retryDelayFn(attempt);
           getLog().warn(
             { attempt, maxRetries, conversationId, delayMs: delay },
             'github.comment_post_retry'

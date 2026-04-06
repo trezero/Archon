@@ -45,7 +45,7 @@ describe('CodexClient', () => {
   let client: CodexClient;
 
   beforeEach(() => {
-    client = new CodexClient();
+    client = new CodexClient({ retryBaseDelayMs: 1 });
     mockStartThread.mockClear();
     mockResumeThread.mockClear();
     mockRunStreamed.mockClear();
@@ -864,7 +864,7 @@ describe('CodexClient', () => {
         await expect(consumeGenerator()).rejects.toThrow(/Codex crash/);
         // Initial attempt + 3 retries = 4 runStreamed calls
         expect(mockRunStreamed).toHaveBeenCalledTimes(4);
-      }, 30_000);
+      }, 5_000);
 
       test('recovers from transient crash on retry', async () => {
         let callCount = 0;
@@ -891,7 +891,7 @@ describe('CodexClient', () => {
 
         expect(callCount).toBe(3);
         expect(chunks.some(c => c.type === 'assistant' && c.content === 'Recovered!')).toBe(true);
-      }, 30_000);
+      }, 5_000);
 
       test('classifies auth errors as fatal (no retry)', async () => {
         mockRunStreamed.mockRejectedValue(new Error('unauthorized'));
