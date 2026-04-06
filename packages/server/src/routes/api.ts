@@ -36,12 +36,9 @@ import {
   getDefaultCommandsPath,
   getDefaultWorkflowsPath,
   getArchonWorkspacesPath,
-<<<<<<< HEAD
   getRunArtifactsPath,
   getArchonHome,
-=======
   isDocker,
->>>>>>> 75eec3f7 (fix: hide 'Open in IDE' button in Docker deployments (#898))
 } from '@archon/paths';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import { parseWorkflow } from '@archon/workflows/loader';
@@ -798,11 +795,8 @@ const getHealthRoute = createRoute({
               adapter: z.string(),
               concurrency: z.record(z.unknown()),
               runningWorkflows: z.number(),
-<<<<<<< HEAD
               version: z.string().optional(),
-=======
               is_docker: z.boolean(),
->>>>>>> 75eec3f7 (fix: hide 'Open in IDE' button in Docker deployments (#898))
             })
             .openapi('HealthResponse'),
         },
@@ -2495,11 +2489,8 @@ export function registerApiRoutes(
         activeConversationIds: allActiveIds,
       },
       runningWorkflows: runningWorkflowRows.length,
-<<<<<<< HEAD
       version: appVersion,
-=======
       is_docker: isDocker(),
->>>>>>> 75eec3f7 (fix: hide 'Open in IDE' button in Docker deployments (#898))
     });
   });
 }
