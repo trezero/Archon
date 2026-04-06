@@ -360,6 +360,41 @@ describe('ClaudeClient', () => {
       }
     });
 
+    test('ANTHROPIC_API_KEY alone does not set hasExplicitTokens (falls through to global auth)', async () => {
+      const originalOauth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      const originalApiKey = process.env.CLAUDE_API_KEY;
+      const originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
+
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      delete process.env.CLAUDE_API_KEY;
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-test-key';
+
+      mockQuery.mockImplementation(async function* () {
+        // Empty generator
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of client.sendQuery('test', '/workspace')) {
+        // consume
+      }
+
+      // ANTHROPIC_API_KEY should pass through (not filtered) since useGlobalAuth=true path
+      // strips only CLAUDE_CODE_OAUTH_TOKEN and CLAUDE_API_KEY
+      const callArgs = mockQuery.mock.calls[0][0] as { options: { env: NodeJS.ProcessEnv } };
+      expect(callArgs.options.env.ANTHROPIC_API_KEY).toBe('sk-ant-test-key');
+      // Explicit SDK vars are absent (useGlobalAuth=true path)
+      expect(callArgs.options.env.CLAUDE_API_KEY).toBeUndefined();
+      expect(callArgs.options.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+
+      // Cleanup
+      if (originalOauth !== undefined) process.env.CLAUDE_CODE_OAUTH_TOKEN = originalOauth;
+      else delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      if (originalApiKey !== undefined) process.env.CLAUDE_API_KEY = originalApiKey;
+      else delete process.env.CLAUDE_API_KEY;
+      if (originalAnthropicKey !== undefined) process.env.ANTHROPIC_API_KEY = originalAnthropicKey;
+      else delete process.env.ANTHROPIC_API_KEY;
+    });
+
     test('strips VSCODE_INSPECTOR_OPTIONS from subprocess env', async () => {
       const original = process.env.VSCODE_INSPECTOR_OPTIONS;
       process.env.VSCODE_INSPECTOR_OPTIONS = 'some-value';

@@ -49,7 +49,7 @@ Your verification should prioritize SDK functionality and best practices over ge
 
 6. **Environment and Security**:
 
-   - Check that `.env.example` exists with `ANTHROPIC_API_KEY`
+   - Check that `.env.example` exists with Claude auth options (`CLAUDE_CODE_OAUTH_TOKEN` or `CLAUDE_API_KEY`)
    - Verify `.env` is in `.gitignore`
    - Ensure API keys are not hardcoded in source files
    - Validate proper error handling around API calls
