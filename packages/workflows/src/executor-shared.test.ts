@@ -127,6 +127,18 @@ describe('substituteWorkflowVariables', () => {
     expect(prompt).toBe('No docs reference here');
   });
 
+  it('falls back to docs/ when docsDir is empty string', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'Check $DOCS_DIR for changes',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main',
+      ''
+    );
+    expect(prompt).toBe('Check docs/ for changes');
+  });
+
   it('replaces $CONTEXT when issueContext is provided', () => {
     const { prompt, contextSubstituted } = substituteWorkflowVariables(
       'Fix this: $CONTEXT',

@@ -1548,12 +1548,23 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
     });
 
     if (!isCancel(docsPath) && typeof docsPath === 'string' && docsPath.trim()) {
-      const archonDir = join(options.repoPath, '.archon');
-      mkdirSync(archonDir, { recursive: true });
-      const configPath = join(archonDir, 'config.yaml');
-      const existing = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '';
-      if (!existing.includes('docs:')) {
-        writeFileSync(configPath, existing + `\ndocs:\n  path: ${docsPath.trim()}\n`);
+      try {
+        const archonDir = join(options.repoPath, '.archon');
+        mkdirSync(archonDir, { recursive: true });
+        const configPath = join(archonDir, 'config.yaml');
+        const existing = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '';
+        if (!existing.includes('docs:')) {
+          const escaped = docsPath.trim().replace(/"/g, '\\"');
+          writeFileSync(configPath, existing + `\ndocs:\n  path: "${escaped}"\n`);
+        } else {
+          note(
+            `A "docs:" key already exists in ${configPath}.\nEdit it manually to set path: ${docsPath.trim()}`,
+            'Docs path not written'
+          );
+        }
+      } catch (err) {
+        cancel(`Could not write docs config: ${(err as NodeJS.ErrnoException).message}`);
+        process.exit(1);
       }
     }
   }

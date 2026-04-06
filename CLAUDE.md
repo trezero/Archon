@@ -457,6 +457,9 @@ assistants:
     webSearchMode: live  # 'disabled' | 'cached' | 'live'
     additionalDirectories:
       - /absolute/path/to/other/repo
+
+# docs:
+#   path: docs  # Optional: default is docs/
 ```
 
 **Configuration Priority:**
@@ -646,6 +649,7 @@ async function createSession(conversationId: string, codebaseId: string) {
 - `$ARTIFACTS_DIR` - External artifacts directory for the current workflow run (pre-created by executor)
 - `$WORKFLOW_ID` - The workflow run ID
 - `$BASE_BRANCH` - Base branch; auto-detected from git when `worktree.baseBranch` is not set; fails only if referenced in a prompt and auto-detection also fails
+- `$DOCS_DIR` - Documentation directory path; configured via `docs.path` in `.archon/config.yaml`. Defaults to `docs/`. Never throws.
 - `$LOOP_USER_INPUT` - User feedback provided via `/workflow approve <id> <text>` at an interactive loop gate. Only populated on the first iteration of a resumed interactive loop; empty string on all other iterations.
 - `$REJECTION_REASON` - Reviewer feedback provided via `/workflow reject <id> <reason>` at an approval gate. Only populated in `on_reject` prompts; empty string elsewhere.
 

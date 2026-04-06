@@ -280,6 +280,9 @@ export function substituteWorkflowVariables(
     );
   }
 
+  // Defensive: ensure docsDir always has a value (callers should resolve, but guard here)
+  const resolvedDocsDir = docsDir || 'docs/';
+
   // Substitute basic variables
   let result = prompt
     .replace(/\$WORKFLOW_ID/g, workflowId)
@@ -287,7 +290,7 @@ export function substituteWorkflowVariables(
     .replace(/\$ARGUMENTS/g, userMessage)
     .replace(/\$ARTIFACTS_DIR/g, artifactsDir)
     .replace(/\$BASE_BRANCH/g, baseBranch)
-    .replace(/\$DOCS_DIR/g, docsDir)
+    .replace(/\$DOCS_DIR/g, resolvedDocsDir)
     .replace(/\$LOOP_USER_INPUT/g, loopUserInput ?? '')
     .replace(/\$REJECTION_REASON/g, rejectionReason ?? '');
 

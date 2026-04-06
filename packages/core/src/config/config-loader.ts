@@ -369,8 +369,13 @@ function mergeRepoConfig(merged: MergedConfig, repo: RepoConfig): MergedConfig {
   }
 
   // Propagate docs path for $DOCS_DIR substitution in workflow commands
-  if (repo.docs?.path?.trim()) {
-    result.docsPath = repo.docs.path.trim();
+  if (repo.docs?.path !== undefined) {
+    const trimmed = repo.docs.path.trim();
+    if (trimmed) {
+      result.docsPath = trimmed;
+    } else {
+      getLog().warn({ rawValue: repo.docs.path }, 'config.docs_path_whitespace_ignored');
+    }
   }
 
   // Propagate per-project env vars from repo config
