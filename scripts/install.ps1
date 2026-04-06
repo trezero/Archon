@@ -61,6 +61,8 @@ function Get-Arch {
         try {
             $procArch = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' -Name PROCESSOR_ARCHITECTURE).PROCESSOR_ARCHITECTURE
         } catch {
+            Write-Warn "Could not read processor architecture from registry: $($_.Exception.Message)"
+            Write-Warn "Assuming x64 architecture. Set PROCESSOR_ARCHITECTURE env var to override."
             $procArch = "AMD64"
         }
     }

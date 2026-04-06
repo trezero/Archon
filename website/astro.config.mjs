@@ -16,22 +16,6 @@ export default defineConfig({
           label: 'Getting Started',
           autogenerate: { directory: 'getting-started' },
         },
-        {
-          label: 'Guides',
-          autogenerate: { directory: 'guides' },
-        },
-        {
-          label: 'Adapters',
-          autogenerate: { directory: 'adapters' },
-        },
-        {
-          label: 'Deployment',
-          autogenerate: { directory: 'deployment' },
-        },
-        {
-          label: 'Reference',
-          autogenerate: { directory: 'reference' },
-        },
       ],
       customCss: ['./src/styles/custom.css'],
     }),

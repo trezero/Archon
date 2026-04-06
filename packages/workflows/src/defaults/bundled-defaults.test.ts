@@ -32,6 +32,9 @@ describe('bundled-defaults', () => {
 
   describe('isBinaryBuild', () => {
     it('should return false when running in test environment (not compiled)', () => {
+      // The true path requires an actual compiled binary (import.meta.dir points to
+      // Bun's virtual FS only inside compiled binaries). Coverage of the true branch
+      // relies on isBunVirtualFs tests above + manual binary smoke testing in CI.
       expect(isBinaryBuild()).toBe(false);
     });
   });

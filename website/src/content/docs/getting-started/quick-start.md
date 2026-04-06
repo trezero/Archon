@@ -41,6 +41,5 @@ Commands are reusable prompt files (`.md` or `.txt`) that workflows reference. T
 
 ## What's Next?
 
-- [Authoring Workflows](/guides/authoring-workflows/) — Create your own workflows
-- [CLI Guide](/guides/cli/) — Full CLI reference
-- [Web UI](/guides/web-ui/) — Use the browser interface
+- [Configuration](/getting-started/configuration/) — Customize Archon for your project
+- [GitHub Repository](https://github.com/coleam00/Archon) — Source code, issues, and discussions
