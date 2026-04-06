@@ -314,20 +314,30 @@ describe('PUT /api/workflows/:name', () => {
     expect(body.error).toContain('definition');
   });
 
-  test('returns 400 when cwd not available', async () => {
+  test('falls back to getArchonHome() when no cwd and no codebases registered', async () => {
     const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     mockListCodebases.mockImplementationOnce(async () => []);
+    mockParseWorkflow.mockReturnValueOnce({
+      workflow: makeTestWorkflow({ name: 'my-workflow', description: 'test' }),
+      error: null,
+    });
 
     const response = await app.request('/api/workflows/my-workflow', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ definition: { name: 'my-workflow', description: 'test' } }),
+      body: JSON.stringify({
+        definition: {
+          name: 'my-workflow',
+          description: 'test',
+          nodes: [{ id: 'n1', command: 'assist' }],
+        },
+      }),
     });
-    expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: string };
-    expect(body.error).toContain('cwd');
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { workflow: object; source: string };
+    expect(body.source).toBe('project');
   });
 
   test('returns 400 when definition fails validation', async () => {
@@ -414,16 +424,16 @@ describe('DELETE /api/workflows/:name', () => {
     expect(body.error).toContain('test-nonexistent-workflow-xyz');
   });
 
-  test('returns 400 when cwd not available', async () => {
+  test('falls back to getArchonHome() when no cwd and no codebases, returns 404 for missing file', async () => {
     const app = createTestApp();
     registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
     mockListCodebases.mockImplementationOnce(async () => []);
 
-    const response = await app.request('/api/workflows/my-workflow', { method: 'DELETE' });
-    expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: string };
-    expect(body.error).toContain('cwd');
+    const response = await app.request('/api/workflows/nonexistent-no-cwd-test', {
+      method: 'DELETE',
+    });
+    expect(response.status).toBe(404);
   });
 
   test('removes existing workflow file and returns deleted:true', async () => {

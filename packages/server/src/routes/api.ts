@@ -2166,7 +2166,7 @@ export function registerApiRoutes(
       if (codebases.length > 0) workingDir = codebases[0].default_cwd;
     }
     if (!workingDir) {
-      return apiError(c, 400, 'cwd is required');
+      workingDir = getArchonHome();
     }
 
     const { definition } = getValidatedBody(c, saveWorkflowBodySchema);
@@ -2227,7 +2227,7 @@ export function registerApiRoutes(
       if (codebases.length > 0) workingDir = codebases[0].default_cwd;
     }
     if (!workingDir) {
-      return apiError(c, 400, 'cwd is required');
+      workingDir = getArchonHome();
     }
 
     const [workflowFolder] = getWorkflowFolderSearchPaths();
