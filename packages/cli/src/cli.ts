@@ -66,7 +66,6 @@ import { chatCommand } from './commands/chat';
 import { setupCommand } from './commands/setup';
 import { validateWorkflowsCommand, validateCommandsCommand } from './commands/validate';
 import { closeDatabase } from '@archon/core';
-import { createWorkflowStore } from '@archon/core/workflows/store-adapter';
 import { setLogLevel, createLogger } from '@archon/paths';
 import * as git from '@archon/git';
 
@@ -222,13 +221,9 @@ async function main(): Promise<number> {
       setLogLevel('debug');
     }
 
-    // Mark workflow runs orphaned by previous process termination as failed
-    void createWorkflowStore()
-      .failOrphanedRuns()
-      .catch((err: unknown) => {
-        const e = err as Error;
-        getLog().warn({ err: e, errorType: e.constructor.name }, 'cli.fail_orphans_failed');
-      });
+    // Note: orphaned run cleanup moved to `workflow cleanup` command only.
+    // Running it on every CLI startup killed parallel workflow runs (all
+    // 'running' status rows were marked failed by each new process).
 
     // Validate working directory exists
     let effectiveCwd = cwd;
