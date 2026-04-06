@@ -315,29 +315,37 @@ describe('PUT /api/workflows/:name', () => {
   });
 
   test('falls back to getArchonHome() when no cwd and no codebases registered', async () => {
-    const app = createTestApp();
-    registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
+    const testArchonHome = join(tmpdir(), `archon-home-test-${Date.now()}`);
+    process.env.ARCHON_HOME = testArchonHome;
 
-    mockListCodebases.mockImplementationOnce(async () => []);
-    mockParseWorkflow.mockReturnValueOnce({
-      workflow: makeTestWorkflow({ name: 'my-workflow', description: 'test' }),
-      error: null,
-    });
+    try {
+      const app = createTestApp();
+      registerApiRoutes(app, {} as WebAdapter, {} as ConversationLockManager);
 
-    const response = await app.request('/api/workflows/my-workflow', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        definition: {
-          name: 'my-workflow',
-          description: 'test',
-          nodes: [{ id: 'n1', command: 'assist' }],
-        },
-      }),
-    });
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as { workflow: object; source: string };
-    expect(body.source).toBe('project');
+      mockListCodebases.mockImplementationOnce(async () => []);
+      mockParseWorkflow.mockReturnValueOnce({
+        workflow: makeTestWorkflow({ name: 'my-workflow', description: 'test' }),
+        error: null,
+      });
+
+      const response = await app.request('/api/workflows/my-workflow', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          definition: {
+            name: 'my-workflow',
+            description: 'test',
+            nodes: [{ id: 'n1', command: 'assist' }],
+          },
+        }),
+      });
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { workflow: object; source: string };
+      expect(body.source).toBe('project');
+    } finally {
+      delete process.env.ARCHON_HOME;
+      await rm(testArchonHome, { recursive: true, force: true });
+    }
   });
 
   test('returns 400 when definition fails validation', async () => {
@@ -434,6 +442,8 @@ describe('DELETE /api/workflows/:name', () => {
       method: 'DELETE',
     });
     expect(response.status).toBe(404);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('nonexistent-no-cwd-test');
   });
 
   test('removes existing workflow file and returns deleted:true', async () => {
