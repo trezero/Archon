@@ -555,7 +555,7 @@ async function main(): Promise<void> {
     try {
       await telegramAdapter.start();
     } catch (err) {
-      const error = err as Error;
+      const error = err instanceof Error ? err : new Error(String(err));
       getLog().error({ err: error, errorType: error.constructor.name }, 'telegram.start_failed');
       telegram = null; // Don't include in active platforms or shutdown
     }
