@@ -291,8 +291,8 @@ archon workflow run <name> "<message>"
 # Run with worktree isolation (recommended for code changes)
 archon workflow run <name> --branch <branch-name> "<message>"
 
-# Run on branch directly without worktree
-archon workflow run <name> --branch <branch-name> --no-worktree "<message>"
+# Run directly in the live checkout without worktree isolation
+archon workflow run <name> --no-worktree "<message>"
 
 # Run against a different directory
 archon workflow run <name> --cwd /path/to/repo "<message>"
@@ -382,7 +382,7 @@ commands:
   folder: .claude/commands/archon    # additional command search path
 worktree:
   copyFiles:
-    - .env.example -> .env           # copy + rename into worktrees
+    - .env.example                   # copy into worktrees (same filename)
     - .env
 ```
 

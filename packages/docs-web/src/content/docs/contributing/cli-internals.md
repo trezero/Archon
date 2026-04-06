@@ -38,36 +38,36 @@ packages/cli/
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ cli.ts:15-39  Load environment                                  │
-│               .env (cwd) → ~/.archon/.env (fallback)            │
+│ cli.ts:15-31  Load environment                                  │
+│               Suppresses cwd .env → loads ~/.archon/.env only   │
 └─────────────────────────────────┬───────────────────────────────┘
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ cli.ts:115-135  Parse arguments                                 │
+│ cli.ts  Parse arguments                                         │
 │                 --cwd, --branch, --no-worktree, --help          │
 └─────────────────────────────────┬───────────────────────────────┘
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ cli.ts:154-170  Git repository check                            │
+│ cli.ts  Git repository check                                    │
 │                 Skip for version/help, validate and resolve to  │
 │                 repo root for workflow/isolation commands       │
 └─────────────────────────────────┬───────────────────────────────┘
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ cli.ts:172-246  Route to command handler                        │
+│ cli.ts  Route to command handler                                │
 │                 switch(command) → workflow | isolation | version│
 └─────────────────────────────────┬───────────────────────────────┘
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ cli.ts:244-252  Exit with code, always closeDatabase()          │
+│ cli.ts  Exit with code, always closeDatabase()                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Code:** `packages/cli/src/cli.ts:106-259`
+**Code:** `packages/cli/src/cli.ts`
 
 **Git repository check:**
 - Commands `workflow`, `isolation`, and `complete` require running from a git repository
@@ -310,7 +310,7 @@ CLI conversations use ID format: `cli-{timestamp}-{random}`
 
 Example: `cli-1705932847321-a7f3b2`
 
-Generated at: `packages/cli/src/commands/workflow.ts:26`
+Generated at: `packages/cli/src/commands/workflow.ts`
 
 ---
 
@@ -345,4 +345,4 @@ Worktrees stored at: `~/.archon/workspaces/<owner>/<repo>/worktrees/<branch-slug
 - **Default: SQLite** at `~/.archon/archon.db` (zero setup, auto-initialized)
 - **Optional: PostgreSQL** when `DATABASE_URL` is set (for cloud/advanced deployments)
 
-**Code:** `packages/cli/src/cli.ts:229-241`
+**Code:** `packages/cli/src/cli.ts`

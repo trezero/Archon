@@ -35,7 +35,7 @@ nodes:
     context: fresh
 ```
 
-> **Using defaults as templates:** Archon ships 17 default workflows in `.archon/workflows/defaults/`. Browse them for real-world examples, then copy and modify:
+> **Using defaults as templates:** Archon ships default workflows in `.archon/workflows/defaults/` (12 bundled into the binary, plus additional ones available on disk in source builds). Browse them for real-world examples, then copy and modify:
 > ```bash
 > cp .archon/workflows/defaults/archon-fix-github-issue.yaml .archon/workflows/my-fix-issue.yaml
 > ```
@@ -312,31 +312,31 @@ nodes:
 
 ## Retry Configuration
 
-Every node automatically retries on **transient** errors (SDK subprocess crashes, rate limits, network timeouts) using a default configuration: **2 retries**, **3 s base delay** with exponential backoff. You will see a platform notification before each retry attempt.
+Every node automatically retries on **transient** errors (SDK subprocess crashes, rate limits, network timeouts) using a default configuration: **2 retries** (3 total attempts), **3 s base delay** with exponential backoff. You will see a platform notification before each retry attempt.
 
-To opt out or customise, add a `retry:` block:
+To customise, add a `retry:` block:
 
 ```yaml
 nodes:
   - id: flaky-node
     command: flaky-command
     retry:
-      max_attempts: 3
+      max_attempts: 3       # 3 retries = 4 total attempts
       delay_ms: 5000
       on_error: transient
 
   - id: aggressive-retry
     prompt: "Summarise the output"
     retry:
-      max_attempts: 4
-      on_error: all        # Retry even non-transient errors (use with caution)
+      max_attempts: 4       # 4 retries = 5 total attempts
+      on_error: all         # Retry even non-transient errors (use with caution)
 ```
 
 ### Retry Fields
 
 | Field | Type | Default | Constraints | Description |
 |-------|------|---------|-------------|-------------|
-| `max_attempts` | number | `3` | 1–5 | Total attempts including the first. `1` disables retry |
+| `max_attempts` | number | `2` | 1–5 | Number of retry attempts (not including the initial attempt). `1` = one retry (2 total attempts) |
 | `delay_ms` | number | `3000` | 1000–60000 | Base delay in ms before the first retry. Doubles each attempt (exponential backoff) |
 | `on_error` | `'transient'` \| `'all'` | `'transient'` | — | Which errors trigger a retry. `'transient'` = SDK crashes, rate limits, network timeouts only. `'all'` = any error including unknown errors (FATAL errors such as auth failures are never retried regardless) |
 
@@ -1018,7 +1018,7 @@ Before deploying a workflow:
 6. **Conditional branching** — `when:` conditions and `trigger_rule` control which nodes run
 7. **`output_format`** — enforce structured JSON output from AI nodes for reliable branching
 8. **`allowed_tools` / `denied_tools`** — restrict tools per node (Claude only, SDK-enforced)
-9. **`retry:`** — auto-retries transient errors (default: 2 retries, 3 s backoff); customize per node
+9. **`retry:`** — auto-retries transient errors (default: 2 retries / 3 total attempts, 3 s backoff); customize per node
 10. **`hooks`** — attach SDK hook callbacks to Claude nodes for tool control and context injection
 11. **`mcp:`** — attach per-node MCP servers via JSON config (Claude only)
 12. **`skills:`** — preload skills into Claude nodes for domain expertise

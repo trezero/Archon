@@ -566,10 +566,10 @@ Each conversation gets its own isolated copy of the repo:
 │   ├── .archon/                      ├── config.yaml      (global cfg)  │
 │   │   ├── config.yaml               ├── workspaces/      (cloned repos)│
 │   │   ├── commands/                 │   └── user/repo/                 │
-│   │   │   ├── investigate-issue.md  └── worktrees/       (isolation)   │
-│   │   │   ├── implement-issue.md        └── my-app/                    │
-│   │   │   └── assist.md                     ├── issue-42/              │
-│   │   ├── workflows/                        └── pr-127/                │
+│   │   │   ├── investigate-issue.md  │       ├── source/    (clone)      │
+│   │   │   ├── implement-issue.md   │       └── worktrees/ (isolation)  │
+│   │   │   └── assist.md            │           ├── issue-42/           │
+│   │   ├── workflows/               │           └── pr-127/             │
 │   │   │   ├── fix-github-issue.yaml                                    │
 │   │   │   └── assist.yaml                                              │
 │   │   └── artifacts/                                                   │

@@ -35,17 +35,16 @@ Archon ships with ready-to-use workflows that cover common coding tasks. You do 
 |----------|-------------|
 | `archon-assist` | General Q&A, debugging, exploration -- the catch-all |
 | `archon-fix-github-issue` | Investigate, root cause, implement fix, validate, PR |
-| `archon-idea-to-pr` | Feature idea through to PR with parallel reviews |
 | `archon-smart-pr-review` | Complexity-adaptive PR review |
 | `archon-comprehensive-pr-review` | Multi-agent PR review (5 parallel reviewers) |
 | `archon-feature-development` | Implement feature from plan, validate, create PR |
 | `archon-create-issue` | Investigate a problem and create a GitHub issue |
 | `archon-validate-pr` | Thorough PR validation testing |
 | `archon-resolve-conflicts` | Detect and resolve merge conflicts in PRs |
-| `archon-refactor-safely` | Safe refactoring with type-check hooks |
-| `archon-architect` | Architectural sweep and complexity reduction |
-| `archon-test-loop-dag` | Iterative test-fix cycle until all tests pass |
+| `archon-remotion-generate` | Generate or modify Remotion video compositions with AI |
+| `archon-interactive-prd` | Create a PRD through guided conversation |
 | `archon-piv-loop` | Guided Plan-Implement-Validate with human-in-the-loop |
+| `archon-adversarial-dev` | Build a complete application from scratch using adversarial development |
 
 For the full list with descriptions, see the [Available Workflows table](/getting-started/overview/#available-workflows) in the Overview.
 

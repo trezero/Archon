@@ -161,13 +161,11 @@ When new migrations are added, apply them manually:
 # Connect to the running postgres container
 docker compose exec postgres psql -U postgres -d remote_coding_agent
 
-# Run migrations you haven't applied yet
-\i /migrations/002_command_templates.sql
-\i /migrations/003_add_worktree.sql
-\i /migrations/004_worktree_sharing.sql
-\i /migrations/006_isolation_environments.sql
-\i /migrations/007_drop_legacy_columns.sql
-\i /migrations/011_partial_unique_constraint.sql
+# For a fresh install, run the combined migration (idempotent, creates all 7 tables):
+\i /migrations/000_combined.sql
+
+# Or apply individual migrations you haven't applied yet.
+# Check the migrations/ directory for the full list (currently 001 through 019).
 \q
 ```
 

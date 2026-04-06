@@ -56,7 +56,7 @@ git push origin vX.Y.Z
 ```
 
 This triggers the GitHub Actions release workflow which:
-1. Builds binaries for all platforms (macOS arm64/x64, Linux arm64/x64)
+1. Builds binaries for all platforms (macOS arm64/x64, Linux arm64/x64, Windows x64)
 2. Generates checksums
 3. Creates a GitHub Release with all artifacts
 
@@ -169,7 +169,7 @@ The `.github/workflows/release.yml` workflow:
 ### Build Fails on GitHub Actions
 
 Check the Actions tab for specific errors. Common issues:
-- Dependency installation failure: Check bun.lockb is committed
+- Dependency installation failure: Check `bun.lock` is committed
 - Type errors: Run `bun run type-check` locally first
 
 ### Install Script Fails

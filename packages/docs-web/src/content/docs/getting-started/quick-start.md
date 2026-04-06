@@ -10,7 +10,7 @@ sidebar:
 ## Prerequisites
 
 1. [Install Archon](/getting-started/installation/)
-2. Set your Anthropic API key: `export ANTHROPIC_API_KEY=sk-ant-...`
+2. Authenticate with Claude: run `claude /login` (uses your existing Claude Pro/Max subscription)
 3. Navigate to any git repository
 
 ## Run Your First Workflow
@@ -23,7 +23,7 @@ archon workflow list
 archon workflow run assist "What does this codebase do?"
 
 # Run a code review
-archon workflow run smart-review
+archon workflow run smart-pr-review
 ```
 
 ## What's Next?

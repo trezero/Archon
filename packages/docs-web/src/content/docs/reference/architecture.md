@@ -80,8 +80,12 @@ Platform adapters connect messaging platforms to the orchestrator. Implement the
 
 ```typescript
 export interface IPlatformAdapter {
-  // Send a message to the platform
-  sendMessage(conversationId: string, message: string): Promise<void>;
+  // Send a message to the platform (optional metadata for message type hints)
+  sendMessage(conversationId: string, message: string, metadata?: MessageMetadata): Promise<void>;
+
+  // Ensure responses go to a thread, creating one if needed
+  // Returns the thread's conversation ID (may be same as original)
+  ensureThread(originalConversationId: string, messageContext?: unknown): Promise<string>;
 
   // Get the configured streaming mode
   getStreamingMode(): 'stream' | 'batch';
@@ -94,6 +98,12 @@ export interface IPlatformAdapter {
 
   // Stop the platform adapter gracefully
   stop(): void;
+
+  // Optional: Send a structured event (e.g., Web UI rich data)
+  sendStructuredEvent?(conversationId: string, event: MessageChunk): Promise<void>;
+
+  // Optional: Retract previously streamed text (workflow routing intercept)
+  emitRetract?(conversationId: string): Promise<void>;
 }
 ```
 
@@ -593,15 +603,16 @@ export class WorktreeProvider implements IIsolationProvider {
 ### Storage Location
 
 ```
-LOCAL:   ~/.archon/worktrees/<project>/<branch>/
-DOCKER:  /.archon/worktrees/<project>/<branch>/
+PRIMARY: ~/.archon/workspaces/<owner>/<repo>/worktrees/<branch>/
+LEGACY:  ~/.archon/worktrees/<owner>/<repo>/<branch>/   (fallback for repos not registered under workspaces/)
+DOCKER:  /.archon/workspaces/<owner>/<repo>/worktrees/<branch>/
 ```
 
-**Logic in `getWorktreeBase()`:**
+**Path resolution:**
 
-1. Docker detected? -> `/.archon/worktrees` (always, no override)
-2. `ARCHON_HOME` set? -> `${ARCHON_HOME}/worktrees`
-3. Default -> `~/.archon/worktrees`
+1. Project registered under `workspaces/`? -> `~/.archon/workspaces/<owner>/<repo>/worktrees/<branch>/`
+2. Legacy fallback -> `~/.archon/worktrees/<owner>/<repo>/<branch>/`
+3. Docker detected? -> `/.archon/` prefix instead of `~/.archon/`
 
 ### Usage Pattern
 
@@ -662,15 +673,21 @@ if (existing) {
 
 ```sql
 remote_agent_conversations
-├── worktree_path       -- LEGACY (kept for compatibility)
-├── isolation_env_id    -- NEW: provider-assigned ID (worktree path)
-└── isolation_provider  -- NEW: 'worktree' | 'container' | ...
+└── isolation_env_id    -- Provider-assigned ID (worktree path)
+
+remote_agent_isolation_environments
+├── id                  -- Unique environment ID
+├── codebase_id         -- Link to codebases table
+├── working_path        -- Filesystem path to worktree
+├── branch_name         -- Git branch name
+├── status              -- 'active' | 'destroyed'
+└── ...
 ```
 
 **Lookup pattern:**
 
 ```typescript
-const envId = conversation.isolation_env_id ?? conversation.worktree_path;
+const envId = conversation.isolation_env_id;
 ```
 
 ### Adding a New Isolation Provider
@@ -713,7 +730,7 @@ export function getIsolationProvider(type?: string): IIsolationProvider {
 }
 ```
 
-**See also:** The isolation architecture is documented in the codebase at `docs/worktree-orchestration.md` for detailed flow diagrams.
+**See also:** The isolation architecture is documented in `.claude/rules/isolation-patterns.md` for design patterns and safety rules.
 
 ---
 
@@ -889,7 +906,7 @@ Streaming modes control how AI responses are delivered to users: real-time (stre
 ```ini
 TELEGRAM_STREAMING_MODE=stream  # Default: stream (real-time chat)
 GITHUB_STREAMING_MODE=batch     # Default: batch (single comment)
-SLACK_STREAMING_MODE=stream     # Default: stream (real-time chat)
+SLACK_STREAMING_MODE=batch      # Default: batch
 ```
 
 ### Mode Comparison

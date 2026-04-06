@@ -477,11 +477,12 @@ Initialize the database schema with required tables:
 
 ```bash
 # For remote database (Supabase, Neon, etc.)
-psql $DATABASE_URL < migrations/001_initial_schema.sql
+psql $DATABASE_URL < migrations/000_combined.sql
 
 # Verify tables were created
 psql $DATABASE_URL -c "\dt"
-# Should show: conversations, codebases, sessions
+# Should show: codebases, conversations, sessions, isolation_environments,
+#              workflow_runs, workflow_events, messages
 ```
 
 **If using local PostgreSQL with `with-db` profile:**
@@ -775,7 +776,7 @@ cat .env | grep DATABASE_URL
 **Run migrations if tables missing:**
 
 ```bash
-psql $DATABASE_URL < migrations/001_initial_schema.sql
+psql $DATABASE_URL < migrations/000_combined.sql
 ```
 
 ### GitHub Webhook Not Working

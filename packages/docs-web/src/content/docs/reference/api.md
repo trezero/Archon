@@ -48,7 +48,7 @@ curl http://localhost:3090/health
 # {"status":"ok"}
 
 curl http://localhost:3090/api/health
-# {"status":"ok"}
+# {"status":"ok","adapter":"...","concurrency":{...},"runningWorkflows":0}
 ```
 
 ---

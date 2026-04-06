@@ -126,7 +126,7 @@ archon workflow run plan --cwd /path/to/repo --branch feature-x "Add caching"
 - Auto-registers codebase if in a git repo
 
 **With `--branch`:**
-- Creates/reuses worktree at `~/.archon/worktrees/<repo>/<branch>/`
+- Creates/reuses worktree at `~/.archon/workspaces/<owner>/<repo>/worktrees/<branch>/`
 - Reuses existing worktree if healthy
 
 **With `--no-worktree`:**

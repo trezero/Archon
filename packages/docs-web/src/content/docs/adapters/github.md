@@ -92,11 +92,7 @@ WEBHOOK_SECRET=your_secret_from_step_1
 
 ## Step 5: Configure Streaming (Optional)
 
-```ini
-GITHUB_STREAMING_MODE=batch  # batch (default) | stream
-```
-
-For streaming mode details, see [Configuration](/getting-started/configuration/).
+The GitHub adapter always uses `batch` mode (hardcoded) since GitHub issues and PRs are best served by single complete comments rather than streaming updates.
 
 ## Usage
 

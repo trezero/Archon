@@ -13,38 +13,17 @@ All slash commands available in Archon. Type `/help` in any platform adapter (We
 
 ---
 
-## Codebase Commands (Per-Project)
+## Deterministic Commands
+
+These commands are handled deterministically by the orchestrator — they always execute the same way regardless of AI state:
+
+## Project Management
 
 | Command | Description |
 |---------|-------------|
-| `/command-set <name> <path> [text]` | Register a command from file |
-| `/load-commands <folder>` | Bulk load commands (recursive) |
-| `/commands` | List registered commands |
-
-> **Note:** Commands use relative paths (e.g., `.archon/commands/plan.md`)
-
-## Codebase Management
-
-| Command | Description |
-|---------|-------------|
-| `/clone <repo-url>` | Clone repository |
-| `/repos` | List repositories (numbered) |
-| `/repo <#\|name> [pull]` | Switch repo (auto-loads commands) |
-| `/repo-remove <#\|name>` | Remove repo and codebase record |
-| `/getcwd` | Show working directory |
-| `/setcwd <path>` | Set working directory |
-
-> **Tip:** Use `/repo` for quick switching between cloned repos, `/setcwd` for manual paths.
-
-## Worktrees (Isolation)
-
-| Command | Description |
-|---------|-------------|
-| `/worktree create <branch>` | Create isolated worktree |
-| `/worktree list` | Show worktrees for this repo |
-| `/worktree remove [--force]` | Remove current worktree |
-| `/worktree cleanup merged\|stale` | Clean up worktrees |
-| `/worktree orphans` | Show all worktrees from git |
+| `/register-project <path>` | Register a local directory as a project |
+| `/update-project <name> <path>` | Update a project's directory path |
+| `/remove-project <name>` | Remove a project registration |
 
 ## Workflows
 
@@ -69,35 +48,38 @@ All slash commands available in Archon. Type `/help` in any platform adapter (We
 |---------|-------------|
 | `/status` | Show conversation state |
 | `/reset` | Clear session completely |
-| `/reset-context` | Reset AI context, keep worktree |
 | `/help` | Show all commands |
 
-## Setup
+---
+
+## AI-Routed Commands
+
+The following commands exist in the command handler but are **not** deterministically routed. Instead, they are routed through the AI orchestrator, which decides whether to invoke them based on context. They work when the AI routes a message to them:
 
 | Command | Description |
 |---------|-------------|
+| `/clone <repo-url>` | Clone repository |
+| `/repos` | List repositories (numbered) |
+| `/repo <#\|name> [pull]` | Switch repo (auto-loads commands) |
+| `/repo-remove <#\|name>` | Remove repo and codebase record |
+| `/getcwd` | Show working directory |
+| `/setcwd <path>` | Set working directory |
+| `/command-set <name> <path> [text]` | Register a command from file |
+| `/load-commands <folder>` | Bulk load commands (recursive) |
+| `/commands` | List registered commands |
+| `/worktree create <branch>` | Create isolated worktree |
+| `/worktree list` | Show worktrees for this repo |
+| `/worktree remove [--force]` | Remove current worktree |
+| `/worktree cleanup merged\|stale` | Clean up worktrees |
+| `/worktree orphans` | Show all worktrees from git |
 | `/init` | Create `.archon` structure in current repo |
+| `/reset-context` | Reset AI context, keep worktree |
+
+> **Note:** In practice, you rarely need to type these commands directly. Describe what you want in natural language and the AI router will invoke the appropriate command or workflow.
 
 ---
 
 ## Example Workflow (Telegram)
-
-### Clone a Repository
-
-```
-You: /clone https://github.com/user/my-project
-
-Bot: Repository cloned successfully!
-
-     Repository: my-project
-     App defaults available at runtime
-
-     Session reset - starting fresh on next message.
-
-     You can now start asking questions about the code.
-```
-
-> **Note:** Default commands and workflows are loaded at runtime and merged with repo-specific ones. Repo commands/workflows override app defaults by name. To disable defaults, set `defaults.loadDefaultCommands: false` or `defaults.loadDefaultWorkflows: false` in the repo's `.archon/config.yaml`.
 
 ### Ask Questions Directly
 
@@ -106,22 +88,6 @@ You: What's the structure of this repo?
 
 Bot: [Claude analyzes and responds...]
 ```
-
-### Create Custom Commands (Optional)
-
-```
-You: /init
-
-Bot: Created .archon structure:
-       .archon/
-       ├── config.yaml
-       └── commands/
-           └── example.md
-
-     Use /load-commands .archon/commands to register commands.
-```
-
-You can then create your own commands in `.archon/commands/` and load them with `/load-commands`.
 
 ### Check Status
 
@@ -137,20 +103,6 @@ Bot: Platform: telegram
      Repository: my-project @ main
 
      Worktrees: 0/10
-```
-
-### Work in Isolation with Worktrees
-
-```
-You: /worktree create feature-auth
-
-Bot: Worktree created!
-
-     Branch: feature-auth
-     Path: feature-auth/
-
-     This conversation now works in isolation.
-     Run dependency install if needed (e.g., bun install).
 ```
 
 ### Reset Session

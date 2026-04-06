@@ -132,7 +132,7 @@ DEFAULT_AI_ASSISTANT=codex
 
 ## How Assistant Selection Works
 
-- Assistant type is set per codebase (auto-detected from `.codex/` or `.claude/` folders)
+- Assistant type is set per codebase via the `assistant` field in `.archon/config.yaml` or the `DEFAULT_AI_ASSISTANT` env var
 - Once a conversation starts, the assistant type is locked for that conversation
 - `DEFAULT_AI_ASSISTANT` (optional) is used only for new conversations without codebase context
 - Workflows can override the assistant on a per-node basis with `provider` and `model` fields
