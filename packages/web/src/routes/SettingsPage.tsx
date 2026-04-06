@@ -28,10 +28,12 @@ function SystemHealthSection({
         adapter: string;
         concurrency: { active: number; queuedTotal: number; maxConcurrent: number };
         runningWorkflows: number;
+        version?: string;
       }
     | undefined;
   database: string | undefined;
 }): React.ReactElement {
+  const gitCommit = import.meta.env.VITE_GIT_COMMIT as string;
   return (
     <Card>
       <CardHeader>
@@ -70,6 +72,18 @@ function SystemHealthSection({
               <span className="text-muted-foreground">Workflows: </span>
               <span className="font-medium">{health.runningWorkflows}</span>
             </div>
+            {health.version && (
+              <div>
+                <span className="text-muted-foreground">Version: </span>
+                <span className="font-medium">{health.version}</span>
+              </div>
+            )}
+            {gitCommit && gitCommit !== 'unknown' && (
+              <div>
+                <span className="text-muted-foreground">Commit: </span>
+                <span className="font-medium font-mono">{gitCommit}</span>
+              </div>
+            )}
           </div>
         )}
       </CardContent>

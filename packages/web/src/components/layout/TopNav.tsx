@@ -50,6 +50,9 @@ export function TopNav(): React.ReactElement {
           )}
         </NavLink>
       ))}
+      <span className="ml-auto text-xs text-text-secondary">
+        v{import.meta.env.VITE_APP_VERSION as string}
+      </span>
     </nav>
   );
 }

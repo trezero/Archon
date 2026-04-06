@@ -220,6 +220,7 @@ describe('GET /api/health', () => {
       adapter: string;
       concurrency: { active: number; activeConversationIds: string[] };
       runningWorkflows: number;
+      version: string;
     };
     expect(body.status).toBe('ok');
     expect(body.adapter).toBe('web');
@@ -227,6 +228,8 @@ describe('GET /api/health', () => {
     expect(body.concurrency.active).toBe(1);
     expect(body.concurrency.activeConversationIds).toEqual(['conv-1']);
     expect(body.runningWorkflows).toBe(1);
+    expect(typeof body.version).toBe('string');
+    expect(body.version.length).toBeGreaterThan(0);
   });
 
   test('includes running background workflows in concurrency.active count', async () => {
