@@ -95,7 +95,7 @@ Access the Web UI at **http://localhost:3000**.
 **Build from WSL, not PowerShell.** Docker Desktop on Windows cannot follow Bun workspace symlinks during the build context transfer. If you see `The file cannot be accessed by the system`, open a WSL terminal:
 
 ```bash
-cd /mnt/c/Users/YourName/path/to/remote-coding-agent
+cd /mnt/c/Users/YourName/path/to/Archon
 docker compose up -d
 ```
 
