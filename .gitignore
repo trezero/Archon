@@ -32,6 +32,10 @@ yarn-error.log*
 # Caddy configuration (keep Caddyfile.example)
 Caddyfile
 
+# User Docker customization (local only, never commit)
+Dockerfile.user
+docker-compose.override.yml
+
 # Session files
 sessions/
 api_sessions/

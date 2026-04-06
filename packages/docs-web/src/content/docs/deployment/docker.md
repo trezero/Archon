@@ -496,6 +496,8 @@ docker compose up -d
 
 Uses `ghcr.io/coleam00/archon:latest`. To add PostgreSQL, uncomment the `postgres` service in the compose file and set `DATABASE_URL` in `.env`.
 
+To layer custom tools on top of the pre-built image, see [Customizing the Image](#customizing-the-image).
+
 ---
 
 ## Building the Image
@@ -521,6 +523,21 @@ docker run --env-file .env -p 3000:3000 archon
 - **Archon dirs**: `/.archon/workspaces`, `/.archon/worktrees`
 
 The multi-stage build keeps the image lean — no devDependencies, test files, docs, or `.git/`.
+
+### Customizing the Image
+
+To add extra tools without modifying the tracked Dockerfile:
+
+1. Copy the example:
+   - **Local/dev**: `cp Dockerfile.user.example Dockerfile.user`
+   - **Server/deploy**: `cp deploy/Dockerfile.user.example Dockerfile.user`
+2. Edit `Dockerfile.user` — uncomment and extend the examples as needed.
+3. Copy the override file:
+   - **Local/dev**: `cp docker-compose.override.example.yml docker-compose.override.yml`
+   - **Server/deploy**: `cp deploy/docker-compose.override.example.yml docker-compose.override.yml`
+4. Run `docker compose up -d` — Compose merges the override automatically.
+
+`Dockerfile.user` and `docker-compose.override.yml` are gitignored so your customizations stay local.
 
 ---
 
