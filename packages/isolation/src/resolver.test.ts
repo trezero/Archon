@@ -85,6 +85,7 @@ describe('IsolationResolver', () => {
   let worktreeExistsSpy: ReturnType<typeof spyOn>;
   let getCanonicalSpy: ReturnType<typeof spyOn>;
   let findWorktreeByBranchSpy: ReturnType<typeof spyOn>;
+  let isAncestorOfSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     worktreeExistsSpy = spyOn(git, 'worktreeExists').mockResolvedValue(true);
@@ -92,12 +93,14 @@ describe('IsolationResolver', () => {
       '/repos/myrepo' as git.RepoPath
     );
     findWorktreeByBranchSpy = spyOn(git, 'findWorktreeByBranch').mockResolvedValue(null);
+    isAncestorOfSpy = spyOn(git, 'isAncestorOf').mockResolvedValue(true);
   });
 
   afterEach(() => {
     worktreeExistsSpy.mockRestore();
     getCanonicalSpy.mockRestore();
     findWorktreeByBranchSpy.mockRestore();
+    isAncestorOfSpy.mockRestore();
   });
 
   function createResolver(overrides?: Partial<IsolationResolverDeps>): IsolationResolver {
@@ -686,7 +689,7 @@ describe('IsolationResolver', () => {
         })
     ).toThrow('staleThresholdDays must be positive, got -1');
   });
-});
+
   test('existing env — emits warning when base branch mismatches', async () => {
     const env = makeEnvRow();
     isAncestorOfSpy.mockResolvedValue(false);
@@ -788,29 +791,5 @@ describe('IsolationResolver', () => {
     });
 
     expect(isAncestorOfSpy).not.toHaveBeenCalled();
-  });
-
-  // --- Constructor validation tests ---
-
-  test('throws on zero staleThresholdDays', () => {
-    expect(
-      () =>
-        new IsolationResolver({
-          store: makeMockStore(),
-          provider: makeMockProvider(),
-          staleThresholdDays: 0,
-        })
-    ).toThrow('staleThresholdDays must be positive, got 0');
-  });
-
-  test('throws on negative staleThresholdDays', () => {
-    expect(
-      () =>
-        new IsolationResolver({
-          store: makeMockStore(),
-          provider: makeMockProvider(),
-          staleThresholdDays: -1,
-        })
-    ).toThrow('staleThresholdDays must be positive, got -1');
   });
 });
