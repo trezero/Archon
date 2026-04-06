@@ -253,6 +253,7 @@ export const CONTEXT_VAR_PATTERN_STR = '\\$(?:CONTEXT|EXTERNAL_CONTEXT|ISSUE_CON
  * - $ARTIFACTS_DIR - External artifacts directory for this workflow run
  * - $BASE_BRANCH - The base branch (from config or auto-detected)
  * - $CONTEXT, $EXTERNAL_CONTEXT, $ISSUE_CONTEXT - GitHub issue/PR context (if available)
+ * - $DOCS_DIR - Documentation directory path (configured or default 'docs/')
  * - $LOOP_USER_INPUT - User feedback from interactive loop approval. Only populated on the
  *   first iteration of a resumed interactive loop; empty string on all other iterations.
  * - $REJECTION_REASON - Reviewer feedback from approval node rejection (on_reject prompts only).
@@ -266,6 +267,7 @@ export function substituteWorkflowVariables(
   userMessage: string,
   artifactsDir: string,
   baseBranch: string,
+  docsDir: string,
   issueContext?: string,
   loopUserInput?: string,
   rejectionReason?: string
@@ -285,6 +287,7 @@ export function substituteWorkflowVariables(
     .replace(/\$ARGUMENTS/g, userMessage)
     .replace(/\$ARTIFACTS_DIR/g, artifactsDir)
     .replace(/\$BASE_BRANCH/g, baseBranch)
+    .replace(/\$DOCS_DIR/g, docsDir)
     .replace(/\$LOOP_USER_INPUT/g, loopUserInput ?? '')
     .replace(/\$REJECTION_REASON/g, rejectionReason ?? '');
 
@@ -319,6 +322,7 @@ export function substituteWorkflowVariables(
  * @param userMessage - The user's trigger message for variable substitution
  * @param artifactsDir - The external artifacts directory for $ARTIFACTS_DIR substitution
  * @param baseBranch - The resolved base branch for $BASE_BRANCH substitution
+ * @param docsDir - The resolved docs directory for $DOCS_DIR substitution
  * @param issueContext - Optional GitHub issue/PR context to substitute or append
  * @param logLabel - Human-readable label for logging (e.g., 'workflow step prompt')
  * @returns The final prompt with variables substituted and context optionally appended
@@ -329,6 +333,7 @@ export function buildPromptWithContext(
   userMessage: string,
   artifactsDir: string,
   baseBranch: string,
+  docsDir: string,
   issueContext: string | undefined,
   logLabel: string
 ): string {
@@ -338,6 +343,7 @@ export function buildPromptWithContext(
     userMessage,
     artifactsDir,
     baseBranch,
+    docsDir,
     issueContext
   );
 

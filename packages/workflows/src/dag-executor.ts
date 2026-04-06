@@ -651,6 +651,7 @@ async function executeNodeInternal(
   artifactsDir: string,
   logDir: string,
   baseBranch: string,
+  docsDir: string,
   nodeOutputs: Map<string, NodeOutput>,
   resumeSessionId: string | undefined,
   configuredCommandFolder?: string,
@@ -729,6 +730,7 @@ async function executeNodeInternal(
       workflowRun.user_message,
       artifactsDir,
       baseBranch,
+      docsDir,
       issueContext,
       `dag node '${node.id}' prompt`
     );
@@ -1200,6 +1202,7 @@ async function executeBashNode(
   artifactsDir: string,
   logDir: string,
   baseBranch: string,
+  docsDir: string,
   nodeOutputs: Map<string, NodeOutput>,
   issueContext?: string
 ): Promise<NodeOutput> {
@@ -1238,6 +1241,7 @@ async function executeBashNode(
     workflowRun.user_message,
     artifactsDir,
     baseBranch,
+    docsDir,
     issueContext
   );
   const finalScript = substituteNodeOutputRefs(substitutedScript, nodeOutputs, true);
@@ -1380,6 +1384,7 @@ async function executeLoopNode(
   artifactsDir: string,
   logDir: string,
   baseBranch: string,
+  docsDir: string,
   nodeOutputs: Map<string, NodeOutput>,
   config: WorkflowConfig,
   issueContext?: string
@@ -1478,6 +1483,7 @@ async function executeLoopNode(
         workflowRun.user_message,
         artifactsDir,
         baseBranch,
+        docsDir,
         issueContext,
         i === startIteration ? loopUserInput : ''
       );
@@ -1661,6 +1667,7 @@ async function executeLoopNode(
           workflowRun.user_message,
           artifactsDir,
           baseBranch,
+          docsDir,
           issueContext
         );
         const substitutedBash = substituteNodeOutputRefs(
@@ -1831,6 +1838,7 @@ async function executeApprovalNode(
   artifactsDir: string,
   logDir: string,
   baseBranch: string,
+  docsDir: string,
   nodeOutputs: Map<string, NodeOutput>,
   config: WorkflowConfig,
   configuredCommandFolder?: string,
@@ -1889,6 +1897,7 @@ async function executeApprovalNode(
       workflowRun.user_message ?? '',
       artifactsDir,
       baseBranch,
+      docsDir,
       issueContext,
       undefined, // loopUserInput
       rejectionReason
@@ -1925,6 +1934,7 @@ async function executeApprovalNode(
       artifactsDir,
       logDir,
       baseBranch,
+      docsDir,
       nodeOutputs,
       undefined, // fresh session
       configuredCommandFolder,
@@ -1995,6 +2005,7 @@ export async function executeDagWorkflow(
   artifactsDir: string,
   logDir: string,
   baseBranch: string,
+  docsDir: string,
   config: WorkflowConfig,
   configuredCommandFolder?: string,
   issueContext?: string,
@@ -2206,6 +2217,7 @@ export async function executeDagWorkflow(
               artifactsDir,
               logDir,
               baseBranch,
+              docsDir,
               nodeOutputs,
               issueContext
             );
@@ -2226,6 +2238,7 @@ export async function executeDagWorkflow(
               artifactsDir,
               logDir,
               baseBranch,
+              docsDir,
               nodeOutputs,
               config,
               issueContext
@@ -2247,6 +2260,7 @@ export async function executeDagWorkflow(
               artifactsDir,
               logDir,
               baseBranch,
+              docsDir,
               nodeOutputs,
               config,
               configuredCommandFolder,
@@ -2322,6 +2336,7 @@ export async function executeDagWorkflow(
               artifactsDir,
               logDir,
               baseBranch,
+              docsDir,
               nodeOutputs,
               // Always pass the prior session ID — forkSession:true in executeNodeInternal
               // ensures the source is never mutated, so retries can safely resume from it.

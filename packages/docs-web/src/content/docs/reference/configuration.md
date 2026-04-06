@@ -114,6 +114,10 @@ worktree:
     - .env.example -> .env  # Rename during copy
     - .vscode               # Copy entire directory
 
+# Documentation directory
+docs:
+  path: docs  # Optional: default is docs/
+
 # Defaults configuration
 defaults:
   loadDefaultCommands: true   # Load app's bundled default commands at runtime
@@ -156,6 +160,8 @@ This is useful when you maintain coding style or identity preferences in `~/.cla
 1. If `worktree.baseBranch` is set: Uses the configured branch. **Fails with an error** if the branch doesn't exist on remote (no silent fallback).
 2. If omitted: Auto-detects the default branch via `git remote show origin`. Works without any config for standard repos.
 3. If auto-detection fails and a workflow references `$BASE_BRANCH`: Fails with an error explaining the resolution chain.
+
+**Docs path behavior:** The `docs.path` setting controls where the `$DOCS_DIR` variable points. When not configured, `$DOCS_DIR` defaults to `docs/`. Unlike `$BASE_BRANCH`, this variable always has a safe default and never throws an error. Configure it when your documentation lives outside the standard `docs/` directory (e.g., `packages/docs-web/src/content/docs`).
 
 ## Environment Variables
 

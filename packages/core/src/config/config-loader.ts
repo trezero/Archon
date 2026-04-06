@@ -368,6 +368,11 @@ function mergeRepoConfig(merged: MergedConfig, repo: RepoConfig): MergedConfig {
     result.baseBranch = repo.worktree.baseBranch.trim();
   }
 
+  // Propagate docs path for $DOCS_DIR substitution in workflow commands
+  if (repo.docs?.path?.trim()) {
+    result.docsPath = repo.docs.path.trim();
+  }
+
   // Propagate per-project env vars from repo config
   if (repo.env) {
     result.envVars = { ...result.envVars, ...repo.env };

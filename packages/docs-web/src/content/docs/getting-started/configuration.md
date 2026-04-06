@@ -35,6 +35,9 @@ assistants:
   codex:
     model: gpt-5.3-codex
     modelReasoningEffort: medium
+
+# docs:
+#   path: packages/docs-web/src/content/docs  # Optional: default is docs/
 ```
 
 See the [full configuration reference](/reference/configuration/) for all options.

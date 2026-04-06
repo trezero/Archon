@@ -31,7 +31,8 @@ describe('substituteWorkflowVariables', () => {
       'run-123',
       'hello',
       '/tmp/artifacts',
-      'main'
+      'main',
+      'docs/'
     );
     expect(prompt).toBe('Run ID: run-123');
   });
@@ -42,7 +43,8 @@ describe('substituteWorkflowVariables', () => {
       'run-1',
       'msg',
       '/tmp/artifacts/runs/run-1',
-      'main'
+      'main',
+      'docs/'
     );
     expect(prompt).toBe('Save to /tmp/artifacts/runs/run-1/output.txt');
   });
@@ -53,14 +55,15 @@ describe('substituteWorkflowVariables', () => {
       'run-1',
       'msg',
       '/tmp',
-      'develop'
+      'develop',
+      'docs/'
     );
     expect(prompt).toBe('Merge into develop');
   });
 
   it('throws when $BASE_BRANCH is referenced but empty', () => {
     expect(() =>
-      substituteWorkflowVariables('Merge into $BASE_BRANCH', 'run-1', 'msg', '/tmp', '')
+      substituteWorkflowVariables('Merge into $BASE_BRANCH', 'run-1', 'msg', '/tmp', '', 'docs/')
     ).toThrow('No base branch could be resolved');
   });
 
@@ -70,7 +73,8 @@ describe('substituteWorkflowVariables', () => {
       'run-1',
       'msg',
       '/tmp',
-      ''
+      '',
+      'docs/'
     );
     expect(prompt).toBe('No branch reference here');
   });
@@ -81,9 +85,46 @@ describe('substituteWorkflowVariables', () => {
       'run-1',
       'add dark mode',
       '/tmp',
-      'main'
+      'main',
+      'docs/'
     );
     expect(prompt).toBe('Goal: add dark mode. Args: add dark mode');
+  });
+
+  it('replaces $DOCS_DIR with configured path', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'Check $DOCS_DIR for changes',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main',
+      'packages/docs-web/src/content/docs'
+    );
+    expect(prompt).toBe('Check packages/docs-web/src/content/docs for changes');
+  });
+
+  it('replaces $DOCS_DIR with default docs/ when default passed', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'Check $DOCS_DIR for changes',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main',
+      'docs/'
+    );
+    expect(prompt).toBe('Check docs/ for changes');
+  });
+
+  it('does not affect prompts without $DOCS_DIR', () => {
+    const { prompt } = substituteWorkflowVariables(
+      'No docs reference here',
+      'run-1',
+      'msg',
+      '/tmp',
+      'main',
+      'custom/docs/'
+    );
+    expect(prompt).toBe('No docs reference here');
   });
 
   it('replaces $CONTEXT when issueContext is provided', () => {
@@ -93,6 +134,7 @@ describe('substituteWorkflowVariables', () => {
       'msg',
       '/tmp',
       'main',
+      'docs/',
       '## Issue #42\nBug report'
     );
     expect(prompt).toBe('Fix this: ## Issue #42\nBug report');
@@ -106,6 +148,7 @@ describe('substituteWorkflowVariables', () => {
       'msg',
       '/tmp',
       'main',
+      'docs/',
       'context-data'
     );
     expect(prompt).toBe('Issue: context-data. External: context-data');
@@ -117,7 +160,8 @@ describe('substituteWorkflowVariables', () => {
       'run-1',
       'msg',
       '/tmp',
-      'main'
+      'main',
+      'docs/'
     );
     expect(prompt).toBe('Context:  here');
     expect(contextSubstituted).toBe(false);
@@ -130,6 +174,7 @@ describe('substituteWorkflowVariables', () => {
       'msg',
       '/tmp',
       'main',
+      'docs/',
       undefined,
       undefined,
       'Missing error handling'
@@ -143,7 +188,8 @@ describe('substituteWorkflowVariables', () => {
       'run-1',
       'msg',
       '/tmp',
-      'main'
+      'main',
+      'docs/'
     );
     expect(prompt).toBe('Fix: ');
   });
@@ -157,6 +203,7 @@ describe('buildPromptWithContext', () => {
       'msg',
       '/tmp',
       'main',
+      'docs/',
       '## Issue #42\nDetails here',
       'test prompt'
     );
@@ -171,6 +218,7 @@ describe('buildPromptWithContext', () => {
       'msg',
       '/tmp',
       'main',
+      'docs/',
       '## Issue #42\nDetails here',
       'test prompt'
     );
@@ -186,6 +234,7 @@ describe('buildPromptWithContext', () => {
       'msg',
       '/tmp',
       'main',
+      'docs/',
       undefined,
       'test prompt'
     );

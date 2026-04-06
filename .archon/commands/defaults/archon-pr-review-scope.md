@@ -351,7 +351,7 @@ Write `$ARTIFACTS_DIR/review/scope.md`:
 - `src/...test.ts`
 
 ### Documentation ({count})
-- `docs/...`
+- `$DOCS_DIR/...`
 - `README.md`
 
 ### Configuration ({count})
@@ -367,7 +367,7 @@ Based on changes, reviewers should focus on:
 2. **Error Handling**: {files with try/catch, error handling}
 3. **Test Coverage**: {new functionality needing tests}
 4. **Comments/Docs**: {files with documentation changes}
-5. **Docs Impact**: {check if CLAUDE.md or docs/ need updates}
+5. **Docs Impact**: {check if CLAUDE.md or $DOCS_DIR need updates}
 
 ---
 

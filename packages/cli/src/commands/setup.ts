@@ -1535,6 +1535,29 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
     skillInstalledPath = join(skillTarget, '.claude', 'skills', 'archon');
   }
 
+  // Optional: configure docs directory
+  const wantsDocsPath = await confirm({
+    message: 'Configure a non-default docs directory? (default: docs/)',
+    initialValue: false,
+  });
+
+  if (!isCancel(wantsDocsPath) && wantsDocsPath) {
+    const docsPath = await text({
+      message: 'Where are your project docs? (relative to repo root)',
+      placeholder: 'docs/',
+    });
+
+    if (!isCancel(docsPath) && typeof docsPath === 'string' && docsPath.trim()) {
+      const archonDir = join(options.repoPath, '.archon');
+      mkdirSync(archonDir, { recursive: true });
+      const configPath = join(archonDir, 'config.yaml');
+      const existing = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '';
+      if (!existing.includes('docs:')) {
+        writeFileSync(configPath, existing + `\ndocs:\n  path: ${docsPath.trim()}\n`);
+      }
+    }
+  }
+
   // Summary
   const configuredPlatforms: string[] = [];
   if (config.platforms.github) configuredPlatforms.push('GitHub');
