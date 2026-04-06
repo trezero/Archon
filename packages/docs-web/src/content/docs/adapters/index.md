@@ -29,6 +29,7 @@ Community adapters follow the same `IPlatformAdapter` interface but target platf
 |---------|-----------|---------------|-------|
 | [**Discord**](/adapters/community/discord/) | WebSocket | Bot token | [Setup guide](/adapters/community/discord/) |
 | [**Gitea**](/adapters/community/gitea/) | Webhooks | Token + webhook secret | [Setup guide](/adapters/community/gitea/) |
+| [**GitLab**](/adapters/community/gitlab/) | Webhooks | Token + webhook secret | [Setup guide](/adapters/community/gitlab/) |
 
 ## How Adapters Work
 
