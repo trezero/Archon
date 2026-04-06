@@ -15,8 +15,10 @@ import { createWorkflowDeps } from '@archon/core/workflows/store-adapter';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import { resolveWorkflowName } from '@archon/workflows/router';
 import { executeWorkflow } from '@archon/workflows/executor';
-import { getWorkflowEventEmitter } from '@archon/workflows/event-emitter';
-import type { WorkflowEmitterEvent } from '@archon/workflows/event-emitter';
+import {
+  getWorkflowEventEmitter,
+  type WorkflowEmitterEvent,
+} from '@archon/workflows/event-emitter';
 import type { WorkflowLoadResult } from '@archon/workflows/schemas/workflow';
 import type { WorkflowRun, ApprovalContext } from '@archon/workflows/schemas/workflow-run';
 import {
@@ -73,20 +75,23 @@ function generateConversationId(): string {
 /**
  * Render a workflow event to stderr as a progress line.
  * Called only when --quiet is not set.
+ *
+ * @param event - The workflow emitter event to render.
+ * @param verbose - When true, also renders tool_started/tool_completed events.
  */
 function renderWorkflowEvent(event: WorkflowEmitterEvent, verbose: boolean): void {
   switch (event.type) {
     case 'node_started':
-      process.stderr.write(`[${event.nodeId}] Started\n`);
+      process.stderr.write(`[${event.nodeName}] Started\n`);
       break;
     case 'node_completed':
-      process.stderr.write(`[${event.nodeId}] Completed (${formatDuration(event.duration)})\n`);
+      process.stderr.write(`[${event.nodeName}] Completed (${formatDuration(event.duration)})\n`);
       break;
     case 'node_failed':
-      process.stderr.write(`[${event.nodeId}] Failed: ${event.error}\n`);
+      process.stderr.write(`[${event.nodeName}] Failed: ${event.error}\n`);
       break;
     case 'node_skipped':
-      process.stderr.write(`[${event.nodeId}] Skipped (${event.reason})\n`);
+      process.stderr.write(`[${event.nodeName}] Skipped (${event.reason})\n`);
       break;
     case 'approval_pending':
       process.stderr.write(`[${event.nodeId}] Waiting for approval: ${event.message}\n`);
@@ -104,6 +109,7 @@ function renderWorkflowEvent(event: WorkflowEmitterEvent, verbose: boolean): voi
       }
       break;
     default:
+      // Workflow-level, loop, artifact, and cancelled events are intentionally not rendered.
       break;
   }
 }
@@ -574,7 +580,9 @@ export async function workflowRunCommand(
     cleanup('SIGINT');
   });
 
-  // Subscribe to workflow events for progress rendering on stderr
+  // Subscribe to workflow events for progress rendering on stderr.
+  // subscribeForConversation is pure in-memory registration — cannot throw in practice.
+  // If that changes, this should be moved inside the try block to prevent blocking executeWorkflow.
   const { quiet, verbose } = options;
   const unsubscribe = quiet
     ? undefined

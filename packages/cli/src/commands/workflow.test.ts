@@ -1861,4 +1861,63 @@ describe('workflowRunCommand — progress rendering', () => {
     expect(stderrSpy).toHaveBeenCalledWith('[classify] tool: Bash (started)\n');
     expect(stderrSpy).toHaveBeenCalledWith('[classify] tool: Bash (42ms)\n');
   });
+
+  it('should call unsubscribe even when executeWorkflow throws', async () => {
+    setupWorkflowMocks();
+
+    const { executeWorkflow } = require('@archon/workflows/executor');
+    (executeWorkflow as ReturnType<typeof mock>).mockImplementationOnce(async () => {
+      throw new Error('executor crashed');
+    });
+
+    await expect(workflowRunCommand('/test/path', 'plan', 'hello', {})).rejects.toThrow(
+      'executor crashed'
+    );
+
+    expect(mockUnsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('should write node_completed with sub-second duration to stderr', async () => {
+    setupWorkflowMocks();
+
+    const { executeWorkflow } = require('@archon/workflows/executor');
+    (executeWorkflow as ReturnType<typeof mock>).mockImplementationOnce(async () => {
+      if (capturedSubscribeHandler) {
+        capturedSubscribeHandler({
+          type: 'node_completed',
+          runId: 'run-1',
+          nodeId: 'fast',
+          nodeName: 'fast',
+          duration: 500,
+        });
+      }
+      return { success: true, workflowRunId: 'run-1' };
+    });
+
+    await workflowRunCommand('/test/path', 'plan', 'hello', {});
+
+    expect(stderrSpy).toHaveBeenCalledWith('[fast] Completed (500ms)\n');
+  });
+
+  it('should write node_completed with minutes duration to stderr', async () => {
+    setupWorkflowMocks();
+
+    const { executeWorkflow } = require('@archon/workflows/executor');
+    (executeWorkflow as ReturnType<typeof mock>).mockImplementationOnce(async () => {
+      if (capturedSubscribeHandler) {
+        capturedSubscribeHandler({
+          type: 'node_completed',
+          runId: 'run-1',
+          nodeId: 'slow',
+          nodeName: 'slow',
+          duration: 90000,
+        });
+      }
+      return { success: true, workflowRunId: 'run-1' };
+    });
+
+    await workflowRunCommand('/test/path', 'plan', 'hello', {});
+
+    expect(stderrSpy).toHaveBeenCalledWith('[slow] Completed (1m30s)\n');
+  });
 });

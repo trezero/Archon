@@ -636,7 +636,8 @@ async function createSession(conversationId: string, codebaseId: string) {
 **Log Levels:** `fatal` > `error` > `warn` > `info` (default) > `debug` > `trace`
 
 **Verbosity:**
-- CLI: `archon --quiet` (errors only) or `archon --verbose` (debug)
+- CLI: `archon --quiet` (errors only) — suppresses Pino logs and workflow progress output
+- CLI: `archon --verbose` (debug) — enables debug Pino logs and tool-level workflow progress events
 - Server: `LOG_LEVEL=debug bun run start`
 
 **Never log:** API keys or tokens (mask: `token.slice(0, 8) + '...'`), user message content, PII.

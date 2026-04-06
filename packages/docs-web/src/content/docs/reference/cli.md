@@ -111,6 +111,8 @@ archon workflow run assist --cwd /path/to/repo "What does this function do?"
 archon workflow run plan --cwd /path/to/repo --branch feature-x "Add caching"
 ```
 
+Progress events (node start/complete/fail/skip, approval gates) are written to stderr during execution.
+
 **Flags:**
 
 | Flag | Effect |
@@ -120,6 +122,8 @@ archon workflow run plan --cwd /path/to/repo --branch feature-x "Add caching"
 | `--from <branch>`, `--from-branch <branch>` | Override base branch (start-point for worktree) |
 | `--no-worktree` | Opt out of isolation -- run directly in live checkout |
 | `--resume` | Resume from last failed run at the working path (skips completed nodes) |
+| `--quiet`, `-q` | Suppress all progress output to stderr |
+| `--verbose`, `-v` | Also show tool-level events (tool name and duration) |
 
 **Default (no flags):**
 - Creates worktree with auto-generated branch (`archon/task-<workflow>-<timestamp>`)
