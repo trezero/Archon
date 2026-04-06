@@ -22,6 +22,7 @@ import {
 import type { ConversationResponse, CodebaseResponse, MessageResponse } from '@/lib/api';
 import type {
   ChatMessage,
+  FileAttachment,
   ToolCallDisplay,
   ErrorDisplay,
   WorkflowDispatchEvent,
@@ -46,6 +47,7 @@ function mapMessageRow(row: MessageResponse): ChatMessage {
     error?: ErrorDisplay;
     workflowDispatch?: { workerConversationId: string; workflowName: string };
     workflowResult?: { workflowName: string; runId: string };
+    files?: { id?: string; name: string; mimeType: string; size: number }[];
   } = {};
   try {
     meta = JSON.parse(row.metadata) as typeof meta;
@@ -77,6 +79,16 @@ function mapMessageRow(row: MessageResponse): ChatMessage {
     error: meta.error,
     workflowDispatch: meta.workflowDispatch,
     workflowResult: meta.workflowResult,
+    files: Array.isArray(meta.files)
+      ? meta.files
+          .filter(f => typeof f.name === 'string' && typeof f.mimeType === 'string')
+          .map((f, i) => ({
+            id: f.id ?? `${row.id}-file-${String(i)}`,
+            name: f.name,
+            mimeType: f.mimeType,
+            size: typeof f.size === 'number' ? f.size : 0,
+          }))
+      : undefined,
     timestamp: new Date(ensureUtc(row.created_at)).getTime(),
     isStreaming: false,
   };
@@ -609,13 +621,25 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   });
 
   const handleSend = useCallback(
-    async (message: string): Promise<void> => {
+    async (message: string, uploadedFiles?: File[]): Promise<void> => {
+      // Build lightweight attachment metadata for optimistic UI display
+      const fileAttachments: FileAttachment[] | undefined =
+        uploadedFiles && uploadedFiles.length > 0
+          ? uploadedFiles.map(f => ({
+              id: crypto.randomUUID(),
+              name: f.name,
+              mimeType: f.type,
+              size: f.size,
+            }))
+          : undefined;
+
       // Add user message + thinking indicator to UI immediately
       const userMsg: ChatMessage = {
         id: nextId(),
         role: 'user',
         content: message,
         timestamp: Date.now(),
+        files: fileAttachments,
       };
       const thinkingMsg: ChatMessage = {
         id: `thinking-${String(Date.now())}`,
@@ -669,7 +693,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
       }
 
       try {
-        await apiSendMessage(targetConversationId, message);
+        await apiSendMessage(targetConversationId, message, uploadedFiles);
         // Invalidate conversations cache once after first non-command message
         // so the auto-generated title appears in the sidebar immediately
         if (!hasTriggeredTitleRefresh.current && !message.startsWith('/')) {
@@ -684,8 +708,14 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         void queryClient.invalidateQueries({ queryKey: ['workflowRuns'] });
       } catch (error) {
         console.error('[Chat] Failed to send message', { error });
+        // Extract server error details from fetchJSON errors (e.g. "API error 400 (...): File ... exceeds...")
+        const errMsg = error instanceof Error ? error.message : undefined;
+        const userMessage =
+          errMsg && /API error 4\d\d/.test(errMsg)
+            ? errMsg.replace(/^API error \d+ \([^)]*\): /, '')
+            : 'Failed to send message. Please try again.';
         onError({
-          message: 'Failed to send message. Please try again.',
+          message: userMessage,
           classification: 'transient',
           suggestedActions: ['Retry'],
         });

@@ -8,9 +8,15 @@ import { cors } from 'hono/cors';
 import type { WebAdapter } from '../adapters/web';
 import { rm, readFile, writeFile, unlink, mkdir } from 'fs/promises';
 import { readFileSync } from 'fs';
-import { normalize, join, sep } from 'path';
+import { normalize, join, sep, basename } from 'path';
+import { randomUUID } from 'crypto';
 import type { Context } from 'hono';
-import type { ConversationLockManager, GlobalConfig } from '@archon/core';
+import type {
+  ConversationLockManager,
+  AttachedFile,
+  HandleMessageContext,
+  GlobalConfig,
+} from '@archon/core';
 import {
   handleMessage,
   getDatabaseType,
@@ -31,6 +37,7 @@ import {
   getDefaultWorkflowsPath,
   getArchonWorkspacesPath,
   getRunArtifactsPath,
+  getArchonHome,
 } from '@archon/paths';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import { parseWorkflow } from '@archon/workflows/loader';
@@ -87,7 +94,6 @@ import {
   successResponseSchema,
   messageListResponseSchema,
   listMessagesQuerySchema,
-  sendMessageBodySchema,
   dispatchResponseSchema,
 } from './schemas/conversation.schemas';
 import {
@@ -361,17 +367,20 @@ const listMessagesRoute = createRoute({
   },
 });
 
+// Body validation is handled manually in the handler (multipart vs JSON branching).
+// Declaring both content types in the OpenAPI route causes @hono/zod-openapi to
+// validate JSON bodies against the multipart schema. We keep `request.body` empty
+// and document the schemas via the OpenAPI spec comments instead.
 const sendMessageRoute = createRoute({
   method: 'post',
   path: '/api/conversations/{id}/message',
   tags: ['Conversations'],
-  summary: 'Send a message to a conversation',
+  summary: 'Send a message (JSON or multipart with file uploads)',
+  description:
+    'Accepts `application/json` with `{ message: string }` or `multipart/form-data` ' +
+    'with a `message` field and optional file attachments (max 5 files, 10 MB each).',
   request: {
     params: conversationIdParamsSchema,
-    body: {
-      content: { 'application/json': { schema: sendMessageBodySchema } },
-      required: true,
-    },
   },
   responses: {
     200: {
@@ -773,9 +782,92 @@ export function registerApiRoutes(
   app.use('/api/*', cors({ origin: process.env.WEB_UI_ORIGIN || '*' }));
 
   // Shared lock/dispatch/error handling for message and workflow endpoints
+  /** Maximum allowed upload size per file (10 MB) */
+  const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+  /** Maximum number of files per message (enforced server-side) */
+  const MAX_FILES_PER_MESSAGE = 5;
+  /**
+   * Binary (non-text) MIME types explicitly allowed for upload.
+   * All text/* types are accepted separately via isAllowedUploadType().
+   */
+  const ALLOWED_UPLOAD_BINARY_MIME_TYPES = new Set([
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+    'application/pdf',
+    // application/json is a structured text type browsers may report for .json files
+    'application/json',
+  ]);
+
+  /** Extensions accepted when browser reports an empty MIME type (code/config files). */
+  const ALLOWED_UPLOAD_EXTENSIONS = new Set([
+    '.md',
+    '.txt',
+    '.csv',
+    '.xml',
+    '.html',
+    '.htm',
+    '.json',
+    '.yaml',
+    '.yml',
+    '.toml',
+    '.ini',
+    '.cfg',
+    '.conf',
+    '.env',
+    '.log',
+    '.css',
+    '.js',
+    '.jsx',
+    '.ts',
+    '.tsx',
+    '.mjs',
+    '.cjs',
+    '.py',
+    '.rb',
+    '.go',
+    '.java',
+    '.c',
+    '.cpp',
+    '.cc',
+    '.cxx',
+    '.h',
+    '.hpp',
+    '.cs',
+    '.php',
+    '.sh',
+    '.bash',
+    '.zsh',
+    '.fish',
+    '.rs',
+    '.swift',
+    '.kt',
+    '.scala',
+    '.r',
+    '.sql',
+  ]);
+
+  /** Returns true if the MIME type is allowed for upload. */
+  function isAllowedUploadType(mimeType: string, fileName: string): boolean {
+    // All text/* types are acceptable (covers .md, .py, .rs, .go, .sh, .yaml, etc.)
+    if (mimeType.startsWith('text/')) return true;
+    if (ALLOWED_UPLOAD_BINARY_MIME_TYPES.has(mimeType)) return true;
+    // Browsers assign empty MIME types to many code/config extensions — fall back to extension
+    if (!mimeType) {
+      const dotIndex = fileName.lastIndexOf('.');
+      if (dotIndex !== -1) {
+        return ALLOWED_UPLOAD_EXTENSIONS.has(fileName.slice(dotIndex).toLowerCase());
+      }
+    }
+    return false;
+  }
+
   async function dispatchToOrchestrator(
     conversationId: string,
-    message: string
+    message: string,
+    extraContext?: Omit<HandleMessageContext, 'isolationHints'>,
+    filesToCleanup?: { files: AttachedFile[]; uploadDir: string }
   ): Promise<{ accepted: boolean; status: string }> {
     const result = await lockManager.acquireLock(conversationId, async () => {
       // Emit lock:true at handler start so the UI knows processing has begun.
@@ -784,6 +876,7 @@ export function registerApiRoutes(
       try {
         await handleMessage(webAdapter, conversationId, message, {
           isolationHints: { workflowType: 'thread', workflowId: conversationId },
+          ...extraContext,
         });
       } catch (error) {
         getLog().error({ err: error, conversationId }, 'handle_message_failed');
@@ -802,6 +895,29 @@ export function registerApiRoutes(
         }
       } finally {
         await webAdapter.emitLockEvent(conversationId, false);
+        // Clean up uploaded files AFTER handleMessage completes so the AI subprocess
+        // has had a chance to read them. Doing this in the HTTP handler's finally block
+        // would delete files while the fire-and-forget lock handler is still running.
+        if (filesToCleanup) {
+          for (const f of filesToCleanup.files) {
+            await unlink(f.path).catch((err: NodeJS.ErrnoException) => {
+              if (err.code !== 'ENOENT') {
+                getLog().warn({ err, filePath: f.path, conversationId }, 'upload.cleanup_failed');
+              }
+            });
+          }
+          // Remove the now-empty upload directory for this conversation.
+          await rm(filesToCleanup.uploadDir, { recursive: true, force: true }).catch(
+            (err: NodeJS.ErrnoException) => {
+              if (err.code !== 'ENOENT') {
+                getLog().warn(
+                  { err, uploadDir: filesToCleanup.uploadDir, conversationId },
+                  'upload.dir_cleanup_failed'
+                );
+              }
+            }
+          );
+        }
       }
     });
 
@@ -981,9 +1097,125 @@ export function registerApiRoutes(
   });
 
   // POST /api/conversations/:id/message - Send message
+  // Manual body parsing: multipart uses parseBody(), JSON uses req.json().
   registerOpenApiRoute(sendMessageRoute, async c => {
     const conversationId = c.req.param('id') ?? '';
-    const { message } = getValidatedBody(c, sendMessageBodySchema);
+
+    // Reject conversation IDs that could be used for path traversal when building
+    // the upload directory. Web conversation IDs are alphanumeric with hyphens only.
+    if (!/^[\w-]+$/.test(conversationId)) {
+      return c.json({ error: 'Invalid conversation ID' }, 400);
+    }
+
+    let message: string;
+    const savedFiles: AttachedFile[] = [];
+    let uploadDir = '';
+
+    const contentType = c.req.header('content-type') ?? '';
+
+    if (contentType.includes('multipart/form-data')) {
+      let body: Record<string, string | File | (string | File)[]>;
+      try {
+        body = await c.req.parseBody({ all: true });
+      } catch (parseErr: unknown) {
+        getLog().warn({ err: parseErr, conversationId }, 'upload.parse_failed');
+        return c.json({ error: 'Invalid multipart form data' }, 400);
+      }
+
+      const rawMessage = body.message;
+      if (typeof rawMessage !== 'string' || !rawMessage) {
+        return c.json({ error: 'message must be a non-empty string' }, 400);
+      }
+      message = rawMessage;
+
+      const rawFiles = body.files;
+      let fileList: (string | File)[];
+      if (Array.isArray(rawFiles)) {
+        fileList = rawFiles;
+      } else if (rawFiles !== undefined) {
+        fileList = [rawFiles];
+      } else {
+        fileList = [];
+      }
+
+      // Enforce server-side file count limit
+      const fileEntries = fileList.filter((e): e is File => e instanceof File);
+      if (fileEntries.length > MAX_FILES_PER_MESSAGE) {
+        return c.json({ error: `Maximum ${String(MAX_FILES_PER_MESSAGE)} files per message` }, 400);
+      }
+
+      const archonHome = getArchonHome();
+      uploadDir = join(archonHome, 'artifacts', 'uploads', conversationId);
+
+      // Guard against path traversal in conversationId (belt-and-suspenders after regex above)
+      if (!uploadDir.startsWith(archonHome + sep)) {
+        return c.json({ error: 'Invalid conversation ID' }, 400);
+      }
+
+      // Validate all files before writing any to disk
+      for (const entry of fileEntries) {
+        const displayName = basename(entry.name).replace(/[^a-zA-Z0-9._-]/g, '_');
+        // Server-side MIME type allowlist (client-side accept= is not a security boundary;
+        // entry.type is the Content-Type supplied by the client and is not verified against
+        // actual file contents — suitable for a single-developer self-hosted tool)
+        if (!isAllowedUploadType(entry.type, entry.name)) {
+          return c.json(
+            { error: `File "${displayName}" has an unsupported type: ${entry.type}` },
+            400
+          );
+        }
+        if (entry.size > MAX_UPLOAD_BYTES) {
+          return c.json({ error: `File "${displayName}" exceeds the 10 MB size limit` }, 400);
+        }
+      }
+
+      // Write files; on any failure clean up already-written files and surface the error
+      try {
+        await mkdir(uploadDir, { recursive: true });
+        for (const entry of fileEntries) {
+          const fileId = randomUUID();
+          const safeName = basename(entry.name).replace(/[^a-zA-Z0-9._-]/g, '_');
+          const filePath = join(uploadDir, `${fileId}_${safeName}`);
+          await writeFile(filePath, Buffer.from(await entry.arrayBuffer()));
+          // Normalise MIME: strip parameters to prevent prompt injection via crafted Content-Type
+          const normalizedMime =
+            entry.type.split(';')[0].trim().toLowerCase() || 'application/octet-stream';
+          savedFiles.push({
+            path: filePath,
+            // Use safeName for display to avoid prompt injection via crafted filenames
+            name: safeName || fileId,
+            mimeType: normalizedMime,
+            size: entry.size,
+          });
+        }
+      } catch (writeErr: unknown) {
+        // Roll back any files written before the failure
+        for (const f of savedFiles) {
+          await unlink(f.path).catch((err: NodeJS.ErrnoException) => {
+            if (err.code !== 'ENOENT') {
+              getLog().warn({ err, filePath: f.path, conversationId }, 'upload.rollback_failed');
+            }
+          });
+        }
+        getLog().error({ err: writeErr, conversationId }, 'upload.write_failed');
+        return c.json({ error: 'Failed to save uploaded file. Check available disk space.' }, 500);
+      }
+
+      getLog().info({ conversationId, fileCount: savedFiles.length }, 'message.files_uploaded');
+    } else {
+      let body: { message?: unknown };
+      try {
+        body = await c.req.json();
+      } catch (parseErr: unknown) {
+        getLog().warn({ err: parseErr, conversationId }, 'message.json_parse_failed');
+        return c.json({ error: 'Invalid JSON in request body' }, 400);
+      }
+
+      if (typeof body.message !== 'string' || !body.message) {
+        return c.json({ error: 'message must be a non-empty string' }, 400);
+      }
+      message = body.message;
+    }
 
     // Look up conversation for message persistence
     let conv: Awaited<ReturnType<typeof conversationDb.findConversationByPlatformId>> = null;
@@ -995,8 +1227,14 @@ export function registerApiRoutes(
 
     // Persist user message and pass DB ID to adapter for assistant message persistence
     if (conv) {
+      // Omit path from persisted metadata — the on-disk file is ephemeral and will be
+      // deleted after the AI processes it; storing stale paths would confuse future readers.
+      const meta =
+        savedFiles.length > 0
+          ? { files: savedFiles.map(f => ({ name: f.name, mimeType: f.mimeType, size: f.size })) }
+          : undefined;
       try {
-        await messageDb.addMessage(conv.id, 'user', message);
+        await messageDb.addMessage(conv.id, 'user', message, meta);
       } catch (e: unknown) {
         getLog().error({ err: e, conversationId: conv.id }, 'message_persistence_failed');
         try {
@@ -1015,7 +1253,21 @@ export function registerApiRoutes(
       webAdapter.setConversationDbId(conversationId, conv.id);
     }
 
-    const result = await dispatchToOrchestrator(conversationId, message);
+    // Pass savedFiles to dispatchToOrchestrator so cleanup happens inside the lock handler,
+    // AFTER handleMessage completes — not in the HTTP handler's finally block where the
+    // fire-and-forget lock callback may still be running and the AI has not yet read the files.
+    let extraContext: Omit<HandleMessageContext, 'isolationHints'> | undefined;
+    let filesToCleanup: { files: AttachedFile[]; uploadDir: string } | undefined;
+    if (savedFiles.length > 0) {
+      extraContext = { attachedFiles: savedFiles };
+      filesToCleanup = { files: savedFiles, uploadDir };
+    }
+    const result = await dispatchToOrchestrator(
+      conversationId,
+      message,
+      extraContext,
+      filesToCleanup
+    );
     return c.json(result);
   });
 

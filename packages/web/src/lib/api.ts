@@ -108,13 +108,26 @@ export async function deleteConversation(id: string): Promise<{ success: boolean
 
 export async function sendMessage(
   conversationId: string,
-  message: string
+  message: string,
+  files?: File[]
 ): Promise<{ accepted: boolean; status: string }> {
-  return fetchJSON(`/api/conversations/${encodeURIComponent(conversationId)}/message`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
-  });
+  const url = `/api/conversations/${encodeURIComponent(conversationId)}/message`;
+
+  if (!files || files.length === 0) {
+    return fetchJSON(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
+  }
+
+  const form = new FormData();
+  form.append('message', message);
+  for (const file of files) {
+    form.append('files', file, file.name);
+  }
+  // No Content-Type header — browser sets multipart/form-data with boundary automatically
+  return fetchJSON(url, { method: 'POST', body: form });
 }
 
 // Messages

@@ -35,11 +35,20 @@ export interface Conversation {
 
 import type { IsolationHints } from '@archon/isolation';
 
+export interface AttachedFile {
+  /** Absolute path on disk where the file was saved by the server */
+  path: string;
+  name: string;
+  mimeType: string;
+  size: number;
+}
+
 export interface HandleMessageContext {
   readonly issueContext?: string;
   readonly threadContext?: string;
   readonly parentConversationId?: string;
   readonly isolationHints?: IsolationHints;
+  readonly attachedFiles?: AttachedFile[];
 }
 
 export interface Codebase {
