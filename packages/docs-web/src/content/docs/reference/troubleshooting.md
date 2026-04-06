@@ -158,6 +158,45 @@ PORT=4000 bun run dev
 
 When running in a git worktree, Archon automatically allocates a unique port (3190-4089 range) so you don't need to worry about conflicts with the main instance.
 
+### Stale Processes (Windows)
+
+**Symptom:** The Web UI shows a spinning indicator with no response, and the terminal shows no activity — even though you've started `bun run dev`.
+
+**Cause:** A previous `bun` or `node` process is still holding the port. This is common on Windows when the terminal is closed without stopping the server.
+
+**Diagnose:**
+
+```powershell
+netstat -ano | findstr :3090
+```
+
+Note the PID in the last column, then verify which process it is:
+
+```powershell
+tasklist | findstr 12345
+```
+
+(Replace `12345` with the actual PID.)
+
+**Fix — kill by PID** (preferred):
+
+```powershell
+taskkill /F /PID 12345
+```
+
+If multiple stale processes are present:
+
+```powershell
+taskkill /F /IM bun.exe
+taskkill /F /IM node.exe
+```
+
+:::caution
+Do not kill `claude.exe` processes — those are active Claude Code sessions.
+:::
+
+See also: [Windows Setup](/deployment/windows/) for more Windows-specific guidance.
+
 ## E2E Testing / agent-browser
 
 **`agent-browser: command not found`:**
