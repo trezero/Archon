@@ -43,7 +43,6 @@ describe('config-loader', () => {
     'TELEGRAM_STREAMING_MODE',
     'DISCORD_STREAMING_MODE',
     'SLACK_STREAMING_MODE',
-    'GITHUB_STREAMING_MODE',
     'MAX_CONCURRENT_CONVERSATIONS',
     'WORKSPACE_PATH',
     'WORKTREE_BASE',
@@ -227,7 +226,6 @@ concurrency:
       expect(config.assistant).toBe('claude');
       expect(config.assistants).toEqual({ claude: {}, codex: {} });
       expect(config.streaming.telegram).toBe('stream');
-      expect(config.streaming.github).toBe('batch');
       expect(config.concurrency.maxConversations).toBe(10);
     });
 

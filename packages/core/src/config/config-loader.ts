@@ -76,7 +76,6 @@ const DEFAULT_CONFIG_CONTENT = `# Archon Global Configuration
 #   telegram: stream
 #   discord: batch
 #   slack: batch
-#   github: batch
 
 # Concurrency settings
 # concurrency:
@@ -182,7 +181,6 @@ function getDefaults(): MergedConfig {
       telegram: 'stream',
       discord: 'batch',
       slack: 'batch',
-      github: 'batch',
     },
     paths: {
       workspaces: getArchonWorkspacesPath(),
@@ -234,11 +232,6 @@ function applyEnvOverrides(config: MergedConfig): MergedConfig {
   const slackMode = process.env.SLACK_STREAMING_MODE;
   if (slackMode && streamingModes.includes(slackMode as 'stream' | 'batch')) {
     config.streaming.slack = slackMode as 'stream' | 'batch';
-  }
-
-  const githubMode = process.env.GITHUB_STREAMING_MODE;
-  if (githubMode && streamingModes.includes(githubMode as 'stream' | 'batch')) {
-    config.streaming.github = githubMode as 'stream' | 'batch';
   }
 
   // Path overrides (these come from archon-paths.ts which already checks env vars)
@@ -296,7 +289,6 @@ function mergeGlobalConfig(defaults: MergedConfig, global: GlobalConfig): Merged
     if (global.streaming.telegram) result.streaming.telegram = global.streaming.telegram;
     if (global.streaming.discord) result.streaming.discord = global.streaming.discord;
     if (global.streaming.slack) result.streaming.slack = global.streaming.slack;
-    if (global.streaming.github) result.streaming.github = global.streaming.github;
   }
 
   // Path preferences
@@ -499,7 +491,6 @@ export function toSafeConfig(config: MergedConfig): SafeConfig {
       telegram: config.streaming.telegram,
       discord: config.streaming.discord,
       slack: config.streaming.slack,
-      github: config.streaming.github,
     },
     concurrency: { maxConversations: config.concurrency.maxConversations },
     defaults: {

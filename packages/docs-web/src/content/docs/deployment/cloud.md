@@ -458,7 +458,6 @@ Add to `.env`:
 
 ```ini
 WEBHOOK_SECRET=your_generated_secret_here
-GITHUB_STREAMING_MODE=batch  # batch (default) | stream
 ```
 
 **GitHub webhook configuration happens in Section 9 after services are running.**
