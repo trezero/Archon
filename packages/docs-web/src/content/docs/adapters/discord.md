@@ -9,6 +9,10 @@ sidebar:
   order: 5
 ---
 
+:::note
+Discord is a **community adapter** — contributed and maintained by the community.
+:::
+
 Connect Archon to Discord so you can interact with your AI coding assistant from any Discord server or DM.
 
 ## Prerequisites

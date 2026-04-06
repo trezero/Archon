@@ -191,11 +191,6 @@ nodes:
 | `provider` | `'claude'` \| `'codex'` | inherited | Per-node provider override |
 | `model` | string | inherited | Per-node model override |
 | `output_format` | object | — | JSON Schema for structured output (Claude and Codex) |
-| `effort` | `'low'` \| `'medium'` \| `'high'` \| `'max'` | — | Controls thinking depth. `max` is Opus only. Claude only |
-| `thinking` | string or object | — | `'adaptive'`, `'enabled'`, `'disabled'`, or `{ type: 'enabled', budgetTokens: N }`. Claude only |
-| `maxBudgetUsd` | number | — | Cost cap per node. Node fails with clear message if exceeded. Claude only |
-| `systemPrompt` | string | — | Per-node system prompt override. Claude only |
-| `fallbackModel` | string | — | Auto-failover model if primary fails. Claude only |
 | `allowed_tools` | string[] | — | Whitelist of built-in tools. `[]` = no tools. Claude only |
 | `denied_tools` | string[] | — | Tools to remove. Applied after `allowed_tools`. Claude only |
 | `hooks` | object | — | Per-node SDK hook callbacks. Claude only. See [Hooks](/guides/hooks/) |
@@ -617,22 +612,19 @@ Good descriptions include:
 
 ## Variable Substitution
 
-All workflows support these variables in prompts and commands:
+All workflows support variable substitution in prompts and commands. The most commonly used:
 
 | Variable | Description |
 |----------|-------------|
+| `$ARGUMENTS` / `$USER_MESSAGE` | The user's input message that triggered the workflow |
 | `$WORKFLOW_ID` | Unique ID for this workflow run |
-| `$USER_MESSAGE` | Original message that triggered workflow |
-| `$ARGUMENTS` | Same as `$USER_MESSAGE` |
 | `$ARTIFACTS_DIR` | Pre-created artifacts directory for this workflow run |
-| `$BASE_BRANCH` | Base branch; auto-detected from git when `worktree.baseBranch` is not set. Fails only if referenced and detection fails |
+| `$BASE_BRANCH` | Base branch (auto-detected or configured) |
 | `$CONTEXT` | GitHub issue/PR context (if available) |
-| `$EXTERNAL_CONTEXT` | Same as `$CONTEXT` |
-| `$ISSUE_CONTEXT` | Same as `$CONTEXT` |
-| `$LOOP_USER_INPUT` | User feedback from an interactive loop approval gate (empty string on non-resume iterations) |
-| `$REJECTION_REASON` | Rejection feedback from an approval node's `--reason` (only available in `on_reject` prompts; empty string elsewhere) |
-| `$nodeId.output` | Output of a completed upstream DAG node (DAG workflows only) |
-| `$nodeId.output.field` | JSON field from a structured upstream node output (DAG workflows only) |
+| `$nodeId.output` | Output of a completed upstream node |
+| `$nodeId.output.field` | JSON field from a structured upstream node output |
+
+See the [Variable Reference](/reference/variables/) for the complete list, including `$LOOP_USER_INPUT`, `$REJECTION_REASON`, positional arguments, substitution order, and context variable behavior.
 
 Example:
 ```yaml

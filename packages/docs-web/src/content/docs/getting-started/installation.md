@@ -4,7 +4,7 @@ description: Install Archon on macOS, Linux, or Windows.
 category: getting-started
 audience: [user, operator]
 sidebar:
-  order: 1
+  order: 0
 ---
 
 ## Quick Install
@@ -55,5 +55,6 @@ archon version
 
 ## Next Steps
 
+- [Core Concepts](/getting-started/concepts/) — Understand workflows, nodes, commands, and isolation
 - [Quick Start](/getting-started/quick-start/) — Run your first workflow
 - [Configuration](/getting-started/configuration/) — Set up API keys and preferences

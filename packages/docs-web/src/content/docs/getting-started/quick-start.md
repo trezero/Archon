@@ -26,24 +26,12 @@ archon workflow run assist "What does this codebase do?"
 archon workflow run smart-review
 ```
 
-## Key Concepts
-
-### Workflows
-
-Workflows are YAML files that define multi-step AI coding tasks. Each workflow has **nodes** that execute in order (or as a DAG with dependencies).
-
-### Isolation
-
-By default, workflows run in **git worktrees** — isolated copies of your repo. This means:
-- Your working branch stays clean
-- Multiple workflows can run in parallel
-- Failed workflows don't leave a mess
-
-### Commands
-
-Commands are reusable prompt files (`.md` or `.txt`) that workflows reference. They define what the AI should do at each step.
-
 ## What's Next?
 
+For the full getting started guide -- installation, authentication, Web UI setup, CLI setup, and troubleshooting -- see the [Overview](/getting-started/overview/).
+
+- [Overview](/getting-started/overview/) — Complete onboarding guide
+- [Core Concepts](/getting-started/concepts/) — Understand workflows, nodes, commands, and isolation
 - [Configuration](/getting-started/configuration/) — Customize Archon for your project
+- [Authoring Workflows](/guides/authoring-workflows/) — Create your own workflows
 - [GitHub Repository](https://github.com/coleam00/Archon) — Source code, issues, and discussions

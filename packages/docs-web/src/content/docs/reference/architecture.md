@@ -713,7 +713,7 @@ export function getIsolationProvider(type?: string): IIsolationProvider {
 }
 ```
 
-**See also:** [Worktree Orchestration](https://github.com/coleam00/Archon/blob/dev/docs/worktree-orchestration.md) for detailed flow diagrams.
+**See also:** The isolation architecture is documented in the codebase at `docs/worktree-orchestration.md` for detailed flow diagrams.
 
 ---
 

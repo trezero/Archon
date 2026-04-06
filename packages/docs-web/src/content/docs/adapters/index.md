@@ -11,17 +11,24 @@ sidebar:
 
 Archon supports multiple platform adapters. Each adapter connects Archon to a different communication channel, letting you trigger workflows and interact with AI agents from wherever you work.
 
-## Available Adapters
+## Core Adapters
 
 | Adapter | Transport | Auth Required | Setup |
 |---------|-----------|---------------|-------|
 | [**Web UI**](/adapters/web/) | SSE streaming | None | Built-in |
+| [**CLI**](/reference/cli/) | stdout | None | Built-in |
 | [**Slack**](/adapters/slack/) | Socket Mode | Bot + App tokens | [Setup guide](/adapters/slack/) |
 | [**Telegram**](/adapters/telegram/) | Bot API polling | Bot token | [Setup guide](/adapters/telegram/) |
 | [**GitHub**](/adapters/github/) | Webhooks | Token + webhook secret | [Setup guide](/adapters/github/) |
-| [**Discord**](/adapters/discord/) | WebSocket | Bot token | [Setup guide](/adapters/discord/) |
 
-The **CLI** adapter (`stdout`) is also built-in and requires no setup. See the [CLI usage guide](/getting-started/) for details.
+## Community Adapters
+
+Community adapters follow the same `IPlatformAdapter` interface but target platforms outside the core set.
+
+| Adapter | Transport | Auth Required | Setup |
+|---------|-----------|---------------|-------|
+| [**Discord**](/adapters/discord/) | WebSocket | Bot token | [Setup guide](/adapters/discord/) |
+| [**Gitea**](/adapters/gitea/) | Webhooks | Token + webhook secret | [Setup guide](/adapters/gitea/) |
 
 ## How Adapters Work
 

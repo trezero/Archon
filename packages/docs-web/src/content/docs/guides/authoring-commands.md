@@ -221,21 +221,18 @@ End each phase with a checkpoint:
 
 ## Variable Substitution
 
-Archon replaces these variables before sending to the AI:
+Archon replaces variables in command text before sending to the AI. The most commonly used variables in commands:
 
-| Variable | Value | Use Case |
-|----------|-------|----------|
-| `$ARGUMENTS` | User's input message | Primary input |
-| `$USER_MESSAGE` | Same as `$ARGUMENTS` | Alias |
-| `$1`, `$2`, `$3` | Positional arguments | Structured input |
-| `$WORKFLOW_ID` | Unique workflow run ID | Artifact naming |
-| `$ARTIFACTS_DIR` | Pre-created external artifacts directory (`~/.archon/workspaces/owner/repo/artifacts/runs/{id}/`) | Storing artifacts outside the repo |
-| `$BASE_BRANCH` | Base branch; auto-detected from git or set via `worktree.baseBranch` in config | Git operations |
-| `$CONTEXT` | GitHub issue/PR context (if available) | External context |
-| `$EXTERNAL_CONTEXT` | Same as `$CONTEXT` | Alias |
-| `$ISSUE_CONTEXT` | Same as `$CONTEXT` | Alias |
-| `$LOOP_USER_INPUT` | User feedback from an interactive loop approval gate. Only populated on the first iteration of a resumed interactive loop; empty string on all other iterations. | Interactive loop prompts |
-| `$REJECTION_REASON` | Reviewer feedback from an approval node rejection (`on_reject` prompts only; empty string elsewhere) | Approval rework prompts |
+| Variable | Value |
+|----------|-------|
+| `$ARGUMENTS` / `$USER_MESSAGE` | User's input message |
+| `$1`, `$2`, `$3` | Positional arguments (direct invocation only) |
+| `$ARTIFACTS_DIR` | Pre-created artifacts directory for this workflow run |
+| `$BASE_BRANCH` | Base branch (auto-detected or configured) |
+| `$WORKFLOW_ID` | Unique workflow run ID |
+| `$CONTEXT` | GitHub issue/PR context (if available) |
+
+See the [Variable Reference](/reference/variables/) for the complete list, including `$LOOP_USER_INPUT`, `$REJECTION_REASON`, node output references, substitution order, and context variable behavior.
 
 ### Usage Pattern
 

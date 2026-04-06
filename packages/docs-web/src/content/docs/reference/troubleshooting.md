@@ -162,7 +162,7 @@ When running in a git worktree, Archon automatically allocates a unique port (31
 
 **`agent-browser: command not found`:**
 
-`agent-browser` is an optional external dependency -- see the [E2E Testing Guide](https://github.com/coleam00/Archon/blob/dev/docs/e2e-testing.md) for installation.
+`agent-browser` is an optional external dependency -- see the [E2E Testing Guide](/deployment/e2e-testing/) for installation.
 
 ```bash
 npm install -g agent-browser
@@ -171,7 +171,7 @@ agent-browser install
 
 **agent-browser daemon fails to start (Windows):**
 
-agent-browser has a [known Windows bug](https://github.com/vercel-labs/agent-browser/issues/56). Use WSL as a workaround -- see [E2E Testing on WSL](https://github.com/coleam00/Archon/blob/dev/docs/e2e-testing-wsl.md).
+agent-browser has a [known Windows bug](https://github.com/vercel-labs/agent-browser/issues/56). Use WSL as a workaround -- see [E2E Testing on WSL](/deployment/e2e-testing-wsl/).
 
 **agent-browser daemon fails to start (macOS/Linux):**
 

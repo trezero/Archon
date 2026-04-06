@@ -153,22 +153,119 @@ This is useful when you maintain coding style or identity preferences in `~/.cla
 
 ## Environment Variables
 
-Environment variables override all other configuration:
+Environment variables override all other configuration. They are organized by category below.
 
-| Variable                       | Description                | Default       |
-| ------------------------------ | -------------------------- | ------------- |
-| `DATABASE_URL`                 | PostgreSQL connection (optional -- omit for SQLite) | SQLite at `~/.archon/archon.db` |
-| `ARCHON_HOME`                  | Base directory for Archon  | `~/.archon`   |
-| `DEFAULT_AI_ASSISTANT`         | Default AI assistant       | `claude`      |
-| `TELEGRAM_STREAMING_MODE`      | Telegram streaming         | `stream`      |
-| `DISCORD_STREAMING_MODE`       | Discord streaming          | `batch`       |
-| `SLACK_STREAMING_MODE`         | Slack streaming            | `batch`       |
-| `GITHUB_STREAMING_MODE`        | GitHub streaming           | `batch`       |
-| `MAX_CONCURRENT_CONVERSATIONS` | Concurrency limit          | `10`          |
-| `STALE_THRESHOLD_DAYS`         | Days before an inactive worktree is considered stale | `14` |
-| `MAX_WORKTREES_PER_CODEBASE`   | Max worktrees per codebase before auto-cleanup | `25` |
-| `CLEANUP_INTERVAL_HOURS`       | How often the background cleanup runs | `6` |
-| `SESSION_RETENTION_DAYS`       | Delete inactive sessions older than N days | `30` |
+### Core
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `ARCHON_HOME` | Base directory for all Archon-managed files | `~/.archon` |
+| `PORT` | HTTP server listen port | `3090` (auto-allocated in worktrees) |
+| `LOG_LEVEL` | Logging verbosity (`fatal`, `error`, `warn`, `info`, `debug`, `trace`) | `info` |
+| `BOT_DISPLAY_NAME` | Bot name shown in batch-mode "starting" messages | `Archon` |
+| `DEFAULT_AI_ASSISTANT` | Default AI assistant (`claude` or `codex`) | `claude` |
+| `MAX_CONCURRENT_CONVERSATIONS` | Maximum concurrent AI conversations | `10` |
+| `SESSION_RETENTION_DAYS` | Delete inactive sessions older than N days | `30` |
+
+### AI Providers -- Claude
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `CLAUDE_USE_GLOBAL_AUTH` | Use global auth from `claude /login` (`true`/`false`) | Auto-detect |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Explicit OAuth token (alternative to global auth) | -- |
+| `CLAUDE_API_KEY` | Explicit API key (alternative to global auth) | -- |
+| `TITLE_GENERATION_MODEL` | Lightweight model for generating conversation titles | SDK default |
+
+When `CLAUDE_USE_GLOBAL_AUTH` is unset, Archon auto-detects: it uses explicit tokens if present, otherwise falls back to global auth.
+
+### AI Providers -- Codex
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `CODEX_ID_TOKEN` | Codex ID token (from `~/.codex/auth.json`) | -- |
+| `CODEX_ACCESS_TOKEN` | Codex access token | -- |
+| `CODEX_REFRESH_TOKEN` | Codex refresh token | -- |
+| `CODEX_ACCOUNT_ID` | Codex account ID | -- |
+
+### Platform Adapters -- Slack
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `SLACK_BOT_TOKEN` | Slack bot token (`xoxb-...`) | -- |
+| `SLACK_APP_TOKEN` | Slack app-level token for Socket Mode (`xapp-...`) | -- |
+| `SLACK_ALLOWED_USER_IDS` | Comma-separated Slack user IDs for whitelist | Open access |
+| `SLACK_STREAMING_MODE` | Streaming mode (`stream` or `batch`) | `batch` |
+
+### Platform Adapters -- Telegram
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token from @BotFather | -- |
+| `TELEGRAM_ALLOWED_USER_IDS` | Comma-separated Telegram user IDs for whitelist | Open access |
+| `TELEGRAM_STREAMING_MODE` | Streaming mode (`stream` or `batch`) | `stream` |
+
+### Platform Adapters -- Discord
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `DISCORD_BOT_TOKEN` | Discord bot token from Developer Portal | -- |
+| `DISCORD_ALLOWED_USER_IDS` | Comma-separated Discord user IDs for whitelist | Open access |
+| `DISCORD_STREAMING_MODE` | Streaming mode (`stream` or `batch`) | `batch` |
+
+### Platform Adapters -- GitHub
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `GITHUB_TOKEN` | GitHub personal access token (also used by `gh` CLI) | -- |
+| `GH_TOKEN` | Alias for `GITHUB_TOKEN` (used by GitHub CLI) | -- |
+| `WEBHOOK_SECRET` | HMAC SHA-256 secret for GitHub webhook signature verification | -- |
+| `GITHUB_ALLOWED_USERS` | Comma-separated GitHub usernames for whitelist (case-insensitive) | Open access |
+| `GITHUB_BOT_MENTION` | @mention name the bot responds to in issues/PRs | Falls back to `BOT_DISPLAY_NAME` |
+| `GITHUB_STREAMING_MODE` | Streaming mode (`stream` or `batch`) | `batch` |
+
+### Platform Adapters -- Gitea
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `GITEA_URL` | Self-hosted Gitea instance URL (e.g. `https://gitea.example.com`) | -- |
+| `GITEA_TOKEN` | Gitea personal access token or bot account token | -- |
+| `GITEA_WEBHOOK_SECRET` | HMAC SHA-256 secret for Gitea webhook signature verification | -- |
+| `GITEA_ALLOWED_USERS` | Comma-separated Gitea usernames for whitelist (case-insensitive) | Open access |
+| `GITEA_BOT_MENTION` | @mention name the bot responds to in issues/PRs | Falls back to `BOT_DISPLAY_NAME` |
+
+### Database
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `DATABASE_URL` | PostgreSQL connection string (omit to use SQLite) | SQLite at `~/.archon/archon.db` |
+
+### Web UI
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `WEB_UI_ORIGIN` | CORS origin for API routes (restrict when exposing publicly) | `*` (allow all) |
+| `WEB_UI_DEV` | When set, skip serving static frontend (Vite dev server used instead) | -- |
+
+### Worktree Management
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `STALE_THRESHOLD_DAYS` | Days before an inactive worktree is considered stale | `14` |
+| `MAX_WORKTREES_PER_CODEBASE` | Max worktrees per codebase before auto-cleanup | `25` |
+| `CLEANUP_INTERVAL_HOURS` | How often the background cleanup service runs | `6` |
+
+### Docker / Deployment
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `ARCHON_DATA` | Host path for Archon data (workspaces, worktrees, artifacts) | Docker-managed volume |
+| `DOMAIN` | Public domain for Caddy reverse proxy (TLS auto-provisioned) | -- |
+| `CADDY_BASIC_AUTH` | Caddy basicauth directive to protect Web UI and API | Disabled |
+| `AUTH_USERNAME` | Username for form-based auth (Caddy forward_auth) | -- |
+| `AUTH_PASSWORD_HASH` | Bcrypt hash for form-based auth password (escape `$` as `$$` in Compose) | -- |
+| `COOKIE_SECRET` | 64-hex-char secret for auth session cookies | -- |
+| `AUTH_SERVICE_PORT` | Port for the auth service container | `9000` |
+| `COOKIE_MAX_AGE` | Auth cookie lifetime in seconds | `86400` |
 
 ### `.env` File Locations
 
