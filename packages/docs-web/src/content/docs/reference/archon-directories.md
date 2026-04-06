@@ -147,7 +147,6 @@ Key configuration options:
 | Telegram Streaming | `TELEGRAM_STREAMING_MODE` | `stream` |
 | Discord Streaming | `DISCORD_STREAMING_MODE` | `batch` |
 | Slack Streaming | `SLACK_STREAMING_MODE` | `batch` |
-| GitHub Streaming | `GITHUB_STREAMING_MODE` | `batch` |
 
 ## Command Folders
 

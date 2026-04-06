@@ -227,7 +227,6 @@ When `CLAUDE_USE_GLOBAL_AUTH` is unset, Archon auto-detects: it uses explicit to
 | `WEBHOOK_SECRET` | HMAC SHA-256 secret for GitHub webhook signature verification | -- |
 | `GITHUB_ALLOWED_USERS` | Comma-separated GitHub usernames for whitelist (case-insensitive) | Open access |
 | `GITHUB_BOT_MENTION` | @mention name the bot responds to in issues/PRs | Falls back to `BOT_DISPLAY_NAME` |
-| `GITHUB_STREAMING_MODE` | Streaming mode (`stream` or `batch`) | `batch` |
 
 ### Platform Adapters -- Gitea
 
@@ -368,7 +367,6 @@ Messages are sent in real-time as the AI generates responses.
 
 ```ini
 TELEGRAM_STREAMING_MODE=stream
-GITHUB_STREAMING_MODE=stream
 SLACK_STREAMING_MODE=stream
 DISCORD_STREAMING_MODE=stream
 ```
@@ -391,7 +389,6 @@ Only the final summary message is sent after AI completes processing.
 
 ```ini
 TELEGRAM_STREAMING_MODE=batch
-GITHUB_STREAMING_MODE=batch
 SLACK_STREAMING_MODE=batch
 DISCORD_STREAMING_MODE=batch
 ```

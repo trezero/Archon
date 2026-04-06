@@ -525,7 +525,6 @@ Each conversation gets its own isolated copy of the repo:
 │   │ 1. DEFAULTS (hardcoded)                                         │  │
 │   │    assistant: claude                                            │  │
 │   │    streaming.telegram: stream                                   │  │
-│   │    streaming.github: batch                                      │  │
 │   └─────────────────────────────────────────────────────────────────┘  │
 │                              │                                          │
 │                              ▼                                          │

@@ -905,7 +905,6 @@ Streaming modes control how AI responses are delivered to users: real-time (stre
 
 ```ini
 TELEGRAM_STREAMING_MODE=stream  # Default: stream (real-time chat)
-GITHUB_STREAMING_MODE=batch     # Default: batch (single comment)
 SLACK_STREAMING_MODE=batch      # Default: batch
 ```
 

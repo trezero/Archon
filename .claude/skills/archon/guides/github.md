@@ -12,7 +12,7 @@ Before starting, read the existing `.env` file and check which GitHub-related va
 cat <archon-repo>/.env
 ```
 
-Check these keys: `WEBHOOK_SECRET`, `GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_ALLOWED_USERS`, `GITHUB_STREAMING_MODE`.
+Check these keys: `WEBHOOK_SECRET`, `GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_ALLOWED_USERS`.
 
 **If all are already filled in**: Tell the user "GitHub tokens are already configured in `.env`. Skipping to webhook setup." Jump to Step 5 (configure the repo webhook).
 
@@ -107,7 +107,6 @@ WEBHOOK_SECRET=<webhook-secret>
 GITHUB_TOKEN=<token>
 GH_TOKEN=<same token>
 GITHUB_ALLOWED_USERS=<username>
-GITHUB_STREAMING_MODE=batch
 ```
 
 ## 6. Configure the Repository Webhook
