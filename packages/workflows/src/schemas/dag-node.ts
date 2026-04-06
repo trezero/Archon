@@ -346,6 +346,22 @@ export const dagNodeSchema = dagNodeBaseSchema
       return z.NEVER;
     }
     if (modeCount === 0) {
+      if (typeof data.bash === 'string') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'bash script cannot be empty',
+          path: ['bash'],
+        });
+        return z.NEVER;
+      }
+      if (typeof data.prompt === 'string') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'prompt cannot be empty',
+          path: ['prompt'],
+        });
+        return z.NEVER;
+      }
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "must have either 'command', 'prompt', 'bash', 'loop', 'approval', or 'cancel'",

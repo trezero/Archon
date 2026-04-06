@@ -47,6 +47,27 @@ function getInstantIssues(
     });
   }
 
+  for (const node of nodes) {
+    if (node.data.nodeType === 'bash' && !node.data.bashScript?.trim()) {
+      issues.push({
+        severity: 'error',
+        message: `Node "${node.data.id}": bash script cannot be empty`,
+        nodeId: node.data.id,
+        field: 'bashScript',
+        suggestion: 'Enter a bash script for this node',
+      });
+    }
+    if (node.data.nodeType === 'prompt' && !node.data.promptText?.trim()) {
+      issues.push({
+        severity: 'error',
+        message: `Node "${node.data.id}": prompt cannot be empty`,
+        nodeId: node.data.id,
+        field: 'promptText',
+        suggestion: 'Enter a prompt for this node',
+      });
+    }
+  }
+
   return issues;
 }
 

@@ -224,6 +224,49 @@ describe('approvalOnRejectSchema', () => {
 });
 
 // ---------------------------------------------------------------------------
+// dagNodeSchema — empty bash/prompt validation
+// ---------------------------------------------------------------------------
+
+describe('dagNodeSchema — empty bash/prompt', () => {
+  test('emits "bash script cannot be empty" for bash: ""', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n1', bash: '' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe('bash script cannot be empty');
+    }
+  });
+
+  test('emits "bash script cannot be empty" for whitespace-only bash', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n1', bash: '   ' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe('bash script cannot be empty');
+    }
+  });
+
+  test('emits "prompt cannot be empty" for prompt: ""', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n1', prompt: '' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe('prompt cannot be empty');
+    }
+  });
+
+  test('passes for bash: "echo hello"', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n1', bash: 'echo hello' });
+    expect(result.success).toBe(true);
+  });
+
+  test('still emits generic error when no mode field is present', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n1' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toContain('must have either');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // dagNodeSchema — Claude SDK options
 // ---------------------------------------------------------------------------
 
