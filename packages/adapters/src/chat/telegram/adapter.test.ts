@@ -269,6 +269,21 @@ describe('TelegramAdapter', () => {
       expect(mockLaunch).toHaveBeenCalledTimes(1);
     });
 
+    test('should retry twice on 409 and succeed on third attempt', async () => {
+      const adapter = new TelegramAdapter('fake-token-for-testing');
+      const conflictError = new Error('409: Conflict: terminated by other getUpdates request');
+      const mockLaunch = mock<() => Promise<void>>()
+        .mockRejectedValueOnce(conflictError)
+        .mockRejectedValueOnce(conflictError)
+        .mockResolvedValueOnce(undefined);
+      (adapter.getBot() as unknown as { launch: typeof mockLaunch }).launch = mockLaunch;
+
+      await adapter.start({ retryDelayMs: 0 });
+
+      expect(mockLaunch).toHaveBeenCalledTimes(3);
+      expect(mockLogger.warn).toHaveBeenCalledTimes(2);
+    });
+
     test('should throw after exhausting all 409 retry attempts', async () => {
       const adapter = new TelegramAdapter('fake-token-for-testing');
       const conflictError = new Error('409: Conflict: terminated by other getUpdates request');

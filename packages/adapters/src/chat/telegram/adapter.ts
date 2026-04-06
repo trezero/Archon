@@ -167,7 +167,7 @@ export class TelegramAdapter implements IPlatformAdapter {
 
   /**
    * Start the bot (begins polling).
-   * Retries up to 3 times on 409 Conflict (stale getUpdates connection).
+   * Makes up to 3 attempts on 409 Conflict (stale getUpdates connection).
    */
   async start(options?: { retryDelayMs?: number }): Promise<void> {
     // Register message handler before launch
@@ -198,23 +198,24 @@ export class TelegramAdapter implements IPlatformAdapter {
     // on each retry — that adds more stale connections rather than fewer.
     const MAX_ATTEMPTS = 3;
     const RETRY_DELAY_MS = options?.retryDelayMs ?? 60_000;
-    let lastError: Error | undefined;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
+        // dropPendingUpdates: true — discard queued messages from while the bot was offline
+        // to avoid reprocessing stale commands after a container restart.
         await this.bot.launch({ dropPendingUpdates: true });
         getLog().info('telegram.bot_started');
         return;
       } catch (err) {
-        lastError = err as Error;
-        const is409 = lastError.message.includes('409');
+        const message = err instanceof Error ? err.message : String(err);
+        const is409 = message.includes('409');
         if (is409 && attempt < MAX_ATTEMPTS) {
           getLog().warn(
-            { attempt, maxAttempts: MAX_ATTEMPTS, retryDelayMs: RETRY_DELAY_MS },
+            { err, attempt, maxAttempts: MAX_ATTEMPTS, retryDelayMs: RETRY_DELAY_MS },
             'telegram.start_conflict_retrying'
           );
           await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
         } else {
-          throw lastError;
+          throw err instanceof Error ? err : new Error(message);
         }
       }
     }
