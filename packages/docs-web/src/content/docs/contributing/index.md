@@ -9,13 +9,14 @@ sidebar:
 
 Guides for developers contributing to the Archon codebase.
 
-## Planned Guides
+## Developer Guides
 
-The following developer documentation is being migrated:
+- **[New Developer Guide](/contributing/new-developer-guide/)** — Codebase orientation, architecture overview, and first steps
+- **[CLI Internals](/contributing/cli-internals/)** — CLI package internals, command routing, and worktree logic
+- **[Releasing](/contributing/releasing/)** — Version management and release process
+- **[DX Quirks](/contributing/dx-quirks/)** — Known development experience issues and workarounds
 
-- **New Developer Guide** — Codebase orientation and first contribution
-- **CLI Developer Guide** — CLI package internals and architecture
-- **Testing** — Unit tests, integration tests, E2E with agent-browser
-- **Releasing** — Version management and release process
-- **DX Quirks** — Known development experience issues and workarounds
-- **Migration Guides** — Upgrading between Archon versions
+## Migration Guides
+
+- **[Migration Guide](/contributing/migration-guide/)** — Upgrading between Archon versions (runtime defaults)
+- **[Sequential-to-DAG Migration](/contributing/sequential-dag-migration/)** — Converting legacy sequential workflows to DAG format (deprecated)

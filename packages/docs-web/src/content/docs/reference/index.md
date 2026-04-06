@@ -1,6 +1,6 @@
 ---
 title: Reference
-description: Technical reference for Archon's architecture, CLI, commands, database, and API.
+description: Technical reference for Archon's architecture, CLI, commands, database, configuration, and troubleshooting.
 category: reference
 audience: [developer]
 sidebar:
@@ -9,14 +9,12 @@ sidebar:
 
 Technical reference documentation for Archon internals.
 
-## Planned Reference Docs
+## Reference Docs
 
-The following reference material is being migrated from the existing documentation:
-
-- **Architecture** — System overview, package structure, data flow
-- **CLI Reference** — All CLI commands and flags
-- **Commands Reference** — Slash commands available in all adapters
-- **Database** — Schema, migrations, SQLite/PostgreSQL
-- **Configuration Reference** — Full config.yaml options
-- **Workflow Schema** — YAML workflow definition format
-- **API Reference** — REST API endpoints (OpenAPI)
+- **[Architecture](/reference/architecture/)** -- System overview, interfaces, data flow, extension guides
+- **[Archon Directories](/reference/archon-directories/)** -- Directory structure, path resolution, configuration system
+- **[CLI Reference](/reference/cli/)** -- All CLI commands, flags, and usage examples
+- **[Commands Reference](/reference/commands/)** -- Slash commands available in all platform adapters
+- **[Database](/reference/database/)** -- Schema, migrations, SQLite/PostgreSQL setup
+- **[Configuration Reference](/reference/configuration/)** -- Full config.yaml options, environment variables, streaming modes
+- **[Troubleshooting](/reference/troubleshooting/)** -- Common issues and solutions
