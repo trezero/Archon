@@ -98,6 +98,31 @@ describe('SqliteAdapter', () => {
     });
   });
 
+  describe('placeholder conversion (#999 regression)', () => {
+    test('$N inside SQL comments is treated as a placeholder — avoid $N in comments', async () => {
+      db = createTestDb();
+      await insertCodebase(db, 'cb-1');
+
+      // A query with $1 and $2 as real params, but $3 only appears in a comment.
+      // convertPlaceholders replaces ALL $N occurrences including inside comments,
+      // producing 3 ? marks for only 2 params → SQLite error.
+      const sql = `SELECT * FROM remote_agent_codebases WHERE id = $1 AND name = $2 -- $3 is not a real param`;
+      await expect(db.query(sql, ['cb-1', 'test-codebase-cb-1'])).rejects.toThrow();
+    });
+
+    test('query succeeds when $N placeholders match param count', async () => {
+      db = createTestDb();
+      await insertCodebase(db, 'cb-1');
+
+      const result = await db.query<{ id: string }>(
+        `SELECT id FROM remote_agent_codebases WHERE id = $1 AND name = $2`,
+        ['cb-1', 'test-codebase-cb-1']
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].id).toBe('cb-1');
+    });
+  });
+
   describe('UPDATE/DELETE with RETURNING', () => {
     test('throws error for UPDATE RETURNING', async () => {
       db = createTestDb();

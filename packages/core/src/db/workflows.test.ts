@@ -489,6 +489,7 @@ describe('workflows database', () => {
       expect(query).toContain('working_path = $2');
       expect(query).not.toContain('conversation_id');
       expect(query).toContain('ORDER BY started_at DESC');
+      expect(query).not.toMatch(/--.*\$\d/); // regression guard for #999: $N in SQL comments breaks convertPlaceholders
       expect(params).toEqual(['feature-development', '/repo/path', 1]);
     });
 
