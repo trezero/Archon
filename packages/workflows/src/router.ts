@@ -177,7 +177,7 @@ export function parseWorkflowInvocation(
     if (caseMatch) {
       getLog().info(
         { requested: workflowName, matched: caseMatch.name },
-        'workflow_case_insensitive_match'
+        'workflow.invoke_case_insensitive_match'
       );
       const remainingMessage = trimmed.slice(match.index + match[0].length).trim();
       return { workflowName: caseMatch.name, remainingMessage };
@@ -185,7 +185,7 @@ export function parseWorkflowInvocation(
 
     // No match - build helpful error
     const available = workflows.map(w => w.name);
-    getLog().warn({ workflowName, available }, 'unknown_workflow');
+    getLog().warn({ workflowName, available }, 'workflow.invoke_unknown');
 
     return {
       workflowName: null,
@@ -208,4 +208,59 @@ export function findWorkflow(
   workflows: readonly WorkflowDefinition[]
 ): WorkflowDefinition | undefined {
   return workflows.find(w => w.name === name);
+}
+
+/**
+ * Resolve a workflow by name using a 4-tier fallback hierarchy:
+ * 1. Exact match
+ * 2. Case-insensitive match
+ * 3. Suffix match (e.g. "assist" → "archon-assist")
+ * 4. Substring match (e.g. "smart" → "archon-smart-pr-review")
+ *
+ * Returns the matched workflow, or undefined if no match found.
+ * Throws an Error if multiple workflows match at the same tier (ambiguous).
+ */
+export function resolveWorkflowName(
+  name: string,
+  workflows: readonly WorkflowDefinition[]
+): WorkflowDefinition | undefined {
+  // Tier 1: Exact match
+  const exact = workflows.find(w => w.name === name);
+  if (exact) return exact;
+
+  const lowerName = name.toLowerCase();
+
+  // Returns the single match, throws on ambiguity, returns undefined for no match
+  function checkTier(
+    matches: WorkflowDefinition[],
+    logEvent: string
+  ): WorkflowDefinition | undefined {
+    if (matches.length === 1) {
+      getLog().info({ requested: name, matched: matches[0].name }, logEvent);
+      return matches[0];
+    }
+    if (matches.length > 1) {
+      const candidates = matches.map(w => `  - ${w.name}`).join('\n');
+      throw new Error(`Ambiguous workflow '${name}'. Did you mean:\n${candidates}`);
+    }
+    return undefined;
+  }
+
+  return (
+    // Tier 2: Case-insensitive match
+    checkTier(
+      workflows.filter(w => w.name.toLowerCase() === lowerName),
+      'workflow.resolve_case_insensitive_match'
+    ) ??
+    // Tier 3: Suffix match (e.g. "assist" matches "archon-assist")
+    checkTier(
+      workflows.filter(w => w.name.toLowerCase().endsWith(`-${lowerName}`)),
+      'workflow.resolve_suffix_match'
+    ) ??
+    // Tier 4: Substring match (e.g. "smart" matches "archon-smart-pr-review")
+    checkTier(
+      workflows.filter(w => w.name.toLowerCase().includes(lowerName)),
+      'workflow.resolve_substring_match'
+    )
+  );
 }
