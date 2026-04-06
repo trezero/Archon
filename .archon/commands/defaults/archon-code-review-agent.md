@@ -98,11 +98,27 @@ For each issue found, search codebase for correct patterns:
 grep -r "pattern" src/ --include="*.ts" | head -5
 ```
 
+### 2.5 Check for Primitive Duplication
+
+For each new interface, class, type alias, or utility module introduced in the diff:
+
+1. Search for similar existing abstractions:
+
+```bash
+# Replace {Name} with the new abstraction's name
+grep -r "interface {Name}\|class {Name}\|type {Name}" packages/ --include="*.ts" | head -10
+```
+
+2. Flag if the new abstraction duplicates or closely overlaps an existing one.
+3. Flag if a new utility function reimplements logic already available in a shared package.
+4. Note findings in the CLAUDE.md Compliance section with verdict: **EXTENDS** (extends existing primitive) or **DUPLICATE** (redundant with existing) or **NEW** (genuinely new, no existing primitive).
+
 **PHASE_2_CHECKPOINT:**
 - [ ] CLAUDE.md compliance checked
 - [ ] Bugs identified
 - [ ] Quality issues noted
 - [ ] Patterns found for fixes
+- [ ] Primitive duplication checked
 
 ---
 

@@ -231,6 +231,21 @@ Note key rules that reviewers should check against.
 - [ ] Files categorized by type
 - [ ] CLAUDE.md rules noted
 
+### 3.4 Identify New Abstractions
+
+Scan the diff for new abstractions introduced by this PR:
+
+- New interfaces, types, or abstract classes (search diff for `interface `, `type `, `abstract class`)
+- New utility modules or helper files (new `.ts` files that aren't feature files or tests)
+- New configuration keys or schema fields
+
+For each new abstraction found, note it in the scope manifest under "Review Focus Areas" so the code review agent can verify it doesn't duplicate an existing primitive.
+
+```bash
+# Quick scan for new abstractions in diff
+gh pr diff {number} | grep "^+" | grep -E "(^interface |^export interface |^type |^abstract class |^export class )" | head -20
+```
+
 ---
 
 ## Phase 3.5: PLAN/ISSUE CONTEXT - Check for Workflow Artifacts
@@ -368,6 +383,7 @@ Based on changes, reviewers should focus on:
 3. **Test Coverage**: {new functionality needing tests}
 4. **Comments/Docs**: {files with documentation changes}
 5. **Docs Impact**: {check if CLAUDE.md or $DOCS_DIR need updates}
+6. **Primitive Alignment**: {If new abstractions found: list them} — verify no duplication of existing primitives
 
 ---
 

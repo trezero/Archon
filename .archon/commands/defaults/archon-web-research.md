@@ -38,6 +38,7 @@ From the issue context, identify:
 - Error messages or stack traces to search for
 - Concepts or patterns that need clarification
 - Version-specific documentation needs
+- Existing primitives in the ecosystem — what built-in or library-level abstractions already solve part of this? (avoids reinventing)
 
 ### 1.3 Formulate Search Plan
 
@@ -48,6 +49,7 @@ Create 3-5 targeted search queries:
 | "{library} {feature} documentation" | Official docs | Library website |
 | "{error message}" | Known issues | Stack Overflow, GitHub issues |
 | "{pattern} best practices {year}" | Current approaches | Blog posts, docs |
+| "{library} built-in {primitive/feature}" | Avoid reinventing | Official docs, changelog, migration guides |
 
 **PHASE_1_CHECKPOINT:**
 

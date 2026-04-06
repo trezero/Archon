@@ -281,6 +281,24 @@ Use WebSearch tool for:
 
 ## Phase 5: ARCHITECT - Strategic Design
 
+### 5.0 Primitives Inventory
+
+Before designing the solution, audit existing building blocks:
+
+1. **What primitives already exist?** List the core abstractions in the codebase
+   related to this feature — with file:line references from the Explore agent output.
+2. **Are they complete?** Do the existing primitives cover this use case, or do they
+   have gaps that require extension?
+3. **Extend before adding** — can we extend an existing primitive rather than creating
+   a new one? Prefer `implements ExistingInterface` over `interface NewInterface`.
+4. **Minimum primitive surface** — if new primitives ARE needed, what's the smallest
+   addition that enables this feature and remains useful to future callers?
+5. **Dependency chain** — what must exist first? What does this feature unlock downstream?
+
+| Primitive | File:Lines | Complete? | Role in Feature |
+|-----------|-----------|-----------|----------------|
+| {name} | `path/to/file.ts:10-30` | Yes/Partial/No | {how it's used or extended} |
+
 ### 5.1 Deep Analysis
 
 Consider (use extended thinking if needed):
