@@ -46,6 +46,7 @@ export function isGitLabUserAuthorized(
  * Uses timing-safe comparison to prevent timing attacks.
  */
 export function verifyWebhookToken(receivedToken: string, expectedSecret: string): boolean {
+  if (!receivedToken || !expectedSecret) return false;
   const receivedBuf = Buffer.from(receivedToken);
   const expectedBuf = Buffer.from(expectedSecret);
 

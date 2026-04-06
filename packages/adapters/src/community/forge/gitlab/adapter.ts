@@ -270,7 +270,8 @@ export class GitLabAdapter implements IPlatformAdapter {
   }
 
   private stripMention(text: string): string {
-    const pattern = new RegExp(`@${this.botMention}[\\s,:;]*`, 'gi');
+    // `+` consumes all trailing separators (e.g. "@archon, " not just "@archon")
+    const pattern = new RegExp(`@${this.botMention}(?:[\\s,:;]+|$)`, 'gi');
     return text.replace(pattern, '').trim();
   }
 
@@ -475,6 +476,9 @@ Use 'glab mr view ${String(mr.iid)}' for full details and 'glab mr diff ${String
       if (err.cause && typeof (err.cause as Error).message === 'string') {
         sanitizedError.cause = sanitize((err.cause as Error).message);
       }
+      const errRecord = err as unknown as Record<string, unknown>;
+      if (typeof errRecord.stdout === 'string') sanitizedError.stdout = sanitize(errRecord.stdout);
+      if (typeof errRecord.stderr === 'string') sanitizedError.stderr = sanitize(errRecord.stderr);
 
       getLog().error({ projectPath, repoPath, error: sanitizedError }, 'gitlab.repo_clone_failed');
 

@@ -7,6 +7,3 @@ export { GitHubAdapter } from './forge/github';
 
 // Community adapters
 export { DiscordAdapter } from './community/chat/discord';
-
-// Community forge adapters
-export { GitLabAdapter } from './community/forge/gitlab';

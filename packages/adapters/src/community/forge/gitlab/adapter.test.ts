@@ -402,6 +402,30 @@ describe('GitLabAdapter', () => {
     });
   });
 
+  describe('stripMention', () => {
+    const adapter = createAdapter({ botMention: 'archon' });
+    const strip = (text: string) =>
+      (adapter as unknown as { stripMention: (t: string) => string }).stripMention(text);
+
+    test('strips mention followed by space', () => {
+      expect(strip('@archon hello')).toBe('hello');
+    });
+
+    test('strips mention followed by comma', () => {
+      expect(strip('@archon, please help')).toBe('please help');
+    });
+
+    test('strips mention at end of string', () => {
+      expect(strip('help me @archon')).toBe('help me');
+    });
+
+    test('does NOT strip partial-prefix username (@archonbot)', () => {
+      // Regression: old regex `@archon[\s,:;]*` would strip '@archon' from '@archonbot',
+      // yielding 'bot hello'. New regex requires a separator or end-of-string.
+      expect(strip('@archonbot hello')).toBe('@archonbot hello');
+    });
+  });
+
   describe('conversation ID parsing', () => {
     test('parses issue conversation ID (# separator)', () => {
       const adapter = createAdapter();

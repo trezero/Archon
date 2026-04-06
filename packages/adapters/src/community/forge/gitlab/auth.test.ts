@@ -67,4 +67,16 @@ describe('verifyWebhookToken', () => {
   test('returns false for empty vs non-empty', () => {
     expect(verifyWebhookToken('', 'secret')).toBe(false);
   });
+
+  test('returns false for non-empty received vs empty expected', () => {
+    // Guards the !expectedSecret branch added to prevent GITLAB_WEBHOOK_SECRET=""
+    // from accepting all incoming requests
+    expect(verifyWebhookToken('some-token', '')).toBe(false);
+  });
+
+  test('returns false when both tokens are empty', () => {
+    // Pre-fix: Buffer.timingSafeEqual(Buffer.from(''), Buffer.from('')) === true
+    // because two zero-length buffers are trivially equal — a real auth-bypass
+    expect(verifyWebhookToken('', '')).toBe(false);
+  });
 });
