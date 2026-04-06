@@ -252,7 +252,7 @@ export async function findResumableRun(
          AND working_path = $2
          AND (
            status IN ('failed', 'paused')
-           OR (status = 'running' AND (last_activity_at IS NULL OR last_activity_at < ${dialect.nowMinusDays(3)})) -- nowMinusDays(3): param index 3, value bound as $3 = 1 day
+           OR (status = 'running' AND (last_activity_at IS NULL OR last_activity_at < ${dialect.nowMinusDays(3)}))
          )
        ORDER BY started_at DESC
        LIMIT 1`,
