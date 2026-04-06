@@ -69,22 +69,32 @@ function normalizeClaudeUsage(usage?: {
  * Auth behavior:
  * - CLAUDE_USE_GLOBAL_AUTH=true: Filter tokens, use global auth from `claude /login`
  * - CLAUDE_USE_GLOBAL_AUTH=false: Pass tokens through explicitly
- * - Not set: Auto-detect - if tokens exist in env, use them (backwards compatibility)
+ * - Not set: Auto-detect — use explicit tokens if present, otherwise fall back to global auth
  */
 function buildSubprocessEnv(): NodeJS.ProcessEnv {
   const globalAuthSetting = process.env.CLAUDE_USE_GLOBAL_AUTH?.toLowerCase();
 
   // Check for empty token values (common misconfiguration)
-  const tokenVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_API_KEY', 'ANTHROPIC_API_KEY'] as const;
+  const tokenVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_API_KEY'] as const;
   const emptyTokens = tokenVars.filter(v => process.env[v] === '');
   if (emptyTokens.length > 0) {
     getLog().warn({ emptyTokens }, 'empty_token_values');
   }
 
+  // Warn if user has the legacy variable but not the new ones
+  if (
+    process.env.ANTHROPIC_API_KEY &&
+    !process.env.CLAUDE_CODE_OAUTH_TOKEN &&
+    !process.env.CLAUDE_API_KEY
+  ) {
+    getLog().warn(
+      { hint: 'Use CLAUDE_API_KEY or CLAUDE_CODE_OAUTH_TOKEN instead' },
+      'deprecated_anthropic_api_key_ignored'
+    );
+  }
+
   const hasExplicitTokens = Boolean(
-    process.env.CLAUDE_CODE_OAUTH_TOKEN ??
-    process.env.CLAUDE_API_KEY ??
-    process.env.ANTHROPIC_API_KEY
+    process.env.CLAUDE_CODE_OAUTH_TOKEN ?? process.env.CLAUDE_API_KEY
   );
 
   // Determine whether to use global auth
@@ -113,14 +123,12 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
 
   if (useGlobalAuth) {
     // Filter out auth tokens - let Claude use global auth from 'claude /login'
-    const { CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_API_KEY, ANTHROPIC_API_KEY, ...envWithoutAuth } =
-      process.env;
+    const { CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_API_KEY, ...envWithoutAuth } = process.env;
 
     // Log if we're filtering out tokens (helps debug auth issues)
     const filtered = [
       CLAUDE_CODE_OAUTH_TOKEN && 'CLAUDE_CODE_OAUTH_TOKEN',
       CLAUDE_API_KEY && 'CLAUDE_API_KEY',
-      ANTHROPIC_API_KEY && 'ANTHROPIC_API_KEY',
     ].filter(Boolean);
 
     if (filtered.length > 0) {
