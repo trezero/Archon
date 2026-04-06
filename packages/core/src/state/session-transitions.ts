@@ -11,12 +11,7 @@ export type TransitionTrigger =
   | 'first-message' // No existing session
   | 'plan-to-execute' // Plan phase completed, starting execution
   | 'isolation-changed' // Working directory/worktree changed
-  | 'codebase-changed' // Switched to different codebase via /repo
-  | 'codebase-cloned' // Cloned new or linked existing repo
-  | 'cwd-changed' // Manual /setcwd command
   | 'reset-requested' // User requested /reset
-  | 'context-reset' // User requested /reset-context
-  | 'repo-removed' // Repository removed from conversation
   | 'worktree-removed' // Worktree manually removed
   | 'conversation-closed'; // Platform conversation closed (issue/PR closed)
 
@@ -33,12 +28,7 @@ const TRIGGER_BEHAVIOR: Record<TransitionTrigger, 'creates' | 'deactivates' | 'n
   'first-message': 'none', // No existing session to deactivate
   'plan-to-execute': 'creates', // Only case where we deactivate AND immediately create
   'isolation-changed': 'deactivates',
-  'codebase-changed': 'deactivates',
-  'codebase-cloned': 'deactivates',
-  'cwd-changed': 'deactivates',
   'reset-requested': 'deactivates',
-  'context-reset': 'deactivates',
-  'repo-removed': 'deactivates',
   'worktree-removed': 'deactivates',
   'conversation-closed': 'deactivates',
 };
@@ -78,22 +68,10 @@ export function detectPlanToExecuteTransition(
  * Commands that have known trigger mappings.
  * Used for function overloads to return non-null for known commands.
  */
-export type DeactivatingCommand =
-  | 'setcwd'
-  | 'clone'
-  | 'reset'
-  | 'reset-context'
-  | 'repo'
-  | 'repo-remove'
-  | 'worktree-remove';
+export type DeactivatingCommand = 'reset' | 'worktree-remove';
 
 const COMMAND_TRIGGER_MAP: Record<DeactivatingCommand, TransitionTrigger> = {
-  setcwd: 'cwd-changed',
-  clone: 'codebase-cloned',
   reset: 'reset-requested',
-  'reset-context': 'context-reset',
-  repo: 'codebase-changed',
-  'repo-remove': 'repo-removed',
   'worktree-remove': 'worktree-removed',
 };
 

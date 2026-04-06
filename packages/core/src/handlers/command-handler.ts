@@ -2,14 +2,12 @@
  * Command handler for slash commands
  * Handles deterministic operations without AI
  */
-import { readFile, writeFile, readdir, access, rm } from 'fs/promises';
-import { join, basename, resolve, relative } from 'path';
+import { writeFile, access } from 'fs/promises';
+import { join, relative } from 'path';
 import { type Conversation, type CommandResult, ConversationNotFoundError } from '../types';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
 import * as sessionDb from '../db/sessions';
-import { isPathWithinWorkspace } from '../utils/path-validation';
-import { sanitizeError } from '../utils/credential-sanitizer';
 import { listWorktrees, execFileAsync, toRepoPath } from '@archon/git';
 import { getIsolationProvider } from '@archon/isolation';
 import * as isolationEnvDb from '../db/isolation-environments';
@@ -18,7 +16,7 @@ import {
   cleanupStaleWorktrees,
   getWorktreeStatusBreakdown,
 } from '../services/cleanup-service';
-import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '@archon/paths';
+import { getArchonWorkspacesPath } from '@archon/paths';
 import { loadConfig } from '../config/config-loader';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import type { WorkflowWithSource, WorkflowLoadError } from '@archon/workflows/schemas/workflow';
@@ -32,8 +30,6 @@ import * as workflowDb from '../db/workflows';
 import * as workflowEventDb from '../db/workflow-events';
 import { getTriggerForCommand, type DeactivatingCommand } from '../state/session-transitions';
 import { SessionNotFoundError } from '../db/sessions';
-import { cloneRepository } from './clone';
-import { findMarkdownFilesRecursive } from '../utils/commands';
 import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -174,113 +170,6 @@ async function formatRepoContext(
   return `${codebase.name} @ ${branchName}`;
 }
 
-/**
- * Represents a repository with nested owner/repo structure
- */
-interface RepoEntry {
-  displayName: string; // "owner/repo" format for display
-  repoName: string; // Just the repo name for matching
-  fullPath: string; // Full filesystem path
-}
-
-/**
- * List all repositories with nested owner/repo structure
- * Recurses one level into owner folders to find actual repo directories
- */
-async function listRepositories(workspacePath: string): Promise<RepoEntry[]> {
-  const repos: RepoEntry[] = [];
-
-  try {
-    const ownerEntries = await readdir(workspacePath, { withFileTypes: true });
-    const ownerFolders = ownerEntries.filter(entry => entry.isDirectory());
-
-    for (const owner of ownerFolders) {
-      const ownerPath = join(workspacePath, owner.name);
-      try {
-        const repoEntries = await readdir(ownerPath, { withFileTypes: true });
-        const repoFolders = repoEntries.filter(entry => entry.isDirectory());
-
-        for (const repo of repoFolders) {
-          repos.push({
-            displayName: `${owner.name}/${repo.name}`,
-            repoName: repo.name,
-            fullPath: join(ownerPath, repo.name),
-          });
-        }
-      } catch (error) {
-        // Log skipped owner folders so issues can be diagnosed
-        const err = error as NodeJS.ErrnoException;
-        getLog().warn(
-          { owner: owner.name, path: ownerPath, code: err.code, err },
-          'repo_list_skip_owner'
-        );
-      }
-    }
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    // ENOENT is expected when workspace hasn't been created yet
-    if (err.code !== 'ENOENT') {
-      getLog().error({ path: workspacePath, code: err.code, err }, 'repo_list_failed');
-      throw err;
-    }
-  }
-
-  return repos.sort((a, b) => a.displayName.localeCompare(b.displayName));
-}
-
-/**
- * Find a repository by identifier using priority matching:
- * 1. Exact full path match (e.g., "octocat/Hello-World")
- * 2. Exact repo name match (e.g., "Hello-World")
- * 3. Prefix match on full path
- * 4. Prefix match on repo name
- */
-function findRepository(repos: RepoEntry[], identifier: string): RepoEntry | undefined {
-  return (
-    repos.find(r => r.displayName === identifier) ??
-    repos.find(r => r.repoName === identifier) ??
-    repos.find(r => r.displayName.startsWith(identifier)) ??
-    repos.find(r => r.repoName.startsWith(identifier))
-  );
-}
-
-type ResolveRepoArgResult =
-  | { ok: true; repos: RepoEntry[]; targetRepo: RepoEntry }
-  | { ok: false; result: CommandResult };
-
-/**
- * Resolve a repository by number or name from the workspace.
- * Returns `{ ok: false, result }` on error (no repos, not found),
- * or `{ ok: true, repos, targetRepo }` on success.
- */
-async function resolveRepoArg(
-  workspacePath: string,
-  identifier: string,
-  emptyMessage: string
-): Promise<ResolveRepoArgResult> {
-  const repos = await listRepositories(workspacePath);
-
-  if (!repos.length) {
-    return { ok: false, result: { success: false, message: emptyMessage } };
-  }
-
-  const num = parseInt(identifier, 10);
-  const isValidIndex = !isNaN(num) && num >= 1 && num <= repos.length;
-  const targetRepo = isValidIndex ? repos[num - 1] : findRepository(repos, identifier);
-
-  if (!targetRepo) {
-    return {
-      ok: false,
-      result: {
-        success: false,
-        message: `Repository not found: ${identifier}\n\nUse /repos to see available repositories.`,
-      },
-    };
-  }
-
-  return { ok: true, repos, targetRepo };
-}
-
 export function parseCommand(text: string): { command: string; args: string[] } {
   // Match quoted strings or non-whitespace sequences
   const matches = text.match(/"[^"]+"|'[^']+'|\S+/g) ?? [];
@@ -325,212 +214,6 @@ async function safeDeactivateSession(
     } else {
       throw error;
     }
-  }
-}
-
-async function handleRepoCommand(
-  conversation: Conversation,
-  args: string[]
-): Promise<CommandResult> {
-  if (args.length === 0) {
-    return { success: false, message: 'Usage: /repo <number|name> [pull]' };
-  }
-
-  const workspacePath = getArchonWorkspacesPath();
-  const identifier = args[0];
-  const shouldPull = args[1]?.toLowerCase() === 'pull';
-
-  try {
-    const resolved = await resolveRepoArg(
-      workspacePath,
-      identifier,
-      'No repositories found. Use /clone <repo-url> first.'
-    );
-    if (!resolved.ok) return resolved.result;
-    const { targetRepo } = resolved;
-
-    const targetPath = targetRepo.fullPath;
-    const targetFolder = targetRepo.displayName;
-
-    // Git pull if requested
-    if (shouldPull) {
-      try {
-        await execFileAsync('git', ['-C', targetPath, 'pull']);
-        getLog().info({ repo: targetFolder }, 'cmd.repo_pulled');
-      } catch (pullError) {
-        const err = pullError as Error;
-        getLog().error({ err, repo: targetFolder }, 'cmd.repo_pull_failed');
-        return {
-          success: false,
-          message: `Failed to pull: ${err.message}`,
-        };
-      }
-    }
-
-    // Find or create codebase for this path
-    let codebase = await codebaseDb.findCodebaseByDefaultCwd(targetPath);
-
-    if (!codebase) {
-      // Create new codebase for this directory
-      // Auto-detect assistant type
-      let suggestedAssistant = 'claude';
-      try {
-        await access(join(targetPath, '.codex'));
-        suggestedAssistant = 'codex';
-      } catch {
-        // Default to claude
-      }
-
-      codebase = await codebaseDb.createCodebase({
-        name: targetFolder,
-        default_cwd: targetPath,
-        ai_assistant_type: suggestedAssistant,
-      });
-      getLog().info({ repo: targetFolder, codebaseId: codebase.id }, 'cmd.codebase_created');
-    }
-
-    // Link conversation to codebase
-    try {
-      await db.updateConversation(conversation.id, {
-        codebase_id: codebase.id,
-        cwd: targetPath,
-      });
-    } catch (updateError) {
-      if (updateError instanceof ConversationNotFoundError) {
-        return {
-          success: false,
-          message: 'Failed to switch repository: conversation state changed. Please try again.',
-        };
-      }
-      throw updateError;
-    }
-
-    // Reset session when switching
-    const session = await sessionDb.getActiveSession(conversation.id);
-    if (session) {
-      await safeDeactivateSession(session.id, 'repo');
-    }
-
-    // Auto-load commands if found
-    let commandsLoaded = 0;
-    for (const folder of getCommandFolderSearchPaths()) {
-      try {
-        const commandPath = join(targetPath, folder);
-        await access(commandPath);
-
-        const markdownFiles = await findMarkdownFilesRecursive(commandPath);
-        if (markdownFiles.length > 0) {
-          const commands = await codebaseDb.getCodebaseCommands(codebase.id);
-          markdownFiles.forEach(({ commandName, relativePath }) => {
-            commands[commandName] = {
-              path: join(folder, relativePath),
-              description: `From ${folder}`,
-            };
-          });
-          await codebaseDb.updateCodebaseCommands(codebase.id, commands);
-          commandsLoaded = markdownFiles.length;
-          break;
-        }
-      } catch {
-        // Folder doesn't exist, try next
-      }
-    }
-
-    let msg = `Switched to: ${targetFolder}`;
-    if (shouldPull) {
-      msg += '\n✓ Pulled latest changes';
-    }
-    if (commandsLoaded > 0) {
-      msg += `\n✓ Loaded ${String(commandsLoaded)} commands`;
-    }
-    msg += '\n\nReady to work!';
-
-    return { success: true, message: msg, modified: true };
-  } catch (error) {
-    const err = error as Error;
-    getLog().error({ err, command: 'repo', identifier }, 'cmd.repo_switch_failed');
-    return {
-      success: false,
-      message: `Failed to switch to repository '${identifier}': ${err.message}`,
-    };
-  }
-}
-
-async function handleRepoRemoveCommand(
-  conversation: Conversation,
-  args: string[]
-): Promise<CommandResult> {
-  if (args.length === 0) {
-    return { success: false, message: 'Usage: /repo-remove <number|name>' };
-  }
-
-  const workspacePath = getArchonWorkspacesPath();
-  const identifier = args[0];
-
-  try {
-    const resolved = await resolveRepoArg(
-      workspacePath,
-      identifier,
-      'No repositories found. Nothing to remove.'
-    );
-    if (!resolved.ok) return resolved.result;
-    const { targetRepo } = resolved;
-
-    const targetPath = targetRepo.fullPath;
-    const targetFolder = targetRepo.displayName;
-
-    // Find codebase by path
-    const codebase = await codebaseDb.findCodebaseByDefaultCwd(targetPath);
-
-    // Capture before mutation — used for both unlinking and message building
-    const isCurrentCodebase = conversation.codebase_id === codebase?.id;
-
-    // If current conversation uses this codebase, unlink it
-    if (isCurrentCodebase) {
-      try {
-        await db.updateConversation(conversation.id, { codebase_id: null, cwd: null });
-      } catch (updateError) {
-        if (updateError instanceof ConversationNotFoundError) {
-          return {
-            success: false,
-            message: 'Failed to unlink repository: conversation state changed. Please try again.',
-          };
-        }
-        throw updateError;
-      }
-      // Also deactivate any active session
-      const session = await sessionDb.getActiveSession(conversation.id);
-      if (session) {
-        await safeDeactivateSession(session.id, 'repo-remove');
-      }
-    }
-
-    // Delete codebase record (this also unlinks sessions)
-    if (codebase) {
-      await codebaseDb.deleteCodebase(codebase.id);
-      getLog().info(
-        { codebaseId: codebase.id, codebaseName: codebase.name },
-        'cmd.codebase_deleted'
-      );
-    }
-
-    // Remove directory
-    await rm(targetPath, { recursive: true, force: true });
-    getLog().info({ path: targetPath, repo: targetFolder }, 'cmd.repo_directory_removed');
-
-    let msg = `Removed: ${targetFolder}`;
-    if (codebase) {
-      msg += '\n✓ Deleted codebase record';
-    }
-    if (isCurrentCodebase) {
-      msg += '\n✓ Unlinked from current conversation';
-    }
-
-    return { success: true, message: msg, modified: true };
-  } catch (error) {
-    const err = error as Error;
-    getLog().error({ err, command: 'repo-remove', identifier }, 'cmd.repo_remove_failed');
-    return { success: false, message: `Failed to remove: ${err.message}` };
   }
 }
 
@@ -1450,250 +1133,6 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
       return { success: true, message: msg };
     }
 
-    case 'getcwd': {
-      const codebase = conversation.codebase_id
-        ? await codebaseDb.getCodebase(conversation.codebase_id)
-        : null;
-      const repoContext = await formatRepoContext(codebase, conversation.isolation_env_id);
-      return {
-        success: true,
-        message: `Repository: ${repoContext}`,
-      };
-    }
-
-    case 'setcwd': {
-      if (args.length === 0) {
-        return { success: false, message: 'Usage: /setcwd <path>' };
-      }
-      const newCwd = args.join(' ');
-      const resolvedCwd = resolve(newCwd);
-
-      // Validate path is within workspace to prevent path traversal
-      const workspacePath = getArchonWorkspacesPath();
-      if (!isPathWithinWorkspace(resolvedCwd)) {
-        return {
-          success: false,
-          message:
-            `Path must be within the Archon workspaces directory (${workspacePath}).\n\n` +
-            'To work with a repository, use:\n' +
-            '  /clone <repo-url> — Clone and register a remote repo',
-        };
-      }
-
-      try {
-        await db.updateConversation(conversation.id, { cwd: resolvedCwd });
-      } catch (updateError) {
-        if (updateError instanceof ConversationNotFoundError) {
-          return {
-            success: false,
-            message:
-              'Failed to update working directory: conversation state changed. Please try again.',
-          };
-        }
-        throw updateError;
-      }
-
-      // Add this directory to git safe.directory if it's a git repository
-      // This prevents "dubious ownership" errors when working with existing repos
-      // Use execFile instead of execAsync to prevent command injection
-      try {
-        await execFileAsync('git', ['config', '--global', '--add', 'safe.directory', resolvedCwd]);
-        getLog().debug({ path: resolvedCwd }, 'safe_directory_added');
-      } catch (_error) {
-        // Ignore errors - directory might not be a git repo
-        getLog().debug({ path: resolvedCwd }, 'safe_directory_skip');
-      }
-
-      // Reset session when changing working directory
-      const session = await sessionDb.getActiveSession(conversation.id);
-      if (session) {
-        await safeDeactivateSession(session.id, 'setcwd');
-      }
-
-      // Format response with repo context instead of filesystem path
-      const codebase = await codebaseDb.findCodebaseByDefaultCwd(resolvedCwd);
-      const repoContext = codebase
-        ? await formatRepoContext(codebase, conversation.isolation_env_id)
-        : basename(resolvedCwd); // Show folder name only, not full path
-
-      return {
-        success: true,
-        message: `Working directory set to: ${repoContext}\n\nSession reset - starting fresh on next message.`,
-        modified: true,
-      };
-    }
-
-    case 'clone': {
-      if (args.length === 0 || !args[0]) {
-        return { success: false, message: 'Usage: /clone <repo-url>' };
-      }
-
-      try {
-        const result = await cloneRepository(args[0]);
-
-        // Link conversation to the codebase
-        try {
-          await db.updateConversation(conversation.id, {
-            codebase_id: result.codebaseId,
-            cwd: result.defaultCwd,
-          });
-        } catch (updateError) {
-          if (updateError instanceof ConversationNotFoundError) {
-            return {
-              success: false,
-              message: 'Failed to link codebase: conversation state changed. Please try again.',
-            };
-          }
-          throw updateError;
-        }
-
-        // Only reset session when actually switching to a different codebase
-        const isNewCodebase = conversation.codebase_id !== result.codebaseId;
-        if (isNewCodebase) {
-          const session = await sessionDb.getActiveSession(conversation.id);
-          if (session) {
-            await safeDeactivateSession(session.id, 'clone');
-          }
-        }
-
-        if (result.alreadyExisted) {
-          let responseMessage: string;
-          if (isNewCodebase) {
-            responseMessage = `Linked to existing codebase: ${result.name}\nPath: ${result.defaultCwd}\n\nSession reset - starting fresh on next message.`;
-          } else {
-            responseMessage = `Already linked to codebase: ${result.name}\nPath: ${result.defaultCwd}`;
-          }
-
-          // Check for command folders
-          let commandFolder: string | null = null;
-          for (const folder of getCommandFolderSearchPaths()) {
-            try {
-              await access(join(result.defaultCwd, folder));
-              commandFolder = folder;
-              break;
-            } catch {
-              /* ignore */
-            }
-          }
-          if (commandFolder) {
-            responseMessage += `\n\nFound: ${commandFolder}/\nUse /load-commands ${commandFolder} to register commands.`;
-          }
-
-          return { success: true, message: responseMessage, modified: isNewCodebase };
-        }
-
-        let responseMessage = `Repository cloned successfully!\n\nRepository: ${result.name}`;
-        if (result.commandCount > 0) {
-          responseMessage += `\n✓ Loaded ${String(result.commandCount)} repo commands`;
-        }
-        responseMessage += '\n✓ App defaults available at runtime';
-        responseMessage +=
-          '\n\nSession reset - starting fresh on next message.\n\nYou can now start asking questions about the code.';
-
-        return { success: true, message: responseMessage, modified: true };
-      } catch (error) {
-        const err = error as Error;
-        const safeErr = sanitizeError(err);
-        getLog().error({ err: safeErr }, 'cmd.clone_failed');
-        return {
-          success: false,
-          message: `Failed to clone repository: ${safeErr.message}`,
-        };
-      }
-    }
-
-    case 'command-set': {
-      if (args.length < 2) {
-        return { success: false, message: 'Usage: /command-set <name> <path> [text]' };
-      }
-      if (!conversation.codebase_id) {
-        return { success: false, message: 'No codebase configured. Use /clone first.' };
-      }
-
-      const [commandName, commandPath, ...textParts] = args;
-      const commandText = textParts.join(' ');
-      const workspacePath = getArchonWorkspacesPath();
-      const basePath = conversation.cwd ?? workspacePath;
-      const fullPath = resolve(basePath, commandPath);
-
-      // Validate path is within workspace to prevent path traversal
-      if (!isPathWithinWorkspace(fullPath)) {
-        return { success: false, message: `Path must be within ${workspacePath} directory` };
-      }
-
-      try {
-        if (commandText) {
-          await writeFile(fullPath, commandText, 'utf-8');
-        } else {
-          await readFile(fullPath, 'utf-8'); // Validate exists
-        }
-        await codebaseDb.registerCommand(conversation.codebase_id, commandName, {
-          path: commandPath,
-          description: `Custom: ${commandName}`,
-        });
-        return {
-          success: true,
-          message: `Command '${commandName}' registered!\nPath: ${commandPath}`,
-        };
-      } catch (error) {
-        const err = error as Error;
-        getLog().error({ err, command: 'command-set' }, 'cmd.command_set_failed');
-        return { success: false, message: `Failed: ${err.message}` };
-      }
-    }
-
-    case 'load-commands': {
-      if (!args.length) {
-        return { success: false, message: 'Usage: /load-commands <folder>' };
-      }
-      if (!conversation.codebase_id) {
-        return { success: false, message: 'No codebase configured.' };
-      }
-
-      const folderPath = args.join(' ');
-      const workspacePath = getArchonWorkspacesPath();
-      const basePath = conversation.cwd ?? workspacePath;
-      const fullPath = resolve(basePath, folderPath);
-
-      // Validate path is within workspace to prevent path traversal
-      if (!isPathWithinWorkspace(fullPath)) {
-        return { success: false, message: `Path must be within ${workspacePath} directory` };
-      }
-
-      try {
-        // Recursively find all .md files
-        const markdownFiles = await findMarkdownFilesRecursive(fullPath);
-
-        if (!markdownFiles.length) {
-          return {
-            success: false,
-            message: `No .md files found in ${folderPath} (searched recursively)`,
-          };
-        }
-
-        const commands = await codebaseDb.getCodebaseCommands(conversation.codebase_id);
-
-        // Register each command (later files with same name will override earlier ones)
-        markdownFiles.forEach(({ commandName, relativePath }) => {
-          commands[commandName] = {
-            path: join(folderPath, relativePath),
-            description: `From ${folderPath}`,
-          };
-        });
-
-        await codebaseDb.updateCodebaseCommands(conversation.codebase_id, commands);
-
-        return {
-          success: true,
-          message: `Loaded ${String(markdownFiles.length)} commands recursively: ${markdownFiles.map(f => f.commandName).join(', ')}`,
-        };
-      } catch (error) {
-        const err = error as Error;
-        getLog().error({ err, command: 'load-commands' }, 'cmd.load_commands_failed');
-        return { success: false, message: `Failed: ${err.message}` };
-      }
-    }
-
     case 'commands': {
       if (!conversation.codebase_id) {
         return { success: false, message: 'No codebase configured.' };
@@ -1704,7 +1143,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
       if (!Object.keys(commands).length) {
         return {
           success: true,
-          message: 'No commands registered.\n\nUse /command-set or /load-commands.',
+          message: 'No commands registered.\n\nAdd .md files to .archon/commands/ in your project.',
         };
       }
 
@@ -1713,49 +1152,6 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
         msg += `${name} - ${def.path}\n`;
       }
       return { success: true, message: msg };
-    }
-
-    case 'repos': {
-      const workspacePath = getArchonWorkspacesPath();
-
-      try {
-        const repos = await listRepositories(workspacePath);
-
-        if (!repos.length) {
-          return {
-            success: true,
-            message: 'No repositories found in /workspace\n\nUse /clone <repo-url> to add one.',
-          };
-        }
-
-        // Get current codebase to check for active repo (consistent with /status)
-        let currentCodebase = conversation.codebase_id
-          ? await codebaseDb.getCodebase(conversation.codebase_id)
-          : null;
-
-        // Auto-detect codebase from cwd if not explicitly linked (same as /status)
-        if (!currentCodebase && conversation.cwd) {
-          currentCodebase = await codebaseDb.findCodebaseByDefaultCwd(conversation.cwd);
-        }
-
-        let msg = 'Repositories:\n\n';
-
-        for (let i = 0; i < repos.length; i++) {
-          const repo = repos[i];
-          // Mark as active if current codebase's default_cwd matches this repo's path
-          const isActive = currentCodebase?.default_cwd === repo.fullPath;
-          const marker = isActive ? ' ← active' : '';
-          msg += `${String(i + 1)}. ${repo.displayName}${marker}\n`;
-        }
-
-        msg += '\nUse /repo <number|name> to switch';
-
-        return { success: true, message: msg };
-      } catch (error) {
-        const err = error as Error;
-        getLog().error({ err, command: 'repos' }, 'cmd.repos_list_failed');
-        return { success: false, message: `Failed to list repositories: ${err.message}` };
-      }
     }
 
     case 'reset': {
@@ -1773,29 +1169,6 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
         message: 'No active session to reset.',
       };
     }
-
-    case 'reset-context': {
-      // Reset AI session while keeping worktree
-      const activeSession = await sessionDb.getActiveSession(conversation.id);
-      if (activeSession) {
-        await safeDeactivateSession(activeSession.id, 'reset-context');
-        return {
-          success: true,
-          message:
-            'AI context reset. Your next message will start a fresh conversation while keeping your current working directory.',
-        };
-      }
-      return {
-        success: true,
-        message: 'No active session to reset.',
-      };
-    }
-
-    case 'repo':
-      return handleRepoCommand(conversation, args);
-
-    case 'repo-remove':
-      return handleRepoRemoveCommand(conversation, args);
 
     case 'worktree':
       return handleWorktreeCommand(conversation, args);
@@ -1870,7 +1243,7 @@ Task: $ARGUMENTS
   └── commands/
       └── example.md
 
-Use /load-commands .archon/commands to register commands.`,
+Commands are auto-discovered from .archon/commands/ — no registration needed.`,
         };
       } catch (error) {
         const err = error as Error;

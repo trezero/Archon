@@ -652,6 +652,9 @@ export async function handleMessage(
         'register-project',
         'update-project',
         'remove-project',
+        'commands',
+        'init',
+        'worktree',
       ];
 
       if (deterministicCommands.includes(command)) {
