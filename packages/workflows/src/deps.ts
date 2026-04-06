@@ -5,7 +5,13 @@
  * Callers in @archon/core satisfy these structurally — no adapter wrappers needed.
  */
 import type { IWorkflowStore } from './store';
-import type { ModelReasoningEffort, WebSearchMode } from './schemas';
+import type {
+  ModelReasoningEffort,
+  WebSearchMode,
+  EffortLevel,
+  ThinkingConfig,
+  SandboxSettings,
+} from './schemas';
 
 // ---------------------------------------------------------------------------
 // Workflow-local type copies — structurally identical to the originals in
@@ -142,6 +148,43 @@ export interface WorkflowAssistantOptions {
    * Claude only — ignored for Codex.
    */
   forkSession?: boolean;
+  /**
+   * Controls reasoning depth for Claude. Claude only — ignored for Codex.
+   * Maps to SDK Options.effort.
+   */
+  effort?: EffortLevel;
+  /**
+   * Controls Claude's thinking/reasoning behavior. Claude only — ignored for Codex.
+   * Maps to SDK Options.thinking (ThinkingConfig).
+   * String shorthand is resolved at the schema level before reaching here.
+   */
+  thinking?: ThinkingConfig;
+  /**
+   * Maximum USD cost for this node. SDK returns error_max_budget_usd if exceeded.
+   * Claude only — ignored for Codex.
+   */
+  maxBudgetUsd?: number;
+  /**
+   * Per-node system prompt override. Replaces the default claude_code preset.
+   * Claude only — ignored for Codex.
+   */
+  systemPrompt?: string;
+  /**
+   * Fallback model if primary model fails. Claude only — ignored for Codex.
+   */
+  fallbackModel?: string;
+  /**
+   * SDK beta features to enable (e.g., 'context-1m-2025-08-07').
+   * Claude only — ignored for Codex.
+   */
+  betas?: string[];
+  /**
+   * OS-level sandbox restrictions for the Claude subprocess.
+   * Layers on top of worktree isolation — NOT a replacement for it.
+   * Claude only — ignored for Codex.
+   * Structural match for SDK SandboxSettings.
+   */
+  sandbox?: SandboxSettings;
 }
 
 // ---------------------------------------------------------------------------

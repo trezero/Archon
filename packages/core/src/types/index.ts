@@ -297,6 +297,67 @@ export interface AssistantRequestOptions {
    * Claude only — Codex SDK does not support env injection.
    */
   env?: Record<string, string>;
+  /**
+   * Controls reasoning depth for Claude. Claude only — ignored for Codex.
+   */
+  effort?: 'low' | 'medium' | 'high' | 'max';
+  /**
+   * Controls Claude's thinking/reasoning behavior. Claude only — ignored for Codex.
+   */
+  thinking?:
+    | { type: 'adaptive' }
+    | { type: 'enabled'; budgetTokens?: number }
+    | { type: 'disabled' };
+  /**
+   * Maximum USD cost budget. SDK returns error_max_budget_usd result if exceeded.
+   * Claude only — ignored for Codex.
+   */
+  maxBudgetUsd?: number;
+  /**
+   * Per-node system prompt string. Overrides the default claude_code preset.
+   * Claude only — ignored for Codex.
+   */
+  systemPrompt?: string;
+  /**
+   * Fallback model if primary fails. Claude only — ignored for Codex.
+   */
+  fallbackModel?: string;
+  /**
+   * SDK beta feature flags. Claude only — ignored for Codex.
+   */
+  betas?: string[];
+  /**
+   * OS-level sandbox settings passed to Claude subprocess.
+   * Claude only — ignored for Codex.
+   */
+  sandbox?: {
+    [key: string]: unknown;
+    enabled?: boolean;
+    autoAllowBashIfSandboxed?: boolean;
+    allowUnsandboxedCommands?: boolean;
+    network?: {
+      allowedDomains?: string[];
+      allowManagedDomainsOnly?: boolean;
+      allowUnixSockets?: string[];
+      allowAllUnixSockets?: boolean;
+      allowLocalBinding?: boolean;
+      httpProxyPort?: number;
+      socksProxyPort?: number;
+    };
+    filesystem?: {
+      allowWrite?: string[];
+      denyWrite?: string[];
+      denyRead?: string[];
+    };
+    ignoreViolations?: Record<string, string[]>;
+    enableWeakerNestedSandbox?: boolean;
+    enableWeakerNetworkIsolation?: boolean;
+    excludedCommands?: string[];
+    ripgrep?: {
+      command: string;
+      args?: string[];
+    };
+  };
 }
 
 /**

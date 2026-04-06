@@ -27,6 +27,9 @@ import type {
   TriggerRule,
   WorkflowRun,
   WorkflowNodeHooks,
+  EffortLevel,
+  ThinkingConfig,
+  SandboxSettings,
 } from './schemas';
 import { isBashNode, isLoopNode, isApprovalNode, isCancelNode, isApprovalContext } from './schemas';
 import { formatToolCall } from './utils/tool-formatter';
@@ -60,6 +63,15 @@ let cachedLog: ReturnType<typeof createLogger> | undefined;
 function getLog(): ReturnType<typeof createLogger> {
   if (!cachedLog) cachedLog = createLogger('workflow.dag-executor');
   return cachedLog;
+}
+
+/** Workflow-level Claude SDK options — per-node overrides take precedence via ?? */
+interface WorkflowLevelOptions {
+  effort?: EffortLevel;
+  thinking?: ThinkingConfig;
+  fallbackModel?: string;
+  betas?: string[];
+  sandbox?: SandboxSettings;
 }
 
 /** Throttle state for cancel checks (reads — no write contention in WAL mode) */
@@ -343,7 +355,8 @@ async function resolveNodeProviderAndModel(
   platform: IWorkflowPlatform,
   conversationId: string,
   workflowRunId: string,
-  cwd: string
+  cwd: string,
+  workflowLevelOptions: WorkflowLevelOptions
 ): Promise<{
   provider: 'claude' | 'codex';
   model: string | undefined;
@@ -427,6 +440,35 @@ async function resolveNodeProviderAndModel(
     );
     if (!delivered) {
       getLog().error({ nodeId: node.id, workflowRunId }, 'dag.skills_warning_delivery_failed');
+    }
+  }
+
+  // Warn if Codex node has Claude-only SDK options (effort, thinking, maxBudgetUsd, systemPrompt, fallbackModel, betas, sandbox)
+  if (provider === 'codex') {
+    const claudeOnlyFields = [
+      ['effort', node.effort ?? workflowLevelOptions.effort],
+      ['thinking', node.thinking ?? workflowLevelOptions.thinking],
+      ['maxBudgetUsd', node.maxBudgetUsd],
+      ['systemPrompt', node.systemPrompt],
+      ['fallbackModel', node.fallbackModel ?? workflowLevelOptions.fallbackModel],
+      ['betas', node.betas ?? workflowLevelOptions.betas],
+      ['sandbox', node.sandbox ?? workflowLevelOptions.sandbox],
+    ] as const;
+    const present = claudeOnlyFields.filter(([, val]) => val !== undefined).map(([name]) => name);
+    if (present.length > 0) {
+      getLog().warn({ nodeId: node.id, fields: present }, 'dag.claude_options_ignored_codex');
+      const delivered = await safeSendMessage(
+        platform,
+        conversationId,
+        `Warning: Node '${node.id}' has Claude-only options (${present.join(', ')}) but uses Codex — these will be ignored.`,
+        { workflowId: workflowRunId, nodeName: node.id }
+      );
+      if (!delivered) {
+        getLog().error(
+          { nodeId: node.id, workflowRunId },
+          'dag.claude_options_warning_delivery_failed'
+        );
+      }
     }
   }
 
@@ -544,6 +586,21 @@ async function resolveNodeProviderAndModel(
     if (config.envVars && Object.keys(config.envVars).length > 0) {
       claudeOptions.env = config.envVars;
     }
+
+    // Per-node overrides take precedence over workflow-level defaults; maxBudgetUsd and systemPrompt are per-node only
+    const resolvedEffort = node.effort ?? workflowLevelOptions.effort;
+    if (resolvedEffort !== undefined) claudeOptions.effort = resolvedEffort;
+    const resolvedThinking = node.thinking ?? workflowLevelOptions.thinking;
+    if (resolvedThinking !== undefined) claudeOptions.thinking = resolvedThinking;
+    if (node.maxBudgetUsd !== undefined) claudeOptions.maxBudgetUsd = node.maxBudgetUsd;
+    if (node.systemPrompt !== undefined) claudeOptions.systemPrompt = node.systemPrompt;
+    const resolvedFallbackModel = node.fallbackModel ?? workflowLevelOptions.fallbackModel;
+    if (resolvedFallbackModel !== undefined) claudeOptions.fallbackModel = resolvedFallbackModel;
+    const resolvedBetas = node.betas ?? workflowLevelOptions.betas;
+    if (resolvedBetas !== undefined) claudeOptions.betas = resolvedBetas;
+    const resolvedSandbox = node.sandbox ?? workflowLevelOptions.sandbox;
+    if (resolvedSandbox !== undefined) claudeOptions.sandbox = resolvedSandbox;
+
     options = Object.keys(claudeOptions).length > 0 ? claudeOptions : undefined;
   }
 
@@ -935,6 +992,17 @@ async function executeNodeInternal(
         if (msg.sessionId) newSessionId = msg.sessionId;
         if (msg.tokens) nodeTokens = msg.tokens;
         if (msg.structuredOutput !== undefined) structuredOutput = msg.structuredOutput;
+        // Fail the node if the SDK reports a cost cap exceeded error
+        if (msg.isError && msg.errorSubtype === 'error_max_budget_usd') {
+          const cap = nodeOptions?.maxBudgetUsd;
+          getLog().warn(
+            { nodeId: node.id, maxBudgetUsd: cap, durationMs: Date.now() - nodeStartTime },
+            'dag.node_budget_cap_exceeded'
+          );
+          throw new Error(
+            `Node '${node.id}' exceeded cost cap${cap !== undefined ? ` of $${cap.toFixed(2)}` : ''}.`
+          );
+        }
         break; // Result is the "I'm done" signal — don't wait for subprocess to exit
       } else if (msg.type === 'system' && msg.content) {
         // Surface MCP connection failures to the user
@@ -1841,6 +1909,7 @@ async function executeApprovalNode(
   docsDir: string,
   nodeOutputs: Map<string, NodeOutput>,
   config: WorkflowConfig,
+  workflowLevelOptions: WorkflowLevelOptions,
   configuredCommandFolder?: string,
   issueContext?: string
 ): Promise<NodeOutput> {
@@ -1919,7 +1988,8 @@ async function executeApprovalNode(
       platform,
       conversationId,
       workflowRun.id,
-      cwd
+      cwd,
+      workflowLevelOptions
     );
 
     const output = await executeNodeInternal(
@@ -1998,7 +2068,7 @@ export async function executeDagWorkflow(
   platform: IWorkflowPlatform,
   conversationId: string,
   cwd: string,
-  workflow: { name: string; nodes: readonly DagNode[] },
+  workflow: { name: string; nodes: readonly DagNode[] } & WorkflowLevelOptions,
   workflowRun: WorkflowRun,
   workflowProvider: 'claude' | 'codex',
   workflowModel: string | undefined,
@@ -2012,6 +2082,13 @@ export async function executeDagWorkflow(
   priorCompletedNodes?: Map<string, string>
 ): Promise<string | undefined> {
   const dagStartTime = Date.now();
+  const workflowLevelOptions = {
+    effort: workflow.effort,
+    thinking: workflow.thinking,
+    fallbackModel: workflow.fallbackModel,
+    betas: workflow.betas,
+    sandbox: workflow.sandbox,
+  };
   const layers = buildTopologicalLayers(workflow.nodes);
   const nodeOutputs = new Map<string, NodeOutput>();
 
@@ -2263,6 +2340,7 @@ export async function executeDagWorkflow(
               docsDir,
               nodeOutputs,
               config,
+              workflowLevelOptions,
               configuredCommandFolder,
               issueContext
             );
@@ -2310,7 +2388,8 @@ export async function executeDagWorkflow(
             platform,
             conversationId,
             workflowRun.id,
-            cwd
+            cwd,
+            workflowLevelOptions
           );
 
           // 5. Determine session — parallel or context:fresh → always fresh

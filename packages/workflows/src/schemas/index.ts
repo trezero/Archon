@@ -44,6 +44,9 @@ export {
   isCancelNode,
   isTriggerRule,
   BASH_NODE_AI_FIELDS,
+  effortLevelSchema,
+  thinkingConfigSchema,
+  sandboxSettingsSchema,
 } from './dag-node';
 export type {
   TriggerRule,
@@ -56,6 +59,9 @@ export type {
   ApprovalOnReject,
   CancelNode,
   DagNode,
+  EffortLevel,
+  ThinkingConfig,
+  SandboxSettings,
 } from './dag-node';
 
 // Workflow definition
