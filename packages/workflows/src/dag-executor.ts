@@ -588,18 +588,18 @@ async function resolveNodeProviderAndModel(
     }
 
     // Per-node overrides take precedence over workflow-level defaults; maxBudgetUsd and systemPrompt are per-node only
-    const resolvedEffort = node.effort ?? workflowLevelOptions.effort;
-    if (resolvedEffort !== undefined) claudeOptions.effort = resolvedEffort;
-    const resolvedThinking = node.thinking ?? workflowLevelOptions.thinking;
-    if (resolvedThinking !== undefined) claudeOptions.thinking = resolvedThinking;
+    const effort = node.effort ?? workflowLevelOptions.effort;
+    if (effort !== undefined) claudeOptions.effort = effort;
+    const thinking = node.thinking ?? workflowLevelOptions.thinking;
+    if (thinking !== undefined) claudeOptions.thinking = thinking;
     if (node.maxBudgetUsd !== undefined) claudeOptions.maxBudgetUsd = node.maxBudgetUsd;
     if (node.systemPrompt !== undefined) claudeOptions.systemPrompt = node.systemPrompt;
-    const resolvedFallbackModel = node.fallbackModel ?? workflowLevelOptions.fallbackModel;
-    if (resolvedFallbackModel !== undefined) claudeOptions.fallbackModel = resolvedFallbackModel;
-    const resolvedBetas = node.betas ?? workflowLevelOptions.betas;
-    if (resolvedBetas !== undefined) claudeOptions.betas = resolvedBetas;
-    const resolvedSandbox = node.sandbox ?? workflowLevelOptions.sandbox;
-    if (resolvedSandbox !== undefined) claudeOptions.sandbox = resolvedSandbox;
+    const fallbackModel = node.fallbackModel ?? workflowLevelOptions.fallbackModel;
+    if (fallbackModel !== undefined) claudeOptions.fallbackModel = fallbackModel;
+    const betas = node.betas ?? workflowLevelOptions.betas;
+    if (betas !== undefined) claudeOptions.betas = betas;
+    const sandbox = node.sandbox ?? workflowLevelOptions.sandbox;
+    if (sandbox !== undefined) claudeOptions.sandbox = sandbox;
 
     options = Object.keys(claudeOptions).length > 0 ? claudeOptions : undefined;
   }
