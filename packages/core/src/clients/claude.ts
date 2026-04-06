@@ -75,16 +75,14 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
   const globalAuthSetting = process.env.CLAUDE_USE_GLOBAL_AUTH?.toLowerCase();
 
   // Check for empty token values (common misconfiguration)
-  const tokenVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_API_KEY', 'ANTHROPIC_API_KEY'] as const;
+  const tokenVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_API_KEY'] as const;
   const emptyTokens = tokenVars.filter(v => process.env[v] === '');
   if (emptyTokens.length > 0) {
     getLog().warn({ emptyTokens }, 'empty_token_values');
   }
 
   const hasExplicitTokens = Boolean(
-    process.env.CLAUDE_CODE_OAUTH_TOKEN ??
-    process.env.CLAUDE_API_KEY ??
-    process.env.ANTHROPIC_API_KEY
+    process.env.CLAUDE_CODE_OAUTH_TOKEN ?? process.env.CLAUDE_API_KEY
   );
 
   // Determine whether to use global auth
@@ -113,14 +111,12 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
 
   if (useGlobalAuth) {
     // Filter out auth tokens - let Claude use global auth from 'claude /login'
-    const { CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_API_KEY, ANTHROPIC_API_KEY, ...envWithoutAuth } =
-      process.env;
+    const { CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_API_KEY, ...envWithoutAuth } = process.env;
 
     // Log if we're filtering out tokens (helps debug auth issues)
     const filtered = [
       CLAUDE_CODE_OAUTH_TOKEN && 'CLAUDE_CODE_OAUTH_TOKEN',
       CLAUDE_API_KEY && 'CLAUDE_API_KEY',
-      ANTHROPIC_API_KEY && 'ANTHROPIC_API_KEY',
     ].filter(Boolean);
 
     if (filtered.length > 0) {
