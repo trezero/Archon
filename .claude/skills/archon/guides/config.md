@@ -179,7 +179,6 @@ Loop back to Step 4 if they want more changes.
 | `streaming.telegram` | `stream` \| `batch` | `stream` | Telegram response delivery mode |
 | `streaming.discord` | `stream` \| `batch` | `batch` | Discord response delivery mode |
 | `streaming.slack` | `stream` \| `batch` | `batch` | Slack response delivery mode |
-| `streaming.github` | `stream` \| `batch` | `batch` | GitHub response delivery mode |
 | `paths.workspaces` | string | `~/.archon/workspaces` | Directory for cloned repositories |
 | `paths.worktrees` | string | `~/.archon/worktrees` | Directory for git worktrees |
 | `concurrency.maxConversations` | number | `10` | Maximum concurrent AI conversations |
@@ -214,6 +213,5 @@ These env vars override any config file setting:
 | `TELEGRAM_STREAMING_MODE` | `streaming.telegram` |
 | `DISCORD_STREAMING_MODE` | `streaming.discord` |
 | `SLACK_STREAMING_MODE` | `streaming.slack` |
-| `GITHUB_STREAMING_MODE` | `streaming.github` |
 | `MAX_CONCURRENT_CONVERSATIONS` | `concurrency.maxConversations` |
 | `ARCHON_HOME` | Base directory for all Archon paths |
