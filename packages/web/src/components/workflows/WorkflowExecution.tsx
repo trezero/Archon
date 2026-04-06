@@ -485,7 +485,7 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       </div>
       {!isRunning && workflow.artifacts.length > 0 && (
         <div className="border-t border-border p-3">
-          <ArtifactSummary artifacts={workflow.artifacts} />
+          <ArtifactSummary artifacts={workflow.artifacts} runId={runId} />
         </div>
       )}
     </div>
