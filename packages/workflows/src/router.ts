@@ -228,45 +228,39 @@ export function resolveWorkflowName(
   const exact = workflows.find(w => w.name === name);
   if (exact) return exact;
 
-  // Tier 2: Case-insensitive match
   const lowerName = name.toLowerCase();
-  const caseMatches = workflows.filter(w => w.name.toLowerCase() === lowerName);
-  if (caseMatches.length === 1) {
-    getLog().info(
-      { requested: name, matched: caseMatches[0].name },
+
+  // Returns the single match, throws on ambiguity, returns undefined for no match
+  function checkTier(
+    matches: WorkflowDefinition[],
+    logEvent: string
+  ): WorkflowDefinition | undefined {
+    if (matches.length === 1) {
+      getLog().info({ requested: name, matched: matches[0].name }, logEvent);
+      return matches[0];
+    }
+    if (matches.length > 1) {
+      const candidates = matches.map(w => `  - ${w.name}`).join('\n');
+      throw new Error(`Ambiguous workflow '${name}'. Did you mean:\n${candidates}`);
+    }
+    return undefined;
+  }
+
+  return (
+    // Tier 2: Case-insensitive match
+    checkTier(
+      workflows.filter(w => w.name.toLowerCase() === lowerName),
       'workflow.resolve_case_insensitive_match'
-    );
-    return caseMatches[0];
-  } else if (caseMatches.length > 1) {
-    const candidates = caseMatches.map(w => `  - ${w.name}`).join('\n');
-    throw new Error(`Ambiguous workflow '${name}'. Did you mean:\n${candidates}`);
-  }
-
-  // Tier 3: Suffix match (e.g. "assist" matches "archon-assist")
-  const suffixMatches = workflows.filter(w => w.name.toLowerCase().endsWith(`-${lowerName}`));
-  if (suffixMatches.length === 1) {
-    getLog().info(
-      { requested: name, matched: suffixMatches[0].name },
+    ) ??
+    // Tier 3: Suffix match (e.g. "assist" matches "archon-assist")
+    checkTier(
+      workflows.filter(w => w.name.toLowerCase().endsWith(`-${lowerName}`)),
       'workflow.resolve_suffix_match'
-    );
-    return suffixMatches[0];
-  } else if (suffixMatches.length > 1) {
-    const candidates = suffixMatches.map(w => `  - ${w.name}`).join('\n');
-    throw new Error(`Ambiguous workflow '${name}'. Did you mean:\n${candidates}`);
-  }
-
-  // Tier 4: Substring match (e.g. "smart" matches "archon-smart-pr-review")
-  const subMatches = workflows.filter(w => w.name.toLowerCase().includes(lowerName));
-  if (subMatches.length === 1) {
-    getLog().info(
-      { requested: name, matched: subMatches[0].name },
+    ) ??
+    // Tier 4: Substring match (e.g. "smart" matches "archon-smart-pr-review")
+    checkTier(
+      workflows.filter(w => w.name.toLowerCase().includes(lowerName)),
       'workflow.resolve_substring_match'
-    );
-    return subMatches[0];
-  } else if (subMatches.length > 1) {
-    const candidates = subMatches.map(w => `  - ${w.name}`).join('\n');
-    throw new Error(`Ambiguous workflow '${name}'. Did you mean:\n${candidates}`);
-  }
-
-  return undefined;
+    )
+  );
 }
