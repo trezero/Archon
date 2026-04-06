@@ -192,6 +192,7 @@ export interface WorkflowConfig {
   /** Default assistant provider ('claude' | 'codex') */
   assistant: 'claude' | 'codex';
   baseBranch?: string;
+  docsPath?: string;
   /**
    * Merged per-project env vars (config file + DB). Injected into Options.env on Claude SDK calls.
    * Populated by executeWorkflow — loadConfig returns file-based vars; DB vars merged on top after.

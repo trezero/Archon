@@ -206,7 +206,7 @@ Structure the output for easy decision-making:
 | File | Section | Update Needed |
 |------|---------|---------------|
 | CLAUDE.md | Database Schema | Add ended_reason column |
-| docs/architecture.md | Sessions | Update deactivateSession signature |
+| $DOCS_DIR/architecture.md | Sessions | Update deactivateSession signature |
 
 **Your choice**:
 - [ ] Send docs agent to fix all

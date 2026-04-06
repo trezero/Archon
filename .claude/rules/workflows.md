@@ -40,6 +40,7 @@ nodes:
 | `$ARTIFACTS_DIR` | Pre-created external artifacts directory |
 | `$WORKFLOW_ID` | Current workflow run ID |
 | `$BASE_BRANCH` | Base branch from config or auto-detected |
+| `$DOCS_DIR` | Documentation directory path (default: `docs/`) |
 | `$nodeId.output` | Captured stdout/AI output from completed DAG node |
 
 ## WorkflowDeps — Dependency Injection

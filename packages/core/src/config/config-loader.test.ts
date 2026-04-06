@@ -353,6 +353,59 @@ worktree:
       expect(config.baseBranch).toBeUndefined();
     });
 
+    test('propagates docsPath from repo docs config', async () => {
+      const pathMatches = (path: string, pattern: string): boolean => {
+        const normalizedPath = path.replace(/\\/g, '/');
+        return normalizedPath.includes(pattern);
+      };
+
+      mockReadConfigFile.mockImplementation(async (path: string) => {
+        if (pathMatches(path, '/repo/.archon/config.yaml')) {
+          return `
+docs:
+  path: packages/docs-web/src/content/docs
+`;
+        }
+        const error = new Error('ENOENT') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      });
+
+      const config = await loadConfig('/test/repo');
+      expect(config.docsPath).toBe('packages/docs-web/src/content/docs');
+    });
+
+    test('trims whitespace from docsPath', async () => {
+      const pathMatches = (path: string, pattern: string): boolean => {
+        const normalizedPath = path.replace(/\\/g, '/');
+        return normalizedPath.includes(pattern);
+      };
+
+      mockReadConfigFile.mockImplementation(async (path: string) => {
+        if (pathMatches(path, '/repo/.archon/config.yaml')) {
+          return `
+docs:
+  path: "  custom/docs/  "
+`;
+        }
+        const error = new Error('ENOENT') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      });
+
+      const config = await loadConfig('/test/repo');
+      expect(config.docsPath).toBe('custom/docs/');
+    });
+
+    test('docsPath is undefined when docs config is absent', async () => {
+      const error = new Error('ENOENT') as NodeJS.ErrnoException;
+      error.code = 'ENOENT';
+      mockReadConfigFile.mockRejectedValue(error);
+
+      const config = await loadConfig('/test/repo');
+      expect(config.docsPath).toBeUndefined();
+    });
+
     test('propagates env vars from repo config', async () => {
       const pathMatches = (path: string, pattern: string): boolean =>
         path.replace(/\\/g, '/').includes(pattern);

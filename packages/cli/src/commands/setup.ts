@@ -1535,6 +1535,40 @@ export async function setupCommand(options: SetupOptions): Promise<void> {
     skillInstalledPath = join(skillTarget, '.claude', 'skills', 'archon');
   }
 
+  // Optional: configure docs directory
+  const wantsDocsPath = await confirm({
+    message: 'Configure a non-default docs directory? (default: docs/)',
+    initialValue: false,
+  });
+
+  if (!isCancel(wantsDocsPath) && wantsDocsPath) {
+    const docsPath = await text({
+      message: 'Where are your project docs? (relative to repo root)',
+      placeholder: 'docs/',
+    });
+
+    if (!isCancel(docsPath) && typeof docsPath === 'string' && docsPath.trim()) {
+      try {
+        const archonDir = join(options.repoPath, '.archon');
+        mkdirSync(archonDir, { recursive: true });
+        const configPath = join(archonDir, 'config.yaml');
+        const existing = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '';
+        if (!existing.includes('docs:')) {
+          const escaped = docsPath.trim().replace(/"/g, '\\"');
+          writeFileSync(configPath, existing + `\ndocs:\n  path: "${escaped}"\n`);
+        } else {
+          note(
+            `A "docs:" key already exists in ${configPath}.\nEdit it manually to set path: ${docsPath.trim()}`,
+            'Docs path not written'
+          );
+        }
+      } catch (err) {
+        cancel(`Could not write docs config: ${(err as NodeJS.ErrnoException).message}`);
+        process.exit(1);
+      }
+    }
+  }
+
   // Summary
   const configuredPlatforms: string[] = [];
   if (config.platforms.github) configuredPlatforms.push('GitHub');

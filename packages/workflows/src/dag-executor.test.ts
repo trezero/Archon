@@ -790,6 +790,7 @@ describe('executeDagWorkflow -- tool restrictions', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -825,6 +826,7 @@ describe('executeDagWorkflow -- tool restrictions', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       { ...minimalConfig, assistant: 'codex' }
     );
 
@@ -851,6 +853,7 @@ describe('executeDagWorkflow -- tool restrictions', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -887,6 +890,7 @@ describe('executeDagWorkflow -- tool restrictions', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -931,6 +935,7 @@ describe('executeDagWorkflow -- tool restrictions', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       { ...minimalConfig, assistant: 'codex' }
     );
 
@@ -996,6 +1001,7 @@ describe('executeDagWorkflow -- bash nodes', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1034,6 +1040,7 @@ describe('executeDagWorkflow -- bash nodes', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1070,6 +1077,7 @@ describe('executeDagWorkflow -- bash nodes', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1107,6 +1115,7 @@ describe('executeDagWorkflow -- bash nodes', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1145,6 +1154,7 @@ describe('executeDagWorkflow -- bash nodes', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1185,6 +1195,7 @@ describe('executeDagWorkflow -- bash nodes', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1279,6 +1290,7 @@ describe('executeDagWorkflow -- output_format structured output', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1322,6 +1334,7 @@ describe('executeDagWorkflow -- output_format structured output', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1367,6 +1380,7 @@ describe('executeDagWorkflow -- output_format structured output', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1434,6 +1448,7 @@ describe('executeDagWorkflow -- output_format structured output', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1485,6 +1500,7 @@ describe('executeDagWorkflow -- output_format structured output', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1559,6 +1575,7 @@ describe('executeDagWorkflow -- when condition parse errors (fail-closed)', () =
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1586,6 +1603,7 @@ describe('executeDagWorkflow -- when condition parse errors (fail-closed)', () =
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1617,6 +1635,7 @@ describe('executeDagWorkflow -- when condition parse errors (fail-closed)', () =
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       )
     ).resolves.toBeUndefined();
@@ -1685,6 +1704,7 @@ describe('executeDagWorkflow -- node-level retry for transient errors', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1718,6 +1738,7 @@ describe('executeDagWorkflow -- node-level retry for transient errors', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1751,6 +1772,7 @@ describe('executeDagWorkflow -- node-level retry for transient errors', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1788,6 +1810,7 @@ describe('executeDagWorkflow -- node-level retry for transient errors', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1852,6 +1875,7 @@ describe('executeDagWorkflow -- tool_called event persistence', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1892,6 +1916,7 @@ describe('executeDagWorkflow -- tool_called event persistence', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1955,6 +1980,7 @@ describe('executeDagWorkflow -- tool_completed event emission', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -1992,6 +2018,7 @@ describe('executeDagWorkflow -- tool_completed event emission', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -2027,6 +2054,7 @@ describe('executeDagWorkflow -- tool_completed event emission', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -2214,6 +2242,7 @@ describe('executeDagWorkflow -- skills options', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -2259,6 +2288,7 @@ describe('executeDagWorkflow -- skills options', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -2298,6 +2328,7 @@ describe('executeDagWorkflow -- skills options', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       { ...minimalConfig, assistant: 'codex' }
     );
 
@@ -2464,6 +2495,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig,
       undefined,
       undefined,
@@ -2507,6 +2539,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig,
       undefined,
       undefined,
@@ -2543,6 +2576,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig,
       undefined,
       undefined,
@@ -2582,6 +2616,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig,
       undefined,
       undefined,
@@ -2612,6 +2647,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -2650,6 +2686,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -2702,6 +2739,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -2760,6 +2798,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -2800,6 +2839,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -2866,6 +2906,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -2914,6 +2955,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -2966,6 +3008,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -3010,6 +3053,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -3068,6 +3112,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -3108,6 +3153,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -3154,6 +3200,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -3204,6 +3251,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -3254,6 +3302,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -3313,6 +3362,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -3383,6 +3433,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -3446,6 +3497,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -3493,6 +3545,7 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       );
 
@@ -3569,6 +3622,7 @@ describe('executeDagWorkflow -- break after result (no hang on subprocess exit)'
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       ).then(() => 'completed'),
       new Promise<string>((_, reject) =>
@@ -3613,6 +3667,7 @@ describe('executeDagWorkflow -- break after result (no hang on subprocess exit)'
         join(testDir, 'artifacts'),
         join(testDir, 'logs'),
         'main',
+        'docs/',
         minimalConfig
       ).then(() => 'completed'),
       new Promise<string>((_, reject) =>
@@ -3689,6 +3744,7 @@ describe('executeDagWorkflow -- terminal node output selection', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -3717,6 +3773,7 @@ describe('executeDagWorkflow -- terminal node output selection', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -3759,6 +3816,7 @@ describe('executeDagWorkflow -- terminal node output selection', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -3823,6 +3881,7 @@ describe('executeDagWorkflow -- cancel node', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -3861,6 +3920,7 @@ describe('executeDagWorkflow -- cancel node', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -3932,6 +3992,7 @@ describe('executeDagWorkflow -- credit exhaustion', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -4005,6 +4066,7 @@ describe('executeDagWorkflow -- approval node', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -4052,6 +4114,7 @@ describe('executeDagWorkflow -- approval node', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -4118,6 +4181,7 @@ describe('executeDagWorkflow -- approval node', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -4177,6 +4241,7 @@ describe('executeDagWorkflow -- approval node', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -4236,6 +4301,7 @@ describe('executeDagWorkflow -- approval node', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       minimalConfig
     );
 
@@ -4294,6 +4360,7 @@ describe('executeDagWorkflow -- env var injection', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       { ...minimalConfig, envVars: { MY_SECRET: 'abc123' } }
     );
 
@@ -4319,6 +4386,7 @@ describe('executeDagWorkflow -- env var injection', () => {
       join(testDir, 'artifacts'),
       join(testDir, 'logs'),
       'main',
+      'docs/',
       { ...minimalConfig, envVars: {} }
     );
 

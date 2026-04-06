@@ -86,6 +86,7 @@ substitution:
 | `$ARGUMENTS` / `$USER_MESSAGE` | Original user message |
 | `$ARTIFACTS_DIR` | Workflow artifacts directory |
 | `$BASE_BRANCH` | Repository base branch |
+| `$DOCS_DIR` | Documentation directory path (default: `docs/`) |
 | `$WORKFLOW_ID` | Current workflow run ID |
 | `$nodeId.output` | Output from upstream nodes |
 | `$LOOP_USER_INPUT` | User feedback provided via `/workflow approve <id> <text>` at an interactive loop gate. Only populated on the first iteration of a resumed interactive loop; empty string on all other iterations. |

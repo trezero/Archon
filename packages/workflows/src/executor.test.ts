@@ -256,6 +256,61 @@ describe('executeWorkflow', () => {
   });
 
   // -------------------------------------------------------------------------
+  // $DOCS_DIR default resolution
+  // -------------------------------------------------------------------------
+
+  describe('docsDir resolution', () => {
+    it('passes docs/ default when config.docsPath is undefined', async () => {
+      const store = makeStore();
+      const deps = makeDeps(store);
+      await executeWorkflow(
+        deps,
+        makePlatform(),
+        'conv-1',
+        '/tmp',
+        makeWorkflow(),
+        'test message',
+        'db-conv-1'
+      );
+      expect(mockExecuteDagWorkflow).toHaveBeenCalledTimes(1);
+      // docsDir is arg index 11 (0-indexed) of executeDagWorkflow
+      const docsDir = mockExecuteDagWorkflow.mock.calls[0]?.[11];
+      expect(docsDir).toBe('docs/');
+    });
+
+    it('passes configured docsPath when set', async () => {
+      const store = makeStore();
+      const deps = {
+        store,
+        loadConfig: mock(
+          async (): Promise<WorkflowConfig> => ({
+            assistant: 'claude' as const,
+            assistants: { claude: {}, codex: {} },
+            baseBranch: '',
+            commands: { folder: '' },
+            docsPath: 'packages/docs-web/src/content/docs',
+          })
+        ),
+        createAssistantClient: mock(() => ({
+          run: mock(async () => {}),
+        })),
+      } as unknown as WorkflowDeps;
+      await executeWorkflow(
+        deps,
+        makePlatform(),
+        'conv-1',
+        '/tmp',
+        makeWorkflow(),
+        'test message',
+        'db-conv-1'
+      );
+      expect(mockExecuteDagWorkflow).toHaveBeenCalledTimes(1);
+      const docsDir = mockExecuteDagWorkflow.mock.calls[0]?.[11];
+      expect(docsDir).toBe('packages/docs-web/src/content/docs');
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Resume logic
   // -------------------------------------------------------------------------
 
@@ -453,8 +508,8 @@ describe('executeWorkflow', () => {
       // DB env vars should have been fetched for the codebaseId
       expect(store.getCodebaseEnvVars).toHaveBeenCalledWith('codebase-1');
 
-      // The config passed to executeDagWorkflow (arg index 11) should have merged envVars
-      const configArg = mockExecuteDagWorkflow.mock.calls[0]?.[11] as WorkflowConfig | undefined;
+      // The config passed to executeDagWorkflow (arg index 12) should have merged envVars
+      const configArg = mockExecuteDagWorkflow.mock.calls[0]?.[12] as WorkflowConfig | undefined;
       expect(configArg?.envVars).toEqual({ FILE_KEY: 'file_val', DB_KEY: 'db_val' });
     });
 

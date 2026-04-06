@@ -78,6 +78,7 @@ Commands support variable substitution. The most commonly used variables:
 | `$ARGUMENTS` | The user's input message |
 | `$ARTIFACTS_DIR` | Pre-created directory for workflow artifacts |
 | `$BASE_BRANCH` | The base branch (auto-detected or configured) |
+| `$DOCS_DIR` | Documentation directory path (default: `docs/`) |
 | `$WORKFLOW_ID` | Unique ID for the current workflow run |
 
 See the [Variable Reference](/reference/variables/) for the complete list.

@@ -44,7 +44,7 @@ gh pr diff {number}
 cat CLAUDE.md
 
 # List docs folder
-ls -la docs/
+ls -la $DOCS_DIR
 
 # List agent definitions
 ls -la .claude/agents/ 2>/dev/null || true
@@ -131,8 +131,8 @@ Write to `$ARTIFACTS_DIR/review/docs-impact-findings.md`:
 | Document | Impact | Required Update |
 |----------|--------|-----------------|
 | CLAUDE.md | NONE/LOW/HIGH | {description or "None"} |
-| docs/architecture.md | NONE/LOW/HIGH | {description or "None"} |
-| docs/configuration.md | NONE/LOW/HIGH | {description or "None"} |
+| $DOCS_DIR/architecture.md | NONE/LOW/HIGH | {description or "None"} |
+| $DOCS_DIR/configuration.md | NONE/LOW/HIGH | {description or "None"} |
 | README.md | NONE/LOW/HIGH | {description or "None"} |
 | .claude/agents/*.md | NONE/LOW/HIGH | {description or "None"} |
 | .archon/commands/*.md | NONE/LOW/HIGH | {description or "None"} |

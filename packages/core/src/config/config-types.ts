@@ -141,6 +141,17 @@ export interface RepoConfig {
   };
 
   /**
+   * Documentation directory settings
+   */
+  docs?: {
+    /**
+     * Path to documentation directory (relative to repo root)
+     * @default 'docs/'
+     */
+    path?: string;
+  };
+
+  /**
    * Per-project environment variables injected into Claude SDK subprocess env.
    * Values here override process.env for workflow node execution.
    * Sensitive — do not commit actual secrets to version-controlled repos.
@@ -217,6 +228,12 @@ export interface MergedConfig {
    * When undefined, workflows referencing $BASE_BRANCH will fail with an error.
    */
   baseBranch?: string;
+  /**
+   * Docs directory path from repo config (docs.path).
+   * Used for $DOCS_DIR substitution in workflow commands.
+   * @default 'docs/'
+   */
+  docsPath?: string;
   /**
    * Merged per-project env vars from .archon/config.yaml env: section.
    * DB env vars (from Web UI) are merged on top by executeWorkflow.
