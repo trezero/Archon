@@ -13,6 +13,10 @@ export default defineConfig({
       },
       sidebar: [
         {
+          label: 'The Book of Archon',
+          autogenerate: { directory: 'book' },
+        },
+        {
           label: 'Getting Started',
           autogenerate: { directory: 'getting-started' },
         },
