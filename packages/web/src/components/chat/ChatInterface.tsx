@@ -18,6 +18,7 @@ import {
   getMessages,
   createConversation,
   getWorkflowRunByWorker,
+  getHealth,
 } from '@/lib/api';
 import type { ConversationResponse, CodebaseResponse, MessageResponse } from '@/lib/api';
 import type {
@@ -123,6 +124,16 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
   }, [messages]);
   const activeWorkflow = useWorkflowStore(selectActiveWorkflow);
   const hydrateWorkflow = useWorkflowStore(s => s.hydrateWorkflow);
+
+  const { data: health } = useQuery({
+    queryKey: ['health'],
+    queryFn: getHealth,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  // Default to true (hide button) until server confirms non-Docker — prevents broken vscode:// links
+  const isDocker = health?.is_docker ?? true;
 
   // Sync messages to cache for persistence across navigation
   useEffect(() => {
@@ -741,6 +752,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
         subtitle={headerSubtitle}
         projectName={currentCodebase?.name ?? contextCodebase?.name}
         connected={isNewChat ? undefined : connected}
+        isDocker={isDocker}
       />
       {(conversationsError || codebasesError) && (
         <div className="flex gap-2 px-4 py-1">

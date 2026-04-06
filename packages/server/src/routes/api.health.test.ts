@@ -17,6 +17,7 @@ const mockLoadConfig = mock(async () => ({
   worktree: { baseBranch: 'main' },
 }));
 const mockGetDatabaseType = mock(() => 'sqlite' as const);
+const mockIsDocker = mock(() => false);
 const mockGetStats = mock(() => ({
   active: 1,
   queuedTotal: 2,
@@ -76,6 +77,7 @@ mock.module('@archon/paths', () => ({
   getDefaultCommandsPath: mock(() => '/tmp/.archon-test-nonexistent/commands/defaults'),
   getDefaultWorkflowsPath: mock(() => '/tmp/.archon-test-nonexistent/workflows/defaults'),
   getArchonWorkspacesPath: () => '/tmp/.archon/workspaces',
+  isDocker: mockIsDocker,
 }));
 
 mock.module('@archon/workflows/workflow-discovery', makeDiscoverWorkflowsMock);
@@ -197,6 +199,7 @@ describe('GET /api/health', () => {
   beforeEach(() => {
     mockGetStats.mockReset();
     mockGetRunningWorkflows.mockReset();
+    mockIsDocker.mockClear(); // preserve base () => false implementation; only clear call records
   });
 
   test('returns status ok with adapter and concurrency info', async () => {
@@ -321,6 +324,44 @@ describe('GET /api/health', () => {
     const app = makeApp();
     const response = await app.request('/api/health');
     expect(response.status).toBe(200);
+  });
+
+  test('includes is_docker: false in non-Docker environment', async () => {
+    mockGetStats.mockImplementationOnce(() => ({
+      active: 0,
+      queuedTotal: 0,
+      queuedByConversation: [],
+      maxConcurrent: 10,
+      activeConversationIds: [],
+    }));
+    mockGetRunningWorkflows.mockImplementationOnce(async () => []);
+    mockIsDocker.mockReturnValueOnce(false);
+
+    const app = makeApp();
+    const response = await app.request('/api/health');
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as { is_docker: boolean };
+    expect(body.is_docker).toBe(false);
+  });
+
+  test('includes is_docker: true in Docker environment', async () => {
+    mockGetStats.mockImplementationOnce(() => ({
+      active: 0,
+      queuedTotal: 0,
+      queuedByConversation: [],
+      maxConcurrent: 10,
+      activeConversationIds: [],
+    }));
+    mockGetRunningWorkflows.mockImplementationOnce(async () => []);
+    mockIsDocker.mockReturnValueOnce(true);
+
+    const app = makeApp();
+    const response = await app.request('/api/health');
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as { is_docker: boolean };
+    expect(body.is_docker).toBe(true);
   });
 });
 

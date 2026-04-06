@@ -212,7 +212,9 @@ export function DashboardPage(): React.ReactElement {
 
   const { data: health } = useQuery({
     queryKey: ['health'],
-    queryFn: () => getHealth(),
+    queryFn: getHealth,
+    staleTime: 10_000,
+    refetchOnWindowFocus: true,
     refetchInterval: 30_000,
   });
 
@@ -361,6 +363,7 @@ export function DashboardPage(): React.ReactElement {
                         <WorkflowRunCard
                           key={run.id}
                           run={run}
+                          isDocker={health?.is_docker}
                           onCancel={handleCancel}
                           onResume={handleResume}
                           onAbandon={handleAbandon}
@@ -377,6 +380,7 @@ export function DashboardPage(): React.ReactElement {
                       key={group.parentPlatformId ?? 'standalone'}
                       parentPlatformId={group.parentPlatformId}
                       runs={group.runs}
+                      isDocker={health?.is_docker}
                       onCancel={handleCancel}
                       onResume={handleResume}
                       onAbandon={handleAbandon}
