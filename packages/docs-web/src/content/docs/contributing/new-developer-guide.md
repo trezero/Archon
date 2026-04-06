@@ -600,6 +600,8 @@ Each conversation gets its own isolated copy of the repo:
 │   Switch repos                      "/repos" then pick one              │
 │   List available workflows          "/workflow list"                    │
 │   Reload workflow definitions       "/workflow reload"                  │
+│   Approve paused workflow           "/workflow approve <id> [comment]"  │
+│   Reject paused workflow           "/workflow reject <id> [reason]"   │
 │   Cancel stuck workflow             "/workflow cancel"                  │
 │   Start fresh                       "/reset"                            │
 │   Get help                          "/help"                             │

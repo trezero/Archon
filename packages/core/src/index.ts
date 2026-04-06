@@ -70,6 +70,12 @@ export { createWorkflowStore } from './workflows/store-adapter';
 export * as workflowEventDb from './db/workflow-events';
 
 // =============================================================================
+// Operations (shared business logic for CLI and command-handler)
+// =============================================================================
+export * as workflowOperations from './operations/workflow-operations';
+export * as isolationOperations from './operations/isolation-operations';
+
+// =============================================================================
 // Orchestrator
 // =============================================================================
 export { handleMessage } from './orchestrator/orchestrator-agent';

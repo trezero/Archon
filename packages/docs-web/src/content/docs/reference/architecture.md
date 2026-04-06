@@ -888,7 +888,7 @@ The handler is split into focused functions per command group:
 - `handleRepoCommand()` -- `/repo` (switch repos, pull, auto-load commands)
 - `handleRepoRemoveCommand()` -- `/repo-remove` (delete repo + codebase record)
 - `handleWorktreeCommand()` -- `/worktree` subcommands (create, list, remove, cleanup, orphans)
-- `handleWorkflowCommand()` -- `/workflow` subcommands (list, reload, run, status, cancel, resume, abandon, approve, reject)
+- `handleWorkflowCommand()` -- `/workflow` subcommands (list, reload, run, status, cancel, resume, abandon, approve, reject). The status/resume/abandon/approve/reject cases delegate to shared operations in `packages/core/src/operations/workflow-operations.ts`
 - `resolveRepoArg()` -- Shared helper for repo lookup by number or name
 
 **Important:** `modified: true` flag on `CommandResult` signals orchestrator to reload conversation state.
