@@ -1,12 +1,17 @@
-import { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router';
+import { useEffect, useRef, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Pencil } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { listWorkflows, createConversation, runWorkflow, deleteConversation } from '@/lib/api';
-import type { WorkflowListEntry } from '@/lib/api';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useProject } from '@/contexts/ProjectContext';
+import { WorkflowCard } from '@/components/workflows/WorkflowCard';
+import {
+  getWorkflowCategory,
+  getWorkflowDisplayName,
+  CATEGORIES,
+  type WorkflowCategory,
+} from '@/lib/workflow-metadata';
 
 export function WorkflowList(): React.ReactElement {
   const navigate = useNavigate();
@@ -14,15 +19,31 @@ export function WorkflowList(): React.ReactElement {
   const [runMessage, setRunMessage] = useState('');
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeCategory, setActiveCategory] = useState<WorkflowCategory>('All');
   const { codebases, selectedProjectId } = useProject();
   const [localProjectId, setLocalProjectId] = useState<string | null>(selectedProjectId);
+  const messageInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync with the global project selection when it changes in the sidebar.
-  // Also handles the deleted-project fallback: if localProjectId is no longer in the list,
-  // the global selection (which may also be null) takes precedence.
   useEffect(() => {
     setLocalProjectId(selectedProjectId);
   }, [selectedProjectId]);
+
+  // Focus message input when a workflow is selected
+  useEffect(() => {
+    if (selectedWorkflow) {
+      requestAnimationFrame(() => {
+        messageInputRef.current?.focus();
+      });
+    }
+  }, [selectedWorkflow]);
+
+  // Reset selection when filters change so stale run panel state doesn't persist
+  useEffect(() => {
+    setSelectedWorkflow(null);
+    setRunMessage('');
+    setRunError(null);
+  }, [searchQuery, activeCategory]);
 
   const handleRun = async (workflowName: string): Promise<void> => {
     if (!runMessage.trim() || running) return;
@@ -70,6 +91,28 @@ export function WorkflowList(): React.ReactElement {
     queryFn: () => listWorkflows(selectedCwd),
   });
 
+  // Filter workflows by search query and category
+  const filteredWorkflows = useMemo(() => {
+    if (!workflows) return [];
+    return workflows
+      .map(entry => entry.workflow)
+      .filter(wf => {
+        // Search filter
+        if (searchQuery) {
+          const query = searchQuery.toLowerCase();
+          const matchesName = wf.name.toLowerCase().includes(query);
+          const matchesDesc = wf.description?.toLowerCase().includes(query) ?? false;
+          if (!matchesName && !matchesDesc) return false;
+        }
+        // Category filter
+        if (activeCategory !== 'All') {
+          const cat = getWorkflowCategory(wf.name, wf.description ?? '');
+          if (cat !== activeCategory) return false;
+        }
+        return true;
+      });
+  }, [workflows, searchQuery, activeCategory]);
+
   if (loadingWorkflows) {
     return (
       <div className="flex items-center justify-center h-32 text-text-secondary text-sm">
@@ -84,111 +127,148 @@ export function WorkflowList(): React.ReactElement {
     );
   }
 
+  const hasWorkflows = workflows != null && workflows.length > 0;
+  const displayName = selectedWorkflow ? getWorkflowDisplayName(selectedWorkflow) : '';
+
   return (
-    <div>
-      {!workflows || workflows.length === 0 ? (
-        <div className="text-sm text-text-secondary">
-          No workflows found. Add workflow definitions to{' '}
-          <code className="text-xs bg-surface-inset px-1 py-0.5 rounded">.archon/workflows/</code>
-        </div>
-      ) : (
-        <div className="grid gap-2">
-          {workflows.map((entry: WorkflowListEntry) => {
-            const wf = entry.workflow;
-            const source = entry.source;
-            return (
-              <div key={wf.name}>
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-auto space-y-4 p-0">
+        {/* Search + Category Filters — only show when workflows exist */}
+        {hasWorkflows && (
+          <div className="space-y-3">
+            {/* Search bar */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-text-tertiary" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e): void => {
+                  setSearchQuery(e.target.value);
+                }}
+                placeholder="Search workflows..."
+                className="w-full pl-9 pr-3 py-2 rounded-lg border border-border bg-surface text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </div>
+
+            {/* Category filter tabs */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {CATEGORIES.map(cat => (
                 <button
+                  key={cat}
                   onClick={(): void => {
-                    setSelectedWorkflow(selectedWorkflow === wf.name ? null : wf.name);
-                    setRunMessage('');
-                    setRunError(null);
+                    setActiveCategory(cat);
                   }}
-                  className={`w-full text-left rounded-lg border p-3 transition-colors ${
-                    selectedWorkflow === wf.name
-                      ? 'border-accent bg-accent/5'
-                      : 'border-border bg-surface hover:bg-surface-hover'
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    activeCategory === cat
+                      ? 'bg-primary text-white'
+                      : 'bg-surface-elevated text-text-secondary hover:text-text-primary'
                   }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm text-text-primary">{wf.name}</span>
-                      <Badge
-                        variant={source === 'project' ? 'default' : 'secondary'}
-                        className="text-[10px] px-1.5 py-0"
-                      >
-                        {source}
-                      </Badge>
-                    </div>
-                    <Link
-                      to={`/workflows/builder?edit=${encodeURIComponent(wf.name)}`}
-                      onClick={(e): void => {
-                        e.stopPropagation();
-                      }}
-                      className="flex items-center gap-1 text-xs text-text-tertiary hover:text-primary transition-colors"
-                    >
-                      <Pencil className="size-3" />
-                      Edit
-                    </Link>
-                  </div>
-                  {wf.description && (
-                    <p className="text-xs text-text-secondary mt-1 line-clamp-2">
-                      {wf.description}
-                    </p>
-                  )}
+                  {cat}
                 </button>
-                {selectedWorkflow === wf.name && (
-                  <div className="mt-2 p-3 rounded-lg border border-border bg-surface-inset">
-                    <div className="flex items-center gap-2 mb-2">
-                      <label className="text-xs text-text-secondary shrink-0">Run on</label>
-                      <select
-                        value={localProjectId ?? ''}
-                        onChange={(e): void => {
-                          setLocalProjectId(e.target.value || null);
-                        }}
-                        className="flex-1 min-w-0 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
-                      >
-                        <option value="">No project (orchestrator decides)</option>
-                        {codebases?.map(cb => (
-                          <option key={cb.id} value={cb.id}>
-                            {cb.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <input
-                      type="text"
-                      value={runMessage}
-                      onChange={(e): void => {
-                        setRunMessage(e.target.value);
-                      }}
-                      placeholder="Enter a message for this workflow..."
-                      className="w-full px-3 py-2 rounded-md border border-border bg-surface text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
-                      onKeyDown={(e): void => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          void handleRun(wf.name);
-                        }
-                      }}
-                      disabled={running}
-                    />
-                    <div className="flex justify-end mt-2">
-                      <Button
-                        size="sm"
-                        onClick={(): void => {
-                          void handleRun(wf.name);
-                        }}
-                        disabled={running || !runMessage.trim()}
-                      >
-                        {running ? 'Starting...' : `Run ${wf.name}`}
-                      </Button>
-                    </div>
-                    {runError && <p className="text-xs text-error mt-1">{runError}</p>}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Workflow grid */}
+        {!hasWorkflows ? (
+          <div className="text-sm text-text-secondary">
+            No workflows found. Add workflow definitions to{' '}
+            <code className="text-xs bg-surface-inset px-1 py-0.5 rounded">.archon/workflows/</code>
+          </div>
+        ) : filteredWorkflows.length === 0 ? (
+          <div className="text-sm text-text-secondary py-8 text-center">
+            No workflows match your search.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {filteredWorkflows.map(wf => (
+              <WorkflowCard
+                key={wf.name}
+                workflow={wf}
+                isSelected={selectedWorkflow === wf.name}
+                onToggle={(name): void => {
+                  setSelectedWorkflow(selectedWorkflow === name ? null : name);
+                  setRunMessage('');
+                  setRunError(null);
+                }}
+                onRun={(name): void => {
+                  setSelectedWorkflow(name);
+                  setRunMessage('');
+                  setRunError(null);
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Sticky run bar — anchored at bottom, slides up with glow when workflow selected */}
+      {selectedWorkflow && (
+        <div className="shrink-0 border-t border-accent/40 bg-surface-elevated px-4 py-3 animate-slide-up shadow-[0_-4px_20px_rgba(59,130,246,0.15)]">
+          <div className="flex items-center gap-3">
+            {/* Workflow name + dismiss */}
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-sm font-medium text-text-primary">{displayName}</span>
+              <button
+                onClick={(): void => {
+                  setSelectedWorkflow(null);
+                  setRunMessage('');
+                  setRunError(null);
+                }}
+                className="p-0.5 rounded text-text-tertiary hover:text-text-primary transition-colors"
+                title="Dismiss"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+
+            {/* Project picker */}
+            <select
+              value={localProjectId ?? ''}
+              onChange={(e): void => {
+                setLocalProjectId(e.target.value || null);
+              }}
+              className="w-48 shrink-0 rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+            >
+              <option value="">No project</option>
+              {codebases?.map(cb => (
+                <option key={cb.id} value={cb.id}>
+                  {cb.name}
+                </option>
+              ))}
+            </select>
+
+            {/* Message input + Run button */}
+            <input
+              ref={messageInputRef}
+              type="text"
+              value={runMessage}
+              onChange={(e): void => {
+                setRunMessage(e.target.value);
+              }}
+              placeholder="Enter a message for this workflow..."
+              className="flex-1 min-w-0 px-3 py-1.5 rounded-md border border-border bg-surface text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+              onKeyDown={(e): void => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void handleRun(selectedWorkflow);
+                }
+              }}
+              disabled={running}
+            />
+            <Button
+              size="sm"
+              onClick={(): void => {
+                void handleRun(selectedWorkflow);
+              }}
+              disabled={running || !runMessage.trim()}
+            >
+              {running ? 'Starting...' : 'Run'}
+            </Button>
+          </div>
+          {runError && <p className="text-xs text-error mt-1">{runError}</p>}
         </div>
       )}
     </div>
