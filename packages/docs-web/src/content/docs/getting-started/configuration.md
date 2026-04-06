@@ -1,6 +1,11 @@
 ---
 title: Configuration
 description: Configure Archon with API keys, assistants, and project settings.
+category: getting-started
+area: config
+audience: [user, operator]
+sidebar:
+  order: 3
 ---
 
 ## Environment Variables

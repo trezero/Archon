@@ -1,6 +1,10 @@
 ---
 title: Quick Start
 description: Run your first Archon workflow in minutes.
+category: getting-started
+audience: [user]
+sidebar:
+  order: 2
 ---
 
 ## Prerequisites

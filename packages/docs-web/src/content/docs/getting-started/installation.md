@@ -1,6 +1,10 @@
 ---
 title: Installation
 description: Install Archon on macOS, Linux, or Windows.
+category: getting-started
+audience: [user, operator]
+sidebar:
+  order: 1
 ---
 
 ## Quick Install
