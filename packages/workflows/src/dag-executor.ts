@@ -444,7 +444,7 @@ async function resolveNodeProviderAndModel(
   }
 
   // Warn if Codex node has Claude-only SDK options (effort, thinking, maxBudgetUsd, systemPrompt, fallbackModel, betas, sandbox)
-  {
+  if (provider === 'codex') {
     const claudeOnlyFields = [
       ['effort', node.effort ?? workflowLevelOptions.effort],
       ['thinking', node.thinking ?? workflowLevelOptions.thinking],
@@ -454,22 +454,20 @@ async function resolveNodeProviderAndModel(
       ['betas', node.betas ?? workflowLevelOptions.betas],
       ['sandbox', node.sandbox ?? workflowLevelOptions.sandbox],
     ] as const;
-    if (provider === 'codex') {
-      const present = claudeOnlyFields.filter(([, val]) => val !== undefined).map(([name]) => name);
-      if (present.length > 0) {
-        getLog().warn({ nodeId: node.id, fields: present }, 'dag.claude_options_ignored_codex');
-        const delivered = await safeSendMessage(
-          platform,
-          conversationId,
-          `Warning: Node '${node.id}' has Claude-only options (${present.join(', ')}) but uses Codex — these will be ignored.`,
-          { workflowId: workflowRunId, nodeName: node.id }
+    const present = claudeOnlyFields.filter(([, val]) => val !== undefined).map(([name]) => name);
+    if (present.length > 0) {
+      getLog().warn({ nodeId: node.id, fields: present }, 'dag.claude_options_ignored_codex');
+      const delivered = await safeSendMessage(
+        platform,
+        conversationId,
+        `Warning: Node '${node.id}' has Claude-only options (${present.join(', ')}) but uses Codex — these will be ignored.`,
+        { workflowId: workflowRunId, nodeName: node.id }
+      );
+      if (!delivered) {
+        getLog().error(
+          { nodeId: node.id, workflowRunId },
+          'dag.claude_options_warning_delivery_failed'
         );
-        if (!delivered) {
-          getLog().error(
-            { nodeId: node.id, workflowRunId },
-            'dag.claude_options_warning_delivery_failed'
-          );
-        }
       }
     }
   }
@@ -589,29 +587,17 @@ async function resolveNodeProviderAndModel(
       claudeOptions.env = config.envVars;
     }
 
-    // effort — per-node override > workflow-level default
+    // Per-node overrides take precedence over workflow-level defaults; maxBudgetUsd and systemPrompt are per-node only
     const resolvedEffort = node.effort ?? workflowLevelOptions.effort;
     if (resolvedEffort !== undefined) claudeOptions.effort = resolvedEffort;
-
-    // thinking — per-node override > workflow-level default
     const resolvedThinking = node.thinking ?? workflowLevelOptions.thinking;
     if (resolvedThinking !== undefined) claudeOptions.thinking = resolvedThinking;
-
-    // maxBudgetUsd — per-node only (no workflow-level)
     if (node.maxBudgetUsd !== undefined) claudeOptions.maxBudgetUsd = node.maxBudgetUsd;
-
-    // systemPrompt — per-node only (no workflow-level)
     if (node.systemPrompt !== undefined) claudeOptions.systemPrompt = node.systemPrompt;
-
-    // fallbackModel — per-node override > workflow-level default
     const resolvedFallbackModel = node.fallbackModel ?? workflowLevelOptions.fallbackModel;
     if (resolvedFallbackModel !== undefined) claudeOptions.fallbackModel = resolvedFallbackModel;
-
-    // betas — per-node override > workflow-level default
     const resolvedBetas = node.betas ?? workflowLevelOptions.betas;
     if (resolvedBetas !== undefined) claudeOptions.betas = resolvedBetas;
-
-    // sandbox — per-node override > workflow-level default
     const resolvedSandbox = node.sandbox ?? workflowLevelOptions.sandbox;
     if (resolvedSandbox !== undefined) claudeOptions.sandbox = resolvedSandbox;
 
