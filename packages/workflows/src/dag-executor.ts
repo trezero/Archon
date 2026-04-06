@@ -1438,8 +1438,8 @@ async function executeBashNode(
 }
 
 /**
- * Build WorkflowAssistantOptions from workflow-level config.
- * Loop nodes use workflow-level provider/model only; per-node overrides are not supported.
+ * Build WorkflowAssistantOptions from resolved provider, model, and config.
+ * Caller is responsible for resolving per-node overrides before passing model.
  */
 function buildLoopNodeOptions(
   provider: 'claude' | 'codex',
@@ -2373,6 +2373,34 @@ export async function executeDagWorkflow(
 
           // 3b. Loop node dispatch — manages its own AI sessions and iteration
           if (isLoopNode(node)) {
+            // Resolve per-node provider/model overrides (same logic as other node types)
+            let loopProvider: 'claude' | 'codex';
+            if (node.provider) {
+              loopProvider = node.provider;
+            } else if (node.model && isClaudeModel(node.model)) {
+              loopProvider = 'claude';
+            } else if (node.model) {
+              loopProvider = 'codex';
+            } else {
+              loopProvider = workflowProvider;
+            }
+            const loopModel =
+              node.model ??
+              (loopProvider === workflowProvider
+                ? workflowModel
+                : config.assistants[loopProvider]?.model);
+
+            if (!isModelCompatible(loopProvider, loopModel)) {
+              return {
+                nodeId: node.id,
+                output: {
+                  state: 'failed' as const,
+                  output: '',
+                  error: `Node '${node.id}': model "${loopModel ?? 'default'}" is not compatible with provider "${loopProvider}"`,
+                },
+              };
+            }
+
             const output = await executeLoopNode(
               deps,
               platform,
@@ -2380,8 +2408,8 @@ export async function executeDagWorkflow(
               cwd,
               workflowRun,
               node,
-              workflowProvider,
-              workflowModel,
+              loopProvider,
+              loopModel,
               artifactsDir,
               logDir,
               baseBranch,
