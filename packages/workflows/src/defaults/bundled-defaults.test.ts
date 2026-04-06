@@ -117,13 +117,14 @@ describe('bundled-defaults', () => {
         'archon-interactive-prd',
         'archon-piv-loop',
         'archon-adversarial-dev',
+        'archon-workflow-builder',
       ];
 
       for (const wf of expectedWorkflows) {
         expect(BUNDLED_WORKFLOWS).toHaveProperty(wf);
       }
 
-      expect(Object.keys(BUNDLED_WORKFLOWS)).toHaveLength(12);
+      expect(Object.keys(BUNDLED_WORKFLOWS)).toHaveLength(13);
     });
 
     it('should have non-empty content for all workflows', () => {
@@ -134,6 +135,15 @@ describe('bundled-defaults', () => {
         // Workflows should have meaningful YAML content
         expect(content.length).toBeGreaterThan(50);
       }
+    });
+
+    it('archon-workflow-builder should have validate-before-save node ordering and key constraints', () => {
+      const content = BUNDLED_WORKFLOWS['archon-workflow-builder'];
+      expect(content).toContain('id: validate-yaml');
+      expect(content).toContain('depends_on: [validate-yaml]');
+      expect(content).toContain('denied_tools: [Edit, Bash]');
+      expect(content).toContain('output_format:');
+      expect(content).toContain('workflow_name');
     });
 
     it('should have valid YAML structure', () => {
