@@ -234,4 +234,52 @@ describe('TelegramAdapter', () => {
       expect(adapter.getPlatformType()).toBe('telegram');
     });
   });
+
+  describe('start()', () => {
+    beforeEach(() => {
+      mockLogger.warn.mockClear();
+      mockLogger.info.mockClear();
+    });
+
+    test('should retry on 409 and succeed on second attempt', async () => {
+      const adapter = new TelegramAdapter('fake-token-for-testing');
+      const mockLaunch = mock<() => Promise<void>>()
+        .mockRejectedValueOnce(new Error('409: Conflict: terminated by other getUpdates request'))
+        .mockResolvedValueOnce(undefined);
+      (adapter.getBot() as unknown as { launch: typeof mockLaunch }).launch = mockLaunch;
+
+      await adapter.start({ retryDelayMs: 0 });
+
+      expect(mockLaunch).toHaveBeenCalledTimes(2);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ attempt: 1, maxAttempts: 3 }),
+        'telegram.start_conflict_retrying'
+      );
+      expect(mockLogger.info).toHaveBeenCalledWith('telegram.bot_started');
+    });
+
+    test('should throw immediately on non-409 error', async () => {
+      const adapter = new TelegramAdapter('fake-token-for-testing');
+      const mockLaunch = mock<() => Promise<void>>().mockRejectedValueOnce(
+        new Error('401: Unauthorized')
+      );
+      (adapter.getBot() as unknown as { launch: typeof mockLaunch }).launch = mockLaunch;
+
+      await expect(adapter.start({ retryDelayMs: 0 })).rejects.toThrow('401: Unauthorized');
+      expect(mockLaunch).toHaveBeenCalledTimes(1);
+    });
+
+    test('should throw after exhausting all 409 retry attempts', async () => {
+      const adapter = new TelegramAdapter('fake-token-for-testing');
+      const conflictError = new Error('409: Conflict: terminated by other getUpdates request');
+      const mockLaunch = mock<() => Promise<void>>()
+        .mockRejectedValueOnce(conflictError)
+        .mockRejectedValueOnce(conflictError)
+        .mockRejectedValueOnce(conflictError);
+      (adapter.getBot() as unknown as { launch: typeof mockLaunch }).launch = mockLaunch;
+
+      await expect(adapter.start({ retryDelayMs: 0 })).rejects.toThrow('409');
+      expect(mockLaunch).toHaveBeenCalledTimes(3);
+    });
+  });
 });
