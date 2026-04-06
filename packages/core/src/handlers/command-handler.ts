@@ -222,7 +222,10 @@ async function handleWorktreeCommand(
   args: string[]
 ): Promise<CommandResult> {
   if (!conversation.codebase_id) {
-    return { success: false, message: 'No codebase configured. Use /clone first.' };
+    return {
+      success: false,
+      message: 'No codebase configured. Register a project first with /register-project.',
+    };
   }
 
   const codebase = await codebaseDb.getCodebase(conversation.codebase_id);
@@ -1181,7 +1184,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
       if (!conversation.cwd) {
         return {
           success: false,
-          message: 'No working directory set. Use /clone or /setcwd first.',
+          message: 'No working directory set. Register a project first with /register-project.',
         };
       }
 

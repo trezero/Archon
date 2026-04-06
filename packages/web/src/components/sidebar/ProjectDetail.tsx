@@ -51,7 +51,7 @@ export function ProjectDetail({
     refetchInterval: 10_000,
   });
 
-  const { data: environments } = useQuery({
+  const { data: environments, isError: isErrorEnvironments } = useQuery({
     queryKey: ['environments', { codebaseId }],
     queryFn: () => getCodebaseEnvironments(codebaseId),
     refetchInterval: 10_000,
@@ -175,27 +175,31 @@ export function ProjectDetail({
       </div>
 
       {/* Active worktrees section */}
-      {activeEnvironments.length > 0 && (
+      {(isErrorEnvironments || activeEnvironments.length > 0) && (
         <div>
           <span className="px-1 text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">
-            Active Worktrees ({activeEnvironments.length})
+            Active Worktrees{!isErrorEnvironments && ` (${String(activeEnvironments.length)})`}
           </span>
           <div className="mt-1 flex flex-col gap-0.5">
-            {activeEnvironments.map((env: IsolationEnvironment) => (
-              <div
-                key={env.id}
-                className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs"
-              >
-                <span className="truncate font-mono text-[11px] text-text-primary">
-                  {env.branch_name}
-                </span>
-                <span className="shrink-0 text-[10px] text-text-tertiary">
-                  {env.days_since_activity === 0
-                    ? 'today'
-                    : `${String(env.days_since_activity)}d ago`}
-                </span>
-              </div>
-            ))}
+            {isErrorEnvironments ? (
+              <span className="px-1 text-xs text-error">Failed to load — retrying</span>
+            ) : (
+              activeEnvironments.map((env: IsolationEnvironment) => (
+                <div
+                  key={env.id}
+                  className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs"
+                >
+                  <span className="truncate font-mono text-[11px] text-text-primary">
+                    {env.branch_name}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-text-tertiary">
+                    {env.days_since_activity === 0
+                      ? 'today'
+                      : `${String(env.days_since_activity)}d ago`}
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}
