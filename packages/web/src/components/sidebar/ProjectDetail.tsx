@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
-import { listConversations, listWorkflowRuns } from '@/lib/api';
-import type { WorkflowRunResponse } from '@/lib/api';
+import { listConversations, listWorkflowRuns, getCodebaseEnvironments } from '@/lib/api';
+import type { WorkflowRunResponse, IsolationEnvironment } from '@/lib/api';
 import { ConversationItem } from '@/components/conversations/ConversationItem';
 import { WorkflowInvoker } from '@/components/sidebar/WorkflowInvoker';
 import { formatDuration } from '@/lib/format';
@@ -50,6 +50,17 @@ export function ProjectDetail({
     queryFn: () => listWorkflowRuns({ codebaseId, limit: 20 }),
     refetchInterval: 10_000,
   });
+
+  const { data: environments, isError: isErrorEnvironments } = useQuery({
+    queryKey: ['environments', { codebaseId }],
+    queryFn: () => getCodebaseEnvironments(codebaseId),
+    refetchInterval: 10_000,
+  });
+
+  const activeEnvironments = useMemo(
+    () => environments?.filter((e: IsolationEnvironment) => e.status === 'active') ?? [],
+    [environments]
+  );
 
   const conversationStatusMap = useMemo((): Map<string, 'running' | 'failed'> => {
     const map = new Map<string, 'running' | 'failed'>();
@@ -162,6 +173,36 @@ export function ProjectDetail({
           )}
         </div>
       </div>
+
+      {/* Active worktrees section */}
+      {(isErrorEnvironments || activeEnvironments.length > 0) && (
+        <div>
+          <span className="px-1 text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">
+            Active Worktrees{!isErrorEnvironments && ` (${String(activeEnvironments.length)})`}
+          </span>
+          <div className="mt-1 flex flex-col gap-0.5">
+            {isErrorEnvironments ? (
+              <span className="px-1 text-xs text-error">Failed to load — retrying</span>
+            ) : (
+              activeEnvironments.map((env: IsolationEnvironment) => (
+                <div
+                  key={env.id}
+                  className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs"
+                >
+                  <span className="truncate font-mono text-[11px] text-text-primary">
+                    {env.branch_name}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-text-tertiary">
+                    {env.days_since_activity === 0
+                      ? 'today'
+                      : `${String(env.days_since_activity)}d ago`}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

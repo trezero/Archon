@@ -20,12 +20,7 @@ describe('session-transitions', () => {
     test('returns false for deactivate-only triggers', () => {
       const deactivateOnly: TransitionTrigger[] = [
         'isolation-changed',
-        'codebase-changed',
-        'codebase-cloned',
-        'cwd-changed',
         'reset-requested',
-        'context-reset',
-        'repo-removed',
         'worktree-removed',
         'conversation-closed',
       ];
@@ -43,12 +38,7 @@ describe('session-transitions', () => {
     test('returns true for all deactivate-only triggers', () => {
       const deactivateOnly: TransitionTrigger[] = [
         'isolation-changed',
-        'codebase-changed',
-        'codebase-cloned',
-        'cwd-changed',
         'reset-requested',
-        'context-reset',
-        'repo-removed',
         'worktree-removed',
         'conversation-closed',
       ];
@@ -98,28 +88,8 @@ describe('session-transitions', () => {
   });
 
   describe('getTriggerForCommand', () => {
-    test('maps setcwd to cwd-changed', () => {
-      expect(getTriggerForCommand('setcwd')).toBe('cwd-changed');
-    });
-
-    test('maps clone to codebase-cloned', () => {
-      expect(getTriggerForCommand('clone')).toBe('codebase-cloned');
-    });
-
     test('maps reset to reset-requested', () => {
       expect(getTriggerForCommand('reset')).toBe('reset-requested');
-    });
-
-    test('maps reset-context to context-reset', () => {
-      expect(getTriggerForCommand('reset-context')).toBe('context-reset');
-    });
-
-    test('maps repo to codebase-changed', () => {
-      expect(getTriggerForCommand('repo')).toBe('codebase-changed');
-    });
-
-    test('maps repo-remove to repo-removed', () => {
-      expect(getTriggerForCommand('repo-remove')).toBe('repo-removed');
     });
 
     test('maps worktree-remove to worktree-removed', () => {

@@ -14,7 +14,7 @@ Platform message
   → ConversationLockManager.acquireLock()
   → handleMessage() (orchestrator-agent.ts:383)
       → inheritThreadContext() — copy parent's codebase/cwd if child thread
-      → Deterministic gate: 7 commands (help, status, reset, workflow, register-project, update-project, remove-project)
+      → Deterministic gate: 10 commands (help, status, reset, workflow, register-project, update-project, remove-project, commands, init, worktree)
       → Everything else → AI routing call:
           → listCodebases() + discoverAllWorkflows()
           → buildFullPrompt() → buildOrchestratorPrompt() or buildProjectScopedPrompt()
@@ -29,7 +29,7 @@ Lock manager returns `{ status: 'started' | 'queued-conversation' | 'queued-capa
 
 ## Deterministic Commands (command-handler.ts)
 
-Only **7 commands** are handled deterministically (orchestrator-agent.ts:420):
+Only **10 commands** are handled deterministically:
 
 | Command | Behavior |
 |---------|----------|
@@ -40,8 +40,11 @@ Only **7 commands** are handled deterministically (orchestrator-agent.ts:420):
 | `/register-project` | Handled inline — creates codebase DB record |
 | `/update-project` | Handled inline — updates codebase path |
 | `/remove-project` | Handled inline — deletes codebase DB record |
+| `/commands` | List registered codebase commands |
+| `/init` | Scaffold `.archon/` in current repo |
+| `/worktree` | Worktree subcommands |
 
-**All other slash commands fall through to the AI router.** Additional commands (`/clone`, `/setcwd`, `/getcwd`, `/repos`, `/repo`, `/repo-remove`, `/worktree`, `/init`, `/command-set`, `/load-commands`, `/commands`, `/reset-context`) are handled by command-handler.ts. Unrecognized commands return an "Unknown command" error.
+**All other slash commands fall through to the AI router.** Unrecognized commands return an "Unknown command" error.
 
 ## Routing AI — Prompt Building (prompt-builder.ts)
 
@@ -74,13 +77,13 @@ Sessions are **immutable** — never mutated, only deactivated and replaced. The
 ```typescript
 import { getTriggerForCommand, shouldCreateNewSession } from '../state/session-transitions';
 
-const trigger = getTriggerForCommand('clone'); // 'codebase-cloned'
+const trigger = getTriggerForCommand('reset'); // 'reset-requested'
 if (shouldCreateNewSession(trigger)) {
   // plan-to-execute only
 }
 ```
 
-`TransitionTrigger` values: `'first-message'`, `'plan-to-execute'`, `'isolation-changed'`, `'codebase-changed'`, `'codebase-cloned'`, `'cwd-changed'`, `'reset-requested'`, `'context-reset'`, `'repo-removed'`, `'worktree-removed'`, `'conversation-closed'`.
+`TransitionTrigger` values: `'first-message'`, `'plan-to-execute'`, `'isolation-changed'`, `'reset-requested'`, `'worktree-removed'`, `'conversation-closed'`.
 
 ## Isolation Resolution
 
@@ -115,4 +118,4 @@ function getLog(): ReturnType<typeof createLogger> {
 - Never skip `IsolationBlockedError` — it must propagate to stop all further message handling
 - Never add platform-specific logic to the orchestrator; it uses `IPlatformAdapter` interface only
 - Never transition sessions by mutating them; always deactivate and create a new linked session
-- Never assume a slash command is deterministic — only the 7 listed above bypass the AI router
+- Never assume a slash command is deterministic — only the 10 listed above bypass the AI router
