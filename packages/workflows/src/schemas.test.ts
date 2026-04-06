@@ -252,6 +252,14 @@ describe('dagNodeSchema — empty bash/prompt', () => {
     }
   });
 
+  test('emits "prompt cannot be empty" for whitespace-only prompt', () => {
+    const result = dagNodeSchema.safeParse({ id: 'n1', prompt: '   ' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe('prompt cannot be empty');
+    }
+  });
+
   test('passes for bash: "echo hello"', () => {
     const result = dagNodeSchema.safeParse({ id: 'n1', bash: 'echo hello' });
     expect(result.success).toBe(true);
