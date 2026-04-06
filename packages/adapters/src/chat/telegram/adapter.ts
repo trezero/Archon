@@ -166,9 +166,10 @@ export class TelegramAdapter implements IPlatformAdapter {
   }
 
   /**
-   * Start the bot (begins polling)
+   * Start the bot (begins polling).
+   * Makes up to 3 attempts on 409 Conflict (stale getUpdates connection).
    */
-  async start(): Promise<void> {
+  async start(options?: { retryDelayMs?: number }): Promise<void> {
     // Register message handler before launch
     this.bot.on('message', ctx => {
       if (!('text' in ctx.message)) return;
@@ -192,12 +193,32 @@ export class TelegramAdapter implements IPlatformAdapter {
       }
     });
 
-    // Drop pending updates on startup to prevent reprocessing messages after container restart
-    // This ensures a clean slate - old unprocessed messages won't be handled
-    await this.bot.launch({
-      dropPendingUpdates: true,
-    });
-    getLog().info('telegram.bot_started');
+    // Retry on 409 Conflict — another getUpdates is still active (Telegram's long-poll timeout is 50s).
+    // Wait 60s between attempts to outlast the stale connection. Do NOT recreate the bot instance
+    // on each retry — that adds more stale connections rather than fewer.
+    const MAX_ATTEMPTS = 3;
+    const RETRY_DELAY_MS = options?.retryDelayMs ?? 60_000;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        // dropPendingUpdates: true — discard queued messages from while the bot was offline
+        // to avoid reprocessing stale commands after a container restart.
+        await this.bot.launch({ dropPendingUpdates: true });
+        getLog().info('telegram.bot_started');
+        return;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const is409 = message.includes('409');
+        if (is409 && attempt < MAX_ATTEMPTS) {
+          getLog().warn(
+            { err, attempt, maxAttempts: MAX_ATTEMPTS, retryDelayMs: RETRY_DELAY_MS },
+            'telegram.start_conflict_retrying'
+          );
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+        } else {
+          throw err instanceof Error ? err : new Error(message);
+        }
+      }
+    }
   }
 
   /**

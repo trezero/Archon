@@ -552,7 +552,13 @@ async function main(): Promise<void> {
         .catch(createMessageErrorHandler('Telegram', telegramAdapter, conversationId));
     });
 
-    await telegramAdapter.start();
+    try {
+      await telegramAdapter.start();
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      getLog().error({ err: error, errorType: error.constructor.name }, 'telegram.start_failed');
+      telegram = null; // Don't include in active platforms or shutdown
+    }
   } else {
     getLog().info('telegram_adapter_skipped');
   }
