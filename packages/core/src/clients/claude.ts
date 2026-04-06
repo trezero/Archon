@@ -227,7 +227,9 @@ export function getProcessUid(): number | undefined {
  * Implements generic IAssistantClient interface
  */
 export class ClaudeClient implements IAssistantClient {
-  constructor() {
+  private readonly retryBaseDelayMs: number;
+
+  constructor(options?: { retryBaseDelayMs?: number }) {
     // Claude Code SDK silently rejects bypassPermissions when running as root (UID 0).
     // Check once at construction time so the error surfaces early, not on first query.
     // IS_SANDBOX=1 bypasses this check — the SDK itself honours this env var in sandboxed
@@ -238,6 +240,7 @@ export class ClaudeClient implements IAssistantClient {
           'Run as a non-root user, set IS_SANDBOX=1, or use the Dockerfile which creates a non-root appuser.'
       );
     }
+    this.retryBaseDelayMs = options?.retryBaseDelayMs ?? RETRY_BASE_DELAY_MS;
   }
 
   /**
@@ -521,7 +524,7 @@ export class ClaudeClient implements IAssistantClient {
           attempt < MAX_SUBPROCESS_RETRIES &&
           (errorClass === 'rate_limit' || errorClass === 'crash')
         ) {
-          const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+          const delayMs = this.retryBaseDelayMs * Math.pow(2, attempt);
           getLog().info({ attempt, delayMs, errorClass }, 'retrying_subprocess');
           await new Promise(resolve => setTimeout(resolve, delayMs));
           lastError = err;

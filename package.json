@@ -14,7 +14,7 @@
     "build": "bun --filter '*' build",
     "build:binaries": "bash scripts/build-binaries.sh",
     "build:checksums": "bash scripts/checksums.sh",
-    "test": "bun --filter '*' test",
+    "test": "bun --filter '*' --parallel test",
     "test:watch": "bun --filter @archon/server test:watch",
     "type-check": "bun --filter '*' type-check",
     "lint": "bun x eslint . --cache",

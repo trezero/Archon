@@ -1690,7 +1690,9 @@ describe('executeDagWorkflow -- node-level retry for transient errors', () => {
     const platform = createMockPlatform();
     const workflowRun = makeWorkflowRun('dag-retry-succeed-run');
 
-    const nodes: DagNode[] = [{ id: 'my-node', command: 'my-cmd' }];
+    const nodes: DagNode[] = [
+      { id: 'my-node', command: 'my-cmd', retry: { max_attempts: 2, delay_ms: 1 } },
+    ];
 
     await executeDagWorkflow(
       mockDeps,
@@ -1711,7 +1713,7 @@ describe('executeDagWorkflow -- node-level retry for transient errors', () => {
     // Node was called at least twice (first fails transiently, second succeeds)
     expect(callCount).toBeGreaterThanOrEqual(2);
     expect(mockDeps.store.failWorkflowRun as ReturnType<typeof mock>).not.toHaveBeenCalled();
-  }, 60_000);
+  }, 5_000);
 
   it('workflow fails after exhausting all node retries', async () => {
     let callCount = 0;
@@ -1724,7 +1726,9 @@ describe('executeDagWorkflow -- node-level retry for transient errors', () => {
     const platform = createMockPlatform();
     const workflowRun = makeWorkflowRun('dag-retry-exhaust-run');
 
-    const nodes: DagNode[] = [{ id: 'my-node', command: 'my-cmd' }];
+    const nodes: DagNode[] = [
+      { id: 'my-node', command: 'my-cmd', retry: { max_attempts: 2, delay_ms: 1 } },
+    ];
 
     await executeDagWorkflow(
       mockDeps,
@@ -1745,7 +1749,7 @@ describe('executeDagWorkflow -- node-level retry for transient errors', () => {
     // Default retry is 2 retries → 3 total attempts
     expect(callCount).toBe(3);
     expect(mockDeps.store.failWorkflowRun as ReturnType<typeof mock>).toHaveBeenCalled();
-  }, 60_000);
+  }, 5_000);
 
   it('node with FATAL error does not retry (call count = 1)', async () => {
     let callCount = 0;
@@ -1758,7 +1762,9 @@ describe('executeDagWorkflow -- node-level retry for transient errors', () => {
     const platform = createMockPlatform();
     const workflowRun = makeWorkflowRun('dag-retry-fatal-run');
 
-    const nodes: DagNode[] = [{ id: 'my-node', command: 'my-cmd' }];
+    const nodes: DagNode[] = [
+      { id: 'my-node', command: 'my-cmd', retry: { max_attempts: 2, delay_ms: 1 } },
+    ];
 
     await executeDagWorkflow(
       mockDeps,
@@ -1796,7 +1802,9 @@ describe('executeDagWorkflow -- node-level retry for transient errors', () => {
     const platform = createMockPlatform();
     const workflowRun = makeWorkflowRun('dag-retry-notify-run');
 
-    const nodes: DagNode[] = [{ id: 'my-node', command: 'my-cmd' }];
+    const nodes: DagNode[] = [
+      { id: 'my-node', command: 'my-cmd', retry: { max_attempts: 2, delay_ms: 1 } },
+    ];
 
     await executeDagWorkflow(
       mockDeps,
@@ -1820,7 +1828,7 @@ describe('executeDagWorkflow -- node-level retry for transient errors', () => {
         typeof call[1] === 'string' && (call[1] as string).includes('transient error')
     );
     expect(retryMessages.length).toBeGreaterThan(0);
-  }, 60_000);
+  }, 5_000);
 });
 
 describe('executeDagWorkflow -- tool_called event persistence', () => {

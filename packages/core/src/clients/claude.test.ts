@@ -23,7 +23,7 @@ describe('ClaudeClient', () => {
   let client: ClaudeClient;
 
   beforeEach(() => {
-    client = new ClaudeClient();
+    client = new ClaudeClient({ retryBaseDelayMs: 1 });
     mockQuery.mockClear();
     mockLogger.info.mockClear();
     mockLogger.warn.mockClear();
@@ -542,7 +542,7 @@ describe('ClaudeClient', () => {
       await expect(consumeGenerator()).rejects.toThrow(/Claude Code crash/);
       // Should have been called 4 times (initial + 3 retries)
       expect(mockQuery).toHaveBeenCalledTimes(4);
-    }, 30_000);
+    }, 5_000);
 
     test('recovers from transient crash on retry', async () => {
       let callCount = 0;
@@ -566,7 +566,7 @@ describe('ClaudeClient', () => {
       expect(callCount).toBe(3);
       expect(chunks).toHaveLength(1);
       expect(chunks[0]).toEqual({ type: 'assistant', content: 'Recovered!' });
-    }, 30_000);
+    }, 5_000);
 
     test('classifies auth errors as fatal (no retry)', async () => {
       const error = new Error('unauthorized');
@@ -621,7 +621,7 @@ describe('ClaudeClient', () => {
       // crash classification = retried up to 3 times → 4 total calls
       await expect(consumeGenerator()).rejects.toThrow(/Claude Code crash/);
       expect(mockQuery).toHaveBeenCalledTimes(4);
-    }, 30_000);
+    }, 5_000);
 
     test('classifies mixed-case "OPERATION ABORTED" errors as crash', async () => {
       // Pattern matching uses .toLowerCase() — case must not matter
@@ -639,7 +639,7 @@ describe('ClaudeClient', () => {
 
       await expect(consumeGenerator()).rejects.toThrow(/Claude Code crash/);
       expect(mockQuery).toHaveBeenCalledTimes(4);
-    }, 30_000);
+    }, 5_000);
 
     test('captures all stderr output for diagnostics', async () => {
       // When the subprocess crashes, the enriched error should include all stderr,
@@ -669,7 +669,7 @@ describe('ClaudeClient', () => {
       expect(err.message).toContain('stderr:');
       expect(err.message).toContain('AJV validation');
       expect(err.message).toContain('startup diagnostic');
-    }, 30_000);
+    }, 5_000);
 
     test('passes settingSources from request options', async () => {
       mockQuery.mockImplementation(async function* () {

@@ -51,13 +51,15 @@ export class GiteaAdapter implements IPlatformAdapter {
   private allowedUsers: string[];
   private botMention: string;
   private lockManager: ConversationLockManager;
+  private readonly retryDelayFn: (attempt: number) => number;
 
   constructor(
     baseUrl: string,
     token: string,
     webhookSecret: string,
     lockManager: ConversationLockManager,
-    botMention?: string
+    botMention?: string,
+    options?: { retryDelayMs?: (attempt: number) => number }
   ) {
     // Normalize base URL (remove trailing slash)
     this.baseUrl = baseUrl.replace(/\/+$/, '');
@@ -73,6 +75,8 @@ export class GiteaAdapter implements IPlatformAdapter {
     } else {
       getLog().info('whitelist_disabled');
     }
+
+    this.retryDelayFn = options?.retryDelayMs ?? ((attempt: number): number => 1000 * attempt);
 
     getLog().info({ botMention: this.botMention, baseUrl: this.baseUrl }, 'adapter_initialized');
   }
@@ -189,7 +193,7 @@ export class GiteaAdapter implements IPlatformAdapter {
       } catch (error) {
         const isRetryable = this.isRetryableError(error);
         if (attempt < maxRetries && isRetryable) {
-          const delay = 1000 * attempt;
+          const delay = this.retryDelayFn(attempt);
           getLog().warn(
             { attempt, maxRetries, conversationId, delayMs: delay },
             'comment_post_retry'

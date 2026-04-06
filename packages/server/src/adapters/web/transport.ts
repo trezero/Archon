@@ -34,7 +34,10 @@ export class SSETransport {
   private eventBuffer = new Map<string, BufferedEvent[]>();
   private bufferCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(private onCleanup?: (conversationId: string) => void) {}
+  constructor(
+    private onCleanup?: (conversationId: string) => void,
+    private graceMs: number = RECONNECT_GRACE_MS
+  ) {}
 
   /**
    * Register an SSE stream for a conversation.
@@ -87,7 +90,7 @@ export class SSETransport {
     }
     this.streams.delete(conversationId);
     // Schedule onCleanup after grace period (allows reconnection without losing persistence state)
-    this.scheduleCleanup(conversationId, RECONNECT_GRACE_MS);
+    this.scheduleCleanup(conversationId, this.graceMs);
   }
 
   hasActiveStream(conversationId: string): boolean {

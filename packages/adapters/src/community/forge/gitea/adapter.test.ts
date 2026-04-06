@@ -94,7 +94,9 @@ describe('GiteaAdapter', () => {
       'https://gitea.example.com',
       'fake-token-for-testing',
       'fake-webhook-secret',
-      mockLockManager
+      mockLockManager,
+      undefined,
+      { retryDelayMs: () => 1 }
     );
   });
 
