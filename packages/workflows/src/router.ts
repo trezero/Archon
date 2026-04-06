@@ -209,3 +209,61 @@ export function findWorkflow(
 ): WorkflowDefinition | undefined {
   return workflows.find(w => w.name === name);
 }
+
+/**
+ * Resolve a workflow by name using a 4-tier fallback hierarchy:
+ * 1. Exact match
+ * 2. Case-insensitive match
+ * 3. Suffix match (e.g. "assist" → "archon-assist")
+ * 4. Substring match (e.g. "smart" → "archon-smart-pr-review")
+ *
+ * Returns the matched workflow, or undefined if no match found.
+ * Throws an Error if multiple workflows match at the same tier (ambiguous).
+ */
+export function resolveWorkflowName(
+  name: string,
+  workflows: readonly WorkflowDefinition[]
+): WorkflowDefinition | undefined {
+  // Tier 1: Exact match
+  const exact = workflows.find(w => w.name === name);
+  if (exact) return exact;
+
+  // Tier 2: Case-insensitive match
+  const lowerName = name.toLowerCase();
+  const caseMatch = workflows.find(w => w.name.toLowerCase() === lowerName);
+  if (caseMatch) {
+    getLog().info(
+      { requested: name, matched: caseMatch.name },
+      'workflow.resolve_case_insensitive_match'
+    );
+    return caseMatch;
+  }
+
+  // Tier 3: Suffix match (e.g. "assist" matches "archon-assist")
+  const suffixMatches = workflows.filter(w => w.name.toLowerCase().endsWith(`-${lowerName}`));
+  if (suffixMatches.length === 1) {
+    getLog().info(
+      { requested: name, matched: suffixMatches[0].name },
+      'workflow.resolve_suffix_match'
+    );
+    return suffixMatches[0];
+  } else if (suffixMatches.length > 1) {
+    const candidates = suffixMatches.map(w => `  - ${w.name}`).join('\n');
+    throw new Error(`Ambiguous workflow '${name}'. Did you mean:\n${candidates}`);
+  }
+
+  // Tier 4: Substring match (e.g. "smart" matches "archon-smart-pr-review")
+  const subMatches = workflows.filter(w => w.name.toLowerCase().includes(lowerName));
+  if (subMatches.length === 1) {
+    getLog().info(
+      { requested: name, matched: subMatches[0].name },
+      'workflow.resolve_substring_match'
+    );
+    return subMatches[0];
+  } else if (subMatches.length > 1) {
+    const candidates = subMatches.map(w => `  - ${w.name}`).join('\n');
+    throw new Error(`Ambiguous workflow '${name}'. Did you mean:\n${candidates}`);
+  }
+
+  return undefined;
+}

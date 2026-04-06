@@ -21,6 +21,7 @@ import {
 import { getArchonWorkspacesPath, getCommandFolderSearchPaths } from '@archon/paths';
 import { loadConfig } from '../config/config-loader';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
+import { resolveWorkflowName } from '@archon/workflows/router';
 import type { WorkflowWithSource, WorkflowLoadError } from '@archon/workflows/schemas/workflow';
 import {
   TERMINAL_WORKFLOW_STATUSES,
@@ -1256,17 +1257,15 @@ async function handleWorkflowCommand(
         'cmd.workflows_discovered'
       );
 
-      // Exact match first, then case-insensitive
-      let workflow = workflows.find(w => w.name === workflowName);
-      if (!workflow) {
-        const caseMatch = workflows.find(w => w.name.toLowerCase() === workflowName.toLowerCase());
-        if (caseMatch) {
-          getLog().info(
-            { requested: workflowName, matched: caseMatch.name },
-            'cmd.workflow_run_case_insensitive_match'
-          );
-          workflow = caseMatch;
-        }
+      let workflow;
+      try {
+        workflow = resolveWorkflowName(workflowName, workflows);
+      } catch (err) {
+        // Ambiguous match — surface the candidates to the user
+        return {
+          success: false,
+          message: (err as Error).message,
+        };
       }
 
       if (!workflow) {

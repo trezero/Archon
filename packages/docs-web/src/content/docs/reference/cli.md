@@ -135,7 +135,7 @@ archon workflow run plan --cwd /path/to/repo --branch feature-x "Add caching"
 
 **Name Matching:**
 
-Workflow names are resolved using a fallback hierarchy:
+Workflow names are resolved using a 4-tier fallback hierarchy. This applies consistently across the CLI and all chat platforms (Slack, Telegram, Web, GitHub, Discord):
 1. **Exact match** - `archon-assist` matches `archon-assist`
 2. **Case-insensitive** - `Archon-Assist` matches `archon-assist`
 3. **Suffix match** - `assist` matches `archon-assist` (looks for `-assist` suffix)

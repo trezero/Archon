@@ -412,7 +412,7 @@ describe('workflowRunCommand', () => {
     // Verify suffix matching tier was used
     expect(mockLogger.info).toHaveBeenCalledWith(
       expect.objectContaining({ requested: 'assist', matched: 'archon-assist' }),
-      'workflow_run_suffix_match'
+      'workflow.resolve_suffix_match'
     );
   });
 
@@ -469,11 +469,11 @@ describe('workflowRunCommand', () => {
     // Verify case-insensitive match was used, not suffix match
     expect(mockLogger.info).toHaveBeenCalledWith(
       expect.objectContaining({ requested: 'ASSIST', matched: 'assist' }),
-      'workflow_run_case_insensitive_match'
+      'workflow.resolve_case_insensitive_match'
     );
     expect(mockLogger.info).not.toHaveBeenCalledWith(
       expect.anything(),
-      'workflow_run_suffix_match'
+      'workflow.resolve_suffix_match'
     );
   });
 

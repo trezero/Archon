@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'bun:test';
-import { buildRouterPrompt, parseWorkflowInvocation, findWorkflow } from './router';
+import {
+  buildRouterPrompt,
+  parseWorkflowInvocation,
+  findWorkflow,
+  resolveWorkflowName,
+} from './router';
 import type { WorkflowDefinition } from './schemas';
 import type { RouterContext } from './router';
 
@@ -269,6 +274,76 @@ function broken() {
 
       // Workflow names are case-sensitive
       expect(workflow).toBeUndefined();
+    });
+  });
+
+  describe('resolveWorkflowName', () => {
+    it('should return exact match', () => {
+      const result = resolveWorkflowName('fix-bug', testWorkflows);
+      expect(result?.name).toBe('fix-bug');
+    });
+
+    it('should return case-insensitive match', () => {
+      const result = resolveWorkflowName('Fix-Bug', testWorkflows);
+      expect(result?.name).toBe('fix-bug');
+    });
+
+    it('should return suffix match', () => {
+      const workflows: WorkflowDefinition[] = [
+        { name: 'archon-assist', description: 'General assistant', nodes: [] },
+      ];
+      const result = resolveWorkflowName('assist', workflows);
+      expect(result?.name).toBe('archon-assist');
+    });
+
+    it('should return substring match', () => {
+      const workflows: WorkflowDefinition[] = [
+        { name: 'archon-smart-pr-review', description: 'Smart PR review', nodes: [] },
+      ];
+      const result = resolveWorkflowName('smart', workflows);
+      expect(result?.name).toBe('archon-smart-pr-review');
+    });
+
+    it('should return undefined for no match', () => {
+      const result = resolveWorkflowName('nonexistent', testWorkflows);
+      expect(result).toBeUndefined();
+    });
+
+    it('should throw on ambiguous suffix match', () => {
+      const workflows: WorkflowDefinition[] = [
+        { name: 'archon-review', description: 'Review', nodes: [] },
+        { name: 'custom-review', description: 'Custom review', nodes: [] },
+      ];
+      expect(() => resolveWorkflowName('review', workflows)).toThrow('Ambiguous workflow');
+    });
+
+    it('should throw on ambiguous substring match', () => {
+      const workflows: WorkflowDefinition[] = [
+        { name: 'alpha-one', description: 'One', nodes: [] },
+        { name: 'alpha-two', description: 'Two', nodes: [] },
+      ];
+      // "alpha" is a substring of both but not a suffix of either (no "-alpha" ending)
+      expect(() => resolveWorkflowName('alpha', workflows)).toThrow('Ambiguous workflow');
+    });
+
+    it('should prefer exact match over suffix match', () => {
+      const workflows: WorkflowDefinition[] = [
+        { name: 'assist', description: 'Short name', nodes: [] },
+        { name: 'archon-assist', description: 'Long name', nodes: [] },
+      ];
+      const result = resolveWorkflowName('assist', workflows);
+      expect(result?.name).toBe('assist');
+    });
+
+    it('should prefer suffix match over substring match', () => {
+      const workflows: WorkflowDefinition[] = [
+        { name: 'archon-assist', description: 'Suffix match', nodes: [] },
+        { name: 'assist-helper', description: 'Substring match', nodes: [] },
+      ];
+      const result = resolveWorkflowName('assist', workflows);
+      // "assist" is a suffix of "archon-assist" (ends with -assist)
+      // and a substring of both, but suffix tier wins
+      expect(result?.name).toBe('archon-assist');
     });
   });
 
