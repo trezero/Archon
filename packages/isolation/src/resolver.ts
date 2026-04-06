@@ -13,8 +13,9 @@ import {
   getCanonicalRepoPath,
   findWorktreeByBranch,
   toBranchName,
+  isAncestorOf,
 } from '@archon/git';
-import type { RepoPath } from '@archon/git';
+import type { RepoPath, BranchName } from '@archon/git';
 
 import type {
   IIsolationProvider,
@@ -84,9 +85,11 @@ export class IsolationResolver {
    * Resolve isolation for a conversation request.
    */
   async resolve(request: ResolveRequest): Promise<IsolationResolution> {
+    const baseBranch = request.hints?.baseBranch;
+
     // 1. Check existing isolation reference
     if (request.existingEnvId) {
-      const existing = await this.checkExisting(request.existingEnvId);
+      const existing = await this.checkExisting(request.existingEnvId, baseBranch);
       if (existing) return existing;
       // Stale — tell caller to clear and retry
       return { status: 'stale_cleaned', previousEnvId: request.existingEnvId };
@@ -103,13 +106,14 @@ export class IsolationResolver {
     const workflowId = hints?.workflowId ?? '';
 
     // 3. Check for existing environment with same workflow
-    const reusable = await this.findReusable(codebase.id, workflowType, workflowId);
+    const reusable = await this.findReusable(codebase.id, workflowType, workflowId, baseBranch);
     if (reusable) {
       return {
         status: 'resolved',
-        env: reusable,
-        cwd: reusable.working_path,
+        env: reusable.env,
+        cwd: reusable.env.working_path,
         method: { type: 'workflow_reuse' },
+        ...(reusable.warnings.length > 0 ? { warnings: reusable.warnings } : {}),
       };
     }
 
@@ -144,16 +148,53 @@ export class IsolationResolver {
   }
 
   /**
+   * Validate that the worktree is based on the expected base branch.
+   * Returns a warning string if mismatched, empty array otherwise.
+   * Never throws — validation errors are non-blocking.
+   */
+  private async collectBaseBranchWarnings(
+    env: IsolationEnvironmentRow,
+    baseBranch: BranchName | undefined,
+    logContext: Record<string, unknown>
+  ): Promise<string[]> {
+    if (!baseBranch) return [];
+    try {
+      const isValid = await isAncestorOf(toWorktreePath(env.working_path), `origin/${baseBranch}`);
+      if (!isValid) {
+        getLog().warn(
+          { ...logContext, branchName: env.branch_name, baseBranch },
+          'isolation.reuse_base_branch_mismatch'
+        );
+        return [
+          `Worktree branch '${env.branch_name}' is not based on '${baseBranch}'. ` +
+            `Recreate with: archon complete ${env.branch_name} --force`,
+        ];
+      }
+    } catch (err) {
+      getLog().warn(
+        { err, ...logContext, branchName: env.branch_name, baseBranch },
+        'isolation.reuse_base_branch_check_failed'
+      );
+    }
+    return [];
+  }
+
+  /**
    * Check if an existing environment reference is still valid.
    */
-  private async checkExisting(envId: string): Promise<IsolationResolution | null> {
+  private async checkExisting(
+    envId: string,
+    baseBranch?: BranchName
+  ): Promise<IsolationResolution | null> {
     const env = await this.store.getById(envId);
     if (env && (await worktreeExists(toWorktreePath(env.working_path)))) {
+      const warnings = await this.collectBaseBranchWarnings(env, baseBranch, { envId });
       return {
         status: 'resolved',
         env,
         cwd: env.working_path,
         method: { type: 'existing' },
+        ...(warnings.length > 0 ? { warnings } : {}),
       };
     }
 
@@ -170,14 +211,19 @@ export class IsolationResolver {
   private async findReusable(
     codebaseId: string,
     workflowType: IsolationWorkflowType,
-    workflowId: string
-  ): Promise<IsolationEnvironmentRow | null> {
+    workflowId: string,
+    baseBranch?: BranchName
+  ): Promise<{ env: IsolationEnvironmentRow; warnings: string[] } | null> {
     const existing = await this.store.findActiveByWorkflow(codebaseId, workflowType, workflowId);
     if (!existing) return null;
 
     if (await worktreeExists(toWorktreePath(existing.working_path))) {
       getLog().debug({ workflowType, workflowId }, 'isolation_reuse_existing');
-      return existing;
+      const warnings = await this.collectBaseBranchWarnings(existing, baseBranch, {
+        workflowType,
+        workflowId,
+      });
+      return { env: existing, warnings };
     }
 
     await this.markDestroyedBestEffort(existing.id);

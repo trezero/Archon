@@ -208,6 +208,9 @@ export interface IsolationHints {
   /** Start-point branch for new task worktree creation. Only consumed when workflowType === 'task'. */
   fromBranch?: BranchName;
 
+  /** Expected base branch for this workflow. When set, reused worktrees are validated with merge-base. */
+  baseBranch?: BranchName;
+
   // Cross-reference hints
   linkedIssues?: number[];
   linkedPRs?: number[];

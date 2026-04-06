@@ -221,6 +221,47 @@ export async function isBranchMerged(
 }
 
 /**
+ * Check if a ref is an ancestor of HEAD in the given working directory.
+ *
+ * Returns true if ancestorRef is an ancestor of HEAD (worktree is based on that branch).
+ * Returns false if it is not (base branch mismatch detected).
+ * Returns false for expected errors (branch not found, not a git repo).
+ * Throws for unexpected errors (permission denied, corruption).
+ */
+export async function isAncestorOf(
+  workingPath: RepoPath | WorktreePath,
+  ancestorRef: string
+): Promise<boolean> {
+  try {
+    await execFileAsync('git', [
+      '-C',
+      workingPath,
+      'merge-base',
+      '--is-ancestor',
+      ancestorRef,
+      'HEAD',
+    ]);
+    return true;
+  } catch (error) {
+    const err = error as Error & { code?: number | string; stderr?: string };
+    // exit code 1 = not an ancestor — expected case
+    if (err.code === 1) return false;
+    const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
+    const isExpectedError =
+      errorText.includes('not a git repository') ||
+      errorText.includes('unknown revision') ||
+      errorText.includes('not a valid object name') ||
+      errorText.includes('no such file') ||
+      err.code === 'ENOENT';
+    if (isExpectedError) return false;
+    getLog().error({ err: error, workingPath, ancestorRef }, 'branch.ancestor_check_failed');
+    throw new Error(
+      `Failed to check if ${ancestorRef} is ancestor of HEAD at ${workingPath}: ${(err as Error).message}`
+    );
+  }
+}
+
+/**
  * Get the last commit date for a repository or worktree.
  *
  * Returns null for expected errors (no commits, path not found).
