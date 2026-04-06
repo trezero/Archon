@@ -122,7 +122,7 @@ nodes:
             Instructions for the AI...
           # Optional: model, allowed_tools, denied_tools, output_format, context, idle_timeout
 
-          # --- bash node (shell script, no AI, stdout = $nodeId.output) ---
+          # --- bash node (shell script, no AI, stdout = $<nodeId>.output) ---
           bash: |
             #!/bin/bash
             set -e
@@ -141,7 +141,7 @@ nodes:
 
           # Common options for all node types:
           depends_on: [other-node-id]       # DAG edges
-          when: "$other-node.output == 'value'"  # conditional execution
+          when: "$<other-node>.output == 'value'"  # conditional execution
           trigger_rule: all_success          # all_success | one_success | all_done
           timeout: 120000                    # ms, for bash nodes
       ```
@@ -149,8 +149,8 @@ nodes:
       ## Variable Reference
       - `$ARGUMENTS` — user's input text
       - `$ARTIFACTS_DIR` — pre-created directory for workflow artifacts
-      - `$nodeId.output` — stdout from a bash node or AI response from a prompt node
-      - `$nodeId.output.field` — JSON field from a node with output_format
+      - `$<nodeId>.output` — stdout from a bash node or AI response from a prompt node
+      - `$<nodeId>.output.field` — JSON field from a node with output_format
       - `$BASE_BRANCH` — base git branch
 
       ## Rules
