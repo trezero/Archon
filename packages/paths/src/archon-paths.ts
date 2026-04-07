@@ -351,7 +351,7 @@ export async function createProjectSourceSymlink(
 
   // Remove the empty directory created by ensureProjectStructure (force handles ENOENT)
   await rm(linkPath, { recursive: true, force: true });
-  await symlink(targetPath, linkPath);
+  await symlink(targetPath, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
 }
 
 /**
