@@ -926,6 +926,7 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
 **Session**
 - \`/status\` — Show current session and project info
 - \`/reset\` — Clear conversation and start fresh
+- \`/ping\` — Check if the bot is responsive
 - \`/help\` — Show this help message
 
 ### Tips
@@ -1064,6 +1065,9 @@ Talk naturally — the orchestrator routes your requests to the right workflow a
 
     case 'workflow':
       return handleWorkflowCommand(conversation, args);
+
+    case 'ping':
+      return { success: true, message: 'pong' };
 
     case 'init': {
       // Create .archon structure in current repo
