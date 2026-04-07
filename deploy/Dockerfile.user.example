@@ -5,7 +5,7 @@
 # This file extends the published GHCR image — no local build step needed.
 # The image is pulled automatically when you run docker compose up -d.
 
-FROM ghcr.io/dynamous-community/remote-coding-agent:latest
+FROM ghcr.io/coleam00/archon:latest
 
 # Install additional system packages
 USER root

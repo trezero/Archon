@@ -68,7 +68,7 @@ When invoking a workflow, output the command as the VERY LAST line of your respo
 /invoke-workflow {workflow-name} --project {project-name} --prompt "{task description}"
 
 Rules:
-- Use the project NAME (e.g., "remote-coding-agent"), not an ID or path.
+- Use the project NAME (e.g., "my-project"), not an ID or path.
 - The --prompt MUST be a complete, self-contained task description that fully captures the user's intent.
 - Synthesize the prompt from conversation context — do NOT use vague references like "do what we discussed" or "yes, go ahead."
 - The prompt should make sense to someone with NO knowledge of the conversation history.
@@ -81,7 +81,7 @@ Routing behavior:
 
 Example (clear intent):
 I'll analyze the orchestrator module architecture for you.
-/invoke-workflow archon-assist --project remote-coding-agent --prompt "Analyze the orchestrator module architecture: explain how it routes messages, manages sessions, and dispatches workflows to AI clients"
+/invoke-workflow archon-assist --project my-project --prompt "Analyze the orchestrator module architecture: explain how it routes messages, manages sessions, and dispatches workflows to AI clients"
 
 Example (ambiguous — answer directly):
 User: "What do you think about adding dark mode?"

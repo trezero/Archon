@@ -4,11 +4,11 @@
 [![CI](https://github.com/coleam00/Archon/actions/workflows/test.yml/badge.svg)](https://github.com/coleam00/Archon/actions/workflows/test.yml)
 [![Docs](https://img.shields.io/badge/docs-archon.diy-blue)](https://archon.diy)
 
-Make AI coding deterministic and repeatable.
+The first open-source harness builder for AI coding. Make AI coding deterministic and repeatable.
 
 Archon is a workflow engine for AI coding agents. Define your development processes as YAML workflows — planning, implementation, validation, code review, PR creation — and run them reliably across all your projects.
 
-Think n8n, but for software development.
+Like what Dockerfiles did for infrastructure and GitHub Actions did for CI/CD — Archon does for AI coding workflows. Think n8n, but for software development.
 
 ## Install
 
@@ -136,7 +136,7 @@ npm install -g agent-browser
 agent-browser install
 ```
 
-See the [E2E Testing Guide](docs/e2e-testing.md) for platform-specific setup.
+See the [E2E Testing Guide](https://archon.diy/deployment/e2e-testing/) for platform-specific setup.
 
 </details>
 
@@ -183,7 +183,7 @@ The coding agent handles workflow selection, branch naming, and worktree isolati
 
 ### Alternative setup paths
 
-- **[Getting Started](docs/getting-started.md)** — Full setup guide (Web UI or CLI)
+- **[Getting Started](https://archon.diy/getting-started/overview/)** — Full setup guide (Web UI or CLI)
 
 ## Web UI
 
@@ -199,7 +199,7 @@ Register a project by clicking **+** next to "Project" in the chat sidebar — e
 
 **Monitoring hub:** The sidebar shows conversations from **all platforms** — not just the web. Workflows kicked off from the CLI, messages from Slack or Telegram, GitHub issue interactions — everything appears in one place.
 
-See the [Web UI Guide](docs/adapters/web.md) for full documentation.
+See the [Web UI Guide](https://archon.diy/adapters/web/) for full documentation.
 
 ## What Can You Automate?
 
@@ -229,7 +229,7 @@ Archon ships 17 default workflows — run `archon workflow list` or describe wha
 
 **Or define your own.** Default workflows are great starting points — copy one from `.archon/workflows/defaults/` and customize it. Workflows are YAML files in `.archon/workflows/`, commands are markdown files in `.archon/commands/`. Same-named files in your repo override the bundled defaults. Commit them — your whole team runs the same process.
 
-See [Authoring Workflows](docs/authoring-workflows.md) and [Authoring Commands](docs/authoring-commands.md).
+See [Authoring Workflows](https://archon.diy/guides/authoring-workflows/) and [Authoring Commands](https://archon.diy/guides/authoring-commands/).
 
 ## Architecture
 
@@ -270,10 +270,10 @@ The Web UI and CLI work out of the box. Optionally connect a chat platform for r
 
 | Platform | Setup time | Guide |
 |----------|-----------|-------|
-| **Telegram** | 5 min | [docs/adapters/telegram.md](docs/adapters/telegram.md) |
-| **Slack** | 15 min | [docs/adapters/slack.md](docs/adapters/slack.md) |
-| **GitHub Webhooks** | 15 min | [docs/adapters/github.md](docs/adapters/github.md) |
-| **Discord** | 5 min | [docs/adapters/discord.md](docs/adapters/discord.md) |
+| **Telegram** | 5 min | [Telegram Guide](https://archon.diy/adapters/telegram/) |
+| **Slack** | 15 min | [Slack Guide](https://archon.diy/adapters/slack/) |
+| **GitHub Webhooks** | 15 min | [GitHub Guide](https://archon.diy/adapters/github/) |
+| **Discord** | 5 min | [Discord Guide](https://archon.diy/adapters/community/discord/) |
 
 ## Documentation
 
@@ -281,19 +281,16 @@ Full documentation is available at **[archon.diy](https://archon.diy)**.
 
 | Topic | Description |
 |-------|-------------|
-| [Getting Started](docs/getting-started.md) | Setup guide (Web UI or CLI) |
-| [CLI User Guide](docs/cli-user-guide.md) | Full CLI reference |
-| [Authoring Workflows](docs/authoring-workflows.md) | Create custom YAML workflows |
-| [Authoring Commands](docs/authoring-commands.md) | Create reusable AI commands |
-| [Configuration](docs/configuration.md) | All config options, env vars, YAML settings |
-| [AI Assistants](docs/ai-assistants.md) | Claude and Codex setup details |
-| [Database](docs/database.md) | SQLite, PostgreSQL, schema reference |
-| [Deployment](docs/deployment.md) | Docker, VPS, production setup |
-| [Commands Reference](docs/commands-reference.md) | All slash commands |
-| [Architecture](docs/architecture.md) | System design and internals |
-| [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
-| [E2E Testing](docs/e2e-testing.md) | agent-browser setup for E2E workflows |
-| [Windows Setup](docs/windows.md) | Windows and WSL2 guide |
+| [Getting Started](https://archon.diy/getting-started/overview/) | Setup guide (Web UI or CLI) |
+| [The Book of Archon](https://archon.diy/book/) | 10-chapter narrative tutorial |
+| [CLI Reference](https://archon.diy/reference/cli/) | Full CLI reference |
+| [Authoring Workflows](https://archon.diy/guides/authoring-workflows/) | Create custom YAML workflows |
+| [Authoring Commands](https://archon.diy/guides/authoring-commands/) | Create reusable AI commands |
+| [Configuration](https://archon.diy/reference/configuration/) | All config options, env vars, YAML settings |
+| [AI Assistants](https://archon.diy/getting-started/ai-assistants/) | Claude and Codex setup details |
+| [Deployment](https://archon.diy/deployment/) | Docker, VPS, production setup |
+| [Architecture](https://archon.diy/reference/architecture/) | System design and internals |
+| [Troubleshooting](https://archon.diy/reference/troubleshooting/) | Common issues and fixes |
 
 ## Contributing
 

@@ -29,8 +29,8 @@ Before you start, make sure you have:
 
 ```bash
 # Clone and install
-git clone https://github.com/dynamous-community/remote-coding-agent
-cd remote-coding-agent
+git clone https://github.com/coleam00/Archon.git
+cd Archon
 bun install
 
 # Register the archon command globally
@@ -42,7 +42,7 @@ archon version
 
 You should see something like `archon v0.2.12`. That's it — Archon is installed.
 
-> **If `archon` isn't found after `bun link`:** Your shell may need to reload. Run `source ~/.zshrc` (or `~/.bashrc`), then try again. Alternatively, use `bun run cli` from inside the `remote-coding-agent` directory for this session.
+> **If `archon` isn't found after `bun link`:** Your shell may need to reload. Run `source ~/.zshrc` (or `~/.bashrc`), then try again. Alternatively, use `bun run cli` from inside the `Archon` directory for this session.
 
 ---
 

@@ -3,12 +3,12 @@
 # Dockerfile.user is gitignored so your customizations stay local.
 #
 # Build the base image first, then start the stack:
-#   docker compose build           # builds the base remote-coding-agent image
+#   docker compose build           # builds the base archon image
 #   docker compose up -d           # auto-merges docker-compose.override.yml
 #
 # This file extends the locally-built dev image. Add any tools you need below.
 
-FROM remote-coding-agent
+FROM archon
 
 # Install additional system packages
 USER root
