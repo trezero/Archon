@@ -6,7 +6,7 @@
 # ---------------------------------------------------------------------------
 # Stage 1: Install dependencies
 # ---------------------------------------------------------------------------
-FROM oven/bun:1.2-slim AS deps
+FROM oven/bun:1.3.11-slim AS deps
 
 WORKDIR /app
 
@@ -17,6 +17,10 @@ COPY package.json bun.lock ./
 COPY packages/adapters/package.json ./packages/adapters/
 COPY packages/cli/package.json ./packages/cli/
 COPY packages/core/package.json ./packages/core/
+# docs-web source is NOT copied — it's a static site deployed separately
+# (see .github/workflows/deploy-docs.yml). package.json is included only
+# so Bun's workspace lockfile resolves correctly.
+COPY packages/docs-web/package.json ./packages/docs-web/
 COPY packages/git/package.json ./packages/git/
 COPY packages/isolation/package.json ./packages/isolation/
 COPY packages/paths/package.json ./packages/paths/
@@ -25,7 +29,10 @@ COPY packages/web/package.json ./packages/web/
 COPY packages/workflows/package.json ./packages/workflows/
 
 # Install ALL dependencies (including devDependencies needed for web build)
-RUN bun install --frozen-lockfile
+# --linker=hoisted: Bun's default "isolated" linker stores packages in
+# node_modules/.bun/ with symlinks that Vite/Rollup cannot resolve during
+# production builds. Hoisted layout gives classic flat node_modules.
+RUN bun install --frozen-lockfile --linker=hoisted
 
 # ---------------------------------------------------------------------------
 # Stage 2: Build web UI (Vite + React)
@@ -43,7 +50,7 @@ RUN bun run build:web && \
 # ---------------------------------------------------------------------------
 # Stage 3: Production image
 # ---------------------------------------------------------------------------
-FROM oven/bun:1.2-slim AS production
+FROM oven/bun:1.3.11-slim AS production
 
 # OCI Labels for GHCR
 LABEL org.opencontainers.image.source="https://github.com/coleam00/Archon"
@@ -116,6 +123,10 @@ COPY package.json bun.lock ./
 COPY packages/adapters/package.json ./packages/adapters/
 COPY packages/cli/package.json ./packages/cli/
 COPY packages/core/package.json ./packages/core/
+# docs-web source is NOT copied — it's a static site deployed separately
+# (see .github/workflows/deploy-docs.yml). package.json is included only
+# so Bun's workspace lockfile resolves correctly.
+COPY packages/docs-web/package.json ./packages/docs-web/
 COPY packages/git/package.json ./packages/git/
 COPY packages/isolation/package.json ./packages/isolation/
 COPY packages/paths/package.json ./packages/paths/
@@ -124,7 +135,7 @@ COPY packages/web/package.json ./packages/web/
 COPY packages/workflows/package.json ./packages/workflows/
 
 # Install production dependencies only (--ignore-scripts skips husky prepare hook)
-RUN bun install --frozen-lockfile --production --ignore-scripts
+RUN bun install --frozen-lockfile --production --ignore-scripts --linker=hoisted
 
 # Copy application source (Bun runs TypeScript directly, no compile step needed)
 COPY packages/adapters/ ./packages/adapters/
