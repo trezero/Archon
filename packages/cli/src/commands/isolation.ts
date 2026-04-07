@@ -10,11 +10,14 @@ import {
   execFileAsync,
   hasUncommittedChanges,
   toWorktreePath,
-  worktreeExists,
   getDefaultBranch,
 } from '@archon/git';
 import { getIsolationProvider } from '@archon/isolation';
-import { cleanupMergedWorktrees, removeEnvironment } from '@archon/core/services/cleanup-service';
+import { removeEnvironment } from '@archon/core/services/cleanup-service';
+import {
+  listEnvironments,
+  cleanupMergedEnvironments,
+} from '@archon/core/operations/isolation-operations';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -24,50 +27,10 @@ function getLog(): ReturnType<typeof createLogger> {
 }
 
 /**
- * Codebase info for display (extracted from isolation environment JOIN)
- */
-interface CodebaseInfo {
-  id: string;
-  repository_url: string | null;
-  default_cwd: string;
-}
-
-/**
- * Reconcile DB state with filesystem — mark environments as destroyed
- * if their worktree path no longer exists on disk.
- * Returns the number of ghost entries cleaned up.
- */
-async function reconcileGhosts(
-  envs: readonly {
-    id: string;
-    working_path: string;
-    branch_name: string | null;
-    workflow_id: string;
-  }[]
-): Promise<number> {
-  let reconciled = 0;
-  for (const env of envs) {
-    try {
-      const exists = await worktreeExists(toWorktreePath(env.working_path));
-      if (!exists) {
-        await isolationDb.updateStatus(env.id, 'destroyed');
-        getLog().info({ envId: env.id, path: env.working_path }, 'ghost_environment_reconciled');
-        console.log(`  Reconciled ghost: ${env.branch_name ?? env.workflow_id} (path missing)`);
-        reconciled++;
-      }
-    } catch (error) {
-      const err = error as Error;
-      getLog().warn({ err, envId: env.id, path: env.working_path }, 'ghost_reconciliation_failed');
-    }
-  }
-  return reconciled;
-}
-
-/**
  * List all active isolation environments
  */
 export async function isolationListCommand(): Promise<void> {
-  const codebases = await getCodebases();
+  const { codebases, totalEnvironments, ghostsReconciled } = await listEnvironments();
 
   if (codebases.length === 0) {
     console.log('No codebases registered.');
@@ -75,24 +38,10 @@ export async function isolationListCommand(): Promise<void> {
     return;
   }
 
-  let totalEnvs = 0;
-  let totalGhosts = 0;
-
   for (const codebase of codebases) {
-    const envs = await isolationDb.listByCodebaseWithAge(codebase.id);
+    console.log(`\n${codebase.repositoryUrl ?? codebase.defaultCwd}:`);
 
-    if (envs.length === 0) continue;
-
-    // Reconcile ghost entries before displaying
-    const ghosts = await reconcileGhosts(envs);
-    totalGhosts += ghosts;
-    const liveEnvs = ghosts > 0 ? await isolationDb.listByCodebaseWithAge(codebase.id) : envs;
-
-    if (liveEnvs.length === 0) continue;
-
-    console.log(`\n${codebase.repository_url ?? codebase.default_cwd}:`);
-
-    for (const env of liveEnvs) {
+    for (const env of codebase.environments) {
       const age =
         env.days_since_activity !== null
           ? `${Math.floor(env.days_since_activity)}d ago`
@@ -103,30 +52,33 @@ export async function isolationListCommand(): Promise<void> {
       console.log(`    Path: ${env.working_path}`);
       console.log(`    Type: ${env.workflow_type} | Platform: ${platform} | Last activity: ${age}`);
     }
-
-    totalEnvs += liveEnvs.length;
   }
 
-  if (totalGhosts > 0) {
-    console.log(`\nReconciled ${String(totalGhosts)} ghost environment(s) (missing from disk).`);
+  if (ghostsReconciled > 0) {
+    console.log(
+      `\nReconciled ${String(ghostsReconciled)} ghost environment(s) (missing from disk).`
+    );
   }
 
-  if (totalEnvs === 0) {
+  if (totalEnvironments === 0) {
     console.log('No active isolation environments.');
   } else {
-    console.log(`\nTotal: ${String(totalEnvs)} environment(s)`);
+    console.log(`\nTotal: ${String(totalEnvironments)} environment(s)`);
   }
 }
 
 /**
- * Cleanup stale isolation environments
+ * Cleanup stale isolation environments.
+ * Note: This command has its own stale-finding logic (per-env worktree destroy)
+ * distinct from the cleanup-service's cleanupStaleWorktrees (which uses different
+ * criteria). Kept here because the display-heavy flow doesn't map cleanly to
+ * the operations layer's batch-oriented API.
  */
 export async function isolationCleanupCommand(daysStale = 7): Promise<void> {
-  // First, reconcile ghost entries (paths removed outside Archon)
-  const allActive = await isolationDb.listAllActiveWithCodebase();
-  const ghostCount = await reconcileGhosts(allActive);
-  if (ghostCount > 0) {
-    console.log(`Reconciled ${String(ghostCount)} ghost environment(s) (missing from disk).`);
+  // Reconcile ghosts via the operations layer
+  const { ghostsReconciled } = await listEnvironments();
+  if (ghostsReconciled > 0) {
+    console.log(`Reconciled ${String(ghostsReconciled)} ghost environment(s) (missing from disk).`);
   }
 
   console.log(`Finding environments with no activity for ${String(daysStale)}+ days...`);
@@ -175,7 +127,7 @@ export async function isolationCleanupCommand(daysStale = 7): Promise<void> {
 export async function isolationCleanupMergedCommand(): Promise<void> {
   console.log('Finding environments with branches merged into main...');
 
-  const codebases = await getCodebases();
+  const { codebases } = await listEnvironments();
 
   if (codebases.length === 0) {
     console.log('No codebases with active environments found.');
@@ -187,9 +139,9 @@ export async function isolationCleanupMergedCommand(): Promise<void> {
 
   for (const codebase of codebases) {
     try {
-      console.log(`\nChecking ${codebase.repository_url ?? codebase.default_cwd}...`);
+      console.log(`\nChecking ${codebase.repositoryUrl ?? codebase.defaultCwd}...`);
 
-      const result = await cleanupMergedWorktrees(codebase.id, codebase.default_cwd);
+      const result = await cleanupMergedEnvironments(codebase.codebaseId, codebase.defaultCwd);
 
       for (const branch of result.removed) {
         console.log(`  Cleaned: ${branch}`);
@@ -202,7 +154,7 @@ export async function isolationCleanupMergedCommand(): Promise<void> {
       totalSkipped += result.skipped.length;
     } catch (error) {
       const err = error as Error;
-      getLog().warn({ err, codebaseId: codebase.id }, 'merged_cleanup_failed');
+      getLog().warn({ err, codebaseId: codebase.codebaseId }, 'merged_cleanup_failed');
       console.error(`  Error processing codebase: ${err.message}`);
     }
   }
@@ -355,25 +307,4 @@ export async function isolationCompleteCommand(
   }
 
   console.log(`\nComplete: ${completed} completed, ${failed} failed, ${notFound} not found`);
-}
-
-/**
- * Helper to get all codebases with active environments
- * Extracts unique codebases from isolation environment JOIN results
- */
-async function getCodebases(): Promise<CodebaseInfo[]> {
-  const allEnvs = await isolationDb.listAllActiveWithCodebase();
-  const codebaseMap = new Map<string, CodebaseInfo>();
-
-  for (const env of allEnvs) {
-    if (!codebaseMap.has(env.codebase_id)) {
-      codebaseMap.set(env.codebase_id, {
-        id: env.codebase_id,
-        repository_url: env.codebase_repository_url,
-        default_cwd: env.codebase_default_cwd,
-      });
-    }
-  }
-
-  return Array.from(codebaseMap.values());
 }

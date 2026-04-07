@@ -138,6 +138,7 @@ mock.module('@archon/core/db/workflows', () => ({
 
 mock.module('@archon/core/db/workflow-events', () => ({
   listWorkflowEvents: mock(() => Promise.resolve([])),
+  createWorkflowEvent: mock(() => Promise.resolve()),
 }));
 
 describe('workflowListCommand', () => {
@@ -1198,7 +1199,7 @@ describe('workflowResumeCommand', () => {
     });
 
     await expect(workflowResumeCommand('run-1')).rejects.toThrow(
-      "is in status 'completed' and cannot be resumed"
+      "Cannot resume run with status 'completed'"
     );
   });
 
@@ -1334,7 +1335,9 @@ describe('workflowApproveCommand', () => {
     const workflowDb = await import('@archon/core/db/workflows');
     (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce(null);
 
-    await expect(workflowApproveCommand('missing-id')).rejects.toThrow();
+    await expect(workflowApproveCommand('missing-id')).rejects.toThrow(
+      'Workflow run not found: missing-id'
+    );
   });
 
   it('should pass codebase_id from run record to workflowRunCommand', async () => {
@@ -1409,7 +1412,7 @@ describe('workflowAbandonCommand', () => {
     });
 
     await expect(workflowAbandonCommand('run-1')).rejects.toThrow(
-      "is in status 'completed' and cannot be abandoned"
+      "Cannot abandon run with status 'completed'"
     );
   });
 
@@ -1501,7 +1504,7 @@ describe('workflowRejectCommand', () => {
       metadata: {},
     });
 
-    await expect(workflowRejectCommand('run-1')).rejects.toThrow('cannot be rejected');
+    await expect(workflowRejectCommand('run-1')).rejects.toThrow('Cannot reject run');
   });
 
   it('cancels immediately when no on_reject configured', async () => {
@@ -1524,14 +1527,13 @@ describe('workflowRejectCommand', () => {
     await workflowRejectCommand('run-plain', 'not good');
 
     expect(workflowDb.cancelWorkflowRun).toHaveBeenCalledWith('run-plain');
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('run-plain'));
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Rejected and cancelled'));
   });
 
   it('updates metadata and auto-resumes when on_reject configured and under limit', async () => {
     const workflowDb = await import('@archon/core/db/workflows');
-    const core = await import('@archon/core');
 
-    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+    const runData = {
       id: 'run-on-reject',
       workflow_name: 'my-wf',
       status: 'paused',
@@ -1548,10 +1550,8 @@ describe('workflowRejectCommand', () => {
         },
         rejection_count: 0,
       },
-    });
-    (core.createWorkflowStore as ReturnType<typeof mock>).mockReturnValueOnce({
-      createWorkflowEvent: mock(() => Promise.resolve()),
-    });
+    };
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce(runData);
 
     try {
       await workflowRejectCommand('run-on-reject', 'needs work');
@@ -1600,9 +1600,8 @@ describe('workflowRejectCommand', () => {
 
   it('throws when on_reject configured but working_path is null', async () => {
     const workflowDb = await import('@archon/core/db/workflows');
-    const core = await import('@archon/core');
 
-    (workflowDb.getWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce({
+    const runData = {
       id: 'run-no-path',
       workflow_name: 'my-wf',
       status: 'paused',
@@ -1619,10 +1618,11 @@ describe('workflowRejectCommand', () => {
         },
         rejection_count: 0,
       },
-    });
-    (core.createWorkflowStore as ReturnType<typeof mock>).mockReturnValueOnce({
-      createWorkflowEvent: mock(() => Promise.resolve()),
-    });
+    };
+    // First call: rejectWorkflow (operations layer), second call: CLI re-fetch
+    (workflowDb.getWorkflowRun as ReturnType<typeof mock>)
+      .mockResolvedValueOnce(runData)
+      .mockResolvedValueOnce(runData);
     (workflowDb.updateWorkflowRun as ReturnType<typeof mock>).mockResolvedValueOnce(undefined);
 
     await expect(workflowRejectCommand('run-no-path', 'bad')).rejects.toThrow('no working path');

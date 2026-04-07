@@ -18,8 +18,8 @@ packages/cli/
 ├── src/
 │   ├── cli.ts              # Entry point, argument parsing, routing
 │   ├── commands/
-│   │   ├── workflow.ts     # workflow list/run implementation
-│   │   ├── isolation.ts    # isolation list/cleanup implementation
+│   │   ├── workflow.ts     # workflow list/run (approve/reject/status/resume/abandon delegate to @archon/core/operations)
+│   │   ├── isolation.ts    # isolation list/cleanup (list/merged-cleanup delegate to @archon/core/operations)
 │   │   ├── setup.ts        # setup command implementation
 │   │   ├── chat.ts         # chat command implementation
 │   │   ├── validate.ts     # validate command implementation

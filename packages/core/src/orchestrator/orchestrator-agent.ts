@@ -203,6 +203,9 @@ function filterToolIndicators(assistantMessages: string[]): string {
 /**
  * Dispatch a workflow after the orchestrator resolves a project.
  * Auto-attaches the project to the conversation, resolves isolation, and executes.
+ *
+ * TODO(#988): Move to operations/ once dispatchBackgroundWorkflow is extracted
+ * from the orchestrator (currently coupled to SSE bridging infrastructure).
  */
 async function dispatchOrchestratorWorkflow(
   platform: IPlatformAdapter,
