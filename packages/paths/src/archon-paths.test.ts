@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
+import { existsSync } from 'fs';
 import { mkdir, rm, writeFile, lstat, readlink } from 'fs/promises';
 
 const isWindows = process.platform === 'win32';
@@ -237,8 +238,9 @@ describe('archon-paths', () => {
       delete process.env.ARCHON_DOCKER;
       delete process.env.WORKSPACE_PATH;
       const path = getAppArchonBasePath();
-      // The path should contain 'remote-coding-agent' (the repo name)
-      expect(path).toContain('remote-coding-agent');
+      // The path should end with .archon and the directory should exist
+      expect(path).toMatch(/\.archon$/);
+      expect(existsSync(path)).toBe(true);
     });
   });
 
