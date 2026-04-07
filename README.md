@@ -1,10 +1,20 @@
-# Archon
+<p align="center">
+  <img src="assets/logo.png" alt="Archon" width="160" />
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/coleam00/Archon/actions/workflows/test.yml/badge.svg)](https://github.com/coleam00/Archon/actions/workflows/test.yml)
-[![Docs](https://img.shields.io/badge/docs-archon.diy-blue)](https://archon.diy)
+<h1 align="center">Archon</h1>
 
-The first open-source harness builder for AI coding. Make AI coding deterministic and repeatable.
+<p align="center">
+  The first open-source harness builder for AI coding. Make AI coding deterministic and repeatable.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://github.com/coleam00/Archon/actions/workflows/test.yml"><img src="https://github.com/coleam00/Archon/actions/workflows/test.yml/badge.svg" alt="CI" /></a>
+  <a href="https://archon.diy"><img src="https://img.shields.io/badge/docs-archon.diy-blue" alt="Docs" /></a>
+</p>
+
+---
 
 Archon is a workflow engine for AI coding agents. Define your development processes as YAML workflows - planning, implementation, validation, code review, PR creation - and run them reliably across all your projects.
 
