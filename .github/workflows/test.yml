@@ -60,10 +60,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Smoke test — container starts and serves /health
+      - name: Smoke test — container starts and serves /api/health
         run: |
           docker run -d --name archon-smoke -e PORT=3000 -p 3000:3000 archon-ci:test
-          curl --fail --retry 10 --retry-delay 3 --retry-connrefused http://localhost:3000/health
+          sleep 5
+          curl --fail --retry 10 --retry-delay 3 --retry-all-errors http://localhost:3000/api/health
 
       - name: Cleanup smoke test container
         if: always()

@@ -720,7 +720,8 @@ describe('ClaudeClient', () => {
       const env = callArgs.options.env as Record<string, string>;
       expect(env.MY_SECRET).toBe('abc123');
       // Verify process.env entries are still present (not fully replaced)
-      expect(env.PATH).toBeDefined();
+      // Windows uses 'Path' instead of 'PATH'
+      expect(env.PATH ?? env.Path).toBeDefined();
     });
 
     test('requestOptions.env overrides buildSubprocessEnv values', async () => {
