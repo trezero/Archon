@@ -298,6 +298,10 @@ Contributions welcome! See the open [issues](https://github.com/coleam00/Archon/
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a pull request.
 
+## Previous Version
+
+Looking for the original Python-based Archon (task management + RAG)? It's fully preserved on the [`archive/v1-task-management-rag`](https://github.com/coleam00/Archon/tree/archive/v1-task-management-rag) branch.
+
 ## License
 
 [MIT](LICENSE)
