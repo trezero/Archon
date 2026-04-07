@@ -38,7 +38,7 @@ Archon fixes this. Encode your development process as a workflow. The workflow d
 
 ## What It Looks Like
 
-A workflow that plans, implements in a loop until tests pass, gets your approval, then creates the PR:
+Here's an example of an Archon workflow that plans, implements in a loop until tests pass, gets your approval, then creates the PR:
 
 ```yaml
 # .archon/workflows/build-feature.yaml
@@ -152,35 +152,9 @@ Then say: **"Set up Archon"**
 
 The setup wizard walks you through everything: CLI installation, authentication, platform selection, and copies the Archon skill to your target repo.
 
-Once setup is complete:
-
-```bash
-# 1. Exit Claude Code in the Archon repo (Ctrl+C or /exit)
-
-# 2. Go to your project
-cd /path/to/your/project
-
-# 3. Open Claude Code from your project
-claude
-```
-
-Then start working:
-
-```
-Use archon to fix issue #42
-```
-
-```
-What archon workflows do I have? When would I use each one?
-```
-
-The coding agent handles workflow selection, branch naming, and worktree isolation for you. Projects are registered automatically the first time they're used.
-
-> **Important:** Always run Claude Code from your target repo, not from the Archon repo. The setup wizard copies the Archon skill into your project so it works from there.
-
 ### Quick Install (30 seconds)
 
-Install the standalone CLI binary if you just want to run workflows from the terminal.
+Already have Claude Code set up? Install the standalone CLI binary and skip the wizard.
 
 **macOS / Linux**
 ```bash
@@ -197,13 +171,26 @@ irm https://archon.diy/install.ps1 | iex
 brew install coleam00/archon/archon
 ```
 
-Then go to any git repo and start running workflows:
+### Start Using Archon
+
+Once you've completed either setup path, go to your project and start working:
 
 ```bash
 cd /path/to/your/project
-archon workflow list
-archon workflow run archon-assist "What does this codebase do?"
+claude
 ```
+
+```
+Use archon to fix issue #42
+```
+
+```
+What archon workflows do I have? When would I use each one?
+```
+
+The coding agent handles workflow selection, branch naming, and worktree isolation for you. Projects are registered automatically the first time they're used.
+
+> **Important:** Always run Claude Code from your target repo, not from the Archon repo. The setup wizard copies the Archon skill into your project so it works from there.
 
 ## Web UI
 
