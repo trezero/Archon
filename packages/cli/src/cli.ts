@@ -305,7 +305,14 @@ async function main(): Promise<number> {
               );
               return 1;
             }
-            const options = { branchName, fromBranch, noWorktree, resume: resumeFlag };
+            const options = {
+              branchName,
+              fromBranch,
+              noWorktree,
+              resume: resumeFlag,
+              quiet: values.quiet as boolean | undefined,
+              verbose: values.verbose as boolean | undefined,
+            };
             await workflowRunCommand(effectiveCwd, workflowName, userMessage, options);
             break;
           }
