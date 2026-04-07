@@ -24,30 +24,6 @@ Archon is a workflow engine for AI coding agents. Define your development proces
 
 Like what Dockerfiles did for infrastructure and GitHub Actions did for CI/CD - Archon does for AI coding workflows. Think n8n, but for software development.
 
-## Install
-
-**macOS / Linux**
-```bash
-curl -fsSL https://archon.diy/install | bash
-```
-
-**Windows (PowerShell)**
-```powershell
-irm https://archon.diy/install.ps1 | iex
-```
-
-**Homebrew**
-```bash
-brew install coleam00/archon/archon
-```
-
-**Docker**
-```bash
-docker run --rm -v "$PWD:/workspace" ghcr.io/coleam00/archon:latest workflow list
-```
-
-See the [Installation Guide](https://archon.diy/getting-started/installation/) for all options.
-
 ## Why Archon?
 
 When you ask an AI agent to "fix this bug", what happens depends on the model's mood. It might skip planning. It might forget to run tests. It might write a PR description that ignores your template. Every run is different.
@@ -108,18 +84,50 @@ Looking for the original Python-based Archon (task management + RAG)? It's fully
 
 ## Quickstart
 
-<details>
-<summary><b>Prerequisites</b> - Node.js, Claude Code, and the GitHub CLI</summary>
+**Just want the CLI?** Install the binary and start running workflows in 30 seconds. **Want the web dashboard, platform integrations (Slack, Telegram, GitHub), and a guided setup?** Follow the full setup below.
 
-**Node.js** (v18+) - [nodejs.org](https://nodejs.org/)
+### Option A: CLI Install (30 seconds)
+
+Install the pre-built binary and run workflows from your terminal immediately.
+
+**macOS / Linux**
+```bash
+curl -fsSL https://archon.diy/install | bash
+```
+
+**Windows (PowerShell)**
+```powershell
+irm https://archon.diy/install.ps1 | iex
+```
+
+**Homebrew**
+```bash
+brew install coleam00/archon/archon
+```
+
+Then go to any git repo and start running workflows:
 
 ```bash
-# macOS/Linux (via nvm, recommended)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-nvm install --lts
+cd /path/to/your/project
+archon workflow list
+archon workflow run archon-assist "What does this codebase do?"
+```
 
-# Windows (via winget)
-winget install OpenJS.NodeJS.LTS
+### Option B: Full Setup (5 minutes)
+
+Clone the repo and use the setup wizard to configure credentials, platform integrations, and the web UI.
+
+<details>
+<summary><b>Prerequisites</b> - Bun, Claude Code, and the GitHub CLI</summary>
+
+**Bun** - [bun.sh](https://bun.sh)
+
+```bash
+# macOS/Linux
+curl -fsSL https://bun.sh/install | bash
+
+# Windows (PowerShell)
+irm bun.sh/install.ps1 | iex
 ```
 
 **GitHub CLI** - [cli.github.com](https://cli.github.com/)
@@ -135,7 +143,7 @@ winget install GitHub.cli
 sudo apt install gh
 ```
 
-**Claude Code** - [code.claude.com](https://code.claude.com/docs/en/getting-started)
+**Claude Code** - [claude.ai/code](https://claude.ai/code)
 
 ```bash
 # macOS/Linux/WSL
@@ -145,20 +153,7 @@ curl -fsSL https://claude.ai/install.sh | bash
 irm https://claude.ai/install.ps1 | iex
 ```
 
-**agent-browser** *(optional)* - [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser)
-
-Only needed for E2E/UI testing workflows (`archon-validate-pr`). Core functionality works without it.
-
-```bash
-npm install -g agent-browser
-agent-browser install
-```
-
-See the [E2E Testing Guide](https://archon.diy/deployment/e2e-testing/) for platform-specific setup.
-
 </details>
-
-### Setup (2 min)
 
 ```bash
 git clone https://github.com/coleam00/Archon
@@ -170,8 +165,6 @@ claude
 Then say: **"Set up Archon"**
 
 The setup wizard walks you through everything: CLI installation, authentication, platform selection, and copies the Archon skill to your target repo.
-
-### Start Using Archon
 
 Once setup is complete:
 
@@ -198,10 +191,6 @@ What archon workflows do I have? When would I use each one?
 The coding agent handles workflow selection, branch naming, and worktree isolation for you. Projects are registered automatically the first time they're used.
 
 > **Important:** Always run Claude Code from your target repo, not from the Archon repo. The setup wizard copies the Archon skill into your project so it works from there.
-
-### Alternative setup paths
-
-- **[Getting Started](https://archon.diy/getting-started/overview/)** - Full setup guide (Web UI or CLI)
 
 ## Web UI
 
@@ -249,6 +238,17 @@ Archon ships 17 default workflows - run `archon workflow list` or describe what 
 
 See [Authoring Workflows](https://archon.diy/guides/authoring-workflows/) and [Authoring Commands](https://archon.diy/guides/authoring-commands/).
 
+## Add a Platform
+
+The Web UI and CLI work out of the box. Optionally connect a chat platform for remote access:
+
+| Platform | Setup time | Guide |
+|----------|-----------|-------|
+| **Telegram** | 5 min | [Telegram Guide](https://archon.diy/adapters/telegram/) |
+| **Slack** | 15 min | [Slack Guide](https://archon.diy/adapters/slack/) |
+| **GitHub Webhooks** | 15 min | [GitHub Guide](https://archon.diy/adapters/github/) |
+| **Discord** | 5 min | [Discord Guide](https://archon.diy/adapters/community/discord/) |
+
 ## Architecture
 
 ```
@@ -281,17 +281,6 @@ See [Authoring Workflows](https://archon.diy/guides/authoring-workflows/) and [A
 │    Isolation Environments • Messages • Workflow Events  │
 └─────────────────────────────────────────────────────────┘
 ```
-
-## Add a Platform
-
-The Web UI and CLI work out of the box. Optionally connect a chat platform for remote access:
-
-| Platform | Setup time | Guide |
-|----------|-----------|-------|
-| **Telegram** | 5 min | [Telegram Guide](https://archon.diy/adapters/telegram/) |
-| **Slack** | 15 min | [Slack Guide](https://archon.diy/adapters/slack/) |
-| **GitHub Webhooks** | 15 min | [GitHub Guide](https://archon.diy/adapters/github/) |
-| **Discord** | 5 min | [Discord Guide](https://archon.diy/adapters/community/discord/) |
 
 ## Documentation
 
