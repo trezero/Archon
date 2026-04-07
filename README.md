@@ -38,84 +38,70 @@ Archon fixes this. Encode your development process as a workflow. The workflow d
 
 ## What It Looks Like
 
-```yaml
-# .archon/workflows/archon-idea-to-pr.yaml
-name: archon-idea-to-pr
-description: Take a feature idea from plan to merged PR
+A workflow that plans, implements in a loop until tests pass, gets your approval, then creates the PR:
 
+```yaml
+# .archon/workflows/build-feature.yaml
 nodes:
   - id: plan
-    command: create-plan
+    prompt: "Explore the codebase and create an implementation plan"
+
   - id: implement
-    command: implement-tasks
-    context: fresh
     depends_on: [plan]
-  - id: validate
-    command: validate
+    loop:                                      # AI loop - iterate until done
+      prompt: "Read the plan. Implement the next task. Run validation."
+      until: ALL_TASKS_COMPLETE
+      fresh_context: true                      # Fresh session each iteration
+
+  - id: run-tests
     depends_on: [implement]
+    bash: "bun run validate"                   # Deterministic - no AI
+
+  - id: review
+    depends_on: [run-tests]
+    prompt: "Review all changes against the plan. Fix any issues."
+
+  - id: approve
+    depends_on: [review]
+    loop:                                      # Human approval gate
+      prompt: "Present the changes for review. Address any feedback."
+      until: APPROVED
+      interactive: true                        # Pauses and waits for human input
+
   - id: create-pr
-    command: create-pr
-    context: fresh
-    depends_on: [validate]
-  - id: review-security
-    command: review-security
-    depends_on: [create-pr]
-  - id: review-tests
-    command: review-tests
-    depends_on: [create-pr]
-  - id: review-types
-    command: review-types
-    depends_on: [create-pr]
-  - id: self-fix
-    command: self-fix
-    depends_on: [review-security, review-tests, review-types]
+    depends_on: [approve]
+    prompt: "Push changes and create a pull request"
 ```
 
-```bash
-archon workflow run archon-idea-to-pr --branch feat/dark-mode "Add dark mode to settings"
-# → Creates isolated worktree
-# → Runs: plan → implement → validate → create PR → parallel reviews → self-fix
-# → Result: PR ready for human review
+Tell your coding agent what you want, and Archon handles the rest:
+
+```
+You: Use archon to add dark mode to the settings page
+
+Agent: I'll run the archon-idea-to-pr workflow for this.
+       → Creating isolated worktree on branch archon/task-dark-mode...
+       → Planning...
+       → Implementing (task 1/4)...
+       → Implementing (task 2/4)...
+       → Tests failing - iterating...
+       → Tests passing after 2 iterations
+       → Code review complete - 0 issues
+       → PR ready: https://github.com/you/project/pull/47
 ```
 
 ## Previous Version
 
 Looking for the original Python-based Archon (task management + RAG)? It's fully preserved on the [`archive/v1-task-management-rag`](https://github.com/coleam00/Archon/tree/archive/v1-task-management-rag) branch.
 
-## Quickstart
+## Getting Started
 
-**Just want the CLI?** Install the binary and start running workflows in 30 seconds. **Want the web dashboard, platform integrations (Slack, Telegram, GitHub), and a guided setup?** Follow the full setup below.
+> **Most users should start with the [Full Setup](#full-setup-5-minutes)** - it walks you through credentials, installs the Archon skill into your projects, and gives you the web dashboard.
+>
+> **Already have Claude Code and just want the CLI?** Jump to the [Quick Install](#quick-install-30-seconds).
 
-### Option A: CLI Install (30 seconds)
+### Full Setup (5 minutes)
 
-Install the pre-built binary and run workflows from your terminal immediately.
-
-**macOS / Linux**
-```bash
-curl -fsSL https://archon.diy/install | bash
-```
-
-**Windows (PowerShell)**
-```powershell
-irm https://archon.diy/install.ps1 | iex
-```
-
-**Homebrew**
-```bash
-brew install coleam00/archon/archon
-```
-
-Then go to any git repo and start running workflows:
-
-```bash
-cd /path/to/your/project
-archon workflow list
-archon workflow run archon-assist "What does this codebase do?"
-```
-
-### Option B: Full Setup (5 minutes)
-
-Clone the repo and use the setup wizard to configure credentials, platform integrations, and the web UI.
+Clone the repo and use the guided setup wizard. This configures credentials, platform integrations, and copies the Archon skill into your target projects.
 
 <details>
 <summary><b>Prerequisites</b> - Bun, Claude Code, and the GitHub CLI</summary>
@@ -191,6 +177,33 @@ What archon workflows do I have? When would I use each one?
 The coding agent handles workflow selection, branch naming, and worktree isolation for you. Projects are registered automatically the first time they're used.
 
 > **Important:** Always run Claude Code from your target repo, not from the Archon repo. The setup wizard copies the Archon skill into your project so it works from there.
+
+### Quick Install (30 seconds)
+
+Install the standalone CLI binary if you just want to run workflows from the terminal.
+
+**macOS / Linux**
+```bash
+curl -fsSL https://archon.diy/install | bash
+```
+
+**Windows (PowerShell)**
+```powershell
+irm https://archon.diy/install.ps1 | iex
+```
+
+**Homebrew**
+```bash
+brew install coleam00/archon/archon
+```
+
+Then go to any git repo and start running workflows:
+
+```bash
+cd /path/to/your/project
+archon workflow list
+archon workflow run archon-assist "What does this codebase do?"
+```
 
 ## Web UI
 
