@@ -106,10 +106,17 @@ export class WebAdapter implements IWebPlatformAdapter {
         input: chunk.toolInput ?? {},
       });
 
-      // Generate unique tool call ID for SSE
-      const counter = (this.toolCallCounter.get(conversationId) ?? 0) + 1;
-      this.toolCallCounter.set(conversationId, counter);
-      const toolCallId = `${conversationId}-tool-${String(counter)}`;
+      // Prefer the SDK-provided stable ID (e.g. Claude `tool_use_id`); fall back to a
+      // generated counter for clients that don't supply one (e.g. Codex). Stable IDs
+      // guarantee tool_call/tool_result pair correctly under concurrent same-named tools.
+      let toolCallId: string;
+      if (chunk.toolCallId) {
+        toolCallId = chunk.toolCallId;
+      } else {
+        const counter = (this.toolCallCounter.get(conversationId) ?? 0) + 1;
+        this.toolCallCounter.set(conversationId, counter);
+        toolCallId = `${conversationId}-tool-${String(counter)}`;
+      }
 
       // Track this tool's start for duration computation (supports parallel DAG nodes)
       let convTools = this.runningTools.get(conversationId);
@@ -128,20 +135,45 @@ export class WebAdapter implements IWebPlatformAdapter {
       });
     } else if (chunk.type === 'tool_result' && chunk.toolName) {
       const now = Date.now();
-      // Find and remove the matching running tool entry
+      // Find and remove the matching running tool entry. Prefer stable ID lookup
+      // (correct under concurrent same-named tools), fall back to name reverse-scan
+      // for clients that don't supply an ID.
       const convTools = this.runningTools.get(conversationId);
       let matchedToolCallId: string | undefined;
       let startedAt = now;
       if (convTools) {
-        // Reverse iterate to match the most recent tool with this name
-        for (const [id, t] of [...convTools.entries()].reverse()) {
-          if (t.name === chunk.toolName) {
-            matchedToolCallId = id;
+        if (chunk.toolCallId && convTools.has(chunk.toolCallId)) {
+          const t = convTools.get(chunk.toolCallId);
+          if (t) {
+            matchedToolCallId = chunk.toolCallId;
             startedAt = t.startedAt;
-            convTools.delete(id);
-            break;
+            convTools.delete(chunk.toolCallId);
+          }
+        } else {
+          // Reverse iterate to match the most recent tool with this name
+          for (const [id, t] of [...convTools.entries()].reverse()) {
+            if (t.name === chunk.toolName) {
+              matchedToolCallId = id;
+              startedAt = t.startedAt;
+              convTools.delete(id);
+              break;
+            }
           }
         }
+      }
+      if (!matchedToolCallId) {
+        // Neither stable-ID lookup nor name reverse-scan found a match. The
+        // SSE event still goes out, but the UI cannot pair it to a running
+        // card and the entry (if any) will leak in runningTools. Surface this
+        // so we can debug missing tool_call emissions.
+        getLog().warn(
+          {
+            conversationId,
+            toolName: chunk.toolName,
+            toolCallId: chunk.toolCallId,
+          },
+          'web_adapter.tool_result_unmatched'
+        );
       }
       const duration = now - startedAt;
       // Persist tool output to DB

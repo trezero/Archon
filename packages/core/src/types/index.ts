@@ -209,8 +209,23 @@ export type MessageChunk =
       modelUsage?: Record<string, unknown>;
     }
   | { type: 'rate_limit'; rateLimitInfo: Record<string, unknown> }
-  | { type: 'tool'; toolName: string; toolInput?: Record<string, unknown> }
-  | { type: 'tool_result'; toolName: string; toolOutput: string }
+  | {
+      type: 'tool';
+      toolName: string;
+      toolInput?: Record<string, unknown>;
+      /** Stable per-call ID from the underlying SDK (e.g. Claude `tool_use_id`).
+       *  When present, the platform adapter uses it directly instead of generating
+       *  one — guarantees `tool_call`/`tool_result` pair correctly even when
+       *  multiple tools with the same name run concurrently. */
+      toolCallId?: string;
+    }
+  | {
+      type: 'tool_result';
+      toolName: string;
+      toolOutput: string;
+      /** Matching ID for the originating `tool` chunk. See `tool` variant above. */
+      toolCallId?: string;
+    }
   | { type: 'workflow_dispatch'; workerConversationId: string; workflowName: string };
 
 import type { ModelReasoningEffort, WebSearchMode } from '@archon/workflows/schemas/workflow';

@@ -43,6 +43,8 @@ interface ContentBlock {
   text?: string;
   name?: string;
   input?: Record<string, unknown>;
+  /** Stable Anthropic `tool_use_id` — used to pair `tool_call`/`tool_result` events. */
+  id?: string;
 }
 
 function normalizeClaudeUsage(usage?: {
@@ -267,7 +269,7 @@ export class ClaudeClient implements IAssistantClient {
       }
 
       const stderrLines: string[] = [];
-      const toolResultQueue: { toolName: string; toolOutput: string }[] = [];
+      const toolResultQueue: { toolName: string; toolOutput: string; toolCallId?: string }[] = [];
 
       // Create per-attempt abort controller and wire to caller's signal
       const controller = new AbortController();
@@ -347,6 +349,7 @@ export class ClaudeClient implements IAssistantClient {
               hooks: [
                 (async (input: Record<string, unknown>): Promise<{ continue: true }> => {
                   const toolName = (input as { tool_name?: string }).tool_name ?? 'unknown';
+                  const toolUseId = (input as { tool_use_id?: string }).tool_use_id;
                   const toolResponse = (input as { tool_response?: unknown }).tool_response;
                   const output =
                     typeof toolResponse === 'string'
@@ -357,7 +360,41 @@ export class ClaudeClient implements IAssistantClient {
                   toolResultQueue.push({
                     toolName,
                     toolOutput: output.length > maxLen ? output.slice(0, maxLen) + '...' : output,
+                    ...(toolUseId !== undefined ? { toolCallId: toolUseId } : {}),
                   });
+                  return { continue: true };
+                }) as HookCallback,
+              ],
+            },
+          ],
+          // Without this, errored / interrupted / permission-denied tools never produce
+          // a paired tool_result chunk and the corresponding UI card spins forever.
+          // SDK type: PostToolUseFailureHookInput { tool_name, tool_use_id, error, is_interrupt? }
+          PostToolUseFailure: [
+            ...((requestOptions?.hooks?.PostToolUseFailure ?? []) as HookCallbackMatcher[]),
+            {
+              hooks: [
+                (async (input: Record<string, unknown>): Promise<{ continue: true }> => {
+                  // Always return { continue: true } even on internal errors so a
+                  // malformed SDK payload can never crash the hook dispatch silently.
+                  try {
+                    const toolName = (input as { tool_name?: string }).tool_name ?? 'unknown';
+                    const toolUseId = (input as { tool_use_id?: string }).tool_use_id;
+                    const rawError = (input as { error?: string }).error;
+                    if (rawError === undefined) {
+                      getLog().debug({ input }, 'claude.post_tool_use_failure_no_error_field');
+                    }
+                    const errorText = rawError ?? 'tool failed';
+                    const isInterrupt = (input as { is_interrupt?: boolean }).is_interrupt === true;
+                    const prefix = isInterrupt ? '⚠️ Interrupted' : '❌ Error';
+                    toolResultQueue.push({
+                      toolName,
+                      toolOutput: `${prefix}: ${errorText}`,
+                      ...(toolUseId !== undefined ? { toolCallId: toolUseId } : {}),
+                    });
+                  } catch (e) {
+                    getLog().error({ err: e, input }, 'claude.post_tool_use_failure_hook_error');
+                  }
                   return { continue: true };
                 }) as HookCallback,
               ],
@@ -407,7 +444,12 @@ export class ClaudeClient implements IAssistantClient {
           while (toolResultQueue.length > 0) {
             const tr = toolResultQueue.shift();
             if (tr) {
-              yield { type: 'tool_result', toolName: tr.toolName, toolOutput: tr.toolOutput };
+              yield {
+                type: 'tool_result',
+                toolName: tr.toolName,
+                toolOutput: tr.toolOutput,
+                ...(tr.toolCallId !== undefined ? { toolCallId: tr.toolCallId } : {}),
+              };
             }
           }
 
@@ -423,6 +465,7 @@ export class ClaudeClient implements IAssistantClient {
                   type: 'tool',
                   toolName: block.name,
                   toolInput: block.input ?? {},
+                  ...(block.id !== undefined ? { toolCallId: block.id } : {}),
                 };
               }
             }
@@ -486,11 +529,19 @@ export class ClaudeClient implements IAssistantClient {
             };
           }
         }
-        // Drain any remaining tool results from the hook queue
+        // Drain any remaining tool results from the hook queue.
+        // Must mirror the in-loop drain — PostToolUseFailure results commonly land
+        // here (they fire just before the SDK's terminal `result` message), so
+        // dropping toolCallId here would defeat the stable-pairing fix.
         while (toolResultQueue.length > 0) {
           const tr = toolResultQueue.shift();
           if (tr) {
-            yield { type: 'tool_result', toolName: tr.toolName, toolOutput: tr.toolOutput };
+            yield {
+              type: 'tool_result',
+              toolName: tr.toolName,
+              toolOutput: tr.toolOutput,
+              ...(tr.toolCallId !== undefined ? { toolCallId: tr.toolCallId } : {}),
+            };
           }
         }
         return; // Success - exit retry loop
