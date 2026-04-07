@@ -118,8 +118,9 @@ The GitHub and Gitea adapters verify webhook signatures to ensure payloads origi
 - The `.env.example` file in the repository contains placeholder values -- copy it and fill in real values.
 - Never commit `.env` files to git. The repository's `.gitignore` excludes them.
 
-**`DATABASE_URL` protection:**
-- The CLI explicitly clears any `DATABASE_URL` that Bun auto-loads from the current directory's `.env`, then loads only from `~/.archon/.env`. This prevents accidentally connecting to a target project's database.
+**CWD `.env` isolation:**
+- When running inside a target repository, Bun auto-loads that repo's `.env` before any Archon code runs. Both the CLI and server strip every key parsed from the CWD `.env` at startup, then load only `~/.archon/.env` (which always wins via `override: true`). This prevents target-repo secrets (e.g. `ANTHROPIC_API_KEY`, `DATABASE_URL`, `OPENAI_API_KEY`) from bleeding into Archon or its subprocesses.
+- Claude Code subprocesses receive only an explicit allowlist of env vars (system essentials, Claude auth, Archon runtime config, git identity, GitHub tokens). Per-codebase env vars configured via `codebase_env_vars` or `.archon/config.yaml` `env:` are merged on top of this filtered base.
 
 **CORS:**
 - API routes use `WEB_UI_ORIGIN` to restrict CORS. The default is `*` (allow all), which is appropriate for local single-developer use. Set a specific origin when exposing the server publicly.

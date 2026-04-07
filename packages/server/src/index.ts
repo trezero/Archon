@@ -9,6 +9,24 @@ import { config } from 'dotenv';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 
+// Strip all vars that Bun may have auto-loaded from CWD's .env.
+// When the server is started from inside a target repo, Bun auto-loads that
+// repo's .env (containing e.g. ANTHROPIC_API_KEY for the target app) before
+// any user code runs. Strip those vars now so they don't bleed into server env
+// or subprocess spawns.
+const cwdEnvPath = resolve(process.cwd(), '.env');
+if (existsSync(cwdEnvPath)) {
+  const cwdEnvResult = config({ path: cwdEnvPath, processEnv: {} });
+  // If parse fails, cwdEnvResult.parsed is undefined — safe to skip:
+  // Bun uses the same RFC-style parser, so a file dotenv cannot parse
+  // was also unparseable by Bun and contributed no keys to process.env.
+  if (cwdEnvResult.parsed) {
+    for (const key of Object.keys(cwdEnvResult.parsed)) {
+      Reflect.deleteProperty(process.env, key);
+    }
+  }
+}
+
 // Resolve from this file's location: packages/server/src/ → ../../.. → repo root
 const envPath = resolve(import.meta.dir, '..', '..', '..', '.env');
 const dotenvResult = config({ path: envPath });

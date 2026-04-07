@@ -485,10 +485,11 @@ describe('ClaudeClient', () => {
         // consume
       }
 
-      // ANTHROPIC_API_KEY should pass through (not filtered) since useGlobalAuth=true path
-      // strips only CLAUDE_CODE_OAUTH_TOKEN and CLAUDE_API_KEY
+      // ANTHROPIC_API_KEY must NOT reach the subprocess: it is not in the
+      // SUBPROCESS_ENV_ALLOWLIST, so a leaked target-repo key cannot bill
+      // the wrong account. See issue #1029.
       const callArgs = mockQuery.mock.calls[0][0] as { options: { env: NodeJS.ProcessEnv } };
-      expect(callArgs.options.env.ANTHROPIC_API_KEY).toBe('sk-ant-test-key');
+      expect(callArgs.options.env.ANTHROPIC_API_KEY).toBeUndefined();
       // Explicit SDK vars are absent (useGlobalAuth=true path)
       expect(callArgs.options.env.CLAUDE_API_KEY).toBeUndefined();
       expect(callArgs.options.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
@@ -500,6 +501,45 @@ describe('ClaudeClient', () => {
       else delete process.env.CLAUDE_API_KEY;
       if (originalAnthropicKey !== undefined) process.env.ANTHROPIC_API_KEY = originalAnthropicKey;
       else delete process.env.ANTHROPIC_API_KEY;
+    });
+
+    test('ANTHROPIC_API_KEY excluded from subprocess env when using explicit auth (useGlobalAuth=false)', async () => {
+      const originalOauth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      const originalApiKey = process.env.CLAUDE_API_KEY;
+      const originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
+      const originalGlobalAuth = process.env.CLAUDE_USE_GLOBAL_AUTH;
+
+      // Force explicit auth path regardless of env
+      process.env.CLAUDE_USE_GLOBAL_AUTH = 'false';
+      process.env.CLAUDE_API_KEY = 'sk-ant-explicit-key';
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-target-repo-key';
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+      mockQuery.mockImplementation(async function* () {
+        // Empty generator
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of client.sendQuery('test', '/workspace')) {
+        // consume
+      }
+
+      // ANTHROPIC_API_KEY must NOT reach the subprocess regardless of which auth
+      // path is taken — the allowlist excludes it in both cases. See issue #1029.
+      const callArgs = mockQuery.mock.calls[0][0] as { options: { env: NodeJS.ProcessEnv } };
+      expect(callArgs.options.env.ANTHROPIC_API_KEY).toBeUndefined();
+      // Explicit auth vars are present on the useGlobalAuth=false path
+      expect(callArgs.options.env.CLAUDE_API_KEY).toBeDefined();
+
+      // Cleanup
+      if (originalOauth !== undefined) process.env.CLAUDE_CODE_OAUTH_TOKEN = originalOauth;
+      else delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      if (originalApiKey !== undefined) process.env.CLAUDE_API_KEY = originalApiKey;
+      else delete process.env.CLAUDE_API_KEY;
+      if (originalAnthropicKey !== undefined) process.env.ANTHROPIC_API_KEY = originalAnthropicKey;
+      else delete process.env.ANTHROPIC_API_KEY;
+      if (originalGlobalAuth !== undefined) process.env.CLAUDE_USE_GLOBAL_AUTH = originalGlobalAuth;
+      else delete process.env.CLAUDE_USE_GLOBAL_AUTH;
     });
 
     test('strips VSCODE_INSPECTOR_OPTIONS from subprocess env', async () => {

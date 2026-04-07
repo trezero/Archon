@@ -26,6 +26,7 @@ import {
   type TokenUsage,
 } from '../types';
 import { createLogger } from '@archon/paths';
+import { buildCleanSubprocessEnv } from '../utils/env-allowlist';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -124,8 +125,9 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
   let baseEnv: NodeJS.ProcessEnv;
 
   if (useGlobalAuth) {
-    // Filter out auth tokens - let Claude use global auth from 'claude /login'
-    const { CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_API_KEY, ...envWithoutAuth } = process.env;
+    // Start from allowlist-filtered env, then strip auth tokens
+    const clean = buildCleanSubprocessEnv();
+    const { CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_API_KEY, ...envWithoutAuth } = clean;
 
     // Log if we're filtering out tokens (helps debug auth issues)
     const filtered = [
@@ -139,8 +141,8 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
 
     baseEnv = envWithoutAuth;
   } else {
-    // Pass through all env vars including auth tokens
-    baseEnv = { ...process.env };
+    // Start from allowlist-filtered env (includes auth tokens)
+    baseEnv = buildCleanSubprocessEnv();
   }
 
   // Clean env vars that interfere with Claude Code subprocess
