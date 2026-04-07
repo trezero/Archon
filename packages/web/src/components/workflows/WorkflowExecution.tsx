@@ -195,11 +195,13 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
       .map(ev => {
         const evTime = new Date(ev.created_at).getTime();
         const toolName = ev.data.tool_name as string;
+        const stepName = ev.step_name ?? undefined;
         const completed = completedEvents.find(
           c =>
             !usedCompleted.has(c.id) &&
             (c.data.tool_name as string) === toolName &&
-            new Date(c.created_at).getTime() > evTime
+            new Date(c.created_at).getTime() >= evTime &&
+            (c.step_name ?? undefined) === stepName
         );
         if (completed) usedCompleted.add(completed.id);
         return {
