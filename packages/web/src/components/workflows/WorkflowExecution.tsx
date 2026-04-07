@@ -235,8 +235,9 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
   }, [codebaseId]);
 
   // Fetch workflow definition for DAG topology (depends_on edges).
-  // Only gated on workflowName — codebaseCwd is optional; the server falls back to bundled
-  // defaults when cwd is absent (handles CLI runs and "No project" web runs).
+  // Only gated on workflowName — codebaseCwd is optional; when absent the server tries the
+  // first registered codebase before falling back to bundled defaults (handles CLI runs and
+  // "No project" web runs).
   const { data: workflowDef } = useQuery({
     queryKey: ['workflowDefinition', initialData?.workflowName, codebaseCwd],
     queryFn: () => getWorkflow(initialData?.workflowName ?? '', codebaseCwd ?? undefined),
