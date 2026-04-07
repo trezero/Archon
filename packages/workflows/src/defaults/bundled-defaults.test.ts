@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import {
   isBinaryBuild,
   isBunVirtualFs,
+  isCompiledExecPath,
   BUNDLED_COMMANDS,
   BUNDLED_WORKFLOWS,
 } from './bundled-defaults';
@@ -27,6 +28,30 @@ describe('bundled-defaults', () => {
       expect(isBunVirtualFs('/home/user/project/src')).toBe(false);
       expect(isBunVirtualFs('C:\\Users\\user\\project\\src')).toBe(false);
       expect(isBunVirtualFs('/tmp/test')).toBe(false);
+    });
+  });
+
+  describe('isCompiledExecPath', () => {
+    it('should return false for the bun interpreter', () => {
+      expect(isCompiledExecPath('/usr/local/bin/bun')).toBe(false);
+      expect(isCompiledExecPath('C:\\Users\\me\\.bun\\bin\\bun.exe')).toBe(false);
+      expect(isCompiledExecPath('bun')).toBe(false);
+    });
+
+    it('should return false for the node interpreter', () => {
+      expect(isCompiledExecPath('/usr/bin/node')).toBe(false);
+      expect(isCompiledExecPath('C:\\Program Files\\nodejs\\node.exe')).toBe(false);
+    });
+
+    it('should return true for a standalone compiled binary', () => {
+      expect(isCompiledExecPath('/usr/local/bin/archon')).toBe(true);
+      expect(isCompiledExecPath('/usr/local/bin/archon-linux-x64')).toBe(true);
+      expect(isCompiledExecPath('C:\\Program Files\\Archon\\archon.exe')).toBe(true);
+    });
+
+    it('should return false for empty or undefined execPath', () => {
+      expect(isCompiledExecPath('')).toBe(false);
+      expect(isCompiledExecPath(undefined)).toBe(false);
     });
   });
 

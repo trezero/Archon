@@ -118,7 +118,29 @@ export function isBunVirtualFs(dir: string): boolean {
  *
  * Note: `process.versions.bun` is still set in compiled binaries as of Bun 1.3.5,
  * so we use the virtual filesystem path prefix for detection instead.
+ *
+ * Detection signals (any one is sufficient):
+ *   1. `import.meta.dir` lives under Bun's virtual FS (`/$bunfs/` or `B:\~BUN\`).
+ *      Works for ESM/JS compiled binaries.
+ *   2. `process.execPath` is not the bun/node interpreter. Works for compiled
+ *      CJS bytecode binaries (`bun build --compile --bytecode`) where
+ *      `import.meta.dir` may be undefined or empty.
  */
 export function isBinaryBuild(): boolean {
-  return isBunVirtualFs(import.meta.dir);
+  if (isBunVirtualFs(import.meta.dir ?? '')) {
+    return true;
+  }
+  return isCompiledExecPath(process.execPath);
+}
+
+/**
+ * Check whether `execPath` looks like a standalone compiled binary rather than
+ * the `bun` or `node` interpreter. Exported for testability.
+ */
+export function isCompiledExecPath(execPath: string | undefined): boolean {
+  if (!execPath) return false;
+  const base = execPath.split(/[/\\]/).pop() ?? '';
+  // Strip extension on Windows (e.g. archon.exe → archon)
+  const withoutExt = base.replace(/\.exe$/i, '').toLowerCase();
+  return withoutExt !== 'bun' && withoutExt !== 'node';
 }
