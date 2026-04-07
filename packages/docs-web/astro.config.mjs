@@ -6,6 +6,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Archon',
+      favicon: '/favicon.png',
       description: 'AI workflow engine — package your coding workflows as YAML, run them anywhere.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/coleam00/Archon' }],
       editLink: {
