@@ -163,3 +163,36 @@ jobs:
             ```bash
             archon version
             ```
+
+  update-homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Wait for release assets
+        run: sleep 30
+
+      - name: Update Homebrew formula
+        run: bash scripts/update-homebrew.sh ${{ steps.version.outputs.version }}
+
+      - name: Commit updated formula
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add homebrew/archon.rb
+          git diff --cached --quiet || git commit -m "chore: update Homebrew formula for ${{ steps.version.outputs.version }}"
+          git push origin dev
