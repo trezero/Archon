@@ -44,12 +44,35 @@ function getInitialLevel(): string {
 }
 
 /**
+ * Detect whether the current process is running as a `bun build --compile`
+ * binary. Inlined here because `@archon/paths` has zero `@archon/*` deps.
+ *
+ * pino-pretty cannot be loaded inside a compiled binary: pino transports spawn
+ * a worker that does a dynamic `require.resolve('pino-pretty')`, which fails
+ * inside Bun's virtual `/$bunfs/` filesystem and crashes the binary on startup.
+ */
+function isCompiledBinary(): boolean {
+  const dir = import.meta.dir ?? '';
+  if (dir.startsWith('/$bunfs/') || dir.startsWith('B:\\~BUN\\') || dir.startsWith('B:/~BUN/')) {
+    return true;
+  }
+  const exec = process.execPath ?? '';
+  const base = exec.split(/[/\\]/).pop() ?? '';
+  const withoutExt = base.replace(/\.exe$/i, '').toLowerCase();
+  return exec !== '' && withoutExt !== 'bun' && withoutExt !== 'node';
+}
+
+/**
  * Uses pino-pretty when stdout is a TTY and NODE_ENV !== 'production';
  * outputs newline-delimited JSON otherwise.
+ *
+ * Compiled binaries always use NDJSON (pino-pretty transport cannot resolve
+ * inside `/$bunfs/`).
  */
 function buildLoggerOptions(): pino.LoggerOptions {
   const level = getInitialLevel();
-  const usePretty = process.stdout.isTTY && process.env.NODE_ENV !== 'production';
+  const usePretty =
+    process.stdout.isTTY && process.env.NODE_ENV !== 'production' && !isCompiledBinary();
 
   if (usePretty) {
     return {
