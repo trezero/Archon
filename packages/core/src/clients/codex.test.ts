@@ -96,7 +96,12 @@ describe('CodexClient', () => {
         events: (async function* () {
           yield {
             type: 'item.completed',
-            item: { type: 'command_execution', command: 'npm test' },
+            item: {
+              type: 'command_execution',
+              command: 'npm test',
+              aggregated_output: 'tests passed\n',
+              exit_code: 0,
+            },
           };
           yield { type: 'turn.completed', usage: defaultUsage };
         })(),
@@ -107,7 +112,42 @@ describe('CodexClient', () => {
         chunks.push(chunk);
       }
 
+      // Codex item.completed fires once the command is fully done, so we emit
+      // start + result back-to-back to close the UI tool card immediately.
       expect(chunks[0]).toEqual({ type: 'tool', toolName: 'npm test' });
+      expect(chunks[1]).toEqual({
+        type: 'tool_result',
+        toolName: 'npm test',
+        toolOutput: 'tests passed\n',
+      });
+    });
+
+    test('appends non-zero exit code to command_execution tool_result', async () => {
+      mockRunStreamed.mockResolvedValue({
+        events: (async function* () {
+          yield {
+            type: 'item.completed',
+            item: {
+              type: 'command_execution',
+              command: 'npm test',
+              aggregated_output: 'failure\n',
+              exit_code: 1,
+            },
+          };
+          yield { type: 'turn.completed', usage: defaultUsage };
+        })(),
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test prompt', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks[1]).toEqual({
+        type: 'tool_result',
+        toolName: 'npm test',
+        toolOutput: 'failure\n\n[exit code: 1]',
+      });
     });
 
     test('yields thinking events from reasoning items', async () => {
@@ -143,6 +183,11 @@ describe('CodexClient', () => {
       }
 
       expect(chunks[0]).toEqual({ type: 'tool', toolName: '🔍 Searching: codex sdk' });
+      expect(chunks[1]).toEqual({
+        type: 'tool_result',
+        toolName: '🔍 Searching: codex sdk',
+        toolOutput: '',
+      });
     });
 
     test('yields system task list for todo_list items and deduplicates', async () => {
@@ -349,10 +394,19 @@ describe('CodexClient', () => {
         chunks.push(chunk);
       }
 
+      // First mcp call (in_progress on item.completed): start + empty result
       expect(chunks[0]).toEqual({ type: 'tool', toolName: '🔌 MCP: fs/readFile' });
       expect(chunks[1]).toEqual({
-        type: 'system',
-        content: '⚠️ MCP fs/readFile failed: Permission denied',
+        type: 'tool_result',
+        toolName: '🔌 MCP: fs/readFile',
+        toolOutput: '',
+      });
+      // Second mcp call (failed): start + error result so the UI card closes
+      expect(chunks[2]).toEqual({ type: 'tool', toolName: '🔌 MCP: fs/readFile' });
+      expect(chunks[3]).toEqual({
+        type: 'tool_result',
+        toolName: '🔌 MCP: fs/readFile',
+        toolOutput: '❌ Error: Permission denied',
       });
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.objectContaining({ server: 'fs', tool: 'readFile' }),
@@ -384,9 +438,21 @@ describe('CodexClient', () => {
         chunks.push(chunk);
       }
 
+      // Each item now emits start + empty result so the UI cards always close.
       expect(chunks[0]).toEqual({ type: 'tool', toolName: '🔌 MCP: readFile' });
-      expect(chunks[1]).toEqual({ type: 'tool', toolName: '🔌 MCP: fs' });
-      expect(chunks[2]).toEqual({ type: 'tool', toolName: '🔌 MCP: MCP tool' });
+      expect(chunks[1]).toEqual({
+        type: 'tool_result',
+        toolName: '🔌 MCP: readFile',
+        toolOutput: '',
+      });
+      expect(chunks[2]).toEqual({ type: 'tool', toolName: '🔌 MCP: fs' });
+      expect(chunks[3]).toEqual({ type: 'tool_result', toolName: '🔌 MCP: fs', toolOutput: '' });
+      expect(chunks[4]).toEqual({ type: 'tool', toolName: '🔌 MCP: MCP tool' });
+      expect(chunks[5]).toEqual({
+        type: 'tool_result',
+        toolName: '🔌 MCP: MCP tool',
+        toolOutput: '',
+      });
     });
 
     test('yields MCP failure without error message', async () => {
@@ -405,18 +471,26 @@ describe('CodexClient', () => {
         chunks.push(chunk);
       }
 
-      expect(chunks[0]).toEqual({
-        type: 'system',
-        content: '⚠️ MCP db/query failed',
+      expect(chunks[0]).toEqual({ type: 'tool', toolName: '🔌 MCP: db/query' });
+      expect(chunks[1]).toEqual({
+        type: 'tool_result',
+        toolName: '🔌 MCP: db/query',
+        toolOutput: '❌ Error: MCP tool failed',
       });
     });
 
-    test('skips MCP tool call with completed status', async () => {
+    test('emits paired tool + tool_result for completed MCP tool call', async () => {
       mockRunStreamed.mockResolvedValue({
         events: (async function* () {
           yield {
             type: 'item.completed',
-            item: { type: 'mcp_tool_call', server: 'fs', tool: 'readFile', status: 'completed' },
+            item: {
+              type: 'mcp_tool_call',
+              server: 'fs',
+              tool: 'readFile',
+              status: 'completed',
+              result: { content: [{ type: 'text', text: 'file contents' }] },
+            },
           };
           yield { type: 'turn.completed', usage: defaultUsage };
         })(),
@@ -427,9 +501,15 @@ describe('CodexClient', () => {
         chunks.push(chunk);
       }
 
-      // Only the result — completed MCP calls should not yield a duplicate tool event
-      expect(chunks).toHaveLength(1);
-      expect(chunks[0]).toEqual({
+      // Completed MCP calls now emit tool + tool_result so the UI card closes.
+      expect(chunks).toHaveLength(3);
+      expect(chunks[0]).toEqual({ type: 'tool', toolName: '🔌 MCP: fs/readFile' });
+      expect(chunks[1]).toEqual({
+        type: 'tool_result',
+        toolName: '🔌 MCP: fs/readFile',
+        toolOutput: JSON.stringify([{ type: 'text', text: 'file contents' }]),
+      });
+      expect(chunks[2]).toEqual({
         type: 'result',
         sessionId: 'new-thread-id',
         tokens: { input: 10, output: 5 },

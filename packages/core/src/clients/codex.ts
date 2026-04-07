@@ -308,9 +308,23 @@ export class CodexClient implements IAssistantClient {
                 break;
 
               case 'command_execution':
-                // Tool/command execution
+                // Tool/command execution. The Codex SDK only emits item.completed
+                // once the command has fully run, so we emit the start + result
+                // back-to-back to close the UI's tool card immediately. Without
+                // the paired tool_result, the card spins forever until lock release.
                 if (item.command) {
                   yield { type: 'tool', toolName: item.command };
+                  const exitSuffix =
+                    item.exit_code != null && item.exit_code !== 0
+                      ? `\n[exit code: ${item.exit_code}]`
+                      : '';
+                  yield {
+                    type: 'tool_result',
+                    toolName: item.command,
+                    toolOutput: (item.aggregated_output ?? '') + exitSuffix,
+                  };
+                } else {
+                  getLog().warn({ itemId: item.id }, 'command_execution_missing_command');
                 }
                 break;
 
@@ -323,7 +337,10 @@ export class CodexClient implements IAssistantClient {
 
               case 'web_search':
                 if (item.query) {
-                  yield { type: 'tool', toolName: `🔍 Searching: ${item.query}` };
+                  const searchToolName = `🔍 Searching: ${item.query}`;
+                  yield { type: 'tool', toolName: searchToolName };
+                  // Web search items only fire on completion, so close the card immediately.
+                  yield { type: 'tool_result', toolName: searchToolName, toolOutput: '' };
                 } else {
                   getLog().debug({ itemId: item.id }, 'web_search_missing_query');
                 }
@@ -394,18 +411,41 @@ export class CodexClient implements IAssistantClient {
                   item.server && item.tool
                     ? `${item.server}/${item.tool}`
                     : (item.tool ?? item.server ?? 'MCP tool');
+                const mcpToolName = `🔌 MCP: ${toolInfo}`;
+
+                // Always emit start+result so the UI card closes. item.completed
+                // fires once the call is final (completed or failed).
+                yield { type: 'tool', toolName: mcpToolName };
 
                 if (item.status === 'failed') {
                   getLog().warn(
                     { server: item.server, tool: item.tool, error: item.error, itemId: item.id },
                     'mcp_tool_call_failed'
                   );
-                  const message = item.error?.message
-                    ? `⚠️ MCP ${toolInfo} failed: ${item.error.message}`
-                    : `⚠️ MCP ${toolInfo} failed`;
-                  yield { type: 'system', content: message };
-                } else if (item.status !== 'completed') {
-                  yield { type: 'tool', toolName: `🔌 MCP: ${toolInfo}` };
+                  const errMsg = item.error?.message
+                    ? `❌ Error: ${item.error.message}`
+                    : '❌ Error: MCP tool failed';
+                  yield { type: 'tool_result', toolName: mcpToolName, toolOutput: errMsg };
+                } else {
+                  // status === 'completed' (or 'in_progress', which shouldn't reach
+                  // item.completed but is closed defensively).
+                  let toolOutput = '';
+                  if (item.result?.content) {
+                    if (Array.isArray(item.result.content)) {
+                      toolOutput = JSON.stringify(item.result.content);
+                    } else {
+                      getLog().warn(
+                        {
+                          itemId: item.id,
+                          server: item.server,
+                          tool: item.tool,
+                          resultType: typeof item.result.content,
+                        },
+                        'mcp_tool_call_unexpected_result_shape'
+                      );
+                    }
+                  }
+                  yield { type: 'tool_result', toolName: mcpToolName, toolOutput };
                 }
                 break;
               }
