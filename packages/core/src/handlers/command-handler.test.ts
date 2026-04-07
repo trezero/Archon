@@ -495,14 +495,6 @@ describe('CommandHandler', () => {
       });
     });
 
-    describe('/ping', () => {
-      test('should return pong', async () => {
-        const result = await handleCommand(baseConversation, '/ping');
-        expect(result.success).toBe(true);
-        expect(result.message).toBe('pong');
-      });
-    });
-
     describe('/status', () => {
       test('should show platform and assistant info', async () => {
         const result = await handleCommand(baseConversation, '/status');

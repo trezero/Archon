@@ -658,7 +658,6 @@ export async function handleMessage(
         'commands',
         'init',
         'worktree',
-        'ping',
       ];
 
       if (deterministicCommands.includes(command)) {
