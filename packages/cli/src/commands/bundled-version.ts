@@ -8,3 +8,4 @@
  */
 
 export const BUNDLED_VERSION = '0.2.0';
+export const BUNDLED_GIT_COMMIT = 'unknown';

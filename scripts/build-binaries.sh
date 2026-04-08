@@ -6,7 +6,8 @@ set -euo pipefail
 
 # Get version from package.json or git tag
 VERSION="${VERSION:-$(grep '"version"' package.json | head -1 | cut -d'"' -f4)}"
-echo "Building Archon CLI v${VERSION}"
+GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')}"
+echo "Building Archon CLI v${VERSION} (commit: ${GIT_COMMIT})"
 
 # Update bundled version in source before compiling
 BUNDLED_VERSION_FILE="packages/cli/src/commands/bundled-version.ts"
@@ -22,6 +23,7 @@ cat > "$BUNDLED_VERSION_FILE" << EOF
  */
 
 export const BUNDLED_VERSION = '${VERSION}';
+export const BUNDLED_GIT_COMMIT = '${GIT_COMMIT}';
 EOF
 
 # Output directory
