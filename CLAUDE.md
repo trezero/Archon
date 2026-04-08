@@ -224,6 +224,9 @@ bun run cli isolation cleanup 14  # Custom days
 # Clean up environments with branches merged into main (also deletes remote branches)
 bun run cli isolation cleanup --merged
 
+# Also remove environments with closed (abandoned) PRs
+bun run cli isolation cleanup --merged --include-closed
+
 # Validate workflow definitions and their referenced resources
 bun run cli validate workflows              # All workflows
 bun run cli validate workflows my-workflow  # Single workflow

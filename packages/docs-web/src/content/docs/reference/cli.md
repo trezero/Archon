@@ -246,7 +246,17 @@ archon isolation cleanup 14
 
 # Remove environments with branches merged into main (also deletes remote branches)
 archon isolation cleanup --merged
+
+# Also remove environments whose PRs were closed without merging
+archon isolation cleanup --merged --include-closed
 ```
+
+Merge detection uses three signals in order: git branch ancestry (fast-forward / merge commit),
+patch equivalence (squash-merge via `git cherry`), and GitHub PR state via the `gh` CLI.
+The `gh` CLI is optional — if absent, only git signals are used.
+
+By default, branches with a **CLOSED** PR are skipped. Pass `--include-closed` to clean
+those up as well. Branches with an **OPEN** PR are always skipped.
 
 ### `validate workflows [name]`
 

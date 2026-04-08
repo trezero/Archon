@@ -269,6 +269,50 @@ packages/cli/
 
 ---
 
+## `isolation cleanup --merged` Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ archon isolation cleanup --merged [--include-closed]            │
+└─────────────────────────────────┬───────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ isolation.ts  isolationCleanupMergedCommand({ includeClosed })  │
+│ For each codebase → cleanupMergedWorktrees(codebaseId, path)    │
+└─────────────────────────────────┬───────────────────────────────┘
+                                  │
+                     For each active environment
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ isSafeToRemove() — three-signal union                           │
+│  (a) isBranchMerged()    git ancestry (fast-forward/merge)      │
+│  (b) isPatchEquivalent() git cherry  (squash-merge)             │
+│  (c) getPrState()        gh CLI      (MERGED/CLOSED/OPEN/NONE)  │
+│                                                                  │
+│  OPEN   → always skip                                           │
+│  CLOSED → skip unless includeClosed=true                        │
+│  MERGED or any git-signal → proceed to remove                   │
+└─────────────────────────────────┬───────────────────────────────┘
+                                  │ safe=true
+                                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Guard checks: no uncommitted changes, no active conversations   │
+│ provider.destroy() → remove worktree + delete remote branch     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Signals are evaluated in order — the first positive match short-circuits to avoid
+unnecessary `gh` API calls. The `gh` CLI is a soft dependency: if missing or failing,
+only git signals are used and the result degrades gracefully to `NONE`.
+
+**Code:** `packages/core/src/services/cleanup-service.ts` — `isSafeToRemove()`, `cleanupMergedWorktrees()`
+**Code:** `packages/isolation/src/pr-state.ts` — `getPrState()`
+**Code:** `packages/git/src/branch.ts` — `isPatchEquivalent()`
+
+---
+
 ## CLI Adapter
 
 Implements `IPlatformAdapter` for terminal output.

@@ -2,7 +2,7 @@
  * Tests for isolation complete command
  */
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
-import { isolationCompleteCommand } from './isolation';
+import { isolationCompleteCommand, isolationCleanupMergedCommand } from './isolation';
 
 const mockLogger = {
   fatal: mock(() => undefined),
@@ -42,6 +42,27 @@ const mockCleanupMergedWorktrees = mock(() => Promise.resolve({ removed: [], ski
 mock.module('@archon/core/services/cleanup-service', () => ({
   removeEnvironment: mockRemoveEnvironment,
   cleanupMergedWorktrees: mockCleanupMergedWorktrees,
+}));
+
+const mockListEnvironments = mock(() =>
+  Promise.resolve({
+    codebases: [
+      {
+        codebaseId: 'cb-1',
+        defaultCwd: '/test/repo',
+        repositoryUrl: 'https://github.com/owner/repo',
+        environments: [],
+      },
+    ],
+    totalEnvironments: 0,
+    ghostsReconciled: 0,
+  })
+);
+const mockCleanupMergedEnvironments = mock(() => Promise.resolve({ removed: [], skipped: [] }));
+
+mock.module('@archon/core/operations/isolation-operations', () => ({
+  listEnvironments: mockListEnvironments,
+  cleanupMergedEnvironments: mockCleanupMergedEnvironments,
 }));
 
 const mockHasUncommittedChanges = mock(() => Promise.resolve(false));
@@ -356,5 +377,34 @@ describe('isolationCompleteCommand', () => {
     });
 
     expect(consoleLogSpy).toHaveBeenCalledWith('\nComplete: 1 completed, 1 failed, 1 not found');
+  });
+});
+
+describe('isolationCleanupMergedCommand', () => {
+  let consoleLogSpy: ReturnType<typeof spyOn>;
+  let consoleErrorSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    consoleLogSpy = spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = spyOn(console, 'error').mockImplementation(() => {});
+    mockCleanupMergedEnvironments.mockReset();
+    mockCleanupMergedEnvironments.mockResolvedValue({ removed: [], skipped: [] });
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('passes includeClosed=true when --include-closed flag is set', async () => {
+    await isolationCleanupMergedCommand({ includeClosed: true });
+    expect(mockCleanupMergedEnvironments).toHaveBeenCalledWith('cb-1', '/test/repo', {
+      includeClosed: true,
+    });
+  });
+
+  it('defaults to includeClosed=false', async () => {
+    await isolationCleanupMergedCommand();
+    expect(mockCleanupMergedEnvironments).toHaveBeenCalledWith('cb-1', '/test/repo', {});
   });
 });

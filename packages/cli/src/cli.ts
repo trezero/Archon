@@ -459,7 +459,8 @@ async function main(): Promise<number> {
             // Check for --merged flag in remaining args
             const mergedFlag = args.includes('--merged') || positionals.includes('--merged');
             if (mergedFlag) {
-              await isolationCleanupMergedCommand();
+              const includeClosed = args.includes('--include-closed');
+              await isolationCleanupMergedCommand({ includeClosed });
             } else {
               const days = parseInt(positionals[2] ?? '7', 10);
               await isolationCleanupCommand(days);
