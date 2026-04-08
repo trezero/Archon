@@ -224,6 +224,28 @@ describe('SSETransport', () => {
     });
   });
 
+  describe('buffer eviction warn throttle', () => {
+    test('throttles repeated eviction warns to one per conversation per window', () => {
+      // EVENT_BUFFER_MAX is 500; push 600 events into a conversation with no
+      // active stream so all overflow events trigger an eviction. Even though
+      // ~100 evictions happen, we should see exactly one warn (throttled).
+      const transport = new SSETransport();
+      mockLogger.warn.mockClear();
+
+      for (let i = 0; i < 600; i++) {
+        // emit() with no registered stream falls through to bufferEvent()
+        void transport.emit('conv-throttle', `{"i":${i}}`);
+      }
+
+      const evictionWarns = mockLogger.warn.mock.calls.filter(
+        (call: unknown[]) => call[1] === 'transport.buffer_evicted_oldest'
+      );
+      expect(evictionWarns.length).toBe(1);
+
+      transport.stop();
+    });
+  });
+
   describe('start/stop', () => {
     test('start logs adapter_ready', () => {
       const transport = new SSETransport();

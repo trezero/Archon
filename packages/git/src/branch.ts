@@ -221,6 +221,56 @@ export async function isBranchMerged(
 }
 
 /**
+ * Check if a branch is patch-equivalent to the upstream (e.g. squash-merged).
+ *
+ * Uses `git cherry <upstream> <branch>` which lists branch commits not in upstream:
+ *   - `- <sha>` means the patch IS already in upstream (squash-merged / cherry-picked)
+ *   - `+ <sha>` means the patch is NOT in upstream (genuinely unmerged)
+ *
+ * Returns true if every reported commit is patch-equivalent (or if there are no
+ * commits to compare). Returns false if any commit is unmerged.
+ *
+ * Returns false for expected errors (branch/repo not found).
+ * Throws for unexpected errors (permission denied, corruption).
+ */
+export async function isPatchEquivalent(
+  repoPath: RepoPath,
+  branchName: BranchName,
+  baseBranch: BranchName
+): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', repoPath, 'cherry', baseBranch, branchName],
+      { timeout: 15000 }
+    );
+    const lines = stdout.split('\n').filter(line => line.trim());
+    if (lines.length === 0) return true;
+    return lines.every(line => line.startsWith('-'));
+  } catch (error) {
+    const err = error as Error & { code?: string; stderr?: string };
+    const errorText = `${err.message} ${err.stderr ?? ''}`.toLowerCase();
+
+    const isExpectedError =
+      errorText.includes('not a git repository') ||
+      errorText.includes('unknown revision') ||
+      errorText.includes('bad revision') ||
+      errorText.includes('no such file') ||
+      err.code === 'ENOENT';
+
+    if (isExpectedError) return false;
+
+    getLog().error(
+      { err: error, repoPath, branchName, baseBranch },
+      'branch.patch_equivalent_check_failed'
+    );
+    throw new Error(
+      `Failed to check if ${branchName} is patch-equivalent to ${baseBranch}: ${err.message}`
+    );
+  }
+}
+
+/**
  * Check if a ref is an ancestor of HEAD in the given working directory.
  *
  * Returns true if ancestorRef is an ancestor of HEAD (worktree is based on that branch).

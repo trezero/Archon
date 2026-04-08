@@ -90,6 +90,13 @@ archon isolation cleanup --merged
 
 This also deletes the remote branches — a clean sweep after a round of PRs.
 
+By default, branches with open or closed-without-merging PRs are skipped to avoid
+accidental deletion. To also clean up abandoned (CLOSED) PRs:
+
+```bash
+archon isolation cleanup --merged --include-closed
+```
+
 ### Completing a Branch Lifecycle
 
 When a PR is merged and you want to remove everything — the worktree, the local branch, and the remote branch — use `complete`:

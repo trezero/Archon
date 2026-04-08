@@ -12,6 +12,7 @@ const mockHasUncommittedChanges = mock(() => Promise.resolve(false));
 const mockWorktreeExists = mock(() => Promise.resolve(false));
 const mockGetDefaultBranch = mock(() => Promise.resolve('main'));
 const mockIsBranchMerged = mock(() => Promise.resolve(false));
+const mockIsPatchEquivalent = mock(() => Promise.resolve(false));
 const mockGetLastCommitDate = mock(() => Promise.resolve(null as Date | null));
 mock.module('@archon/git', () => ({
   execFileAsync: mockExecFileAsync,
@@ -19,6 +20,7 @@ mock.module('@archon/git', () => ({
   worktreeExists: mockWorktreeExists,
   getDefaultBranch: mockGetDefaultBranch,
   isBranchMerged: mockIsBranchMerged,
+  isPatchEquivalent: mockIsPatchEquivalent,
   getLastCommitDate: mockGetLastCommitDate,
   toRepoPath: (p: string) => p,
   toBranchName: (b: string) => b,
@@ -40,10 +42,13 @@ mock.module('../isolation', () => ({
     destroy: mockDestroy,
   }),
 }));
+type PrStateValue = 'MERGED' | 'CLOSED' | 'OPEN' | 'NONE';
+const mockGetPrState = mock(() => Promise.resolve('NONE' as PrStateValue));
 mock.module('@archon/isolation', () => ({
   getIsolationProvider: () => ({
     destroy: mockDestroy,
   }),
+  getPrState: mockGetPrState,
 }));
 
 // Mock isolation-environments DB
@@ -824,6 +829,10 @@ describe('cleanupMergedWorktrees', () => {
     // Reset defaults
     mockGetDefaultBranch.mockResolvedValue('main');
     mockIsBranchMerged.mockResolvedValue(false);
+    mockIsPatchEquivalent.mockReset();
+    mockIsPatchEquivalent.mockResolvedValue(false);
+    mockGetPrState.mockReset();
+    mockGetPrState.mockResolvedValue('NONE');
     mockHasUncommittedChanges.mockResolvedValue(false);
     mockWorktreeExists.mockResolvedValue(false);
   });
@@ -914,6 +923,164 @@ describe('cleanupMergedWorktrees', () => {
       branchName: 'in-use-branch',
       reason: 'still used by 2 conversation(s)',
     });
+  });
+
+  test('removes branch when git-cherry detects squash-merge', async () => {
+    mockListByCodebase.mockResolvedValueOnce([
+      {
+        id: 'env-squash',
+        branch_name: 'squash-branch',
+        working_path: '/workspace/repo/worktrees/squash-branch',
+        status: 'active',
+      },
+    ]);
+    mockIsBranchMerged.mockResolvedValueOnce(false);
+    mockIsPatchEquivalent.mockResolvedValueOnce(true);
+    mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
+    mockGetById.mockResolvedValueOnce({
+      id: 'env-squash',
+      working_path: '/workspace/repo/worktrees/squash-branch',
+      status: 'active',
+    });
+    mockWorktreeExists.mockResolvedValueOnce(true);
+
+    const result = await cleanupMergedWorktrees('codebase-1', '/workspace/repo');
+
+    expect(result.removed).toContain('squash-branch');
+  });
+
+  test('removes branch when PR is MERGED', async () => {
+    mockListByCodebase.mockResolvedValueOnce([
+      {
+        id: 'env-pr-merged',
+        branch_name: 'pr-merged-branch',
+        working_path: '/workspace/repo/worktrees/pr-merged-branch',
+        status: 'active',
+      },
+    ]);
+    mockIsBranchMerged.mockResolvedValueOnce(false);
+    mockIsPatchEquivalent.mockResolvedValueOnce(false);
+    mockGetPrState.mockResolvedValueOnce('MERGED');
+    mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
+    mockGetById.mockResolvedValueOnce({
+      id: 'env-pr-merged',
+      working_path: '/workspace/repo/worktrees/pr-merged-branch',
+      status: 'active',
+    });
+    mockWorktreeExists.mockResolvedValueOnce(true);
+
+    const result = await cleanupMergedWorktrees('codebase-1', '/workspace/repo');
+
+    expect(result.removed).toContain('pr-merged-branch');
+  });
+
+  test('skips branch when PR is OPEN with clear reason', async () => {
+    mockListByCodebase.mockResolvedValueOnce([
+      {
+        id: 'env-pr-open',
+        branch_name: 'pr-open-branch',
+        working_path: '/workspace/repo/worktrees/pr-open-branch',
+        status: 'active',
+      },
+    ]);
+    mockIsBranchMerged.mockResolvedValueOnce(false);
+    mockIsPatchEquivalent.mockResolvedValueOnce(false);
+    mockGetPrState.mockResolvedValueOnce('OPEN');
+
+    const result = await cleanupMergedWorktrees('codebase-1', '/workspace/repo');
+
+    expect(result.removed).toHaveLength(0);
+    expect(result.skipped).toContainEqual({
+      branchName: 'pr-open-branch',
+      reason: 'PR is open (active review)',
+    });
+  });
+
+  test('skips branch when PR is CLOSED and includeClosed=false', async () => {
+    mockListByCodebase.mockResolvedValueOnce([
+      {
+        id: 'env-pr-closed',
+        branch_name: 'pr-closed-branch',
+        working_path: '/workspace/repo/worktrees/pr-closed-branch',
+        status: 'active',
+      },
+    ]);
+    mockIsBranchMerged.mockResolvedValueOnce(false);
+    mockIsPatchEquivalent.mockResolvedValueOnce(false);
+    mockGetPrState.mockResolvedValueOnce('CLOSED');
+
+    const result = await cleanupMergedWorktrees('codebase-1', '/workspace/repo');
+
+    expect(result.removed).toHaveLength(0);
+  });
+
+  test('removes branch when PR is CLOSED and includeClosed=true', async () => {
+    mockListByCodebase.mockResolvedValueOnce([
+      {
+        id: 'env-pr-closed-include',
+        branch_name: 'pr-closed-branch',
+        working_path: '/workspace/repo/worktrees/pr-closed-branch',
+        status: 'active',
+      },
+    ]);
+    mockIsBranchMerged.mockResolvedValueOnce(false);
+    mockIsPatchEquivalent.mockResolvedValueOnce(false);
+    mockGetPrState.mockResolvedValueOnce('CLOSED');
+    mockGetConversationsUsingEnv.mockResolvedValueOnce([]);
+    mockGetById.mockResolvedValueOnce({
+      id: 'env-pr-closed-include',
+      working_path: '/workspace/repo/worktrees/pr-closed-branch',
+      status: 'active',
+    });
+    mockWorktreeExists.mockResolvedValueOnce(true);
+
+    const result = await cleanupMergedWorktrees('codebase-1', '/workspace/repo', {
+      includeClosed: true,
+    });
+
+    expect(result.removed).toContain('pr-closed-branch');
+  });
+
+  test('skips branch when no PR and not merged', async () => {
+    mockListByCodebase.mockResolvedValueOnce([
+      {
+        id: 'env-none',
+        branch_name: 'orphan-branch',
+        working_path: '/workspace/repo/worktrees/orphan-branch',
+        status: 'active',
+      },
+    ]);
+    mockIsBranchMerged.mockResolvedValueOnce(false);
+    mockIsPatchEquivalent.mockResolvedValueOnce(false);
+    mockGetPrState.mockResolvedValueOnce('NONE');
+
+    const result = await cleanupMergedWorktrees('codebase-1', '/workspace/repo');
+
+    expect(result.removed).toHaveLength(0);
+    expect(result.skipped).toHaveLength(0);
+  });
+
+  test('skips branch when isPatchEquivalent throws unexpected error', async () => {
+    mockListByCodebase.mockResolvedValueOnce([
+      {
+        id: 'env-error',
+        branch_name: 'error-branch',
+        working_path: '/workspace/repo/worktrees/error-branch',
+        status: 'active',
+      },
+    ]);
+    mockIsBranchMerged.mockResolvedValueOnce(false);
+    mockIsPatchEquivalent.mockRejectedValueOnce(new Error('permission denied'));
+
+    const result = await cleanupMergedWorktrees('codebase-1', '/workspace/repo');
+
+    expect(result.removed).toHaveLength(0);
+    expect(result.skipped).toContainEqual(
+      expect.objectContaining({
+        branchName: 'error-branch',
+        reason: expect.stringContaining('merge check failed'),
+      })
+    );
   });
 });
 

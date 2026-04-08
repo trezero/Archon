@@ -122,6 +122,7 @@ Progress events (node start/complete/fail/skip, approval gates) are written to s
 | `--from <branch>`, `--from-branch <branch>` | Override base branch (start-point for worktree) |
 | `--no-worktree` | Opt out of isolation -- run directly in live checkout |
 | `--resume` | Resume from last failed run at the working path (skips completed nodes) |
+| `--allow-env-keys` | Grant env-leak-gate consent during auto-registration (bypasses the gate for this codebase). Audit-logged as `env_leak_consent_granted` with `actor: 'user-cli'`. See [security.md](/reference/security/#env-leak-gate-target-repo-env-keys). |
 | `--quiet`, `-q` | Suppress all progress output to stderr |
 | `--verbose`, `-v` | Also show tool-level events (tool name and duration) |
 
@@ -246,7 +247,17 @@ archon isolation cleanup 14
 
 # Remove environments with branches merged into main (also deletes remote branches)
 archon isolation cleanup --merged
+
+# Also remove environments whose PRs were closed without merging
+archon isolation cleanup --merged --include-closed
 ```
+
+Merge detection uses three signals in order: git branch ancestry (fast-forward / merge commit),
+patch equivalence (squash-merge via `git cherry`), and GitHub PR state via the `gh` CLI.
+The `gh` CLI is optional — if absent, only git signals are used.
+
+By default, branches with a **CLOSED** PR are skipped. Pass `--include-closed` to clean
+those up as well. Branches with an **OPEN** PR are always skipped.
 
 ### `validate workflows [name]`
 
