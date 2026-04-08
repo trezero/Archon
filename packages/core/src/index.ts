@@ -145,6 +145,14 @@ export { toError } from './utils/error';
 // Credential sanitization
 export { sanitizeCredentials, sanitizeError } from './utils/credential-sanitizer';
 
+// Env leak scanner
+export {
+  EnvLeakError,
+  scanPathForSensitiveKeys,
+  formatLeakError,
+  type LeakReport,
+} from './utils/env-leak-scanner';
+
 // GitHub GraphQL
 export { getLinkedIssueNumbers } from './utils/github-graphql';
 

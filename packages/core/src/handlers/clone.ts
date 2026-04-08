@@ -16,6 +16,7 @@ import {
   parseOwnerRepo,
 } from '@archon/paths';
 import { findMarkdownFilesRecursive } from '../utils/commands';
+import { scanPathForSensitiveKeys, EnvLeakError } from '../utils/env-leak-scanner';
 import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -40,8 +41,17 @@ export interface RegisterResult {
 async function registerRepoAtPath(
   targetPath: string,
   name: string,
-  repositoryUrl: string | null
+  repositoryUrl: string | null,
+  allowEnvKeys = false
 ): Promise<RegisterResult> {
+  // Scan for sensitive keys in auto-loaded .env files before registering
+  if (!allowEnvKeys) {
+    const report = scanPathForSensitiveKeys(targetPath);
+    if (report.findings.length > 0) {
+      throw new EnvLeakError(report);
+    }
+  }
+
   // Auto-detect assistant type based on folder structure
   let suggestedAssistant = 'claude';
   const codexFolder = join(targetPath, '.codex');
@@ -122,6 +132,7 @@ async function registerRepoAtPath(
     repository_url: repositoryUrl ?? undefined,
     default_cwd: targetPath,
     ai_assistant_type: suggestedAssistant,
+    allow_env_keys: allowEnvKeys,
   });
 
   // Auto-load commands if found
@@ -190,11 +201,14 @@ function normalizeRepoUrl(rawUrl: string): {
  * Local paths (starting with /, ~, or .) are delegated to registerRepository
  * to avoid wrong owner/repo naming. See #383 for broader rethink.
  */
-export async function cloneRepository(repoUrl: string): Promise<RegisterResult> {
+export async function cloneRepository(
+  repoUrl: string,
+  allowEnvKeys?: boolean
+): Promise<RegisterResult> {
   // Local paths should be registered (symlink), not cloned (copied)
   if (repoUrl.startsWith('/') || repoUrl.startsWith('~') || repoUrl.startsWith('.')) {
     const resolvedPath = repoUrl.startsWith('~') ? expandTilde(repoUrl) : resolve(repoUrl);
-    return registerRepository(resolvedPath);
+    return registerRepository(resolvedPath, allowEnvKeys);
   }
 
   const { workingUrl, ownerName, repoName, targetPath } = normalizeRepoUrl(repoUrl);
@@ -275,7 +289,12 @@ export async function cloneRepository(repoUrl: string): Promise<RegisterResult> 
   await execFileAsync('git', ['config', '--global', '--add', 'safe.directory', targetPath]);
   getLog().debug({ path: targetPath }, 'safe_directory_added');
 
-  const result = await registerRepoAtPath(targetPath, `${ownerName}/${repoName}`, workingUrl);
+  const result = await registerRepoAtPath(
+    targetPath,
+    `${ownerName}/${repoName}`,
+    workingUrl,
+    allowEnvKeys
+  );
   getLog().info({ url: workingUrl, targetPath }, 'clone_completed');
   return result;
 }
@@ -283,7 +302,10 @@ export async function cloneRepository(repoUrl: string): Promise<RegisterResult> 
 /**
  * Register an existing local repository in the database (no git clone).
  */
-export async function registerRepository(localPath: string): Promise<RegisterResult> {
+export async function registerRepository(
+  localPath: string,
+  allowEnvKeys?: boolean
+): Promise<RegisterResult> {
   // Validate path exists and is a git repo
   try {
     await execFileAsync('git', ['-C', localPath, 'rev-parse', '--git-dir']);
@@ -349,5 +371,5 @@ export async function registerRepository(localPath: string): Promise<RegisterRes
   );
 
   // default_cwd is the real local path (not the symlink)
-  return registerRepoAtPath(localPath, name, remoteUrl);
+  return registerRepoAtPath(localPath, name, remoteUrl, allowEnvKeys);
 }

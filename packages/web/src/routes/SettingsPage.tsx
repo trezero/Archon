@@ -250,10 +250,20 @@ function EnvVarsPanel({ codebaseId }: { codebaseId: string }): React.ReactElemen
   );
 }
 
+function isEnvLeakError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'status' in error &&
+    (error as Error & { status: number }).status === 422 &&
+    error.message.startsWith('Cannot add codebase')
+  );
+}
+
 function ProjectsSection(): React.ReactElement {
   const queryClient = useQueryClient();
   const [addPath, setAddPath] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [allowEnvKeys, setAllowEnvKeys] = useState(false);
   const [expandedEnvVars, setExpandedEnvVars] = useState<string | null>(null);
 
   const { data: codebases } = useQuery({
@@ -262,11 +272,13 @@ function ProjectsSection(): React.ReactElement {
   });
 
   const addMutation = useMutation({
-    mutationFn: (path: string) => addCodebase({ path }),
+    mutationFn: ({ path, allowEnvKeys }: { path: string; allowEnvKeys?: boolean }) =>
+      addCodebase({ path, allowEnvKeys }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['codebases'] });
       setAddPath('');
       setShowAdd(false);
+      setAllowEnvKeys(false);
     },
   });
 
@@ -280,7 +292,7 @@ function ProjectsSection(): React.ReactElement {
   function handleAddSubmit(e: React.FormEvent): void {
     e.preventDefault();
     if (addPath.trim()) {
-      addMutation.mutate(addPath.trim());
+      addMutation.mutate({ path: addPath.trim(), allowEnvKeys: allowEnvKeys || undefined });
     }
   }
 
@@ -373,6 +385,18 @@ function ProjectsSection(): React.ReactElement {
             {addMutation.error instanceof Error
               ? addMutation.error.message
               : 'Failed to add project'}
+            {isEnvLeakError(addMutation.error) && (
+              <label className="mt-2 flex items-center gap-2 text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={allowEnvKeys}
+                  onChange={e => {
+                    setAllowEnvKeys(e.target.checked);
+                  }}
+                />
+                Allow env keys (I understand the risk)
+              </label>
+            )}
           </div>
         )}
       </CardContent>

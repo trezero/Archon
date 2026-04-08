@@ -20,6 +20,7 @@ const mockCreateCodebase = mock(() =>
     repository_url: 'https://github.com/owner/repo',
     default_cwd: '/home/test/.archon/workspaces/owner/repo/source',
     ai_assistant_type: 'claude',
+    allow_env_keys: false,
     commands: {},
     created_at: new Date(),
     updated_at: new Date(),
@@ -66,6 +67,20 @@ mock.module('../utils/commands', () => ({
   findMarkdownFilesRecursive: mockFindMarkdownFilesRecursive,
 }));
 
+// ── env-leak-scanner mock ───────────────────────────────────────────────────
+class MockEnvLeakError extends Error {
+  constructor(public report: unknown) {
+    super('Cannot add codebase — /test/path contains keys that will leak into AI subprocesses');
+    this.name = 'EnvLeakError';
+  }
+}
+
+const mockScanPathForSensitiveKeys = mock(() => ({ path: '', findings: [] }));
+mock.module('../utils/env-leak-scanner', () => ({
+  scanPathForSensitiveKeys: mockScanPathForSensitiveKeys,
+  EnvLeakError: MockEnvLeakError,
+}));
+
 // ── Import module under test AFTER mocks are registered ────────────────────
 import { cloneRepository, registerRepository } from './clone';
 
@@ -103,6 +118,7 @@ function clearMocks(): void {
   mockFindCodebaseByName.mockReset();
   mockUpdateCodebase.mockReset();
   mockFindMarkdownFilesRecursive.mockReset();
+  mockScanPathForSensitiveKeys.mockReset();
   mockLogger.info.mockClear();
   mockLogger.debug.mockClear();
   mockLogger.warn.mockClear();
@@ -116,6 +132,7 @@ function clearMocks(): void {
   mockFindCodebaseByName.mockResolvedValue(null);
   mockUpdateCodebase.mockResolvedValue(undefined);
   mockFindMarkdownFilesRecursive.mockResolvedValue([]);
+  mockScanPathForSensitiveKeys.mockReturnValue({ path: '', findings: [] });
 }
 
 afterAll(() => {
@@ -140,6 +157,7 @@ function makeCodebase(
     repository_url: 'https://github.com/owner/repo',
     default_cwd: '/home/test/.archon/workspaces/owner/repo/source',
     ai_assistant_type: 'claude',
+    allow_env_keys: false,
     commands: {},
     created_at: new Date(),
     updated_at: new Date(),
@@ -929,5 +947,28 @@ describe('RegisterResult shape', () => {
 
     expect(result.alreadyExisted).toBe(true);
     expect(result.commandCount).toBe(0);
+  });
+
+  describe('env leak gate', () => {
+    test('throws EnvLeakError when scanner finds sensitive keys and allowEnvKeys is false', async () => {
+      mockScanPathForSensitiveKeys.mockReturnValueOnce({
+        path: '/home/test/.archon/workspaces/owner/repo/source',
+        findings: [{ file: '.env', keys: ['ANTHROPIC_API_KEY'] }],
+      });
+
+      await expect(cloneRepository('https://github.com/owner/repo')).rejects.toThrow(
+        'Cannot add codebase'
+      );
+    });
+
+    test('does not scan when allowEnvKeys is true, even with scanner findings available', async () => {
+      mockCreateCodebase.mockResolvedValueOnce(makeCodebase() as ReturnType<typeof makeCodebase>);
+
+      // allowEnvKeys=true should bypass the gate; scanner not called even with findings queued
+      const result = await cloneRepository('https://github.com/owner/repo', true);
+
+      expect(mockScanPathForSensitiveKeys).not.toHaveBeenCalled();
+      expect(result.codebaseId).toBe('codebase-uuid-1');
+    });
   });
 });

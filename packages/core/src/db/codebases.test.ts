@@ -36,6 +36,7 @@ describe('codebases', () => {
     repository_url: 'https://github.com/user/repo',
     default_cwd: '/workspace/test-project',
     ai_assistant_type: 'claude',
+    allow_env_keys: false,
     commands: { plan: { path: '.claude/commands/plan.md', description: 'Plan feature' } },
     created_at: new Date(),
     updated_at: new Date(),
@@ -54,8 +55,8 @@ describe('codebases', () => {
 
       expect(result).toEqual(mockCodebase);
       expect(mockQuery).toHaveBeenCalledWith(
-        'INSERT INTO remote_agent_codebases (name, repository_url, default_cwd, ai_assistant_type) VALUES ($1, $2, $3, $4) RETURNING *',
-        ['test-project', 'https://github.com/user/repo', '/workspace/test-project', 'claude']
+        'INSERT INTO remote_agent_codebases (name, repository_url, default_cwd, ai_assistant_type, allow_env_keys) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+        ['test-project', 'https://github.com/user/repo', '/workspace/test-project', 'claude', false]
       );
     });
 
@@ -73,8 +74,8 @@ describe('codebases', () => {
 
       expect(result).toEqual(codebaseWithoutOptional);
       expect(mockQuery).toHaveBeenCalledWith(
-        'INSERT INTO remote_agent_codebases (name, repository_url, default_cwd, ai_assistant_type) VALUES ($1, $2, $3, $4) RETURNING *',
-        ['test-project', null, '/workspace/test-project', 'claude']
+        'INSERT INTO remote_agent_codebases (name, repository_url, default_cwd, ai_assistant_type, allow_env_keys) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+        ['test-project', null, '/workspace/test-project', 'claude', false]
       );
     });
 
@@ -297,6 +298,7 @@ describe('codebases', () => {
             name: 'test-repo',
             default_cwd: '/workspace/test-repo',
             ai_assistant_type: 'claude',
+            allow_env_keys: false,
             repository_url: null,
             commands: {},
             created_at: new Date(),

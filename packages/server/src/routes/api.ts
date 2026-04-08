@@ -27,6 +27,7 @@ import {
   registerRepository,
   ConversationNotFoundError,
   generateAndSetTitle,
+  EnvLeakError,
 } from '@archon/core';
 import { removeWorktree, toRepoPath, toWorktreePath } from '@archon/git';
 import {
@@ -816,7 +817,7 @@ export function registerApiRoutes(
 ): void {
   function apiError(
     c: Context,
-    status: 400 | 404 | 500,
+    status: 400 | 404 | 422 | 500,
     message: string,
     detail?: string
   ): Response {
@@ -1482,8 +1483,8 @@ export function registerApiRoutes(
     try {
       // .refine() guarantees exactly one of url/path is present
       const result = body.url
-        ? await cloneRepository(body.url)
-        : await registerRepository(body.path ?? '');
+        ? await cloneRepository(body.url, body.allowEnvKeys)
+        : await registerRepository(body.path ?? '', body.allowEnvKeys);
 
       // Fetch the full codebase record for a consistent response
       const codebase = await codebaseDb.getCodebase(result.codebaseId);
@@ -1493,6 +1494,12 @@ export function registerApiRoutes(
 
       return c.json(codebase, result.alreadyExisted ? 200 : 201);
     } catch (error) {
+      if (error instanceof EnvLeakError) {
+        const path = body.url ?? body.path ?? '';
+        const files = error.report.findings.map(f => f.file);
+        getLog().warn({ path, files }, 'add_codebase_env_leak_refused');
+        return apiError(c, 422, error.message);
+      }
       getLog().error({ err: error }, 'add_codebase_failed');
       return apiError(
         c,

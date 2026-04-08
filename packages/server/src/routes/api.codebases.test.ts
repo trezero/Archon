@@ -48,6 +48,14 @@ mock.module('@archon/core', () => ({
       this.name = 'ConversationNotFoundError';
     }
   },
+  EnvLeakError: class EnvLeakError extends Error {
+    constructor(public report: { path: string; findings: { file: string; keys: string[] }[] }) {
+      super(
+        `Cannot add codebase — ${report.path} contains keys that will leak into AI subprocesses`
+      );
+      this.name = 'EnvLeakError';
+    }
+  },
   getArchonWorkspacesPath: () => '/tmp/.archon/workspaces',
   generateAndSetTitle: mock(async () => {}),
   createLogger: () => ({
@@ -170,6 +178,7 @@ const MOCK_CODEBASE = {
   repository_url: 'https://github.com/user/repo',
   default_cwd: '/home/user/projects/my-project',
   ai_assistant_type: 'claude',
+  allow_env_keys: false,
   commands: {},
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
@@ -387,7 +396,7 @@ describe('POST /api/codebases', () => {
 
     const body = (await response.json()) as { id: string };
     expect(body.id).toBe('codebase-uuid-1');
-    expect(mockCloneRepository).toHaveBeenCalledWith('https://github.com/user/repo');
+    expect(mockCloneRepository).toHaveBeenCalledWith('https://github.com/user/repo', undefined);
   });
 
   test('registers existing URL codebase with 200', async () => {
@@ -424,7 +433,7 @@ describe('POST /api/codebases', () => {
       body: JSON.stringify({ path: '/home/user/my-repo' }),
     });
     expect(response.status).toBe(201);
-    expect(mockRegisterRepository).toHaveBeenCalledWith('/home/user/my-repo');
+    expect(mockRegisterRepository).toHaveBeenCalledWith('/home/user/my-repo', undefined);
   });
 
   test('returns 400 when both url and path are provided', async () => {
@@ -495,6 +504,44 @@ describe('POST /api/codebases', () => {
 
     const body = (await response.json()) as { error: string };
     expect(body.error).toContain('authentication required');
+  });
+
+  test('returns 422 when cloneRepository throws EnvLeakError', async () => {
+    const { EnvLeakError } = await import('@archon/core');
+    mockCloneRepository.mockImplementationOnce(async () => {
+      throw new EnvLeakError({
+        path: '/repo/path',
+        findings: [{ file: '.env', keys: ['ANTHROPIC_API_KEY'] }],
+      });
+    });
+
+    const app = makeApp();
+    const response = await app.request('/api/codebases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: 'https://github.com/user/repo' }),
+    });
+    expect(response.status).toBe(422);
+
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('Cannot add codebase');
+  });
+
+  test('passes allowEnvKeys=true to cloneRepository when body includes it', async () => {
+    mockCloneRepository.mockImplementationOnce(async () => ({
+      codebaseId: 'clone-uuid-2',
+      alreadyExisted: false,
+    }));
+    mockGetCodebase.mockImplementationOnce(async () => MOCK_CODEBASE);
+
+    const app = makeApp();
+    const response = await app.request('/api/codebases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: 'https://github.com/user/repo', allowEnvKeys: true }),
+    });
+    expect(response.status).toBe(201);
+    expect(mockCloneRepository).toHaveBeenCalledWith('https://github.com/user/repo', true);
   });
 });
 
