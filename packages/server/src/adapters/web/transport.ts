@@ -16,11 +16,33 @@ export interface SSEWriter {
 /** Grace period (ms) before firing onCleanup after stream removal. */
 const RECONNECT_GRACE_MS = 5_000;
 
-/** Max time (ms) to hold buffered events waiting for a stream to connect. */
-const EVENT_BUFFER_TTL_MS = 3_000;
+/**
+ * Max time (ms) to hold buffered events waiting for a stream to connect.
+ *
+ * Must be ≥ RECONNECT_GRACE_MS — otherwise events emitted during a reconnect
+ * window are dropped *before* the client has had a chance to reconnect, which
+ * manifests as perpetually-spinning tool cards when a `tool_result` happens to
+ * land in the gap. 60s covers typical EventSource auto-reconnect delays on
+ * flaky networks (mobile, VPN, laptop sleep) without meaningfully growing
+ * memory footprint — events are small JSON strings and the cap below bounds
+ * the worst case.
+ */
+const EVENT_BUFFER_TTL_MS = 60_000;
 
 /** Max events to buffer per conversation before oldest are dropped. */
-const EVENT_BUFFER_MAX = 50;
+const EVENT_BUFFER_MAX = 500;
+
+/** Min interval (ms) between `transport.buffer_evicted_oldest` warns per conversation. */
+const EVICTION_WARN_THROTTLE_MS = 5_000;
+
+// Fail-fast invariant: buffer TTL must outlive the reconnect grace window,
+// otherwise events emitted during a reconnect can be dropped before the
+// client has had a chance to come back. See comment on EVENT_BUFFER_TTL_MS.
+if (EVENT_BUFFER_TTL_MS < RECONNECT_GRACE_MS) {
+  throw new Error(
+    `EVENT_BUFFER_TTL_MS (${EVENT_BUFFER_TTL_MS}) must be >= RECONNECT_GRACE_MS (${RECONNECT_GRACE_MS})`
+  );
+}
 
 interface BufferedEvent {
   data: string;
@@ -33,6 +55,7 @@ export class SSETransport {
   private zombieReaperHandle: ReturnType<typeof setInterval> | null = null;
   private eventBuffer = new Map<string, BufferedEvent[]>();
   private bufferCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private lastEvictionWarnAt = new Map<string, number>();
 
   constructor(
     private onCleanup?: (conversationId: string) => void,
@@ -65,7 +88,17 @@ export class SSETransport {
     if (buffered && buffered.length > 0) {
       const now = Date.now();
       const valid = buffered.filter(e => now - e.timestamp < EVENT_BUFFER_TTL_MS);
+      const expired = buffered.length - valid.length;
       this.clearBuffer(conversationId);
+      if (expired > 0) {
+        // Events outlived the buffer TTL before the client reconnected.
+        // Symptom on the UI: stuck tool cards for any tool_result that was
+        // in the expired batch. If this fires in practice, bump TTL further.
+        getLog().warn(
+          { conversationId, expired, ttlMs: EVENT_BUFFER_TTL_MS },
+          'transport.buffer_ttl_expired'
+        );
+      }
       if (valid.length > 0) {
         getLog().debug({ conversationId, count: valid.length }, 'sse_buffer_replay');
         for (const event of valid) {
@@ -132,6 +165,7 @@ export class SSETransport {
     }
     this.cleanupTimers.clear();
     this.eventBuffer.clear();
+    this.lastEvictionWarnAt.clear();
     for (const timer of this.bufferCleanupTimers.values()) {
       clearTimeout(timer);
     }
@@ -198,22 +232,39 @@ export class SSETransport {
       this.eventBuffer.set(conversationId, buf);
     }
     buf.push({ data, timestamp: Date.now() });
-    // Cap buffer size — drop oldest if over limit
+    // Cap buffer size — drop oldest if over limit. Warn so we notice if
+    // this ever happens in practice: evicted events mean the UI will miss
+    // something when the client reconnects.
     if (buf.length > EVENT_BUFFER_MAX) {
       buf.shift();
+      // Throttle: a runaway producer could overflow by hundreds in a tight
+      // loop and flood logs. Warn at most once per EVICTION_WARN_THROTTLE_MS
+      // per conversation — enough to notice in practice without flooding.
+      const lastWarn = this.lastEvictionWarnAt.get(conversationId) ?? 0;
+      const now = Date.now();
+      if (now - lastWarn >= EVICTION_WARN_THROTTLE_MS) {
+        this.lastEvictionWarnAt.set(conversationId, now);
+        getLog().warn(
+          { conversationId, bufferMax: EVENT_BUFFER_MAX },
+          'transport.buffer_evicted_oldest'
+        );
+      }
     }
-    // Schedule auto-cleanup so buffers don't leak for conversations that never connect
-    if (!this.bufferCleanupTimers.has(conversationId)) {
-      const timer = setTimeout(() => {
-        this.clearBuffer(conversationId);
-      }, EVENT_BUFFER_TTL_MS + 500);
-      this.bufferCleanupTimers.set(conversationId, timer);
-    }
+    // Schedule auto-cleanup so buffers don't leak for conversations that never
+    // connect. Reset the timer on each new event so the buffer is held for
+    // TTL past the *most recent* event, not the first one.
+    const existingCleanup = this.bufferCleanupTimers.get(conversationId);
+    if (existingCleanup) clearTimeout(existingCleanup);
+    const timer = setTimeout(() => {
+      this.clearBuffer(conversationId);
+    }, EVENT_BUFFER_TTL_MS + 500);
+    this.bufferCleanupTimers.set(conversationId, timer);
     getLog().debug({ conversationId, buffered: buf.length }, 'sse_event_buffered');
   }
 
   private clearBuffer(conversationId: string): void {
     this.eventBuffer.delete(conversationId);
+    this.lastEvictionWarnAt.delete(conversationId);
     const timer = this.bufferCleanupTimers.get(conversationId);
     if (timer) {
       clearTimeout(timer);
