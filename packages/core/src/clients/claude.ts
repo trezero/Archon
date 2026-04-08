@@ -29,6 +29,7 @@ import { createLogger } from '@archon/paths';
 import { buildCleanSubprocessEnv } from '../utils/env-allowlist';
 import { scanPathForSensitiveKeys, EnvLeakError } from '../utils/env-leak-scanner';
 import * as codebaseDb from '../db/codebases';
+import { loadConfig } from '../config/config-loader';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -267,9 +268,21 @@ export class ClaudeClient implements IAssistantClient {
       (await codebaseDb.findCodebaseByDefaultCwd(cwd)) ??
       (await codebaseDb.findCodebaseByPathPrefix(cwd));
     if (!codebase?.allow_env_keys) {
-      const report = scanPathForSensitiveKeys(cwd);
-      if (report.findings.length > 0) {
-        throw new EnvLeakError(report);
+      // Fail-closed: a config load failure (corrupt YAML, permission denied)
+      // must NOT silently bypass the gate. Catch, log, and treat as
+      // `allowTargetRepoKeys = false` so the scanner still runs.
+      let allowTargetRepoKeys = false;
+      try {
+        const merged = await loadConfig(cwd);
+        allowTargetRepoKeys = merged.allowTargetRepoKeys;
+      } catch (configErr) {
+        getLog().warn({ err: configErr, cwd }, 'env_leak_gate.config_load_failed_gate_enforced');
+      }
+      if (!allowTargetRepoKeys) {
+        const report = scanPathForSensitiveKeys(cwd);
+        if (report.findings.length > 0) {
+          throw new EnvLeakError(report, 'spawn-existing');
+        }
       }
     }
 

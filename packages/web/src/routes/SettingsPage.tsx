@@ -10,6 +10,7 @@ import {
   getHealth,
   listCodebases,
   addCodebase,
+  updateCodebase,
   deleteCodebase,
   updateAssistantConfig,
   getCodebaseEnvVars,
@@ -265,6 +266,7 @@ function ProjectsSection(): React.ReactElement {
   const [showAdd, setShowAdd] = useState(false);
   const [allowEnvKeys, setAllowEnvKeys] = useState(false);
   const [expandedEnvVars, setExpandedEnvVars] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState<string | null>(null);
 
   const { data: codebases } = useQuery({
     queryKey: ['codebases'],
@@ -289,6 +291,20 @@ function ProjectsSection(): React.ReactElement {
     },
   });
 
+  const toggleEnvKeysMutation = useMutation({
+    mutationFn: ({ id, allowEnvKeys }: { id: string; allowEnvKeys: boolean }) =>
+      updateCodebase(id, { allowEnvKeys }),
+    onSuccess: () => {
+      setToggleError(null);
+      void queryClient.invalidateQueries({ queryKey: ['codebases'] });
+    },
+    onError: (err: Error) => {
+      // Without this the user clicks "Revoke env keys", confirms the
+      // destructive dialog, and gets no feedback if the PATCH fails.
+      setToggleError(err.message);
+    },
+  });
+
   function handleAddSubmit(e: React.FormEvent): void {
     e.preventDefault();
     if (addPath.trim()) {
@@ -302,6 +318,11 @@ function ProjectsSection(): React.ReactElement {
         <CardTitle>Projects</CardTitle>
       </CardHeader>
       <CardContent>
+        {toggleError && (
+          <div className="mb-2 rounded-md border border-error/50 bg-error/10 p-2 text-sm text-error">
+            Failed to update env-key consent: {toggleError}
+          </div>
+        )}
         {!codebases || codebases.length === 0 ? (
           <div className="text-sm text-muted-foreground">No projects registered.</div>
         ) : (
@@ -310,10 +331,40 @@ function ProjectsSection(): React.ReactElement {
               <div key={cb.id} className="rounded-md border border-border p-2 text-sm">
                 <div className="flex items-center justify-between">
                   <div className="min-w-0 flex-1">
-                    <div className="font-medium truncate">{cb.name}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="font-medium truncate">{cb.name}</div>
+                      {cb.allow_env_keys && (
+                        <Badge variant="destructive" className="text-[10px]">
+                          env keys allowed
+                        </Badge>
+                      )}
+                    </div>
                     <div className="text-xs text-muted-foreground truncate">{cb.default_cwd}</div>
                   </div>
                   <div className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => {
+                        if (cb.allow_env_keys) {
+                          if (
+                            !window.confirm(
+                              `Revoke env-key consent for "${cb.name}"? Future workflow runs will be blocked if .env contains sensitive keys.`
+                            )
+                          ) {
+                            return;
+                          }
+                        }
+                        toggleEnvKeysMutation.mutate({
+                          id: cb.id,
+                          allowEnvKeys: !cb.allow_env_keys,
+                        });
+                      }}
+                      disabled={toggleEnvKeysMutation.isPending}
+                    >
+                      {cb.allow_env_keys ? 'Revoke env keys' : 'Allow env keys'}
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"

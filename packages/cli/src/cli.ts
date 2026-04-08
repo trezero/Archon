@@ -127,6 +127,9 @@ Options:
   --json                     Output machine-readable JSON (for workflow list)
   --workflow <name>          Workflow to run for 'continue' (default: archon-assist)
   --no-context               Skip context injection for 'continue'
+  --allow-env-keys           Grant env-key consent during auto-registration
+                             (bypasses the env-leak gate for this codebase;
+                             logs an audit entry)
 
 Examples:
   archon chat "What does the orchestrator do?"
@@ -190,6 +193,7 @@ async function main(): Promise<number> {
         reason: { type: 'string' },
         workflow: { type: 'string' },
         'no-context': { type: 'boolean' },
+        'allow-env-keys': { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false, // Allow unknown flags to pass through
@@ -211,6 +215,7 @@ async function main(): Promise<number> {
   const resumeFlag = values.resume as boolean | undefined;
   const spawnFlag = values.spawn as boolean | undefined;
   const jsonFlag = values.json as boolean | undefined;
+  const allowEnvKeysFlag = values['allow-env-keys'] as boolean | undefined;
 
   // Handle help flag
   if (values.help) {
@@ -323,6 +328,7 @@ async function main(): Promise<number> {
               fromBranch,
               noWorktree,
               resume: resumeFlag,
+              allowEnvKeys: allowEnvKeysFlag,
               quiet: values.quiet as boolean | undefined,
               verbose: values.verbose as boolean | undefined,
             };
