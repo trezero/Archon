@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-08
+
+Patch release: SQLite migration fix for existing databases and release build pipeline fix.
+
+### Fixed
+
+- **SQLite migration for `allow_env_keys`**: add the missing `allow_env_keys` column to the `codebases` schema and a migration so databases created before v0.3.0 upgrade cleanly instead of erroring on first query (#988).
+- **Release workflow binary builds**: wire `.github/workflows/release.yml` back to `scripts/build-binaries.sh` so tagged releases actually produce platform binaries and `checksums.txt` (#986, #987).
+
 ## [0.3.0] - 2026-04-08
 
 Env-leak gate hardening, SSE reliability fixes, isolation cleanup smarter merge detection, build/version improvements, and deploy hardening.
