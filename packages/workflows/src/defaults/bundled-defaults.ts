@@ -8,6 +8,8 @@
  * Import syntax uses `with { type: 'text' }` to import file contents as strings.
  */
 
+import { BUNDLED_IS_BINARY } from '@archon/paths';
+
 // =============================================================================
 // Default Commands (21 total)
 // =============================================================================
@@ -103,22 +105,18 @@ export const BUNDLED_WORKFLOWS: Record<string, string> = {
 };
 
 /**
- * Check if a given module directory path belongs to a compiled Bun binary.
- *
- * Compiled Bun binaries use a virtual filesystem for bundled modules:
- * - Linux/macOS: `/$bunfs/root/`
- * - Windows: `B:\~BUN\root\` or `B:/~BUN/root/`
- */
-export function isBunVirtualFs(dir: string): boolean {
-  return dir.startsWith('/$bunfs/') || dir.startsWith('B:\\~BUN\\') || dir.startsWith('B:/~BUN/');
-}
-
-/**
  * Check if the current process is running as a compiled binary (not via Bun CLI).
  *
- * Note: `process.versions.bun` is still set in compiled binaries as of Bun 1.3.5,
- * so we use the virtual filesystem path prefix for detection instead.
+ * Reads the build-time constant `BUNDLED_IS_BINARY` from `@archon/paths`.
+ * `scripts/build-binaries.sh` rewrites that file to set it to `true` before
+ * `bun build --compile` and restores it afterwards. See GitHub issue #979.
+ *
+ * Kept as a function (rather than a direct re-export of `BUNDLED_IS_BINARY`)
+ * so tests can use `spyOn(bundledDefaults, 'isBinaryBuild').mockReturnValue(...)`
+ * without resorting to `mock.module('@archon/paths', ...)` — which is
+ * process-global and irreversible in Bun and would pollute other test files.
+ * See `.claude/rules/dx-quirks.md` and `loader.test.ts` for context.
  */
 export function isBinaryBuild(): boolean {
-  return isBunVirtualFs(import.meta.dir);
+  return BUNDLED_IS_BINARY;
 }

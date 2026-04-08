@@ -316,6 +316,7 @@ archon workflow run <name> --cwd /path/to/repo "<message>"
 | `archon isolation list` | List active worktrees |
 | `archon isolation cleanup [days]` | Remove stale environments |
 | `archon isolation cleanup --merged` | Remove merged branches |
+| `archon isolation cleanup --merged --include-closed` | Also remove closed (abandoned) PR branches |
 | `archon complete <branch>` | Complete branch lifecycle |
 | `archon validate workflows [name]` | Validate workflow definitions |
 | `archon validate commands [name]` | Validate command files |
@@ -327,7 +328,8 @@ archon workflow run <name> --cwd /path/to/repo "<message>"
 archon isolation list              # show active worktrees
 archon isolation cleanup           # remove stale (>7 days)
 archon isolation cleanup 14        # custom staleness threshold
-archon isolation cleanup --merged  # remove merged branches (deletes remote too)
+archon isolation cleanup --merged            # remove merged branches (deletes remote too)
+archon isolation cleanup --merged --include-closed  # also remove closed/abandoned PR branches
 archon complete <branch>           # complete branch lifecycle (worktree + branches)
 archon complete <branch> --force   # skip uncommitted-changes check
 ```

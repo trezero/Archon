@@ -7,19 +7,20 @@ import * as conversationDb from '../db/conversations';
 import * as sessionDb from '../db/sessions';
 import { SessionNotFoundError } from '../db/sessions';
 import * as codebaseDb from '../db/codebases';
-import { getIsolationProvider } from '@archon/isolation';
-import type { WorktreeStatusBreakdown } from '@archon/isolation';
+import { getIsolationProvider, getPrState } from '@archon/isolation';
+import type { WorktreeStatusBreakdown, PrState } from '@archon/isolation';
 import {
   hasUncommittedChanges,
   worktreeExists,
   getDefaultBranch,
   isBranchMerged,
+  isPatchEquivalent,
   getLastCommitDate,
   toRepoPath,
   toWorktreePath,
   toBranchName,
 } from '@archon/git';
-import type { RepoPath } from '@archon/git';
+import type { RepoPath, BranchName } from '@archon/git';
 import { createLogger } from '@archon/paths';
 import type { IsolationEnvironmentRow } from '@archon/isolation';
 import { ConversationNotFoundError } from '../types';
@@ -501,23 +502,68 @@ export async function cleanupStaleWorktrees(
 }
 
 /**
+ * Decide whether a branch is safe to remove using a union of signals:
+ *   (a) git ancestry  — `git branch --merged` (catches fast-forward / merge-commit)
+ *   (b) git cherry    — patch-equivalent commits (catches squash-merge)
+ *   (c) GitHub PR state via `gh` CLI — MERGED/CLOSED/OPEN
+ *
+ * Returns `{ safe, openPr }`. `openPr=true` only when the PR state is OPEN —
+ * callers use this to surface a clearer skip reason.
+ */
+async function isSafeToRemove(
+  repoPath: RepoPath,
+  branchName: BranchName,
+  mainBranch: BranchName,
+  prStateCache: Map<string, PrState>,
+  includeClosed: boolean
+): Promise<{ safe: boolean; openPr: boolean }> {
+  // (a) Fast path — fast-forward / merge-commit ancestry
+  if (await isBranchMerged(repoPath, branchName, mainBranch)) {
+    return { safe: true, openPr: false };
+  }
+  // (b) Squash-merge detection via patch equivalence
+  if (await isPatchEquivalent(repoPath, branchName, mainBranch)) {
+    return { safe: true, openPr: false };
+  }
+  // (c) GitHub PR state
+  const prState = await getPrState(branchName, repoPath, prStateCache);
+  if (prState === 'MERGED') return { safe: true, openPr: false };
+  if (prState === 'CLOSED') return { safe: includeClosed, openPr: false };
+  if (prState === 'OPEN') return { safe: false, openPr: true };
+  return { safe: false, openPr: false };
+}
+
+/**
  * Clean up merged worktrees for a codebase
  * Respects uncommitted changes and conversation references
  */
 export async function cleanupMergedWorktrees(
   codebaseId: string,
-  mainRepoPath: string
+  mainRepoPath: string,
+  options: { includeClosed?: boolean } = {}
 ): Promise<CleanupOperationResult> {
   const result: CleanupOperationResult = { removed: [], skipped: [] };
   const environments = await isolationEnvDb.listByCodebase(codebaseId);
   const repoPath = toRepoPath(mainRepoPath);
   const mainBranch = await getDefaultBranch(repoPath);
+  const includeClosed = options.includeClosed ?? false;
+  const prStateCache = new Map<string, PrState>();
 
   for (const env of environments) {
-    // Check if merged (skip env on unexpected errors)
-    let merged = false;
+    // Check if safe to remove via union of signals (skip env on unexpected errors)
+    let safe = false;
+    let openPr = false;
     try {
-      merged = await isBranchMerged(repoPath, toBranchName(env.branch_name), mainBranch);
+      const branchName = toBranchName(env.branch_name);
+      const decision = await isSafeToRemove(
+        repoPath,
+        branchName,
+        mainBranch,
+        prStateCache,
+        includeClosed
+      );
+      safe = decision.safe;
+      openPr = decision.openPr;
     } catch (error) {
       const err = error as Error;
       result.skipped.push({
@@ -526,7 +572,15 @@ export async function cleanupMergedWorktrees(
       });
       continue;
     }
-    if (!merged) continue;
+    if (!safe) {
+      if (openPr) {
+        result.skipped.push({
+          branchName: env.branch_name,
+          reason: 'PR is open (active review)',
+        });
+      }
+      continue;
+    }
 
     // Check for uncommitted changes or active conversation references
     const blocker = await getRemovalBlocker(env);

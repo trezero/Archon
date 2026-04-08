@@ -1064,6 +1064,54 @@ branch refs/heads/feature/auth
     });
   });
 
+  describe('isPatchEquivalent', () => {
+    let execSpy: Mock<typeof git.execFileAsync>;
+
+    beforeEach(() => {
+      execSpy = spyOn(git, 'execFileAsync');
+    });
+
+    afterEach(() => {
+      execSpy.mockRestore();
+    });
+
+    test('returns true when all cherry lines start with -', async () => {
+      execSpy.mockResolvedValue({ stdout: '- abc123\n- def456\n', stderr: '' });
+      const result = await git.isPatchEquivalent('/workspace/repo', 'feature', 'main');
+      expect(result).toBe(true);
+    });
+
+    test('returns false when any cherry line starts with +', async () => {
+      execSpy.mockResolvedValue({ stdout: '- abc123\n+ def456\n', stderr: '' });
+      const result = await git.isPatchEquivalent('/workspace/repo', 'feature', 'main');
+      expect(result).toBe(false);
+    });
+
+    test('returns true for empty cherry output', async () => {
+      execSpy.mockResolvedValue({ stdout: '', stderr: '' });
+      const result = await git.isPatchEquivalent('/workspace/repo', 'feature', 'main');
+      expect(result).toBe(true);
+    });
+
+    test('returns false on expected errors (not a git repo)', async () => {
+      execSpy.mockRejectedValue(new Error('fatal: not a git repository'));
+      const result = await git.isPatchEquivalent('/workspace/repo', 'feature', 'main');
+      expect(result).toBe(false);
+    });
+
+    test('throws on unexpected errors', async () => {
+      mockLogger.error.mockClear();
+      execSpy.mockRejectedValue(new Error('fatal: permission denied'));
+      await expect(git.isPatchEquivalent('/workspace/repo', 'feature', 'main')).rejects.toThrow(
+        'Failed to check if feature is patch-equivalent to main'
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ branchName: 'feature', baseBranch: 'main' }),
+        'branch.patch_equivalent_check_failed'
+      );
+    });
+  });
+
   describe('getLastCommitDate', () => {
     let execSpy: Mock<typeof git.execFileAsync>;
 

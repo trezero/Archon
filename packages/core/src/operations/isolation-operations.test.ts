@@ -190,7 +190,7 @@ describe('cleanupMergedEnvironments', () => {
 
     const result = await cleanupMergedEnvironments('cb-1', '/main');
 
-    expect(mockCleanupMerged).toHaveBeenCalledWith('cb-1', '/main');
+    expect(mockCleanupMerged).toHaveBeenCalledWith('cb-1', '/main', {});
     expect(result.removed).toBe(2);
   });
 
@@ -200,5 +200,13 @@ describe('cleanupMergedEnvironments', () => {
     const result = await cleanupMergedEnvironments('cb-1', '/main');
 
     expect(result.errors).toEqual(['branch-a: git error']);
+  });
+
+  test('forwards includeClosed option to cleanupMergedWorktrees', async () => {
+    mockCleanupMerged.mockResolvedValueOnce({ removed: 1, errors: [] });
+
+    await cleanupMergedEnvironments('cb-1', '/main', { includeClosed: true });
+
+    expect(mockCleanupMerged).toHaveBeenCalledWith('cb-1', '/main', { includeClosed: true });
   });
 });

@@ -27,6 +27,8 @@ import {
   registerRepository,
   ConversationNotFoundError,
   generateAndSetTitle,
+  EnvLeakError,
+  scanPathForSensitiveKeys,
 } from '@archon/core';
 import { removeWorktree, toRepoPath, toWorktreePath } from '@archon/git';
 import {
@@ -103,6 +105,7 @@ import {
   codebaseSchema,
   codebaseIdParamsSchema,
   addCodebaseBodySchema,
+  updateCodebaseBodySchema,
   deleteCodebaseResponseSchema,
   codebaseEnvVarsResponseSchema,
   setEnvVarBodySchema,
@@ -453,6 +456,28 @@ const addCodebaseRoute = createRoute({
       description: 'Codebase created',
     },
     400: jsonError('Bad request'),
+    500: jsonError('Server error'),
+  },
+});
+
+const updateCodebaseRoute = createRoute({
+  method: 'patch',
+  path: '/api/codebases/{id}',
+  tags: ['Codebases'],
+  summary: 'Update codebase consent flags (e.g. allow_env_keys)',
+  request: {
+    params: codebaseIdParamsSchema,
+    body: {
+      content: { 'application/json': { schema: updateCodebaseBodySchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: codebaseSchema } },
+      description: 'Updated codebase',
+    },
+    404: jsonError('Not found'),
     500: jsonError('Server error'),
   },
 });
@@ -816,7 +841,7 @@ export function registerApiRoutes(
 ): void {
   function apiError(
     c: Context,
-    status: 400 | 404 | 500,
+    status: 400 | 404 | 422 | 500,
     message: string,
     detail?: string
   ): Response {
@@ -1482,8 +1507,8 @@ export function registerApiRoutes(
     try {
       // .refine() guarantees exactly one of url/path is present
       const result = body.url
-        ? await cloneRepository(body.url)
-        : await registerRepository(body.path ?? '');
+        ? await cloneRepository(body.url, body.allowEnvKeys)
+        : await registerRepository(body.path ?? '', body.allowEnvKeys);
 
       // Fetch the full codebase record for a consistent response
       const codebase = await codebaseDb.getCodebase(result.codebaseId);
@@ -1493,12 +1518,83 @@ export function registerApiRoutes(
 
       return c.json(codebase, result.alreadyExisted ? 200 : 201);
     } catch (error) {
+      if (error instanceof EnvLeakError) {
+        const path = body.url ?? body.path ?? '';
+        const files = error.report.findings.map(f => f.file);
+        getLog().warn({ path, files }, 'add_codebase_env_leak_refused');
+        return apiError(c, 422, error.message);
+      }
       getLog().error({ err: error }, 'add_codebase_failed');
       return apiError(
         c,
         500,
         `Failed to add codebase: ${(error as Error).message ?? 'unknown error'}`
       );
+    }
+  });
+
+  // PATCH /api/codebases/:id - Update consent flags
+  registerOpenApiRoute(updateCodebaseRoute, async c => {
+    const id = c.req.param('id') ?? '';
+    const body = getValidatedBody(c, updateCodebaseBodySchema);
+    try {
+      const codebase = await codebaseDb.getCodebase(id);
+      if (!codebase) {
+        return apiError(c, 404, 'Codebase not found');
+      }
+
+      // Capture scanner findings for the audit log (best-effort — path may be gone)
+      let files: string[] = [];
+      let keys: string[] = [];
+      let scanStatus: 'ok' | 'skipped' = 'ok';
+      try {
+        const report = scanPathForSensitiveKeys(codebase.default_cwd);
+        files = report.findings.map(f => f.file);
+        keys = Array.from(new Set(report.findings.flatMap(f => f.keys)));
+      } catch (scanErr) {
+        scanStatus = 'skipped';
+        getLog().warn(
+          { err: scanErr, codebaseId: id, path: codebase.default_cwd },
+          'env_leak_consent_scan_skipped'
+        );
+      }
+
+      await codebaseDb.updateCodebaseAllowEnvKeys(id, body.allowEnvKeys);
+
+      // Audit log: emitted unconditionally on every grant/revoke. `scanStatus`
+      // distinguishes "scanned and these are the findings" from "could not
+      // scan, files/keys are empty for that reason" — important for later
+      // security review of the audit trail.
+      getLog().warn(
+        {
+          codebaseId: id,
+          name: codebase.name,
+          path: codebase.default_cwd,
+          files,
+          keys,
+          scanStatus,
+          actor: 'user-ui',
+        },
+        body.allowEnvKeys ? 'env_leak_consent_granted' : 'env_leak_consent_revoked'
+      );
+
+      const updated = await codebaseDb.getCodebase(id);
+      if (!updated) {
+        return apiError(c, 500, 'Codebase updated but not found');
+      }
+      let commands = updated.commands;
+      if (typeof commands === 'string') {
+        try {
+          commands = JSON.parse(commands);
+        } catch (parseErr) {
+          getLog().error({ err: parseErr, codebaseId: id }, 'corrupted_commands_json');
+          commands = {};
+        }
+      }
+      return c.json({ ...updated, commands });
+    } catch (error) {
+      getLog().error({ err: error, codebaseId: id }, 'update_codebase_failed');
+      return apiError(c, 500, 'Failed to update codebase');
     }
   });
 

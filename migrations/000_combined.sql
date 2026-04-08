@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS remote_agent_codebases (
   repository_url VARCHAR(500),
   default_cwd VARCHAR(500) NOT NULL,
   ai_assistant_type VARCHAR(20) DEFAULT 'claude',
+  allow_env_keys BOOLEAN NOT NULL DEFAULT FALSE,
   commands JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
@@ -307,3 +308,7 @@ ALTER TABLE remote_agent_conversations
 -- From migration 016: ended_reason on sessions
 ALTER TABLE remote_agent_sessions
   ADD COLUMN IF NOT EXISTS ended_reason TEXT;
+
+-- From migration 021: allow_env_keys on codebases
+ALTER TABLE remote_agent_codebases
+  ADD COLUMN IF NOT EXISTS allow_env_keys BOOLEAN NOT NULL DEFAULT FALSE;

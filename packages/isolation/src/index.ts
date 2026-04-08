@@ -48,6 +48,10 @@ export type { IsolationResolverDeps } from './resolver';
 // --- Provider ---
 export { WorktreeProvider } from './providers/worktree';
 
+// --- PR state lookup ---
+export { getPrState } from './pr-state';
+export type { PrState } from './pr-state';
+
 // --- Worktree copy utility ---
 export {
   copyWorktreeFiles,
