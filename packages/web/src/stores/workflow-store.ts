@@ -10,6 +10,8 @@ import type {
   WorkflowArtifactEvent,
   DagNodeEvent,
   WorkflowToolActivityEvent,
+  LoopIterationEvent,
+  LoopIterationInfo,
 } from '@/lib/types';
 
 interface WorkflowStoreState {
@@ -19,6 +21,7 @@ interface WorkflowStoreState {
   handleWorkflowStatus: (event: WorkflowStatusEvent) => void;
   handleWorkflowArtifact: (event: WorkflowArtifactEvent) => void;
   handleDagNode: (event: DagNodeEvent) => void;
+  handleLoopIteration: (event: LoopIterationEvent) => void;
   handleWorkflowToolActivity: (event: WorkflowToolActivityEvent) => void;
   hydrateWorkflow: (state: WorkflowState) => void;
 }
@@ -265,6 +268,42 @@ export const useWorkflowStore = create<WorkflowStoreState>()(
         );
       },
 
+      handleLoopIteration: (event: LoopIterationEvent): void => {
+        if (!event.nodeId) return; // Non-DAG loops have no nodeId — skip
+        set(
+          state =>
+            updateWorkflow(state, event.runId, wf => {
+              const dagNodes = [...wf.dagNodes];
+              const existingIdx = dagNodes.findIndex(n => n.nodeId === event.nodeId);
+              if (existingIdx < 0) return wf; // Node not yet in list — skip
+
+              const existing = dagNodes[existingIdx];
+              const iterations: LoopIterationInfo[] = [...(existing.iterations ?? [])];
+              const iterIdx = iterations.findIndex(it => it.iteration === event.iteration);
+              const iterState: LoopIterationInfo = {
+                iteration: event.iteration,
+                status: event.status,
+                duration: event.duration,
+              };
+              if (iterIdx >= 0) {
+                iterations[iterIdx] = iterState;
+              } else {
+                iterations.push(iterState);
+              }
+
+              dagNodes[existingIdx] = {
+                ...existing,
+                currentIteration: event.iteration,
+                maxIterations: event.total > 0 ? event.total : existing.maxIterations,
+                iterations,
+              };
+              return { ...wf, dagNodes };
+            }),
+          undefined,
+          'workflow/loopIteration'
+        );
+      },
+
       handleWorkflowToolActivity: (event: WorkflowToolActivityEvent): void => {
         set(
           state =>
@@ -316,13 +355,19 @@ export function selectActiveWorkflow(state: WorkflowStoreState): WorkflowState |
 
 // Stable SSE handler object — actions are defined once in create(), so references never change.
 // Shared by ChatInterface and WorkflowLogs instead of per-component useShallow selectors.
-const { handleWorkflowStatus, handleWorkflowArtifact, handleDagNode, handleWorkflowToolActivity } =
-  useWorkflowStore.getState();
+const {
+  handleWorkflowStatus,
+  handleWorkflowArtifact,
+  handleDagNode,
+  handleLoopIteration,
+  handleWorkflowToolActivity,
+} = useWorkflowStore.getState();
 
 export const workflowSSEHandlers = {
   onWorkflowStatus: handleWorkflowStatus,
   onWorkflowArtifact: handleWorkflowArtifact,
   onDagNode: handleDagNode,
+  onLoopIteration: handleLoopIteration,
   onToolActivity: handleWorkflowToolActivity,
 } as const;
 
