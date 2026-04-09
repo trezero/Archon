@@ -376,10 +376,11 @@ async function main(): Promise<number> {
           case 'reject': {
             const rejectRunId = positionals[2];
             if (!rejectRunId) {
-              console.error('Usage: archon workflow reject <run-id> [--reason "..."]');
+              console.error('Usage: archon workflow reject <run-id> [reason]');
               return 1;
             }
-            const rejectReason = values.reason as string | undefined;
+            const rejectReason =
+              (values.reason as string | undefined) || positionals.slice(3).join(' ') || undefined;
             await workflowRejectCommand(rejectRunId, rejectReason);
             break;
           }
