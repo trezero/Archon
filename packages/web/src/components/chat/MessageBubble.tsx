@@ -1,6 +1,6 @@
 import { memo, useMemo, useState } from 'react';
 import { Copy, Check } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
@@ -13,6 +13,7 @@ import { ArtifactViewerModal } from '@/components/workflows/ArtifactViewerModal'
 const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 const REHYPE_PLUGINS = [rehypeHighlight];
 
+// Matches artifact paths (forward- and back-slash safe); groups: [1] runId, [2] filename
 const ARTIFACT_PATH_RE = /artifacts[/\\]runs[/\\]([a-f0-9-]+)[/\\](.+)/;
 
 function extractArtifactInfo(text: string): { runId: string; filename: string } | null {
@@ -26,7 +27,7 @@ function extractArtifactInfo(text: string): { runId: string; filename: string } 
 
 function makeMarkdownComponents(
   onArtifactClick: (runId: string, filename: string) => void
-): Record<string, React.ComponentType<React.ComponentPropsWithoutRef<never>>> {
+): Components {
   return {
     pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'>): React.ReactElement => (
       <pre
@@ -141,6 +142,7 @@ function MessageBubbleRaw({ message }: MessageBubbleProps): React.ReactElement {
   const [artifactViewer, setArtifactViewer] = useState<{ runId: string; filename: string } | null>(
     null
   );
+  // setArtifactViewer is a stable React state setter — empty dep array is intentional
   const markdownComponents = useMemo(
     () =>
       makeMarkdownComponents((runId, filename) => {
