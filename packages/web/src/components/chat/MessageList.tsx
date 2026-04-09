@@ -46,7 +46,8 @@ function WorkflowResultCard({
   // Zustand live state (populated if user had the page open during execution)
   const liveState = useWorkflowStore(state => state.workflows.get(runId));
 
-  // One-time API fetch — terminal run never changes
+  // One-time API fetch: staleTime: Infinity because a terminal run record is immutable —
+  // status, timestamps, and events do not change once completed/failed/cancelled.
   const { data: runData } = useQuery({
     queryKey: ['workflowRun', runId],
     queryFn: () => getWorkflowRun(runId),
@@ -65,12 +66,16 @@ function WorkflowResultCard({
     (runData?.run.completed_at ? new Date(ensureUtc(runData.run.completed_at)).getTime() : null);
   const duration = startedAt != null && completedAt != null ? completedAt - startedAt : null;
 
-  // Node counts: prefer live dagNodes, fall back to events
+  // Node counts: prefer live dagNodes (exact), fall back to events (approximation —
+  // totalCount is nodes that reached a terminal state, not the workflow's full node count).
   let completedCount: number;
   let totalCount: number;
   if (dagNodes.length > 0) {
     completedCount = dagNodes.filter(n => n.status === 'completed').length;
-    totalCount = dagNodes.length;
+    // Only count terminal nodes (same semantics as events fallback path)
+    totalCount = dagNodes.filter(
+      n => n.status === 'completed' || n.status === 'failed' || n.status === 'skipped'
+    ).length;
   } else {
     const events = runData?.events ?? [];
     const terminalEvents = events.filter(
@@ -129,7 +134,7 @@ function WorkflowResultCard({
           </span>
         )}
         {duration != null && (
-          <span className="rounded-full bg-surface-elevated px-2 py-0.5 text-[10px] text-text-secondary shrink-0">
+          <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] text-text-secondary shrink-0">
             {formatDurationMs(duration)}
           </span>
         )}
