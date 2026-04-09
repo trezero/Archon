@@ -13,14 +13,16 @@ const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 const REHYPE_PLUGINS = [rehypeHighlight];
 
 // Matches artifact paths (forward- and back-slash safe); groups: [1] runId, [2] filename
-const ARTIFACT_PATH_RE = /artifacts[/\\]runs[/\\]([a-f0-9-]+)[/\\](.+)/;
+const ARTIFACT_PATH_RE = /artifacts[/\\]runs[/\\]([a-fA-F0-9-]+)[/\\](.+)/;
 
 function extractArtifactInfo(text: string): { runId: string; filename: string } | null {
   const match = ARTIFACT_PATH_RE.exec(text);
   if (!match) return null;
+  const filename = match[2].replace(/\\/g, '/');
+  if (filename.split('/').some(s => s === '..')) return null;
   return {
     runId: match[1],
-    filename: match[2].replace(/\\/g, '/'),
+    filename,
   };
 }
 
