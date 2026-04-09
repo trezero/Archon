@@ -394,16 +394,14 @@ describe('handleLoopIteration', () => {
       .getState()
       .handleDagNode(dagNodeEvent({ runId: 'run-li3', nodeId: 'loop-node', name: 'My Loop' }));
     // First: started
-    useWorkflowStore
-      .getState()
-      .handleLoopIteration(
-        loopIterationEvent({
-          runId: 'run-li3',
-          nodeId: 'loop-node',
-          iteration: 1,
-          status: 'running',
-        })
-      );
+    useWorkflowStore.getState().handleLoopIteration(
+      loopIterationEvent({
+        runId: 'run-li3',
+        nodeId: 'loop-node',
+        iteration: 1,
+        status: 'running',
+      })
+    );
     // Then: completed with duration
     useWorkflowStore.getState().handleLoopIteration(
       loopIterationEvent({
