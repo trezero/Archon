@@ -58,7 +58,7 @@ function extractToolCallsFromEvents(events: WorkflowEventResponse[]): ToolCallDi
         input: (ev.data.tool_input as Record<string, unknown>) ?? {},
         output: undefined, // tool output not extracted here; WorkflowExecution.tsx also omits it
         duration: completed ? (completed.data.duration_ms as number | undefined) : undefined,
-        startedAt: evTime, // use ev.created_at timestamp so ToolCallCard timer works for in-progress tools
+        startedAt: evTime, // epoch ms from ev.created_at — these runs are always terminal so the timer never ticks
         isExpanded: false,
       };
     });
@@ -101,7 +101,10 @@ function WorkflowResultCard({
 
   const lines = content.split('\n');
   const isTruncatable = content.length > 500 || lines.length > 8;
-  const preview = isTruncatable ? lines.slice(0, 8).join('\n').slice(0, 500) + '...' : content;
+  const previewText = lines.slice(0, 8).join('\n').slice(0, 500);
+  const preview = isTruncatable
+    ? previewText + (previewText.length < content.length ? '...' : '')
+    : content;
 
   const displayContent = expanded || !isTruncatable ? content : preview;
 
