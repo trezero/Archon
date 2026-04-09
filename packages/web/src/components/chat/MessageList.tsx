@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,7 +9,10 @@ import { ToolCallCard } from './ToolCallCard';
 import { ErrorCard } from './ErrorCard';
 import { WorkflowProgressCard } from './WorkflowProgressCard';
 import { useAutoScroll } from '@/hooks/useAutoScroll';
-import type { ChatMessage } from '@/lib/types';
+import { useQuery } from '@tanstack/react-query';
+import { getWorkflowRun } from '@/lib/api';
+import type { WorkflowEventResponse } from '@/lib/api';
+import type { ChatMessage, ToolCallDisplay } from '@/lib/types';
 
 // Hoisted to module scope to prevent new references on every render
 const WORKFLOW_RESULT_MARKDOWN_COMPONENTS = {
@@ -25,6 +28,42 @@ const WORKFLOW_RESULT_MARKDOWN_COMPONENTS = {
   ),
 };
 
+/** Extract ToolCallDisplay objects from workflow_events (tool_called + tool_completed pairs).
+ *  Mirrors the greedy matching in WorkflowExecution.tsx — duplicated intentionally (< 3 uses). */
+function extractToolCallsFromEvents(events: WorkflowEventResponse[]): ToolCallDisplay[] {
+  const completedEvents = events
+    .filter(ev => ev.event_type === 'tool_completed')
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+  const usedCompleted = new Set<string>();
+
+  return events
+    .filter(ev => ev.event_type === 'tool_called')
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .map(ev => {
+      const evTime = new Date(ev.created_at).getTime();
+      const toolName = ev.data.tool_name as string;
+      const stepName = ev.step_name;
+      const completed = completedEvents.find(
+        c =>
+          !usedCompleted.has(c.id) &&
+          (c.data.tool_name as string) === toolName &&
+          new Date(c.created_at).getTime() >= evTime &&
+          c.step_name === stepName
+      );
+      if (completed) usedCompleted.add(completed.id);
+      return {
+        id: ev.id,
+        name: toolName,
+        input: (ev.data.tool_input as Record<string, unknown>) ?? {},
+        output: undefined,
+        duration: completed ? (completed.data.duration_ms as number | undefined) : undefined,
+        startedAt: 0,
+        isExpanded: false,
+      };
+    });
+}
+
 function WorkflowResultCard({
   workflowName,
   runId,
@@ -36,6 +75,18 @@ function WorkflowResultCard({
 }): React.ReactElement {
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
+  const [toolsExpanded, setToolsExpanded] = useState(false);
+
+  const { data: runData } = useQuery({
+    queryKey: ['workflow-run', runId],
+    queryFn: () => getWorkflowRun(runId),
+    staleTime: 30_000,
+  });
+
+  const toolCalls = useMemo(
+    () => extractToolCallsFromEvents(runData?.events ?? []),
+    [runData?.events]
+  );
 
   const lines = content.split('\n');
   const isTruncatable = content.length > 500 || lines.length > 8;
@@ -82,6 +133,26 @@ function WorkflowResultCard({
           </button>
         )}
       </div>
+      {toolCalls.length > 0 && (
+        <div className="border-t border-border px-3 py-2">
+          <button
+            onClick={(): void => {
+              setToolsExpanded(!toolsExpanded);
+            }}
+            className="text-[10px] text-text-tertiary hover:text-text-secondary transition-colors"
+          >
+            {toolsExpanded ? '\u25BE' : '\u25B8'} {toolCalls.length} tool call
+            {toolCalls.length !== 1 ? 's' : ''}
+          </button>
+          {toolsExpanded && (
+            <div className="mt-2 flex flex-col gap-1.5">
+              {toolCalls.map(tool => (
+                <ToolCallCard key={tool.id} tool={tool} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
