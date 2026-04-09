@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowDown, Sparkles, ArrowRight, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MessageBubble } from './MessageBubble';
@@ -9,7 +10,12 @@ import { ToolCallCard } from './ToolCallCard';
 import { ErrorCard } from './ErrorCard';
 import { WorkflowProgressCard } from './WorkflowProgressCard';
 import { useAutoScroll } from '@/hooks/useAutoScroll';
-import type { ChatMessage } from '@/lib/types';
+import { useWorkflowStore } from '@/stores/workflow-store';
+import { getWorkflowRun } from '@/lib/api';
+import { StatusIcon } from '@/components/workflows/StatusIcon';
+import { ArtifactSummary } from '@/components/workflows/ArtifactSummary';
+import { formatDurationMs, ensureUtc } from '@/lib/format';
+import type { ChatMessage, WorkflowArtifact, ArtifactType } from '@/lib/types';
 
 // Hoisted to module scope to prevent new references on every render
 const WORKFLOW_RESULT_MARKDOWN_COMPONENTS = {
@@ -37,22 +43,96 @@ function WorkflowResultCard({
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
 
+  // Zustand live state (populated if user had the page open during execution)
+  const liveState = useWorkflowStore(state => state.workflows.get(runId));
+
+  // One-time API fetch — terminal run never changes
+  const { data: runData } = useQuery({
+    queryKey: ['workflowRun', runId],
+    queryFn: () => getWorkflowRun(runId),
+    staleTime: Infinity,
+  });
+
+  // Merge: prefer live state when available
+  const status = liveState?.status ?? runData?.run.status ?? 'completed';
+  const dagNodes = liveState?.dagNodes ?? [];
+  const storeArtifacts = liveState?.artifacts ?? [];
+  const startedAt =
+    liveState?.startedAt ??
+    (runData?.run.started_at ? new Date(ensureUtc(runData.run.started_at)).getTime() : null);
+  const completedAt =
+    liveState?.completedAt ??
+    (runData?.run.completed_at ? new Date(ensureUtc(runData.run.completed_at)).getTime() : null);
+  const duration = startedAt != null && completedAt != null ? completedAt - startedAt : null;
+
+  // Node counts: prefer live dagNodes, fall back to events
+  let completedCount: number;
+  let totalCount: number;
+  if (dagNodes.length > 0) {
+    completedCount = dagNodes.filter(n => n.status === 'completed').length;
+    totalCount = dagNodes.length;
+  } else {
+    const events = runData?.events ?? [];
+    const terminalEvents = events.filter(
+      e =>
+        e.event_type === 'node_completed' ||
+        e.event_type === 'node_failed' ||
+        e.event_type === 'node_skipped'
+    );
+    completedCount = events.filter(e => e.event_type === 'node_completed').length;
+    totalCount = terminalEvents.length;
+  }
+
+  // Artifacts: prefer live store, fall back to events
+  const eventArtifacts: WorkflowArtifact[] = (runData?.events ?? [])
+    .filter(e => e.event_type === 'workflow_artifact')
+    .map(e => {
+      const d = e.data as Record<string, string | undefined>;
+      return {
+        type: (d.artifactType ?? 'file') as ArtifactType,
+        label: d.label ?? '',
+        url: d.url,
+        path: d.path,
+      };
+    });
+  const artifacts = storeArtifacts.length > 0 ? storeArtifacts : eventArtifacts;
+
+  // Status-aware header title
+  const headerTitle =
+    status === 'failed'
+      ? 'Workflow failed'
+      : status === 'cancelled'
+        ? 'Workflow cancelled'
+        : 'Workflow complete';
+
+  // Expand/collapse for text content
   const lines = content.split('\n');
   const isTruncatable = content.length > 500 || lines.length > 8;
   const previewText = lines.slice(0, 8).join('\n').slice(0, 500);
   const preview = isTruncatable
     ? previewText + (previewText.length < content.length ? '...' : '')
     : content;
-
   const displayContent = expanded || !isTruncatable ? content : preview;
 
   return (
     <div className="rounded-lg border border-border bg-surface overflow-hidden max-w-3xl">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-surface-elevated">
-        <span className="text-success text-xs shrink-0">&#x2713;</span>
-        <span className="text-xs font-medium text-text-primary truncate flex-1">
-          Workflow complete: {workflowName}
+        <span className="shrink-0">
+          <StatusIcon status={status} />
         </span>
+        <span className="text-xs font-medium text-text-primary truncate flex-1">
+          {headerTitle}: {workflowName}
+        </span>
+        {totalCount > 0 && (
+          <span className="shrink-0 text-[10px] text-text-secondary">
+            {completedCount}/{totalCount} nodes
+          </span>
+        )}
+        {duration != null && (
+          <span className="rounded-full bg-surface-elevated px-2 py-0.5 text-[10px] text-text-secondary shrink-0">
+            {formatDurationMs(duration)}
+          </span>
+        )}
         <button
           onClick={(): void => {
             navigate(`/workflows/runs/${runId}`);
@@ -63,6 +143,11 @@ function WorkflowResultCard({
         </button>
       </div>
       <div className="px-3 py-2">
+        {artifacts.length > 0 && (
+          <div className="mb-2">
+            <ArtifactSummary artifacts={artifacts} runId={runId} />
+          </div>
+        )}
         <div className="chat-markdown text-xs text-text-secondary">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
