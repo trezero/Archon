@@ -5,3 +5,36 @@
   --sl-font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --sl-font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
+
+/* Hero spacing — reduce vertical whitespace on splash pages */
+.hero {
+  padding-block: 2rem !important;
+  gap: 1rem !important;
+}
+
+/* Tighten gap between hero and first content */
+.sl-markdown-content > :first-child {
+  margin-top: 1.5rem;
+}
+
+/* Dark theme — match main Archon app visual language */
+[data-theme='dark'] {
+  --sl-color-bg: #0f111a;
+  --sl-color-bg-sidebar: #0d0f17;
+  --sl-color-bg-nav: #0d0f17;
+  --sl-color-hairline-light: rgba(255, 255, 255, 0.08);
+  --sl-color-hairline: rgba(255, 255, 255, 0.12);
+}
+
+/* Sidebar active-page gradient accent */
+[data-theme='dark'] nav a[aria-current='page'] {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.15), rgba(59, 130, 246, 0.15));
+  border-left: 2px solid;
+  border-image: linear-gradient(180deg, #a855f7, #3b82f6) 1;
+}
+
+/* Feature card styling in dark mode */
+[data-theme='dark'] .card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
