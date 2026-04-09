@@ -23,35 +23,28 @@ function DagNodeItem({
 
   return (
     <div>
-      <button
+      <div
+        className={`w-full text-left px-2 py-1.5 rounded transition-colors cursor-pointer ${
+          isActive ? 'bg-accent/10 border-l-2 border-accent' : 'hover:bg-surface-hover'
+        }`}
         onClick={(): void => {
           onNodeClick(node.nodeId);
         }}
-        className={`w-full text-left px-2 py-1.5 rounded transition-colors ${
-          isActive ? 'bg-accent/10 border-l-2 border-accent' : 'hover:bg-surface-hover'
-        }`}
+        role="row"
       >
         <div className="flex items-center gap-2 text-sm">
           {hasIterations && (
-            <span
-              role="button"
-              tabIndex={0}
+            <button
+              type="button"
               onClick={(e): void => {
                 e.stopPropagation();
                 setExpanded(prev => !prev);
-              }}
-              onKeyDown={(e): void => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setExpanded(prev => !prev);
-                }
               }}
               className="text-text-tertiary hover:text-text-secondary shrink-0 text-xs cursor-pointer"
               aria-label={expanded ? 'Collapse iterations' : 'Expand iterations'}
             >
               {expanded ? '\u25BC' : '\u25B6'}
-            </span>
+            </button>
           )}
           <StatusIcon status={node.status} />
           <span className="truncate flex-1">{node.name}</span>
@@ -76,7 +69,7 @@ function DagNodeItem({
             Skipped: {node.reason.replace(/_/g, ' ')}
           </div>
         )}
-      </button>
+      </div>
       {expanded && hasIterations && (
         <div className="ml-6 mt-0.5 space-y-0.5">
           {(node.iterations ?? []).map(iter => (
