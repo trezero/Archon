@@ -146,12 +146,14 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
               const maxIter = e.data.maxIterations as number | undefined;
               if (iteration === undefined) continue;
 
-              const iterStatus: LoopIterationInfo['status'] =
-                e.event_type === 'loop_iteration_started'
-                  ? 'running'
-                  : e.event_type === 'loop_iteration_completed'
-                    ? 'completed'
-                    : 'failed';
+              let iterStatus: LoopIterationInfo['status'];
+              if (e.event_type === 'loop_iteration_started') {
+                iterStatus = 'running';
+              } else if (e.event_type === 'loop_iteration_completed') {
+                iterStatus = 'completed';
+              } else {
+                iterStatus = 'failed';
+              }
 
               const existingIters: LoopIterationInfo[] = existing.iterations ?? [];
               const iterIdx = existingIters.findIndex(it => it.iteration === iteration);
