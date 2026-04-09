@@ -139,9 +139,7 @@ function WorkflowResultCard({
           </span>
         )}
         <button
-          onClick={(): void => {
-            navigate(`/workflows/runs/${runId}`);
-          }}
+          onClick={() => navigate(`/workflows/runs/${runId}`)}
           className="text-[10px] text-primary hover:text-accent-bright transition-colors shrink-0"
         >
           View full logs &rarr;
