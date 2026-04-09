@@ -9,6 +9,9 @@ sidebar:
 hero:
   title: The Book of Archon
   tagline: From zero to workflow author in 10 chapters.
+  image:
+    file: ../../../assets/logo.png
+    alt: Archon Logo
   actions:
     - text: Start reading
       link: /book/what-is-archon/
