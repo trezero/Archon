@@ -1,10 +1,9 @@
 import { memo, useMemo, useState } from 'react';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, Paperclip } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
-import { Paperclip } from 'lucide-react';
 import type { ChatMessage, FileAttachment } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { ArtifactViewerModal } from '@/components/workflows/ArtifactViewerModal';
