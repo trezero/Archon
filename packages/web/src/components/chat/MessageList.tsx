@@ -43,22 +43,22 @@ function extractToolCallsFromEvents(events: WorkflowEventResponse[]): ToolCallDi
     .map(ev => {
       const evTime = new Date(ev.created_at).getTime();
       const toolName = ev.data.tool_name as string;
-      const stepName = ev.step_name;
+      const stepName = ev.step_name ?? undefined;
       const completed = completedEvents.find(
         c =>
           !usedCompleted.has(c.id) &&
           (c.data.tool_name as string) === toolName &&
           new Date(c.created_at).getTime() >= evTime &&
-          c.step_name === stepName
+          (c.step_name ?? undefined) === stepName
       );
       if (completed) usedCompleted.add(completed.id);
       return {
         id: ev.id,
         name: toolName,
         input: (ev.data.tool_input as Record<string, unknown>) ?? {},
-        output: undefined,
+        output: undefined, // tool output not extracted here; WorkflowExecution.tsx also omits it
         duration: completed ? (completed.data.duration_ms as number | undefined) : undefined,
-        startedAt: 0,
+        startedAt: evTime, // use ev.created_at timestamp so ToolCallCard timer works for in-progress tools
         isExpanded: false,
       };
     });
@@ -77,11 +77,22 @@ function WorkflowResultCard({
   const [expanded, setExpanded] = useState(false);
   const [toolsExpanded, setToolsExpanded] = useState(false);
 
-  const { data: runData } = useQuery({
-    queryKey: ['workflow-run', runId],
+  const {
+    data: runData,
+    error: runError,
+    isError: isRunError,
+  } = useQuery({
+    queryKey: ['workflowRun', runId],
     queryFn: () => getWorkflowRun(runId),
-    staleTime: 30_000,
+    staleTime: 30_000, // longer than default — workflow run events are immutable once terminal
   });
+
+  if (isRunError) {
+    console.warn('[WorkflowResultCard] Failed to load run events for tool calls', {
+      runId,
+      error: runError instanceof Error ? runError.message : runError,
+    });
+  }
 
   const toolCalls = useMemo(
     () => extractToolCallsFromEvents(runData?.events ?? []),
@@ -133,7 +144,11 @@ function WorkflowResultCard({
           </button>
         )}
       </div>
-      {toolCalls.length > 0 && (
+      {isRunError ? (
+        <div className="border-t border-border px-3 py-2">
+          <span className="text-[10px] text-error">Failed to load tool calls</span>
+        </div>
+      ) : toolCalls.length > 0 ? (
         <div className="border-t border-border px-3 py-2">
           <button
             onClick={(): void => {
@@ -152,7 +167,7 @@ function WorkflowResultCard({
             </div>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
