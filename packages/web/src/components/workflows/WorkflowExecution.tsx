@@ -140,11 +140,11 @@ export function WorkflowExecution({ runId }: WorkflowExecutionProps): React.Reac
               const nodeId = e.step_name ?? '';
               if (!nodeId) continue;
               const existing = nodeMap.get(nodeId);
-              if (!existing) continue;
+              if (!existing) continue; // No node_started event yet — skip (events ordered in DB)
 
               const iteration = e.data.iteration as number | undefined;
               const maxIter = e.data.maxIterations as number | undefined;
-              if (!iteration) continue;
+              if (iteration === undefined) continue;
 
               const iterStatus: LoopIterationInfo['status'] =
                 e.event_type === 'loop_iteration_started'

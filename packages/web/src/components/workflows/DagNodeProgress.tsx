@@ -33,16 +33,25 @@ function DagNodeItem({
       >
         <div className="flex items-center gap-2 text-sm">
           {hasIterations && (
-            <button
+            <span
+              role="button"
+              tabIndex={0}
               onClick={(e): void => {
                 e.stopPropagation();
                 setExpanded(prev => !prev);
               }}
-              className="text-text-tertiary hover:text-text-secondary shrink-0 text-xs"
+              onKeyDown={(e): void => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setExpanded(prev => !prev);
+                }
+              }}
+              className="text-text-tertiary hover:text-text-secondary shrink-0 text-xs cursor-pointer"
               aria-label={expanded ? 'Collapse iterations' : 'Expand iterations'}
             >
               {expanded ? '\u25BC' : '\u25B6'}
-            </button>
+            </span>
           )}
           <StatusIcon status={node.status} />
           <span className="truncate flex-1">{node.name}</span>

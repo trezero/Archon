@@ -247,6 +247,7 @@ export const useWorkflowStore = create<WorkflowStoreState>()(
               const existingIdx = dagNodes.findIndex(n => n.nodeId === event.nodeId);
 
               const nodeState: DagNodeState = {
+                ...(existingIdx >= 0 ? dagNodes[existingIdx] : {}), // preserve accumulated iteration state
                 nodeId: event.nodeId,
                 name: event.name,
                 status: event.status,
@@ -275,7 +276,7 @@ export const useWorkflowStore = create<WorkflowStoreState>()(
             updateWorkflow(state, event.runId, wf => {
               const dagNodes = [...wf.dagNodes];
               const existingIdx = dagNodes.findIndex(n => n.nodeId === event.nodeId);
-              if (existingIdx < 0) return wf; // Node not yet in list — skip
+              if (existingIdx < 0) return wf; // Node not yet in store — loop iteration may arrive before dag_node event in SSE ordering. Intentional silent drop.
 
               const existing = dagNodes[existingIdx];
               const iterations: LoopIterationInfo[] = [...(existing.iterations ?? [])];
