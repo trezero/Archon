@@ -101,10 +101,7 @@ function WorkflowResultCard({
 
   const lines = content.split('\n');
   const isTruncatable = content.length > 500 || lines.length > 8;
-  const previewText = lines.slice(0, 8).join('\n').slice(0, 500);
-  const preview = isTruncatable
-    ? previewText + (previewText.length < content.length ? '...' : '')
-    : content;
+  const preview = isTruncatable ? lines.slice(0, 8).join('\n').slice(0, 500) + '...' : content;
 
   const displayContent = expanded || !isTruncatable ? content : preview;
 
@@ -144,11 +141,12 @@ function WorkflowResultCard({
           </button>
         )}
       </div>
-      {isRunError ? (
+      {isRunError && (
         <div className="border-t border-border px-3 py-2">
           <span className="text-[10px] text-error">Failed to load tool calls</span>
         </div>
-      ) : toolCalls.length > 0 ? (
+      )}
+      {!isRunError && toolCalls.length > 0 && (
         <div className="border-t border-border px-3 py-2">
           <button
             onClick={(): void => {
@@ -167,7 +165,7 @@ function WorkflowResultCard({
             </div>
           )}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
