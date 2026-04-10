@@ -469,6 +469,7 @@ assistants:
     webSearchMode: live  # 'disabled' | 'cached' | 'live'
     additionalDirectories:
       - /absolute/path/to/other/repo
+    codexBinaryPath: /usr/local/bin/codex  # Optional: custom Codex CLI binary path
 
 # docs:
 #   path: docs  # Optional: default is docs/
@@ -535,6 +536,7 @@ curl http://localhost:3637/api/conversations/<conversationId>/messages
 │   │   ├── runs/{id}/            # Per-run artifacts ($ARTIFACTS_DIR)
 │   │   └── uploads/{convId}/     # Web UI file uploads (ephemeral)
 │   └── logs/                     # Workflow execution logs
+├── vendor/codex/                  # Codex native binary (binary builds, user-placed)
 ├── web-dist/<version>/            # Cached web UI dist (archon serve, binary only)
 ├── update-check.json              # Update check cache (binary builds, 24h TTL)
 ├── archon.db                     # SQLite database (when DATABASE_URL not set)
