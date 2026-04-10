@@ -59,7 +59,7 @@ function makeResultMarkdownComponents(
             return (
               <button
                 type="button"
-                className="text-primary underline decoration-primary/40 hover:decoration-primary cursor-pointer bg-transparent border-none p-0 font-mono text-[inherit]"
+                className="text-accent-bright underline decoration-accent-bright/40 hover:decoration-accent-bright cursor-pointer bg-transparent border-none p-0 font-mono text-xs"
                 onClick={(): void => {
                   onArtifactClick(runId, filename);
                 }}
@@ -74,7 +74,7 @@ function makeResultMarkdownComponents(
               href={`/api/artifacts/${encodeURIComponent(runId)}/${encodedFilename}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-primary underline decoration-primary/40 hover:decoration-primary font-mono text-[inherit]"
+              className="text-accent-bright underline decoration-accent-bright/40 hover:decoration-accent-bright font-mono text-xs"
             >
               {displayName}
             </a>
