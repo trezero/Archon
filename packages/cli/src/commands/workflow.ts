@@ -766,17 +766,16 @@ export async function workflowStatusCommand(json?: boolean, verbose?: boolean): 
   }
 
   if (json) {
+    let runsOutput: unknown[] = runs;
     if (verbose) {
       const eventsPerRun = await Promise.all(
         runs.map(run =>
           workflowEventsDb.listWorkflowEvents(run.id).catch(() => [] as WorkflowEventRow[])
         )
       );
-      const runsWithEvents = runs.map((run, i) => ({ ...run, events: eventsPerRun[i] }));
-      console.log(JSON.stringify({ runs: runsWithEvents }, null, 2));
-    } else {
-      console.log(JSON.stringify({ runs }, null, 2));
+      runsOutput = runs.map((run, i) => ({ ...run, events: eventsPerRun[i] }));
     }
+    console.log(JSON.stringify({ runs: runsOutput }, null, 2));
     return;
   }
 
