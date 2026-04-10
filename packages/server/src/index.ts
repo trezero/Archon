@@ -3,50 +3,46 @@
  * Multi-platform AI coding assistant (Telegram, Discord, Slack, GitHub, Gitea)
  */
 
-// Load environment variables FIRST — resolve to monorepo root .env
-// Uses dotenv with explicit path so it works from any CWD (worktrees, packages/server/, etc.)
+// Load environment variables FIRST — before any application imports.
+//
+// Credential safety: target repo `.env` keys (like ANTHROPIC_API_KEY) that Bun
+// auto-loads from CWD cannot leak into AI subprocesses because
+// SUBPROCESS_ENV_ALLOWLIST blocks them. The env-leak gate provides a second
+// layer by scanning target repos before spawning. No CWD stripping needed.
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
+import { BUNDLED_IS_BINARY } from '@archon/paths';
 
-// Strip all vars that Bun may have auto-loaded from CWD's .env.
-// When the server is started from inside a target repo, Bun auto-loads that
-// repo's .env (containing e.g. ANTHROPIC_API_KEY for the target app) before
-// any user code runs. Strip those vars now so they don't bleed into server env
-// or subprocess spawns.
-const cwdEnvPath = resolve(process.cwd(), '.env');
-if (existsSync(cwdEnvPath)) {
-  const cwdEnvResult = config({ path: cwdEnvPath, processEnv: {} });
-  // If parse fails, cwdEnvResult.parsed is undefined — safe to skip:
-  // Bun uses the same RFC-style parser, so a file dotenv cannot parse
-  // was also unparseable by Bun and contributed no keys to process.env.
-  if (cwdEnvResult.parsed) {
-    for (const key of Object.keys(cwdEnvResult.parsed)) {
-      Reflect.deleteProperty(process.env, key);
-    }
+// In dev/source mode, load the repo root .env (platform tokens, API keys, etc.)
+// import.meta.dir is frozen at build time, so skip in compiled binaries.
+let envPath: string | undefined;
+if (!BUNDLED_IS_BINARY) {
+  envPath = resolve(import.meta.dir, '..', '..', '..', '.env');
+  const dotenvResult = config({ path: envPath });
+  if (dotenvResult.error) {
+    // Use console.error since logger depends on env vars (LOG_LEVEL)
+    console.error(`Failed to load .env from ${envPath}: ${dotenvResult.error.message}`);
+    console.error('Hint: Copy .env.example to .env and configure your credentials.');
   }
 }
 
-// Resolve from this file's location: packages/server/src/ → ../../.. → repo root
-const envPath = resolve(import.meta.dir, '..', '..', '..', '.env');
-const dotenvResult = config({ path: envPath });
-
-if (dotenvResult.error) {
-  // Use console.error since logger depends on env vars (LOG_LEVEL)
-  console.error(`Failed to load .env from ${envPath}: ${dotenvResult.error.message}`);
-  console.error('Hint: Copy .env.example to .env and configure your credentials.');
-}
-
-// Load ~/.archon/.env for infrastructure config (DATABASE_URL).
-// The CLI loads this file with override: true, so both CLI and server
-// resolve DATABASE_URL from the same source. We only override DATABASE_URL
-// (not PORT, LOG_LEVEL, etc.) to avoid stomping on server-specific config.
+// Load ~/.archon/.env with override — Archon's config always wins over any
+// Bun-auto-loaded CWD vars. In binary mode this is the single source of truth.
+// In dev mode it overrides CWD vars for keys like DATABASE_URL.
 const globalEnvPath = resolve(process.env.HOME ?? '~', '.archon', '.env');
 if (existsSync(globalEnvPath)) {
-  const globalResult = config({ path: globalEnvPath, processEnv: {} });
-  if (globalResult.parsed?.DATABASE_URL) {
-    process.env.DATABASE_URL = globalResult.parsed.DATABASE_URL;
-  }
+  config({ path: globalEnvPath, override: true });
+}
+
+// Smart default: use Claude Code's built-in OAuth if no explicit credentials.
+// Same logic as the CLI (packages/cli/src/cli.ts).
+if (
+  !process.env.CLAUDE_API_KEY &&
+  !process.env.CLAUDE_CODE_OAUTH_TOKEN &&
+  process.env.CLAUDE_USE_GLOBAL_AUTH === undefined
+) {
+  process.env.CLAUDE_USE_GLOBAL_AUTH = 'true';
 }
 
 import { OpenAPIHono } from '@hono/zod-openapi';
@@ -167,7 +163,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
           'Or set CODEX_ID_TOKEN + CODEX_ACCESS_TOKEN in .env',
           'See .env.example for all options',
         ],
-        envFile: envPath,
+        envFile: BUNDLED_IS_BINARY ? globalEnvPath : envPath,
       },
       'no_ai_credentials'
     );
