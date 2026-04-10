@@ -29,10 +29,9 @@ bun run cli version
 
 ## Startup Behavior
 
-1. Deletes `process.env.DATABASE_URL` (prevent target repo's DB from leaking in)
-2. Loads `~/.archon/.env` with `override: true`
-3. Smart Claude auth default: if no `CLAUDE_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, sets `CLAUDE_USE_GLOBAL_AUTH=true`
-4. Imports all commands AFTER dotenv setup
+1. Loads `~/.archon/.env` with `override: true` (Archon's config wins over any Bun-auto-loaded CWD vars)
+2. Smart Claude auth default: if no `CLAUDE_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, sets `CLAUDE_USE_GLOBAL_AUTH=true`
+3. Imports all commands AFTER dotenv setup
 
 ## WorkflowRunOptions Interface
 
