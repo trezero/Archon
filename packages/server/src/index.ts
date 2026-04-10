@@ -604,7 +604,12 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
       opts.webDistPath ??
       pathModule.join(pathModule.dirname(pathModule.dirname(import.meta.dir)), 'web', 'dist');
 
-    app.use('/assets/*', serveStatic({ root: webDistPath }));
+    // Strip leading slash from request path — path.join treats absolute segments
+    // as root resets, so "/assets/foo.js" would discard the webDistPath entirely.
+    const stripLeadingSlash = (path: string): string => path.replace(/^\//, '');
+
+    app.use('/assets/*', serveStatic({ root: webDistPath, rewriteRequestPath: stripLeadingSlash }));
+    app.use('/favicon.png', serveStatic({ root: webDistPath, path: 'favicon.png' }));
     // SPA fallback - serve index.html for unmatched routes (after all API routes)
     app.get('*', serveStatic({ root: webDistPath, path: 'index.html' }));
   }
