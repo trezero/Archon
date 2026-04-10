@@ -591,12 +591,23 @@ export async function workflowRunCommand(
         renderWorkflowEvent(event, verbose ?? false);
       });
 
-  // Notify Web UI that a workflow is dispatching (mirrors orchestrator.ts dispatch message)
-  await adapter.sendMessage(conversationId, `Dispatching workflow: **${workflow.name}**`, {
-    category: 'workflow_dispatch_status',
-    segment: 'new',
-    workflowDispatch: { workerConversationId: conversationId, workflowName: workflow.name },
-  });
+  // Notify Web UI that a workflow is dispatching.
+  // Mirrors the orchestrator dispatch message structure (category/segment/workflowDispatch),
+  // but omits the rocket emoji and "(background)" qualifier since the CLI runs synchronously.
+  // In the CLI path there is no separate worker conversation — the CLI itself
+  // is both the dispatcher and the executor, so workerConversationId === conversationId.
+  try {
+    await adapter.sendMessage(conversationId, `Dispatching workflow: **${workflow.name}**`, {
+      category: 'workflow_dispatch_status',
+      segment: 'new',
+      workflowDispatch: { workerConversationId: conversationId, workflowName: workflow.name },
+    });
+  } catch (dispatchError) {
+    getLog().warn(
+      { err: dispatchError as Error, conversationId },
+      'workflow_dispatch_surface_failed'
+    );
+  }
 
   // Execute workflow with workingCwd (may be worktree path)
   let result: Awaited<ReturnType<typeof executeWorkflow>>;
@@ -619,7 +630,8 @@ export async function workflowRunCommand(
   if (result.success && 'paused' in result && result.paused) {
     console.log('\nWorkflow paused — waiting for approval.');
   } else if (result.success) {
-    // Surface workflow result to Web UI as a result card (mirrors orchestrator.ts result message)
+    // Surface workflow result to Web UI as a result card (mirrors orchestrator.ts result message).
+    // Paused workflows are handled in the branch above and intentionally do not get a result card.
     if ('summary' in result && result.summary) {
       try {
         await adapter.sendMessage(conversationId, result.summary, {
