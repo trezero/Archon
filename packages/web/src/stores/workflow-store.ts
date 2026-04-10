@@ -65,6 +65,7 @@ function invalidateWorkflowQueries(): void {
   const keys = [
     'workflow-runs',
     'workflowRuns',
+    'workflowRun',
     'workflow-runs-status',
     'conversations',
     'workflowMessages',

@@ -48,7 +48,7 @@ function WorkflowResultCard({
 
   // One-time API fetch: staleTime: Infinity because a terminal run record is immutable —
   // status, timestamps, and events do not change once completed/failed/cancelled.
-  const { data: runData } = useQuery({
+  const { data: runData, isError } = useQuery({
     queryKey: ['workflowRun', runId],
     queryFn: () => getWorkflowRun(runId),
     staleTime: Infinity,
@@ -92,15 +92,20 @@ function WorkflowResultCard({
   const eventArtifacts: WorkflowArtifact[] = (runData?.events ?? [])
     .filter(e => e.event_type === 'workflow_artifact')
     .map(e => {
-      const d = e.data as Record<string, string | undefined>;
+      const d = e.data;
       return {
-        type: (d.artifactType ?? 'file') as ArtifactType,
-        label: d.label ?? '',
-        url: d.url,
-        path: d.path,
+        type: (typeof d.artifactType === 'string'
+          ? d.artifactType
+          : 'file_created') as ArtifactType,
+        label: typeof d.label === 'string' ? d.label : '',
+        url: typeof d.url === 'string' ? d.url : undefined,
+        path: typeof d.path === 'string' ? d.path : undefined,
       };
     });
   const artifacts = storeArtifacts.length > 0 ? storeArtifacts : eventArtifacts;
+
+  // If API fetch failed and no live state, show degraded card with just content + link
+  const fetchFailed = isError && !liveState;
 
   // Status-aware header title
   const headerTitle =
@@ -123,17 +128,17 @@ function WorkflowResultCard({
     <div className="rounded-lg border border-border bg-surface overflow-hidden max-w-3xl">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-surface-elevated">
         <span className="shrink-0">
-          <StatusIcon status={status} />
+          <StatusIcon status={fetchFailed ? 'completed' : status} />
         </span>
         <span className="text-xs font-medium text-text-primary truncate flex-1">
           {headerTitle}: {workflowName}
         </span>
-        {totalCount > 0 && (
+        {!fetchFailed && totalCount > 0 && (
           <span className="shrink-0 text-[10px] text-text-secondary">
             {completedCount}/{totalCount} nodes
           </span>
         )}
-        {duration != null && (
+        {!fetchFailed && duration != null && (
           <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] text-text-secondary shrink-0">
             {formatDurationMs(duration)}
           </span>
@@ -146,7 +151,7 @@ function WorkflowResultCard({
         </button>
       </div>
       <div className="px-3 py-2">
-        {artifacts.length > 0 && (
+        {!fetchFailed && artifacts.length > 0 && (
           <div className="mb-2">
             <ArtifactSummary artifacts={artifacts} runId={runId} />
           </div>
