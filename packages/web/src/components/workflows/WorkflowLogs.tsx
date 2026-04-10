@@ -436,7 +436,32 @@ export function WorkflowLogs({
   const onText = useCallback((content: string): void => {
     setSseMessages(prev => {
       const last = prev[prev.length - 1];
+      // Workflow status messages (🚀 start, ✅ complete) should be their own message,
+      // matching ChatInterface's behavior and persistence segmentation. Without this,
+      // all text concatenates into one giant streaming message, breaking text dedup
+      // against DB messages (which are stored as separate segments).
+      const isWorkflowStatus = /^[\u{1F680}\u{2705}]/u.test(content);
+
       if (last?.role === 'assistant' && last.isStreaming) {
+        const lastIsWorkflowStatus = /^[\u{1F680}\u{2705}]/u.test(last.content);
+
+        if ((isWorkflowStatus && last.content) || (lastIsWorkflowStatus && !isWorkflowStatus)) {
+          // Close the current streaming message and start a new one when:
+          // 1. Incoming is a workflow status and current has content
+          // 2. Current is a workflow status and incoming is regular text
+          return [
+            ...prev.slice(0, -1),
+            { ...last, isStreaming: false },
+            {
+              id: `msg-${String(Date.now())}`,
+              role: 'assistant' as const,
+              content,
+              timestamp: Date.now(),
+              isStreaming: true,
+              toolCalls: [],
+            },
+          ];
+        }
         return [...prev.slice(0, -1), { ...last, content: last.content + content }];
       }
       return [
