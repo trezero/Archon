@@ -1203,7 +1203,7 @@ export function copyArchonSkill(targetPath: string): void {
 function trySpawn(
   command: string,
   args: string[],
-  options: { detached: boolean; stdio: 'ignore'; shell?: boolean }
+  options: { detached: boolean; stdio: 'ignore' }
 ): boolean {
   try {
     const child: ChildProcess = spawn(command, args, options);
@@ -1238,7 +1238,6 @@ function spawnWindowsTerminal(repoPath: string): SpawnResult {
     trySpawn('cmd.exe', ['/c', 'start', '""', '/D', repoPath, 'cmd', '/k', 'archon setup'], {
       detached: true,
       stdio: 'ignore',
-      shell: true,
     })
   ) {
     return { success: true };
