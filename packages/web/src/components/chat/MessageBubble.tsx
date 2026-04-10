@@ -60,7 +60,7 @@ function makeMarkdownComponents(
             return (
               <button
                 type="button"
-                className="rounded bg-background px-1.5 py-0.5 font-mono text-sm text-accent hover:text-accent-bright transition-colors"
+                className="cursor-pointer rounded bg-background px-1.5 py-0.5 font-mono text-sm text-accent-bright hover:text-primary transition-colors"
                 onClick={() => {
                   onArtifactClick(runId, filename);
                 }}
@@ -75,7 +75,7 @@ function makeMarkdownComponents(
               href={`/api/artifacts/${encodeURIComponent(runId)}/${encodedFilename}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded bg-background px-1.5 py-0.5 font-mono text-sm text-accent underline decoration-accent/40 hover:decoration-accent"
+              className="rounded bg-background px-1.5 py-0.5 font-mono text-sm text-accent-bright underline decoration-accent-bright/40 hover:decoration-accent-bright"
             >
               {displayName}
             </a>

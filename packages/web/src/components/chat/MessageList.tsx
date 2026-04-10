@@ -70,7 +70,7 @@ function makeResultMarkdownComponents(
               }
               target={filename.endsWith('.md') ? undefined : '_blank'}
               rel={filename.endsWith('.md') ? undefined : 'noopener noreferrer'}
-              className="!text-accent-bright hover:!text-[oklch(0.85_0.19_250)] font-mono font-medium underline decoration-accent-bright/40 hover:decoration-accent-bright"
+              className="!text-accent-bright hover:!text-primary font-mono font-medium underline decoration-accent-bright/40 hover:decoration-accent-bright"
             >
               {displayName}
             </a>

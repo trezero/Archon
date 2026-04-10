@@ -37,6 +37,7 @@ import {
   getCommandFolderSearchPaths,
   getDefaultCommandsPath,
   getDefaultWorkflowsPath,
+  getArchonWorkspacesPath,
   getRunArtifactsPath,
   getArchonHome,
   isDocker,
