@@ -19,7 +19,7 @@ export interface UpdateCheckResult {
 }
 
 const CACHE_FILE = 'update-check.json';
-const STALENESS_MS = 24 * 60 * 60 * 1000; // 24 hours
+const STALENESS_MS = 60 * 60 * 1000; // 1 hour
 const FETCH_TIMEOUT_MS = 3000; // 3 seconds
 const GITHUB_API_URL = 'https://api.github.com/repos/coleam00/Archon/releases/latest';
 
