@@ -591,6 +591,13 @@ export async function workflowRunCommand(
         renderWorkflowEvent(event, verbose ?? false);
       });
 
+  // Notify Web UI that a workflow is dispatching (mirrors orchestrator.ts dispatch message)
+  await adapter.sendMessage(conversationId, `Dispatching workflow: **${workflow.name}**`, {
+    category: 'workflow_dispatch_status',
+    segment: 'new',
+    workflowDispatch: { workerConversationId: conversationId, workflowName: workflow.name },
+  });
+
   // Execute workflow with workingCwd (may be worktree path)
   let result: Awaited<ReturnType<typeof executeWorkflow>>;
   try {
@@ -612,6 +619,21 @@ export async function workflowRunCommand(
   if (result.success && 'paused' in result && result.paused) {
     console.log('\nWorkflow paused — waiting for approval.');
   } else if (result.success) {
+    // Surface workflow result to Web UI as a result card (mirrors orchestrator.ts result message)
+    if ('summary' in result && result.summary) {
+      try {
+        await adapter.sendMessage(conversationId, result.summary, {
+          category: 'workflow_result',
+          segment: 'new',
+          workflowResult: { workflowName: workflow.name, runId: result.workflowRunId },
+        });
+      } catch (surfaceError) {
+        getLog().warn(
+          { err: surfaceError as Error, conversationId },
+          'workflow_output_surface_failed'
+        );
+      }
+    }
     console.log('\nWorkflow completed successfully.');
   } else {
     throw new Error(`Workflow failed: ${result.error}`);
