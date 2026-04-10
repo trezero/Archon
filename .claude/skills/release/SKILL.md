@@ -97,13 +97,16 @@ Read the commit messages and the actual diffs (`git diff main..dev`) to understa
    - `pyproject.toml`: update `version = "x.y.z"`
    - `Cargo.toml`: update `version = "x.y.z"`
 
-2. **Lockfile refresh** (stack-dependent):
+2. **Workspace version sync** (monorepo only):
+   - If `scripts/sync-versions.sh` exists, run `bash scripts/sync-versions.sh` to sync all `packages/*/package.json` versions to match the root version.
+
+3. **Lockfile refresh** (stack-dependent):
    - `package.json` + `bun.lock`: run `bun install`
    - `package.json` + `package-lock.json`: run `npm install --package-lock-only`
    - `pyproject.toml` + `uv.lock`: run `uv lock --quiet`
    - `Cargo.toml`: run `cargo update --workspace`
 
-3. **`CHANGELOG.md`** — prepend new version section:
+4. **`CHANGELOG.md`** — prepend new version section:
 
 ```markdown
 ## [x.y.z] - YYYY-MM-DD
@@ -141,8 +144,8 @@ Ask: "Does this look good? I'll commit and create the PR."
 Only after user approval:
 
 ```bash
-# Stage version file, lockfile, and changelog
-git add <version-file> <lockfile> CHANGELOG.md
+# Stage version file, workspace packages, lockfile, and changelog
+git add <version-file> packages/*/package.json <lockfile> CHANGELOG.md
 git commit -m "Release x.y.z"
 
 # Push dev
