@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-04-10
+
+Fixes for `archon serve` process lifecycle and static file serving.
+
+### Fixed
+
+- **`archon serve` process exits immediately**: the CLI called `process.exit(0)` after `startServer()` returned, killing the server. Now blocks on SIGINT/SIGTERM so the server stays running (#1047)
+- **Web dist path existence check**: server logs a warning at startup if the web dist directory is missing, instead of silently serving 404s
+- **Favicon route**: added explicit `/favicon.png` route for the web UI
+
 ## [0.3.4] - 2026-04-10
 
 Binary env loading fix and release infrastructure improvements.
