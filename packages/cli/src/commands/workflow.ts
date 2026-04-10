@@ -180,7 +180,7 @@ export async function workflowListCommand(cwd: string, json?: boolean): Promise<
   }
 
   if (workflowEntries.length > 0) {
-    console.log(`\nFound ${String(workflowEntries.length)} workflow(s):\n`);
+    console.log(`\nFound ${workflowEntries.length} workflow(s):\n`);
 
     for (const { workflow } of workflowEntries) {
       console.log(`  ${workflow.name}`);
@@ -193,7 +193,7 @@ export async function workflowListCommand(cwd: string, json?: boolean): Promise<
   }
 
   if (errors.length > 0) {
-    console.log(`\n${String(errors.length)} workflow(s) failed to load:\n`);
+    console.log(`\n${errors.length} workflow(s) failed to load:\n`);
     for (const e of errors) {
       console.log(`  ${e.filename}: ${e.error}`);
     }
@@ -664,25 +664,25 @@ function formatAge(startedAt: Date | string): string {
   if (Number.isNaN(date.getTime())) return 'unknown';
   const ms = Date.now() - date.getTime();
   const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${String(secs)}s`;
+  if (secs < 60) return `${secs}s`;
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${String(mins)}m`;
+  if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${String(hours)}h ${String(mins % 60)}m`;
+  if (hours < 24) return `${hours}h ${mins % 60}m`;
   const days = Math.floor(hours / 24);
-  return `${String(days)}d ${String(hours % 24)}h`;
+  return `${days}d ${hours % 24}h`;
 }
 
 /**
  * Format a duration in milliseconds as a compact string.
  */
 function formatDuration(ms: number): string {
-  if (ms < 1000) return `${String(ms)}ms`;
+  if (ms < 1000) return `${ms}ms`;
   const secs = Math.round(ms / 100) / 10;
-  if (secs < 60) return `${String(secs)}s`;
+  if (secs < 60) return `${secs}s`;
   const mins = Math.floor(secs / 60);
   const remSecs = Math.round(secs % 60);
-  return `${String(mins)}m${String(remSecs)}s`;
+  return `${mins}m${remSecs}s`;
 }
 
 interface NodeSummary {
@@ -772,10 +772,7 @@ export async function workflowStatusCommand(json?: boolean, verbose?: boolean): 
           workflowEventsDb.listWorkflowEvents(run.id).catch(() => [] as WorkflowEventRow[])
         )
       );
-      const runsWithEvents = runs.map((run, i) => ({
-        ...run,
-        events: eventsPerRun[i],
-      }));
+      const runsWithEvents = runs.map((run, i) => ({ ...run, events: eventsPerRun[i] }));
       console.log(JSON.stringify({ runs: runsWithEvents }, null, 2));
     } else {
       console.log(JSON.stringify({ runs }, null, 2));
@@ -788,7 +785,7 @@ export async function workflowStatusCommand(json?: boolean, verbose?: boolean): 
     return;
   }
 
-  console.log(`\nActive workflows (${String(runs.length)}):\n`);
+  console.log(`\nActive workflows (${runs.length}):\n`);
   for (const run of runs) {
     const age = formatAge(run.started_at);
     console.log(`  ID:     ${run.id}`);
@@ -1002,9 +999,9 @@ export async function workflowCleanupCommand(days: number): Promise<void> {
   try {
     const { count } = await workflowDb.deleteOldWorkflowRuns(days);
     if (count === 0) {
-      console.log(`No workflow runs older than ${String(days)} days to clean up.`);
+      console.log(`No workflow runs older than ${days} days to clean up.`);
     } else {
-      console.log(`Deleted ${String(count)} workflow run(s) older than ${String(days)} days.`);
+      console.log(`Deleted ${count} workflow run(s) older than ${days} days.`);
     }
   } catch (error) {
     const err = error as Error;
