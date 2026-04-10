@@ -154,7 +154,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build web UI
-        run: bun --filter @archon/web run build
+        run: bun --filter @archon/web build
 
       - name: Package web dist
         run: |
