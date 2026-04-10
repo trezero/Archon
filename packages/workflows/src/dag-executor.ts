@@ -8,6 +8,7 @@
 import { readFile } from 'fs/promises';
 import { resolve, isAbsolute } from 'path';
 import { execFileAsync } from '@archon/git';
+import { discoverScripts } from './script-discovery';
 import type {
   WorkflowAssistantOptions,
   IWorkflowPlatform,
@@ -23,6 +24,7 @@ import type {
   CommandNode,
   PromptNode,
   LoopNode,
+  ScriptNode,
   NodeOutput,
   TriggerRule,
   WorkflowRun,
@@ -31,7 +33,14 @@ import type {
   ThinkingConfig,
   SandboxSettings,
 } from './schemas';
-import { isBashNode, isLoopNode, isApprovalNode, isCancelNode, isApprovalContext } from './schemas';
+import {
+  isBashNode,
+  isLoopNode,
+  isApprovalNode,
+  isCancelNode,
+  isScriptNode,
+  isApprovalContext,
+} from './schemas';
 import { formatToolCall } from './utils/tool-formatter';
 import { createLogger } from '@archon/paths';
 import { getWorkflowEventEmitter } from './event-emitter';
@@ -56,6 +65,7 @@ import {
   buildPromptWithContext,
   detectCompletionSignal,
   stripCompletionTags,
+  isInlineScript,
 } from './executor-shared';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -1284,8 +1294,8 @@ async function executeNodeInternal(
   }
 }
 
-/** Default timeout for bash nodes: 2 minutes */
-const BASH_DEFAULT_TIMEOUT = 120_000;
+/** Default timeout for subprocess nodes (bash, script): 2 minutes */
+const SUBPROCESS_DEFAULT_TIMEOUT = 120_000;
 
 /**
  * Execute a bash (shell script) DAG node.
@@ -1346,7 +1356,7 @@ async function executeBashNode(
   );
   const finalScript = substituteNodeOutputRefs(substitutedScript, nodeOutputs, true);
 
-  const timeout = node.timeout ?? BASH_DEFAULT_TIMEOUT;
+  const timeout = node.timeout ?? SUBPROCESS_DEFAULT_TIMEOUT;
 
   try {
     const { stdout, stderr } = await execFileAsync('bash', ['-c', finalScript], {
@@ -1417,6 +1427,221 @@ async function executeBashNode(
         event_type: 'node_failed',
         step_name: node.id,
         data: { error: errorMsg, type: 'bash' },
+      })
+      .catch((dbErr: Error) => {
+        getLog().error(
+          { err: dbErr, workflowRunId: workflowRun.id, eventType: 'node_failed' },
+          'workflow_event_persist_failed'
+        );
+      });
+
+    emitter.emit({
+      type: 'node_failed',
+      runId: workflowRun.id,
+      nodeId: node.id,
+      nodeName: node.id,
+      error: errorMsg,
+    });
+
+    return { state: 'failed', output: '', error: errorMsg };
+  }
+}
+
+/**
+ * Execute a script (TypeScript via bun or Python via uv) DAG node.
+ * Supports both inline code snippets and named scripts discovered from .archon/scripts/.
+ * stdout is captured and trimmed as the node output; stderr is logged as a warning.
+ */
+async function executeScriptNode(
+  deps: WorkflowDeps,
+  platform: IWorkflowPlatform,
+  conversationId: string,
+  cwd: string,
+  workflowRun: WorkflowRun,
+  node: ScriptNode,
+  artifactsDir: string,
+  logDir: string,
+  baseBranch: string,
+  docsDir: string,
+  nodeOutputs: Map<string, NodeOutput>,
+  issueContext?: string
+): Promise<NodeOutput> {
+  const nodeStartTime = Date.now();
+  const nodeContext: SendMessageContext = { workflowId: workflowRun.id, nodeName: node.id };
+
+  getLog().info({ nodeId: node.id, type: 'script', runtime: node.runtime }, 'dag_node_started');
+  await logNodeStart(logDir, workflowRun.id, node.id, '<script>');
+
+  deps.store
+    .createWorkflowEvent({
+      workflow_run_id: workflowRun.id,
+      event_type: 'node_started',
+      step_name: node.id,
+      data: { type: 'script', runtime: node.runtime },
+    })
+    .catch((err: Error) => {
+      getLog().error(
+        { err, workflowRunId: workflowRun.id, eventType: 'node_started' },
+        'workflow_event_persist_failed'
+      );
+    });
+
+  const emitter = getWorkflowEventEmitter();
+  emitter.emit({
+    type: 'node_started',
+    runId: workflowRun.id,
+    nodeId: node.id,
+    nodeName: node.id,
+  });
+
+  // Variable substitution on script field
+  const { prompt: substitutedScript } = substituteWorkflowVariables(
+    node.script,
+    workflowRun.id,
+    workflowRun.user_message,
+    artifactsDir,
+    baseBranch,
+    docsDir,
+    issueContext
+  );
+  const finalScript = substituteNodeOutputRefs(substitutedScript, nodeOutputs, false);
+
+  const timeout = node.timeout ?? SUBPROCESS_DEFAULT_TIMEOUT;
+
+  // Build the command and args based on runtime and inline vs named
+  let cmd = '';
+  let args: string[] = [];
+
+  const nodeDeps = node.deps ?? [];
+
+  try {
+    if (isInlineScript(finalScript)) {
+      // Inline code execution
+      if (node.runtime === 'bun') {
+        cmd = 'bun';
+        args = ['-e', finalScript];
+      } else {
+        // uv run --with dep1 --with dep2 python -c <code>
+        cmd = 'uv';
+        const withFlags = nodeDeps.flatMap(dep => ['--with', dep]);
+        args = ['run', ...withFlags, 'python', '-c', finalScript];
+      }
+    } else {
+      // Named script — look up in .archon/scripts/ directory
+      const scriptsDir = resolve(cwd, '.archon', 'scripts');
+      const scripts = await discoverScripts(scriptsDir);
+      const scriptDef = scripts.get(finalScript);
+
+      if (!scriptDef) {
+        const errorMsg = `Script node '${node.id}': named script '${finalScript}' not found in .archon/scripts/`;
+        getLog().error({ nodeId: node.id, scriptName: finalScript }, 'script_not_found');
+        await safeSendMessage(platform, conversationId, errorMsg, nodeContext);
+        await logNodeError(logDir, workflowRun.id, node.id, errorMsg);
+
+        emitter.emit({
+          type: 'node_failed',
+          runId: workflowRun.id,
+          nodeId: node.id,
+          nodeName: node.id,
+          error: errorMsg,
+        });
+        deps.store
+          .createWorkflowEvent({
+            workflow_run_id: workflowRun.id,
+            event_type: 'node_failed',
+            step_name: node.id,
+            data: { error: errorMsg, type: 'script' },
+          })
+          .catch((dbErr: Error) => {
+            getLog().error(
+              { err: dbErr, workflowRunId: workflowRun.id, eventType: 'node_failed' },
+              'workflow_event_persist_failed'
+            );
+          });
+
+        return { state: 'failed', output: '', error: errorMsg };
+      }
+
+      // Use scriptDef.runtime (canonical source) instead of re-deriving from extension
+      if (scriptDef.runtime === 'uv') {
+        cmd = 'uv';
+        const withFlags = nodeDeps.flatMap(dep => ['--with', dep]);
+        args = ['run', ...withFlags, scriptDef.path];
+      } else {
+        cmd = 'bun';
+        args = ['run', scriptDef.path];
+      }
+    }
+
+    const { stdout, stderr } = await execFileAsync(cmd, args, {
+      cwd,
+      timeout,
+    });
+
+    // Trim trailing newline from stdout (common shell behavior)
+    const output = stdout.replace(/\n$/, '');
+
+    if (stderr.trim()) {
+      getLog().warn({ nodeId: node.id, stderr: stderr.trim() }, 'script_node_stderr');
+      await safeSendMessage(
+        platform,
+        conversationId,
+        `Script node '${node.id}' stderr:\n\`\`\`\n${stderr.trim()}\n\`\`\``,
+        nodeContext
+      );
+    }
+
+    const duration = Date.now() - nodeStartTime;
+    getLog().info({ nodeId: node.id, durationMs: duration }, 'dag_node_completed');
+    await logNodeComplete(logDir, workflowRun.id, node.id, '<script>', { durationMs: duration });
+
+    deps.store
+      .createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'node_completed',
+        step_name: node.id,
+        data: { duration_ms: duration, type: 'script', node_output: output },
+      })
+      .catch((err: Error) => {
+        getLog().error(
+          { err, workflowRunId: workflowRun.id, eventType: 'node_completed' },
+          'workflow_event_persist_failed'
+        );
+      });
+
+    emitter.emit({
+      type: 'node_completed',
+      runId: workflowRun.id,
+      nodeId: node.id,
+      nodeName: node.id,
+      duration,
+    });
+
+    return { state: 'completed', output };
+  } catch (error) {
+    const err = error as Error & { killed?: boolean; code?: number | string; stderr?: string };
+    const isTimeout = err.killed === true || (err.message ?? '').includes('timed out');
+    const stderrHint = err.stderr?.trim() ? `\n\nScript output:\n${err.stderr.trim()}` : '';
+    let errorMsg: string;
+    if (isTimeout) {
+      errorMsg = `Script node '${node.id}' timed out after ${String(timeout)}ms`;
+    } else if (err.message?.includes('ENOENT')) {
+      errorMsg = `Script node '${node.id}' failed: '${cmd}' executable not found in PATH`;
+    } else if (err.message?.includes('EACCES')) {
+      errorMsg = `Script node '${node.id}' failed: permission denied (check cwd permissions)`;
+    } else {
+      errorMsg = `Script node '${node.id}' failed: ${err.message}${stderrHint}`;
+    }
+
+    getLog().error({ err, nodeId: node.id, isTimeout }, 'dag_node_failed');
+    await logNodeError(logDir, workflowRun.id, node.id, errorMsg);
+
+    deps.store
+      .createWorkflowEvent({
+        workflow_run_id: workflowRun.id,
+        event_type: 'node_failed',
+        step_name: node.id,
+        data: { error: errorMsg, type: 'script' },
       })
       .catch((dbErr: Error) => {
         getLog().error(
@@ -2475,6 +2700,25 @@ export async function executeDagWorkflow(
             });
             // Return completed — the between-layer status check will see 'cancelled' and break.
             return { nodeId: node.id, output: { state: 'completed' as const, output: reason } };
+          }
+
+          // 3e. Script node dispatch — runs via bun or uv
+          if (isScriptNode(node)) {
+            const output = await executeScriptNode(
+              deps,
+              platform,
+              conversationId,
+              cwd,
+              workflowRun,
+              node,
+              artifactsDir,
+              logDir,
+              baseBranch,
+              docsDir,
+              nodeOutputs,
+              issueContext
+            );
+            return { nodeId: node.id, output };
           }
 
           // 4. Resolve per-node provider/model/options

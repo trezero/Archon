@@ -21,6 +21,7 @@ import { createLogger } from '@archon/paths';
 import { scanPathForSensitiveKeys, EnvLeakError } from '../utils/env-leak-scanner';
 import * as codebaseDb from '../db/codebases';
 import { loadConfig } from '../config/config-loader';
+import { resolveCodexBinaryPath } from '../utils/codex-binary-resolver';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -29,18 +30,38 @@ function getLog(): ReturnType<typeof createLogger> {
   return cachedLog;
 }
 
-// Singleton Codex instance
+// Singleton Codex instance (async because binary path resolution is async)
 let codexInstance: Codex | null = null;
+let codexInitPromise: Promise<Codex> | null = null;
+
+/** Reset singleton state. Exported for tests only. */
+export function resetCodexSingleton(): void {
+  codexInstance = null;
+  codexInitPromise = null;
+}
 
 /**
- * Get or create Codex SDK instance
- * Synchronous now that we have direct ESM import
+ * Get or create Codex SDK instance.
+ * Async because in compiled binary mode, binary path resolution is async.
+ * Once initialized, the binary path is fixed for the process lifetime.
  */
-function getCodex(): Codex {
-  if (!codexInstance) {
-    codexInstance = new Codex();
+async function getCodex(configCodexBinaryPath?: string): Promise<Codex> {
+  if (codexInstance) return codexInstance;
+
+  // Prevent concurrent initialization race
+  if (!codexInitPromise) {
+    codexInitPromise = (async (): Promise<Codex> => {
+      const codexPathOverride = await resolveCodexBinaryPath(configCodexBinaryPath);
+      const instance = new Codex({ codexPathOverride });
+      codexInstance = instance;
+      return instance;
+    })().catch(err => {
+      // Clear promise so next call can retry (e.g. after user installs Codex)
+      codexInitPromise = null;
+      throw err;
+    });
   }
-  return codexInstance;
+  return codexInitPromise;
 }
 
 /**
@@ -157,6 +178,15 @@ export class CodexClient implements IAssistantClient {
     resumeSessionId?: string,
     options?: AssistantRequestOptions
   ): AsyncGenerator<MessageChunk> {
+    // Load config once — used for env-leak gate and (on first call) codexBinaryPath resolution.
+    let mergedConfig: Awaited<ReturnType<typeof loadConfig>> | undefined;
+    try {
+      mergedConfig = await loadConfig(cwd);
+    } catch (configErr) {
+      // Fail-closed: config load failure enforces the env-leak gate (allowTargetRepoKeys stays false)
+      getLog().warn({ err: configErr, cwd }, 'env_leak_gate.config_load_failed_gate_enforced');
+    }
+
     // Pre-spawn: check for env key leak if codebase is not explicitly consented.
     // Use prefix lookup so worktree paths (e.g. .../worktrees/feature-branch) still
     // match the registered source cwd (e.g. .../source).
@@ -165,13 +195,7 @@ export class CodexClient implements IAssistantClient {
       (await codebaseDb.findCodebaseByPathPrefix(cwd));
     if (codebase && !codebase.allow_env_keys) {
       // Fail-closed: a config load failure must NOT silently bypass the gate.
-      let allowTargetRepoKeys = false;
-      try {
-        const merged = await loadConfig(cwd);
-        allowTargetRepoKeys = merged.allowTargetRepoKeys;
-      } catch (configErr) {
-        getLog().warn({ err: configErr, cwd }, 'env_leak_gate.config_load_failed_gate_enforced');
-      }
+      const allowTargetRepoKeys = mergedConfig?.allowTargetRepoKeys ?? false;
       if (!allowTargetRepoKeys) {
         const report = scanPathForSensitiveKeys(cwd);
         if (report.findings.length > 0) {
@@ -180,7 +204,10 @@ export class CodexClient implements IAssistantClient {
       }
     }
 
-    const codex = getCodex();
+    // Initialize Codex SDK with binary path override (resolved from env/config/vendor).
+    // In dev mode, resolveCodexBinaryPath returns undefined and the SDK uses node_modules.
+    // In binary mode, it resolves from env/config/vendor or throws with install instructions.
+    const codex = await getCodex(mergedConfig?.assistants.codex.codexBinaryPath);
     const threadOptions = buildThreadOptions(cwd, options);
 
     // Check if already aborted before starting
