@@ -339,6 +339,22 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps): React.Rea
               },
             ];
           }
+          // Text after tool calls starts a new message segment, matching server-side
+          // persistence.ts segmentation (persistence.ts:72: lastSeg.toolCalls.length > 0).
+          if ((last.toolCalls?.length ?? 0) > 0) {
+            return [
+              ...prev.slice(0, -1),
+              { ...last, isStreaming: false },
+              {
+                id: `msg-${String(Date.now())}`,
+                role: 'assistant' as const,
+                content,
+                timestamp: Date.now(),
+                isStreaming: true,
+                toolCalls: [],
+              },
+            ];
+          }
           // Append to existing streaming message (replace thinking placeholder if empty)
           return [...prev.slice(0, -1), { ...last, content: last.content + content }];
         }
