@@ -80,7 +80,13 @@ import { setupCommand } from './commands/setup';
 import { validateWorkflowsCommand, validateCommandsCommand } from './commands/validate';
 import { serveCommand } from './commands/serve';
 import { closeDatabase } from '@archon/core';
-import { setLogLevel, createLogger } from '@archon/paths';
+import {
+  setLogLevel,
+  createLogger,
+  checkForUpdate,
+  BUNDLED_IS_BINARY,
+  BUNDLED_VERSION,
+} from '@archon/paths';
 import * as git from '@archon/git';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -156,6 +162,20 @@ async function closeDb(): Promise<void> {
     const err = error as Error;
     // Log with details but don't throw - we want the original error to be visible
     getLog().warn({ err }, 'db_close_failed');
+  }
+}
+
+async function printUpdateNotice(quiet: boolean | undefined): Promise<void> {
+  if (quiet || !BUNDLED_IS_BINARY) return;
+  try {
+    const result = await checkForUpdate(BUNDLED_VERSION);
+    if (result?.updateAvailable) {
+      process.stderr.write(
+        `Update available: v${result.currentVersion} → v${result.latestVersion} — ${result.releaseUrl}\n`
+      );
+    }
+  } catch (err) {
+    getLog().debug({ err }, 'update_check.notice_failed');
   }
 }
 
@@ -556,6 +576,7 @@ async function main(): Promise<number> {
         printUsage();
         return 1;
     }
+    await printUpdateNotice(values.quiet as boolean | undefined);
     return 0;
   } catch (error) {
     const err = error as Error;
