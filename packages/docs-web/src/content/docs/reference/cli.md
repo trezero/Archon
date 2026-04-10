@@ -362,12 +362,11 @@ When using `--branch`, workflows run inside the worktree directory.
 
 ## Environment
 
-The CLI loads environment variables exclusively from `~/.archon/.env`. It does **not** load `.env` from the current working directory. This prevents conflicts when running Archon from target projects that have their own database configurations.
+The CLI loads `~/.archon/.env` with `override: true`, so Archon's own config always wins over any env vars Bun auto-loads from the current working directory. Target repo env vars remain in `process.env` but cannot reach AI subprocesses — `SUBPROCESS_ENV_ALLOWLIST` blocks all non-whitelisted keys.
 
 On startup, the CLI:
-1. Deletes any `DATABASE_URL` that Bun may have auto-loaded from the target repo's `.env`
-2. Loads `~/.archon/.env` with `override: true`
-3. Auto-enables global Claude auth if no explicit tokens are set
+1. Loads `~/.archon/.env` with `override: true` (Archon's config wins over CWD vars)
+2. Auto-enables global Claude auth if no explicit tokens are set
 
 ## Database
 

@@ -5,7 +5,7 @@
 
 // Load environment variables FIRST — before any application imports.
 //
-// Credential safety: target repo `.env` keys (like ANTHROPIC_API_KEY) that Bun
+// Credential safety: target repo `.env` keys (like CLAUDE_API_KEY) that Bun
 // auto-loads from CWD cannot leak into AI subprocesses because
 // SUBPROCESS_ENV_ALLOWLIST blocks them. The env-leak gate provides a second
 // layer by scanning target repos before spawning. No CWD stripping needed.
@@ -16,9 +16,9 @@ import { BUNDLED_IS_BINARY } from '@archon/paths';
 
 // In dev/source mode, load the repo root .env (platform tokens, API keys, etc.)
 // import.meta.dir is frozen at build time, so skip in compiled binaries.
-let envPath: string | undefined;
-if (!BUNDLED_IS_BINARY) {
-  envPath = resolve(import.meta.dir, '..', '..', '..', '.env');
+const envPath = BUNDLED_IS_BINARY ? undefined : resolve(import.meta.dir, '..', '..', '..', '.env');
+
+if (envPath) {
   const dotenvResult = config({ path: envPath });
   if (dotenvResult.error) {
     // Use console.error since logger depends on env vars (LOG_LEVEL)
@@ -32,11 +32,14 @@ if (!BUNDLED_IS_BINARY) {
 // In dev mode it overrides CWD vars for keys like DATABASE_URL.
 const globalEnvPath = resolve(process.env.HOME ?? '~', '.archon', '.env');
 if (existsSync(globalEnvPath)) {
-  config({ path: globalEnvPath, override: true });
+  const globalResult = config({ path: globalEnvPath, override: true });
+  if (globalResult.error) {
+    console.error(`Failed to load .env from ${globalEnvPath}: ${globalResult.error.message}`);
+    console.error('Hint: Check for syntax errors in your ~/.archon/.env file.');
+  }
 }
 
-// Smart default: use Claude Code's built-in OAuth if no explicit credentials.
-// Same logic as the CLI (packages/cli/src/cli.ts).
+// Smart default: use Claude Code's built-in OAuth if no explicit credentials
 if (
   !process.env.CLAUDE_API_KEY &&
   !process.env.CLAUDE_CODE_OAUTH_TOKEN &&

@@ -296,21 +296,19 @@ Infrastructure configuration (database URL, platform tokens) is stored in `.env`
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| **CLI** | `~/.archon/.env` | Global infrastructure config (only source loaded) |
-| **Server** | `<archon-repo>/.env` | Platform tokens, database |
+| **CLI** | `~/.archon/.env` | Global infrastructure config (only source, loaded with `override: true`) |
+| **Server (dev)** | `<archon-repo>/.env` + `~/.archon/.env` | Repo `.env` for platform tokens; `~/.archon/.env` overrides with `override: true` |
+| **Server (binary)** | `~/.archon/.env` | Single source of truth (repo `.env` path is not available in compiled binaries) |
 
-**Important**: The CLI loads `.env` **only** from `~/.archon/.env`. On startup, it explicitly deletes any `DATABASE_URL` that Bun may have auto-loaded from the current working directory's `.env`, then loads `~/.archon/.env` with `override: true`. This prevents conflicts when running Archon from target projects that have their own database configurations.
+**How it works**: Both the CLI and server load `~/.archon/.env` with `override: true`, so Archon's own config always wins over any env vars Bun auto-loads from the current working directory. Target repo env vars remain in `process.env` but cannot reach AI subprocesses — `SUBPROCESS_ENV_ALLOWLIST` blocks all non-whitelisted keys.
 
-**Best practice**: Use `~/.archon/.env` as the single source of truth. If running the server, symlink or copy to the archon repo:
+**Best practice**: Use `~/.archon/.env` as the single source of truth:
 
 ```bash
 # Create global config
 mkdir -p ~/.archon
 cp .env.example ~/.archon/.env
 # Edit with your values
-
-# For server, symlink to repo
-ln -s ~/.archon/.env .env
 ```
 
 ## Docker Configuration
