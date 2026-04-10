@@ -43,7 +43,13 @@ import type { MergedConfig } from '../config/config-types';
 import { generateAndSetTitle } from '../services/title-generator';
 import { validateAndResolveIsolation, dispatchBackgroundWorkflow } from './orchestrator';
 import { IsolationBlockedError } from '@archon/isolation';
-import { buildOrchestratorPrompt, buildProjectScopedPrompt } from './prompt-builder';
+import {
+  buildOrchestratorPrompt,
+  buildProjectScopedPrompt,
+  formatWorkflowContextSection,
+} from './prompt-builder';
+import type { WorkflowResultContext } from './prompt-builder';
+import * as messageDb from '../db/messages';
 import * as workflowDb from '../db/workflows';
 import * as workflowEventDb from '../db/workflow-events';
 import type { ApprovalContext } from '@archon/workflows/schemas/workflow-run';
@@ -451,7 +457,8 @@ function buildFullPrompt(
   message: string,
   issueContext: string | undefined,
   threadContext: string | undefined,
-  attachedFiles?: AttachedFile[]
+  attachedFiles?: AttachedFile[],
+  workflowContext?: string
 ): string {
   const scopedCodebase = conversation.codebase_id
     ? codebases.find(c => c.id === conversation.codebase_id)
@@ -471,11 +478,14 @@ function buildFullPrompt(
           .join('\n')
       : '';
 
+  const workflowContextSuffix = workflowContext ? '\n\n---\n\n' + workflowContext : '';
+
   if (threadContext) {
     return (
       systemPrompt +
       '\n\n---\n\n## Thread Context (previous messages)\n\n' +
       threadContext +
+      workflowContextSuffix +
       '\n\n---\n\n## Current Request\n\n' +
       message +
       contextSuffix +
@@ -483,7 +493,14 @@ function buildFullPrompt(
     );
   }
 
-  return systemPrompt + '\n\n---\n\n## User Message\n\n' + message + contextSuffix + fileSuffix;
+  return (
+    systemPrompt +
+    workflowContextSuffix +
+    '\n\n---\n\n## User Message\n\n' +
+    message +
+    contextSuffix +
+    fileSuffix
+  );
 }
 
 // ─── Main Handler ───────────────────────────────────────────────────────────
@@ -731,6 +748,38 @@ export async function handleMessage(
       });
     }
 
+    // Build workflow context for follow-up awareness
+    let workflowContext: string | undefined;
+    try {
+      const recentResultMessages = await messageDb.getRecentWorkflowResultMessages(
+        conversation.id,
+        3
+      );
+      if (recentResultMessages.length > 0) {
+        const workflowResults: WorkflowResultContext[] = recentResultMessages.map(msg => {
+          let workflowName = 'unknown';
+          let runId = 'unknown';
+          try {
+            const meta = JSON.parse(msg.metadata) as {
+              workflowResult?: { workflowName?: string; runId?: string };
+            };
+            workflowName = meta.workflowResult?.workflowName ?? 'unknown';
+            runId = meta.workflowResult?.runId ?? 'unknown';
+          } catch {
+            // Malformed metadata — use defaults
+          }
+          return { workflowName, runId, summary: msg.content };
+        });
+        workflowContext = formatWorkflowContextSection(workflowResults);
+      }
+    } catch (error) {
+      getLog().warn(
+        { err: error as Error, conversationId },
+        'orchestrator.workflow_context_fetch_failed'
+      );
+      // Non-critical — continue without context
+    }
+
     const fullPrompt = buildFullPrompt(
       conversation,
       codebases,
@@ -738,7 +787,8 @@ export async function handleMessage(
       message,
       issueContext,
       threadContext,
-      attachedFiles
+      attachedFiles,
+      workflowContext
     );
     const cwd = getArchonWorkspacesPath();
 

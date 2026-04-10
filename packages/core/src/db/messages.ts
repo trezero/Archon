@@ -1,7 +1,7 @@
 /**
  * Database operations for conversation messages (Web UI history)
  */
-import { pool, getDialect } from './connection';
+import { pool, getDialect, getDatabaseType } from './connection';
 import { createLogger } from '@archon/paths';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -63,4 +63,35 @@ export async function listMessages(
     [conversationId, limit]
   );
   return result.rows;
+}
+
+/**
+ * Get recent messages with workflowResult metadata for a conversation.
+ * Used to inject workflow context into the orchestrator prompt.
+ * Non-throwing — returns empty array on error.
+ */
+export async function getRecentWorkflowResultMessages(
+  conversationId: string,
+  limit = 3
+): Promise<readonly MessageRow[]> {
+  const dbType = getDatabaseType();
+  const metadataFilter =
+    dbType === 'postgresql'
+      ? "(metadata->>'category') = $2"
+      : "json_extract(metadata, '$.category') = $2";
+  try {
+    const result = await pool.query<MessageRow>(
+      `SELECT * FROM remote_agent_messages
+       WHERE conversation_id = $1
+       AND ${metadataFilter}
+       ORDER BY created_at DESC
+       LIMIT $3`,
+      [conversationId, 'workflow_result', limit]
+    );
+    return result.rows;
+  } catch (error) {
+    const err = error as Error;
+    getLog().warn({ err, conversationId }, 'db.workflow_result_messages_query_failed');
+    return [];
+  }
 }
