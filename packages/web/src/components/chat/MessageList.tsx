@@ -1,6 +1,6 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowDown, Sparkles, ArrowRight, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -8,22 +8,87 @@ import { MessageBubble } from './MessageBubble';
 import { ToolCallCard } from './ToolCallCard';
 import { ErrorCard } from './ErrorCard';
 import { WorkflowProgressCard } from './WorkflowProgressCard';
+import { ArtifactViewerModal } from '@/components/workflows/ArtifactViewerModal';
 import { useAutoScroll } from '@/hooks/useAutoScroll';
 import type { ChatMessage } from '@/lib/types';
 
-// Hoisted to module scope to prevent new references on every render
-const WORKFLOW_RESULT_MARKDOWN_COMPONENTS = {
-  a: ({ children, ...props }: React.ComponentPropsWithoutRef<'a'>): React.ReactElement => (
-    <a
-      className="text-primary underline decoration-primary/40 hover:decoration-primary"
-      target="_blank"
-      rel="noopener noreferrer"
-      {...props}
-    >
-      {children}
-    </a>
-  ),
-};
+// Matches artifact paths (forward- and back-slash safe); groups: [1] runId, [2] filename
+const ARTIFACT_PATH_RE = /artifacts[/\\]runs[/\\]([a-fA-F0-9-]+)[/\\](.+)/;
+
+function extractArtifactInfo(text: string): { runId: string; filename: string } | null {
+  const match = ARTIFACT_PATH_RE.exec(text);
+  if (!match) return null;
+  const filename = match[2].replace(/\\/g, '/');
+  if (filename.split('/').some(s => s === '..')) return null;
+  return { runId: match[1], filename };
+}
+
+function makeResultMarkdownComponents(
+  onArtifactClick: (runId: string, filename: string) => void
+): Components {
+  return {
+    a: ({ children, ...props }: React.ComponentPropsWithoutRef<'a'>): React.ReactElement => (
+      <a
+        className="text-primary underline decoration-primary/40 hover:decoration-primary"
+        target="_blank"
+        rel="noopener noreferrer"
+        {...props}
+      >
+        {children}
+      </a>
+    ),
+    code: ({
+      children,
+      className,
+      ...props
+    }: React.ComponentPropsWithoutRef<'code'> & { className?: string }): React.ReactElement => {
+      const isBlock = className?.startsWith('language-') || className?.startsWith('hljs');
+      if (isBlock) {
+        return (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        );
+      }
+      if (typeof children === 'string') {
+        const artifact = extractArtifactInfo(children);
+        if (artifact) {
+          const { runId, filename } = artifact;
+          const displayName = filename.split('/').pop() ?? filename;
+          if (filename.endsWith('.md')) {
+            return (
+              <button
+                type="button"
+                className="text-primary underline decoration-primary/40 hover:decoration-primary cursor-pointer bg-transparent border-none p-0 font-mono text-[inherit]"
+                onClick={(): void => {
+                  onArtifactClick(runId, filename);
+                }}
+              >
+                {displayName}
+              </button>
+            );
+          }
+          const encodedFilename = filename.split('/').map(encodeURIComponent).join('/');
+          return (
+            <a
+              href={`/api/artifacts/${encodeURIComponent(runId)}/${encodedFilename}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline decoration-primary/40 hover:decoration-primary font-mono text-[inherit]"
+            >
+              {displayName}
+            </a>
+          );
+        }
+      }
+      return (
+        <code className="rounded bg-surface-elevated px-1 py-0.5 font-mono text-[0.9em]" {...props}>
+          {children}
+        </code>
+      );
+    },
+  };
+}
 
 function WorkflowResultCard({
   workflowName,
@@ -36,6 +101,19 @@ function WorkflowResultCard({
 }): React.ReactElement {
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
+  const [artifactViewer, setArtifactViewer] = useState<{
+    runId: string;
+    filename: string;
+  } | null>(null);
+
+  // setArtifactViewer is a stable React state setter — empty dep array is intentional
+  const mdComponents = useMemo(
+    () =>
+      makeResultMarkdownComponents((aRunId, filename) => {
+        setArtifactViewer({ runId: aRunId, filename });
+      }),
+    []
+  );
 
   const lines = content.split('\n');
   const isTruncatable = content.length > 500 || lines.length > 8;
@@ -47,42 +125,51 @@ function WorkflowResultCard({
   const displayContent = expanded || !isTruncatable ? content : preview;
 
   return (
-    <div className="rounded-lg border border-border bg-surface overflow-hidden max-w-3xl">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-surface-elevated">
-        <span className="text-success text-xs shrink-0">&#x2713;</span>
-        <span className="text-xs font-medium text-text-primary truncate flex-1">
-          Workflow complete: {workflowName}
-        </span>
-        <button
-          onClick={(): void => {
-            navigate(`/workflows/runs/${runId}`);
-          }}
-          className="text-[10px] text-primary hover:text-accent-bright transition-colors shrink-0"
-        >
-          View full logs &rarr;
-        </button>
-      </div>
-      <div className="px-3 py-2">
-        <div className="chat-markdown text-xs text-text-secondary">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={WORKFLOW_RESULT_MARKDOWN_COMPONENTS}
-          >
-            {displayContent}
-          </ReactMarkdown>
-        </div>
-        {isTruncatable && (
+    <>
+      <div className="rounded-lg border border-border bg-surface overflow-hidden max-w-3xl">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-surface-elevated">
+          <span className="text-success text-xs shrink-0">&#x2713;</span>
+          <span className="text-xs font-medium text-text-primary truncate flex-1">
+            Workflow complete: {workflowName}
+          </span>
           <button
             onClick={(): void => {
-              setExpanded(!expanded);
+              navigate(`/workflows/runs/${runId}`);
             }}
-            className="mt-1 text-[10px] text-primary hover:text-accent-bright transition-colors"
+            className="text-[10px] text-primary hover:text-accent-bright transition-colors shrink-0"
           >
-            {expanded ? 'Show less' : 'Show more'}
+            View full logs &rarr;
           </button>
-        )}
+        </div>
+        <div className="px-3 py-2">
+          <div className="chat-markdown text-xs text-text-secondary">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+              {displayContent}
+            </ReactMarkdown>
+          </div>
+          {isTruncatable && (
+            <button
+              onClick={(): void => {
+                setExpanded(!expanded);
+              }}
+              className="mt-1 text-[10px] text-primary hover:text-accent-bright transition-colors"
+            >
+              {expanded ? 'Show less' : 'Show more'}
+            </button>
+          )}
+        </div>
       </div>
-    </div>
+      {artifactViewer && (
+        <ArtifactViewerModal
+          open={true}
+          onOpenChange={(): void => {
+            setArtifactViewer(null);
+          }}
+          runId={artifactViewer.runId}
+          filename={artifactViewer.filename}
+        />
+      )}
+    </>
   );
 }
 
