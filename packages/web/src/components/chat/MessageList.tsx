@@ -55,43 +55,22 @@ function makeResultMarkdownComponents(
         if (artifact) {
           const { runId, filename } = artifact;
           const displayName = filename.split('/').pop() ?? filename;
-          if (filename.endsWith('.md')) {
-            return (
-              <button
-                type="button"
-                style={{
-                  color: 'oklch(0.82 0.19 250)',
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-                  fontSize: 'inherit',
-                  fontWeight: 500,
-                }}
-                onClick={(): void => {
-                  onArtifactClick(runId, filename);
-                }}
-              >
-                {displayName}
-              </button>
-            );
-          }
           const encodedFilename = filename.split('/').map(encodeURIComponent).join('/');
+          const artifactHref = `/api/artifacts/${encodeURIComponent(runId)}/${encodedFilename}`;
           return (
             <a
-              href={`/api/artifacts/${encodeURIComponent(runId)}/${encodedFilename}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                color: 'oklch(0.82 0.19 250)',
-                cursor: 'pointer',
-                textDecoration: 'underline',
-                fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-                fontSize: 'inherit',
-                fontWeight: 500,
-              }}
+              href={artifactHref}
+              onClick={
+                filename.endsWith('.md')
+                  ? (e: React.MouseEvent): void => {
+                      e.preventDefault();
+                      onArtifactClick(runId, filename);
+                    }
+                  : undefined
+              }
+              target={filename.endsWith('.md') ? undefined : '_blank'}
+              rel={filename.endsWith('.md') ? undefined : 'noopener noreferrer'}
+              className="!text-accent-bright hover:!text-[oklch(0.85_0.19_250)] font-mono font-medium underline decoration-accent-bright/40 hover:decoration-accent-bright"
             >
               {displayName}
             </a>
