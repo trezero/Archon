@@ -760,13 +760,19 @@ export async function handleMessage(
           let workflowName = 'unknown';
           let runId = 'unknown';
           try {
-            const meta = JSON.parse(msg.metadata) as {
+            const parsed =
+              typeof msg.metadata === 'string' ? JSON.parse(msg.metadata) : msg.metadata;
+            const meta = parsed as {
               workflowResult?: { workflowName?: string; runId?: string };
             };
             workflowName = meta.workflowResult?.workflowName ?? 'unknown';
             runId = meta.workflowResult?.runId ?? 'unknown';
-          } catch {
+          } catch (metaErr) {
             // Malformed metadata — use defaults
+            getLog().warn(
+              { err: metaErr as Error, conversationId, messageId: msg.id },
+              'orchestrator.workflow_result_metadata_parse_failed'
+            );
           }
           return { workflowName, runId, summary: msg.content };
         });

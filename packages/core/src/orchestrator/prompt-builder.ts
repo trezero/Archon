@@ -46,7 +46,8 @@ export interface WorkflowResultContext {
 
 /**
  * Format recent workflow results for injection into the orchestrator prompt.
- * Returns empty string when there are no results (caller checks truthiness).
+ * Returns empty string when there are no results; buildFullPrompt checks for
+ * a non-empty string before including the section in the prompt.
  */
 export function formatWorkflowContextSection(results: readonly WorkflowResultContext[]): string {
   if (results.length === 0) return '';

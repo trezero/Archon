@@ -1,5 +1,5 @@
 /**
- * Database operations for conversation messages (Web UI history)
+ * Database operations for conversation messages (Web UI history and orchestrator prompt enrichment)
  */
 import { pool, getDialect, getDatabaseType } from './connection';
 import { createLogger } from '@archon/paths';
@@ -16,7 +16,7 @@ export interface MessageRow {
   conversation_id: string;
   role: 'user' | 'assistant';
   content: string;
-  metadata: string; // JSON string - parsed by frontend
+  metadata: string; // JSON string - parsed by frontend and server-side (orchestrator prompt enrichment)
   created_at: string;
 }
 
@@ -77,18 +77,18 @@ export async function getRecentWorkflowResultMessages(
   const dbType = getDatabaseType();
   const metadataFilter =
     dbType === 'postgresql'
-      ? "(metadata->>'category') = $2"
-      : "json_extract(metadata, '$.category') = $2";
+      ? "(metadata->>'workflowResult') IS NOT NULL"
+      : "json_extract(metadata, '$.workflowResult') IS NOT NULL";
   try {
-    const result = await pool.query<MessageRow>(
-      `SELECT * FROM remote_agent_messages
+    const result = await pool.query<Pick<MessageRow, 'id' | 'content' | 'metadata'>>(
+      `SELECT id, content, metadata FROM remote_agent_messages
        WHERE conversation_id = $1
        AND ${metadataFilter}
        ORDER BY created_at DESC
-       LIMIT $3`,
-      [conversationId, 'workflow_result', limit]
+       LIMIT $2`,
+      [conversationId, limit]
     );
-    return result.rows;
+    return result.rows as MessageRow[];
   } catch (error) {
     const err = error as Error;
     getLog().warn({ err, conversationId }, 'db.workflow_result_messages_query_failed');
