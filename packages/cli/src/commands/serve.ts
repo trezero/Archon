@@ -69,7 +69,17 @@ export async function serveCommand(opts: ServeOptions): Promise<number> {
     return 1;
   }
 
-  // Server runs until SIGINT/SIGTERM — never returns
+  // Block forever — Bun.serve() keeps the event loop alive, but the CLI's
+  // process.exit(exitCode) would kill it. Wait on a promise that only resolves
+  // on SIGINT/SIGTERM so the server stays running.
+  await new Promise<void>(resolve => {
+    process.on('SIGINT', () => {
+      resolve();
+    });
+    process.on('SIGTERM', () => {
+      resolve();
+    });
+  });
   return 0;
 }
 
