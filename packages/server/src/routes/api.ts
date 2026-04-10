@@ -37,11 +37,6 @@ import {
   getCommandFolderSearchPaths,
   getDefaultCommandsPath,
   getDefaultWorkflowsPath,
-<<<<<<< Updated upstream
-=======
-  getArchonWorkspacesPath,
-  getArchonWorktreesPath,
->>>>>>> Stashed changes
   getRunArtifactsPath,
   getArchonHome,
   isDocker,
@@ -2457,7 +2452,6 @@ export function registerApiRoutes(
       return apiError(c, 404, 'Workflow run not found');
     }
 
-<<<<<<< Updated upstream
     // Derive owner/repo from codebase name (format: "owner/repo")
     const codebase = run.codebase_id ? await codebaseDb.getCodebase(run.codebase_id) : null;
     if (!codebase?.name) {
@@ -2467,28 +2461,6 @@ export function registerApiRoutes(
     const nameParts = codebase.name.split('/');
     if (nameParts.length < 2) {
       getLog().error({ runId, codebaseName: codebase.name }, 'artifacts.owner_repo_parse_failed');
-=======
-    // Derive owner/repo from working_path (under ~/.archon/workspaces/ or ~/.archon/worktrees/)
-    const normalizedWorkingPath = normalize(run.working_path);
-    const normalizedWorkspacesPath = normalize(getArchonWorkspacesPath());
-    const normalizedWorktreesPath = normalize(getArchonWorktreesPath());
-    let basePath: string;
-    if (normalizedWorkingPath.startsWith(normalizedWorkspacesPath + sep)) {
-      basePath = normalizedWorkspacesPath;
-    } else if (normalizedWorkingPath.startsWith(normalizedWorktreesPath + sep)) {
-      basePath = normalizedWorktreesPath;
-    } else {
-      getLog().error(
-        { runId, workingPath: run.working_path },
-        'artifacts.working_path_outside_workspaces'
-      );
-      return apiError(c, 404, 'Artifact not available: working path not in workspaces');
-    }
-    const relative = normalizedWorkingPath.substring(basePath.length + 1);
-    const parts = relative.split(sep).filter(p => p.length > 0);
-    if (parts.length < 2) {
-      getLog().error({ runId, workingPath: run.working_path }, 'artifacts.owner_repo_parse_failed');
->>>>>>> Stashed changes
       return apiError(c, 404, 'Artifact not available: could not determine owner/repo');
     }
     const [owner, repo] = nameParts;
