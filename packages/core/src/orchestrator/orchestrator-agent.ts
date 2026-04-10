@@ -898,13 +898,20 @@ async function handleStreamMode(
     if (platform.emitRetract) {
       await platform.emitRetract(conversationId);
     }
+    // In stream mode, pre-command text was already sent chunk-by-chunk
+    // and then retracted. Suppress remainingMessage to avoid re-sending
+    // it (which causes duplicate text in the chat).
+    const streamSafeInvocation = {
+      ...commands.workflowInvocation,
+      remainingMessage: '',
+    };
     await handleWorkflowInvocationResult(
       platform,
       conversationId,
       conversation,
       codebases,
       workflows,
-      commands.workflowInvocation,
+      streamSafeInvocation,
       originalMessage,
       isolationHints,
       issueContext

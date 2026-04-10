@@ -388,10 +388,31 @@ export function WorkflowLogs({
       filteredDbMessages = dbMessages;
     }
 
+    // Collect DB text content for dedup against SSE text messages.
+    // During live execution, the same text (e.g., "🚀 Starting workflow...") can appear
+    // in both DB (from REST fetch on mount) and SSE (from event buffer replay).
+    // Without dedup, the text shows up twice in the message list.
+    const dbTextContents = new Set<string>();
+    for (const dm of filteredDbMessages) {
+      if (dm.role === 'assistant' && dm.content) {
+        dbTextContents.add(dm.content);
+      }
+    }
+
     // Strip SSE tool calls that already appear in DB messages (completed).
+    // Also strip SSE text messages that are already in DB (prevents duplicate text).
     const dedupedSse: ChatMessage[] = [];
     for (const m of sseMessages) {
       if (!m.toolCalls?.length) {
+        // Skip SSE text-only messages whose content already exists in DB.
+        if (m.content && dbTextContents.has(m.content)) {
+          continue;
+        }
+        // Also skip if DB has a message that starts with the SSE content
+        // (SSE text was flushed to DB before SSE finished accumulating).
+        if (m.content && [...dbTextContents].some(dc => dc.startsWith(m.content))) {
+          continue;
+        }
         if (m.isStreaming || m.content) dedupedSse.push(m);
         continue;
       }
