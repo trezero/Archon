@@ -205,7 +205,6 @@ const AUTH_PATTERNS = [
   'authentication',
   'invalid token',
   'refresh token',
-  'access token',
   'could not be refreshed',
   'log out and sign in',
   '401',
