@@ -1106,3 +1106,40 @@ describe('ClaudeClient', () => {
     });
   });
 });
+
+describe('withFirstMessageTimeout', () => {
+  const { withFirstMessageTimeout } = claudeModule;
+
+  test('completes normally when first event arrives before timeout', async () => {
+    async function* fastGen(): AsyncGenerator<string> {
+      yield 'hello';
+      yield 'world';
+    }
+    const controller = new AbortController();
+    const gen = withFirstMessageTimeout(fastGen(), controller, 5000, {});
+    const first = await gen.next();
+    expect(first.value).toBe('hello');
+    const second = await gen.next();
+    expect(second.value).toBe('world');
+  });
+
+  test('throws after timeout when generator never yields', async () => {
+    async function* stuckGen(): AsyncGenerator<string> {
+      await new Promise(() => {});
+      yield 'never';
+    }
+    const controller = new AbortController();
+    const gen = withFirstMessageTimeout(stuckGen(), controller, 50, {});
+    await expect(gen.next()).rejects.toThrow('produced no output within 50ms');
+  });
+
+  test('timeout error mentions issue #1067 for discoverability', async () => {
+    async function* stuckGen(): AsyncGenerator<string> {
+      await new Promise(() => {});
+      yield 'never';
+    }
+    const controller = new AbortController();
+    const gen = withFirstMessageTimeout(stuckGen(), controller, 50, {});
+    await expect(gen.next()).rejects.toThrow('1067');
+  });
+});

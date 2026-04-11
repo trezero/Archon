@@ -7,27 +7,36 @@
  *   archon workflow run <name> [msg]  Run a workflow
  *   archon version                    Show version info
  */
+// Must be the very first import — strips Bun-auto-loaded CWD .env keys before
+// any module reads process.env at init time (e.g. @archon/paths/logger reads LOG_LEVEL).
+import '@archon/paths/strip-cwd-env-boot';
 import { parseArgs } from 'util';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 
-// Load .env from global Archon config (override: true so ~/.archon/.env
-// always wins over any Bun-auto-loaded CWD vars).
-//
-// Credential safety: target repo .env keys that Bun auto-loads from CWD
-// cannot leak into AI subprocesses — SUBPROCESS_ENV_ALLOWLIST blocks them.
-// The env-leak gate provides a second layer by scanning target repos before
-// spawning. No CWD stripping needed.
+// Load ~/.archon/.env — no longer needs override: true because stripCwdEnv()
+// above already removed all CWD .env keys from process.env.
 const globalEnvPath = resolve(process.env.HOME ?? '~', '.archon', '.env');
 if (existsSync(globalEnvPath)) {
-  const result = config({ path: globalEnvPath, override: true });
+  const result = config({ path: globalEnvPath });
   if (result.error) {
     // Logger may not be available yet (early startup), so use console for user-facing error
     console.error(`Error loading .env from ${globalEnvPath}: ${result.error.message}`);
     console.error('Hint: Check for syntax errors in your .env file.');
     process.exit(1);
   }
+}
+
+// Warn when running inside a Claude Code session — nested sessions can deadlock.
+if (process.env.CLAUDECODE === '1' && !process.env.ARCHON_SUPPRESS_NESTED_CLAUDE_WARNING) {
+  process.stderr.write(
+    '\u26a0  Detected CLAUDECODE=1 — you appear to be running `archon` from inside a Claude Code session.\n' +
+      '   If workflows hang silently at dag_node_started, this is a known class of issue.\n' +
+      '   Workaround: run `archon serve` from a regular shell and use the web UI or HTTP API.\n' +
+      '   Suppress: set ARCHON_SUPPRESS_NESTED_CLAUDE_WARNING=1\n' +
+      '   Details: https://github.com/coleam00/Archon/issues/1067\n'
+  );
 }
 
 // Smart defaults for Claude auth

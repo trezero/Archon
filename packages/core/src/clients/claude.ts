@@ -230,6 +230,83 @@ function classifySubprocessError(
   return 'unknown';
 }
 
+/** Default timeout for first SDK message (ms). Configurable via env var. */
+function getFirstEventTimeoutMs(): number {
+  const raw = process.env.ARCHON_CLAUDE_FIRST_EVENT_TIMEOUT_MS;
+  if (raw) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 60_000;
+}
+
+/** Build a diagnostic payload for claude.first_event_timeout log */
+function buildFirstEventHangDiagnostics(
+  subprocessEnv: Record<string, string>,
+  model: string | undefined
+): Record<string, unknown> {
+  return {
+    subprocessEnvKeys: Object.keys(subprocessEnv),
+    parentClaudeKeys: Object.keys(process.env).filter(
+      k => k === 'CLAUDECODE' || k.startsWith('CLAUDE_CODE_') || k.startsWith('ANTHROPIC_')
+    ),
+    model,
+    platform: process.platform,
+    uid: getProcessUid(),
+    isTTY: process.stdout.isTTY ?? false,
+    claudeCode: process.env.CLAUDECODE,
+    claudeCodeEntrypoint: process.env.CLAUDE_CODE_ENTRYPOINT,
+  };
+}
+
+/**
+ * Wraps an async generator so that the first call to .next() must resolve
+ * within `timeoutMs`. If it doesn't, aborts the controller and throws a
+ * descriptive error. Subsequent .next() calls are forwarded directly.
+ *
+ * Uses Promise.race() — not just AbortController — because the pathological
+ * case is "SDK ignores abort", so we need an independent unblocking mechanism.
+ */
+export async function* withFirstMessageTimeout<T>(
+  gen: AsyncGenerator<T>,
+  controller: AbortController,
+  timeoutMs: number,
+  diagnostics: Record<string, unknown>
+): AsyncGenerator<T> {
+  // Race first event against timeout
+  let firstValue: IteratorResult<T>;
+  try {
+    firstValue = await Promise.race([
+      gen.next(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('__timeout__'));
+        }, timeoutMs);
+      }),
+    ]);
+  } catch (err) {
+    const e = err as Error;
+    if (e.message === '__timeout__') {
+      controller.abort();
+      getLog().error({ ...diagnostics, timeoutMs }, 'claude.first_event_timeout');
+      throw new Error(
+        'Claude Code subprocess produced no output within ' +
+          timeoutMs +
+          'ms. ' +
+          'See logs for claude.first_event_timeout diagnostic dump. ' +
+          'Details: https://github.com/coleam00/Archon/issues/1067'
+      );
+    }
+    throw e;
+  }
+
+  if (firstValue.done) return;
+  yield firstValue.value;
+
+  // Forward remaining events directly
+  yield* gen;
+}
+
 /**
  * Returns the current process UID, or undefined on platforms that don't support it (e.g. Windows).
  * Exported for testing — spyOn(claudeModule, 'getProcessUid') works cross-platform.
@@ -479,7 +556,14 @@ export class ClaudeClient implements IAssistantClient {
       }
 
       try {
-        for await (const msg of query({ prompt, options })) {
+        const rawEvents = query({ prompt, options });
+        const timeoutMs = getFirstEventTimeoutMs();
+        const diagnostics = buildFirstEventHangDiagnostics(
+          options.env as Record<string, string>,
+          options.model
+        );
+        const events = withFirstMessageTimeout(rawEvents, controller, timeoutMs, diagnostics);
+        for await (const msg of events) {
           // Drain tool results captured by PostToolUse hook before processing the next message
           while (toolResultQueue.length > 0) {
             const tr = toolResultQueue.shift();
