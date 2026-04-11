@@ -13,6 +13,10 @@
  * - CLAUDE_USE_GLOBAL_AUTH=false: Use explicit tokens from env vars
  * - Not set: Auto-detect - use tokens if present in env, otherwise global auth
  */
+import { readFileSync, writeFileSync, mkdirSync, chmodSync, renameSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { createHash } from 'crypto';
 import {
   query,
   type Options,
@@ -43,10 +47,6 @@ import { buildCleanSubprocessEnv } from '../utils/env-allowlist';
 import { scanPathForSensitiveKeys, EnvLeakError } from '../utils/env-leak-scanner';
 import * as codebaseDb from '../db/codebases';
 import { loadConfig } from '../config/config-loader';
-import { readFileSync, writeFileSync, mkdirSync, chmodSync, renameSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { createHash } from 'crypto';
 
 /**
  * On Windows, Bun's virtual filesystem uses `B:/~BUN/root/` instead of `$bunfs`.
@@ -60,8 +60,8 @@ import { createHash } from 'crypto';
  */
 export function resolveWindowsBunfsCliPath(embeddedPath: string): string {
   // Windows Bun virtual FS paths contain '~BUN' (e.g. B:/~BUN/root/cli-xxx.js).
-  // Non-Windows paths are already resolved by extractFromBunfs (real temp file or
-  // real node_modules path) and don't contain this marker.
+  // Non-Windows paths are expected to have been resolved already by extractFromBunfs
+  // (real temp file or real node_modules path) and won't contain this marker.
   if (!embeddedPath.includes('~BUN')) {
     return embeddedPath;
   }
@@ -80,13 +80,13 @@ export function resolveWindowsBunfsCliPath(embeddedPath: string): string {
   } catch (err) {
     // Log warning but fall back to original path — will fail but that was the
     // pre-fix behavior. Fail-open here since we can't throw at module init time.
-    console.warn(
-      `[archon] Failed to extract Claude CLI from Windows $bunfs: ${(err as Error).message}. Claude Code subprocess will likely fail to start.`
-    );
+    getLog().warn({ err, embeddedPath }, 'claude.windows_bunfs_extraction_failed');
     return embeddedPath;
   }
 }
 
+// Module-level cached result: resolved once at import time so every call to
+// pathToClaudeCodeExecutable returns the same real path without re-extracting.
 const resolvedCliPath = resolveWindowsBunfsCliPath(cliPath);
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
