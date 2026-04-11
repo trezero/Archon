@@ -1106,3 +1106,48 @@ describe('ClaudeClient', () => {
     });
   });
 });
+
+describe('resolveWindowsBunfsCliPath', () => {
+  const { resolveWindowsBunfsCliPath } = claudeModule;
+
+  test('returns non-Windows paths unchanged', () => {
+    const realPath = '/tmp/claude-agent-sdk-abc123/cli.js';
+    expect(resolveWindowsBunfsCliPath(realPath)).toBe(realPath);
+  });
+
+  test('returns $bunfs paths unchanged (already extracted by SDK)', () => {
+    const bunfsPath = '/$bunfs/root/cli.js';
+    expect(resolveWindowsBunfsCliPath(bunfsPath)).toBe(bunfsPath);
+  });
+
+  test('extracts Windows Bun virtual FS paths to a real temp file', () => {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+
+    // Create a real temp file that simulates a Windows ~BUN path content
+    const testContent = '// fake cli.js content for test';
+    const fakeBunDir = path.join(os.tmpdir(), 'archon-test-bunfs');
+    fs.mkdirSync(fakeBunDir, { recursive: true });
+    const fakeBunPath = path.join(fakeBunDir, '~BUN-test-cli.js');
+    fs.writeFileSync(fakeBunPath, testContent);
+
+    try {
+      const result = resolveWindowsBunfsCliPath(fakeBunPath);
+      expect(result).not.toBe(fakeBunPath);
+      expect(result).toContain('cli.js');
+      // Verify the extracted file exists and has correct content
+      expect(fs.readFileSync(result, 'utf-8')).toBe(testContent);
+    } finally {
+      // Clean up
+      fs.rmSync(fakeBunDir, { recursive: true, force: true });
+    }
+  });
+
+  test('falls back to original path if extraction fails', () => {
+    // Path contains ~BUN but doesn't exist on disk
+    const windowsBunfsPath = 'B:/~BUN/root/nonexistent-cli.js';
+    const result = resolveWindowsBunfsCliPath(windowsBunfsPath);
+    expect(result).toBe(windowsBunfsPath);
+  });
+});

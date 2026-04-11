@@ -27,6 +27,10 @@ import {
 // the build host's absolute node_modules path, producing a "Module not found
 // /Users/runner/..." error on any machine other than the CI runner.
 // Safe in dev too: resolves to the real on-disk cli.js.
+//
+// NOTE: The SDK's extractFromBunfs only handles $bunfs (Linux/Mac) paths.
+// On Windows, Bun uses B:/~BUN/root/ for its virtual FS — see resolveWindowsBunfsCliPath
+// below for the Windows workaround.
 import cliPath from '@anthropic-ai/claude-agent-sdk/embed';
 import {
   type AssistantRequestOptions,
@@ -39,6 +43,51 @@ import { buildCleanSubprocessEnv } from '../utils/env-allowlist';
 import { scanPathForSensitiveKeys, EnvLeakError } from '../utils/env-leak-scanner';
 import * as codebaseDb from '../db/codebases';
 import { loadConfig } from '../config/config-loader';
+import { readFileSync, writeFileSync, mkdirSync, chmodSync, renameSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { createHash } from 'crypto';
+
+/**
+ * On Windows, Bun's virtual filesystem uses `B:/~BUN/root/` instead of `$bunfs`.
+ * The SDK's `extractFromBunfs` only checks for `$bunfs`, so Windows virtual FS
+ * paths are returned unchanged — child processes cannot access the parent's virtual
+ * FS, causing "Module not found B:/~BUN/root/..." errors.
+ *
+ * This function detects Windows Bun FS paths and extracts them to a real temp file
+ * using the same logic as `extractFromBunfs`, so `pathToClaudeCodeExecutable` always
+ * points to a real file accessible to child processes.
+ */
+export function resolveWindowsBunfsCliPath(embeddedPath: string): string {
+  // Windows Bun virtual FS paths contain '~BUN' (e.g. B:/~BUN/root/cli-xxx.js).
+  // Non-Windows paths are already resolved by extractFromBunfs (real temp file or
+  // real node_modules path) and don't contain this marker.
+  if (!embeddedPath.includes('~BUN')) {
+    return embeddedPath;
+  }
+  try {
+    const content = readFileSync(embeddedPath);
+    const hash = createHash('sha256').update(content).digest('hex').slice(0, 16);
+    const tmpDir = join(tmpdir(), `claude-agent-sdk-${hash}`);
+    const tmpPath = join(tmpDir, 'cli.js');
+    mkdirSync(tmpDir, { recursive: true });
+    // Atomic write: write to temp file then rename to avoid truncation races
+    const tmpFile = join(tmpDir, `cli.js.tmp.${process.pid}`);
+    writeFileSync(tmpFile, content);
+    chmodSync(tmpFile, 0o755);
+    renameSync(tmpFile, tmpPath);
+    return tmpPath;
+  } catch (err) {
+    // Log warning but fall back to original path — will fail but that was the
+    // pre-fix behavior. Fail-open here since we can't throw at module init time.
+    console.warn(
+      `[archon] Failed to extract Claude CLI from Windows $bunfs: ${(err as Error).message}. Claude Code subprocess will likely fail to start.`
+    );
+    return embeddedPath;
+  }
+}
+
+const resolvedCliPath = resolveWindowsBunfsCliPath(cliPath);
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
@@ -324,7 +373,7 @@ export class ClaudeClient implements IAssistantClient {
 
       const options: Options = {
         cwd,
-        pathToClaudeCodeExecutable: cliPath,
+        pathToClaudeCodeExecutable: resolvedCliPath,
         env: requestOptions?.env
           ? { ...buildSubprocessEnv(), ...requestOptions.env }
           : buildSubprocessEnv(),
