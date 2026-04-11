@@ -1124,7 +1124,6 @@ describe('resolveWindowsBunfsCliPath', () => {
   });
 
   test('extracts Windows Bun virtual FS paths to a real temp file', () => {
-    // Create a real temp file that simulates a Windows ~BUN path content
     const testContent = '// fake cli.js content for test';
     const fakeBunDir = join(tmpdir(), 'archon-test-bunfs');
     mkdirSync(fakeBunDir, { recursive: true });
@@ -1135,10 +1134,8 @@ describe('resolveWindowsBunfsCliPath', () => {
       const result = resolveWindowsBunfsCliPath(fakeBunPath);
       expect(result).not.toBe(fakeBunPath);
       expect(result).toContain('cli.js');
-      // Verify the extracted file exists and has correct content
       expect(readFileSync(result, 'utf-8')).toBe(testContent);
     } finally {
-      // Clean up
       rmSync(fakeBunDir, { recursive: true, force: true });
     }
   });
