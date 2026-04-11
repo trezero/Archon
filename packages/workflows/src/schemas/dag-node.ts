@@ -291,7 +291,7 @@ export type DagNode =
   | ScriptNode;
 
 // ---------------------------------------------------------------------------
-// AI-specific fields that are meaningless on bash/loop nodes
+// AI-specific fields that are meaningless on non-AI nodes
 // ---------------------------------------------------------------------------
 
 /** AI-specific fields that are meaningless on bash nodes — exported for loader warnings */
