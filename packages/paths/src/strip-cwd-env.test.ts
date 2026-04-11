@@ -14,6 +14,8 @@ describe('stripCwdEnv', () => {
     rmSync(tmpDir, { recursive: true, force: true });
     delete process.env.TEST_STRIP_KEY;
     delete process.env.TEST_STRIP_KEY2;
+    delete process.env.TEST_STRIP_KEY_A;
+    delete process.env.TEST_STRIP_KEY_B;
   });
 
   it('strips keys from single .env file', () => {
@@ -59,5 +61,15 @@ describe('stripCwdEnv', () => {
     // Do NOT set process.env.TEST_STRIP_KEY — simulate key parsed but not auto-loaded
     stripCwdEnv(tmpDir);
     expect(process.env.TEST_STRIP_KEY).toBeUndefined(); // still undefined, no error
+  });
+
+  it('strips distinct keys from different .env files', () => {
+    writeFileSync(join(tmpDir, '.env'), 'TEST_STRIP_KEY_A=leaked\n');
+    writeFileSync(join(tmpDir, '.env.local'), 'TEST_STRIP_KEY_B=leaked\n');
+    process.env.TEST_STRIP_KEY_A = 'leaked';
+    process.env.TEST_STRIP_KEY_B = 'leaked';
+    stripCwdEnv(tmpDir);
+    expect(process.env.TEST_STRIP_KEY_A).toBeUndefined();
+    expect(process.env.TEST_STRIP_KEY_B).toBeUndefined();
   });
 });

@@ -274,12 +274,13 @@ export async function* withFirstMessageTimeout<T>(
   diagnostics: Record<string, unknown>
 ): AsyncGenerator<T> {
   // Race first event against timeout
+  let timerId: ReturnType<typeof setTimeout> | undefined;
   let firstValue: IteratorResult<T>;
   try {
     firstValue = await Promise.race([
       gen.next(),
       new Promise<never>((_, reject) => {
-        setTimeout(() => {
+        timerId = setTimeout(() => {
           reject(new Error('__timeout__'));
         }, timeoutMs);
       }),
@@ -298,6 +299,8 @@ export async function* withFirstMessageTimeout<T>(
       );
     }
     throw e;
+  } finally {
+    clearTimeout(timerId);
   }
 
   if (firstValue.done) return;

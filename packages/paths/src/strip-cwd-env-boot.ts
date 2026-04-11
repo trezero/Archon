@@ -1,7 +1,7 @@
 /**
  * Side-effect entry point: strips Bun-auto-loaded CWD .env keys at import time.
  *
- * Import this as the FIRST import in CLI and server entry points so it runs
+ * Import this as the FIRST import in CLI entry points so it runs
  * before any module that reads process.env at initialization time.
  *
  * @example

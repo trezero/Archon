@@ -21,7 +21,7 @@ const BUN_AUTO_LOADED_ENV_FILES = ['.env', '.env.local', '.env.development', '.e
 
 /**
  * Parse CWD .env files and delete any matching keys from process.env.
- * Keys in ~/.archon/.env (loaded later with override: true) are unaffected.
+ * Keys in ~/.archon/.env (loaded afterward by each entry point) are unaffected.
  * Safe to call even when no CWD .env files exist.
  */
 export function stripCwdEnv(cwd: string = process.cwd()): void {
@@ -31,7 +31,15 @@ export function stripCwdEnv(cwd: string = process.cwd()): void {
     const filepath = resolve(cwd, filename);
     // dotenv.config with processEnv:{} parses without writing to process.env
     const result = config({ path: filepath, processEnv: {} });
-    if (!result.error && result.parsed) {
+    if (result.error) {
+      // ENOENT is expected (file simply doesn't exist) — all others are unexpected
+      const code = (result.error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') {
+        process.stderr.write(
+          `[archon] Warning: could not parse ${filepath} for CWD env stripping: ${result.error.message}\n`
+        );
+      }
+    } else if (result.parsed) {
       for (const key of Object.keys(result.parsed)) {
         cwdKeys.add(key);
       }

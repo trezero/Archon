@@ -1116,7 +1116,7 @@ describe('withFirstMessageTimeout', () => {
       yield 'world';
     }
     const controller = new AbortController();
-    const gen = withFirstMessageTimeout(fastGen(), controller, 5000, {});
+    const gen = withFirstMessageTimeout(fastGen(), controller, 50, {});
     const first = await gen.next();
     expect(first.value).toBe('hello');
     const second = await gen.next();
@@ -1141,5 +1141,26 @@ describe('withFirstMessageTimeout', () => {
     const controller = new AbortController();
     const gen = withFirstMessageTimeout(stuckGen(), controller, 50, {});
     await expect(gen.next()).rejects.toThrow('1067');
+  });
+
+  test('aborts the controller when timeout fires', async () => {
+    async function* stuckGen(): AsyncGenerator<string> {
+      await new Promise(() => {});
+      yield 'never';
+    }
+    const controller = new AbortController();
+    const gen = withFirstMessageTimeout(stuckGen(), controller, 50, {});
+    await expect(gen.next()).rejects.toThrow();
+    expect(controller.signal.aborted).toBe(true);
+  });
+
+  test('handles generator that completes immediately without yielding', async () => {
+    async function* emptyGen(): AsyncGenerator<string> {
+      return;
+    }
+    const controller = new AbortController();
+    const gen = withFirstMessageTimeout(emptyGen(), controller, 50, {});
+    const result = await gen.next();
+    expect(result.done).toBe(true);
   });
 });
