@@ -38,6 +38,21 @@ if (!process.env.CLAUDE_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
   }
 }
 
+// Warn if running from inside a Claude Code session. Nested Claude Code
+// subprocess launches have a history of hanging (keychain/session/TTY state,
+// upstream SDK quirks) even when Archon's subprocess env strip works. Users
+// hitting this class of issue should use `archon serve` + web UI / HTTP API
+// from a non-nested shell. See coleam00/Archon#1067.
+if (process.env.CLAUDECODE === '1' && process.env.ARCHON_SUPPRESS_NESTED_CLAUDE_WARNING !== '1') {
+  console.warn(
+    '⚠  Detected CLAUDECODE=1 — you appear to be running `archon` from inside a Claude Code session.\n' +
+      '   If workflows hang silently at dag_node_started, this is a known class of issue.\n' +
+      '   Workaround: run `archon serve` from a regular shell and use the web UI or HTTP API.\n' +
+      '   Details: https://github.com/coleam00/Archon/issues/1067\n' +
+      '   Suppress this warning: export ARCHON_SUPPRESS_NESTED_CLAUDE_WARNING=1'
+  );
+}
+
 // DATABASE_URL is no longer required - SQLite will be used as default
 
 // Import commands after dotenv is loaded

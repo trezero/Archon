@@ -1105,4 +1105,91 @@ describe('ClaudeClient', () => {
       expect(spyScan).not.toHaveBeenCalled();
     });
   });
+
+  describe('first-event timeout', () => {
+    const originalTimeoutEnv = process.env.ARCHON_CLAUDE_FIRST_EVENT_TIMEOUT_MS;
+
+    beforeEach(() => {
+      process.env.ARCHON_CLAUDE_FIRST_EVENT_TIMEOUT_MS = '50';
+    });
+
+    afterEach(() => {
+      if (originalTimeoutEnv === undefined) {
+        delete process.env.ARCHON_CLAUDE_FIRST_EVENT_TIMEOUT_MS;
+      } else {
+        process.env.ARCHON_CLAUDE_FIRST_EVENT_TIMEOUT_MS = originalTimeoutEnv;
+      }
+    });
+
+    test('throws a descriptive error when SDK never yields a first message', async () => {
+      // Generator that sleeps forever — simulates a hung subprocess
+      mockQuery.mockImplementation(async function* () {
+        await new Promise(() => {
+          // never resolves; the abortController.abort() inside the generator's
+          // internal loop is what actually unblocks it in production. For the
+          // test, we simulate that by awaiting a promise that rejects on abort.
+        });
+        // unreachable
+        yield { type: 'assistant', message: { content: [{ type: 'text', text: 'x' }] } };
+      });
+
+      // The for-await loop in sendQuery() will be blocked on the generator's
+      // first `next()` call. The timeout fires, aborts the controller, and the
+      // SDK generator is expected to throw or return. Since our mock doesn't
+      // actually react to abort, we test that sendQuery() itself raises the
+      // descriptive timeout error. We use a very short timeout (50ms) to keep
+      // the test fast.
+      await expect(async () => {
+        for await (const _ of client.sendQuery('test', '/workspace')) {
+          // consume — should never produce any chunks
+        }
+      }).toThrow(/produced no output within/);
+
+      // The diagnostic dump should have been logged at error level
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          timeoutMs: 50,
+          parentProcess: expect.objectContaining({
+            platform: process.platform,
+          }),
+        }),
+        'claude.first_event_timeout'
+      );
+    });
+
+    test('does not throw when SDK yields a message within the timeout', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'fast response' }] },
+        };
+      });
+
+      const chunks = [];
+      for await (const chunk of client.sendQuery('test', '/workspace')) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toEqual({ type: 'assistant', content: 'fast response' });
+      // The timeout should not have fired
+      expect(mockLogger.error).not.toHaveBeenCalledWith(
+        expect.anything(),
+        'claude.first_event_timeout'
+      );
+    });
+
+    test('the timeout error mentions issue #1067 for discoverability', async () => {
+      mockQuery.mockImplementation(async function* () {
+        await new Promise(() => {});
+        yield { type: 'assistant', message: { content: [{ type: 'text', text: 'x' }] } };
+      });
+
+      await expect(async () => {
+        for await (const _ of client.sendQuery('test', '/workspace')) {
+          // consume
+        }
+      }).toThrow(/coleam00\/Archon\/issues\/1067/);
+    });
+  });
 });

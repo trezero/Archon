@@ -195,6 +195,98 @@ const MAX_SUBPROCESS_RETRIES = 3;
 /** Delay between retries in milliseconds */
 const RETRY_BASE_DELAY_MS = 2000;
 
+/** Timeout (ms) for the SDK's *first* yielded message. If the subprocess spawns
+ *  but produces no output within this window, we abort it and emit a diagnostic
+ *  dump instead of hanging forever. Defaults to 60s — normal first events arrive
+ *  in <5s, so 60s catches real hangs without flagging legitimately slow starts.
+ *  Override via ARCHON_CLAUDE_FIRST_EVENT_TIMEOUT_MS. See coleam00/Archon#1067. */
+function getFirstEventTimeoutMs(): number {
+  const raw = process.env.ARCHON_CLAUDE_FIRST_EVENT_TIMEOUT_MS;
+  if (raw === undefined) return 60_000;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    getLog().warn({ raw }, 'claude.invalid_first_event_timeout_env');
+    return 60_000;
+  }
+  return parsed;
+}
+
+/**
+ * Wrap an async iterable so that its first `next()` call is raced against a
+ * timeout. On timeout, `onTimeout()` is called to build and throw the error.
+ * Subsequent iterations are unaffected — only the *first* yield has a deadline.
+ *
+ * Uses Promise.race rather than relying on abortController so we unblock even
+ * if the source ignores abort (the exact pathological case we're defending).
+ */
+async function* withFirstMessageTimeout<T>(
+  source: AsyncIterable<T>,
+  timeoutMs: number,
+  onTimeout: () => Error
+): AsyncGenerator<T> {
+  const it = source[Symbol.asyncIterator]();
+  let first = true;
+  while (true) {
+    let result: IteratorResult<T>;
+    if (first) {
+      first = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        result = await Promise.race([
+          it.next(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              reject(onTimeout());
+            }, timeoutMs);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    } else {
+      result = await it.next();
+    }
+    if (result.done) return;
+    yield result.value;
+  }
+  // No `finally` with `await it.return()` — on the timeout path, the source
+  // generator is stuck inside an `await` that never resolves (that's literally
+  // the bug we're defending against). Calling `it.return()` would itself hang
+  // waiting for the generator to unwind. In production, the SDK's own abort
+  // handling cleans up; in tests, the stuck generator is GC'd.
+}
+
+/** Build a diagnostic snapshot for the hang case. Includes env var names
+ *  (not values — secrets), SDK options (redacted), and process state. Logged
+ *  at error level when the first-event timeout fires so the next reporter has
+ *  actionable evidence instead of 30 minutes of silence. */
+function buildFirstEventHangDiagnostics(params: {
+  cwd: string;
+  attempt: number;
+  subprocessEnvKeys: string[];
+  parentClaudeEnvKeys: string[];
+  model: string | undefined;
+  timeoutMs: number;
+  stderrLines: string[];
+}): Record<string, unknown> {
+  return {
+    cwd: params.cwd,
+    attempt: params.attempt,
+    timeoutMs: params.timeoutMs,
+    model: params.model,
+    subprocessEnvKeys: params.subprocessEnvKeys.sort(),
+    parentClaudeEnvKeys: params.parentClaudeEnvKeys.sort(),
+    parentProcess: {
+      platform: process.platform,
+      uid: getProcessUid(),
+      isTTY: process.stdout.isTTY ?? false,
+      claudeCode: process.env.CLAUDECODE ?? null,
+      claudeCodeEntrypoint: process.env.CLAUDE_CODE_ENTRYPOINT ?? null,
+    },
+    stderrTail: params.stderrLines.slice(-20),
+  };
+}
+
 /** Patterns indicating rate limiting in stderr/error messages */
 const RATE_LIMIT_PATTERNS = ['rate limit', 'too many requests', '429', 'overloaded'];
 
@@ -478,8 +570,43 @@ export class ClaudeClient implements IAssistantClient {
         getLog().debug({ cwd, attempt }, 'starting_new_session');
       }
 
+      // First-event timeout: if the SDK produces no output within
+      // `firstEventTimeoutMs`, log a diagnostic dump and throw. Uses Promise.race
+      // on the first iterator.next() so we unblock even if the SDK ignores abort
+      // (the pathological case we're defending against).
+      // See coleam00/Archon#1067.
+      const firstEventTimeoutMs = getFirstEventTimeoutMs();
+      let firstEventTimedOut = false;
+      const buildTimeoutError = (): Error => {
+        firstEventTimedOut = true;
+        const subprocessEnvKeys = Object.keys(options.env ?? {});
+        const parentClaudeEnvKeys = Object.keys(process.env).filter(
+          k => k === 'CLAUDECODE' || k.startsWith('CLAUDE_CODE_') || k.startsWith('ANTHROPIC_')
+        );
+        const diag = buildFirstEventHangDiagnostics({
+          cwd,
+          attempt,
+          subprocessEnvKeys,
+          parentClaudeEnvKeys,
+          model: requestOptions?.model,
+          timeoutMs: firstEventTimeoutMs,
+          stderrLines,
+        });
+        getLog().error(diag, 'claude.first_event_timeout');
+        controller.abort(); // best effort — Promise.race has already unblocked us
+        return new Error(
+          `Claude Code subprocess produced no output within ${firstEventTimeoutMs}ms. ` +
+            "See logs for 'claude.first_event_timeout' diagnostics. " +
+            'Details: https://github.com/coleam00/Archon/issues/1067'
+        );
+      };
+
       try {
-        for await (const msg of query({ prompt, options })) {
+        for await (const msg of withFirstMessageTimeout(
+          query({ prompt, options }),
+          firstEventTimeoutMs,
+          buildTimeoutError
+        )) {
           // Drain tool results captured by PostToolUse hook before processing the next message
           while (toolResultQueue.length > 0) {
             const tr = toolResultQueue.shift();
@@ -587,6 +714,14 @@ export class ClaudeClient implements IAssistantClient {
         return; // Success - exit retry loop
       } catch (error) {
         const err = error as Error;
+
+        // First-event timeout fired: the SDK never yielded a message within
+        // `firstEventTimeoutMs`. `buildTimeoutError()` already built, logged,
+        // and aborted. Re-throw the error as-is — no retry, because a wedged
+        // subprocess will produce the same hang next time.
+        if (firstEventTimedOut) {
+          throw err;
+        }
 
         // Don't retry aborted queries
         if (controller.signal.aborted) {
