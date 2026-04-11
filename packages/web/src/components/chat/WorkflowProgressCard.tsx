@@ -36,8 +36,8 @@ export function WorkflowProgressCard({
     },
   });
 
-  const runId = runData?.run.id;
-  const restStatus = runData?.run.status;
+  const runId = runData?.run?.id;
+  const restStatus = runData?.run?.status;
 
   // Live SSE state from Zustand store
   const liveState = useWorkflowStore(state => (runId ? state.workflows.get(runId) : undefined));
