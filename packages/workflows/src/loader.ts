@@ -5,7 +5,12 @@ import type { WorkflowDefinition, WorkflowLoadError, DagNode, WorkflowNodeHooks 
 import { isLoopNode, isApprovalNode, isCancelNode, isScriptNode } from './schemas';
 import { createLogger } from '@archon/paths';
 import { isModelCompatible } from './model-validation';
-import { dagNodeSchema, BASH_NODE_AI_FIELDS, SCRIPT_NODE_AI_FIELDS } from './schemas/dag-node';
+import {
+  dagNodeSchema,
+  BASH_NODE_AI_FIELDS,
+  SCRIPT_NODE_AI_FIELDS,
+  LOOP_NODE_AI_FIELDS,
+} from './schemas/dag-node';
 import { modelReasoningEffortSchema, webSearchModeSchema } from './schemas/workflow';
 import { workflowNodeHooksSchema } from './schemas/hooks';
 import { z } from '@hono/zod-openapi';
@@ -75,7 +80,11 @@ function parseDagNode(raw: unknown, index: number, errors: string[]): DagNode | 
     } else {
       nodeType = 'bash';
     }
-    const aiFields = isScriptNode(node) ? SCRIPT_NODE_AI_FIELDS : BASH_NODE_AI_FIELDS;
+    const aiFields = isLoopNode(node)
+      ? LOOP_NODE_AI_FIELDS
+      : isScriptNode(node)
+        ? SCRIPT_NODE_AI_FIELDS
+        : BASH_NODE_AI_FIELDS;
     const presentAiFields = aiFields.filter(f => (raw as Record<string, unknown>)[f] !== undefined);
     if (presentAiFields.length > 0) {
       getLog().warn({ id: node.id, fields: presentAiFields }, `${nodeType}_node_ai_fields_ignored`);
