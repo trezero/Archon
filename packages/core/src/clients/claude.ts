@@ -452,11 +452,12 @@ export class ClaudeClient implements IAssistantClient {
           // useful SDK startup output, leaving stderrContext empty on crashes.
           stderrLines.push(output);
 
+          const outputLower = output.toLowerCase();
           const isError =
-            output.toLowerCase().includes('error') ||
-            output.toLowerCase().includes('fatal') ||
-            output.toLowerCase().includes('failed') ||
-            output.toLowerCase().includes('exception') ||
+            outputLower.includes('error') ||
+            outputLower.includes('fatal') ||
+            outputLower.includes('failed') ||
+            outputLower.includes('exception') ||
             output.includes('at ') ||
             output.includes('Error:');
 
