@@ -85,16 +85,17 @@ export function resolveWindowsBunfsCliPath(embeddedPath: string): string {
   }
 }
 
-// Module-level cached result: resolved once at import time so every call to
-// pathToClaudeCodeExecutable returns the same real path without re-extracting.
-const resolvedCliPath = resolveWindowsBunfsCliPath(cliPath);
-
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
 function getLog(): ReturnType<typeof createLogger> {
   if (!cachedLog) cachedLog = createLogger('client.claude');
   return cachedLog;
 }
+
+// Module-level cached result: resolved once at import time so every call to
+// pathToClaudeCodeExecutable returns the same real path without re-extracting.
+// Must be declared after getLog() to avoid TDZ if extraction fails and logs a warning.
+const resolvedCliPath = resolveWindowsBunfsCliPath(cliPath);
 
 /**
  * Content block type for assistant messages
