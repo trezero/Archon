@@ -259,6 +259,9 @@ function buildFirstEventHangDiagnostics(
   };
 }
 
+/** Sentinel error class to identify timeout rejections in withFirstMessageTimeout. */
+class FirstEventTimeoutError extends Error {}
+
 /**
  * Wraps an async generator so that the first call to .next() must resolve
  * within `timeoutMs`. If it doesn't, aborts the controller and throws a
@@ -281,13 +284,12 @@ export async function* withFirstMessageTimeout<T>(
       gen.next(),
       new Promise<never>((_, reject) => {
         timerId = setTimeout(() => {
-          reject(new Error('__timeout__'));
+          reject(new FirstEventTimeoutError());
         }, timeoutMs);
       }),
     ]);
   } catch (err) {
-    const e = err as Error;
-    if (e.message === '__timeout__') {
+    if (err instanceof FirstEventTimeoutError) {
       controller.abort();
       getLog().error({ ...diagnostics, timeoutMs }, 'claude.first_event_timeout');
       throw new Error(
@@ -298,7 +300,7 @@ export async function* withFirstMessageTimeout<T>(
           'Details: https://github.com/coleam00/Archon/issues/1067'
       );
     }
-    throw e;
+    throw err;
   } finally {
     clearTimeout(timerId);
   }
