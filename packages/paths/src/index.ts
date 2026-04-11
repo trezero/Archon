@@ -43,3 +43,6 @@ export {
   parseLatestRelease,
 } from './update-check';
 export type { UpdateCheckResult } from './update-check';
+
+// CWD env isolation
+export { stripCwdEnv } from './strip-cwd-env';

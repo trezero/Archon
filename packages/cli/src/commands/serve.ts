@@ -55,12 +55,14 @@ export async function serveCommand(opts: ServeOptions): Promise<number> {
   }
 
   // Import server and start (dynamic import keeps CLI startup fast for other commands)
+  // Platform adapters (Telegram, Discord, Slack, GitHub, Gitea, GitLab) auto-start
+  // when their respective tokens are present in ~/.archon/.env. Users who only
+  // want the web UI simply leave those tokens unset.
   try {
     const { startServer } = await import('@archon/server');
     await startServer({
       webDistPath: webDistDir,
       port: opts.port,
-      skipPlatformAdapters: true,
     });
   } catch (err) {
     const error = toError(err);

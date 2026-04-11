@@ -7,21 +7,23 @@
  *   archon workflow run <name> [msg]  Run a workflow
  *   archon version                    Show version info
  */
+// Design rule: the CLI must never load target repo env.
+//
+// Bun's runtime auto-loads CWD `.env` files before any user code runs. When
+// `archon` is invoked from inside a target repo, that repo's `.env` leaks into
+// `process.env`. Side-effect import strips those keys during module load —
+// MUST be the first import so that downstream modules reading env at init
+// time (e.g. the Pino logger's LOG_LEVEL) see a clean environment.
+import '@archon/paths/strip-cwd-env-boot';
+
 import { parseArgs } from 'util';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 
-// Load .env from global Archon config (override: true so ~/.archon/.env
-// always wins over any Bun-auto-loaded CWD vars).
-//
-// Credential safety: target repo .env keys that Bun auto-loads from CWD
-// cannot leak into AI subprocesses — SUBPROCESS_ENV_ALLOWLIST blocks them.
-// The env-leak gate provides a second layer by scanning target repos before
-// spawning. No CWD stripping needed.
 const globalEnvPath = resolve(process.env.HOME ?? '~', '.archon', '.env');
 if (existsSync(globalEnvPath)) {
-  const result = config({ path: globalEnvPath, override: true });
+  const result = config({ path: globalEnvPath });
   if (result.error) {
     // Logger may not be available yet (early startup), so use console for user-facing error
     console.error(`Error loading .env from ${globalEnvPath}: ${result.error.message}`);

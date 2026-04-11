@@ -3,12 +3,15 @@
  * Multi-platform AI coding assistant (Telegram, Discord, Slack, GitHub, Gitea)
  */
 
-// Load environment variables FIRST — before any application imports.
-//
-// Credential safety: target repo `.env` keys (like CLAUDE_API_KEY) that Bun
-// auto-loads from CWD cannot leak into AI subprocesses because
-// SUBPROCESS_ENV_ALLOWLIST blocks them. The env-leak gate provides a second
-// layer by scanning target repos before spawning. No CWD stripping needed.
+// Design rule: the server must never load target repo env. Bun's runtime
+// auto-loads CWD `.env` files before any user code runs — the side-effect
+// import below strips those keys during module load, BEFORE any module that
+// reads env at init time (e.g. the Pino logger's LOG_LEVEL). Must be the
+// first import.
+import '@archon/paths/strip-cwd-env-boot';
+
+// Load environment variables — before any application imports that depend
+// on env vars being set.
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
@@ -18,7 +21,7 @@ import { BUNDLED_IS_BINARY } from '@archon/paths';
 // import.meta.dir is frozen at build time, so skip in compiled binaries.
 const envPath = BUNDLED_IS_BINARY ? undefined : resolve(import.meta.dir, '..', '..', '..', '.env');
 
-if (envPath) {
+if (envPath && existsSync(envPath)) {
   const dotenvResult = config({ path: envPath });
   if (dotenvResult.error) {
     // Use console.error since logger depends on env vars (LOG_LEVEL)
@@ -27,9 +30,9 @@ if (envPath) {
   }
 }
 
-// Load ~/.archon/.env with override — Archon's config always wins over any
-// Bun-auto-loaded CWD vars. In binary mode this is the single source of truth.
-// In dev mode it overrides CWD vars for keys like DATABASE_URL.
+// Load ~/.archon/.env — Archon's config is the single source of truth.
+// In binary mode this is the only .env loaded. In dev mode it overrides the
+// repo root .env (with override:true) for keys like DATABASE_URL.
 const globalEnvPath = resolve(process.env.HOME ?? '~', '.archon', '.env');
 if (existsSync(globalEnvPath)) {
   const globalResult = config({ path: globalEnvPath, override: true });
