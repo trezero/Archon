@@ -204,6 +204,10 @@ const AUTH_PATTERNS = [
   'unauthorized',
   'authentication',
   'invalid token',
+  'refresh token',
+  'access token',
+  'could not be refreshed',
+  'log out and sign in',
   '401',
   '403',
 ];
