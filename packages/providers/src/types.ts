@@ -1,6 +1,29 @@
 // CONTRACT LAYER — no SDK imports, no runtime deps.
-// @archon/workflows imports from this subpath (@archon/providers/types).
+// @archon/workflows and @archon/core import from this subpath (@archon/providers/types).
 // HARD RULE: This file must never import SDK packages or other @archon/* packages.
+
+// ─── Provider Config Defaults ──────────────────────────────────────────────
+// Canonical definitions — @archon/core/config/config-types.ts imports from here.
+// Single source of truth for provider-specific config shapes.
+
+export interface ClaudeProviderDefaults {
+  model?: string;
+  /** Claude Code settingSources — controls which CLAUDE.md files are loaded.
+   *  @default ['project']
+   */
+  settingSources?: ('project' | 'user')[];
+}
+
+export interface CodexProviderDefaults {
+  model?: string;
+  /** Structurally matches @archon/workflows ModelReasoningEffort */
+  modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+  /** Structurally matches @archon/workflows WebSearchMode */
+  webSearchMode?: 'disabled' | 'cached' | 'live';
+  additionalDirectories?: string[];
+  /** Path to the Codex CLI binary. Overrides auto-detection in compiled Archon builds. */
+  codexBinaryPath?: string;
+}
 
 /**
  * Token usage statistics from AI provider responses.

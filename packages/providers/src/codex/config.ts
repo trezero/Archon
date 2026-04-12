@@ -2,14 +2,10 @@
  * Typed config parsing for Codex provider defaults.
  * Validates and narrows the opaque assistantConfig to typed fields.
  */
+import type { CodexProviderDefaults } from '../types';
 
-export interface CodexProviderDefaults {
-  model?: string;
-  modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-  webSearchMode?: 'disabled' | 'cached' | 'live';
-  additionalDirectories?: string[];
-  codexBinaryPath?: string;
-}
+// Re-export so consumers can import the type from either location
+export type { CodexProviderDefaults } from '../types';
 
 /**
  * Parse raw assistantConfig into typed Codex defaults.

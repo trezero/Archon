@@ -24,8 +24,6 @@ export {
   type IWebPlatformAdapter,
   isWebAdapter,
   type MessageMetadata,
-  type MessageChunk,
-  type IAgentProvider,
 } from './types';
 
 // =============================================================================
@@ -51,11 +49,6 @@ export * as messageDb from './db/messages';
 
 // Re-export SessionNotFoundError for error handling
 export { SessionNotFoundError } from './db/sessions';
-
-// =============================================================================
-// Agent Providers (re-exported from @archon/providers)
-// =============================================================================
-export { ClaudeProvider, CodexProvider, getAgentProvider } from '@archon/providers';
 
 // =============================================================================
 // Workflows

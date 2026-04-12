@@ -5,26 +5,8 @@ import type { TransitionTrigger } from '../state/session-transitions';
 import type { WorkflowDefinition } from '@archon/workflows/schemas/workflow';
 import { z } from 'zod';
 
-// Provider types — imported for local use, re-exported for backwards compatibility
-import type {
-  MessageChunk,
-  TokenUsage,
-  IAgentProvider,
-  AgentRequestOptions,
-  SendQueryOptions,
-  ProviderCapabilities,
-  NodeConfig,
-} from '@archon/providers/types';
-
-export type {
-  MessageChunk,
-  TokenUsage,
-  IAgentProvider,
-  AgentRequestOptions,
-  SendQueryOptions,
-  ProviderCapabilities,
-  NodeConfig,
-};
+// MessageChunk imported for use in IPlatformAdapter/IWebPlatformAdapter below
+import type { MessageChunk } from '@archon/providers/types';
 
 /**
  * Custom error for when a conversation is not found during update operations

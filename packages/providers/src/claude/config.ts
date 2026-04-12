@@ -2,11 +2,10 @@
  * Typed config parsing for Claude provider defaults.
  * Validates and narrows the opaque assistantConfig to typed fields.
  */
+import type { ClaudeProviderDefaults } from '../types';
 
-export interface ClaudeProviderDefaults {
-  model?: string;
-  settingSources?: ('project' | 'user')[];
-}
+// Re-export so consumers can import the type from either location
+export type { ClaudeProviderDefaults } from '../types';
 
 /**
  * Parse raw assistantConfig into typed Claude defaults.

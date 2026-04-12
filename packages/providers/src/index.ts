@@ -9,6 +9,9 @@ export type {
   TokenUsage,
 } from './types';
 
+// Provider config types (canonical definitions in ./types, re-exported via config modules)
+// Import from ./types directly or from the config modules — both work.
+
 // Factory
 export { getAgentProvider } from './factory';
 

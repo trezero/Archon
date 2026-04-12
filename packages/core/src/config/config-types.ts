@@ -10,25 +10,15 @@
  * Global configuration (non-secret user preferences)
  * Located at ~/.archon/config.yaml
  */
-import type { ModelReasoningEffort, WebSearchMode } from '../types';
 
-export interface CodexProviderDefaults {
-  model?: string;
-  modelReasoningEffort?: ModelReasoningEffort;
-  webSearchMode?: WebSearchMode;
-  additionalDirectories?: string[];
-  /** Path to the Codex CLI binary. Overrides auto-detection in compiled Archon builds.
-   *  Only relevant for the Codex provider; ignored for Claude. */
-  codexBinaryPath?: string;
-}
+// Provider config defaults — canonical definitions live in @archon/providers/types.
+// Imported and re-exported here so existing consumers don't break.
+import type { ClaudeProviderDefaults, CodexProviderDefaults } from '@archon/providers/types';
 
-export interface ClaudeCodexProviderDefaults {
-  model?: string;
-  /** Claude Code settingSources — controls which CLAUDE.md files are loaded.
-   *  @default ['project']
-   *  @see https://github.com/anthropics/claude-agent-sdk */
-  settingSources?: ('project' | 'user')[];
-}
+export type { ClaudeProviderDefaults, CodexProviderDefaults };
+
+/** @deprecated Use ClaudeProviderDefaults (renamed for consistency). */
+export type ClaudeCodexProviderDefaults = ClaudeProviderDefaults;
 
 export interface GlobalConfig {
   /**
