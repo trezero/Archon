@@ -298,7 +298,7 @@ Infrastructure configuration (database URL, platform tokens) is stored in `.env`
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| **CLI** | `~/.archon/.env` | Global infrastructure config; CWD .env keys stripped before loading (no `override` needed) |
+| **CLI** | `~/.archon/.env` | Global infrastructure config; CWD .env keys stripped first, then loaded with `override: true` (Archon config wins over shell-inherited vars) |
 | **Server (dev)** | `<archon-repo>/.env` + `~/.archon/.env` | Repo `.env` for platform tokens; `~/.archon/.env` loaded with `override: true` |
 | **Server (binary)** | `~/.archon/.env` | Single source of truth (repo `.env` path is not available in compiled binaries) |
 

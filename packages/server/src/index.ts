@@ -40,16 +40,8 @@ if (existsSync(globalEnvPath)) {
   }
 }
 
-// Warn when running inside a Claude Code session — nested sessions can deadlock.
-if (process.env.CLAUDECODE === '1' && !process.env.ARCHON_SUPPRESS_NESTED_CLAUDE_WARNING) {
-  process.stderr.write(
-    '\u26a0  Detected CLAUDECODE=1 — server started from inside a Claude Code session.\n' +
-      '   If AI queries hang silently, this is a known class of issue.\n' +
-      '   Workaround: start the server from a regular (non-Claude-Code) shell.\n' +
-      '   Suppress: set ARCHON_SUPPRESS_NESTED_CLAUDE_WARNING=1\n' +
-      '   Details: https://github.com/coleam00/Archon/issues/1067\n'
-  );
-}
+// CLAUDECODE=1 warning is emitted inside stripCwdEnv() (boot import above)
+// BEFORE the marker is deleted from process.env. No duplicate warning here.
 
 // Smart default: use Claude Code's built-in OAuth if no explicit credentials
 if (

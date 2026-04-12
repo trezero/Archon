@@ -82,66 +82,30 @@ function normalizeClaudeUsage(usage?: {
 }
 
 /**
- * Build environment for Claude subprocess
+ * Build environment for Claude subprocess.
  *
- * Auth behavior:
- * - CLAUDE_USE_GLOBAL_AUTH=true: Filter tokens, use global auth from `claude /login`
- * - CLAUDE_USE_GLOBAL_AUTH=false: Pass tokens through explicitly
- * - Not set: Auto-detect — use explicit tokens if present, otherwise fall back to global auth
+ * process.env is already clean at this point:
+ * - stripCwdEnv() at entry point removed CWD .env keys + CLAUDECODE markers
+ * - ~/.archon/.env loaded with override:true as the trusted source
+ *
+ * Auth mode is determined by the SDK based on what tokens are present:
+ * - Tokens in env → SDK uses them (explicit auth)
+ * - No tokens → SDK uses `claude /login` credentials (global auth)
+ * - User controls this by what they put in ~/.archon/.env
+ *
+ * We log the detected mode for diagnostics but don't filter — the user's
+ * config is trusted. See coleam00/Archon#1067 for design rationale.
  */
 function buildSubprocessEnv(): NodeJS.ProcessEnv {
-  const globalAuthSetting = process.env.CLAUDE_USE_GLOBAL_AUTH?.toLowerCase();
-
-  // Check for empty token values (common misconfiguration)
-  const tokenVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_API_KEY'] as const;
-  const emptyTokens = tokenVars.filter(v => process.env[v] === '');
-  if (emptyTokens.length > 0) {
-    getLog().warn({ emptyTokens }, 'empty_token_values');
-  }
-
-  // Warn if user has the legacy variable but not the new ones
-  if (
-    process.env.ANTHROPIC_API_KEY &&
-    !process.env.CLAUDE_CODE_OAUTH_TOKEN &&
-    !process.env.CLAUDE_API_KEY
-  ) {
-    getLog().warn(
-      { hint: 'Use CLAUDE_API_KEY or CLAUDE_CODE_OAUTH_TOKEN instead' },
-      'deprecated_anthropic_api_key_ignored'
-    );
-  }
-
   const hasExplicitTokens = Boolean(
     process.env.CLAUDE_CODE_OAUTH_TOKEN ?? process.env.CLAUDE_API_KEY
   );
+  const authMode = hasExplicitTokens ? 'explicit' : 'global';
+  getLog().info(
+    { authMode },
+    authMode === 'global' ? 'using_global_auth' : 'using_explicit_tokens'
+  );
 
-  // Determine whether to use global auth
-  let useGlobalAuth: boolean;
-  if (globalAuthSetting === 'true') {
-    useGlobalAuth = true;
-    getLog().info({ authMode: 'global' }, 'using_global_auth');
-  } else if (globalAuthSetting === 'false') {
-    useGlobalAuth = false;
-    getLog().info({ authMode: 'explicit' }, 'using_explicit_tokens');
-  } else if (globalAuthSetting !== undefined) {
-    // Unrecognized value - warn and fall back to auto-detect
-    getLog().warn({ value: globalAuthSetting }, 'unrecognized_global_auth_setting');
-    useGlobalAuth = !hasExplicitTokens;
-  } else {
-    // Not set - auto-detect: use tokens if present, otherwise global auth
-    useGlobalAuth = !hasExplicitTokens;
-    if (hasExplicitTokens) {
-      getLog().info({ authMode: 'explicit', autoDetected: true }, 'using_explicit_tokens');
-    } else {
-      getLog().info({ authMode: 'global', autoDetected: true }, 'using_global_auth');
-    }
-  }
-
-  // process.env is already clean — stripCwdEnv() at entry point removed CWD
-  // .env keys and CLAUDECODE markers. Everything remaining is user-trusted
-  // (shell env + ~/.archon/.env). Pass it through as-is.
-  const envKeyCount = Object.keys(process.env).length;
-  getLog().debug({ envKeyCount, useGlobalAuth, hasExplicitTokens }, 'subprocess_env_prepared');
   return { ...process.env };
 }
 
