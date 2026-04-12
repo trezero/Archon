@@ -30,6 +30,7 @@ const TEST_KEYS = [
   'CLAUDECODE',
   'CLAUDE_CODE_ENTRYPOINT',
   'NODE_OPTIONS',
+  'REDIS_URL',
 ];
 
 describe('env isolation integration', () => {
@@ -161,6 +162,32 @@ describe('env isolation integration', () => {
     expect(subprocessEnv.CLAUDECODE).toBeUndefined();
     expect(subprocessEnv.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
     expect(subprocessEnv.NODE_OPTIONS).toBeUndefined();
+  });
+
+  it('scenario 5: DATABASE_URL in CWD .env does not reach Archon — archon uses its own DB', () => {
+    // Target repo has DATABASE_URL for its own PostgreSQL. Archon must NOT
+    // connect to the target app's database — it should use its own DB
+    // (from ~/.archon/.env or default SQLite).
+    const subprocessEnv = simulateEntryPointFlow(
+      'DATABASE_URL=postgresql://target-app:5432/wrong_db\nREDIS_URL=redis://target:6379\n',
+      'DATABASE_URL=sqlite:///Users/me/.archon/archon.db\n'
+    );
+
+    // CWD DATABASE_URL is stripped, archon's wins
+    expect(subprocessEnv.DATABASE_URL).toBe('sqlite:///Users/me/.archon/archon.db');
+    // Other CWD keys also stripped
+    expect(subprocessEnv.REDIS_URL).toBeUndefined();
+  });
+
+  it('scenario 6: DATABASE_URL in CWD .env only (no archon env) — stripped entirely', () => {
+    // User relies on default SQLite (no DATABASE_URL in ~/.archon/.env).
+    // Target repo's DATABASE_URL must not leak.
+    const subprocessEnv = simulateEntryPointFlow(
+      'DATABASE_URL=postgresql://target-app:5432/production\n',
+      ''
+    );
+
+    expect(subprocessEnv.DATABASE_URL).toBeUndefined();
   });
 
   it('CLAUDE_CODE_OAUTH_TOKEN from archon env survives marker strip', () => {
