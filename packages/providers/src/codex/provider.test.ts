@@ -1023,5 +1023,109 @@ describe('CodexProvider', () => {
         expect(mockRunStreamed).toHaveBeenCalledTimes(1);
       });
     });
+
+    describe('structured output normalization', () => {
+      test('populates structuredOutput on result when outputFormat is set and text is valid JSON', async () => {
+        const jsonPayload = { status: 'ok', count: 42 };
+        mockRunStreamed.mockResolvedValueOnce({
+          events: (async function* () {
+            yield {
+              type: 'item.completed',
+              item: { type: 'agent_message', id: 'msg-1', text: JSON.stringify(jsonPayload) },
+            };
+            yield { type: 'turn.completed', usage: defaultUsage };
+          })(),
+        });
+
+        const chunks = [];
+        for await (const chunk of client.sendQuery('test', '/tmp', undefined, {
+          outputFormat: { type: 'json_schema', schema: { type: 'object' } },
+        })) {
+          chunks.push(chunk);
+        }
+
+        const resultChunk = chunks.find(c => c.type === 'result');
+        expect(resultChunk).toBeDefined();
+        expect(resultChunk!.type === 'result' && resultChunk!.structuredOutput).toEqual(
+          jsonPayload
+        );
+      });
+
+      test('yields system warning when outputFormat is set but text is not valid JSON', async () => {
+        mockRunStreamed.mockResolvedValueOnce({
+          events: (async function* () {
+            yield {
+              type: 'item.completed',
+              item: { type: 'agent_message', id: 'msg-1', text: 'not json at all' },
+            };
+            yield { type: 'turn.completed', usage: defaultUsage };
+          })(),
+        });
+
+        const chunks = [];
+        for await (const chunk of client.sendQuery('test', '/tmp', undefined, {
+          outputFormat: { type: 'json_schema', schema: { type: 'object' } },
+        })) {
+          chunks.push(chunk);
+        }
+
+        const systemChunk = chunks.find(c => c.type === 'system');
+        expect(systemChunk).toBeDefined();
+        expect(systemChunk!.type === 'system' && systemChunk!.content).toContain(
+          'Structured output requested but Codex returned non-JSON'
+        );
+
+        const resultChunk = chunks.find(c => c.type === 'result');
+        expect(resultChunk).toBeDefined();
+        expect(resultChunk!.type === 'result' && resultChunk!.structuredOutput).toBeUndefined();
+      });
+
+      test('does not populate structuredOutput when outputFormat is not set', async () => {
+        mockRunStreamed.mockResolvedValueOnce({
+          events: (async function* () {
+            yield {
+              type: 'item.completed',
+              item: { type: 'agent_message', id: 'msg-1', text: '{"valid":"json"}' },
+            };
+            yield { type: 'turn.completed', usage: defaultUsage };
+          })(),
+        });
+
+        const chunks = [];
+        for await (const chunk of client.sendQuery('test', '/tmp')) {
+          chunks.push(chunk);
+        }
+
+        const resultChunk = chunks.find(c => c.type === 'result');
+        expect(resultChunk).toBeDefined();
+        expect(resultChunk!.type === 'result' && resultChunk!.structuredOutput).toBeUndefined();
+      });
+
+      test('handles nodeConfig.output_format path', async () => {
+        const jsonPayload = { key: 'value' };
+        mockRunStreamed.mockResolvedValueOnce({
+          events: (async function* () {
+            yield {
+              type: 'item.completed',
+              item: { type: 'agent_message', id: 'msg-1', text: JSON.stringify(jsonPayload) },
+            };
+            yield { type: 'turn.completed', usage: defaultUsage };
+          })(),
+        });
+
+        const chunks = [];
+        for await (const chunk of client.sendQuery('test', '/tmp', undefined, {
+          nodeConfig: { output_format: { type: 'object' } },
+        })) {
+          chunks.push(chunk);
+        }
+
+        const resultChunk = chunks.find(c => c.type === 'result');
+        expect(resultChunk).toBeDefined();
+        expect(resultChunk!.type === 'result' && resultChunk!.structuredOutput).toEqual(
+          jsonPayload
+        );
+      });
+    });
   });
 });

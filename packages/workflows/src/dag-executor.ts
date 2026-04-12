@@ -801,8 +801,10 @@ async function executeNodeInternal(
       // rate_limit chunks: already log.warn'd in claude.ts; not surfaced to SSE per design
     }
 
-    // When output_format is set and the SDK returned structured_output,
-    // use it instead of the concatenated assistant text (which includes prose)
+    // When output_format is set and the provider returned structured_output,
+    // use it instead of the concatenated assistant text (which includes prose).
+    // Each provider normalizes its own structured output onto the result chunk —
+    // no provider-specific branching here.
     if (nodeOptions?.outputFormat) {
       if (structuredOutput !== undefined) {
         try {
@@ -817,26 +819,9 @@ async function executeNodeInternal(
           );
         }
         getLog().debug({ nodeId: node.id, streamingMode }, 'dag.structured_output_override');
-      } else if (provider === 'codex') {
-        // Codex returns structured output inline in agent_message text
-        // (already accumulated in nodeOutputText). Validate it is valid JSON
-        // so downstream $nodeId.output.field references can parse it.
-        try {
-          JSON.parse(nodeOutputText);
-          getLog().debug({ nodeId: node.id }, 'dag.codex_structured_output_valid_json');
-        } catch {
-          getLog().warn(
-            { nodeId: node.id, outputPreview: nodeOutputText.slice(0, 200) },
-            'dag.codex_structured_output_not_json'
-          );
-          await safeSendMessage(
-            platform,
-            conversationId,
-            `Warning: Node '${node.id}' requested output_format but Codex returned non-JSON output. Downstream conditions referencing \`$${node.id}.output.field\` may not evaluate correctly.`,
-            nodeContext
-          );
-        }
       } else {
+        // Provider did not populate structuredOutput — warn the user.
+        // If the provider detected invalid output, it already yielded a system warning.
         getLog().warn(
           { nodeId: node.id, workflowRunId: workflowRun.id },
           'dag.structured_output_missing'
@@ -844,7 +829,7 @@ async function executeNodeInternal(
         await safeSendMessage(
           platform,
           conversationId,
-          `Warning: Node '${node.id}' requested output_format but the SDK did not return structured output. Downstream conditions may not evaluate correctly.`,
+          `Warning: Node '${node.id}' requested output_format but the provider did not return structured output. Downstream conditions may not evaluate correctly.`,
           nodeContext
         );
       }

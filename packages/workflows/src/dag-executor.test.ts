@@ -1435,7 +1435,7 @@ describe('executeDagWorkflow -- output_format structured output', () => {
   });
 
   it('passes outputFormat to Codex nodes and uses inline JSON response', async () => {
-    // Codex returns structured output inline as agent_message text (no structuredOutput field)
+    // Codex provider normalizes inline JSON into structuredOutput on the result chunk
     const classifyJson = { run_code_review: 'true', run_tests: 'false' };
     mockGetAgentProviderDag.mockImplementation(() => ({
       sendQuery: mockSendQueryDag,
@@ -1444,7 +1444,7 @@ describe('executeDagWorkflow -- output_format structured output', () => {
     }));
     mockSendQueryDag.mockImplementation(function* () {
       yield { type: 'assistant', content: JSON.stringify(classifyJson) };
-      yield { type: 'result', sessionId: 'codex-sid-1' };
+      yield { type: 'result', sessionId: 'codex-sid-1', structuredOutput: classifyJson };
     });
 
     const mockDeps = createMockDeps();
@@ -1507,7 +1507,7 @@ describe('executeDagWorkflow -- output_format structured output', () => {
   });
 
   it('does not warn about missing structuredOutput for Codex nodes', async () => {
-    // Codex returns structured output inline — no structuredOutput field on result
+    // Codex provider normalizes inline JSON into structuredOutput on the result chunk
     mockGetAgentProviderDag.mockImplementation(() => ({
       sendQuery: mockSendQueryDag,
       getType: () => 'codex',
@@ -1515,7 +1515,7 @@ describe('executeDagWorkflow -- output_format structured output', () => {
     }));
     mockSendQueryDag.mockImplementation(function* () {
       yield { type: 'assistant', content: '{"status":"ok"}' };
-      yield { type: 'result', sessionId: 'codex-sid-2' };
+      yield { type: 'result', sessionId: 'codex-sid-2', structuredOutput: { status: 'ok' } };
     });
 
     const mockDeps = createMockDeps();

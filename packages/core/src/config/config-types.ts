@@ -17,9 +17,6 @@ import type { ClaudeProviderDefaults, CodexProviderDefaults } from '@archon/prov
 
 export type { ClaudeProviderDefaults, CodexProviderDefaults };
 
-/** @deprecated Use ClaudeProviderDefaults (renamed for consistency). */
-export type ClaudeCodexProviderDefaults = ClaudeProviderDefaults;
-
 export interface GlobalConfig {
   /**
    * Bot display name (shown in messages)
@@ -37,7 +34,7 @@ export interface GlobalConfig {
    * Assistant-specific defaults (model, reasoning effort, etc.)
    */
   assistants?: {
-    claude?: ClaudeCodexProviderDefaults;
+    claude?: ClaudeProviderDefaults;
     codex?: CodexProviderDefaults;
   };
 
@@ -108,7 +105,7 @@ export interface RepoConfig {
    * Assistant-specific defaults for this repository
    */
   assistants?: {
-    claude?: ClaudeCodexProviderDefaults;
+    claude?: ClaudeProviderDefaults;
     codex?: CodexProviderDefaults;
   };
 
@@ -207,7 +204,7 @@ export interface MergedConfig {
   botName: string;
   assistant: 'claude' | 'codex';
   assistants: {
-    claude: ClaudeCodexProviderDefaults;
+    claude: ClaudeProviderDefaults;
     codex: CodexProviderDefaults;
   };
   streaming: {
@@ -271,7 +268,7 @@ export interface SafeConfig {
   botName: string;
   assistant: 'claude' | 'codex';
   assistants: {
-    claude: Pick<ClaudeCodexProviderDefaults, 'model'>;
+    claude: Pick<ClaudeProviderDefaults, 'model'>;
     codex: Pick<CodexProviderDefaults, 'model' | 'modelReasoningEffort' | 'webSearchMode'>;
   };
   streaming: {

@@ -248,6 +248,9 @@ export class CodexProvider implements IAgentProvider {
 
       try {
         const turnOptions: TurnOptions = {};
+        const hasOutputFormat = !!(
+          requestOptions?.outputFormat ?? requestOptions?.nodeConfig?.output_format
+        );
         if (requestOptions?.outputFormat) {
           turnOptions.outputSchema = requestOptions.outputFormat.schema;
         }
@@ -255,6 +258,8 @@ export class CodexProvider implements IAgentProvider {
         if (requestOptions?.nodeConfig?.output_format && !requestOptions?.outputFormat) {
           turnOptions.outputSchema = requestOptions.nodeConfig.output_format;
         }
+        // Track accumulated text for structured output normalization
+        let accumulatedText = '';
         if (requestOptions?.abortSignal) {
           turnOptions.signal = requestOptions.abortSignal;
         }
@@ -310,6 +315,7 @@ export class CodexProvider implements IAgentProvider {
             switch (item.type) {
               case 'agent_message':
                 if (item.text) {
+                  if (hasOutputFormat) accumulatedText += item.text;
                   yield { type: 'assistant', content: item.text };
                 }
                 break;
@@ -457,10 +463,34 @@ export class CodexProvider implements IAgentProvider {
           if (event.type === 'turn.completed') {
             getLog().debug('turn_completed');
             const usage = extractUsageFromCodexEvent(event);
+
+            // Codex returns structured output inline in agent_message text.
+            // Normalize: parse as JSON and put on structuredOutput so the
+            // dag-executor can handle all providers uniformly.
+            let structuredOutput: unknown;
+            if (hasOutputFormat && accumulatedText) {
+              try {
+                structuredOutput = JSON.parse(accumulatedText);
+                getLog().debug('codex.structured_output_parsed');
+              } catch {
+                getLog().warn(
+                  { outputPreview: accumulatedText.slice(0, 200) },
+                  'codex.structured_output_not_json'
+                );
+                yield {
+                  type: 'system',
+                  content:
+                    '⚠️ Structured output requested but Codex returned non-JSON text. ' +
+                    'Downstream $nodeId.output.field references may not evaluate correctly.',
+                };
+              }
+            }
+
             yield {
               type: 'result',
               sessionId: thread.id ?? undefined,
               tokens: usage,
+              ...(structuredOutput !== undefined ? { structuredOutput } : {}),
             };
             break;
           }
