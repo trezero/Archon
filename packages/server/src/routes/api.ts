@@ -43,6 +43,7 @@ import {
   isDocker,
   checkForUpdate,
   BUNDLED_IS_BINARY,
+  BUNDLED_VERSION,
 } from '@archon/paths';
 import { discoverWorkflowsWithConfig } from '@archon/workflows/workflow-discovery';
 import { parseWorkflow } from '@archon/workflows/loader';
@@ -122,18 +123,21 @@ import {
   codebaseEnvironmentsResponseSchema,
 } from './schemas/config.schemas';
 
-// Read app version once at module load (root package.json is 4 levels up from src/routes/)
+// Read app version: use build-time constant in binary, package.json in dev
 let appVersion = 'unknown';
-try {
-  const pkgContent = readFileSync(join(import.meta.dir, '../../../../package.json'), 'utf-8');
-  const pkg = JSON.parse(pkgContent) as { version?: string };
-  appVersion = pkg.version ?? 'unknown';
-} catch (err) {
-  // package.json not found (binary build or unusual install)
-  getLog().debug(
-    { err, path: join(import.meta.dir, '../../../../package.json') },
-    'api.version_read_failed'
-  );
+if (BUNDLED_IS_BINARY) {
+  appVersion = BUNDLED_VERSION;
+} else {
+  try {
+    const pkgContent = readFileSync(join(import.meta.dir, '../../../../package.json'), 'utf-8');
+    const pkg = JSON.parse(pkgContent) as { version?: string };
+    appVersion = pkg.version ?? 'unknown';
+  } catch (err) {
+    getLog().debug(
+      { err, path: join(import.meta.dir, '../../../../package.json') },
+      'api.version_read_failed'
+    );
+  }
 }
 
 type WorkflowSource = 'project' | 'bundled';
@@ -2469,27 +2473,22 @@ export function registerApiRoutes(
       return apiError(c, 500, 'Failed to look up workflow run');
     }
 
-    if (!run?.working_path) {
+    if (!run) {
       return apiError(c, 404, 'Workflow run not found');
     }
 
-    // Derive owner/repo from working_path (must be under ~/.archon/workspaces/owner/repo/...)
-    const normalizedWorkspacesPath = normalize(getArchonWorkspacesPath());
-    const normalizedWorkingPath = normalize(run.working_path);
-    if (!normalizedWorkingPath.startsWith(normalizedWorkspacesPath + sep)) {
-      getLog().error(
-        { runId, workingPath: run.working_path },
-        'artifacts.working_path_outside_workspaces'
-      );
-      return apiError(c, 404, 'Artifact not available: working path not in workspaces');
+    // Derive owner/repo from codebase name (format: "owner/repo")
+    const codebase = run.codebase_id ? await codebaseDb.getCodebase(run.codebase_id) : null;
+    if (!codebase?.name) {
+      getLog().error({ runId, codebaseId: run.codebase_id }, 'artifacts.codebase_lookup_failed');
+      return apiError(c, 404, 'Artifact not available: codebase not found');
     }
-    const relative = normalizedWorkingPath.substring(normalizedWorkspacesPath.length + 1);
-    const parts = relative.split(sep).filter(p => p.length > 0);
-    if (parts.length < 2) {
-      getLog().error({ runId, workingPath: run.working_path }, 'artifacts.owner_repo_parse_failed');
+    const nameParts = codebase.name.split('/');
+    if (nameParts.length < 2) {
+      getLog().error({ runId, codebaseName: codebase.name }, 'artifacts.owner_repo_parse_failed');
       return apiError(c, 404, 'Artifact not available: could not determine owner/repo');
     }
-    const [owner, repo] = parts;
+    const [owner, repo] = nameParts;
 
     const artifactDir = getRunArtifactsPath(owner, repo, runId);
     const filePath = join(artifactDir, filename);
