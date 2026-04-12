@@ -14,7 +14,7 @@
     "type-check": "bun x tsc --noEmit"
   },
   "dependencies": {
-    "dotenv": "^16",
+    "dotenv": "^17",
     "pino": "^9",
     "pino-pretty": "^13"
   },

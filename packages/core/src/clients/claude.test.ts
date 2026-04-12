@@ -1163,4 +1163,32 @@ describe('withFirstMessageTimeout', () => {
     const result = await gen.next();
     expect(result.done).toBe(true);
   });
+
+  test('logs diagnostic payload with env keys and process state on timeout', async () => {
+    async function* stuckGen(): AsyncGenerator<string> {
+      await new Promise(() => {});
+      yield 'never';
+    }
+    const controller = new AbortController();
+    const diagnostics = {
+      subprocessEnvKeys: ['PATH', 'HOME', 'CLAUDE_API_KEY'],
+      parentClaudeKeys: ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT'],
+      model: 'sonnet',
+      platform: 'darwin',
+    };
+    const gen = withFirstMessageTimeout(stuckGen(), controller, 50, diagnostics);
+    await expect(gen.next()).rejects.toThrow();
+
+    // Verify the diagnostic dump was logged at error level
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subprocessEnvKeys: ['PATH', 'HOME', 'CLAUDE_API_KEY'],
+        parentClaudeKeys: ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT'],
+        model: 'sonnet',
+        platform: 'darwin',
+        timeoutMs: 50,
+      }),
+      'claude.first_event_timeout'
+    );
+  });
 });

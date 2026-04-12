@@ -302,7 +302,7 @@ Infrastructure configuration (database URL, platform tokens) is stored in `.env`
 | **Server (dev)** | `<archon-repo>/.env` + `~/.archon/.env` | Repo `.env` for platform tokens; `~/.archon/.env` loaded with `override: true` |
 | **Server (binary)** | `~/.archon/.env` | Single source of truth (repo `.env` path is not available in compiled binaries) |
 
-**How it works**: At startup, the CLI strips all keys that Bun auto-loaded from the current working directory (from `.env`, `.env.local`, `.env.development`, `.env.production`) before loading `~/.archon/.env`. This ensures CWD repo keys are fully removed rather than merely overridden. Target repo env vars cannot reach AI subprocesses — `SUBPROCESS_ENV_ALLOWLIST` blocks all non-whitelisted keys.
+**How it works**: At startup, the CLI and server strip all keys that Bun auto-loaded from the current working directory (`.env`, `.env.local`, `.env.development`, `.env.production`) and any nested Claude Code session markers (`CLAUDECODE`, `CLAUDE_CODE_*` except auth vars) before loading `~/.archon/.env`. This ensures target repo keys and nested-session guards are fully removed from `process.env` before any application code runs.
 
 **Best practice**: Use `~/.archon/.env` as the single source of truth:
 
