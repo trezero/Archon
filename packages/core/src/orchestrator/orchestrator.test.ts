@@ -79,11 +79,11 @@ mock.module('../handlers/command-handler', () => ({
   parseCommand: mockParseCommand,
 }));
 
-// AI client mock
-const mockGetAssistantClient = mock(() => null);
+// AI provider mock
+const mockGetAgentProvider = mock(() => null);
 
-mock.module('../clients/factory', () => ({
-  getAssistantClient: mockGetAssistantClient,
+mock.module('../providers/factory', () => ({
+  getAgentProvider: mockGetAgentProvider,
 }));
 
 // Workflow mocks
@@ -96,7 +96,7 @@ const mockFindWorkflow = mock((name: string, workflows: readonly WorkflowDefinit
 mock.module('../workflows/store-adapter', () => ({
   createWorkflowDeps: mock(() => ({
     store: {},
-    getAssistantClient: () => ({}),
+    getAgentProvider: () => ({}),
     loadConfig: async () => ({}),
   })),
 }));
@@ -274,7 +274,7 @@ function clearAllMocks(): void {
   mockTransitionSession.mockClear();
   mockHandleCommand.mockClear();
   mockParseCommand.mockClear();
-  mockGetAssistantClient.mockClear();
+  mockGetAgentProvider.mockClear();
   mockDiscoverWorkflows.mockClear();
   mockExecuteWorkflow.mockClear();
   mockFindWorkflow.mockClear();
@@ -457,7 +457,7 @@ describe('orchestrator-agent handleMessage', () => {
     mockGetActiveSession.mockResolvedValue(null);
     mockCreateSession.mockResolvedValue(mockSession);
     mockTransitionSession.mockResolvedValue(mockSession);
-    mockGetAssistantClient.mockReturnValue(mockClient);
+    mockGetAgentProvider.mockReturnValue(mockClient);
     mockDiscoverWorkflows.mockResolvedValue({ workflows: [], errors: [] });
     mockParseCommand.mockImplementation((message: string) => {
       const parts = message.split(/\s+/);
@@ -479,7 +479,7 @@ describe('orchestrator-agent handleMessage', () => {
 
       expect(mockHandleCommand).toHaveBeenCalled();
       expect(platform.sendMessage).toHaveBeenCalledWith('chat-456', 'Status info');
-      expect(mockGetAssistantClient).not.toHaveBeenCalled();
+      expect(mockGetAgentProvider).not.toHaveBeenCalled();
     });
 
     test('delegates /help to command handler', async () => {
@@ -676,7 +676,7 @@ describe('orchestrator-agent handleMessage', () => {
       await handleMessage(platform, 'chat-456', 'hello');
 
       expect(mockTransitionSession).not.toHaveBeenCalled();
-      // Should pass existing assistant_session_id to AI client
+      // Should pass existing assistant_session_id to AI provider
       expect(mockClient.sendQuery).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(String),
@@ -700,7 +700,7 @@ describe('orchestrator-agent handleMessage', () => {
   // ─── settingSources forwarding ────────────────────────────────────────
 
   describe('settingSources forwarding', () => {
-    test('passes settingSources from config to AI client for claude', async () => {
+    test('passes settingSources from config to AI provider for claude', async () => {
       mockLoadConfig.mockResolvedValueOnce({
         botName: 'Archon',
         assistant: 'claude',
@@ -754,7 +754,7 @@ describe('orchestrator-agent handleMessage', () => {
           yield { type: 'result', sessionId: 'codex-session' };
         }),
       };
-      mockGetAssistantClient.mockReturnValueOnce(codexClient);
+      mockGetAgentProvider.mockReturnValueOnce(codexClient);
 
       await handleMessage(platform, 'chat-456', 'hello');
 

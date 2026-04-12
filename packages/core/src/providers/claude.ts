@@ -29,8 +29,8 @@ import {
 // Safe in dev too: resolves to the real on-disk cli.js.
 import cliPath from '@anthropic-ai/claude-agent-sdk/embed';
 import {
-  type AssistantRequestOptions,
-  type IAssistantClient,
+  type AgentRequestOptions,
+  type IAgentProvider,
   type MessageChunk,
   type TokenUsage,
 } from '../types';
@@ -46,7 +46,7 @@ import { loadConfig } from '../config/config-loader';
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
 let cachedLog: ReturnType<typeof createLogger> | undefined;
 function getLog(): ReturnType<typeof createLogger> {
-  if (!cachedLog) cachedLog = createLogger('client.claude');
+  if (!cachedLog) cachedLog = createLogger('provider.claude');
   return cachedLog;
 }
 
@@ -244,10 +244,10 @@ export function getProcessUid(): number | undefined {
 }
 
 /**
- * Claude AI assistant client
- * Implements generic IAssistantClient interface
+ * Claude AI agent provider
+ * Implements generic IAgentProvider interface
  */
-export class ClaudeClient implements IAssistantClient {
+export class ClaudeProvider implements IAgentProvider {
   private readonly retryBaseDelayMs: number;
 
   constructor(options?: { retryBaseDelayMs?: number }) {
@@ -273,7 +273,7 @@ export class ClaudeClient implements IAssistantClient {
     prompt: string,
     cwd: string,
     resumeSessionId?: string,
-    requestOptions?: AssistantRequestOptions
+    requestOptions?: AgentRequestOptions
   ): AsyncGenerator<MessageChunk> {
     // Pre-spawn: check for env key leak if codebase is not explicitly consented.
     // Use prefix lookup so worktree paths (e.g. .../worktrees/feature-branch) still
