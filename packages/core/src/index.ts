@@ -53,11 +53,9 @@ export * as messageDb from './db/messages';
 export { SessionNotFoundError } from './db/sessions';
 
 // =============================================================================
-// Agent Providers
+// Agent Providers (re-exported from @archon/providers)
 // =============================================================================
-export { ClaudeProvider } from './providers/claude';
-export { CodexProvider } from './providers/codex';
-export { getAgentProvider } from './providers/factory';
+export { ClaudeProvider, CodexProvider, getAgentProvider } from '@archon/providers';
 
 // =============================================================================
 // Workflows
