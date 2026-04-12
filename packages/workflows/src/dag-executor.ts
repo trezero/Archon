@@ -773,11 +773,16 @@ async function executeNodeInternal(
         }
         break; // Result is the "I'm done" signal — don't wait for subprocess to exit
       } else if (msg.type === 'system' && msg.content) {
-        // Surface MCP connection failures to the user
-        if (msg.content.startsWith('MCP server connection failed:')) {
+        // Forward provider warnings (⚠️) and MCP connection failures to the user.
+        // Providers yield system chunks for user-actionable issues (missing env vars,
+        // Haiku+MCP, structured output failures, etc.)
+        if (
+          msg.content.startsWith('MCP server connection failed:') ||
+          msg.content.startsWith('⚠️')
+        ) {
           getLog().warn(
-            { nodeId: node.id, mcpStatus: msg.content },
-            'dag.mcp_server_connection_failed'
+            { nodeId: node.id, systemContent: msg.content },
+            'dag.provider_warning_forwarded'
           );
           const delivered = await safeSendMessage(
             platform,
@@ -787,8 +792,8 @@ async function executeNodeInternal(
           );
           if (!delivered) {
             getLog().error(
-              { nodeId: node.id, mcpStatus: msg.content, workflowRunId: workflowRun.id },
-              'dag.mcp_connection_failure_delivery_failed'
+              { nodeId: node.id, workflowRunId: workflowRun.id },
+              'dag.provider_warning_delivery_failed'
             );
           }
         } else {
