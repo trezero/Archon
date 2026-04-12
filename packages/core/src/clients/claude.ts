@@ -35,7 +35,10 @@ import {
   type TokenUsage,
 } from '../types';
 import { createLogger } from '@archon/paths';
-import { buildCleanSubprocessEnv } from '../utils/env-allowlist';
+// No env filtering here — process.env is already clean:
+// stripCwdEnv() at entry point stripped CWD .env keys + CLAUDECODE markers,
+// then ~/.archon/.env was loaded as the trusted source. All keys the user sets
+// in ~/.archon/.env are intentional and pass through to the subprocess.
 import { scanPathForSensitiveKeys, EnvLeakError } from '../utils/env-leak-scanner';
 import * as codebaseDb from '../db/codebases';
 import { loadConfig } from '../config/config-loader';
@@ -134,56 +137,12 @@ function buildSubprocessEnv(): NodeJS.ProcessEnv {
     }
   }
 
-  let baseEnv: NodeJS.ProcessEnv;
-
-  if (useGlobalAuth) {
-    // Start from allowlist-filtered env, then strip auth tokens
-    const clean = buildCleanSubprocessEnv();
-    const { CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_API_KEY, ...envWithoutAuth } = clean;
-
-    // Log if we're filtering out tokens (helps debug auth issues)
-    const filtered = [
-      CLAUDE_CODE_OAUTH_TOKEN && 'CLAUDE_CODE_OAUTH_TOKEN',
-      CLAUDE_API_KEY && 'CLAUDE_API_KEY',
-    ].filter(Boolean);
-
-    if (filtered.length > 0) {
-      getLog().info({ filteredVars: filtered }, 'global_auth_filtered_tokens');
-    }
-
-    baseEnv = envWithoutAuth;
-  } else {
-    // Start from allowlist-filtered env (includes auth tokens)
-    baseEnv = buildCleanSubprocessEnv();
-  }
-
-  // Clean env vars that interfere with Claude Code subprocess
-  const cleanedVars: string[] = [];
-
-  // Strip nested-session guard marker (claude-code v2.1.41+).
-  // When the server is started from inside a Claude Code terminal, CLAUDECODE=1
-  // is inherited and causes the subprocess to refuse to launch.
-  // See: https://github.com/anthropics/claude-code/issues/25434
-  if (baseEnv.CLAUDECODE) {
-    delete baseEnv.CLAUDECODE;
-    cleanedVars.push('CLAUDECODE');
-  }
-
-  // Strip debugger env vars
-  // See: https://github.com/anthropics/claude-code/issues/4619
-  if (baseEnv.NODE_OPTIONS) {
-    delete baseEnv.NODE_OPTIONS;
-    cleanedVars.push('NODE_OPTIONS');
-  }
-  if (baseEnv.VSCODE_INSPECTOR_OPTIONS) {
-    delete baseEnv.VSCODE_INSPECTOR_OPTIONS;
-    cleanedVars.push('VSCODE_INSPECTOR_OPTIONS');
-  }
-  if (cleanedVars.length > 0) {
-    getLog().info({ cleanedVars }, 'subprocess_env_cleaned');
-  }
-
-  return baseEnv;
+  // process.env is already clean — stripCwdEnv() at entry point removed CWD
+  // .env keys and CLAUDECODE markers. Everything remaining is user-trusted
+  // (shell env + ~/.archon/.env). Pass it through as-is.
+  const envKeyCount = Object.keys(process.env).length;
+  getLog().debug({ envKeyCount, useGlobalAuth, hasExplicitTokens }, 'subprocess_env_prepared');
+  return { ...process.env };
 }
 
 /** Max retries for transient subprocess failures (3 = 4 total attempts).

@@ -446,9 +446,12 @@ describe('ClaudeClient', () => {
       );
     });
 
-    test('strips NODE_OPTIONS from subprocess env', async () => {
-      const original = process.env.NODE_OPTIONS;
-      process.env.NODE_OPTIONS = '--inspect';
+    test('subprocess env passes through all process.env keys (no allowlist filtering)', async () => {
+      // With the allowlist removed, buildSubprocessEnv returns { ...process.env }.
+      // CWD .env leakage and CLAUDECODE markers are handled at entry point by
+      // stripCwdEnv(), not by buildSubprocessEnv(). See #1067, #1097.
+      const originalKey = process.env.CUSTOM_USER_KEY;
+      process.env.CUSTOM_USER_KEY = 'user-trusted-value';
 
       mockQuery.mockImplementation(async function* () {
         // Empty generator
@@ -460,113 +463,13 @@ describe('ClaudeClient', () => {
       }
 
       const callArgs = mockQuery.mock.calls[0][0] as { options: { env: NodeJS.ProcessEnv } };
-      expect(callArgs.options.env.NODE_OPTIONS).toBeUndefined();
+      expect(callArgs.options.env.CUSTOM_USER_KEY).toBe('user-trusted-value');
+      expect(callArgs.options.env.PATH).toBe(process.env.PATH);
+      expect(callArgs.options.env.HOME).toBe(process.env.HOME);
 
       // Cleanup
-      if (original !== undefined) {
-        process.env.NODE_OPTIONS = original;
-      } else {
-        delete process.env.NODE_OPTIONS;
-      }
-    });
-
-    test('ANTHROPIC_API_KEY alone does not set hasExplicitTokens (falls through to global auth)', async () => {
-      const originalOauth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-      const originalApiKey = process.env.CLAUDE_API_KEY;
-      const originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
-
-      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-      delete process.env.CLAUDE_API_KEY;
-      process.env.ANTHROPIC_API_KEY = 'sk-ant-test-key';
-
-      mockQuery.mockImplementation(async function* () {
-        // Empty generator
-      });
-
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for await (const _ of client.sendQuery('test', '/workspace')) {
-        // consume
-      }
-
-      // ANTHROPIC_API_KEY must NOT reach the subprocess: it is not in the
-      // SUBPROCESS_ENV_ALLOWLIST, so a leaked target-repo key cannot bill
-      // the wrong account. See issue #1029.
-      const callArgs = mockQuery.mock.calls[0][0] as { options: { env: NodeJS.ProcessEnv } };
-      expect(callArgs.options.env.ANTHROPIC_API_KEY).toBeUndefined();
-      // Explicit SDK vars are absent (useGlobalAuth=true path)
-      expect(callArgs.options.env.CLAUDE_API_KEY).toBeUndefined();
-      expect(callArgs.options.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
-
-      // Cleanup
-      if (originalOauth !== undefined) process.env.CLAUDE_CODE_OAUTH_TOKEN = originalOauth;
-      else delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-      if (originalApiKey !== undefined) process.env.CLAUDE_API_KEY = originalApiKey;
-      else delete process.env.CLAUDE_API_KEY;
-      if (originalAnthropicKey !== undefined) process.env.ANTHROPIC_API_KEY = originalAnthropicKey;
-      else delete process.env.ANTHROPIC_API_KEY;
-    });
-
-    test('ANTHROPIC_API_KEY excluded from subprocess env when using explicit auth (useGlobalAuth=false)', async () => {
-      const originalOauth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-      const originalApiKey = process.env.CLAUDE_API_KEY;
-      const originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
-      const originalGlobalAuth = process.env.CLAUDE_USE_GLOBAL_AUTH;
-
-      // Force explicit auth path regardless of env
-      process.env.CLAUDE_USE_GLOBAL_AUTH = 'false';
-      process.env.CLAUDE_API_KEY = 'sk-ant-explicit-key';
-      process.env.ANTHROPIC_API_KEY = 'sk-ant-target-repo-key';
-      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-
-      mockQuery.mockImplementation(async function* () {
-        // Empty generator
-      });
-
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for await (const _ of client.sendQuery('test', '/workspace')) {
-        // consume
-      }
-
-      // ANTHROPIC_API_KEY must NOT reach the subprocess regardless of which auth
-      // path is taken — the allowlist excludes it in both cases. See issue #1029.
-      const callArgs = mockQuery.mock.calls[0][0] as { options: { env: NodeJS.ProcessEnv } };
-      expect(callArgs.options.env.ANTHROPIC_API_KEY).toBeUndefined();
-      // Explicit auth vars are present on the useGlobalAuth=false path
-      expect(callArgs.options.env.CLAUDE_API_KEY).toBeDefined();
-
-      // Cleanup
-      if (originalOauth !== undefined) process.env.CLAUDE_CODE_OAUTH_TOKEN = originalOauth;
-      else delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-      if (originalApiKey !== undefined) process.env.CLAUDE_API_KEY = originalApiKey;
-      else delete process.env.CLAUDE_API_KEY;
-      if (originalAnthropicKey !== undefined) process.env.ANTHROPIC_API_KEY = originalAnthropicKey;
-      else delete process.env.ANTHROPIC_API_KEY;
-      if (originalGlobalAuth !== undefined) process.env.CLAUDE_USE_GLOBAL_AUTH = originalGlobalAuth;
-      else delete process.env.CLAUDE_USE_GLOBAL_AUTH;
-    });
-
-    test('strips VSCODE_INSPECTOR_OPTIONS from subprocess env', async () => {
-      const original = process.env.VSCODE_INSPECTOR_OPTIONS;
-      process.env.VSCODE_INSPECTOR_OPTIONS = 'some-value';
-
-      mockQuery.mockImplementation(async function* () {
-        // Empty generator
-      });
-
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for await (const _ of client.sendQuery('test', '/workspace')) {
-        // consume
-      }
-
-      const callArgs = mockQuery.mock.calls[0][0] as { options: { env: NodeJS.ProcessEnv } };
-      expect(callArgs.options.env.VSCODE_INSPECTOR_OPTIONS).toBeUndefined();
-
-      // Cleanup
-      if (original !== undefined) {
-        process.env.VSCODE_INSPECTOR_OPTIONS = original;
-      } else {
-        delete process.env.VSCODE_INSPECTOR_OPTIONS;
-      }
+      if (originalKey !== undefined) process.env.CUSTOM_USER_KEY = originalKey;
+      else delete process.env.CUSTOM_USER_KEY;
     });
 
     test('classifies exit code errors as crash and retries up to 3 times', async () => {
