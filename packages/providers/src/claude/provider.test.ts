@@ -323,7 +323,6 @@ describe('ClaudeProvider', () => {
       });
 
       // Consume the generator
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('my prompt', '/my/workspace', undefined, {
         model: 'sonnet',
       })) {
@@ -345,7 +344,6 @@ describe('ClaudeProvider', () => {
         // Empty generator
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/workspace')) {
         // consume
       }
@@ -360,7 +358,6 @@ describe('ClaudeProvider', () => {
         // Empty generator
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/workspace', undefined, {
         persistSession: true,
       })) {
@@ -380,7 +377,6 @@ describe('ClaudeProvider', () => {
         // Empty generator
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('prompt', '/workspace', 'session-to-resume')) {
         // consume
       }
@@ -471,7 +467,6 @@ describe('ClaudeProvider', () => {
         // Empty generator
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/workspace')) {
         // consume
       }
@@ -569,7 +564,6 @@ describe('ClaudeProvider', () => {
       });
 
       const consumeGenerator = async (): Promise<void> => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         for await (const _ of client.sendQuery('test', '/workspace')) {
           // consume
         }
@@ -587,7 +581,6 @@ describe('ClaudeProvider', () => {
       });
 
       const consumeGenerator = async (): Promise<void> => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         for await (const _ of client.sendQuery('test', '/workspace')) {
           // consume
         }
@@ -630,7 +623,6 @@ describe('ClaudeProvider', () => {
         yield { type: 'result', session_id: 'test-session' };
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/tmp', undefined, {
         assistantConfig: { settingSources: ['project', 'user'] },
       })) {
@@ -647,7 +639,6 @@ describe('ClaudeProvider', () => {
         yield { type: 'result', session_id: 'test-session' };
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/tmp')) {
         // consume
       }
@@ -662,7 +653,6 @@ describe('ClaudeProvider', () => {
         yield { type: 'result', session_id: 'sid' };
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/tmp', undefined, {
         env: { MY_SECRET: 'abc123' },
       })) {
@@ -684,7 +674,6 @@ describe('ClaudeProvider', () => {
       });
 
       // HOME is always in process.env -- override it to verify priority
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/tmp', undefined, {
         env: { HOME: '/custom/home' },
       })) {
@@ -702,7 +691,6 @@ describe('ClaudeProvider', () => {
         yield { type: 'result', session_id: 'sid' };
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/tmp', undefined, {
         nodeConfig: { effort: 'high' },
       })) {
@@ -719,7 +707,6 @@ describe('ClaudeProvider', () => {
         yield { type: 'result', session_id: 'sid' };
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/tmp')) {
         // consume
       }
@@ -734,7 +721,6 @@ describe('ClaudeProvider', () => {
         yield { type: 'result', session_id: 'sid' };
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/tmp', undefined, {
         nodeConfig: { thinking: { type: 'enabled', budgetTokens: 8000 } },
       })) {
@@ -751,7 +737,6 @@ describe('ClaudeProvider', () => {
         yield { type: 'result', session_id: 'sid' };
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/tmp', undefined, { maxBudgetUsd: 5.0 })) {
         // consume
       }
@@ -766,7 +751,6 @@ describe('ClaudeProvider', () => {
         yield { type: 'result', session_id: 'sid' };
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/tmp', undefined, {
         systemPrompt: 'You are a security reviewer',
       })) {
@@ -783,7 +767,6 @@ describe('ClaudeProvider', () => {
         yield { type: 'result', session_id: 'sid' };
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/tmp')) {
         // consume
       }
@@ -798,7 +781,6 @@ describe('ClaudeProvider', () => {
         yield { type: 'result', session_id: 'sid' };
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/tmp', undefined, {
         fallbackModel: 'claude-haiku-4-5',
       })) {
@@ -815,7 +797,6 @@ describe('ClaudeProvider', () => {
         yield { type: 'result', session_id: 'sid' };
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/tmp', undefined, {
         nodeConfig: { betas: ['context-1m-2025-08-07'] },
       })) {
@@ -834,7 +815,6 @@ describe('ClaudeProvider', () => {
 
       const sandbox = { enabled: true, network: { allowedDomains: [] } };
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test', '/tmp', undefined, {
         nodeConfig: { sandbox },
       })) {

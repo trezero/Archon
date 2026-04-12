@@ -1401,14 +1401,25 @@ async function executeScriptNode(
 function buildLoopNodeOptions(
   provider: 'claude' | 'codex',
   model: string | undefined,
-  config: WorkflowConfig
-): SendQueryOptions | undefined {
+  config: WorkflowConfig,
+  workflowLevelOptions?: WorkflowLevelOptions
+): SendQueryOptions {
   const options: SendQueryOptions = {};
   if (model) options.model = model;
   if (config.envVars && Object.keys(config.envVars).length > 0) {
     options.env = config.envVars;
   }
   options.assistantConfig = (config.assistants[provider] ?? {}) as Record<string, unknown>;
+  // Pass workflow-level options as nodeConfig so providers can apply them
+  if (workflowLevelOptions) {
+    options.nodeConfig = {
+      effort: workflowLevelOptions.effort,
+      thinking: workflowLevelOptions.thinking,
+      sandbox: workflowLevelOptions.sandbox,
+      betas: workflowLevelOptions.betas,
+      fallbackModel: workflowLevelOptions.fallbackModel,
+    };
+  }
   return options;
 }
 
@@ -1435,7 +1446,8 @@ async function executeLoopNode(
   docsDir: string,
   nodeOutputs: Map<string, NodeOutput>,
   config: WorkflowConfig,
-  issueContext?: string
+  issueContext?: string,
+  workflowLevelOptions?: WorkflowLevelOptions
 ): Promise<NodeExecutionResult> {
   const loop = node.loop;
   const msgContext = { workflowId: workflowRun.id, nodeName: node.id };
@@ -1468,7 +1480,12 @@ async function executeLoopNode(
   let loopTotalCostUsd: number | undefined;
   let loopFinalStopReason: string | undefined;
   let loopTotalNumTurns: number | undefined;
-  const resolvedOptions = buildLoopNodeOptions(workflowProvider, workflowModel, config);
+  const resolvedOptions = buildLoopNodeOptions(
+    workflowProvider,
+    workflowModel,
+    config,
+    workflowLevelOptions
+  );
 
   // Helper to log event store errors consistently
   const logEventStoreError = (err: Error, iteration: number): void => {
@@ -2367,7 +2384,8 @@ export async function executeDagWorkflow(
               docsDir,
               nodeOutputs,
               config,
-              issueContext
+              issueContext,
+              workflowLevelOptions
             );
             return { nodeId: node.id, output };
           }

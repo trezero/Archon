@@ -29,9 +29,3 @@ export { parseCodexConfig, type CodexProviderDefaults } from './codex/config';
 // Utilities (needed by consumers)
 export { resetCodexSingleton } from './codex/provider';
 export { resolveCodexBinaryPath, fileExists } from './codex/binary-resolver';
-export {
-  loadMcpConfig,
-  buildSDKHooksFromYAML,
-  withFirstMessageTimeout,
-  getProcessUid,
-} from './claude/provider';

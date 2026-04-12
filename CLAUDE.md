@@ -448,7 +448,7 @@ import type { DagNode, WorkflowDefinition } from '@/lib/api';
 - Session management: Create new or resume existing
 - Stream AI responses to platform
 
-**4. AI Agent Providers** (`packages/core/src/providers/`)
+**4. AI Agent Providers** (`packages/providers/src/`)
 - Implement `IAgentProvider` interface
 - **ClaudeProvider**: `@anthropic-ai/claude-agent-sdk`
 - **CodexProvider**: `@openai/codex-sdk`

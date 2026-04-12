@@ -337,12 +337,14 @@ export function buildSDKHooksFromYAML(
 /**
  * Translate nodeConfig into Claude SDK-specific options.
  * Called inside sendQuery when nodeConfig is present (workflow path).
+ * Returns user-facing warnings that the caller should yield as system chunks.
  */
 async function applyNodeConfig(
   options: Options,
   nodeConfig: NodeConfig,
   cwd: string
-): Promise<void> {
+): Promise<string[]> {
+  const warnings: string[] = [];
   // allowed_tools → tools
   if (nodeConfig.allowed_tools !== undefined) {
     options.tools = nodeConfig.allowed_tools;
@@ -388,6 +390,16 @@ async function applyNodeConfig(
     if (missingVars.length > 0) {
       const uniqueVars = [...new Set(missingVars)];
       getLog().warn({ missingVars: uniqueVars }, 'claude.mcp_env_vars_missing');
+      warnings.push(
+        `MCP config references undefined env vars: ${uniqueVars.join(', ')}. These will be empty strings — MCP servers may fail to authenticate.`
+      );
+    }
+    // Haiku models don't support tool search (lazy loading for many tools)
+    if (options.model?.toLowerCase().includes('haiku')) {
+      getLog().warn({ model: options.model }, 'claude.mcp_haiku_tool_search_unsupported');
+      warnings.push(
+        'Using Haiku model with MCP servers — tool search (lazy loading for many tools) is not supported on Haiku. Consider using Sonnet or Opus.'
+      );
     }
   }
 
@@ -459,6 +471,8 @@ async function applyNodeConfig(
   if (nodeConfig.fallbackModel !== undefined) {
     options.fallbackModel = nodeConfig.fallbackModel;
   }
+
+  return warnings;
 }
 
 // ─── Claude Provider ───────────────────────────────────────────────────────
@@ -501,6 +515,10 @@ export class ClaudeProvider implements IAgentProvider {
    * Send a query to Claude and stream responses.
    * Includes retry logic for transient failures (up to 3 retries with exponential backoff).
    */
+  // TODO(#1135): Pre-spawn env-leak gate was removed during provider extraction.
+  // Caller-side enforcement (orchestrator, dag-executor) is tracked in #1135.
+  // Providers must NOT implement security gates — the platform guarantees safety
+  // before a provider runs.
   async *sendQuery(
     prompt: string,
     cwd: string,
@@ -634,8 +652,10 @@ export class ClaudeProvider implements IAgentProvider {
       };
 
       // Apply nodeConfig if present (workflow path) — translates YAML to SDK options
+      const nodeConfigWarnings: string[] = [];
       if (requestOptions?.nodeConfig) {
-        await applyNodeConfig(options, requestOptions.nodeConfig, cwd);
+        const warns = await applyNodeConfig(options, requestOptions.nodeConfig, cwd);
+        nodeConfigWarnings.push(...warns);
       }
 
       if (resumeSessionId) {
@@ -649,6 +669,11 @@ export class ClaudeProvider implements IAgentProvider {
       }
 
       try {
+        // Yield nodeConfig warnings before starting the query
+        for (const warning of nodeConfigWarnings) {
+          yield { type: 'system' as const, content: `⚠️ ${warning}` };
+        }
+
         const rawEvents = query({ prompt, options });
         const timeoutMs = getFirstEventTimeoutMs();
         const diagnostics = buildFirstEventHangDiagnostics(

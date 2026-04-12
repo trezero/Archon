@@ -169,6 +169,8 @@ export class CodexProvider implements IAgentProvider {
     };
   }
 
+  // TODO(#1135): Pre-spawn env-leak gate was removed during provider extraction.
+  // Caller-side enforcement (orchestrator, dag-executor) is tracked in #1135.
   async *sendQuery(
     prompt: string,
     cwd: string,

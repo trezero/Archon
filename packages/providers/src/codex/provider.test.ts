@@ -543,7 +543,6 @@ describe('CodexProvider', () => {
         })(),
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test prompt', '/my/workspace')) {
         // consume
       }
@@ -566,7 +565,6 @@ describe('CodexProvider', () => {
         })(),
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test prompt', '/workspace', 'existing-thread')) {
         // consume
       }
@@ -635,7 +633,6 @@ describe('CodexProvider', () => {
         })(),
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of client.sendQuery('test prompt', '/workspace', undefined, {
         model: 'gpt-5.2-codex',
         assistantConfig: {

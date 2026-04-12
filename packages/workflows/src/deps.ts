@@ -28,11 +28,8 @@ export type {
   ProviderCapabilities,
 };
 
-// Backwards compat aliases — deprecated, prefer direct imports from @archon/providers/types
-export type WorkflowMessageChunk = MessageChunk;
+// Backwards compat alias — deprecated, prefer direct import from @archon/providers/types
 export type WorkflowTokenUsage = TokenUsage;
-export type WorkflowAgentOptions = SendQueryOptions;
-export type IWorkflowAgentProvider = IAgentProvider;
 
 // ---------------------------------------------------------------------------
 // Platform-specific types (NOT mirrors — unique to workflow engine)
