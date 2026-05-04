@@ -81,7 +81,7 @@ Accessible via the `/dashboard` route, the Command Center shows all workflow run
 
 ### Settings
 
-The `/settings` page lets you configure assistant defaults (model, provider) without editing YAML files.
+The `/settings` page lets you configure assistant defaults (model, provider) without editing YAML files. It also includes a **Projects** section for registering and managing codebases.
 
 ## Chat Interface
 
@@ -166,12 +166,13 @@ Click on a workflow run (from the dashboard or progress card) to open the execut
 The Workflow Builder at `/workflows/builder` provides a visual editor for creating and modifying workflow YAML files. Features include:
 
 - **DAG canvas** -- Drag-and-drop nodes to build your workflow graph visually
-- **Node palette** -- Add command, prompt, bash, and loop nodes from a sidebar library
+- **Node palette** -- Drag command, prompt, and bash nodes from a sidebar library. Additional node types (`script`, `loop`, `approval`, `cancel`) are editable via the Code / Split view
 - **Node inspector** -- Click a node to configure its properties (command, prompt text, dependencies, model overrides, hooks, MCP servers, etc.) in a tabbed panel
 - **View modes** -- Toggle between Visual, Split, and Code views. Split mode shows the canvas and YAML side by side.
 - **Command picker** -- Browse available commands when configuring command nodes
 - **Validation panel** -- Real-time validation feedback as you build
 - **Undo/redo** -- Full undo/redo stack with keyboard shortcuts
+- **Delete node** -- Remove a selected node with `Delete` or `Backspace`, the Delete button in the inspector header, or the right-click context menu on any node
 - **Save** -- Saves the workflow YAML to your project's `.archon/workflows/` directory
 
 You can also browse existing workflows on the `/workflows` page and open any of them in the builder to edit.
@@ -203,10 +204,11 @@ A separate dashboard SSE stream at `/api/stream/__dashboard__` multiplexes workf
 
 ### Registering a Project
 
-From the Web UI, you can register codebases in two ways:
+From the Web UI, you can register codebases in three ways:
 
-1. **Clone from URL** -- Use the `/clone <url>` command in chat, or use the API to POST to `/api/codebases` with a `url` field
-2. **Register a local path** -- POST to `/api/codebases` with a `path` field pointing to an existing git repository
+1. **Add Project input** -- Click **+** in the sidebar or go to **Settings → Projects** and enter a GitHub URL or local path. Inputs starting with `https://`, `ssh://`, `git@`, or `git://` are treated as remote URLs (cloned); everything else is treated as a local path (registered in place).
+2. **Clone from URL via chat** -- Use the `/clone <url>` command in chat, or use the API to POST to `/api/codebases` with a `url` field
+3. **Register a local path via API** -- POST to `/api/codebases` with a `path` field pointing to an existing git repository
 
 Registered codebases appear in the sidebar's project selector.
 

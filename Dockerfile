@@ -24,6 +24,7 @@ COPY packages/docs-web/package.json ./packages/docs-web/
 COPY packages/git/package.json ./packages/git/
 COPY packages/isolation/package.json ./packages/isolation/
 COPY packages/paths/package.json ./packages/paths/
+COPY packages/providers/package.json ./packages/providers/
 COPY packages/server/package.json ./packages/server/
 COPY packages/web/package.json ./packages/web/
 COPY packages/workflows/package.json ./packages/workflows/
@@ -107,6 +108,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
 # Point agent-browser to system Chromium (avoids ~400MB Chrome for Testing download)
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 
+# CLAUDE_BIN_PATH is set at container startup (docker-entrypoint.sh).
+# The entrypoint pins the glibc variant to bypass the SDK's musl-first resolver.
+
 # Create non-root user for running Claude Code
 # Claude Code refuses to run with --dangerously-skip-permissions as root for security
 RUN useradd -m -u 1001 -s /bin/bash appuser \
@@ -130,6 +134,7 @@ COPY packages/docs-web/package.json ./packages/docs-web/
 COPY packages/git/package.json ./packages/git/
 COPY packages/isolation/package.json ./packages/isolation/
 COPY packages/paths/package.json ./packages/paths/
+COPY packages/providers/package.json ./packages/providers/
 COPY packages/server/package.json ./packages/server/
 COPY packages/web/package.json ./packages/web/
 COPY packages/workflows/package.json ./packages/workflows/
@@ -144,6 +149,7 @@ COPY packages/core/ ./packages/core/
 COPY packages/git/ ./packages/git/
 COPY packages/isolation/ ./packages/isolation/
 COPY packages/paths/ ./packages/paths/
+COPY packages/providers/ ./packages/providers/
 COPY packages/server/ ./packages/server/
 COPY packages/workflows/ ./packages/workflows/
 

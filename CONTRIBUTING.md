@@ -17,14 +17,19 @@ Thank you for your interest in contributing to Archon!
 Before submitting a PR, ensure:
 
 ```bash
-bun run type-check  # TypeScript types
-bun run lint        # ESLint
-bun run format      # Prettier
-bun run test        # All tests (per-package isolation)
+bun run check:bundled  # Bundled defaults are up to date (see note below)
+bun run type-check     # TypeScript types
+bun run lint           # ESLint
+bun run format         # Prettier
+bun run test           # All tests (per-package isolation)
 
 # Or run the full validation suite:
 bun run validate
 ```
+
+**Bundled defaults**: If you added, removed, or edited a file under
+`.archon/commands/defaults/` or `.archon/workflows/defaults/`, run
+`bun run generate:bundled` to refresh the embedded bundle before committing.
 
 **Important:** Use `bun run test` (not `bun test` from the repo root) to avoid mock pollution across packages.
 
@@ -39,7 +44,8 @@ bun run validate
 1. Create a feature branch from `dev`
 2. Make your changes
 3. Ensure all checks pass
-4. Submit a PR with a clear description
+4. Submit a PR using the template at [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md). GitHub fills it in automatically when you open a PR through the web UI. If you use `gh pr create`, copy the template into the body — leaving it empty or partially filled slows review.
+5. Link the issue your PR addresses with `Closes #<number>` (or `Fixes #<number>` / `Resolves #<number>`) in the description so it auto-closes on merge.
 
 ## Code Style
 
